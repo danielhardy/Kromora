@@ -38,3 +38,6 @@ realworldtest/*
 
 # DispatchGraph pickup worktrees (local checkouts, not for version control)
 dg-worktrees/
+
+# Generated photo-intelligence visual regression reports (scripts/photo-intelligence-report.sh)
+artifacts/
