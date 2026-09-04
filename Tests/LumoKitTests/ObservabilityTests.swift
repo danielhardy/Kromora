@@ -8,7 +8,10 @@ final class ObservabilityTests: XCTestCase {
 
         XCTAssertEqual(names, [
             "Launch", "Scan", "Decode", "Render", "Cache", "PhotoSwitch", "Histogram", "Export", "LiveEdit",
-            "PhotoTransfer", "PhotoThumbnail", "PhotoCollectionInsert",
+            "PhotoTransfer", "PhotoThumbnail", "PhotoCollectionInsert", "PhotoAnalysisImagePreparation",
+            "PhotoAnalysisGlobalTone", "PhotoAnalysisSubjectMask", "PhotoAnalysisFaceMask",
+            "PhotoAnalysisForegroundMask", "PhotoAnalysisBackgroundMask", "PhotoAnalysisPersonMask",
+            "PhotoAnalysisMaskedStatistics", "PhotoAnalysisAssembly", "PhotoAnalysisTotal",
         ])
     }
 

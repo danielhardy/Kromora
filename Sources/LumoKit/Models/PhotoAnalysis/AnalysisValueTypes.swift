@@ -209,6 +209,43 @@ struct AnalysisTimings: Codable, Sendable, Equatable {
     }
 
     static let zero = AnalysisTimings()
+
+    func replacing(
+        imagePreparation: Duration? = nil,
+        globalTone: Duration? = nil,
+        faceDetection: Duration? = nil,
+        saliency: Duration? = nil,
+        foregroundMasking: Duration? = nil,
+        personSegmentation: Duration? = nil,
+        regionalAnalysis: Duration? = nil,
+        total: Duration? = nil
+    ) -> AnalysisTimings {
+        AnalysisTimings(
+            imagePreparation: imagePreparation ?? self.imagePreparation,
+            globalTone: globalTone ?? self.globalTone,
+            faceDetection: faceDetection ?? self.faceDetection,
+            saliency: saliency ?? self.saliency,
+            foregroundMasking: foregroundMasking ?? self.foregroundMasking,
+            personSegmentation: personSegmentation ?? self.personSegmentation,
+            regionalAnalysis: regionalAnalysis ?? self.regionalAnalysis,
+            total: total ?? self.total
+        )
+    }
+
+    func adding(duration: Duration, for kind: SemanticMaskKind) -> AnalysisTimings {
+        switch kind {
+        case .subject:
+            return replacing(saliency: saliency + duration)
+        case .face, .faceInstance:
+            return replacing(faceDetection: faceDetection + duration)
+        case .foregroundInstance, .background:
+            return replacing(foregroundMasking: foregroundMasking + duration)
+        case .person:
+            return replacing(personSegmentation: personSegmentation + duration)
+        case .unknown:
+            return self
+        }
+    }
 }
 
 struct AnalysisVersion: Codable, Sendable, Equatable, Hashable, Comparable {

@@ -33,6 +33,10 @@ struct GlobalToneAnalyzer: Sendable {
 
     func analyze(image: AnalysisImage) async throws -> GlobalToneAnalysis {
         try Task.checkCancellation()
+        var interval = LumoObservability.begin(
+            .analysisGlobalTone, source: image.source, maskQuality: .analysis
+        )
+        defer { interval.end() }
         let dimensions = image.dimensions
         let histogram = await engine.histogram(
             source: image.source,

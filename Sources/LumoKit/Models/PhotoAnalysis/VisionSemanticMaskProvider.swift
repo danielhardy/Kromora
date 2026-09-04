@@ -67,6 +67,11 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
 
     func mask(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
         try Task.checkCancellation()
+        var interval = LumoSignpostInterval(
+            Self.signpostStage(for: kind),
+            context: LumoTraceContext(sourceToken: image.source.traceToken, quality: quality.rawValue)
+        )
+        defer { interval.end() }
         switch kind {
         case .subject:
             return try await subjectMask(image: image, quality: quality)
@@ -84,6 +89,17 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             // These cases are intentionally explicit: follow-up providers can fill one case at a
             // time without changing the shared protocol or leaking a VN type to consumers.
             throw VisionSemanticMaskError.unsupported(kind)
+        }
+    }
+
+    private static func signpostStage(for kind: SemanticMaskKind) -> LumoWorkflowStage {
+        switch kind {
+        case .subject: return .analysisSubjectMask
+        case .face, .faceInstance: return .analysisFaceMask
+        case .foregroundInstance: return .analysisForegroundMask
+        case .background: return .analysisBackgroundMask
+        case .person: return .analysisPersonMask
+        case .unknown: return .analysisForegroundMask
         }
     }
 

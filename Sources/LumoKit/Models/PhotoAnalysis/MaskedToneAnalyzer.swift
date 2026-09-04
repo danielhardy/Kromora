@@ -41,6 +41,10 @@ struct MaskedToneAnalyzer: Sendable {
         through mask: RegionMask
     ) async throws -> (tone: ToneStatistics, color: ColorStatistics) {
         try Task.checkCancellation()
+        var interval = LumoObservability.begin(
+            .analysisMaskedStatistics, source: image.source, maskQuality: mask.quality
+        )
+        defer { interval.end() }
         try validate(mask: mask, for: image)
         guard let pixels = await store.pixels(for: mask.reference) else {
             throw MaskedToneAnalysisError.missingPixels
