@@ -46,6 +46,11 @@ struct MaskCacheKey: Codable, Sendable, Equatable, Hashable {
         MaskCacheKey(assetID: assetID, sourceFingerprint: sourceFingerprint, kind: kind,
                      quality: quality, providerVersion: providerVersion)
     }
+
+    func with(kind: SemanticMaskKind, quality: MaskQuality? = nil) -> MaskCacheKey {
+        MaskCacheKey(assetID: assetID, sourceFingerprint: sourceFingerprint, kind: kind,
+                     quality: quality ?? self.quality, providerVersion: providerVersion)
+    }
 }
 
 struct RegionMaskReference: Codable, Sendable, Equatable, Hashable {
@@ -119,4 +124,6 @@ protocol SemanticMaskProviding: Sendable {
 enum RegionMaskError: Error, Sendable, Equatable {
     case invalidPixelCount
     case invalidPixelValue
+    case incompatibleSizes
+    case missingPixels
 }
