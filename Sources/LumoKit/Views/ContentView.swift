@@ -57,6 +57,16 @@ public struct ContentView: View {
             .sheet(isPresented: $viewModel.isRemovableMediaSelectorPresented) {
                 RemovableMediaSelectorView(viewModel: viewModel)
             }
+            .sheet(isPresented: $viewModel.isMaskingPanelPresented) {
+                if let assetID = viewModel.maskingAssetID, let source = viewModel.maskingSource {
+                    MaskingPanel(
+                        coordinator: viewModel.photoAnalysisCoordinator,
+                        assetID: assetID,
+                        source: source,
+                        surface: viewModel.previewSurface
+                    )
+                }
+            }
             .onAppear {
                 viewModel.refreshRemovableMedia()
             }
@@ -236,6 +246,14 @@ public struct ContentView: View {
         .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
         .help(viewModel.autoAdjustmentHelp)
         .disabled(!viewModel.canRunAutoAdjustment)
+
+        Button {
+            viewModel.isMaskingPanelPresented = true
+        } label: {
+            Label("Mask", systemImage: "wand.and.rays")
+        }
+        .help("Select a subject, person, background, or face mask")
+        .disabled(viewModel.sourceImage == nil || viewModel.maskingAssetID == nil)
 
         // An active retained side-by-side preference remains actionable on an identity document so
         // the user can return to single view after switching photos or using Reset Photo. Starting
