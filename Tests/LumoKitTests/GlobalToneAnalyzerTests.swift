@@ -5,7 +5,7 @@ import XCTest
 
 final class GlobalToneAnalyzerTests: XCTestCase {
     func testStatisticsUsePercentilesAndClippingFromOneHistogram() throws {
-        let bins = [Int](repeating: 0, count: 256)
+        var bins = [Int](repeating: 0, count: 256)
         bins[0] = 2
         bins[64] = 2
         bins[128] = 4

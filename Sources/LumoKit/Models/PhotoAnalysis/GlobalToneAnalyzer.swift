@@ -56,18 +56,37 @@ struct GlobalToneAnalyzer: Sendable {
     /// Histogram RGB/luma bins are sampled from the renderer's sRGB working space. Its luma bin is
     /// Rec.709 `Y = 0.2126R + 0.7152G + 0.0722B`; the linear view applies the sRGB transfer decode
     /// to that already-computed luma sample, while the perceptual view retains the encoded value.
-    static func statistics(from histogram: HistogramData) throws -> (tone: LuminanceDistribution, color: ColorStatistics) {
-        guard histogram.red.count == 256, histogram.green.count == 256,
-              histogram.blue.count == 256, histogram.luma.count == 256,
-              histogram.red.allSatisfy({ $0 >= 0 }), histogram.green.allSatisfy({ $0 >= 0 }),
-              histogram.blue.allSatisfy({ $0 >= 0 }), histogram.luma.allSatisfy({ $0 >= 0 })
+    static func statistics(from histogram: HistogramData) throws -> (
+        tone: LuminanceDistribution, color: ColorStatistics
+    ) {
+        let weighted = WeightedHistogramData(
+            red: histogram.red.map(Double.init), green: histogram.green.map(Double.init),
+            blue: histogram.blue.map(Double.init), luma: histogram.luma.map(Double.init)
+        )
+        return try statistics(from: weighted)
+    }
+
+    /// The shared histogram-to-facts mapping. Fractional bins are used by masked analysis so soft
+    /// masks retain their edge weights; the unmasked Tier-0 path simply supplies integer-valued
+    /// bins through `HistogramData` above.
+    static func statistics(from histogram: WeightedHistogramData) throws -> (
+        tone: LuminanceDistribution, color: ColorStatistics
+    ) {
+        guard histogram.red.count == 256,
+            histogram.green.count == 256,
+            histogram.blue.count == 256,
+            histogram.luma.count == 256,
+            histogram.red.allSatisfy({ $0.isFinite && $0 >= 0 }),
+            histogram.green.allSatisfy({ $0.isFinite && $0 >= 0 }),
+            histogram.blue.allSatisfy({ $0.isFinite && $0 >= 0 }),
+            histogram.luma.allSatisfy({ $0.isFinite && $0 >= 0 })
         else { throw GlobalToneAnalysisError.malformedHistogram }
 
-        let count = histogram.luma.reduce(0, +)
+        let count = histogram.totalWeight
         guard count > 0,
-              histogram.red.reduce(0, +) == count,
-              histogram.green.reduce(0, +) == count,
-              histogram.blue.reduce(0, +) == count
+            histogram.red.reduce(0, +) == count,
+            histogram.green.reduce(0, +) == count,
+            histogram.blue.reduce(0, +) == count
         else { throw GlobalToneAnalysisError.malformedHistogram }
 
         let perceptual = toneStatistics(
@@ -83,7 +102,7 @@ struct GlobalToneAnalyzer: Sendable {
     }
 
     private static func toneStatistics(
-        bins: [Int], count: Int, variant: LuminanceVariant, transform: (Float) -> Float
+        bins: [Double], count: Double, variant: LuminanceVariant, transform: (Float) -> Float
     ) -> ToneStatistics {
         let minimum = firstValue(in: bins, transform: transform)
         let maximum = lastValue(in: bins, transform: transform)
@@ -101,7 +120,9 @@ struct GlobalToneAnalyzer: Sendable {
         )
     }
 
-    private static func colorStatistics(histogram: HistogramData, count: Int) -> ColorStatistics {
+    private static func colorStatistics(
+        histogram: WeightedHistogramData, count: Double
+    ) -> ColorStatistics {
         let means = SIMD3(
             weightedMean(histogram.red, count: count, transform: { $0 }),
             weightedMean(histogram.green, count: count, transform: { $0 }),
@@ -112,18 +133,24 @@ struct GlobalToneAnalyzer: Sendable {
             rawPercentile(histogram.green, fraction: 0.5, count: count),
             rawPercentile(histogram.blue, fraction: 0.5, count: count)
         )
-        let channelSpread = max(means.x, max(means.y, means.z)) - min(means.x, min(means.y, means.z))
-        let medianSpread = max(medians.x, max(medians.y, medians.z)) - min(medians.x, min(medians.y, medians.z))
+        let channelSpread = max(means.x, max(means.y, means.z))
+            - min(means.x, min(means.y, means.z))
+        let medianSpread = max(medians.x, max(medians.y, medians.z))
+            - min(medians.x, min(medians.y, medians.z))
         // Independent channel histograms do not retain pixel correlation. These are therefore
         // conservative marginal estimates, useful as Tier-0 facts until a masked color pass exists.
         let p95Spread = max(
             rawPercentile(histogram.red, fraction: 0.95, count: count),
-            max(rawPercentile(histogram.green, fraction: 0.95, count: count),
-                rawPercentile(histogram.blue, fraction: 0.95, count: count))
+            max(
+                rawPercentile(histogram.green, fraction: 0.95, count: count),
+                rawPercentile(histogram.blue, fraction: 0.95, count: count)
+            )
         ) - min(
             rawPercentile(histogram.red, fraction: 0.05, count: count),
-            min(rawPercentile(histogram.green, fraction: 0.05, count: count),
-                rawPercentile(histogram.blue, fraction: 0.05, count: count))
+            min(
+                rawPercentile(histogram.green, fraction: 0.05, count: count),
+                rawPercentile(histogram.blue, fraction: 0.05, count: count)
+            )
         )
         return ColorStatistics(
             meanRGB: means,
@@ -141,7 +168,7 @@ struct GlobalToneAnalyzer: Sendable {
     }
 
     private static func weightedMean(
-        _ bins: [Int], count: Int, transform: (Float) -> Float
+        _ bins: [Double], count: Double, transform: (Float) -> Float
     ) -> Float {
         let total = bins.enumerated().reduce(Float.zero) { partial, element in
             partial + transform(Float(element.offset) / 255) * Float(element.element)
@@ -149,19 +176,19 @@ struct GlobalToneAnalyzer: Sendable {
         return total / Float(count)
     }
 
-    private static func firstValue(in bins: [Int], transform: (Float) -> Float) -> Float {
+    private static func firstValue(in bins: [Double], transform: (Float) -> Float) -> Float {
         guard let index = bins.firstIndex(where: { $0 > 0 }) else { return 0 }
         return transform(Float(index) / 255)
     }
 
-    private static func lastValue(in bins: [Int], transform: (Float) -> Float) -> Float {
+    private static func lastValue(in bins: [Double], transform: (Float) -> Float) -> Float {
         guard let index = bins.lastIndex(where: { $0 > 0 }) else { return 0 }
         return transform(Float(index) / 255)
     }
 
-    private static func rawPercentile(_ bins: [Int], fraction: Double, count: Int) -> Float {
-        let target = max(0, min(count - 1, Int((Double(count - 1) * fraction).rounded(.down))))
-        var cumulative = 0
+    private static func rawPercentile(_ bins: [Double], fraction: Double, count: Double) -> Float {
+        let target = max(0, (count - 1) * fraction)
+        var cumulative = 0.0
         for (index, bin) in bins.enumerated() {
             cumulative += bin
             if cumulative > target { return Float(index) / 255 }

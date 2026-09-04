@@ -1,5 +1,5 @@
-import Foundation
 import CoreGraphics
+import Foundation
 
 /// Per-channel tonal distribution of an image, in 256 bins (one per 8-bit
 /// level). Computed from a downscaled RGBA8 render — see
@@ -71,9 +71,9 @@ struct HistogramData: Equatable, Sendable {
 
     func bins(for channel: Channel) -> [Int] {
         switch channel {
-        case .red:   return red
+        case .red: return red
         case .green: return green
-        case .blue:  return blue
+        case .blue: return blue
         case .luma:  return luma
         }
     }
@@ -102,5 +102,63 @@ struct HistogramData: Equatable, Sendable {
         guard ceiling > 0 else { return Array(repeating: 0, count: binCount) }
         let denom = CGFloat(ceiling)
         return bins(for: channel).map { min(1, CGFloat($0) / denom) }
+    }
+}
+
+/// A histogram whose bins retain fractional weights. The renderer uses this for soft semantic
+/// masks: a pixel at the edge of a feathered mask contributes proportionally instead of being
+/// rounded to an all-or-nothing inclusion.
+struct WeightedHistogramData: Equatable, Sendable {
+    let red: [Double]
+    let green: [Double]
+    let blue: [Double]
+    let luma: [Double]
+
+    init(red: [Double], green: [Double], blue: [Double], luma: [Double]) {
+        self.red = red
+        self.green = green
+        self.blue = blue
+        self.luma = luma
+    }
+
+    var totalWeight: Double { luma.reduce(0, +) }
+
+    /// Tally a rendered RGBA8 image against a canonical-resolution mask. This is the one raster
+    /// boundary where pixels and mask values meet; all downstream statistics operate on bins only.
+    init?(
+        rgba8 bytes: [UInt8], width: Int, height: Int, bytesPerRow: Int? = nil,
+        mask: NormalizedMask
+    ) {
+        let stride = bytesPerRow ?? width * 4
+        guard width > 0, height > 0, stride >= width * 4,
+              bytes.count >= height * stride, mask.size.width == width,
+              mask.size.height == height else { return nil }
+
+        var red = [Double](repeating: 0, count: 256)
+        var green = [Double](repeating: 0, count: 256)
+        var blue = [Double](repeating: 0, count: 256)
+        var luma = [Double](repeating: 0, count: 256)
+
+        bytes.withUnsafeBufferPointer { buffer in
+            for y in 0..<height {
+                let row = y * stride
+                let maskRow = y * width
+                for x in 0..<width {
+                    let weight = Double(mask.values[maskRow + x])
+                    guard weight > 0 else { continue }
+                    let offset = row + x * 4
+                    let r = Int(buffer[offset])
+                    let g = Int(buffer[offset + 1])
+                    let b = Int(buffer[offset + 2])
+                    red[r] += weight
+                    green[g] += weight
+                    blue[b] += weight
+                    let level = min(255, (2126 * r + 7152 * g + 722 * b + 5000) / 10000)
+                    luma[level] += weight
+                }
+            }
+        }
+
+        self.init(red: red, green: green, blue: blue, luma: luma)
     }
 }

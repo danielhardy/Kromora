@@ -1,6 +1,6 @@
-import Foundation
-import CoreImage
 import CoreGraphics
+import CoreImage
+import Foundation
 import ImageIO
 import Metal
 import UniformTypeIdentifiers
@@ -58,6 +58,18 @@ protocol RenderEngining: Sendable {
         maxDimension: Int
     ) async -> HistogramData?
 
+    /// Tally the rendered canonical image through a soft mask. The default implementation uses
+    /// the same raster request seam as `histogram`; production engines may override it with an
+    /// actor-local GPU tally without changing the analysis API.
+    func maskedHistogram(
+        source: ImageSource,
+        document: EditDocument,
+        lut: CubeLUT?,
+        scale: RenderScale,
+        space: WorkingSpace,
+        mask: NormalizedMask
+    ) async -> WeightedHistogramData?
+
     /// Drop every cached cube filter, because the bytes behind a `LUTID` may have changed.
     ///
     /// **On the protocol as of Step 9, so that the app calling it is assertable.** The engine has had
@@ -110,6 +122,39 @@ extension RenderEngining {
               let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
         else { return nil }
         return image
+    }
+
+    func maskedHistogram(
+        source: ImageSource,
+        document: EditDocument,
+        lut: CubeLUT?,
+        scale: RenderScale,
+        space: WorkingSpace,
+        mask: NormalizedMask
+    ) async -> WeightedHistogramData? {
+        guard !Task.isCancelled else { return nil }
+        let request = RenderRequest(
+            source: source, document: document, lut: lut,
+            targetSize: CGSize(width: mask.size.width, height: mask.size.height),
+            quality: .preview, output: .raster, space: space
+        )
+        guard let image = await makeCGImage(request), !Task.isCancelled,
+              image.width == mask.size.width, image.height == mask.size.height else { return nil }
+
+        let width = image.width
+        let height = image.height
+        let bytesPerRow = width * 4
+        var bytes = [UInt8](repeating: 0, count: height * bytesPerRow)
+        guard let context = CGContext(
+            data: &bytes, width: width, height: height, bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow, space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard !Task.isCancelled else { return nil }
+        return WeightedHistogramData(
+            rgba8: bytes, width: width, height: height, bytesPerRow: bytesPerRow, mask: mask
+        )
     }
 
     func makeCGImage(
