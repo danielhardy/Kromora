@@ -111,6 +111,21 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.autoAdjustmentHelp.contains("supported photo"))
     }
 
+    func testActionRemainsAvailableWhileOptionalHistogramWorkIsLoading() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = AppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+
+        await fake.gateHistogram()
+        viewModel.toggleInspector()
+        try await Task.sleep(for: .milliseconds(20))
+
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
+        XCTAssertTrue(viewModel.isHistogramLoading)
+
+        await fake.releaseHistograms()
+    }
+
     func testAutoReplacesOnlyGlobalLightAndColorAsOneUndoableOperation() async throws {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(engine: fake)
