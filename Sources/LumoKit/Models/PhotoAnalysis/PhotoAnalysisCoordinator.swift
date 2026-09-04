@@ -42,7 +42,7 @@ actor PhotoAnalysisCoordinator {
     }
 
     private let maskProvider: any SemanticMaskProviding
-    private let maskStore: MaskStore
+    let maskStore: MaskStore
     private let assembler: PhotoAnalysisAssembler
     private let cache: PhotoAnalysisCache
     private let stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]
