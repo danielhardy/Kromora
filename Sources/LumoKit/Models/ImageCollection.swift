@@ -73,7 +73,7 @@ final class ImageCollection: ObservableObject {
 
         var id: PhotoAssetID { asset.id }
         var url: URL? { asset.url }
-        var displayName: String { asset.filename }
+        var displayName: String { asset.displayName }
         var imageData: Data? { asset.source.data }
         var dataFingerprint: String? { asset.source.fingerprint.sampleDigest }
 
@@ -935,7 +935,7 @@ final class ImageCollection: ObservableObject {
     @discardableResult
     func appendDataImport(_ item: PhotoImportItem, ordinal: Int) -> PhotoAssetID {
         let importKey = item.localIdentifier
-            ?? "\(item.contentDigest):\(item.name):\(ordinal)"
+            ?? "\(item.contentDigest):ordinal:\(ordinal)"
         let destinationURL = durableDataURL(for: item, key: importKey)
         let identifier = PhotoAssetID.file(destinationURL)
         if let existingIndex = items.firstIndex(where: { $0.url == destinationURL }) {

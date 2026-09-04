@@ -1,5 +1,6 @@
 import SwiftUI
 import PhotosUI
+import Photos
 import AppKit
 
 /// Main window layout: sidebar + preview + toolbar.
@@ -114,7 +115,7 @@ public struct ContentView: View {
                     break
                 }
 
-                let name = "Photo \(ordinal + 1)"
+                let name = Self.originalPhotoName(for: item) ?? "Photo \(ordinal + 1)"
                 viewModel.updatePhotosImportPhase(.transferring, name: name)
                 var transferInterval = LumoSignpostInterval(
                     .photoTransfer,
@@ -170,6 +171,14 @@ public struct ContentView: View {
         photosImportTask?.cancel()
     }
 
+    private static func originalPhotoName(for item: PhotosPickerItem) -> String? {
+        guard let identifier = item.itemIdentifier else { return nil }
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
+        guard let asset = result.firstObject else { return nil }
+        return PHAssetResource.assetResources(for: asset)
+            .first(where: { $0.type == .photo && !$0.originalFilename.isEmpty })?.originalFilename
+    }
+
     private var mainContent: some View {
         NavigationStack {
             detailContent
@@ -187,6 +196,7 @@ public struct ContentView: View {
                 VStack(spacing: 0) {
                     LibraryGridView(
                         collection: viewModel.collection,
+                        viewModel: viewModel,
                         onOpen: viewModel.openActiveCollectionImage
                     )
                     StatusBar(viewModel: viewModel, onCancelImport: cancelPhotosImport,
@@ -206,10 +216,12 @@ public struct ContentView: View {
 
                         if viewModel.collection.isActive {
                             Divider()
-                            FilmstripView(collection: viewModel.collection) { index, additive in
+                            CullingBarView(viewModel: viewModel)
+                            Divider()
+                            FilmstripView(collection: viewModel.collection, settings: viewModel.settings) { index, additive in
                                 viewModel.selectCollectionImage(at: index, additive: additive)
                             }
-                            .frame(height: 100)
+                            .frame(height: 116)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
 

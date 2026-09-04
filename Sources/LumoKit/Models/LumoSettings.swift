@@ -61,6 +61,7 @@ public final class LumoSettings: ObservableObject {
     private enum Key {
         static let schemaVersion = "Lumo.settings.schemaVersion"
         static let alwaysDarkMode = "Lumo.settings.alwaysDarkMode"
+        static let showPhotoNames = "Lumo.settings.showPhotoNames"
         static let sourceFolder = "Lumo.settings.defaultSourceFolder"
         static let exportFolder = "Lumo.settings.defaultExportFolder"
         static let legacyDarkMode = "Lumo.alwaysDarkMode"
@@ -76,6 +77,13 @@ public final class LumoSettings: ObservableObject {
         didSet {
             guard alwaysDarkMode != oldValue else { return }
             preferences.set(alwaysDarkMode, forKey: Key.alwaysDarkMode)
+        }
+    }
+
+    @Published public var showPhotoNames: Bool {
+        didSet {
+            guard showPhotoNames != oldValue else { return }
+            preferences.set(showPhotoNames, forKey: Key.showPhotoNames)
         }
     }
 
@@ -105,12 +113,14 @@ public final class LumoSettings: ObservableObject {
         self.fileManager = fileManager
         self.userLookFolderURL = userLookFolderURL ?? Self.defaultUserLookFolderURL(fileManager: fileManager)
         self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
+        self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? true
         self.sourceFolderStatus = .notConfigured(.source)
         self.exportFolderStatus = .notConfigured(.export)
 
         migrateIfNeeded()
         // Migration may have supplied the appearance value.
         self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
+        self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? true
         loadRecords()
         refreshFolderStatus()
     }

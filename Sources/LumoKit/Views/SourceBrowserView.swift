@@ -167,7 +167,14 @@ private struct SourceBrowserRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            thumbnail
+            ZStack {
+                thumbnail
+                    .opacity(item.asset.flag == .reject ? 0.35 : 1)
+                if item.asset.flag == .reject {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.red, .white)
+                }
+            }
             Text(item.displayName)
                 .font(.callout)
                 .fontWeight(isSelected ? .medium : .regular)
@@ -175,6 +182,21 @@ private struct SourceBrowserRow: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 0)
+            if item.asset.rating > 0 {
+                HStack(spacing: 2) {
+                    Image(systemName: "star.fill")
+                    Text("\(item.asset.rating)")
+                }
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.yellow)
+            }
+            if item.asset.flag == .pick {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else if item.asset.flag == .reject {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.red)
+            }
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())

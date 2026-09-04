@@ -1,5 +1,7 @@
 import CryptoKit
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 
 /// A durable identity for a photo source.
 ///
@@ -352,6 +354,36 @@ struct PhotoAsset: Identifiable, Codable, Hashable, Sendable, Equatable {
     var url: URL? { source.url }
     var bookmarkData: Data? { source.bookmarkData }
     var cacheKey: String { source.cacheKey }
+
+    /// The name used by the library and filmstrip, with a deterministic value for malformed or
+    /// legacy records that do not carry one.
+    var displayName: String {
+        let value = filename.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !value.isEmpty { return value }
+        if let url, !url.deletingPathExtension().lastPathComponent.isEmpty {
+            return url.deletingPathExtension().lastPathComponent
+        }
+        return "Untitled"
+    }
+
+    /// A user-facing, stable file type. File extensions are preferred because they preserve the
+    /// source convention; data-backed assets fall back to the type ImageIO decoded from bytes.
+    var displayFileType: String {
+        if let extensionType = [fileType, url?.pathExtension]
+            .compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) })
+            .first(where: { !$0.isEmpty }) {
+            return extensionType.uppercased()
+        }
+
+        if let data = source.data,
+           let source = CGImageSourceCreateWithData(data as CFData, nil),
+           let identifier = CGImageSourceGetType(source),
+           let type = UTType(identifier as String),
+           let preferredExtension = type.preferredFilenameExtension {
+            return preferredExtension.uppercased()
+        }
+        return "Unknown"
+    }
 
     // Convenience accessors keep the record pleasant to use from a grid/culling model while the
     // stored representation remains split into immutable source/metadata and mutable library state.

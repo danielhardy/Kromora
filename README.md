@@ -159,6 +159,7 @@ imports use a SHA-256 identity for the delivered bytes.
 | `Return` | Open the active Library item in Edit |
 | `P` | Mark the focused photo as Pick and advance |
 | `X` | Mark the focused photo as Reject and advance |
+| `U` | Clear the focused photo's flag and advance |
 | `0`–`5` | Clear or set the focused photo's star rating |
 | `←` / `→` or `[` / `]` | Previous / next image |
 | `↑` / `↓` | Previous / next Look |

@@ -9,6 +9,7 @@ import SwiftUI
 /// task for the entire folder.
 struct LibraryGridView: View {
     @ObservedObject var collection: ImageCollection
+    @ObservedObject var viewModel: AppViewModel
     let onOpen: () -> Void
 
     private let layout = LibraryGridLayout()
@@ -18,7 +19,7 @@ struct LibraryGridView: View {
         let entries = collection.thumbnailEntries
 
         VStack(spacing: 0) {
-            LibraryFilterBar(collection: collection)
+            CullingBarView(viewModel: viewModel)
             Divider()
 
             GeometryReader { geometry in
@@ -40,6 +41,7 @@ struct LibraryGridView: View {
                                     row: row,
                                     entries: entries,
                                     collection: collection,
+                                    settings: viewModel.settings,
                                     spacing: layout.spacing,
                                     onSelect: select(index:),
                                     onOpen: onOpen
@@ -83,6 +85,7 @@ private struct LibraryMosaicRow: View {
     let row: LibraryGridLayout.MosaicRow
     let entries: [ImageCollection.ThumbnailEntry]
     @ObservedObject var collection: ImageCollection
+    @ObservedObject var settings: LumoSettings
     let spacing: Double
     let onSelect: (Int) -> Void
     let onOpen: () -> Void
@@ -105,6 +108,7 @@ private struct LibraryMosaicRow: View {
                     let item = collection.items[index]
                     LibraryGridCell(
                         item: item,
+                        settings: settings,
                         isSelected: collection.selection.selectedIDs.contains(item.id),
                         isActive: collection.selection.activeID == item.id,
                         imageWidth: cell.width,
@@ -149,75 +153,6 @@ private struct LibraryMosaicCellLayout: Identifiable {
     let id: PhotoAssetID
 }
 
-private struct LibraryFilterBar: View {
-    @ObservedObject var collection: ImageCollection
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "line.3.horizontal.decrease.circle")
-                .foregroundStyle(.secondary)
-            Picker("Flag", selection: flagBinding) {
-                ForEach(LibraryFlagFilter.allCases, id: \.self) { filter in
-                    Text(filter.title).tag(filter)
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-
-            Picker("Rating", selection: ratingBinding) {
-                Text("Any rating").tag(LibraryRatingFilter.any)
-                ForEach(1...5, id: \.self) { rating in
-                    Text("\(rating)+ stars").tag(LibraryRatingFilter.minimum(rating))
-                }
-                Divider()
-                ForEach(0...5, id: \.self) { rating in
-                    Text("Exactly \(rating) stars").tag(LibraryRatingFilter.exact(rating))
-                }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-
-            Text("\(collection.filteredItemCount) of \(collection.items.count)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            if collection.filter.isFiltered {
-                Button("Clear filters") { collection.clearFilter() }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 7)
-        .background(.bar)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Library filters")
-    }
-
-    private var flagBinding: Binding<LibraryFlagFilter> {
-        Binding(
-            get: { collection.filter.flag },
-            set: { value in
-                var filter = collection.filter
-                filter.flag = value
-                collection.setFilter(filter)
-            }
-        )
-    }
-
-    private var ratingBinding: Binding<LibraryRatingFilter> {
-        Binding(
-            get: { collection.filter.rating },
-            set: { value in
-                var filter = collection.filter
-                filter.rating = value
-                collection.setFilter(filter)
-            }
-        )
-    }
-}
-
 private struct LibraryEmptyState: View {
     @ObservedObject var collection: ImageCollection
 
@@ -240,6 +175,7 @@ private struct LibraryEmptyState: View {
 
 private struct LibraryGridCell: View {
     @ObservedObject var item: ImageCollection.Item
+    @ObservedObject var settings: LumoSettings
     let isSelected: Bool
     let isActive: Bool
     let imageWidth: Double
@@ -250,6 +186,18 @@ private struct LibraryGridCell: View {
             thumbnail
                 .frame(width: CGFloat(imageWidth), height: CGFloat(imageHeight))
                 .clipShape(RoundedRectangle(cornerRadius: 8))
+                .opacity(item.asset.flag == .reject ? 0.35 : 1)
+                .overlay(alignment: .topLeading) {
+                    if item.asset.flag == .reject {
+                        Label("Rejected", systemImage: "xmark.circle.fill")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 4)
+                            .background(.red.opacity(0.9), in: Capsule())
+                            .padding(7)
+                    }
+                }
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
@@ -259,11 +207,14 @@ private struct LibraryGridCell: View {
             }
 
             HStack(spacing: 5) {
-                Text(item.displayName)
-                    .font(.caption)
-                    .foregroundStyle(isActive ? .primary : .secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                if settings.showPhotoNames {
+                    Text(item.displayName)
+                        .font(.caption)
+                        .foregroundStyle(isActive ? .primary : .secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .accessibilityLabel(item.displayName)
+                }
                 Spacer(minLength: 0)
                 stateBadges
             }
@@ -304,9 +255,12 @@ private struct LibraryGridCell: View {
     private var stateBadges: some View {
         HStack(spacing: 5) {
             if item.asset.rating > 0 {
-                Image(systemName: "star.fill")
-                    .foregroundStyle(.yellow)
-                    .accessibilityLabel("Rating \(item.asset.rating) of 5")
+                HStack(spacing: 2) {
+                    Image(systemName: "star.fill")
+                    Text("\(item.asset.rating)")
+                }
+                .foregroundStyle(.yellow)
+                .accessibilityLabel("Rating \(item.asset.rating) of 5")
             }
             switch item.asset.flag {
             case .pick:

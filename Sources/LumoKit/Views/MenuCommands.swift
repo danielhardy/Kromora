@@ -21,10 +21,18 @@ enum LumoEditTransferShortcuts {
 /// picks up on the view side — the menu bar is outside the view hierarchy, so
 /// it can't reach the view model directly.
 public struct LumoCommands: Commands {
+    @ObservedObject private var settings: LumoSettings
 
-    public init() {}
+    public init(settings: LumoSettings = LumoSettings()) {
+        _settings = ObservedObject(wrappedValue: settings)
+    }
 
     public var body: some Commands {
+        CommandMenu("View") {
+            Toggle("Show Photo Names", isOn: $settings.showPhotoNames)
+                .accessibilityLabel("Show Photo Names")
+        }
+
         CommandGroup(replacing: .newItem) {
             Button("Open Image...") { post(.openImage) }
                 .keyboardShortcut("o")

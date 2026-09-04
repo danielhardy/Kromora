@@ -6,12 +6,14 @@ import Foundation
 /// value type makes the filtering rules deterministic and easy to exercise without SwiftUI.
 enum LibraryFlagFilter: String, CaseIterable, Codable, Sendable {
     case all
+    case unflagged
     case picks
     case rejected
 
     var title: String {
         switch self {
         case .all: "All"
+        case .unflagged: "Unflagged"
         case .picks: "Picks"
         case .rejected: "Rejected"
         }
@@ -56,6 +58,7 @@ struct LibraryFilter: Codable, Equatable, Hashable, Sendable {
         let flagMatches: Bool
         switch flag {
         case .all: flagMatches = true
+        case .unflagged: flagMatches = assetFlag == .none
         case .picks: flagMatches = assetFlag == .pick
         case .rejected: flagMatches = assetFlag == .reject
         }
@@ -68,6 +71,7 @@ struct LibraryFilter: Codable, Equatable, Hashable, Sendable {
 enum LibraryCullingCommand: Equatable, Sendable {
     case pick
     case reject
+    case clearFlag
     case clearRating
     case rating(Int)
 
@@ -76,6 +80,7 @@ enum LibraryCullingCommand: Equatable, Sendable {
         switch characters.lowercased() {
         case "p": return .pick
         case "x": return .reject
+        case "u": return .clearFlag
         case "0": return .clearRating
         case "1": return .rating(1)
         case "2": return .rating(2)
