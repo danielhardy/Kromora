@@ -57,6 +57,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[1].id)
         XCTAssertEqual(viewModel.histogramErrorMessage, nil)
         XCTAssertFalse(viewModel.isHistogramLoading)
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
         let requests = await engine.histogramRequests
         XCTAssertTrue(requests.last?.source?.backing == .url(second))
     }
@@ -72,8 +73,15 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let viewModel = AppViewModel(engine: engine)
 
         viewModel.openImage(url: first)
+        // One-off opens are copied into the managed library before rendering. Assert the durable
+        // source identity while retaining the original filename as the photo under test.
+        guard let firstManagedURL = viewModel.collection.items.first(where: {
+            $0.displayName == "sequential-first"
+        })?.url else {
+            return XCTFail("one-off open should add the first managed-library item")
+        }
         try await waitUntil("the first preview") {
-            viewModel.sourceURL == first && viewModel.previewState == .ready
+            viewModel.sourceURL == firstManagedURL && viewModel.previewState == .ready
                 && viewModel.previewSurface.image != nil
         }
 
@@ -81,17 +89,22 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         // second model/view action after that release, matching the reported spinner failure.
         await engine.gatePreviews()
         viewModel.openImage(url: second)
+        guard let secondManagedURL = viewModel.collection.items.first(where: {
+            $0.displayName == "sequential-second"
+        })?.url else {
+            return XCTFail("one-off open should add the second managed-library item")
+        }
         try await waitUntil("the second preview request") {
             let requests = await engine.previewRequests
-            return viewModel.sourceURL == second
-                && requests.contains { $0.source?.backing == .url(second) }
+            return viewModel.sourceURL == secondManagedURL
+                && requests.contains { $0.source?.backing == .url(secondManagedURL) }
         }
         XCTAssertEqual(viewModel.previewState, .loading)
         XCTAssertFalse(viewModel.isLoading, "source preparation is complete while B renders")
 
         await engine.releaseNextPreview()
         try await waitUntil("the second preview") {
-            viewModel.sourceURL == second && viewModel.previewState == .ready
+            viewModel.sourceURL == secondManagedURL && viewModel.previewState == .ready
                 && viewModel.previewSurface.image != nil
         }
         XCTAssertFalse(viewModel.isLoading)
@@ -135,8 +148,51 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             viewModel.sourceURL == first && viewModel.previewState == .ready
                 && viewModel.histogram != nil
         }
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
         let histogramRequests = await engine.histogramRequests
         XCTAssertTrue(histogramRequests.last?.source?.backing == .url(first))
+    }
+
+    func testDelayedAutoCompletionCannotMakeTheNextThumbnailReady() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "auto-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "auto-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = AppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: first, second: second)
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the first photo presentation") {
+            viewModel.previewState == .ready && viewModel.canRunAutoAdjustment
+        }
+
+        await engine.gateHistogram()
+        viewModel.runAutoAdjustment()
+        try await waitUntil("the delayed Auto analysis") {
+            await engine.histogramRequests.contains { $0.source?.backing == .url(first) }
+        }
+
+        await engine.gatePreviews()
+        viewModel.selectCollectionImage(at: 1)
+        try await waitUntil("the next photo source") { viewModel.sourceURL == second }
+        XCTAssertEqual(viewModel.autoAdjustmentState, .unavailable(
+            "Auto is available when the photo preview is ready."
+        ))
+
+        await engine.releaseHistograms()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(viewModel.autoAdjustmentState, .unavailable(
+            "Auto is available when the photo preview is ready."
+        ), "the old analysis must not publish ready for the loading photo")
+        XCTAssertFalse(viewModel.canRunAutoAdjustment)
+
+        await engine.releasePreviews()
+        try await waitUntil("the next photo presentation") {
+            viewModel.previewState == .ready && viewModel.canRunAutoAdjustment
+        }
     }
 
     func testLibraryGridHandoffPresentsTheSelectedPhotoWithoutTabSwitching() async throws {

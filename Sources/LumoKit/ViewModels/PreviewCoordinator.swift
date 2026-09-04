@@ -25,6 +25,7 @@ final class PreviewCoordinator {
         /// The caller's navigation generations. The coordinator's own revision protects its
         /// queue, while these protect the owning view model when equal-valued sources are selected
         /// by different photo assets.
+        let assetID: PhotoAssetID?
         let sourceRevision: UInt64
         let displayRevision: UInt64
         let phase: Phase
@@ -35,6 +36,7 @@ final class PreviewCoordinator {
 
     private struct Token: Equatable {
         let source: ImageSource
+        let assetID: PhotoAssetID?
         let sourceRevision: UInt64
         let displayRevision: UInt64
         let revision: UInt64
@@ -95,6 +97,7 @@ final class PreviewCoordinator {
     func submit(
         _ request: RenderRequest,
         phase: Phase = .settled,
+        assetID: PhotoAssetID? = nil,
         sourceRevision: UInt64 = 0,
         displayRevision: UInt64 = 0
     ) {
@@ -114,7 +117,7 @@ final class PreviewCoordinator {
 
         nextRevision &+= 1
         let token = Token(
-            source: request.source, sourceRevision: sourceRevision,
+            source: request.source, assetID: assetID, sourceRevision: sourceRevision,
             displayRevision: displayRevision, revision: nextRevision
         )
         telemetry.input(source: request.source, request: request, revision: token.revision)
@@ -182,7 +185,7 @@ final class PreviewCoordinator {
         let originatingRevision = latestToken?.revision
         nextRevision &+= 1
         let token = Token(
-            source: request.source, sourceRevision: sourceRevision,
+            source: request.source, assetID: latestToken?.assetID, sourceRevision: sourceRevision,
             displayRevision: displayRevision, revision: nextRevision
         )
         latestToken = token
@@ -301,7 +304,8 @@ final class PreviewCoordinator {
         }
         onPublication?(Publication(
             request: request, image: image, gpuImage: gpuImage,
-            revision: token.revision, sourceRevision: token.sourceRevision,
+            revision: token.revision, assetID: token.assetID,
+            sourceRevision: token.sourceRevision,
             displayRevision: token.displayRevision, phase: phase
         ))
     }

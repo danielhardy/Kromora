@@ -481,6 +481,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     @Published private(set) var histogramErrorMessage: String?
     private var histogramTaskRevision: UInt64?
     private var histogramTaskRequest: RenderRequest?
+    /// The asset identity is checked separately from the source value. Two library items can
+    /// legitimately carry equal-valued source data, and an old histogram must never become the
+    /// current item's result just because its `ImageSource` compares equal.
+    private var histogramTaskAssetID: PhotoAssetID?
 
     /// Auto has its own analysis lifecycle rather than borrowing the Info histogram's loading flag:
     /// an Auto request must not make the histogram spinner appear to be waiting on unrelated work.
@@ -940,10 +944,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             }
 
             guard !Task.isCancelled, let self else { return }
-            guard self.sourceRevision == sourceRevision,
-                  self.documentRevision == documentRevision,
-                  self.imageSource == imageSource else {
-                self.autoAdjustmentState = .ready
+            let isSamePhoto = self.activeAssetID == assetID
+                && self.sourceRevision == sourceRevision
+                && self.imageSource == imageSource
+            guard isSamePhoto, self.documentRevision == documentRevision else {
+                // A user edit can supersede an Auto request without changing the photo. Clear
+                // only that photo's in-progress state; a navigation completion must not make the
+                // newly selected photo look ready before its own preview is presented.
+                if isSamePhoto { self.autoAdjustmentState = .ready }
                 return
             }
 
@@ -975,10 +983,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             )
 
             guard !Task.isCancelled else { return }
-            guard self.sourceRevision == sourceRevision,
-                  self.documentRevision == documentRevision,
-                  self.imageSource == imageSource else {
-                self.autoAdjustmentState = .ready
+            let isSamePhotoAfterAnalysis = self.activeAssetID == assetID
+                && self.sourceRevision == sourceRevision
+                && self.imageSource == imageSource
+            guard isSamePhotoAfterAnalysis, self.documentRevision == documentRevision else {
+                if isSamePhotoAfterAnalysis { self.autoAdjustmentState = .ready }
                 return
             }
             guard let histogram,
@@ -1165,7 +1174,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let storedTask = Task { await self.editStore.load(for: request.sourceReference) }
         let preparation = await engine.prepareSource(request.source)
 
-        guard request.sourceRevision == sourceRevision else {
+        guard request.sourceRevision == sourceRevision,
+              request.assetID == activeAssetID else {
             // Do not publish an obsolete source or its error. The worker will consume only the
             // newest pending request after this single in-flight preparation completes.
             storedTask.cancel()
@@ -1183,7 +1193,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         install(preparation: preparation, request: request)
 
         let stored = await storedTask.value
-        guard request.sourceRevision == sourceRevision else { return }
+        guard request.sourceRevision == sourceRevision,
+              request.assetID == activeAssetID else { return }
         adoptStoredEdits(stored, for: request)
     }
 
@@ -1279,16 +1290,23 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard !candidates.isEmpty else { return }
 
         let revision = sourceRevision
+        let assetID = activeAssetID
         let engine = self.engine
         prefetchDelayTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled, let self, self.sourceRevision == revision else { return }
+            guard !Task.isCancelled, let self,
+                  self.activeAssetID == assetID,
+                  self.sourceRevision == revision else { return }
             self.workScheduler.enqueue(
                 id: self.adjacentPreviewPrefetchJobID, lane: .editor, priority: .background
             ) { [weak self, engine] in
-                guard !Task.isCancelled, let self, self.sourceRevision == revision else { return }
+                guard !Task.isCancelled, let self,
+                      self.activeAssetID == assetID,
+                      self.sourceRevision == revision else { return }
                 for (source, document, lut) in candidates {
-                    guard !Task.isCancelled, self.sourceRevision == revision else { return }
+                    guard !Task.isCancelled,
+                          self.activeAssetID == assetID,
+                          self.sourceRevision == revision else { return }
                     let request = RenderRequest(
                         source: source, document: document, lut: lut,
                         targetSize: self.previewBackingSize,
@@ -2227,10 +2245,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         let (requested, look) = displayRequest
         previewCoordinator.submit(RenderRequest(
-                source: imageSource, document: requested, lut: look,
-                targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .preview,
-                output: .raster, space: .current
-            ), phase: .settled, sourceRevision: sourceRevision,
+            source: imageSource, document: requested, lut: look,
+            targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .preview,
+            output: .raster, space: .current
+        ), phase: .settled, assetID: activeAssetID, sourceRevision: sourceRevision,
             displayRevision: displayRevision)
     }
 
@@ -2245,7 +2263,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             source: imageSource, document: requested, lut: lut,
             targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .interactive,
             output: .raster, space: .current
-        ), phase: .interactive, sourceRevision: sourceRevision,
+        ), phase: .interactive, assetID: activeAssetID, sourceRevision: sourceRevision,
         displayRevision: displayRevision)
     }
 
@@ -2516,7 +2534,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     private func publishPreview(_ publication: PreviewCoordinator.Publication) {
-        guard publication.sourceRevision == sourceRevision,
+        guard publication.assetID == activeAssetID,
+              publication.sourceRevision == sourceRevision,
               publication.displayRevision == displayRevision,
               publication.request.source == imageSource else { return }
         let request = publication.request
@@ -2529,7 +2548,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let presentationConfirmation: (() -> Void)? = publication.phase == .settled
             ? { [weak self] in
                 self?.didPresentVisibleFrame(
-                    request, sourceRevision: publication.sourceRevision,
+                    request, assetID: publication.assetID,
+                    sourceRevision: publication.sourceRevision,
                     displayRevision: publication.displayRevision
                 )
             }
@@ -2574,9 +2594,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// visible frame made it through its drawable lifecycle. This keeps a completed renderer result
     /// from being mistaken for pixels the user has actually received.
     private func didPresentVisibleFrame(
-        _ request: RenderRequest, sourceRevision: UInt64, displayRevision: UInt64
+        _ request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
+        displayRevision: UInt64
     ) {
-        guard sourceRevision == self.sourceRevision,
+        guard assetID == activeAssetID,
+              sourceRevision == self.sourceRevision,
               displayRevision == self.displayRevision,
               request.source == imageSource else { return }
         previewState = .ready
@@ -2615,6 +2637,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let box = previewRenderTargetSize(for: baseline, surface: .comparisonBaseline)
         let sourceRevision = self.sourceRevision
         let comparisonRevision = self.comparisonRevision
+        let assetID = self.activeAssetID
 
         workScheduler.enqueue(
             id: comparisonPreviewJobID, lane: .editor, priority: .comparison
@@ -2627,6 +2650,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             let gpuImage = await engine.makeCIImage(request)
             if let gpuImage {
                 guard !Task.isCancelled,
+                      assetID == self.activeAssetID,
                       sourceRevision == self.sourceRevision,
                       comparisonRevision == self.comparisonRevision,
                       self.imageSource == imageSource else { return }
@@ -2635,6 +2659,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             }
             let cgImage = await engine.makeCGImage(request)
             guard !Task.isCancelled,
+                  assetID == self.activeAssetID,
                   sourceRevision == self.sourceRevision,
                   comparisonRevision == self.comparisonRevision,
                   self.imageSource == imageSource,
@@ -2730,10 +2755,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         let sourceRevision = self.sourceRevision
         let displayRevision = self.displayRevision
+        let assetID = self.activeAssetID
 
         // Opening the Info tab can race the settled publication that is already on its way. Do not
         // tally the same displayed request twice just because both paths noticed it.
         if workScheduler.contains(histogramJobID),
+           histogramTaskAssetID == assetID,
            histogramTaskRevision == displayRevision,
            histogramTaskRequest == request {
             return
@@ -2741,6 +2768,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         cancelHistogram(clear: false)
         histogramTaskRevision = displayRevision
         histogramTaskRequest = request
+        histogramTaskAssetID = assetID
         isHistogramLoading = true
         histogramErrorMessage = nil
         workScheduler.enqueue(id: histogramJobID, lane: .editor, priority: .histogram) {
@@ -2753,6 +2781,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             guard !Task.isCancelled,
                   self.isInspectorPresented,
                   self.inspectorTab == .info,
+                  assetID == self.activeAssetID,
                   sourceRevision == self.sourceRevision,
                   displayRevision == self.displayRevision,
                   self.imageSource == request.source else { return }
@@ -2774,6 +2803,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         workScheduler.cancel(id: histogramJobID, pump: pump)
         histogramTaskRevision = nil
         histogramTaskRequest = nil
+        histogramTaskAssetID = nil
         if isHistogramLoading { isHistogramLoading = false }
         if histogramErrorMessage != nil { histogramErrorMessage = nil }
         if clear { histogram = nil }
@@ -2782,6 +2812,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Read EXIF/TIFF/GPS metadata off the main actor and publish it.
     private func refreshMetadata(url: URL?, data: Data?) {
         let revision = sourceRevision
+        let assetID = activeAssetID
         metadataTask?.cancel()
         metadataTask = Task { [weak self] in
             let meta = await Task.detached {
@@ -2793,7 +2824,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 }
                 return ImageMetadata()
             }.value
-            guard !Task.isCancelled, let self, self.sourceRevision == revision else { return }
+            guard !Task.isCancelled, let self,
+                  self.activeAssetID == assetID,
+                  self.sourceRevision == revision else { return }
             self.metadata = meta
         }
     }
@@ -2813,9 +2846,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             return
         }
         let revision = sourceRevision
+        let assetID = activeAssetID
         capabilitiesTask = Task { [engine] in
             let capabilities = await engine.rawCapabilities(for: imageSource)
             guard !Task.isCancelled,
+                  assetID == self.activeAssetID,
                   revision == self.sourceRevision,
                   self.imageSource == imageSource else { return }
             self.rawCapabilities = capabilities
