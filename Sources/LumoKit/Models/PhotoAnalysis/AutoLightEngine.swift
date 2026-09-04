@@ -322,7 +322,7 @@ private enum AutoLightSceneSignals {
             minimum: AutoLightBounds.exposure.lowerBound,
             maximum: AutoLightBounds.exposure.upperBound,
             confidence: AutoLightMath.confidence(analysis),
-            reason: "Median (format(tone.p50)) EV correction, restrained by tonal-key intent."
+            reason: "Median (\(format(tone.p50))) EV correction, restrained by tonal-key intent."
         )
     }
 
