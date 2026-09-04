@@ -79,6 +79,73 @@ final class AutoLightEngineTests: XCTestCase {
         XCTAssertLessThan(abs(result.light.contrast), 6)
     }
 
+    func testCorpusTuningKeepsCategoryAdjustmentsWithinGoldenRanges() {
+        let daylight = makeAnalysis(
+            tone: tone(mean: 0.50, p05: 0.08, p25: 0.28, p50: 0.50, p75: 0.72, p95: 0.90),
+            regions: [region(kind: .subject, mean: 0.52, coverage: 0.24, confidence: 0.92)]
+        )
+        let highKeySubject = region(kind: .subject, mean: 0.82, coverage: 0.24, confidence: 0.92)
+        let highKey = makeAnalysis(
+            tone: tone(mean: 0.80, p05: 0.50, p25: 0.66, p50: 0.81, p75: 0.91, p95: 0.96),
+            regions: [highKeySubject], primary: highKeySubject
+        )
+        let lowKeySubject = region(kind: .subject, mean: 0.43, coverage: 0.24, confidence: 0.92)
+        let lowKey = makeAnalysis(
+            tone: tone(mean: 0.20, p05: 0.01, p25: 0.05, p50: 0.18, p75: 0.35, p95: 0.60),
+            regions: [lowKeySubject],
+            relationships: RegionRelationships(subjectContrast: 0.33),
+            primary: lowKeySubject
+        )
+
+        let daylightResult = AutoLightEngine.evaluate(analysis: daylight).light
+        let highKeyResult = AutoLightEngine.evaluate(analysis: highKey).light
+        let lowKeyResult = AutoLightEngine.evaluate(analysis: lowKey).light
+
+        XCTAssertEqual(AutoLightEngine.evaluate(analysis: daylight).algorithmVersion, 2)
+        XCTAssertGreaterThanOrEqual(daylightResult.exposure, -0.2)
+        XCTAssertLessThanOrEqual(daylightResult.exposure, 0.2)
+        XCTAssertGreaterThanOrEqual(daylightResult.contrast, -4)
+        XCTAssertLessThanOrEqual(daylightResult.contrast, 4)
+        XCTAssertGreaterThanOrEqual(daylightResult.shadows, 0)
+        XCTAssertLessThanOrEqual(daylightResult.shadows, 12)
+        XCTAssertGreaterThanOrEqual(daylightResult.highlights, -16)
+        XCTAssertLessThanOrEqual(daylightResult.highlights, 0)
+
+        XCTAssertLessThan(abs(highKeyResult.exposure), 0.5)
+        XCTAssertGreaterThanOrEqual(highKeyResult.blacks, -12)
+        XCTAssertLessThanOrEqual(highKeyResult.blacks, 0)
+        XCTAssertGreaterThanOrEqual(highKeyResult.highlights, -12)
+        XCTAssertLessThanOrEqual(highKeyResult.highlights, 0)
+
+        XCTAssertLessThan(abs(lowKeyResult.exposure), 0.35)
+        XCTAssertGreaterThanOrEqual(lowKeyResult.shadows, 0)
+        XCTAssertLessThanOrEqual(lowKeyResult.shadows, 12)
+        XCTAssertGreaterThanOrEqual(lowKeyResult.whites, 0)
+        XCTAssertLessThanOrEqual(lowKeyResult.whites, 14)
+    }
+
+    func testCorpusTuningRetainsClippingProtection() {
+        let clippedHighlights = makeAnalysis(
+            tone: tone(
+                mean: 0.60, p05: 0.12, p25: 0.35, p50: 0.58, p75: 0.76, p95: 1.0,
+                highlightClippingFraction: 0.08
+            ),
+            regions: [region(kind: .subject, mean: 0.55, coverage: 0.24, confidence: 0.92)]
+        )
+        let clippedShadows = makeAnalysis(
+            tone: tone(mean: 0.38, p05: 0, p25: 0.12, p50: 0.36, p75: 0.62, p95: 0.88),
+            regions: [region(kind: .subject, mean: 0.42, coverage: 0.24, confidence: 0.92)]
+        )
+
+        let highlightResult = AutoLightEngine.evaluate(analysis: clippedHighlights).light
+        let shadowResult = AutoLightEngine.evaluate(analysis: clippedShadows).light
+
+        XCTAssertLessThanOrEqual(highlightResult.highlights, -18)
+        XCTAssertGreaterThanOrEqual(highlightResult.highlights, -34)
+        XCTAssertGreaterThanOrEqual(shadowResult.shadows, 6)
+        XCTAssertLessThanOrEqual(shadowResult.shadows, 14)
+    }
+
     private func makeAnalysis(
         tone: ToneStatistics,
         regions: [AnalyzedRegion] = [],
@@ -121,11 +188,14 @@ final class AutoLightEngineTests: XCTestCase {
     }
 
     private func tone(
-        mean: Float, p05: Float = 0, p25: Float, p50: Float, p75: Float, p95: Float
+        mean: Float, p05: Float = 0, p25: Float, p50: Float, p75: Float, p95: Float,
+        highlightClippingFraction: Float = 0, shadowClippingFraction: Float = 0
     ) -> ToneStatistics {
         ToneStatistics(
             variant: .perceptual, minimum: p05, maximum: p95, mean: mean,
-            p05: p05, p25: p25, p50: p50, p75: p75, p95: p95
+            p05: p05, p25: p25, p50: p50, p75: p75, p95: p95,
+            shadowClippingFraction: shadowClippingFraction,
+            highlightClippingFraction: highlightClippingFraction
         )
     }
 }
