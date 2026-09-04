@@ -850,12 +850,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     // MARK: - Auto adjustment
 
-    /// Whether the one-click action has a settled source render to analyze. The transparent source
-    /// marker installed during preparation is deliberately not enough: Auto becomes available only
-    /// after a real frame has made it through the presentation lifecycle.
+    /// Whether the one-click action has a ready source to analyze. The transparent source marker
+    /// installed during preparation is deliberately not enough: Auto becomes available only after
+    /// a real frame has made it through the presentation lifecycle. Optional metadata, histogram
+    /// work, and photo-intelligence availability are not prerequisites; the action has a histogram
+    /// fallback for those cases.
     var canRunAutoAdjustment: Bool {
-        sourceImage != nil && imageSource != nil && lastPresentedVisibleRequest != nil
-            && previewState == .ready && autoAdjustmentState != .analyzing
+        sourceImage != nil && imageSource != nil && previewState == .ready
+            && autoAdjustmentState != .analyzing
     }
 
     var isAutoAdjustmentInProgress: Bool {
