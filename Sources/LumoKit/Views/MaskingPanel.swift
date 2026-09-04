@@ -136,7 +136,7 @@ struct MaskOverlayView: View {
     }
 }
 
-private struct MaskGridView: View {
+struct MaskGridView: View {
     let mask: NormalizedMask
 
     var body: some View {

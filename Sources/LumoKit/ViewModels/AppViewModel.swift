@@ -475,6 +475,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Bound to an `.alert` in ContentView; cleared when the user dismisses it.
     @Published var errorMessage: String?
     @Published var isMaskingPanelPresented = false
+    @Published var isAnalysisDebugPanelPresented = false
 
     @Published var isPhotosPickerPresented: Bool = false
     /// Non-nil while the Photos picker task is transferring payloads. The collection itself keeps
