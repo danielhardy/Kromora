@@ -84,6 +84,35 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(publications[0].displayRevision, 23)
     }
 
+    func testAssetIdentityRejectsEqualSourceResultsFromAnEarlierPhoto() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(engine: fake, settleDelay: .zero)
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+        let source = makeSource()
+        let firstAsset = PhotoAssetID.imported(UUID())
+        let secondAsset = PhotoAssetID.imported(UUID())
+
+        coordinator.submit(
+            request(source: source, exposure: 0.1), assetID: firstAsset,
+            sourceRevision: 1, displayRevision: 1
+        )
+        try await waitUntil("the first asset request") { await fake.requests.count == 1 }
+        coordinator.submit(
+            request(source: source, exposure: 0.5), assetID: secondAsset,
+            sourceRevision: 1, displayRevision: 1
+        )
+        try await waitUntil("the second asset request") { await fake.requests.count == 2 }
+
+        await fake.releaseNext()
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertTrue(publications.isEmpty, "an equal source is not enough to identify the photo")
+
+        await fake.releaseNext()
+        try await waitUntil("the second asset publication") { publications.count == 1 }
+        XCTAssertEqual(publications[0].assetID, secondAsset)
+    }
+
     func testSettledGPUPublicationDoesNotRasterizeASecondImage() async throws {
         let fake = GPUBackedRenderEngine()
         let coordinator = PreviewCoordinator(engine: fake)
