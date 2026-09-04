@@ -2,7 +2,7 @@
 id: LUMO-190
 title: Foreground instance + background mask provider
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,12 +11,46 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:51.702Z
-updated: 2026-09-04T14:34:41.546Z
+updated: 2026-09-04T15:12:39.985Z
 depends_on:
   - LUMO-187
   - LUMO-185
 order: zzzzv
 board: product
+branch: main
+commits:
+  - 4f8adcf
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Foreground instance masks use Vision real pixel masks
+      result: pass
+      notes: VNGenerateForegroundInstanceMaskRequest is performed inside VisionSemanticMaskProvider and each allInstances label is converted from the documented float CVPixelBuffer into a NormalizedMask, never a bounding box.
+    - criterion: Multiple instances and cache identity are stable
+      result: pass
+      notes: Foreground instances are exposed by ordinal .foregroundInstance(index), stored independently through MaskStore, and quality plus VisionConfiguration.foregroundRevision participate in the cache key.
+    - criterion: Background is the complement of all foreground instances
+      result: pass
+      notes: The provider unions all cached/generated foreground pixel masks with MaskOperations.union and derives .background with MaskOperations.invert; no-foreground images return an empty foreground list and a full background mask.
+    - criterion: Failures and platform availability are typed and safe
+      result: pass
+      notes: macOS 14 availability, unsupported revision, decode, request, cancellation, missing pixel, and out-of-range paths do not leak raw Vision failures or crash.
+    - criterion: Shared actor/value boundaries remain clean
+      result: pass
+      notes: Vision and CVPixelBuffer stay inside the actor; only RegionMask/NormalizedMask/MaskStore values cross the boundary.
+  checks_run:
+    - swift test --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (9 passed, 0 failed)
+    - swift build (passed as part of focused test build)
+    - git diff --check (clean)
+  findings:
+    - Foreground positive detection remains fixture-dependent; the always-on generated no-foreground fixture verifies graceful empty output and full complement background.
+  fixes: []
+  verification_commits:
+    - 4f8adcf
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T15:12:39.982Z
+  session: 01MTN3F0VS8NS8L8J3
 ---
 
 **Type:** Feature
@@ -65,3 +99,28 @@ other.
   separable foreground object — assert at least one `.foregroundInstance` mask with roughly
   expected coverage, and a `.background` mask that's its complement (assert coverage sums to
   ~1.0). No-clear-foreground fixture — assert empty, not an error. Failure path.
+
+## Agent log
+
+- 2026-09-04T15:12:39.983Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Foreground instance masks use Vision real pixel masks (pass) — VNGenerateForegroundInstanceMaskRequest is performed inside VisionSemanticMaskProvider and each allInstances label is converted from the documented float CVPixelBuffer into a NormalizedMask, never a bounding box.
+- [x] Multiple instances and cache identity are stable (pass) — Foreground instances are exposed by ordinal .foregroundInstance(index), stored independently through MaskStore, and quality plus VisionConfiguration.foregroundRevision participate in the cache key.
+- [x] Background is the complement of all foreground instances (pass) — The provider unions all cached/generated foreground pixel masks with MaskOperations.union and derives .background with MaskOperations.invert; no-foreground images return an empty foreground list and a full background mask.
+- [x] Failures and platform availability are typed and safe (pass) — macOS 14 availability, unsupported revision, decode, request, cancellation, missing pixel, and out-of-range paths do not leak raw Vision failures or crash.
+- [x] Shared actor/value boundaries remain clean (pass) — Vision and CVPixelBuffer stay inside the actor; only RegionMask/NormalizedMask/MaskStore values cross the boundary.
+Checks run:
+- swift test --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (9 passed, 0 failed)
+- swift build (passed as part of focused test build)
+- git diff --check (clean)
+Findings:
+- Foreground positive detection remains fixture-dependent; the always-on generated no-foreground fixture verifies graceful empty output and full complement background.
+Fixes:
+- None
+Verification commits:
+- 4f8adcf
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN3F0VS8NS8L8J3
+Summary: Implemented Vision foreground-instance masks and background complements with quality-aware caching and typed graceful empty results.

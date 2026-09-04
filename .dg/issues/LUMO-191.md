@@ -2,7 +2,7 @@
 id: LUMO-191
 title: Person segmentation mask provider
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,12 +11,46 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:52.110Z
-updated: 2026-09-04T14:34:41.882Z
+updated: 2026-09-04T15:14:26.740Z
 depends_on:
   - LUMO-189
   - LUMO-190
 order: zzzzx
 board: product
+branch: main
+commits:
+  - ee65dbc
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Person segmentation uses Vision at requested analysis/preview quality
+      result: pass
+      notes: VNGeneratePersonSegmentationRequest uses fast for .analysis and balanced for .preview, with the configured revision and a normalized float output pixel format.
+    - criterion: Segmentation is demand-driven and gated by prior signals
+      result: pass
+      notes: The provider checks MaskStore for an existing face or foreground-instance signal before issuing any person Vision request; no-signal calls return personNotApplicable.
+    - criterion: Results use shared RegionMask/MaskStore infrastructure
+      result: pass
+      notes: The resulting person pixel buffer is normalized within the Vision actor, stored under the quality/versioned key, and returned as a RegionMask.
+    - criterion: Render quality and failures are typed
+      result: pass
+      notes: .render returns unsupportedQuality until LUMO-202; unavailable revisions, empty results, decode/request, pixel, and cancellation paths are catchable VisionSemanticMaskError values.
+    - criterion: Swift 6 boundary remains safe
+      result: pass
+      notes: Vision/CoreVideo objects remain inside the actor and no concurrency escape hatch was introduced.
+  checks_run:
+    - swift test --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (10 passed, 0 failed)
+    - swift build (passed as part of focused test build)
+    - git diff --check (clean)
+  findings:
+    - Positive person segmentation requires a licensed person fixture; always-on gating/no-signal coverage confirms landscapes do not issue the expensive request.
+  fixes: []
+  verification_commits:
+    - ee65dbc
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T15:14:26.737Z
+  session: 01MTN3HB8RST8T1KDX
 ---
 
 **Type:** Feature
@@ -69,3 +103,28 @@ needs to work at `.analysis`/`.preview` quality.
   foreground + face → person matte produced. Fixture with no face/person-shaped foreground →
   person segmentation is skipped entirely (assert the Vision request was never issued, via a call
   counter on a fake/spy). Failure path.
+
+## Agent log
+
+- 2026-09-04T15:14:26.738Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Person segmentation uses Vision at requested analysis/preview quality (pass) — VNGeneratePersonSegmentationRequest uses fast for .analysis and balanced for .preview, with the configured revision and a normalized float output pixel format.
+- [x] Segmentation is demand-driven and gated by prior signals (pass) — The provider checks MaskStore for an existing face or foreground-instance signal before issuing any person Vision request; no-signal calls return personNotApplicable.
+- [x] Results use shared RegionMask/MaskStore infrastructure (pass) — The resulting person pixel buffer is normalized within the Vision actor, stored under the quality/versioned key, and returned as a RegionMask.
+- [x] Render quality and failures are typed (pass) — .render returns unsupportedQuality until LUMO-202; unavailable revisions, empty results, decode/request, pixel, and cancellation paths are catchable VisionSemanticMaskError values.
+- [x] Swift 6 boundary remains safe (pass) — Vision/CoreVideo objects remain inside the actor and no concurrency escape hatch was introduced.
+Checks run:
+- swift test --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (10 passed, 0 failed)
+- swift build (passed as part of focused test build)
+- git diff --check (clean)
+Findings:
+- Positive person segmentation requires a licensed person fixture; always-on gating/no-signal coverage confirms landscapes do not issue the expensive request.
+Fixes:
+- None
+Verification commits:
+- ee65dbc
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN3HB8RST8T1KDX
+Summary: Added cache-gated Vision person segmentation with explicit quality mapping, shared mask storage, and typed not-applicable degradation.

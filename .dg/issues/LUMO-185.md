@@ -2,7 +2,7 @@
 id: LUMO-185
 title: "MaskStore: mask caching and versioning"
 type: task
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,11 +11,38 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:49.718Z
-updated: 2026-09-04T14:34:39.939Z
+updated: 2026-09-04T14:56:48.039Z
 depends_on:
   - LUMO-184
-order: zzzx
+order: y
 board: product
+branch: main
+commits:
+  - aeea1094e14c5924decbcad26690aa1a8f555b5a
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: MaskStore is persistent and concurrency-safe
+      result: pass
+      notes: Actor-backed JSON storage uses an injectable directory and atomic writes.
+    - criterion: Quality and provider-version cache identity are consistent
+      result: pass
+      notes: MaskCacheKey includes asset, source fingerprint, semantic kind, quality, and provider version; exact lookup never substitutes lower quality.
+    - criterion: Cancelled writes cannot corrupt existing data
+      result: pass
+      notes: Cancellation is checked before encoding and immediately before atomic replacement.
+  checks_run:
+    - swift test --filter RegionMaskTests (5 passed, 0 failed)
+    - swift build (passed)
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits:
+    - aeea1094e14c5924decbcad26690aa1a8f555b5a
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T14:56:48.036Z
+  session: 01MTN2UMBYAS8DP2XA
 ---
 
 **Type:** Task
@@ -83,3 +110,26 @@ here, not duplicated.
 - `Tests/LumoKitTests/MaskStoreTests.swift` (new): write/read round-trip per quality level;
   independent-quality-caching (§2.3); edit-document-changes-don't-bust-cache (§2.4); cancelled-
   write-doesn't-corrupt-store; persists across a simulated relaunch (reopen the store from disk).
+
+## Agent log
+
+- 2026-09-04T14:56:48.037Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] MaskStore is persistent and concurrency-safe (pass) — Actor-backed JSON storage uses an injectable directory and atomic writes.
+- [x] Quality and provider-version cache identity are consistent (pass) — MaskCacheKey includes asset, source fingerprint, semantic kind, quality, and provider version; exact lookup never substitutes lower quality.
+- [x] Cancelled writes cannot corrupt existing data (pass) — Cancellation is checked before encoding and immediately before atomic replacement.
+Checks run:
+- swift test --filter RegionMaskTests (5 passed, 0 failed)
+- swift build (passed)
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- aeea1094e14c5924decbcad26690aa1a8f555b5a
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN2UMBYAS8DP2XA
+Summary: Implemented actor-isolated durable MaskStore with independent per-quality cache files, exact-quality lookup, explicit best-available lookup, atomic cancellation-safe writes, and relaunch persistence.

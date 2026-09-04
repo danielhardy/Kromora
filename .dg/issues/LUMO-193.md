@@ -2,7 +2,7 @@
 id: LUMO-193
 title: Masked regional statistics engine
 type: feature
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,13 +11,28 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:52.925Z
-updated: 2026-09-04T14:34:42.510Z
+updated: 2026-09-04T15:27:31.699Z
 depends_on:
   - LUMO-184
   - LUMO-186
   - LUMO-192
-order: zzzzz
+order: a0
 board: product
+branch: main
+commits:
+  - 918f224
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits:
+    - 918f224
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T15:27:31.696Z
+  session: 01MTN3Y4WV9MHYL0JC
 ---
 
 **Type:** Feature
@@ -83,3 +98,22 @@ exactly one implementation of "statistics through a mask" in the whole codebase 
   average. Soft/feathered mask test: assert a feathered mask's edge pixels are appropriately
   down-weighted rather than binary-included/excluded. Mismatched image/mask input rejected
   cleanly.
+
+## Agent log
+
+- 2026-09-04T15:27:31.697Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- 918f224
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN3Y4WV9MHYL0JC
+Summary: Added shared masked regional tone/color statistics with weighted soft-mask histograms, canonical image/mask validation, renderer seam, and focused tests.

@@ -2,7 +2,7 @@
 id: LUMO-188
 title: Attention saliency -> subject mask provider
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,12 +11,41 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:50.916Z
-updated: 2026-09-04T14:34:40.912Z
+updated: 2026-09-04T14:59:09.867Z
 depends_on:
   - LUMO-187
   - LUMO-185
-order: zzzzh
+order: zq
 board: product
+branch: main
+commits:
+  - f004c7da5acc72a5ce93b227ef3266dab0576f46
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Subject mask uses attention-based saliency and returns RegionMask
+      result: pass
+      notes: The provider performs VNGenerateAttentionBasedSaliencyImageRequest, maps its salient object bounds, rasterizes the semantic result, and returns a RegionMask.
+    - criterion: Requested quality and provider revision participate in caching
+      result: pass
+      notes: Analysis, preview, and render requests use independent MaskStore keys containing MaskQuality and VisionConfiguration.providerVersion.
+    - criterion: Failure is typed and coordinate conversion is centralized
+      result: pass
+      notes: No salient result throws VisionSemanticMaskError.noSalientRegion; Vision bounds use NormalizedRect.fromVision.
+  checks_run:
+    - swift test --filter VisionSemanticMaskProviderTests (2 passed, 0 failed)
+    - swift test --filter RegionMaskTests (5 passed, 0 failed)
+    - swift build (passed)
+    - git diff --check (clean)
+  findings:
+    - The initial subject result uses the Vision salient-object rectangle; heat-map-driven matte refinement remains the planned LUMO-202 follow-up.
+  fixes: []
+  verification_commits:
+    - f004c7da5acc72a5ce93b227ef3266dab0576f46
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T14:59:09.864Z
+  session: 01MTN2XNRZIXHAODM1
 ---
 
 **Type:** Feature
@@ -63,3 +92,27 @@ later tickets have at least one real mask to test against.
 - `Tests/LumoKitTests/SubjectMaskProviderTests.swift` (new): fixture with an obvious visual
   subject (synthetic, generated per `Fixtures.swift` convention) — assert the resulting mask's
   bounds roughly contain the expected area. Failure path returns a typed error, doesn't crash.
+
+## Agent log
+
+- 2026-09-04T14:59:09.865Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Subject mask uses attention-based saliency and returns RegionMask (pass) — The provider performs VNGenerateAttentionBasedSaliencyImageRequest, maps its salient object bounds, rasterizes the semantic result, and returns a RegionMask.
+- [x] Requested quality and provider revision participate in caching (pass) — Analysis, preview, and render requests use independent MaskStore keys containing MaskQuality and VisionConfiguration.providerVersion.
+- [x] Failure is typed and coordinate conversion is centralized (pass) — No salient result throws VisionSemanticMaskError.noSalientRegion; Vision bounds use NormalizedRect.fromVision.
+Checks run:
+- swift test --filter VisionSemanticMaskProviderTests (2 passed, 0 failed)
+- swift test --filter RegionMaskTests (5 passed, 0 failed)
+- swift build (passed)
+- git diff --check (clean)
+Findings:
+- The initial subject result uses the Vision salient-object rectangle; heat-map-driven matte refinement remains the planned LUMO-202 follow-up.
+Fixes:
+- None
+Verification commits:
+- f004c7da5acc72a5ce93b227ef3266dab0576f46
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN2XNRZIXHAODM1
+Summary: Implemented subject masks from Vision attention-based saliency, converted bounds through the shared Vision coordinate boundary, cached requested qualities through MaskStore, and added typed degradation tests.

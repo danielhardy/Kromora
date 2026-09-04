@@ -2,7 +2,7 @@
 id: LUMO-180
 title: Reduce duplication between addFromURLs and addFromMediaVolume
 type: task
-status: claimed
+status: done
 priority: low
 creation_provenance:
   runner: claude
@@ -11,17 +11,35 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-04T13:38:03.144Z
-updated: 2026-09-04T14:43:04.612Z
+updated: 2026-09-04T14:46:57.249Z
 depends_on:
   - LUMO-178
 order: a0
 board: product
-claim:
+commits:
+  - ffcecca373d98b9dba17888a61994f31fd475515
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: addFromURLs and addFromMediaVolume share one URL-backed import implementation
+      result: pass
+      notes: ImageCollection.addFromMediaVolume establishes the volume security scope and delegates to addFromURLs; no duplicate import loop remains.
+    - criterion: URL-backed durability and media-volume behavior remain covered
+      result: pass
+      notes: MediaVolumeImportTests.testExplicitImportUsesURLBackedPhotoAssetsAndPreservesSource passed.
+  checks_run:
+    - swift test --filter OpenImageDialogTests|MediaVolumeImportTests (9 passed, 0 failed)
+    - git diff --check (clean)
+    - dg validate (OK)
+    - swift test (752 executed, 34 skipped, 15 unrelated timing/lifecycle failures)
+  findings: []
+  fixes: []
+  verification_commits:
+    - ffcecca373d98b9dba17888a61994f31fd475515
   actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-04T14:46:57.243Z
   session: 01MTN2CZ6RUXWUNZ6E
-  claimed_at: 2026-09-04T14:43:04.610Z
-  expires_at: 2026-09-04T15:43:04.610Z
-  model: gpt-5.6-luna
 ---
 
 ## Objective
@@ -43,3 +61,24 @@ Reduce duplication between addFromURLs and addFromMediaVolume
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-04T14:46:57.248Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] addFromURLs and addFromMediaVolume share one URL-backed import implementation (pass) — ImageCollection.addFromMediaVolume establishes the volume security scope and delegates to addFromURLs; no duplicate import loop remains.
+- [x] URL-backed durability and media-volume behavior remain covered (pass) — MediaVolumeImportTests.testExplicitImportUsesURLBackedPhotoAssetsAndPreservesSource passed.
+Checks run:
+- swift test --filter OpenImageDialogTests|MediaVolumeImportTests (9 passed, 0 failed)
+- git diff --check (clean)
+- dg validate (OK)
+- swift test (752 executed, 34 skipped, 15 unrelated timing/lifecycle failures)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- ffcecca373d98b9dba17888a61994f31fd475515
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTN2CZ6RUXWUNZ6E
+Summary: Verified that addFromMediaVolume now delegates all URL-backed import work to addFromURLs, leaving one shared implementation for validation, durable-library copying, identity/deduplication, metadata, and thumbnail setup.

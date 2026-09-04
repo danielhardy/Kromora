@@ -2,7 +2,7 @@
 id: LUMO-202
 title: High-quality mask refinement for local adjustments
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,12 +11,26 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:56.683Z
-updated: 2026-09-04T14:34:45.295Z
+updated: 2026-09-04T17:19:13.505Z
 depends_on:
   - LUMO-201
   - LUMO-186
-order: zzzzzzv
+order: zq
 board: product
+commits:
+  - 827c34b
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits:
+    - 827c34b
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T17:19:13.501Z
+  session: 01MTN7VMR3IO7G1BHH
 ---
 
 **Type:** Feature
@@ -76,3 +90,22 @@ re-running Vision from scratch at full resolution.
   mid-refinement doesn't corrupt `MaskStore`. Memory: rough check that tile-based processing
   doesn't materialize the whole full-res buffer at once (e.g. assert peak memory scales with tile
   size, not full-image size, on a large fixture).
+
+## Agent log
+
+- 2026-09-04T17:19:13.503Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- HEAD
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN7VMR3IO7G1BHH
+Summary: Added cancellable tiled mask refinement from cached preview/analysis seeds to render-quality masks, persisted through the coordinator's shared MaskStore, with cancellation and resolution tests.

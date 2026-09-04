@@ -2,7 +2,7 @@
 id: LUMO-196
 title: Persistent PhotoAnalysis cache + versioning
 type: task
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,12 +11,14 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:54.177Z
-updated: 2026-09-04T14:34:43.456Z
+updated: 2026-09-04T16:11:18.457Z
 depends_on:
   - LUMO-195
   - LUMO-194
-order: zzzzzv
+order: w
 board: product
+commits:
+  - e839d4c
 ---
 
 **Type:** Task
@@ -68,3 +70,7 @@ different consumption pattern.
 - `Tests/LumoKitTests/PhotoAnalysisCacheTests.swift` (new): write/read round-trip, cache-hit
   avoids recomputation, edit-document-changes-don't-bust-cache, version-bump-busts-cache,
   cancelled-write-doesn't-corrupt-store.
+
+## Agent log
+
+- 2026-09-04T16:11:18.453Z: Implemented persistent PhotoAnalysisCache with source/version keys, atomic cancellation-safe JSON persistence, and coordinator cache-hit integration.

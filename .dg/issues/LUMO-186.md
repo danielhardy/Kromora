@@ -2,7 +2,7 @@
 id: LUMO-186
 title: "MaskOperations: invert/intersect/union/subtract/feather/refine"
 type: feature
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,11 +11,38 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:50.102Z
-updated: 2026-09-04T14:34:40.263Z
+updated: 2026-09-04T14:56:48.657Z
 depends_on:
   - LUMO-184
-order: zzzy
+order: z
 board: product
+branch: main
+commits:
+  - aeea1094e14c5924decbcad26690aa1a8f555b5a
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Core mask operations compose over validated normalized pixels
+      result: pass
+      notes: Invert, intersect, union, subtract, feather, and refine are implemented with size validation.
+    - criterion: Region results reuse the shared storage seam
+      result: pass
+      notes: Region operations load through MaskStore and persist derived masks through MaskStore with a derived semantic kind and source quality.
+    - criterion: Operations are framework-independent and tested
+      result: pass
+      notes: MaskOperations imports Foundation only and focused synthetic overlap tests pass.
+  checks_run:
+    - swift test --filter RegionMaskTests (5 passed, 0 failed)
+    - swift build (passed)
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits:
+    - aeea1094e14c5924decbcad26690aa1a8f555b5a
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T14:56:48.653Z
+  session: 01MTN2UMTTOEAXJX97
 ---
 
 **Type:** Feature
@@ -76,3 +103,26 @@ reimplemented once inside `PhotoAnalysis` and again inside the Masking UI.
   the expected coverage). Feather test: assert edge softness increases with radius (e.g. compare
   gradient steepness at the mask boundary before/after). Composition test: chain 2–3 operations
   and assert the result is still a valid, cacheable `RegionMask`.
+
+## Agent log
+
+- 2026-09-04T14:56:48.655Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Core mask operations compose over validated normalized pixels (pass) — Invert, intersect, union, subtract, feather, and refine are implemented with size validation.
+- [x] Region results reuse the shared storage seam (pass) — Region operations load through MaskStore and persist derived masks through MaskStore with a derived semantic kind and source quality.
+- [x] Operations are framework-independent and tested (pass) — MaskOperations imports Foundation only and focused synthetic overlap tests pass.
+Checks run:
+- swift test --filter RegionMaskTests (5 passed, 0 failed)
+- swift build (passed)
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- aeea1094e14c5924decbcad26690aa1a8f555b5a
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN2UMTTOEAXJX97
+Summary: Implemented shared invert/intersect/union/subtract/feather/refine operations for normalized masks and region-level operations that persist derived results through MaskStore.

@@ -2,7 +2,7 @@
 id: LUMO-198
 title: Region relationships (subject/background/face deltas)
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,11 +11,13 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:55.042Z
-updated: 2026-09-04T14:34:44.097Z
+updated: 2026-09-04T16:11:18.734Z
 depends_on:
   - LUMO-197
-order: zzzzzy
+order: y8
 board: product
+commits:
+  - e839d4c
 ---
 
 **Type:** Feature
@@ -55,3 +57,7 @@ the *relationship* ("subject is 0.31 darker than background"). Compute it once h
 - `Tests/LumoKitTests/RegionRelationshipsTests.swift` (new): dark subject/bright background →
   correct-sign, correct-magnitude delta. No subject → subject-relative fields nil. No face →
   face-relative fields nil, subject-relative fields still populated.
+
+## Agent log
+
+- 2026-09-04T16:11:18.731Z: Added pure RegionRelationships derivation with signed perceptual deltas, optional missing evidence, and PhotoAnalysis assembly wiring.

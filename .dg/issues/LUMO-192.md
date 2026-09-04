@@ -2,7 +2,7 @@
 id: LUMO-192
 title: Global tone + color statistics analyzer (Tier 0)
 type: feature
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,12 +11,46 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:52.506Z
-updated: 2026-09-04T14:34:42.194Z
+updated: 2026-09-04T15:16:44.538Z
 depends_on:
   - LUMO-182
   - LUMO-183
 order: zzzzy
 board: product
+branch: main
+commits:
+  - 31748f5
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Global analyzer uses the canonical AnalysisImage and existing histogram machinery
+      result: pass
+      notes: GlobalToneAnalyzer requests a neutral RenderEngining histogram at the AnalysisImage dimensions, retaining rasterization inside RenderEngine and avoiding a second per-pixel image path.
+    - criterion: ToneStatistics cover perceptual and linear variants with explicit luminance semantics
+      result: pass
+      notes: The implementation documents the sRGB renderer space and Rec.709 Y formula inherited from HistogramData; perceptual bins remain encoded and linear bins apply the sRGB transfer decode.
+    - criterion: ColorStatistics are computed from the same pass
+      result: pass
+      notes: Mean/median RGB, clipping, neutrality, colorfulness, and marginal saturation estimates derive from the same validated 256-bin histogram.
+    - criterion: Tier-0 availability and failure behavior are explicit
+      result: pass
+      notes: Successful analysis returns AnalysisQuality.globalToneAvailable=true; unavailable and malformed histograms throw typed GlobalToneAnalysisError values.
+    - criterion: Swift 6 and no Vision dependency
+      result: pass
+      notes: The analyzer is Sendable, renderer-injectable for deterministic tests, imports no Vision, and introduces no concurrency escape hatch.
+  checks_run:
+    - swift test --filter GlobalToneAnalyzerTests --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (12 passed, 0 failed)
+    - swift build (passed as part of focused test build)
+    - git diff --check (clean)
+  findings:
+    - Color saturation is intentionally a conservative marginal estimate because HistogramData does not retain per-pixel channel correlation; a future masked/color pass can refine it without changing the Tier-0 seam.
+  fixes: []
+  verification_commits:
+    - 31748f5
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T15:16:44.534Z
+  session: 01MTN3K9I38U3X3C1E
 ---
 
 **Type:** Feature
@@ -63,3 +97,28 @@ before mask-dependent analysis (LUMO-193+) is built, and it works from the canon
   expected percentiles; clipping-fraction correctness for deliberately over/underexposed fixtures.
 - Rough timing check against the < 20 ms Tier-0 budget (`docs/PHASE3_SPEC.md` §6) — full benchmark
   infra is LUMO-206.
+
+## Agent log
+
+- 2026-09-04T15:16:44.535Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Global analyzer uses the canonical AnalysisImage and existing histogram machinery (pass) — GlobalToneAnalyzer requests a neutral RenderEngining histogram at the AnalysisImage dimensions, retaining rasterization inside RenderEngine and avoiding a second per-pixel image path.
+- [x] ToneStatistics cover perceptual and linear variants with explicit luminance semantics (pass) — The implementation documents the sRGB renderer space and Rec.709 Y formula inherited from HistogramData; perceptual bins remain encoded and linear bins apply the sRGB transfer decode.
+- [x] ColorStatistics are computed from the same pass (pass) — Mean/median RGB, clipping, neutrality, colorfulness, and marginal saturation estimates derive from the same validated 256-bin histogram.
+- [x] Tier-0 availability and failure behavior are explicit (pass) — Successful analysis returns AnalysisQuality.globalToneAvailable=true; unavailable and malformed histograms throw typed GlobalToneAnalysisError values.
+- [x] Swift 6 and no Vision dependency (pass) — The analyzer is Sendable, renderer-injectable for deterministic tests, imports no Vision, and introduces no concurrency escape hatch.
+Checks run:
+- swift test --filter GlobalToneAnalyzerTests --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (12 passed, 0 failed)
+- swift build (passed as part of focused test build)
+- git diff --check (clean)
+Findings:
+- Color saturation is intentionally a conservative marginal estimate because HistogramData does not retain per-pixel channel correlation; a future masked/color pass can refine it without changing the Tier-0 seam.
+Fixes:
+- None
+Verification commits:
+- 31748f5
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN3K9I38U3X3C1E
+Summary: Added renderer-backed Tier-0 global tone/color analysis with dual luminance statistics, typed validation, and quality reporting.

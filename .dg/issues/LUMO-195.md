@@ -2,7 +2,7 @@
 id: LUMO-195
 title: "Analysis coordinator: cancellation + request dedup"
 type: task
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,12 +11,52 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:53.761Z
-updated: 2026-09-04T14:34:43.148Z
+updated: 2026-09-04T15:49:02.313Z
 depends_on:
   - LUMO-187
   - LUMO-192
-order: zzzzzq
+order: a0
 board: product
+commits:
+  - c5237a8b6e7b48a70713dfed0732263ae1875fbd
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: actor PhotoAnalysisCoordinator exposes analyze(assetID:source:level:) and mask(assetID:source:kind:quality:)
+      result: pass
+      notes: Both entry points present in PhotoAnalysisCoordinator.swift; mask(...) does not require a full analyze() call and only invokes SemanticMaskProviding for the requested kind/quality.
+    - criterion: Concurrent calls for the same underlying work share one in-flight Task
+      result: pass
+      notes: 8-way concurrent dedup verified for both analyze() and mask() (CountingMaskProvider callCount == 1 in both tests).
+    - criterion: PhotoAnalysisLevel maps to registered mask stages, Tier 0 wired for real, registry-shaped for later stages
+      result: pass
+      notes: "defaultStages is a [PhotoAnalysisLevel: [PhotoAnalysisStage]] dictionary, injectable via init(stages:), so later tickets register additional stages without touching dedup/cancellation machinery."
+    - criterion: Every awaited stage checks Task.checkCancellation() between stages
+      result: pass
+      notes: checkCancellation() present before/after each stage in performAnalysis, in performMask, and in the assembler's per-region loop.
+    - criterion: No @MainActor requirement anywhere in this actor
+      result: pass
+      notes: PhotoAnalysisCoordinator is a plain actor; no @MainActor annotations anywhere in the file.
+    - criterion: Swift 6 clean, zero escape hatches
+      result: pass
+      notes: PackageSettingsTests (language mode, tools version, zero-escape-hatch grep) pass unchanged after the fix.
+  checks_run:
+    - swift build (clean; pre-existing CIKernel deprecation warnings only, unrelated to this file)
+    - swift test --filter PhotoAnalysisCoordinatorTests (6 passed, 0 failed, includes new regression test)
+    - swift test --filter PackageSettingsTests (3 passed, 0 failed)
+    - dg validate (OK; pre-existing unrelated warnings only)
+    - git status --porcelain (clean aside from this verification commit)
+  findings:
+    - "Cancelling one of several concurrent callers sharing a deduped analyze()/mask() request cancelled the underlying work for every other concurrent caller keyed to the same request, not just the one that cancelled. Editor entry and the thumbnail prefetcher both request the same photo's subject mask concurrently and share the in-flight Task per the dedup contract; the thumbnail prefetcher's request is cancelled (e.g. scrolled off-screen) before the shared work finishes. withTaskCancellationHandler's onCancel fired on the prefetcher's own cancellation and called task.cancel() on the *shared* Task, so the editor's still-active request also failed with CancellationError even though nothing about the editor's own call was cancelled. Reproduced directly: a scratch two-waiter test (one cancelled, one left running) failed the uncancelled waiter with CancellationError before the fix, using the actual coordinator + a gated mask provider. Fixed in commit c5237a8 (file: Sources/LumoKit/Models/PhotoAnalysis/PhotoAnalysisCoordinator.swift)."
+  fixes:
+    - Added a waiter count to each in-flight dedup entry (InFlightEntry<Value>); the shared Task is only cancelled once every attached waiter has itself cancelled, via analysisWaiterCancelled(_:)/maskWaiterCancelled(_:) reached through withTaskCancellationHandler's onCancel. The dictionary entry is still only ever removed by the task's own completion handler, so a late waiter-cancel can't evict an unrelated later request that reused the same key.
+    - "Added testCancellingOneOfSeveralWaitersDoesNotCancelTheOthers to PhotoAnalysisCoordinatorTests.swift: two concurrent mask() callers share one in-flight request, one is cancelled, and the test asserts the other still receives its result and the provider was never cancelled."
+  verification_commits:
+    - c5237a8b6e7b48a70713dfed0732263ae1875fbd
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-04T15:49:02.309Z
+  session: 01MTN4FNOCJMA29HH6
 ---
 
 **Type:** Task
@@ -75,3 +115,37 @@ necessarily wanting a full `PhotoAnalysis` recomputed.
 - `Tests/LumoKitTests/PhotoAnalysisCoordinatorTests.swift` (new): concurrent-dedup test for both
   entry points, cancellation test, direct-mask-request-doesn't-require-full-analyze test (assert a
   `mask(...)` call doesn't trigger unrelated stages).
+
+
+### Comment — codex @ 2026-09-04T15:41:01.653Z
+
+Implemented in c2464cb. Added actor PhotoAnalysisCoordinator with configurable fast/standard/detailed mask stage registry, source/asset request-keyed in-flight dedup for full analysis and direct masks, cancellation checks and shared-task cancellation propagation, Tier-0 assembly with optional mask-stage degradation, and focused concurrent/cancellation/direct-mask tests. Verification: swift build passed; PhotoAnalysis and PackageSettings suites passed; dg validate passed with existing warnings. Full swift test executed 779 tests with 34 skips and 15 pre-existing unrelated timing/lifecycle failures.
+
+## Agent log
+
+- 2026-09-04T15:49:02.311Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] actor PhotoAnalysisCoordinator exposes analyze(assetID:source:level:) and mask(assetID:source:kind:quality:) (pass) — Both entry points present in PhotoAnalysisCoordinator.swift; mask(...) does not require a full analyze() call and only invokes SemanticMaskProviding for the requested kind/quality.
+- [x] Concurrent calls for the same underlying work share one in-flight Task (pass) — 8-way concurrent dedup verified for both analyze() and mask() (CountingMaskProvider callCount == 1 in both tests).
+- [x] PhotoAnalysisLevel maps to registered mask stages, Tier 0 wired for real, registry-shaped for later stages (pass) — defaultStages is a [PhotoAnalysisLevel: [PhotoAnalysisStage]] dictionary, injectable via init(stages:), so later tickets register additional stages without touching dedup/cancellation machinery.
+- [x] Every awaited stage checks Task.checkCancellation() between stages (pass) — checkCancellation() present before/after each stage in performAnalysis, in performMask, and in the assembler's per-region loop.
+- [x] No @MainActor requirement anywhere in this actor (pass) — PhotoAnalysisCoordinator is a plain actor; no @MainActor annotations anywhere in the file.
+- [x] Swift 6 clean, zero escape hatches (pass) — PackageSettingsTests (language mode, tools version, zero-escape-hatch grep) pass unchanged after the fix.
+Checks run:
+- swift build (clean; pre-existing CIKernel deprecation warnings only, unrelated to this file)
+- swift test --filter PhotoAnalysisCoordinatorTests (6 passed, 0 failed, includes new regression test)
+- swift test --filter PackageSettingsTests (3 passed, 0 failed)
+- dg validate (OK; pre-existing unrelated warnings only)
+- git status --porcelain (clean aside from this verification commit)
+Findings:
+- Cancelling one of several concurrent callers sharing a deduped analyze()/mask() request cancelled the underlying work for every other concurrent caller keyed to the same request, not just the one that cancelled. Editor entry and the thumbnail prefetcher both request the same photo's subject mask concurrently and share the in-flight Task per the dedup contract; the thumbnail prefetcher's request is cancelled (e.g. scrolled off-screen) before the shared work finishes. withTaskCancellationHandler's onCancel fired on the prefetcher's own cancellation and called task.cancel() on the *shared* Task, so the editor's still-active request also failed with CancellationError even though nothing about the editor's own call was cancelled. Reproduced directly: a scratch two-waiter test (one cancelled, one left running) failed the uncancelled waiter with CancellationError before the fix, using the actual coordinator + a gated mask provider. Fixed in commit c5237a8 (file: Sources/LumoKit/Models/PhotoAnalysis/PhotoAnalysisCoordinator.swift).
+Fixes:
+- Added a waiter count to each in-flight dedup entry (InFlightEntry<Value>); the shared Task is only cancelled once every attached waiter has itself cancelled, via analysisWaiterCancelled(_:)/maskWaiterCancelled(_:) reached through withTaskCancellationHandler's onCancel. The dictionary entry is still only ever removed by the task's own completion handler, so a late waiter-cancel can't evict an unrelated later request that reused the same key.
+- Added testCancellingOneOfSeveralWaitersDoesNotCancelTheOthers to PhotoAnalysisCoordinatorTests.swift: two concurrent mask() callers share one in-flight request, one is cancelled, and the test asserts the other still receives its result and the provider was never cancelled.
+Verification commits:
+- c5237a8b6e7b48a70713dfed0732263ae1875fbd
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MTN4FNOCJMA29HH6
+Summary: Verified LUMO-195: coordinator meets all acceptance criteria. Found and fixed a real cross-consumer cancellation leak — cancelling one of several concurrent waiters on a deduped request was cancelling the shared work for all of them, undermining the ticket's multi-consumer motivation. Added waiter refcounting so the shared Task only cancels once every attached waiter has cancelled, plus a regression test.

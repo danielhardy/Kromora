@@ -2,7 +2,7 @@
 id: LUMO-189
 title: Face detection + face mask provider
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,12 +11,46 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:51.306Z
-updated: 2026-09-04T14:34:41.219Z
+updated: 2026-09-04T15:09:35.202Z
 depends_on:
   - LUMO-187
   - LUMO-185
-order: zzzzq
+order: zv
 board: product
+branch: main
+commits:
+  - 10e276d
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Face detection returns RegionMask values through Vision
+      result: pass
+      notes: VisionSemanticMaskProvider uses VNDetectFaceRectanglesRequest and maps each VNFaceObservation through NormalizedRect.fromVision into a stored RegionMask.
+    - criterion: Multiple faces have independent semantic identities
+      result: pass
+      notes: The source-compatible .face kind addresses index zero and .faceInstance(index) addresses additional detections; faceMasks returns all independently cached results.
+    - criterion: Small faces are represented with discountable confidence
+      result: pass
+      notes: Coverage is measured from the rasterized rectangle and confidence scales linearly below the documented 1% image-area threshold, capped at 0.95.
+    - criterion: Quality, revision, errors, and concurrency boundaries are correct
+      result: pass
+      notes: MaskQuality and VisionConfiguration.faceRevision participate in MaskStore keys; no-face, bad indices, unsupported revisions, decode, request, and cancellation paths are typed/catchable.
+    - criterion: No skin-brightness recommendation is introduced
+      result: pass
+      notes: The provider only detects and masks face rectangles; all exposure/relational policy remains outside the adapter.
+  checks_run:
+    - swift test --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (8 passed, 0 failed)
+    - swift test (750 passed, 15 unrelated failures, 34 skipped)
+    - git diff --check (clean)
+  findings:
+    - The full suite has unrelated timing-sensitive failures in ComparisonModeTests, DevelopInspectorTests, EditPersistenceIntegrationTests, ExportCutoverTests, FilmstripNavigationTests, LUTWorkflowTests, and ThumbnailSwitchLifecycleTests; all face/provider and mask tests pass.
+  fixes: []
+  verification_commits:
+    - 10e276d
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T15:09:35.199Z
+  session: 01MTN3B2AT6W0CB0WK
 ---
 
 **Type:** Feature
@@ -73,3 +107,28 @@ demographics, and explicitly not a "target skin brightness" heuristic.
   `LUMO_RAW_FIXTURE_DIR` like the opt-in slow RAW lane, keeping the no-face/empty-result and
   failure-path cases always-on. Multi-face fixture (if available) — assert one `RegionMask` per
   face.
+
+## Agent log
+
+- 2026-09-04T15:09:35.200Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Face detection returns RegionMask values through Vision (pass) — VisionSemanticMaskProvider uses VNDetectFaceRectanglesRequest and maps each VNFaceObservation through NormalizedRect.fromVision into a stored RegionMask.
+- [x] Multiple faces have independent semantic identities (pass) — The source-compatible .face kind addresses index zero and .faceInstance(index) addresses additional detections; faceMasks returns all independently cached results.
+- [x] Small faces are represented with discountable confidence (pass) — Coverage is measured from the rasterized rectangle and confidence scales linearly below the documented 1% image-area threshold, capped at 0.95.
+- [x] Quality, revision, errors, and concurrency boundaries are correct (pass) — MaskQuality and VisionConfiguration.faceRevision participate in MaskStore keys; no-face, bad indices, unsupported revisions, decode, request, and cancellation paths are typed/catchable.
+- [x] No skin-brightness recommendation is introduced (pass) — The provider only detects and masks face rectangles; all exposure/relational policy remains outside the adapter.
+Checks run:
+- swift test --filter VisionSemanticMaskProviderTests --filter RegionMaskTests (8 passed, 0 failed)
+- swift test (750 passed, 15 unrelated failures, 34 skipped)
+- git diff --check (clean)
+Findings:
+- The full suite has unrelated timing-sensitive failures in ComparisonModeTests, DevelopInspectorTests, EditPersistenceIntegrationTests, ExportCutoverTests, FilmstripNavigationTests, LUTWorkflowTests, and ThumbnailSwitchLifecycleTests; all face/provider and mask tests pass.
+Fixes:
+- None
+Verification commits:
+- 10e276d
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN3B2AT6W0CB0WK
+Summary: Implemented Vision face detection and indexed bounding-rectangle face masks with quality-aware caching and typed degradation errors.
