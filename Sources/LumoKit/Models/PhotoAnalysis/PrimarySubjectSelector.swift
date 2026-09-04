@@ -51,14 +51,7 @@ struct PrimarySubjectSelection: Sendable, Codable, Equatable {
         Array(rankedSubjects.dropFirst(primaryRegionID == nil ? 0 : 1))
     }
 
-    var rankedSecondarySubjects: [PrimarySubjectScore] { secondarySubjects }
-
     var secondaryRegionIDs: [UUID] { secondarySubjects.map(\.regionID) }
-
-    var rankedRegionIDs: [UUID] { rankedSubjects.map(\.regionID) }
-
-    /// Alias that makes the reference semantics explicit to downstream callers.
-    var primarySubjectID: UUID? { primaryRegionID }
 
     init(
         primaryRegionID: UUID?,
@@ -87,22 +80,6 @@ struct PrimarySubjectSelection: Sendable, Codable, Equatable {
 /// runner-up, so a close contest remains conservative even when both candidates have strong
 /// evidence.
 struct PrimarySubjectSelector: Sendable {
-    func select(from regions: [AnalyzedRegion]) -> PrimarySubjectSelection {
-        Self.select(from: regions)
-    }
-
-    func select(regions: [AnalyzedRegion]) -> PrimarySubjectSelection {
-        Self.select(from: regions)
-    }
-
-    static func select(_ regions: [AnalyzedRegion]) -> PrimarySubjectSelection {
-        select(from: regions)
-    }
-
-    static func select(regions: [AnalyzedRegion]) -> PrimarySubjectSelection {
-        select(from: regions)
-    }
-
     static func select(from regions: [AnalyzedRegion]) -> PrimarySubjectSelection {
         let candidates = subjectCandidates(in: regions)
         guard !candidates.isEmpty else { return .none }
@@ -131,14 +108,6 @@ struct PrimarySubjectSelector: Sendable {
             confidence: confidence,
             rankedSubjects: ranked
         )
-    }
-
-    /// Scores one candidate using the same pure signal extraction as `select(from:)`.
-    static func score(_ candidate: AnalyzedRegion, in regions: [AnalyzedRegion])
-        -> PrimarySubjectScore
-    {
-        let candidates = subjectCandidates(in: regions)
-        return score(candidate, in: regions, maximumCoverage: candidates.map(\.coverage).max() ?? 0)
     }
 
     private static func subjectCandidates(in regions: [AnalyzedRegion]) -> [AnalyzedRegion] {
