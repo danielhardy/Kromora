@@ -43,6 +43,7 @@ actor PhotoAnalysisCoordinator {
 
     private let maskProvider: any SemanticMaskProviding
     private let assembler: PhotoAnalysisAssembler
+    private let cache: PhotoAnalysisCache
     private let stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]
 
     /// `waiters` is the count of callers currently attached to `task`. The shared task is only
@@ -60,10 +61,12 @@ actor PhotoAnalysisCoordinator {
     init(
         engine: any RenderEngining = RenderEngine.shared,
         maskStore: MaskStore = MaskStore(),
+        cache: PhotoAnalysisCache = PhotoAnalysisCache(),
         maskProvider: (any SemanticMaskProviding)? = nil,
         stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]? = nil
     ) {
         self.maskProvider = maskProvider ?? VisionSemanticMaskProvider(store: maskStore)
+        self.cache = cache
         self.assembler = PhotoAnalysisAssembler(
             globalToneAnalyzer: GlobalToneAnalyzer(engine: engine),
             maskedToneAnalyzer: MaskedToneAnalyzer(engine: engine, store: maskStore)
@@ -84,6 +87,21 @@ actor PhotoAnalysisCoordinator {
             level: level
         )
 
+        let cacheKey = AnalysisCacheKey(
+            assetID: key.assetID,
+            sourceFingerprint: key.sourceFingerprint,
+            analysisVersion: .current
+        )
+        do {
+            if let cached = try await cache.analysis(for: cacheKey) {
+                return cached
+            }
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // A damaged or unavailable cache must never prevent Tier 0 analysis.
+        }
+
         let task: Task<PhotoAnalysis, Error>
         if let existing = inFlightAnalyses[key] {
             task = existing.task
@@ -91,7 +109,9 @@ actor PhotoAnalysisCoordinator {
         } else {
             task = Task { [self] in
                 do {
-                    let result = try await performAnalysis(assetID: assetID, source: source, level: level)
+                    let result = try await performAnalysis(
+                        assetID: assetID, source: source, level: level, cacheKey: cacheKey
+                    )
                     inFlightAnalyses.removeValue(forKey: key)
                     return result
                 } catch {
@@ -157,7 +177,8 @@ actor PhotoAnalysisCoordinator {
     private func performAnalysis(
         assetID: PhotoAssetID,
         source: ImageSource,
-        level: PhotoAnalysisLevel
+        level: PhotoAnalysisLevel,
+        cacheKey: AnalysisCacheKey
     ) async throws -> PhotoAnalysis {
         try Task.checkCancellation()
         let image = try AnalysisImageFactory.make(from: source)
@@ -186,6 +207,15 @@ actor PhotoAnalysisCoordinator {
 
         try Task.checkCancellation()
         let result = try await assembler.assemble(image: image, masks: masks)
+        try Task.checkCancellation()
+        do {
+            try await cache.store(result, for: cacheKey)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Persistence is an optimization. Return a valid analysis even when the cache cannot
+            // be written (for example, a read-only application-support volume).
+        }
         try Task.checkCancellation()
         return result
     }

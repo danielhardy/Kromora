@@ -134,6 +134,27 @@ final class PhotoAnalysisCoordinatorTests: XCTestCase {
         XCTAssertEqual(callCount, 1)
     }
 
+    func testAnalysisCacheHitSkipsMaskProviderOnTheNextRequest() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumoAnalysisCache-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let cache = PhotoAnalysisCache(directory: directory)
+        let provider = CountingMaskProvider(gated: false)
+        let coordinator = PhotoAnalysisCoordinator(
+            engine: FakeRenderEngine(), cache: cache, maskProvider: provider,
+            stages: [.fast: [PhotoAnalysisStage(kind: .subject, quality: .analysis)]]
+        )
+        let source = makeSource()
+        let assetID = PhotoAssetID.data(Data([14, 15, 16]))
+
+        _ = try await coordinator.analyze(assetID: assetID, source: source, level: .fast)
+        _ = try await coordinator.analyze(assetID: assetID, source: source, level: .fast)
+
+        let callCount = await provider.callCount
+        XCTAssertEqual(callCount, 1)
+    }
+
     private func makeSource() -> ImageSource {
         ImageSource(
             backing: .data(Data([0, 1, 2, 3])), kind: .standard,

@@ -64,6 +64,8 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
     let globalTone: ToneStatistics
     let colorStatistics: ColorStatistics
     let regions: [AnalyzedRegion]
+    let primarySubject: PrimarySubjectSelection
+    let relationships: RegionRelationships
     let quality: AnalysisQuality
     let timings: AnalysisTimings
 
@@ -72,6 +74,8 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
         globalTone: ToneStatistics,
         colorStatistics: ColorStatistics,
         regions: [AnalyzedRegion] = [],
+        primarySubject: PrimarySubjectSelection = .none,
+        relationships: RegionRelationships? = nil,
         quality: AnalysisQuality,
         timings: AnalysisTimings = .zero
     ) {
@@ -79,6 +83,10 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
         self.globalTone = globalTone
         self.colorStatistics = colorStatistics
         self.regions = regions
+        self.primarySubject = primarySubject
+        self.relationships = relationships ?? RegionRelationships.make(
+            globalTone: globalTone, regions: regions, primarySubject: primarySubject
+        )
         self.quality = quality
         self.timings = timings
     }
@@ -138,11 +146,18 @@ struct PhotoAnalysisAssembler: Sendable {
         try Task.checkCancellation()
 
         let quality = Self.quality(global: global.quality, regions: regions)
+        let primarySubject = PrimarySubjectSelector.select(from: regions)
         return PhotoAnalysis(
             version: version,
             globalTone: global.tone.perceptual,
             colorStatistics: global.color,
             regions: regions,
+            primarySubject: primarySubject,
+            relationships: RegionRelationships.make(
+                globalTone: global.tone.perceptual,
+                regions: regions,
+                primarySubject: primarySubject
+            ),
             quality: quality,
             timings: timings
         )

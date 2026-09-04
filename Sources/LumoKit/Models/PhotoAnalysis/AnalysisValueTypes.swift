@@ -216,11 +216,14 @@ struct AnalysisVersion: Codable, Sendable, Equatable, Hashable, Comparable {
     let rawValue: UInt16
 
     init(rawValue: UInt16) {
-        self.rawValue = max(1, min(rawValue, Self.currentRawValue))
+        // Keep future versions representable when reading persisted keys. The convenience Int
+        // initializer remains clamped for user/configuration input; cache versioning needs a
+        // decoded future value to remain distinct so it can be treated as a clean cache miss.
+        self.rawValue = max(1, rawValue)
     }
 
     init(_ value: Int) {
-        self.init(rawValue: UInt16(clamping: value))
+        self.rawValue = max(1, min(UInt16(clamping: value), Self.currentRawValue))
     }
 
     private static let currentRawValue: UInt16 = 1
