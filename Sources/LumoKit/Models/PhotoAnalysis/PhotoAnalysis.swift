@@ -15,6 +15,9 @@ struct AnalyzedRegion: Sendable, Codable, Equatable, Identifiable {
     let id: UUID
     let kind: RegionKind
     let mask: RegionMaskReference
+    /// The normalized image-space extent of the analyzed mask. This is retained from the mask
+    /// boundary so downstream pure analysis can compare regions spatially without seeing pixels.
+    let bounds: NormalizedRect?
     let confidence: Float
     let importance: Float
     let tone: ToneStatistics
@@ -25,6 +28,7 @@ struct AnalyzedRegion: Sendable, Codable, Equatable, Identifiable {
         id: UUID,
         kind: RegionKind,
         mask: RegionMaskReference,
+        bounds: NormalizedRect? = nil,
         confidence: Float,
         importance: Float,
         tone: ToneStatistics,
@@ -34,6 +38,7 @@ struct AnalyzedRegion: Sendable, Codable, Equatable, Identifiable {
         self.id = id
         self.kind = kind
         self.mask = mask
+        self.bounds = bounds
         self.confidence = Self.unit(confidence)
         self.importance = Self.unit(importance)
         self.tone = tone
@@ -116,16 +121,18 @@ struct PhotoAnalysisAssembler: Sendable {
                 continue
             }
 
-            regions.append(AnalyzedRegion(
-                id: mask.id,
-                kind: mask.kind,
-                mask: mask.reference,
-                confidence: mask.confidence,
-                importance: mask.confidence * mask.coverage,
-                tone: statistics.tone,
-                color: statistics.color,
-                coverage: mask.coverage
-            ))
+            regions.append(
+                AnalyzedRegion(
+                    id: mask.id,
+                    kind: mask.kind,
+                    mask: mask.reference,
+                    bounds: mask.bounds,
+                    confidence: mask.confidence,
+                    importance: mask.confidence * mask.coverage,
+                    tone: statistics.tone,
+                    color: statistics.color,
+                    coverage: mask.coverage
+                ))
         }
 
         try Task.checkCancellation()
