@@ -87,6 +87,31 @@ final class PhotoAnalysisCoordinatorTests: XCTestCase {
         XCTAssertTrue(wasCancelled)
     }
 
+    func testCancellingOneOfSeveralWaitersDoesNotCancelTheOthers() async throws {
+        let provider = CountingMaskProvider(gated: true)
+        let coordinator = PhotoAnalysisCoordinator(maskProvider: provider, stages: [:])
+        let source = makeSource()
+        let assetID = PhotoAssetID.data(Data([11, 12, 13]))
+
+        let cancelled = Task {
+            try await coordinator.mask(
+                assetID: assetID, source: source, kind: .subject, quality: .preview
+            )
+        }
+        let survivor = Task {
+            try await coordinator.mask(
+                assetID: assetID, source: source, kind: .subject, quality: .preview
+            )
+        }
+        await provider.waitUntilStarted()
+        cancelled.cancel()
+
+        let result = try await survivor.value
+        XCTAssertEqual(result.kind, .subject)
+        let wasCancelled = await provider.wasCancelled
+        XCTAssertFalse(wasCancelled)
+    }
+
     func testDirectMaskRequestDoesNotRunGlobalAnalysis() async throws {
         let engine = FakeRenderEngine()
         let provider = CountingMaskProvider(gated: false)

@@ -45,8 +45,17 @@ actor PhotoAnalysisCoordinator {
     private let assembler: PhotoAnalysisAssembler
     private let stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]
 
-    private var inFlightAnalyses: [AnalysisRequestKey: Task<PhotoAnalysis, Error>] = [:]
-    private var inFlightMasks: [MaskRequestKey: Task<RegionMask, Error>] = [:]
+    /// `waiters` is the count of callers currently attached to `task`. The shared task is only
+    /// cancelled once every attached waiter has cancelled — otherwise cancelling one of several
+    /// concurrent callers (e.g. a thumbnail prefetch scrolled off-screen) would cancel the work
+    /// out from under an unrelated caller (e.g. the editor) sharing the same in-flight request.
+    private struct InFlightEntry<Value: Sendable> {
+        let task: Task<Value, Error>
+        var waiters: Int
+    }
+
+    private var inFlightAnalyses: [AnalysisRequestKey: InFlightEntry<PhotoAnalysis>] = [:]
+    private var inFlightMasks: [MaskRequestKey: InFlightEntry<RegionMask>] = [:]
 
     init(
         engine: any RenderEngining = RenderEngine.shared,
@@ -77,7 +86,8 @@ actor PhotoAnalysisCoordinator {
 
         let task: Task<PhotoAnalysis, Error>
         if let existing = inFlightAnalyses[key] {
-            task = existing
+            task = existing.task
+            inFlightAnalyses[key]?.waiters += 1
         } else {
             task = Task { [self] in
                 do {
@@ -89,10 +99,12 @@ actor PhotoAnalysisCoordinator {
                     throw error
                 }
             }
-            inFlightAnalyses[key] = task
+            inFlightAnalyses[key] = InFlightEntry(task: task, waiters: 1)
         }
 
-        let result = try await sharedValue(of: task)
+        let result = try await sharedValue(of: task) { [self] in
+            await analysisWaiterCancelled(key)
+        }
         try Task.checkCancellation()
         return result
     }
@@ -117,7 +129,8 @@ actor PhotoAnalysisCoordinator {
 
         let task: Task<RegionMask, Error>
         if let existing = inFlightMasks[key] {
-            task = existing
+            task = existing.task
+            inFlightMasks[key]?.waiters += 1
         } else {
             task = Task { [self] in
                 do {
@@ -129,10 +142,12 @@ actor PhotoAnalysisCoordinator {
                     throw error
                 }
             }
-            inFlightMasks[key] = task
+            inFlightMasks[key] = InFlightEntry(task: task, waiters: 1)
         }
 
-        let result = try await sharedValue(of: task)
+        let result = try await sharedValue(of: task) { [self] in
+            await maskWaiterCancelled(key)
+        }
         try Task.checkCancellation()
         return result
     }
@@ -187,14 +202,42 @@ actor PhotoAnalysisCoordinator {
         return result
     }
 
-    /// A cancelled waiter cancels the shared work. This matches the app's cancel-on-supersede
-    /// discipline and keeps a Vision request from continuing after its only consumer disappears.
-    private func sharedValue<Value: Sendable>(of task: Task<Value, Error>) async throws -> Value {
+    /// A cancelled waiter detaches from the shared work; only once every attached waiter has
+    /// cancelled does the underlying task itself get cancelled. This matches the app's
+    /// cancel-on-supersede discipline while keeping one caller's cancellation (e.g. a scrolled-away
+    /// thumbnail prefetch) from silently failing an unrelated caller (e.g. the editor) sharing the
+    /// same in-flight request.
+    private func sharedValue<Value: Sendable>(
+        of task: Task<Value, Error>,
+        onCancel detachWaiter: @escaping @Sendable () async -> Void
+    ) async throws -> Value {
         try await withTaskCancellationHandler {
             try await task.value
         } onCancel: {
-            task.cancel()
+            Task { await detachWaiter() }
         }
+    }
+
+    /// Decrement the analysis waiter count for `key`; cancel the shared task once none remain.
+    /// The dictionary entry itself is only ever removed by the task's own completion handler
+    /// above, so a late completion can't evict an unrelated later request that reused the key.
+    private func analysisWaiterCancelled(_ key: AnalysisRequestKey) {
+        guard var entry = inFlightAnalyses[key] else { return }
+        entry.waiters -= 1
+        if entry.waiters <= 0 {
+            entry.task.cancel()
+        }
+        inFlightAnalyses[key] = entry
+    }
+
+    /// Mask-request counterpart of `analysisWaiterCancelled(_:)`.
+    private func maskWaiterCancelled(_ key: MaskRequestKey) {
+        guard var entry = inFlightMasks[key] else { return }
+        entry.waiters -= 1
+        if entry.waiters <= 0 {
+            entry.task.cancel()
+        }
+        inFlightMasks[key] = entry
     }
 
     // MARK: - Stage registry and identity
