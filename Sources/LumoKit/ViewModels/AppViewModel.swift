@@ -533,6 +533,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// The renderer. An `any RenderEngining` rather than the concrete actor so a test can drive the
     /// preview flow without a GPU — the reason Step 4 introduced the protocol.
     private let engine: any RenderEngining
+    /// Shared photo-understanding coordinator. Auto consumes its scalar result; it never reaches
+    /// through to Vision, Core Image, or mask pixels.
+    private let photoAnalysisCoordinator: PhotoAnalysisCoordinator
     private let preferences: UserDefaults
     private let previewCoordinator: PreviewCoordinator
     private struct SourceLoadRequest: Sendable {
@@ -589,12 +592,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         preferences: UserDefaults = .standard,
         mediaVolumeProvider: any MediaVolumeProviding = MountedMediaVolumeProvider(),
         includeBundledLooks: Bool = false,
-        libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL
+        libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL,
+        photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil
     ) {
         var interval = LumoSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
 
         self.engine = engine
+        self.photoAnalysisCoordinator = photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
         self.preferences = preferences
         self.editStore = editStore
         self.settings = LumoSettings(preferences: preferences)
@@ -875,6 +880,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         let sourceRevision = self.sourceRevision
         let documentRevision = self.documentRevision
+        let assetID = self.activeAssetID
         var analysisDocument = document
         analysisDocument.light = .neutral
         analysisDocument.color.vibrance = 0
@@ -883,10 +889,46 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // preserves the active Look on the document below.
         analysisDocument.lut = .none
         let engine = self.engine
+        let photoAnalysisCoordinator = self.photoAnalysisCoordinator
         autoAdjustmentState = .analyzing
         statusMessage = "Analyzing \(sourceName) for Auto adjustments…"
         autoAdjustmentTask?.cancel()
         autoAdjustmentTask = Task { @MainActor [weak self, engine] in
+            let photoAnalysis: PhotoAnalysis?
+            if let assetID {
+                photoAnalysis = try? await photoAnalysisCoordinator.analyze(
+                    assetID: assetID, source: imageSource, level: .standard
+                )
+            } else {
+                photoAnalysis = nil
+            }
+
+            guard !Task.isCancelled, let self else { return }
+            guard self.sourceRevision == sourceRevision,
+                  self.documentRevision == documentRevision,
+                  self.imageSource == imageSource else {
+                self.autoAdjustmentState = .ready
+                return
+            }
+
+            if let photoAnalysis,
+               photoAnalysis.quality.globalToneAvailable,
+               photoAnalysis.quality.overallConfidence >= AutoLightConfiguration.default.confidenceFloor {
+                let result = AutoLightEngine.evaluate(
+                    analysis: photoAnalysis,
+                    currentEdits: analysisDocument,
+                    configuration: .default
+                )
+                self.updateDocument { document in
+                    document.light = result.light
+                    document.color.vibrance = result.color.vibrance
+                    document.color.saturation = result.color.saturation
+                }
+                self.autoAdjustmentState = .ready
+                self.statusMessage = "Auto applied — subject-aware Light baseline (undo to restore previous edits)"
+                return
+            }
+
             let histogram = await engine.histogram(
                 source: imageSource,
                 document: analysisDocument,
@@ -896,7 +938,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 maxDimension: AutoAdjustmentSettings.default.histogramMaxDimension
             )
 
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled else { return }
             guard self.sourceRevision == sourceRevision,
                   self.documentRevision == documentRevision,
                   self.imageSource == imageSource else {
