@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 
 @testable import LumoKit
@@ -25,7 +27,7 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         }
     }
 
-    func testUnsupportedKindsUseTypedErrors() async throws {
+    func testStillUnsupportedKindsUseTypedErrors() async throws {
         let source = ImageSource(
             backing: .data(Data()), kind: .standard,
             nativeExtent: CGSize(width: 32, height: 32)
@@ -37,10 +39,33 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         let provider = VisionSemanticMaskProvider()
 
         do {
-            _ = try await provider.mask(for: .face, image: image, quality: .analysis)
-            XCTFail("unsupported face masks should throw")
+            _ = try await provider.mask(for: .person, image: image, quality: .analysis)
+            XCTFail("unsupported person masks should throw")
         } catch let error as VisionSemanticMaskError {
-            XCTAssertEqual(error, .unsupported(.face))
+            XCTAssertEqual(error, .unsupported(.person))
+        }
+    }
+
+    func testNoFaceIsReportedAsTypedFailureForValidImage() async throws {
+        let directory = try Fixtures.makeTempDirectory("FaceMaskTests")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let image = try Fixtures.makeCGImage(width: 64, height: 48, red: 0.25, green: 0.25, blue: 0.25)
+        let url = directory.appendingPathComponent("solid.png")
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil
+        ) else { XCTFail("could not create image destination"); return }
+        CGImageDestinationAddImage(destination, image, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 48))
+        let analysisImage = try AnalysisImageFactory.make(from: source, configuration: .init(maximumDimension: 64))
+        let provider = VisionSemanticMaskProvider(store: MaskStore(directory: directory))
+
+        do {
+            _ = try await provider.mask(for: .face, image: analysisImage, quality: .analysis)
+            XCTFail("a flat image should not produce a face mask")
+        } catch let error as VisionSemanticMaskError {
+            XCTAssertEqual(error, .noFaceDetected)
         }
     }
 }

@@ -5,7 +5,7 @@ import XCTest
 
 final class RegionMaskTests: XCTestCase {
     func testSemanticKindsAndQualityRoundTrip() throws {
-        let kinds: [SemanticMaskKind] = [.subject, .background, .person, .face, .foregroundInstance(2), .unknown("sky")]
+        let kinds: [SemanticMaskKind] = [.subject, .background, .person, .face, .faceInstance(1), .foregroundInstance(2), .unknown("sky")]
         for kind in kinds {
             let data = try JSONEncoder().encode(kind)
             XCTAssertEqual(try JSONDecoder().decode(SemanticMaskKind.self, from: data), kind)

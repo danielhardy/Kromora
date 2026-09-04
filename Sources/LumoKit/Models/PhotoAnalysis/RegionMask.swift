@@ -5,6 +5,10 @@ enum SemanticMaskKind: Codable, Sendable, Equatable, Hashable {
     case background
     case person
     case face
+    /// The first detected face is addressed by `face`; additional faces use this indexed kind.
+    /// Keeping `.face` source-compatible makes the common single-face request ergonomic while
+    /// still giving multi-face consumers a stable cache identity for every detection.
+    case faceInstance(Int)
     case foregroundInstance(Int)
     /// New semantic kinds can be cached and round-tripped before the app learns how to render them.
     case unknown(String)
