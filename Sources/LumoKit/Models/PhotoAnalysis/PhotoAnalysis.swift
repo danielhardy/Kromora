@@ -99,6 +99,45 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
         self.quality = quality
         self.timings = timings
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, globalTone, colorStatistics, regions, primarySubject, relationships, scene,
+             quality, timings
+    }
+
+    /// Scene characteristics were added after the first cache schema. A missing scene is safely
+    /// reconstructed from the persisted scalar evidence rather than invalidating a usable cache.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try container.decodeIfPresent(AnalysisVersion.self, forKey: .version) ?? .current
+        let globalTone = try container.decode(ToneStatistics.self, forKey: .globalTone)
+        let colorStatistics = try container.decode(ColorStatistics.self, forKey: .colorStatistics)
+        let regions = try container.decodeIfPresent([AnalyzedRegion].self, forKey: .regions) ?? []
+        let primarySubject = try container.decodeIfPresent(
+            PrimarySubjectSelection.self, forKey: .primarySubject
+        ) ?? .none
+        let relationships = try container.decodeIfPresent(
+            RegionRelationships.self, forKey: .relationships
+        ) ?? RegionRelationships.make(
+            globalTone: globalTone, regions: regions, primarySubject: primarySubject
+        )
+        self.version = version
+        self.globalTone = globalTone
+        self.colorStatistics = colorStatistics
+        self.regions = regions
+        self.primarySubject = primarySubject
+        self.relationships = relationships
+        self.scene = try container.decodeIfPresent(SceneCharacteristics.self, forKey: .scene)
+            ?? SceneCharacteristicsAnalyzer.analyze(
+                globalTone: globalTone,
+                regions: regions,
+                relationships: relationships,
+                primarySubject: primarySubject
+            )
+        self.quality = try container.decodeIfPresent(AnalysisQuality.self, forKey: .quality)
+            ?? .unavailable
+        self.timings = try container.decodeIfPresent(AnalysisTimings.self, forKey: .timings) ?? .zero
+    }
 }
 
 /// The asynchronous seams needed to assemble a `PhotoAnalysis`. Both analyzers remain injectable

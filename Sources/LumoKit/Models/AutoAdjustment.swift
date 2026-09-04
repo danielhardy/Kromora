@@ -111,6 +111,41 @@ struct AutoAdjustmentResult: Sendable, Equatable {
     let statistics: AutoImageStatistics
     let light: LightAdjustments
     let color: ColorAdjustments
+    let algorithmVersion: Int
+    let rationale: AutoRationale
+
+    init(
+        statistics: AutoImageStatistics,
+        light: LightAdjustments,
+        color: ColorAdjustments,
+        algorithmVersion: Int = AutoAdjustmentSettings.currentVersion,
+        rationale: AutoRationale = .neutral
+    ) {
+        self.statistics = statistics
+        self.light = light
+        self.color = color
+        self.algorithmVersion = algorithmVersion
+        self.rationale = rationale
+    }
+}
+
+extension AutoImageStatistics {
+    /// A scalar-only statistics projection for the subject-aware engine. The Tier-0 histogram
+    /// path still owns its exact pixel count and percentile settings; this projection exists so
+    /// both Auto result types retain one inspectable result shape.
+    init(analysis: PhotoAnalysis) {
+        let tone = analysis.globalTone
+        self.pixelCount = 0
+        self.meanLuma = Double(tone.mean)
+        self.medianLuma = Double(tone.p50)
+        self.lowPercentileLuma = Double(tone.p10)
+        self.highPercentileLuma = Double(tone.p90)
+        self.redMean = Double(analysis.colorStatistics.meanRGB.x)
+        self.greenMean = Double(analysis.colorStatistics.meanRGB.y)
+        self.blueMean = Double(analysis.colorStatistics.meanRGB.z)
+        self.lowClipFraction = Double(tone.shadowClippingFraction)
+        self.highClipFraction = Double(tone.highlightClippingFraction)
+    }
 }
 
 enum AutoAdjustmentAnalyzer {
