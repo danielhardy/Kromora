@@ -8,6 +8,14 @@ final class CanvasNavigationTests: XCTestCase {
     private let landscape = CGRect(x: 0, y: 0, width: 400, height: 200)
     private let viewport = CGSize(width: 300, height: 300)
 
+    private func assertPoint(
+        _ actual: CGPoint, equals expected: CGPoint, accuracy: CGFloat = 0.000_001,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertEqual(actual.x, expected.x, accuracy: accuracy, file: file, line: line)
+        XCTAssertEqual(actual.y, expected.y, accuracy: accuracy, file: file, line: line)
+    }
+
     func testFitShowsTheWholeImageAndCentersIt() {
         let navigation = CanvasNavigation()
         let transform = navigation.transform(imageExtent: landscape, viewportSize: viewport)
@@ -144,6 +152,91 @@ final class CanvasNavigationTests: XCTestCase {
             CanvasNavigation.maximumZoom
         )
     }
+
+    func testMaskTransformRoundTripsOrientedPortraitAndBottomLeftCrop() {
+        // ImageDecoder supplies the oriented size, so an EXIF-6 landscape source is represented
+        // here as its upright portrait extent. The persisted crop is intentionally bottom-left;
+        // mask points use upper-left coordinates.
+        let sourceSize = CGSize(width: 300, height: 500)
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.5)
+        )
+        var navigation = CanvasNavigation()
+        navigation.fill()
+        navigation.setZoom(2.25)
+        navigation.pan(by: CGSize(width: -70, height: 35),
+                       imageExtent: CGRect(origin: .zero, size: sourceSize),
+                       viewportSize: CGSize(width: 420, height: 280))
+        let transform = CanvasMaskTransform(
+            sourceSize: sourceSize, crop: crop, navigation: navigation,
+            viewportSize: CGSize(width: 420, height: 280), backingScale: 2
+        )
+
+        for point in [CGPoint(x: 0.1, y: 0.3), CGPoint(x: 0.45, y: 0.55), CGPoint(x: 0.8, y: 0.8)] {
+            let viewportPoint = try! XCTUnwrap(transform.viewportPoint(forSourceNormalized: point))
+            let roundTrip = try! XCTUnwrap(transform.sourceNormalizedPoint(forViewport: viewportPoint))
+            XCTAssertEqual(roundTrip.x, point.x, accuracy: 0.000_001)
+            XCTAssertEqual(roundTrip.y, point.y, accuracy: 0.000_001)
+        }
+        assertPoint(transform.cropRect.origin, equals: CGPoint(x: 0.1, y: 0.3))
+        XCTAssertEqual(transform.cropRect.width, 0.7, accuracy: 0.000_001)
+        XCTAssertEqual(transform.cropRect.height, 0.5, accuracy: 0.000_001)
+    }
+
+    func testMaskTransformIsRetinaScaleInvariant() throws {
+        let sourceSize = CGSize(width: 1600, height: 900)
+        var navigation = CanvasNavigation()
+        navigation.setZoom(1.75)
+        navigation.pan(by: CGSize(width: -90, height: 28),
+                       imageExtent: CGRect(origin: .zero, size: sourceSize),
+                       viewportSize: CGSize(width: 500, height: 320))
+        let oneX = CanvasMaskTransform(
+            sourceSize: sourceSize, navigation: navigation,
+            viewportSize: CGSize(width: 500, height: 320), backingScale: 1
+        )
+        let twoX = CanvasMaskTransform(
+            sourceSize: sourceSize, navigation: navigation,
+            viewportSize: CGSize(width: 500, height: 320), backingScale: 2
+        )
+        let sourcePoint = CGPoint(x: 0.73, y: 0.18)
+        let onePoint = try XCTUnwrap(oneX.viewportPoint(forSourceNormalized: sourcePoint))
+        let twoPoint = try XCTUnwrap(twoX.viewportPoint(forSourceNormalized: sourcePoint))
+        XCTAssertEqual(onePoint.x, twoPoint.x, accuracy: 0.000_001)
+        XCTAssertEqual(onePoint.y, twoPoint.y, accuracy: 0.000_001)
+        assertPoint(try XCTUnwrap(twoX.sourceNormalizedPoint(forViewport: twoPoint)), equals: sourcePoint)
+    }
+
+    func testMaskTransformFollowsFitFillZoomPanAndWindowResize() throws {
+        let sourceSize = CGSize(width: 1200, height: 800)
+        let sourcePoint = CGPoint(x: 0.25, y: 0.65)
+        var navigation = CanvasNavigation()
+        let fit = CanvasMaskTransform(
+            sourceSize: sourceSize, navigation: navigation,
+            viewportSize: CGSize(width: 600, height: 400)
+        )
+        let fitPoint = try XCTUnwrap(fit.viewportPoint(forSourceNormalized: sourcePoint))
+        assertPoint(fitPoint, equals: CGPoint(x: 150, y: 260))
+
+        navigation.fill()
+        navigation.setZoom(2)
+        navigation.pan(by: CGSize(width: -120, height: 40),
+                       imageExtent: CGRect(origin: .zero, size: sourceSize),
+                       viewportSize: CGSize(width: 600, height: 400))
+        let zoomed = CanvasMaskTransform(
+            sourceSize: sourceSize, navigation: navigation,
+            viewportSize: CGSize(width: 600, height: 400)
+        )
+        let zoomedPoint = try XCTUnwrap(zoomed.viewportPoint(forSourceNormalized: sourcePoint))
+        XCTAssertNotEqual(zoomedPoint, fitPoint)
+        assertPoint(try XCTUnwrap(zoomed.sourceNormalizedPoint(forViewport: zoomedPoint)), equals: sourcePoint)
+
+        let resized = CanvasMaskTransform(
+            sourceSize: sourceSize, navigation: navigation,
+            viewportSize: CGSize(width: 900, height: 540)
+        )
+        let resizedPoint = try XCTUnwrap(resized.viewportPoint(forSourceNormalized: sourcePoint))
+        assertPoint(try XCTUnwrap(resized.sourceNormalizedPoint(forViewport: resizedPoint)), equals: sourcePoint)
+    }
 }
 
 @MainActor
@@ -217,5 +310,23 @@ final class CanvasObservationTests: XCTestCase {
         viewModel.toggleCanvasZoom()
         XCTAssertEqual(viewModel.canvasNavigation.mode, .fit)
         XCTAssertEqual(viewModel.document, document)
+    }
+
+    func testMaskOverlayStateBypassesBroadModelPublisher() {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let state = MaskOverlayInteractionState()
+        var appChanges = 0
+        var overlayChanges = 0
+        let appSubscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+        let overlaySubscription = state.objectWillChange.sink { _ in overlayChanges += 1 }
+
+        state.activate()
+        state.beginPointer(at: CGPoint(x: 0.2, y: 0.3), time: 1)
+        state.dragPointer(to: CGPoint(x: 0.4, y: 0.5), time: 2)
+        state.selectTool(.radial)
+
+        XCTAssertGreaterThan(overlayChanges, 0)
+        XCTAssertEqual(appChanges, 0)
+        withExtendedLifetime((appSubscription, overlaySubscription)) {}
     }
 }
