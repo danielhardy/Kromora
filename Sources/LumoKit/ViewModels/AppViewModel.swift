@@ -474,6 +474,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Non-nil when a hard failure should be surfaced as a dismissible alert.
     /// Bound to an `.alert` in ContentView; cleared when the user dismisses it.
     @Published var errorMessage: String?
+    @Published var isMaskingPanelPresented = false
 
     @Published var isPhotosPickerPresented: Bool = false
     /// Non-nil while the Photos picker task is transferring payloads. The collection itself keeps
@@ -535,7 +536,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     private let engine: any RenderEngining
     /// Shared photo-understanding coordinator. Auto consumes its scalar result; it never reaches
     /// through to Vision, Core Image, or mask pixels.
-    private let photoAnalysisCoordinator: PhotoAnalysisCoordinator
+    let photoAnalysisCoordinator: PhotoAnalysisCoordinator
+
+    var maskingAssetID: PhotoAssetID? { activeAssetID }
+    var maskingSource: ImageSource? { imageSource }
     private let preferences: UserDefaults
     private let previewCoordinator: PreviewCoordinator
     private struct SourceLoadRequest: Sendable {

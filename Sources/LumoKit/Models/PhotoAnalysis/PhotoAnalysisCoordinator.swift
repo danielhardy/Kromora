@@ -42,6 +42,7 @@ actor PhotoAnalysisCoordinator {
     }
 
     private let maskProvider: any SemanticMaskProviding
+    private let maskStore: MaskStore
     private let assembler: PhotoAnalysisAssembler
     private let cache: PhotoAnalysisCache
     private let stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]
@@ -65,6 +66,7 @@ actor PhotoAnalysisCoordinator {
         maskProvider: (any SemanticMaskProviding)? = nil,
         stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]? = nil
     ) {
+        self.maskStore = maskStore
         self.maskProvider = maskProvider ?? VisionSemanticMaskProvider(store: maskStore)
         self.cache = cache
         self.assembler = PhotoAnalysisAssembler(
@@ -170,6 +172,12 @@ actor PhotoAnalysisCoordinator {
         }
         try Task.checkCancellation()
         return result
+    }
+
+    /// Read a cached/provider-produced payload without exposing MaskStore to UI consumers. Pixel
+    /// access remains behind the coordinator boundary, just like mask production itself.
+    func pixels(for reference: RegionMaskReference) async -> NormalizedMask? {
+        await maskStore.pixels(for: reference)
     }
 
     // MARK: - Pipeline
