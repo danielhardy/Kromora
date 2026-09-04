@@ -126,6 +126,48 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         await fake.releaseHistograms()
     }
 
+    func testAutoAvailabilityRefreshesWhenNavigatingBetweenPhotos() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = AppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
+
+        let secondURL = try Fixtures.writeGradientPNG(
+            width: 40, height: 30, named: "auto-second.png", in: tempDirectory
+        )
+        viewModel.openImage(url: secondURL)
+
+        XCTAssertFalse(
+            viewModel.canRunAutoAdjustment,
+            "the prior photo's readiness must not leak into the newly loading one"
+        )
+
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.previewState != .ready {
+            if Date() > deadline { return XCTFail("timed out waiting for the second preview") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
+    }
+
+    func testAutoAvailableForPhotosLibraryImport() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = AppViewModel(engine: fake)
+        let url = try Fixtures.writeJPEG(
+            width: 60, height: 40, orientation: 1, named: "photos-import.jpg", in: tempDirectory
+        )
+        let data = try Data(contentsOf: url)
+
+        viewModel.openImage(data: data, name: "Imported Photo")
+
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.previewState != .ready {
+            if Date() > deadline { return XCTFail("timed out waiting for the imported preview") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
+    }
+
     func testAutoReplacesOnlyGlobalLightAndColorAsOneUndoableOperation() async throws {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(engine: fake)
