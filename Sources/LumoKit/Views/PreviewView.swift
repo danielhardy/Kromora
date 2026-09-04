@@ -14,12 +14,24 @@ struct PreviewView: View {
     @State private var magnification: CGFloat = 1
     @State private var isDraggingCanvas = false
     @State private var isMagnifyingCanvas = false
+    @StateObject private var maskOverlayState = MaskOverlayInteractionState()
 
     init(viewModel: AppViewModel) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
         _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
+        _maskOverlayState = StateObject(wrappedValue: MaskOverlayInteractionState())
+    }
+
+    /// Step 0 is intentionally opt-in. This keeps synthetic geometry out of normal editing while
+    /// allowing a Release build to exercise the real sibling-view lifecycle on a reference Mac.
+    private var maskOverlayPrototypeEnabled: Bool {
+        ProcessInfo.processInfo.environment["LUMO_MASK_OVERLAY_PROTOTYPE"] == "1"
+    }
+
+    private var maskOverlayBackingScale: CGFloat {
+        NSScreen.main?.backingScaleFactor ?? 2
     }
 
     /// The shell around the Metal image surface follows the window appearance. The Metal
@@ -67,6 +79,11 @@ struct PreviewView: View {
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
+        }
+        .onAppear {
+            if maskOverlayPrototypeEnabled {
+                maskOverlayState.activate()
+            }
         }
     }
 
@@ -201,18 +218,62 @@ struct PreviewView: View {
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if canvasState.isCropToolActive {
-                // Keep the navigation gesture wrappers out of the hit-test tree while the crop
-                // overlay owns pointer input. Disabling only PreviewSurfaceView still leaves
-                // the GeometryReader's navigation gestures eligible to win an interior drag.
-                preview.allowsHitTesting(false)
-            } else {
-                preview
-                    .contentShape(Rectangle())
-                    .gesture(dragGesture(viewportSize: geometry.size))
-                    .simultaneousGesture(magnificationGesture(viewportSize: geometry.size))
+            ZStack {
+                if canvasState.isCropToolActive {
+                    // Keep the navigation gesture wrappers out of the hit-test tree while the
+                    // crop overlay owns pointer input. Disabling only PreviewSurfaceView still
+                    // leaves the GeometryReader's navigation gestures eligible to win an interior
+                    // drag.
+                    preview.allowsHitTesting(false)
+                } else {
+                    preview
+                        .contentShape(Rectangle())
+                        .gesture(dragGesture(viewportSize: geometry.size))
+                        .simultaneousGesture(magnificationGesture(viewportSize: geometry.size))
+                }
+
+                if maskOverlayPrototypeEnabled, viewModel.sourceSize != .zero {
+                    MaskOverlaySurfaceView(
+                        snapshot: maskOverlayState.snapshot,
+                        sourceSize: viewModel.sourceSize,
+                        crop: viewModel.document.crop,
+                        navigation: canvasState.navigation,
+                        backingScale: maskOverlayBackingScale,
+                        isInteractive: maskOverlayState.isActive && !canvasState.isCropToolActive,
+                        onPointer: { event in
+                            handleMaskPointer(event, viewportSize: geometry.size)
+                        }
+                    )
+                    .allowsHitTesting(maskOverlayState.isActive && !canvasState.isCropToolActive)
+                }
             }
         }
+    }
+
+    private func handleMaskPointer(
+        _ event: MaskOverlayPointerEvent, viewportSize: CGSize
+    ) -> MaskOverlayPrototypeSnapshot? {
+        let transform = CanvasMaskTransform(
+            sourceSize: viewModel.sourceSize,
+            crop: viewModel.document.crop,
+            navigation: canvasState.navigation,
+            viewportSize: viewportSize,
+            backingScale: maskOverlayBackingScale
+        )
+        func sourcePoint(_ point: CGPoint) -> CGPoint? {
+            transform.sourceNormalizedPoint(forViewport: point)
+        }
+        switch event {
+        case .moved(let point, let time):
+            if let point = sourcePoint(point) { maskOverlayState.pointerMoved(to: point, time: time) }
+        case .began(let point, let time):
+            if let point = sourcePoint(point) { maskOverlayState.beginPointer(at: point, time: time) }
+        case .dragged(let point, let time):
+            if let point = sourcePoint(point) { maskOverlayState.dragPointer(to: point, time: time) }
+        case .ended(let point):
+            maskOverlayState.endPointer(at: point.flatMap(sourcePoint))
+        }
+        return maskOverlayState.snapshot
     }
 
     private func dragGesture(viewportSize: CGSize) -> some Gesture {

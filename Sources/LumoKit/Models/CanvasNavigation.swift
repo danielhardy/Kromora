@@ -266,3 +266,97 @@ struct CanvasTransform: Equatable, Sendable {
         )
     }
 }
+
+/// The presentation-only mapping used by mask geometry prototypes and, eventually, persisted
+/// mask components. Mask points are normalized in the oriented source image with an upper-left
+/// origin. CropAdjustments remains Core Image's bottom-left value, so the conversion is explicit
+/// at this boundary rather than leaking a second convention into mask state.
+struct CanvasMaskTransform: Equatable, Sendable {
+    let sourceSize: CGSize
+    let cropRect: CGRect
+    let viewportSize: CGSize
+    let backingScale: CGFloat
+    let displaySize: CGSize
+    let canvasTransform: CanvasTransform
+
+    init(
+        sourceSize: CGSize,
+        crop: CropAdjustments = .neutral,
+        navigation: CanvasNavigation = CanvasNavigation(),
+        viewportSize: CGSize,
+        backingScale: CGFloat = 1
+    ) {
+        self.sourceSize = sourceSize
+        self.viewportSize = viewportSize
+        self.backingScale = backingScale.isFinite && backingScale > 0 ? backingScale : 1
+        let normalizedCrop = crop.normalizedRect ?? CropAdjustments.unitRect
+        // CropAdjustments is bottom-left based; mask geometry is upper-left based.
+        self.cropRect = CGRect(
+            x: normalizedCrop.minX,
+            y: 1 - normalizedCrop.maxY,
+            width: normalizedCrop.width,
+            height: normalizedCrop.height
+        )
+        self.displaySize = CGSize(
+            width: sourceSize.width * self.cropRect.width,
+            height: sourceSize.height * self.cropRect.height
+        )
+        let backingViewport = CGSize(
+            width: viewportSize.width * self.backingScale,
+            height: viewportSize.height * self.backingScale
+        )
+        self.canvasTransform = navigation.transform(
+            imageExtent: CGRect(origin: .zero, size: self.displaySize),
+            viewportSize: backingViewport
+        )
+    }
+
+    /// Convert an oriented-source normalized point to a SwiftUI viewport point. Points outside
+    /// the crop are retained so recropping can reveal them later; callers may clip for drawing.
+    func viewportPoint(forSourceNormalized point: CGPoint) -> CGPoint? {
+        guard isValid, canvasTransform.scale.isFinite, canvasTransform.scale > 0 else { return nil }
+        let inCrop = CGPoint(
+            x: (point.x - cropRect.minX) / cropRect.width * displaySize.width,
+            y: (point.y - cropRect.minY) / cropRect.height * displaySize.height
+        )
+        let backingPoint = CGPoint(
+            x: canvasTransform.origin.x + inCrop.x * canvasTransform.scale,
+            y: canvasTransform.origin.y + inCrop.y * canvasTransform.scale
+        )
+        return CGPoint(x: backingPoint.x / backingScale, y: backingPoint.y / backingScale)
+    }
+
+    /// Convert a SwiftUI viewport point back into oriented-source normalized coordinates.
+    func sourceNormalizedPoint(forViewport point: CGPoint) -> CGPoint? {
+        guard isValid, canvasTransform.scale.isFinite, canvasTransform.scale > 0 else { return nil }
+        let backingPoint = CGPoint(x: point.x * backingScale, y: point.y * backingScale)
+        let inCrop = CGPoint(
+            x: (backingPoint.x - canvasTransform.origin.x) / canvasTransform.scale,
+            y: (backingPoint.y - canvasTransform.origin.y) / canvasTransform.scale
+        )
+        return CGPoint(
+            x: cropRect.minX + inCrop.x / displaySize.width * cropRect.width,
+            y: cropRect.minY + inCrop.y / displaySize.height * cropRect.height
+        )
+    }
+
+    func viewportRect(forSourceNormalized rect: CGRect) -> CGRect? {
+        guard let topLeft = viewportPoint(forSourceNormalized: rect.origin),
+              let bottomRight = viewportPoint(forSourceNormalized: CGPoint(x: rect.maxX, y: rect.maxY))
+        else { return nil }
+        return CGRect(
+            x: min(topLeft.x, bottomRight.x), y: min(topLeft.y, bottomRight.y),
+            width: abs(bottomRight.x - topLeft.x), height: abs(bottomRight.y - topLeft.y)
+        )
+    }
+
+    private var isValid: Bool {
+        sourceSize.width.isFinite && sourceSize.height.isFinite
+            && sourceSize.width > 0 && sourceSize.height > 0
+            && viewportSize.width.isFinite && viewportSize.height.isFinite
+            && viewportSize.width > 0 && viewportSize.height > 0
+            && cropRect.width > 0 && cropRect.height > 0
+            && displaySize.width.isFinite && displaySize.height.isFinite
+            && displaySize.width > 0 && displaySize.height > 0
+    }
+}
