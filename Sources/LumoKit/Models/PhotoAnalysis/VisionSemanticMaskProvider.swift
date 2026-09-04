@@ -32,6 +32,9 @@ enum VisionSemanticMaskError: LocalizedError, Sendable, Equatable {
     case noFaceDetected
     case faceIndexOutOfRange(Int)
     case foregroundIndexOutOfRange(Int)
+    case personNotApplicable
+    case noPersonDetected
+    case unsupportedQuality(MaskQuality, SemanticMaskKind)
     case requestFailed(String)
 
     var errorDescription: String? {
@@ -42,6 +45,10 @@ enum VisionSemanticMaskError: LocalizedError, Sendable, Equatable {
         case .noFaceDetected: return "Vision did not detect a face"
         case .faceIndexOutOfRange(let index): return "Vision did not detect face index \(index)"
         case .foregroundIndexOutOfRange(let index): return "Vision did not detect foreground instance index \(index)"
+        case .personNotApplicable: return "Person segmentation was gated because no person signal was available"
+        case .noPersonDetected: return "Vision did not produce a person mask"
+        case .unsupportedQuality(let quality, let kind):
+            return "Vision mask quality \(quality.rawValue) is not supported for \(kind) yet"
         case .requestFailed(let reason): return "Vision mask request failed: \(reason)"
         }
     }
@@ -71,7 +78,9 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             return try await foregroundMask(index: index, image: image, quality: quality)
         case .background:
             return try await backgroundMask(image: image, quality: quality)
-        case .person, .unknown:
+        case .person:
+            return try await personMask(image: image, quality: quality)
+        case .unknown:
             // These cases are intentionally explicit: follow-up providers can fill one case at a
             // time without changing the shared protocol or leaking a VN type to consumers.
             throw VisionSemanticMaskError.unsupported(kind)
@@ -237,6 +246,68 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         return masks[index]
     }
 
+    private func personMask(image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        guard quality != .render else {
+            throw VisionSemanticMaskError.unsupportedQuality(.render, .person)
+        }
+        // Gating is deliberately cache-only. The coordinator/provider that requests person
+        // segmentation must have already requested face or foreground analysis; this prevents a
+        // landscape from paying for a full person matte merely because a caller asked for `.person`.
+        let hasFaceSignal = await store.mask(
+            for: cacheKey(for: .face, image: image, quality: quality), quality: quality
+        ) != nil
+        let hasForegroundSignal = await store.mask(
+            for: cacheKey(for: .foregroundInstance(0), image: image, quality: quality), quality: quality
+        ) != nil
+        guard hasFaceSignal || hasForegroundSignal else {
+            throw VisionSemanticMaskError.personNotApplicable
+        }
+
+        let key = cacheKey(for: .person, image: image, quality: quality)
+        if let reference = await store.mask(for: key, quality: quality),
+           let pixels = await store.pixels(for: reference) {
+            return RegionMask(kind: .person, bounds: bounds(of: pixels), quality: quality,
+                              reference: reference, confidence: 1, coverage: pixels.coverage)
+        }
+
+        guard #available(macOS 12.0, *) else {
+            throw VisionSemanticMaskError.requestFailed("Person segmentation requires macOS 12 or newer")
+        }
+        let request = VNGeneratePersonSegmentationRequest()
+        guard VNGeneratePersonSegmentationRequest.supportedRevisions.contains(configuration.personRevision) else {
+            throw VisionSemanticMaskError.requestFailed(
+                "Vision person revision \(configuration.personRevision) is unavailable"
+            )
+        }
+        request.revision = configuration.personRevision
+        request.qualityLevel = quality == .analysis ? .fast : .balanced
+        request.outputPixelFormat = kCVPixelFormatType_OneComponent32Float
+        let handler = try makeRequestHandler(for: image)
+        do {
+            try handler.perform([request])
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
+        }
+        try Task.checkCancellation()
+
+        guard let observation = request.results?.first else {
+            throw VisionSemanticMaskError.noPersonDetected
+        }
+        let pixels: NormalizedMask
+        do {
+            pixels = try normalizedMask(from: observation.pixelBuffer)
+        } catch let error as VisionSemanticMaskError {
+            throw error
+        } catch {
+            throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
+        }
+        let reference = try await store.store(pixels, for: key, quality: quality)
+        return RegionMask(kind: .person, bounds: bounds(of: pixels), quality: quality,
+                          reference: reference, confidence: 1, coverage: pixels.coverage)
+    }
+
     private func backgroundMask(image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
         let key = cacheKey(for: .background, image: image, quality: quality)
         if let reference = await store.mask(for: key, quality: quality),
@@ -323,18 +394,34 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
     private func normalizedMask(from buffer: CVPixelBuffer) throws -> NormalizedMask {
         let width = CVPixelBufferGetWidth(buffer)
         let height = CVPixelBufferGetHeight(buffer)
-        guard width > 0, height > 0 else { throw RegionMaskError.invalidPixelCount }
+        guard width > 0, height > 0 else {
+            throw VisionSemanticMaskError.requestFailed("Vision returned an empty mask")
+        }
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
         guard let address = CVPixelBufferGetBaseAddress(buffer) else {
-            throw RegionMaskError.missingPixels
+            throw VisionSemanticMaskError.requestFailed("Vision returned a mask without pixels")
         }
 
         let stride = CVPixelBufferGetBytesPerRow(buffer)
         let rowStride = stride / MemoryLayout<Float>.stride
-        let values = (0..<height).flatMap { y in
-            let row = address.assumingMemoryBound(to: Float.self).advanced(by: y * rowStride)
-            return (0..<width).map { x in min(max(row[x], 0), 1) }
+        let values: [Float]
+        switch CVPixelBufferGetPixelFormatType(buffer) {
+        case kCVPixelFormatType_OneComponent32Float:
+            values = (0..<height).flatMap { y in
+                let row = address.assumingMemoryBound(to: Float.self).advanced(by: y * rowStride)
+                return (0..<width).map { x in min(max(row[x], 0), 1) }
+            }
+        case kCVPixelFormatType_OneComponent8:
+            let byteStride = stride
+            values = (0..<height).flatMap { y in
+                let row = address.assumingMemoryBound(to: UInt8.self).advanced(by: y * byteStride)
+                return (0..<width).map { x in Float(row[x]) / 255 }
+            }
+        default:
+            throw VisionSemanticMaskError.requestFailed(
+                "Vision returned unsupported mask pixel format \(CVPixelBufferGetPixelFormatType(buffer))"
+            )
         }
         return try NormalizedMask(size: PixelDimensions(width: width, height: height), values: values)
     }

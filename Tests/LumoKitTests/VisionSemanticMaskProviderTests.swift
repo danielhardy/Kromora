@@ -39,10 +39,10 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         let provider = VisionSemanticMaskProvider()
 
         do {
-            _ = try await provider.mask(for: .person, image: image, quality: .analysis)
-            XCTFail("unsupported person masks should throw")
+            _ = try await provider.mask(for: .unknown("future"), image: image, quality: .analysis)
+            XCTFail("unknown mask kinds should throw")
         } catch let error as VisionSemanticMaskError {
-            XCTAssertEqual(error, .unsupported(.person))
+            XCTAssertEqual(error, .unsupported(.unknown("future")))
         }
     }
 
@@ -91,5 +91,24 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         XCTAssertEqual(background.kind, .background)
         XCTAssertEqual(background.coverage, 1, accuracy: 0.0001)
         XCTAssertEqual(background.bounds, NormalizedRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    func testPersonSegmentationIsGatedWithoutCachedSignals() async throws {
+        let source = ImageSource(
+            backing: .data(Data()), kind: .standard,
+            nativeExtent: CGSize(width: 32, height: 32)
+        )
+        let image = AnalysisImage(
+            source: source, dimensions: PixelDimensions(width: 32, height: 32),
+            configuration: .init(maximumDimension: 32)
+        )
+        let provider = VisionSemanticMaskProvider()
+
+        do {
+            _ = try await provider.mask(for: .person, image: image, quality: .analysis)
+            XCTFail("person segmentation should not run without a face or foreground signal")
+        } catch let error as VisionSemanticMaskError {
+            XCTAssertEqual(error, .personNotApplicable)
+        }
     }
 }
