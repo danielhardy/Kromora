@@ -15,27 +15,114 @@ final class PhotoIntelligenceCorpusTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         for fixture in PhotoIntelligenceCorpus.fixtures {
-            let store = MaskStore(directory: directory.appendingPathComponent(fixture.name))
-            let engine = CorpusRenderEngine(fixtures: [fixture])
-            let provider = CorpusMaskProvider(fixtures: [fixture], store: store)
-            let coordinator = PhotoAnalysisCoordinator(
-                engine: engine,
-                maskStore: store,
-                cache: PhotoAnalysisCache(directory: directory.appendingPathComponent("cache")),
-                maskProvider: provider,
-                stages: [.standard: fixture.specs.map {
-                    PhotoAnalysisStage(kind: $0.kind, quality: .analysis)
-                }]
-            )
-            let analysis = try await coordinator.analyze(
-                assetID: fixture.assetID, source: fixture.source, level: .standard
-            )
+            let analysis = try await makeAnalysis(for: fixture, in: directory)
 
             XCTAssertTrue(analysis.quality.globalToneAvailable, fixture.name)
             XCTAssertFalse(analysis.regions.isEmpty, fixture.name)
             XCTAssertEqual(analysis.scene, SceneCharacteristicsAnalyzer.analyze(analysis), fixture.name)
             fixture.expect(analysis)
         }
+    }
+
+    /// Developer-facing visual review command. The shell wrapper in `scripts/` invokes this test;
+    /// keeping the fixture access here means the report always covers the exact corpus used by the
+    /// semantic regression test above.
+    func testGenerateVisualRegressionReport() async throws {
+        let directory = try Fixtures.makeTempDirectory("LumoPhotoIntelligenceReport")
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        var cards: [String] = []
+        for fixture in PhotoIntelligenceCorpus.fixtures {
+            let analysis = try await makeAnalysis(for: fixture, in: directory)
+            let result = AutoLightEngine.evaluate(analysis: analysis)
+            cards.append(VisualReport.card(fixture: fixture, analysis: analysis, result: result))
+        }
+
+        let configuredPath = ProcessInfo.processInfo.environment["LUMO_PHOTO_INTELLIGENCE_REPORT_PATH"]
+            ?? "artifacts/photo-intelligence/report.html"
+        let outputURL = URL(fileURLWithPath: configuredPath, relativeTo: URL(fileURLWithPath: FileManager.default.currentDirectoryPath))
+            .standardizedFileURL
+        try FileManager.default.createDirectory(
+            at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try VisualReport.document(cards: cards).write(to: outputURL, atomically: true, encoding: .utf8)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outputURL.path))
+        XCTAssertEqual(cards.count, PhotoIntelligenceCorpus.fixtures.count)
+    }
+
+    private func makeAnalysis(
+        for fixture: CorpusFixture, in directory: URL
+    ) async throws -> PhotoAnalysis {
+        let store = MaskStore(directory: directory.appendingPathComponent(fixture.name))
+        let engine = CorpusRenderEngine(fixtures: [fixture])
+        let provider = CorpusMaskProvider(fixtures: [fixture], store: store)
+        let coordinator = PhotoAnalysisCoordinator(
+            engine: engine,
+            maskStore: store,
+            cache: PhotoAnalysisCache(directory: directory.appendingPathComponent("cache")),
+            maskProvider: provider,
+            stages: [.standard: fixture.specs.map {
+                PhotoAnalysisStage(kind: $0.kind, quality: .analysis)
+            }]
+        )
+        return try await coordinator.analyze(
+            assetID: fixture.assetID, source: fixture.source, level: .standard
+        )
+    }
+}
+
+private enum VisualReport {
+    static func document(cards: [String]) -> String {
+        """
+        <!doctype html>
+        <html lang="en"><head><meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Lumo Photo Intelligence Report</title>
+        <style>
+        :root { color-scheme: light dark; font: 14px -apple-system, BlinkMacSystemFont, sans-serif; }
+        body { margin: 0; padding: 24px; background: #17191d; color: #f2f4f7; }
+        h1 { margin: 0 0 6px; font-size: 22px; } p { color: #aeb5bf; }
+        main { display: grid; grid-template-columns: repeat(auto-fit, minmax(520px, 1fr)); gap: 18px; }
+        article { padding: 14px; border: 1px solid #353a43; border-radius: 10px; background: #22262d; }
+        h2 { margin: 0 0 10px; font-size: 16px; } .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        figure { margin: 0; } figcaption { margin: 4px 0 10px; color: #aeb5bf; font-size: 12px; }
+        img { display: block; width: 100%; aspect-ratio: 8/5; object-fit: cover; background: #101216; border-radius: 5px; }
+        .diff { position: relative; aspect-ratio: 8/5; overflow: hidden; border-radius: 5px; background: #101216; }
+        .diff img { position: absolute; inset: 0; height: 100%; }
+        svg { display: block; width: 100%; aspect-ratio: 8/5; background: #101216; border-radius: 5px; }
+        pre { white-space: pre-wrap; margin: 10px 0 0; color: #d8dee8; font: 12px ui-monospace, SFMono-Regular, monospace; }
+        </style></head><body>
+        <h1>Lumo Photo Intelligence — visual regression report</h1>
+        <p>Generated by the 21-fixture corpus. Original, AutoLightEngine preview, difference blend, and semantic mask overlay are shown for each fixture.</p>
+        <main>\(cards.joined())</main></body></html>
+        """
+    }
+
+    static func card(
+        fixture: CorpusFixture, analysis: PhotoAnalysis, result: AutoAdjustmentResult
+    ) -> String {
+        let image = fixture.data.base64EncodedString()
+        let exposure = max(0.65, min(1.35, 1 + result.light.exposure * 0.16))
+        let contrast = max(0.75, min(1.35, 1 + result.light.contrast * 0.006))
+        let rationale = AutoLightParameter.allCases.map { parameter in
+            let item = result.rationale.value(for: parameter)
+            return "\(parameter.rawValue): \(format(item.adjustment)) (confidence \(format(Double(item.confidence)))) — \(item.explanation)"
+        }.joined(separator: "\n")
+        let mask = fixture.specs.first { $0.kind == .subject }?.coverage ?? 0
+        let maskOpacity = max(0.12, min(0.62, Double(mask)))
+        let title = fixture.name.replacingOccurrences(of: "&", with: "&amp;")
+        return """
+        <article><h2>\(title)</h2><div class="grid">
+        <figure><img src="data:image/png;base64,\(image)"><figcaption>Original</figcaption></figure>
+        <figure><img style="filter:brightness(\(format(exposure))) contrast(\(format(contrast)))" src="data:image/png;base64,\(image)"><figcaption>AutoLightEngine</figcaption></figure>
+        <figure><div class="diff"><img src="data:image/png;base64,\(image)"><img style="filter:brightness(\(format(exposure))) contrast(\(format(contrast)));mix-blend-mode:difference;opacity:.9" src="data:image/png;base64,\(image)"></div><figcaption>Difference preview</figcaption></figure>
+        <figure><svg viewBox="0 0 160 100" role="img" aria-label="subject mask overlay"><image href="data:image/png;base64,\(image)" width="160" height="100"/><ellipse cx="79" cy="57" rx="32" ry="36" fill="#26d9a0" opacity="\(format(maskOpacity))"/></svg><figcaption>Subject mask overlay</figcaption></figure>
+        </div><pre>\(rationale.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;"))</pre></article>
+        """
+    }
+
+    private static func format(_ value: Double) -> String {
+        String(format: "%.3f", locale: Locale(identifier: "en_US_POSIX"), value)
     }
 }
 
