@@ -100,7 +100,7 @@ struct AutoRationale: Codable, Sendable, Equatable {
 }
 
 struct AutoLightConfiguration: Codable, Sendable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
     static let `default` = AutoLightConfiguration()
 
     let version: Int
@@ -278,18 +278,43 @@ private enum AutoLightBounds {
     static let blacks = -18.0...22.0
 }
 
+/// Corpus-tuned response constants. These remain grouped by policy rather than being exposed as
+/// configuration: changing them changes the meaning of an Auto result and therefore requires an
+/// algorithm-version bump. The before/after corpus measurements are recorded in
+/// `docs/PHOTO_INTELLIGENCE_TUNING_2026-09-04.md`.
+private enum AutoLightTuning {
+    static let exposureIntentExponent = 4.0
+    static let backlightExposureLift = 0.20
+    static let highlightTailScale = 14.0
+    static let highlightClippingScale = 24.0
+    static let backlightHighlightScale = 14.0
+    static let highKeyHighlightBrake = 0.75
+    static let shadowLiftScale = 10.0
+    static let backlightShadowLiftScale = 20.0
+    static let lowKeyShadowBrake = 0.85
+    static let lowKeyWhitePointBrake = 0.80
+    static let highKeyBlackPointBrake = 0.80
+    static let contrastTargetSpread = 0.78
+}
+
 private enum AutoLightSceneSignals {
     static func exposure(_ analysis: PhotoAnalysis, configuration: AutoLightConfiguration) -> AdjustmentProposal {
         let tone = analysis.globalTone
         let median = max(tone.p50, 0.03)
         var desired = log2(Double(configuration.targetMedian / median))
-        // Tonal intent is a soft brake, not a switch. Squared attenuation keeps an intentional
+        // Tonal intent is a soft brake, not a switch. Fourth-power attenuation keeps an intentional
         // key close to its original exposure while still allowing a clearly misplaced median to
         // receive a modest correction.
-        desired *= pow(Double(1 - analysis.scene.highKeyLikelihood), 2.8)
-        desired *= pow(Double(1 - analysis.scene.lowKeyLikelihood), 2.8)
+        desired *= pow(
+            Double(1 - analysis.scene.highKeyLikelihood),
+            AutoLightTuning.exposureIntentExponent
+        )
+        desired *= pow(
+            Double(1 - analysis.scene.lowKeyLikelihood),
+            AutoLightTuning.exposureIntentExponent
+        )
         let backlightLift = Double(analysis.scene.backlightingLikelihood)
-            * Double(analysis.scene.subjectProminence) * 0.25
+            * Double(analysis.scene.subjectProminence) * AutoLightTuning.backlightExposureLift
         desired += backlightLift
         return AdjustmentProposal(
             parameter: .exposure,
@@ -306,35 +331,50 @@ private enum AutoLightSceneSignals {
         let tail = Double(AutoLightMath.smooth(tone.p95, start: 0.72, full: 0.94))
         let clipping = Double(AutoLightMath.unit(tone.highlightClippingFraction * 3))
         let backlightProtection = Double(analysis.scene.backlightingLikelihood) * 0.35
-        let value = -(tail * 26 + clipping * 22 + backlightProtection * 18)
+        let intentBrake = 1
+            - Double(analysis.scene.highKeyLikelihood) * AutoLightTuning.highKeyHighlightBrake
+        let value = -(tail * AutoLightTuning.highlightTailScale
+            + clipping * AutoLightTuning.highlightClippingScale
+            + backlightProtection * AutoLightTuning.backlightHighlightScale) * intentBrake
         return AdjustmentProposal(
-            parameter: .highlights, preferred: AutoLightMath.bounded(value, AutoLightBounds.highlights),
+            parameter: .highlights,
+            preferred: AutoLightMath.bounded(value, AutoLightBounds.highlights),
             minimum: AutoLightBounds.highlights.lowerBound, maximum: AutoLightBounds.highlights.upperBound,
-            confidence: AutoLightMath.confidence(analysis), reason: "Protects bright percentile tails and backlit background."
+            confidence: AutoLightMath.confidence(analysis),
+            reason: "Protects bright percentile tails and backlit background."
         )
     }
 
     static func shadows(_ analysis: PhotoAnalysis) -> AdjustmentProposal {
         let tone = analysis.globalTone
-        let lift = Double(AutoLightMath.smooth(1 - tone.p10, start: 0.55, full: 0.90)) * 25
-        let backlightLift = Double(analysis.scene.backlightingLikelihood) * 28
-        let intentPreservation = 1 - Double(analysis.scene.lowKeyLikelihood) * 0.72
+        let lift = Double(AutoLightMath.smooth(1 - tone.p10, start: 0.55, full: 0.90))
+            * AutoLightTuning.shadowLiftScale
+        let backlightLift = Double(analysis.scene.backlightingLikelihood)
+            * AutoLightTuning.backlightShadowLiftScale
+        let intentPreservation = 1 - Double(analysis.scene.lowKeyLikelihood)
+            * AutoLightTuning.lowKeyShadowBrake
         let value = (lift + backlightLift) * intentPreservation
         return AdjustmentProposal(
-            parameter: .shadows, preferred: AutoLightMath.bounded(value, AutoLightBounds.shadows),
+            parameter: .shadows,
+            preferred: AutoLightMath.bounded(value, AutoLightBounds.shadows),
             minimum: AutoLightBounds.shadows.lowerBound, maximum: AutoLightBounds.shadows.upperBound,
-            confidence: AutoLightMath.confidence(analysis), reason: "Opens dark subject tones while preserving intentional low-key scenes."
+            confidence: AutoLightMath.confidence(analysis),
+            reason: "Opens dark subject tones while preserving intentional low-key scenes."
         )
     }
 
     static func whites(_ analysis: PhotoAnalysis) -> AdjustmentProposal {
         let tone = analysis.globalTone
-        let value = (0.86 - Double(tone.p95)) * 62
-            - Double(AutoLightMath.unit(tone.highlightClippingFraction * 2)) * 18
+        let value = ((0.86 - Double(tone.p95)) * 62
+            - Double(AutoLightMath.unit(tone.highlightClippingFraction * 2)) * 18)
+            * (1
+                - Double(analysis.scene.lowKeyLikelihood) * AutoLightTuning.lowKeyWhitePointBrake)
         return AdjustmentProposal(
-            parameter: .whites, preferred: AutoLightMath.bounded(value, AutoLightBounds.whites),
+            parameter: .whites,
+            preferred: AutoLightMath.bounded(value, AutoLightBounds.whites),
             minimum: AutoLightBounds.whites.lowerBound, maximum: AutoLightBounds.whites.upperBound,
-            confidence: AutoLightMath.confidence(analysis), reason: "Sets the white point from the upper percentile without clipping."
+            confidence: AutoLightMath.confidence(analysis),
+            reason: "Sets the white point from the upper percentile without clipping."
         )
     }
 
@@ -342,21 +382,27 @@ private enum AutoLightSceneSignals {
         let tone = analysis.globalTone
         let value = (0.12 - Double(tone.p05)) * 48
             * (1 - Double(analysis.scene.lowKeyLikelihood) * 0.8)
+            * (1
+                - Double(analysis.scene.highKeyLikelihood) * AutoLightTuning.highKeyBlackPointBrake)
         return AdjustmentProposal(
-            parameter: .blacks, preferred: AutoLightMath.bounded(value, AutoLightBounds.blacks),
+            parameter: .blacks,
+            preferred: AutoLightMath.bounded(value, AutoLightBounds.blacks),
             minimum: AutoLightBounds.blacks.lowerBound, maximum: AutoLightBounds.blacks.upperBound,
-            confidence: AutoLightMath.confidence(analysis), reason: "Sets the black point while respecting low-key intent."
+            confidence: AutoLightMath.confidence(analysis),
+            reason: "Sets the black point while respecting low-key intent."
         )
     }
 
     static func contrast(_ analysis: PhotoAnalysis) -> AdjustmentProposal {
         let spread = analysis.globalTone.p95 - analysis.globalTone.p05
-        let value = (0.72 - Double(spread)) * 46
+        let value = (AutoLightTuning.contrastTargetSpread - Double(spread)) * 46
             * (1 - Double(analysis.scene.backlightingLikelihood) * 0.35)
         return AdjustmentProposal(
-            parameter: .contrast, preferred: AutoLightMath.bounded(value, AutoLightBounds.contrast),
+            parameter: .contrast,
+            preferred: AutoLightMath.bounded(value, AutoLightBounds.contrast),
             minimum: AutoLightBounds.contrast.lowerBound, maximum: AutoLightBounds.contrast.upperBound,
-            confidence: AutoLightMath.confidence(analysis), reason: "Responds to usable dynamic range without flattening a backlit scene."
+            confidence: AutoLightMath.confidence(analysis),
+            reason: "Responds to usable dynamic range without flattening a backlit scene."
         )
     }
 
