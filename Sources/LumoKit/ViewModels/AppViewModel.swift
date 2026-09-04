@@ -3,6 +3,7 @@ import CoreImage
 import AppKit
 import Combine
 import SwiftUI
+import ImageIO
 import UniformTypeIdentifiers
 
 struct PhotosImportProgress: Equatable, Sendable {
@@ -92,6 +93,35 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     @Published var sourceName: String = ""
     @Published var sourceSize: CGSize = .zero
     @Published var sourceURL: URL?
+
+    /// Identity shown by Inspect. Resolve through the durable collection record so Photos names
+    /// and the library/filmstrip naming convention remain consistent during source navigation.
+    var currentPhotoName: String {
+        if let activeAssetID,
+           let item = collection.items.first(where: { $0.id == activeAssetID }) {
+            return item.asset.displayName
+        }
+        let value = sourceName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? "Untitled" : URL(fileURLWithPath: value).deletingPathExtension().lastPathComponent
+    }
+
+    var currentPhotoFileType: String {
+        if let activeAssetID,
+           let item = collection.items.first(where: { $0.id == activeAssetID }) {
+            return item.asset.displayFileType
+        }
+        if let sourceURL, !sourceURL.pathExtension.isEmpty {
+            return sourceURL.pathExtension.uppercased()
+        }
+        if case .data(let data) = imageSource?.backing,
+           let source = CGImageSourceCreateWithData(data as CFData, nil),
+           let identifier = CGImageSourceGetType(source),
+           let type = UTType(identifier as String),
+           let preferredExtension = type.preferredFilenameExtension {
+            return preferredExtension.uppercased()
+        }
+        return "Unknown"
+    }
 
     /// **The look, as a value.** Phase 2's spine: everything the user has chosen lives here, and the
     /// preview is rebuilt from it rather than from a baked image (`docs/PHASE2_SPEC.md` §3).
@@ -475,7 +505,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Bound to an `.alert` in ContentView; cleared when the user dismisses it.
     @Published var errorMessage: String?
     @Published var isMaskingPanelPresented = false
-    @Published var isAnalysisDebugPanelPresented = false
 
     @Published var isPhotosPickerPresented: Bool = false
     /// Non-nil while the Photos picker task is transferring payloads. The collection itself keeps
