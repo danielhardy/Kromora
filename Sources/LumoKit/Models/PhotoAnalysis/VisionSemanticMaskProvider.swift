@@ -3,8 +3,7 @@ import Foundation
 import Vision
 
 /// The revisions that participate in mask cache identity. Revision 2 of attention saliency is
-/// available on macOS 14; the other request revisions are recorded here before their providers
-/// land so changing one invalidates only the affected cached masks.
+/// available on macOS 14. Changing one invalidates only the affected cached masks.
 struct VisionConfiguration: Codable, Sendable, Equatable, Hashable {
     let attentionRevision: Int
     let foregroundRevision: Int
@@ -29,6 +28,8 @@ enum VisionSemanticMaskError: LocalizedError, Sendable, Equatable {
     case unsupported(SemanticMaskKind)
     case unableToDecodeImage
     case noSalientRegion
+    case noFaceDetected
+    case faceIndexOutOfRange(Int)
     case requestFailed(String)
 
     var errorDescription: String? {
@@ -36,6 +37,8 @@ enum VisionSemanticMaskError: LocalizedError, Sendable, Equatable {
         case .unsupported(let kind): return "Vision mask kind is not supported yet: \(kind)"
         case .unableToDecodeImage: return "The analysis image could not be decoded"
         case .noSalientRegion: return "Vision did not return a salient region"
+        case .noFaceDetected: return "Vision did not detect a face"
+        case .faceIndexOutOfRange(let index): return "Vision did not detect face index \(index)"
         case .requestFailed(let reason): return "Vision mask request failed: \(reason)"
         }
     }
@@ -57,11 +60,56 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         switch kind {
         case .subject:
             return try await subjectMask(image: image, quality: quality)
-        case .background, .person, .face, .foregroundInstance, .unknown:
+        case .face:
+            return try await faceMask(index: 0, image: image, quality: quality)
+        case .faceInstance(let index):
+            return try await faceMask(index: index, image: image, quality: quality)
+        case .background, .person, .foregroundInstance, .unknown:
             // These cases are intentionally explicit: follow-up providers can fill one case at a
             // time without changing the shared protocol or leaking a VN type to consumers.
             throw VisionSemanticMaskError.unsupported(kind)
         }
+    }
+
+    /// Returns every detected face as an independently cached `RegionMask`. `.face` is the
+    /// source-compatible spelling for index zero; later detections use `.faceInstance(index)`.
+    /// The mask is intentionally bounding-rectangle-derived in v1. Landmark parsing is deferred
+    /// until a concrete `.render` consumer demonstrates that the additional complexity is needed.
+    func faceMasks(image: AnalysisImage, quality: MaskQuality) async throws -> [RegionMask] {
+        try Task.checkCancellation()
+        let firstKey = cacheKey(for: .face, image: image, quality: quality)
+        if let firstReference = await store.mask(for: firstKey, quality: quality),
+           let firstPixels = await store.pixels(for: firstReference) {
+            var cached = [makeFaceMask(index: 0, pixels: firstPixels, reference: firstReference,
+                                       quality: quality)]
+            var index = 1
+            while let reference = await store.mask(
+                for: cacheKey(for: .faceInstance(index), image: image, quality: quality),
+                quality: quality
+            ), let pixels = await store.pixels(for: reference) {
+                cached.append(makeFaceMask(index: index, pixels: pixels, reference: reference,
+                                            quality: quality))
+                index += 1
+            }
+            return cached
+        }
+
+        let observations = try detectFaces(image: image)
+        guard !observations.isEmpty else { throw VisionSemanticMaskError.noFaceDetected }
+
+        var masks: [RegionMask] = []
+        masks.reserveCapacity(observations.count)
+        for (index, observation) in observations.enumerated() {
+            try Task.checkCancellation()
+            let bounds = NormalizedRect.fromVision(observation.boundingBox)
+            let pixels = try rectangularMask(bounds: bounds, size: image.dimensions)
+            let kind: SemanticMaskKind = index == 0 ? .face : .faceInstance(index)
+            let key = cacheKey(for: kind, image: image, quality: quality)
+            let reference = try await store.store(pixels, for: key, quality: quality)
+            masks.append(makeFaceMask(index: index, pixels: pixels, reference: reference,
+                                      quality: quality))
+        }
+        return masks
     }
 
     /// Smoke-test seam for the adapter boundary. The handler itself never leaves the actor.
@@ -102,6 +150,50 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         let reference = try await store.store(pixels, for: key, quality: quality)
         return RegionMask(kind: .subject, bounds: bounds, quality: quality, reference: reference,
                           confidence: 1, coverage: pixels.coverage)
+    }
+
+    private func faceMask(index: Int, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        guard index >= 0 else { throw VisionSemanticMaskError.faceIndexOutOfRange(index) }
+        let masks = try await faceMasks(image: image, quality: quality)
+        guard index < masks.count else { throw VisionSemanticMaskError.faceIndexOutOfRange(index) }
+        return masks[index]
+    }
+
+    private func detectFaces(image: AnalysisImage) throws -> [VNFaceObservation] {
+        let request = VNDetectFaceRectanglesRequest()
+        guard VNDetectFaceRectanglesRequest.supportedRevisions.contains(configuration.faceRevision) else {
+            throw VisionSemanticMaskError.requestFailed(
+                "Vision face revision \(configuration.faceRevision) is unavailable"
+            )
+        }
+        request.revision = configuration.faceRevision
+        let handler = try makeRequestHandler(for: image)
+        do {
+            try handler.perform([request])
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
+        }
+        return request.results ?? []
+    }
+
+    private func makeFaceMask(
+        index: Int,
+        pixels: NormalizedMask,
+        reference: RegionMaskReference,
+        quality: MaskQuality
+    ) -> RegionMask {
+        let coverage = pixels.coverage
+        // A 1% image-area face is the minimum meaningful face for analysis. Smaller detections
+        // remain available, but their confidence falls linearly so ensemble consumers can discount
+        // distant/background faces without inventing a skin-tone recommendation here.
+        let confidence = min(0.95, max(0.05, coverage / 0.01 * 0.95))
+        return RegionMask(
+            kind: index == 0 ? .face : .faceInstance(index),
+            bounds: bounds(of: pixels), quality: quality, reference: reference,
+            confidence: confidence, coverage: coverage
+        )
     }
 
     /// Constructing the handler is kept private so VNImageRequestHandler cannot cross isolation.
