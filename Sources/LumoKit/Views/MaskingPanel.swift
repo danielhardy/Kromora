@@ -32,6 +32,7 @@ final class MaskingPanelModel: ObservableObject {
     @Published private(set) var isApplying = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var loadWarningMessage: String?
+    @Published private(set) var unavailableTargetMessages: [String] = []
     @Published var isInverted = false {
         didSet {
             guard isInverted != oldValue else { return }
@@ -70,6 +71,7 @@ final class MaskingPanelModel: ObservableObject {
         isLoading = true
         errorMessage = nil
         loadWarningMessage = nil
+        unavailableTargetMessages = []
         appliedMask = nil
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -109,9 +111,20 @@ final class MaskingPanelModel: ObservableObject {
             guard !Task.isCancelled else { return }
             masks = found
             pixels = payloads
-            loadWarningMessage = failures.isEmpty ? nil : "Some mask targets were unavailable."
+            let filtered = candidates.compactMap { kind -> (SemanticMaskKind, String)? in
+                guard let mask = found[kind],
+                      MaskPresentationPolicy.decision(for: mask) != .actionable else { return nil }
+                let decision = MaskPresentationPolicy.decision(for: mask)
+                return (kind, decision.userMessage ?? "This target is unavailable.")
+            }
+            unavailableTargetMessages = filtered.map { "\(Self.title(for: $0.0)): \($0.1)" }
+            loadWarningMessage = failures.isEmpty && filtered.isEmpty
+                ? nil : "Some mask targets were unavailable."
             availableSelections = candidates
-                .filter { found[$0] != nil }
+                .filter {
+                    guard let mask = found[$0] else { return false }
+                    return MaskPresentationPolicy.decision(for: mask) == .actionable
+                }
                 .map(Selection.init(kind:))
             isLoading = false
             if selectedKind == nil, let first = availableSelections.first?.kind {
@@ -121,10 +134,16 @@ final class MaskingPanelModel: ObservableObject {
             }
             if availableSelections.isEmpty {
                 errorMessage = failures.isEmpty
-                    ? "No semantic regions were available for this photo."
+                    ? (unavailableTargetMessages.isEmpty
+                        ? "No semantic regions were available for this photo."
+                        : "No usable regions were found for this photo.")
                     : "Mask generation failed for this photo. Retry to try again."
             }
         }
+    }
+
+    private static func title(for kind: SemanticMaskKind) -> String {
+        Selection(kind: kind).title
     }
 
     func select(_ kind: SemanticMaskKind) {
@@ -309,9 +328,16 @@ struct MaskingPanel: View {
                 }
 
                 if let warning = model.loadWarningMessage {
-                    Label(warning, systemImage: "exclamationmark.triangle")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(warning, systemImage: "exclamationmark.triangle")
+                        ForEach(model.unavailableTargetMessages, id: \.self) { message in
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
 
                 if let selectedMaskTitle = model.selectedMaskTitle {
