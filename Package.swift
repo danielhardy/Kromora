@@ -128,6 +128,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("Photos"),
                 .linkedFramework("PhotosUI"),
+                .linkedFramework("Vision"),
             ]
         ),
         .executableTarget(
