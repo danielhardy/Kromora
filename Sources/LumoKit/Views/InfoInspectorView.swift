@@ -66,12 +66,28 @@ struct InfoInspectorView: View {
     private var infoContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                identitySection
                 histogramSection
                 metadataSection
+                if let assetID = viewModel.maskingAssetID,
+                   let source = viewModel.maskingSource {
+                    PhotoAnalysisInspectSection(
+                        coordinator: viewModel.photoAnalysisCoordinator,
+                        assetID: assetID,
+                        source: source,
+                        surface: viewModel.previewSurface,
+                        histogram: viewModel.histogram,
+                        isExpanded: $analysisExpanded
+                    )
+                    .id(assetID)
+                }
             }
             .padding(16)
         }
     }
+
+    /// Do not persist this state: a newly opened photo must never trigger analysis unexpectedly.
+    @State private var analysisExpanded = false
 
     // MARK: - Histogram
 
@@ -139,6 +155,16 @@ struct InfoInspectorView: View {
     }
 
     // MARK: - Metadata
+
+    private var identitySection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Photo")
+                .font(.headline)
+            metadataRow(ImageMetadata.Row(label: "Name", value: viewModel.currentPhotoName))
+            metadataRow(ImageMetadata.Row(label: "File Type", value: viewModel.currentPhotoFileType))
+        }
+        .accessibilityElement(children: .contain)
+    }
 
     @ViewBuilder
     private var metadataSection: some View {

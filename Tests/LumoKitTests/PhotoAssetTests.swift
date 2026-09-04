@@ -92,6 +92,37 @@ final class PhotoAssetTests: TempDirectoryTestCase {
         XCTAssertEqual(decoded.metadata.camera, "Lumo Prototype")
     }
 
+    func testIdentityUsesPreservedNameAndFileTypeForFileBackedAsset() throws {
+        let url = tempDirectory.appendingPathComponent("original-name.jpeg")
+        try Data("not decoded here".utf8).write(to: url)
+        let asset = PhotoAsset(url: url, filename: "original-name", metadata: .empty)
+
+        XCTAssertEqual(asset.displayName, "original-name")
+        XCTAssertEqual(asset.displayFileType, "JPEG")
+    }
+
+    func testIdentityDerivesFileTypeFromDataWhenNameHasNoExtension() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 2, height: 1, orientation: 1, named: "fixture.jpg", in: tempDirectory
+        )
+        let data = try Data(contentsOf: url)
+        let asset = PhotoAsset(data: data, filename: "Photos item", fileType: "")
+
+        XCTAssertEqual(asset.displayName, "Photos item")
+        XCTAssertEqual(asset.displayFileType, "JPEG")
+    }
+
+    func testIdentityHasDeterministicFallbacksWhenNameAndTypeAreMissing() {
+        let asset = PhotoAsset(
+            source: PhotoAssetSource(data: Data("unknown".utf8)),
+            filename: "",
+            fileType: ""
+        )
+
+        XCTAssertEqual(asset.displayName, "Untitled")
+        XCTAssertEqual(asset.displayFileType, "Unknown")
+    }
+
     @MainActor
     func testCollectionItemsUseStableAssetIDs() async throws {
         let url = try Fixtures.writeJPEG(
