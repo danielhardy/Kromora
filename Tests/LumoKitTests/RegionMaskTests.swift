@@ -42,4 +42,39 @@ final class RegionMaskTests: XCTestCase {
         XCTAssertEqual(mask.coverage, 0.625, accuracy: 0.0001)
         XCTAssertThrowsError(try NormalizedMask(size: size, values: [0, 1]))
     }
+
+    func testMaskStoreKeepsQualityLevelsIndependentAcrossReopen() async throws {
+        let directory = try Fixtures.makeTempDirectory("MaskStoreTests")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MaskStore(directory: directory)
+        let key = MaskCacheKey(
+            assetID: .data(Data([4, 5, 6])), sourceFingerprint: .data(Data([4, 5, 6])),
+            kind: .subject, providerVersion: "vision-1"
+        )
+        let pixels = try NormalizedMask(size: PixelDimensions(width: 2, height: 2), values: [0, 1, 0.5, 0.25])
+
+        let analysis = try await store.store(pixels, for: key, quality: .analysis)
+        let renderReference = await store.mask(for: key, quality: .render)
+        let storedPixels = await store.pixels(for: analysis)
+        XCTAssertNil(renderReference)
+        XCTAssertEqual(storedPixels, pixels)
+
+        let reopened = MaskStore(directory: directory)
+        let reopenedPixels = await reopened.pixels(for: analysis)
+        XCTAssertEqual(reopenedPixels, pixels)
+    }
+
+    func testMaskOperationsComposeAndRejectDifferentSizes() throws {
+        let size = PixelDimensions(width: 2, height: 2)
+        let left = try NormalizedMask(size: size, values: [1, 1, 0, 0])
+        let right = try NormalizedMask(size: size, values: [1, 0, 1, 0])
+
+        XCTAssertEqual(try MaskOperations.intersect(left, right).values, [1, 0, 0, 0])
+        XCTAssertEqual(try MaskOperations.union(left, right).values, [1, 1, 1, 0])
+        XCTAssertEqual(try MaskOperations.subtract(right, from: left).values, [0, 1, 0, 0])
+        XCTAssertEqual(try MaskOperations.invert(left).values, [0, 0, 1, 1])
+        XCTAssertThrowsError(try MaskOperations.intersect(
+            left, try NormalizedMask(size: PixelDimensions(width: 1, height: 1), values: [1])
+        ))
+    }
 }
