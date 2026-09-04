@@ -68,19 +68,6 @@ public struct ContentView: View {
                     )
                 }
             }
-            #if DEBUG
-            .sheet(isPresented: $viewModel.isAnalysisDebugPanelPresented) {
-                if let assetID = viewModel.maskingAssetID, let source = viewModel.maskingSource {
-                    AnalysisDebugPanel(
-                        coordinator: viewModel.photoAnalysisCoordinator,
-                        assetID: assetID,
-                        source: source,
-                        surface: viewModel.previewSurface,
-                        histogram: viewModel.histogram
-                    )
-                }
-            }
-            #endif
             .onAppear {
                 viewModel.refreshRemovableMedia()
             }
@@ -279,16 +266,6 @@ public struct ContentView: View {
         }
         .help("Select a subject, person, background, or face mask")
         .disabled(viewModel.sourceImage == nil || viewModel.maskingAssetID == nil)
-
-        #if DEBUG
-        Button {
-            viewModel.isAnalysisDebugPanelPresented = true
-        } label: {
-            Label("Analysis", systemImage: "ladybug")
-        }
-        .help("Inspect photo analysis and semantic masks")
-        .disabled(viewModel.sourceImage == nil || viewModel.maskingAssetID == nil)
-        #endif
 
         // An active retained side-by-side preference remains actionable on an identity document so
         // the user can return to single view after switching photos or using Reset Photo. Starting

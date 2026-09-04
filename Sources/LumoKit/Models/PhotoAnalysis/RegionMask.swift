@@ -121,6 +121,36 @@ struct RegionMask: Codable, Sendable, Equatable, Identifiable {
     }
 }
 
+/// Presentation policy for semantic masks. This is deliberately separate from mask production:
+/// filtering a result must never prevent Auto or the cache from retaining it.
+enum MaskPresentationPolicy {
+    /// A mask needs a small but non-trivial area and stable provider confidence to be useful to
+    /// an editor. Background is not special-cased; a full-frame background is valid and useful.
+    static let minimumConfidence: Float = 0.55
+    static let minimumCoverage: Float = 0.02
+
+    enum Decision: Equatable, Sendable {
+        case actionable
+        case lowConfidence
+        case empty
+
+        var userMessage: String? {
+            switch self {
+            case .actionable: return nil
+            case .lowConfidence: return "This target is unavailable because the region was not confidently identified."
+            case .empty: return "This target is unavailable because no usable region was found."
+            }
+        }
+    }
+
+    static func decision(for mask: RegionMask) -> Decision {
+        guard mask.coverage >= minimumCoverage else { return .empty }
+        guard mask.confidence >= minimumConfidence else { return .lowConfidence }
+        return .actionable
+    }
+
+}
+
 protocol SemanticMaskProviding: Sendable {
     func mask(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask
 }
