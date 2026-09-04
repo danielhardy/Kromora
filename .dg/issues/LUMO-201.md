@@ -2,7 +2,7 @@
 id: LUMO-201
 title: User-facing Masking UI (Select Subject/Person/Background/Face)
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,15 +11,28 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:56.274Z
-updated: 2026-09-04T14:34:44.969Z
+updated: 2026-09-04T17:17:11.519Z
 depends_on:
   - LUMO-186
   - LUMO-188
   - LUMO-189
   - LUMO-190
   - LUMO-191
-order: zzzzzzq
+order: zh
 board: product
+commits:
+  - e7f5625
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits:
+    - e7f5625
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T17:17:11.511Z
 ---
 
 **Type:** Feature
@@ -87,3 +100,21 @@ proceed anyway; note the one shared risk explicitly: if this ticket discovers `R
 - Manual verification per CLAUDE.md's UI-change guidance: run the app, open a photo with a clear
   subject and a face, select each available kind, and confirm the overlay matches the underlying
   mask.
+
+## Agent log
+
+- 2026-09-04T17:17:11.517Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- HEAD
+Actor: codex
+Resolved model: unknown
+Summary: Added a selection-only Masking panel and model backed exclusively by PhotoAnalysisCoordinator preview masks, shared MaskStore pixels, and MaskOperations inversion; wired it into the toolbar and added smoke/shared-store tests.

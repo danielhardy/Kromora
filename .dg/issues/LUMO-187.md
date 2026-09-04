@@ -2,7 +2,7 @@
 id: LUMO-187
 title: Vision semantic mask provider boundary
 type: feature
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,12 +11,39 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:50.510Z
-updated: 2026-09-04T14:34:40.577Z
+updated: 2026-09-04T14:59:09.244Z
 depends_on:
   - LUMO-183
   - LUMO-184
-order: zzzz
+order: zh
 board: product
+branch: main
+commits:
+  - f004c7da5acc72a5ce93b227ef3266dab0576f46
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Vision usage is isolated behind an actor conforming to SemanticMaskProviding
+      result: pass
+      notes: VisionSemanticMaskProvider owns handler/request construction and returns Lumo values/errors only.
+    - criterion: Vision configuration revisions and availability boundary are documented
+      result: pass
+      notes: VisionConfiguration records per-kind revisions; attention revision 2 is documented as macOS 14 available.
+    - criterion: Unsupported/failure paths are typed and cancellable
+      result: pass
+      notes: Unsupported semantic kinds and decode/request failures use VisionSemanticMaskError; cancellation is checked around work.
+  checks_run:
+    - swift test --filter VisionSemanticMaskProviderTests (2 passed, 0 failed)
+    - swift build (passed)
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits:
+    - f004c7da5acc72a5ce93b227ef3266dab0576f46
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T14:59:09.241Z
+  session: 01MTN2XNAL3076F6FN
 ---
 
 **Type:** Feature
@@ -73,3 +100,26 @@ the Masking UI caring.
 - `Tests/LumoKitTests/VisionSemanticMaskProviderTests.swift` (new): actor construction, request-
   handler smoke test, cancellation-mid-flight test, unsupported-kind returns a clean error (not a
   crash) for kinds not yet implemented by follow-up tickets.
+
+## Agent log
+
+- 2026-09-04T14:59:09.242Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Vision usage is isolated behind an actor conforming to SemanticMaskProviding (pass) — VisionSemanticMaskProvider owns handler/request construction and returns Lumo values/errors only.
+- [x] Vision configuration revisions and availability boundary are documented (pass) — VisionConfiguration records per-kind revisions; attention revision 2 is documented as macOS 14 available.
+- [x] Unsupported/failure paths are typed and cancellable (pass) — Unsupported semantic kinds and decode/request failures use VisionSemanticMaskError; cancellation is checked around work.
+Checks run:
+- swift test --filter VisionSemanticMaskProviderTests (2 passed, 0 failed)
+- swift build (passed)
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- f004c7da5acc72a5ce93b227ef3266dab0576f46
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN2XNAL3076F6FN
+Summary: Added actor-isolated VisionSemanticMaskProvider, versioned VisionConfiguration, typed failures, and a private request-handler boundary with Vision linked only at the adapter.

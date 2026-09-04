@@ -2,7 +2,7 @@
 id: LUMO-203
 title: Debug analysis and mask visualization overlay
 type: task
-status: backlog
+status: done
 priority: low
 creation_provenance:
   runner: claude
@@ -11,11 +11,25 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:57.189Z
-updated: 2026-09-04T14:34:45.601Z
+updated: 2026-09-04T17:21:02.583Z
 depends_on:
   - LUMO-194
-order: zzzzzzx
+order: zv
 board: product
+commits:
+  - 69f5c4f
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits:
+    - 69f5c4f
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T17:21:02.580Z
+  session: 01MTN7Y80HBQC6GH5Z
 ---
 
 **Type:** Task
@@ -64,3 +78,22 @@ saw is one of the highest-leverage tools for iterating on this subsystem.
 - Smoke test: view constructs with a synthetic `PhotoAnalysis` without crashing.
 - Manual verification against a real photo with a clear subject, per CLAUDE.md's UI-change
   guidance.
+
+## Agent log
+
+- 2026-09-04T17:21:02.581Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- HEAD
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN7Y80HBQC6GH5Z
+Summary: Added a DEBUG-only on-demand analysis panel with reusable semantic-mask overlays, quality/timing/scene facts, primary-subject confidence, and existing histogram display; added construction smoke coverage.

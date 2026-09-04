@@ -2,7 +2,7 @@
 id: LUMO-184
 title: RegionMask core abstraction (mask type, semantic kinds, quality levels)
 type: feature
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,11 +11,38 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:49.295Z
-updated: 2026-09-04T14:34:39.630Z
+updated: 2026-09-04T14:53:48.255Z
 depends_on:
   - LUMO-183
-order: zzzv
+order: w
 board: product
+branch: main
+commits:
+  - d85e6cce5ba9129573193b543ef9b74607b7ec10
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: RegionMask and NormalizedMask are stable Sendable Codable Equatable values
+      result: pass
+      notes: RegionMask stores a RegionMaskReference rather than pixel data; NormalizedMask validates and clamps portable payloads.
+    - criterion: Semantic kinds and quality ordering are explicit and Codable
+      result: pass
+      notes: Subject/background/person/face/foreground-instance plus unknown forward-compatible kind are covered; analysis < preview < render.
+    - criterion: Provider boundary is framework-independent
+      result: pass
+      notes: SemanticMaskProviding is async and no Vision/Core Image import is present in RegionMask.swift.
+  checks_run:
+    - swift test --filter AnalysisValueTypesTests|AnalysisImageTests|RegionMaskTests (8 passed, 0 failed)
+    - swift build (passed)
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits:
+    - d85e6cce5ba9129573193b543ef9b74607b7ec10
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T14:53:48.252Z
+  session: 01MTN2QRLZE28F4ODN
 ---
 
 **Type:** Feature
@@ -121,3 +148,26 @@ to make that impossible by construction: everything downstream — Auto's region
   equality/hashability including the associated-value `.foregroundInstance(Int)` case.
 - A fake `SemanticMaskProviding` conformer used purely to prove the protocol shape compiles and
   is callable asynchronously — no real provider yet.
+
+## Agent log
+
+- 2026-09-04T14:53:48.253Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] RegionMask and NormalizedMask are stable Sendable Codable Equatable values (pass) — RegionMask stores a RegionMaskReference rather than pixel data; NormalizedMask validates and clamps portable payloads.
+- [x] Semantic kinds and quality ordering are explicit and Codable (pass) — Subject/background/person/face/foreground-instance plus unknown forward-compatible kind are covered; analysis < preview < render.
+- [x] Provider boundary is framework-independent (pass) — SemanticMaskProviding is async and no Vision/Core Image import is present in RegionMask.swift.
+Checks run:
+- swift test --filter AnalysisValueTypesTests|AnalysisImageTests|RegionMaskTests (8 passed, 0 failed)
+- swift build (passed)
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- d85e6cce5ba9129573193b543ef9b74607b7ec10
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN2QRLZE28F4ODN
+Summary: Added the shared RegionMask contract, normalized payload type, semantic mask kinds, explicit quality levels, cache key/reference values, and SemanticMaskProviding seam.

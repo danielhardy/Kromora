@@ -2,7 +2,7 @@
 id: LUMO-199
 title: Scene characteristics (backlighting / high-key / low-key)
 type: feature
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -11,11 +11,25 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:55.442Z
-updated: 2026-09-04T14:34:44.344Z
+updated: 2026-09-04T17:07:30.780Z
 depends_on:
   - LUMO-198
-order: zzzzzz
+order: ybh
 board: product
+commits:
+  - e20c572
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits:
+    - e20c572
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T17:07:30.777Z
+  session: 01MTN7FES695SELDC0
 ---
 
 **Type:** Feature
@@ -63,3 +77,22 @@ global-histogram-only Auto.
   fixtures for normal daylight, clear backlit, intentional high-key, intentional low-key — assert
   the corresponding likelihood is clearly dominant for each (semantic assertions, not exact-float
   equality, per `docs/PHASE3_SPEC.md` §7).
+
+## Agent log
+
+- 2026-09-04T17:07:30.778Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- HEAD
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN7FES695SELDC0
+Summary: Added pure scene-characteristics inference with continuous backlighting, high-key, and low-key likelihoods; integrated SceneCharacteristics into PhotoAnalysis and added semantic/codable tests.

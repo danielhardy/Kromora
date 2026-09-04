@@ -2,7 +2,7 @@
 id: LUMO-183
 title: AnalysisImage pipeline + normalized point/rect coordinate system
 type: feature
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,11 +11,38 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:48.908Z
-updated: 2026-09-04T14:34:39.321Z
+updated: 2026-09-04T14:53:47.602Z
 depends_on:
   - LUMO-182
-order: zzzq
+order: t
 board: product
+branch: main
+commits:
+  - d85e6cce5ba9129573193b543ef9b74607b7ec10
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Normalized point/rect values use the upper-left 0...1 coordinate system
+      result: pass
+      notes: NormalizedPoint and NormalizedRect clamp invalid values and expose one Vision conversion implementation.
+    - criterion: AnalysisImageFactory produces one canonical working resolution
+      result: pass
+      notes: Factory computes the bounded longest-edge dimensions from the existing orientation-baked ImageSource geometry and retains one opaque Sendable handle.
+    - criterion: Configurable default and tests
+      result: pass
+      notes: AnalysisConfiguration defaults to 768px and focused sizing/conversion tests pass.
+  checks_run:
+    - swift test --filter AnalysisValueTypesTests|AnalysisImageTests|RegionMaskTests (8 passed, 0 failed)
+    - swift build (passed)
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits:
+    - d85e6cce5ba9129573193b543ef9b74607b7ec10
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-04T14:53:47.596Z
+  session: 01MTN2QR46FP4LX3Q5
 ---
 
 **Type:** Feature
@@ -80,3 +107,26 @@ core abstraction), which depends on this ticket for the point/rect types.
   orientation-tagged JPEG fixture).
 - `Tests/LumoKitTests/NormalizedCoordinateTests.swift` (new): round-trip synthetic Vision-
   convention rects through the conversion function.
+
+## Agent log
+
+- 2026-09-04T14:53:47.597Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Normalized point/rect values use the upper-left 0...1 coordinate system (pass) — NormalizedPoint and NormalizedRect clamp invalid values and expose one Vision conversion implementation.
+- [x] AnalysisImageFactory produces one canonical working resolution (pass) — Factory computes the bounded longest-edge dimensions from the existing orientation-baked ImageSource geometry and retains one opaque Sendable handle.
+- [x] Configurable default and tests (pass) — AnalysisConfiguration defaults to 768px and focused sizing/conversion tests pass.
+Checks run:
+- swift test --filter AnalysisValueTypesTests|AnalysisImageTests|RegionMaskTests (8 passed, 0 failed)
+- swift build (passed)
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- d85e6cce5ba9129573193b543ef9b74607b7ec10
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTN2QR46FP4LX3Q5
+Summary: Added the canonical AnalysisImage handle, configurable 768px analysis sizing, and the single Vision lower-left to Lumo upper-left normalized coordinate conversion boundary.

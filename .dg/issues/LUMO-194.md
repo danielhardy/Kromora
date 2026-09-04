@@ -2,7 +2,7 @@
 id: LUMO-194
 title: PhotoAnalysis domain model assembly
 type: feature
-status: backlog
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -11,15 +11,46 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:53.354Z
-updated: 2026-09-04T14:34:42.822Z
+updated: 2026-09-04T15:32:41.713Z
 depends_on:
   - LUMO-188
   - LUMO-189
   - LUMO-190
   - LUMO-191
   - LUMO-193
-order: zzzzzh
+order: n
 board: product
+commits:
+  - 2d16392
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: AnalyzedRegion and PhotoAnalysis are Sendable Codable Equatable facts
+      result: pass
+      notes: Added reusable RegionKind alias, region statistics pairing, PhotoAnalysis value, and no recommendation fields.
+    - criterion: Assembly computes regional statistics and degrades gracefully
+      result: pass
+      notes: Global Tier 0 remains required; mask/statistics failures are skipped and reflected in AnalysisQuality.
+    - criterion: Quality and background semantics are documented
+      result: pass
+      notes: Quality flags derive from successfully analyzed semantic kinds; background is included only when supplied by the provider.
+    - criterion: Swift 6 and Codable behavior
+      result: pass
+      notes: Round-trip tests pass and PackageSettingsTests confirms no concurrency escape hatches.
+  checks_run:
+    - swift test --filter PhotoAnalysisAssemblyTests (3 passed)
+    - swift test --filter MaskedToneAnalyzerTests (3 passed)
+    - swift test --filter PackageSettingsTests (3 passed)
+    - swift build (passed)
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits:
+    - 2d16392
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-04T15:32:41.710Z
+  session: 01MTN3YWC3YMK778NP
 ---
 
 **Type:** Feature
@@ -80,3 +111,29 @@ something masks get bolted onto afterward.
   succeeds) — assert `AnalysisQuality` correctly reflects what's present, and `Codable` round-trip
   holds for both. No masks at all (Tier-0-only) still produces a valid `PhotoAnalysis` with an
   empty `regions` array.
+
+## Agent log
+
+- 2026-09-04T15:32:41.712Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] AnalyzedRegion and PhotoAnalysis are Sendable Codable Equatable facts (pass) — Added reusable RegionKind alias, region statistics pairing, PhotoAnalysis value, and no recommendation fields.
+- [x] Assembly computes regional statistics and degrades gracefully (pass) — Global Tier 0 remains required; mask/statistics failures are skipped and reflected in AnalysisQuality.
+- [x] Quality and background semantics are documented (pass) — Quality flags derive from successfully analyzed semantic kinds; background is included only when supplied by the provider.
+- [x] Swift 6 and Codable behavior (pass) — Round-trip tests pass and PackageSettingsTests confirms no concurrency escape hatches.
+Checks run:
+- swift test --filter PhotoAnalysisAssemblyTests (3 passed)
+- swift test --filter MaskedToneAnalyzerTests (3 passed)
+- swift test --filter PackageSettingsTests (3 passed)
+- swift build (passed)
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- 2d16392
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTN3YWC3YMK778NP
+Summary: Implemented PhotoAnalysis domain model assembly with graceful mask degradation and Codable tests.
