@@ -186,6 +186,14 @@ actor PhotoAnalysisCoordinator {
         await maskStore.pixels(for: reference)
     }
 
+    /// Compose an inverted mask through the coordinator's shared store. Keeping this operation on
+    /// the coordinator gives interactive consumers the same RegionMask-producing seam as semantic
+    /// generation, rather than asking a view to manufacture a second mask representation from its
+    /// preview pixels.
+    func invertedMask(_ region: RegionMask) async throws -> RegionMask {
+        try await MaskOperations.invert(region, using: maskStore)
+    }
+
     // MARK: - Pipeline
 
     private func performAnalysis(

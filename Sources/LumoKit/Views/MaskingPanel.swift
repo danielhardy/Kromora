@@ -27,11 +27,15 @@ final class MaskingPanelModel: ObservableObject {
     @Published private(set) var selectedKind: SemanticMaskKind?
     @Published private(set) var selectedMask: RegionMask?
     @Published private(set) var selectedPixels: NormalizedMask?
+    @Published private(set) var appliedMask: RegionMask?
     @Published private(set) var isLoading = false
+    @Published private(set) var isApplying = false
     @Published private(set) var errorMessage: String?
+    @Published private(set) var loadWarningMessage: String?
     @Published var isInverted = false {
         didSet {
             guard isInverted != oldValue else { return }
+            appliedMask = nil
             refreshDisplayedPixels()
         }
     }
@@ -39,14 +43,24 @@ final class MaskingPanelModel: ObservableObject {
     private let coordinator: PhotoAnalysisCoordinator
     private let assetID: PhotoAssetID
     private let source: ImageSource
+    /// Optional until the local-adjustment model can own a RegionMask. Keeping the hook explicit
+    /// lets tests prove the full select/invert/apply handoff without shipping a button that only
+    /// dismisses this sheet.
+    private let onApply: (@MainActor (PhotoAssetID, RegionMask) -> Void)?
     private var masks: [SemanticMaskKind: RegionMask] = [:]
     private var pixels: [SemanticMaskKind: NormalizedMask] = [:]
     private var loadTask: Task<Void, Never>?
 
-    init(coordinator: PhotoAnalysisCoordinator, assetID: PhotoAssetID, source: ImageSource) {
+    init(
+        coordinator: PhotoAnalysisCoordinator,
+        assetID: PhotoAssetID,
+        source: ImageSource,
+        onApply: (@MainActor (PhotoAssetID, RegionMask) -> Void)? = nil
+    ) {
         self.coordinator = coordinator
         self.assetID = assetID
         self.source = source
+        self.onApply = onApply
     }
 
     deinit { loadTask?.cancel() }
@@ -55,31 +69,47 @@ final class MaskingPanelModel: ObservableObject {
         loadTask?.cancel()
         isLoading = true
         errorMessage = nil
+        loadWarningMessage = nil
+        appliedMask = nil
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let candidates: [SemanticMaskKind] = [.subject, .person, .background, .face]
             var found: [SemanticMaskKind: RegionMask] = [:]
             var payloads: [SemanticMaskKind: NormalizedMask] = [:]
-            await withTaskGroup(of: (SemanticMaskKind, RegionMask, NormalizedMask)?.self) { group in
+            var failures: [SemanticMaskKind: String] = [:]
+            await withTaskGroup(of: (SemanticMaskKind, RegionMask?, NormalizedMask?, String?)?.self) { group in
                 for kind in candidates {
                     group.addTask { [coordinator, assetID, source] in
-                        guard let mask = try? await coordinator.mask(
-                            assetID: assetID, source: source, kind: kind, quality: .preview
-                        ), let pixels = await coordinator.pixels(for: mask.reference) else {
+                        do {
+                            let mask = try await coordinator.mask(
+                                assetID: assetID, source: source, kind: kind, quality: .preview
+                            )
+                            guard let pixels = await coordinator.pixels(for: mask.reference) else {
+                                return (kind, mask, NormalizedMask?.none, "Mask pixels were unavailable")
+                            }
+                            return (kind, mask, pixels, nil)
+                        } catch is CancellationError {
                             return nil
+                        } catch {
+                            return (kind, RegionMask?.none, NormalizedMask?.none,
+                                    Self.errorDescription(error))
                         }
-                        return (kind, mask, pixels)
                     }
                 }
                 for await result in group {
                     guard let result else { continue }
-                    found[result.0] = result.1
-                    payloads[result.0] = result.2
+                    if let mask = result.1, let pixels = result.2 {
+                        found[result.0] = mask
+                        payloads[result.0] = pixels
+                    } else if let failure = result.3 {
+                        failures[result.0] = failure
+                    }
                 }
             }
             guard !Task.isCancelled else { return }
             masks = found
             pixels = payloads
+            loadWarningMessage = failures.isEmpty ? nil : "Some mask targets were unavailable."
             availableSelections = candidates
                 .filter { found[$0] != nil }
                 .map(Selection.init(kind:))
@@ -90,7 +120,9 @@ final class MaskingPanelModel: ObservableObject {
                 refreshDisplayedPixels()
             }
             if availableSelections.isEmpty {
-                errorMessage = "No semantic regions were available for this photo."
+                errorMessage = failures.isEmpty
+                    ? "No semantic regions were available for this photo."
+                    : "Mask generation failed for this photo. Retry to try again."
             }
         }
     }
@@ -99,7 +131,60 @@ final class MaskingPanelModel: ObservableObject {
         guard let mask = masks[kind] else { return }
         selectedKind = kind
         selectedMask = mask
+        appliedMask = nil
         refreshDisplayedPixels()
+    }
+
+    var selectedMaskTitle: String? {
+        guard let selectedKind else { return nil }
+        let title = Selection(kind: selectedKind).title
+        return isInverted ? "Inverted \(title)" : title
+    }
+
+    var canApplyMask: Bool {
+        selectedMask != nil && onApply != nil && !isApplying
+    }
+
+    var applyHelp: String {
+        guard selectedMask != nil else { return "Select an available mask first." }
+        guard onApply != nil else {
+            return "Local adjustments cannot own a mask yet, so applying is disabled."
+        }
+        return "Use \(selectedMaskTitle ?? "mask") in the active local adjustment."
+    }
+
+    /// Applies the selected RegionMask, or the RegionMask produced by the shared invert operation.
+    /// The callback carries the asset ID as well as the mask so a future local-adjustment owner can
+    /// reject a late result from another photo instead of accidentally attaching it to the current
+    /// document.
+    func apply() async {
+        guard let selectedMask else { return }
+        guard let onApply else {
+            errorMessage = "Local adjustments cannot own a mask yet. Applying is disabled until an adjustment hook is available."
+            return
+        }
+
+        isApplying = true
+        defer { isApplying = false }
+        do {
+            let mask = isInverted
+                ? try await coordinator.invertedMask(selectedMask)
+                : selectedMask
+            guard !Task.isCancelled else { return }
+            onApply(assetID, mask)
+            appliedMask = mask
+        } catch is CancellationError {
+            return
+        } catch {
+            errorMessage = "Could not prepare \(selectedMaskTitle ?? "the mask"). Try again."
+        }
+    }
+
+    private nonisolated static func errorDescription(_ error: Error) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription {
+            return description
+        }
+        return String(describing: error)
     }
 
     private func refreshDisplayedPixels() {
@@ -189,11 +274,16 @@ struct MaskingPanel: View {
             }
 
             if model.availableSelections.isEmpty, !model.isLoading {
-                ContentUnavailableView(
-                    "No masks available",
-                    systemImage: "rectangle.dashed",
-                    description: Text(model.errorMessage ?? "This photo has no selectable semantic regions.")
-                )
+                VStack(spacing: 12) {
+                    ContentUnavailableView(
+                        "No masks available",
+                        systemImage: "rectangle.dashed",
+                        description: Text(model.errorMessage ?? "This photo has no selectable semantic regions.")
+                    )
+                    Button("Retry") { model.load() }
+                        .buttonStyle(.bordered)
+                        .accessibilityHint("Retry semantic mask generation for this photo")
+                }
             } else {
                 Picker("Mask target", selection: Binding(
                     get: { model.selectedKind ?? model.availableSelections.first?.kind },
@@ -217,10 +307,63 @@ struct MaskingPanel: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                if let warning = model.loadWarningMessage {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let selectedMaskTitle = model.selectedMaskTitle {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Selected target: \(selectedMaskTitle)")
+                            .font(.subheadline.weight(.semibold))
+                        if model.appliedMask != nil {
+                            Label(
+                                "Active target in local adjustment: \(selectedMaskTitle)",
+                                systemImage: "checkmark.circle.fill"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                        } else {
+                            Text(model.applyHelp)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        if let errorMessage = model.errorMessage, !model.availableSelections.isEmpty {
+                            Label(errorMessage, systemImage: "exclamationmark.triangle")
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Selected target: \(selectedMaskTitle)")
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }
+                    Button(model.isApplying ? "Applying…" : "Apply Mask") {
+                        Task { await model.apply() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!model.canApplyMask)
+                    .help(model.applyHelp)
+                    .accessibilityHint(model.applyHelp)
+                }
+            }
+
+            if model.availableSelections.isEmpty, !model.isLoading {
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }
+                }
             }
         }
         .padding(20)
         .frame(minWidth: 520, minHeight: 390)
         .task { model.load() }
     }
+
+    @Environment(\.dismiss) private var dismiss
 }
