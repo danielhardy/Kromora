@@ -41,6 +41,22 @@ final class PhotosImportTests: TempDirectoryTestCase {
         XCTAssertEqual(id, collection.items[0].url.map(PhotoAssetID.file))
     }
 
+    func testOriginalNameIncludingExtensionPropagatesToDurableAsset() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "source.jpg", in: tempDirectory
+        )
+        let data = try Data(contentsOf: url)
+        let collection = ImageCollection()
+
+        collection.beginDataImport()
+        _ = collection.appendDataImport(
+            ImageCollection.PhotoImportItem(name: "IMG_0042.HEIC", data: data), ordinal: 0
+        )
+
+        XCTAssertEqual(collection.items[0].asset.filename, "IMG_0042.HEIC")
+        XCTAssertTrue(collection.items[0].url?.lastPathComponent.hasSuffix("-IMG_0042.HEIC") == true)
+    }
+
     func testImportReservationsReplaceByOrdinalWithoutReordering() throws {
         let url = try Fixtures.writeJPEG(
             width: 32, height: 24, orientation: 1, named: "reserved.jpg", in: tempDirectory

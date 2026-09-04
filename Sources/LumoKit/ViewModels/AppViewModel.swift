@@ -1805,9 +1805,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     @discardableResult
     func setFocusedFlag(_ flag: PhotoFlag, advance: Bool = false) -> Bool {
         let name = collection.selectedItem?.displayName
+        let previousIndex = collection.selectedIndex
         let changed = collection.setFlag(flag, advance: advance)
         if changed, let name {
             statusMessage = "\(name): \(flag == .pick ? "Picked" : flag == .reject ? "Rejected" : "Flag cleared")"
+        }
+        // `ImageCollection` owns browsing focus, but Edit also has a prepared/rendered source.
+        // Keep them in lockstep after the rapid-cull advance so the filmstrip never highlights a
+        // different photo from the one shown on the canvas.
+        if advance, !navigation.isGrid, collection.selectedIndex != previousIndex {
+            selectCollectionImage(at: collection.selectedIndex)
         }
         return changed
     }

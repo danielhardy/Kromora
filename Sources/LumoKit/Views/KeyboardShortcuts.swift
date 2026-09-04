@@ -212,6 +212,8 @@ final class KeyMonitor {
                 vm.setFocusedFlag(.pick, advance: true)
             case .reject:
                 vm.setFocusedFlag(.reject, advance: true)
+            case .clearFlag:
+                vm.setFocusedFlag(.none, advance: true)
             case .clearRating:
                 vm.setFocusedRating(0)
             case .rating(let rating):

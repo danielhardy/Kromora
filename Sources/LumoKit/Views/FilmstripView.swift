@@ -4,6 +4,7 @@ import AppKit
 /// Horizontal thumbnail strip for browsing imported images.
 struct FilmstripView: View {
     @ObservedObject var collection: ImageCollection
+    @ObservedObject var settings: LumoSettings
     let onSelect: (Int, Bool) -> Void
 
     var body: some View {
@@ -22,6 +23,7 @@ struct FilmstripView: View {
                             } label: {
                                 FilmstripThumbnail(
                                     item: item,
+                                    settings: settings,
                                     isSelected: collection.selection.selectedIDs.contains(item.id)
                                 )
                             }
@@ -99,6 +101,7 @@ enum FilmstripNavigation {
 
 struct FilmstripThumbnail: View {
     @ObservedObject var item: ImageCollection.Item
+    @ObservedObject var settings: LumoSettings
     let isSelected: Bool
 
     var body: some View {
@@ -119,6 +122,13 @@ struct FilmstripThumbnail: View {
                                 .scaleEffect(0.5)
                         }
                 }
+
+                if item.asset.flag == .reject {
+                    Color.black.opacity(0.58)
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.red, .white)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(
@@ -126,16 +136,43 @@ struct FilmstripThumbnail: View {
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2.5)
             )
 
-            Text(item.displayName)
-                .font(.system(size: 9))
-                .foregroundColor(isSelected ? .primary : .secondary)
-                .lineLimit(1)
-                .frame(width: 72)
+            if settings.showPhotoNames {
+                Text(item.displayName)
+                    .font(.system(size: 9))
+                    .foregroundColor(isSelected ? .primary : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(width: 72)
+                    .accessibilityLabel(item.displayName)
+            }
+
+            HStack(spacing: 3) {
+                if item.asset.flag == .pick {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else if item.asset.flag == .reject {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.red)
+                }
+                if item.asset.rating > 0 {
+                    Image(systemName: "star.fill")
+                        .foregroundStyle(.yellow)
+                    Text("\(item.asset.rating)")
+                }
+            }
+            .font(.system(size: 8, weight: .semibold))
+            .frame(height: 10)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(item.displayName)
-        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityValue(accessibilityValue)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var accessibilityValue: String {
+        let selection = isSelected ? "Selected" : "Not selected"
+        let flag = item.asset.flag == .none ? "unflagged" : item.asset.flag.rawValue
+        return "\(selection), \(flag), \(item.asset.rating) stars"
     }
 }
 

@@ -108,7 +108,7 @@ struct LumoApp: App {
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1200, height: 800)
-        .commands { LumoCommands() }
+        .commands { LumoCommands(settings: appDelegate.viewModel.settings) }
 
         Settings {
             LumoSettingsView(settings: appDelegate.viewModel.settings)

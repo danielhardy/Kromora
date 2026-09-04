@@ -48,6 +48,22 @@ struct PreviewView: View {
             } else {
                 emptyState
             }
+
+            if previewSurface.image != nil,
+               viewModel.collection.selectedItem?.asset.flag == .reject {
+                VStack {
+                    Label("Rejected", systemImage: "xmark.circle.fill")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.red.opacity(0.9), in: Capsule())
+                        .padding(16)
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)

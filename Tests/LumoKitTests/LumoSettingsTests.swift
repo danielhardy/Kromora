@@ -25,6 +25,17 @@ final class LumoSettingsTests: TempDirectoryTestCase {
         XCTAssertEqual(defaults.integer(forKey: "Lumo.settings.schemaVersion"), 1)
     }
 
+    func testPhotoNameVisibilityPersistsAcrossRelaunch() {
+        let defaults = makeDefaults()
+        let first = LumoSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+
+        XCTAssertTrue(first.showPhotoNames)
+        first.showPhotoNames = false
+
+        let relaunched = LumoSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+        XCTAssertFalse(relaunched.showPhotoNames)
+    }
+
     func testSourceAndExportFoldersPersistIndependentlyAndReset() throws {
         let defaults = makeDefaults()
         let source = tempDirectory.appendingPathComponent("Imports")
