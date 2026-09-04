@@ -1,4 +1,5 @@
 import CoreImage
+import CoreVideo
 import Foundation
 import Vision
 
@@ -30,6 +31,7 @@ enum VisionSemanticMaskError: LocalizedError, Sendable, Equatable {
     case noSalientRegion
     case noFaceDetected
     case faceIndexOutOfRange(Int)
+    case foregroundIndexOutOfRange(Int)
     case requestFailed(String)
 
     var errorDescription: String? {
@@ -39,6 +41,7 @@ enum VisionSemanticMaskError: LocalizedError, Sendable, Equatable {
         case .noSalientRegion: return "Vision did not return a salient region"
         case .noFaceDetected: return "Vision did not detect a face"
         case .faceIndexOutOfRange(let index): return "Vision did not detect face index \(index)"
+        case .foregroundIndexOutOfRange(let index): return "Vision did not detect foreground instance index \(index)"
         case .requestFailed(let reason): return "Vision mask request failed: \(reason)"
         }
     }
@@ -64,7 +67,11 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             return try await faceMask(index: 0, image: image, quality: quality)
         case .faceInstance(let index):
             return try await faceMask(index: index, image: image, quality: quality)
-        case .background, .person, .foregroundInstance, .unknown:
+        case .foregroundInstance(let index):
+            return try await foregroundMask(index: index, image: image, quality: quality)
+        case .background:
+            return try await backgroundMask(image: image, quality: quality)
+        case .person, .unknown:
             // These cases are intentionally explicit: follow-up providers can fill one case at a
             // time without changing the shared protocol or leaking a VN type to consumers.
             throw VisionSemanticMaskError.unsupported(kind)
@@ -108,6 +115,70 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             let reference = try await store.store(pixels, for: key, quality: quality)
             masks.append(makeFaceMask(index: index, pixels: pixels, reference: reference,
                                       quality: quality))
+        }
+        return masks
+    }
+
+    /// Returns each foreground instance as a real pixel mask. The ordinal is stable for the
+    /// request result: `.foregroundInstance(0)` is the first instance, `.foregroundInstance(1)`
+    /// the second, and so on. Vision's instance labels remain private to this adapter.
+    func foregroundMasks(image: AnalysisImage, quality: MaskQuality) async throws -> [RegionMask] {
+        try Task.checkCancellation()
+        let firstKey = cacheKey(for: .foregroundInstance(0), image: image, quality: quality)
+        if let firstReference = await store.mask(for: firstKey, quality: quality),
+           let firstPixels = await store.pixels(for: firstReference) {
+            var cached = [makeForegroundMask(index: 0, pixels: firstPixels, reference: firstReference,
+                                             quality: quality)]
+            var index = 1
+            while let reference = await store.mask(
+                for: cacheKey(for: .foregroundInstance(index), image: image, quality: quality),
+                quality: quality
+            ), let pixels = await store.pixels(for: reference) {
+                cached.append(makeForegroundMask(index: index, pixels: pixels, reference: reference,
+                                                 quality: quality))
+                index += 1
+            }
+            return cached
+        }
+
+        guard #available(macOS 14.0, *) else {
+            throw VisionSemanticMaskError.requestFailed("Foreground instance masks require macOS 14 or newer")
+        }
+        let request = VNGenerateForegroundInstanceMaskRequest()
+        guard VNGenerateForegroundInstanceMaskRequest.supportedRevisions.contains(configuration.foregroundRevision) else {
+            throw VisionSemanticMaskError.requestFailed(
+                "Vision foreground revision \(configuration.foregroundRevision) is unavailable"
+            )
+        }
+        let handler = try makeRequestHandler(for: image)
+        do {
+            try handler.perform([request])
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
+        }
+        try Task.checkCancellation()
+
+        guard let observation = request.results?.first else { return [] }
+        let instanceIDs = observation.allInstances
+        guard !instanceIDs.isEmpty else { return [] }
+
+        var masks: [RegionMask] = []
+        masks.reserveCapacity(instanceIDs.count)
+        for (index, instanceID) in instanceIDs.enumerated() {
+            try Task.checkCancellation()
+            let buffer: CVPixelBuffer
+            do {
+                buffer = try observation.generateMask(forInstances: IndexSet(integer: instanceID))
+            } catch {
+                throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
+            }
+            let pixels = try normalizedMask(from: buffer)
+            let key = cacheKey(for: .foregroundInstance(index), image: image, quality: quality)
+            let reference = try await store.store(pixels, for: key, quality: quality)
+            masks.append(makeForegroundMask(index: index, pixels: pixels, reference: reference,
+                                             quality: quality))
         }
         return masks
     }
@@ -159,6 +230,47 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         return masks[index]
     }
 
+    private func foregroundMask(index: Int, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        guard index >= 0 else { throw VisionSemanticMaskError.foregroundIndexOutOfRange(index) }
+        let masks = try await foregroundMasks(image: image, quality: quality)
+        guard index < masks.count else { throw VisionSemanticMaskError.foregroundIndexOutOfRange(index) }
+        return masks[index]
+    }
+
+    private func backgroundMask(image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        let key = cacheKey(for: .background, image: image, quality: quality)
+        if let reference = await store.mask(for: key, quality: quality),
+           let pixels = await store.pixels(for: reference) {
+            return RegionMask(kind: .background, bounds: bounds(of: pixels), quality: quality,
+                              reference: reference, confidence: 1, coverage: pixels.coverage)
+        }
+
+        let foregrounds = try await foregroundMasks(image: image, quality: quality)
+        let union: NormalizedMask
+        if let first = foregrounds.first, let pixels = await store.pixels(for: first.reference) {
+            var combined = pixels
+            for foreground in foregrounds.dropFirst() {
+                guard let next = await store.pixels(for: foreground.reference) else {
+                    throw RegionMaskError.missingPixels
+                }
+                combined = try MaskOperations.union(combined, next)
+            }
+            union = combined
+        } else {
+            union = try NormalizedMask(
+                size: image.dimensions,
+                values: Array(repeating: 0, count: image.dimensions.width * image.dimensions.height)
+            )
+        }
+
+        // Background is intentionally the complement of the shared foreground union. Keeping
+        // this composition on MaskOperations prevents a second, subtly different pixel path.
+        let pixels = try MaskOperations.invert(union)
+        let reference = try await store.store(pixels, for: key, quality: quality)
+        return RegionMask(kind: .background, bounds: bounds(of: pixels), quality: quality,
+                          reference: reference, confidence: 1, coverage: pixels.coverage)
+    }
+
     private func detectFaces(image: AnalysisImage) throws -> [VNFaceObservation] {
         let request = VNDetectFaceRectanglesRequest()
         guard VNDetectFaceRectanglesRequest.supportedRevisions.contains(configuration.faceRevision) else {
@@ -194,6 +306,37 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             bounds: bounds(of: pixels), quality: quality, reference: reference,
             confidence: confidence, coverage: coverage
         )
+    }
+
+    private func makeForegroundMask(
+        index: Int,
+        pixels: NormalizedMask,
+        reference: RegionMaskReference,
+        quality: MaskQuality
+    ) -> RegionMask {
+        RegionMask(
+            kind: .foregroundInstance(index), bounds: bounds(of: pixels), quality: quality,
+            reference: reference, confidence: 1, coverage: pixels.coverage
+        )
+    }
+
+    private func normalizedMask(from buffer: CVPixelBuffer) throws -> NormalizedMask {
+        let width = CVPixelBufferGetWidth(buffer)
+        let height = CVPixelBufferGetHeight(buffer)
+        guard width > 0, height > 0 else { throw RegionMaskError.invalidPixelCount }
+        CVPixelBufferLockBaseAddress(buffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        guard let address = CVPixelBufferGetBaseAddress(buffer) else {
+            throw RegionMaskError.missingPixels
+        }
+
+        let stride = CVPixelBufferGetBytesPerRow(buffer)
+        let rowStride = stride / MemoryLayout<Float>.stride
+        let values = (0..<height).flatMap { y in
+            let row = address.assumingMemoryBound(to: Float.self).advanced(by: y * rowStride)
+            return (0..<width).map { x in min(max(row[x], 0), 1) }
+        }
+        return try NormalizedMask(size: PixelDimensions(width: width, height: height), values: values)
     }
 
     /// Constructing the handler is kept private so VNImageRequestHandler cannot cross isolation.
