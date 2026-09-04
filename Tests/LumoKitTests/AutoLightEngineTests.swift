@@ -79,6 +79,20 @@ final class AutoLightEngineTests: XCTestCase {
         XCTAssertLessThan(abs(result.light.contrast), 6)
     }
 
+    func testExposureRationaleIncludesFormattedMedian() {
+        let analysis = makeAnalysis(
+            tone: tone(mean: 0.32, p25: 0.12, p50: 0.30, p75: 0.58, p95: 0.92)
+        )
+
+        let explanation = AutoLightEngine.evaluate(analysis: analysis)
+            .rationale.exposure.explanation
+
+        XCTAssertEqual(
+            explanation,
+            "Median (0.30) EV correction, restrained by tonal-key intent."
+        )
+    }
+
     func testCorpusTuningKeepsCategoryAdjustmentsWithinGoldenRanges() {
         let daylight = makeAnalysis(
             tone: tone(mean: 0.50, p05: 0.08, p25: 0.28, p50: 0.50, p75: 0.72, p95: 0.90),
