@@ -66,6 +66,7 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
     let regions: [AnalyzedRegion]
     let primarySubject: PrimarySubjectSelection
     let relationships: RegionRelationships
+    let scene: SceneCharacteristics
     let quality: AnalysisQuality
     let timings: AnalysisTimings
 
@@ -76,6 +77,7 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
         regions: [AnalyzedRegion] = [],
         primarySubject: PrimarySubjectSelection = .none,
         relationships: RegionRelationships? = nil,
+        scene: SceneCharacteristics? = nil,
         quality: AnalysisQuality,
         timings: AnalysisTimings = .zero
     ) {
@@ -84,8 +86,15 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
         self.colorStatistics = colorStatistics
         self.regions = regions
         self.primarySubject = primarySubject
-        self.relationships = relationships ?? RegionRelationships.make(
+        let resolvedRelationships = relationships ?? RegionRelationships.make(
             globalTone: globalTone, regions: regions, primarySubject: primarySubject
+        )
+        self.relationships = resolvedRelationships
+        self.scene = scene ?? SceneCharacteristicsAnalyzer.analyze(
+            globalTone: globalTone,
+            regions: regions,
+            relationships: resolvedRelationships,
+            primarySubject: primarySubject
         )
         self.quality = quality
         self.timings = timings
