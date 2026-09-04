@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "hardware": "Apple M1 Pro, 16 GB",
+  "configuration": "Release",
+  "fixture": "generated 1024x768 sRGB gradient",
+  "allowedRegressionPercent": 25,
+  "baselinesMilliseconds": {
+    "prepareAnalysisImage": 0.25,
+    "globalToneAnalyzer": 3.0,
+    "subjectMask": 174.0,
+    "faceMask": 12.8,
+    "foregroundMask": 24.4,
+    "personMask": 0.81,
+    "maskedToneAnalyzer": 104.9,
+    "standardAnalysis": 607.3,
+    "cacheHit": 0.4,
+    "standardAnalysisMemoryMB": 50.0
+  }
+}

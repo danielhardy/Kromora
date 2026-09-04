@@ -144,6 +144,7 @@ let package = Package(
         .testTarget(
             name: "LumoKitTests",
             dependencies: ["LumoKit"],
+            resources: [.copy("PerformanceBaselines")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]

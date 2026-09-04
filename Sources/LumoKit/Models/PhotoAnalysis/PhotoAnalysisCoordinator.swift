@@ -96,8 +96,14 @@ actor PhotoAnalysisCoordinator {
         )
         do {
             if let cached = try await cache.analysis(for: cacheKey) {
+                LumoObservability.event(
+                    .cacheHit, source: source, maskQuality: .analysis, detail: "photoAnalysis"
+                )
                 return cached
             }
+            LumoObservability.event(
+                .cacheMiss, source: source, maskQuality: .analysis, detail: "photoAnalysis"
+            )
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -189,18 +195,32 @@ actor PhotoAnalysisCoordinator {
         cacheKey: AnalysisCacheKey
     ) async throws -> PhotoAnalysis {
         try Task.checkCancellation()
+        let clock = ContinuousClock()
+        let totalStart = clock.now
+        var totalInterval = LumoObservability.begin(
+            .analysisTotal, source: source, maskQuality: .analysis
+        )
+        defer { totalInterval.end() }
+
+        let preparationStart = clock.now
+        var preparationInterval = LumoObservability.begin(
+            .analysisImagePreparation, source: source, maskQuality: .analysis
+        )
         let image = try AnalysisImageFactory.make(from: source)
+        preparationInterval.end()
+        var timings = AnalysisTimings(
+            imagePreparation: preparationStart.duration(to: clock.now)
+        )
+
         var masks: [RegionMask] = []
         masks.reserveCapacity(stages[level, default: []].count)
 
         for stage in stages[level, default: []] {
             try Task.checkCancellation()
+            let stageStart = clock.now
             do {
-                let result = try await mask(
-                    assetID: assetID,
-                    source: source,
-                    kind: stage.kind,
-                    quality: stage.quality
+                let result = try await performMask(
+                    image: image, kind: stage.kind, quality: stage.quality
                 )
                 try Task.checkCancellation()
                 masks.append(result)
@@ -209,15 +229,24 @@ actor PhotoAnalysisCoordinator {
             } catch {
                 // Mask stages are optional. PhotoAnalysisAssembler still requires Tier 0 and
                 // records the successfully populated mask tiers in its quality value.
+                timings = timings.adding(
+                    duration: stageStart.duration(to: clock.now), for: stage.kind
+                )
                 continue
             }
+            timings = timings.adding(
+                duration: stageStart.duration(to: clock.now), for: stage.kind
+            )
         }
 
         try Task.checkCancellation()
-        let result = try await assembler.assemble(image: image, masks: masks)
+        let result = try await assembler.assemble(image: image, masks: masks, timings: timings)
         try Task.checkCancellation()
+        let completed = result.withTimings(
+            result.timings.replacing(total: totalStart.duration(to: clock.now))
+        )
         do {
-            try await cache.store(result, for: cacheKey)
+            try await cache.store(completed, for: cacheKey)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -225,7 +254,7 @@ actor PhotoAnalysisCoordinator {
             // be written (for example, a read-only application-support volume).
         }
         try Task.checkCancellation()
-        return result
+        return completed
     }
 
     private func performMask(
@@ -234,7 +263,20 @@ actor PhotoAnalysisCoordinator {
         quality: MaskQuality
     ) async throws -> RegionMask {
         try Task.checkCancellation()
+        var preparationInterval = LumoObservability.begin(
+            .analysisImagePreparation, source: source, maskQuality: quality
+        )
         let image = try AnalysisImageFactory.make(from: source)
+        preparationInterval.end()
+        return try await performMask(image: image, kind: kind, quality: quality)
+    }
+
+    private func performMask(
+        image: AnalysisImage,
+        kind: SemanticMaskKind,
+        quality: MaskQuality
+    ) async throws -> RegionMask {
+        try Task.checkCancellation()
         let result = try await maskProvider.mask(for: kind, image: image, quality: quality)
         try Task.checkCancellation()
         return result

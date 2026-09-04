@@ -160,10 +160,20 @@ struct PhotoAnalysisAssembler: Sendable {
         version: AnalysisVersion = .current,
         timings: AnalysisTimings = .zero
     ) async throws -> PhotoAnalysis {
+        let clock = ContinuousClock()
+        let assemblyStart = clock.now
+        var assemblyInterval = LumoObservability.begin(
+            .analysisAssembly, source: image.source, maskQuality: .analysis
+        )
+        defer { assemblyInterval.end() }
+
+        let globalStart = clock.now
         let global = try await globalToneAnalyzer.analyze(image: image)
+        let globalDuration = globalStart.duration(to: clock.now)
 
         var regions: [AnalyzedRegion] = []
         regions.reserveCapacity(masks.count)
+        let regionalStart = clock.now
         for mask in masks {
             try Task.checkCancellation()
             let statistics: (tone: ToneStatistics, color: ColorStatistics)
@@ -194,6 +204,9 @@ struct PhotoAnalysisAssembler: Sendable {
         try Task.checkCancellation()
 
         let quality = Self.quality(global: global.quality, regions: regions)
+        let regionalDuration = regionalStart.duration(to: clock.now)
+        let assemblyDuration = assemblyStart.duration(to: clock.now)
+        let totalDuration = max(timings.total, assemblyDuration)
         let primarySubject = PrimarySubjectSelector.select(from: regions)
         return PhotoAnalysis(
             version: version,
@@ -207,7 +220,11 @@ struct PhotoAnalysisAssembler: Sendable {
                 primarySubject: primarySubject
             ),
             quality: quality,
-            timings: timings
+            timings: timings.replacing(
+                globalTone: globalDuration,
+                regionalAnalysis: regionalDuration,
+                total: totalDuration
+            )
         )
     }
 
@@ -251,6 +268,20 @@ struct PhotoAnalysisAssembler: Sendable {
 }
 
 extension PhotoAnalysis {
+    func withTimings(_ timings: AnalysisTimings) -> PhotoAnalysis {
+        PhotoAnalysis(
+            version: version,
+            globalTone: globalTone,
+            colorStatistics: colorStatistics,
+            regions: regions,
+            primarySubject: primarySubject,
+            relationships: relationships,
+            scene: scene,
+            quality: quality,
+            timings: timings
+        )
+    }
+
     /// Convenience entry point for callers that already have analyzers configured with the same
     /// renderer and `MaskStore` as their mask providers.
     static func assemble(

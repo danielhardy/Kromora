@@ -37,8 +37,13 @@ final class PhotoAnalysisCoordinatorTests: XCTestCase {
 
     func testConcurrentAnalysesShareOneInFlightAnalysisAndItsMaskStage() async throws {
         let provider = CountingMaskProvider(gated: true)
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumoAnalysisDedup-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
         let coordinator = PhotoAnalysisCoordinator(
             engine: FakeRenderEngine(),
+            maskStore: MaskStore(directory: directory.appendingPathComponent("masks")),
+            cache: PhotoAnalysisCache(directory: directory.appendingPathComponent("cache")),
             maskProvider: provider,
             stages: [.fast: [PhotoAnalysisStage(kind: .subject, quality: .analysis)]]
         )
@@ -153,6 +158,28 @@ final class PhotoAnalysisCoordinatorTests: XCTestCase {
 
         let callCount = await provider.callCount
         XCTAssertEqual(callCount, 1)
+    }
+
+    func testAnalysisRecordsMeasuredStageTimings() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LumoAnalysisTimings-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let coordinator = PhotoAnalysisCoordinator(
+            engine: FakeRenderEngine(),
+            maskStore: MaskStore(directory: directory.appendingPathComponent("masks")),
+            cache: PhotoAnalysisCache(directory: directory.appendingPathComponent("cache")),
+            maskProvider: CountingMaskProvider(gated: false),
+            stages: [.fast: [PhotoAnalysisStage(kind: .subject, quality: .analysis)]]
+        )
+
+        let analysis = try await coordinator.analyze(
+            assetID: .data(Data([17, 18, 19])), source: makeSource(), level: .fast
+        )
+
+        XCTAssertGreaterThan(analysis.timings.imagePreparation, .zero)
+        XCTAssertGreaterThan(analysis.timings.globalTone, .zero)
+        XCTAssertGreaterThan(analysis.timings.saliency, .zero)
+        XCTAssertGreaterThan(analysis.timings.total, analysis.timings.globalTone)
     }
 
     private func makeSource() -> ImageSource {

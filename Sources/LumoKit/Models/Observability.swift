@@ -20,6 +20,16 @@ enum LumoWorkflowStage: CaseIterable {
     case photoTransfer
     case photoThumbnail
     case photoCollectionInsert
+    case analysisImagePreparation
+    case analysisGlobalTone
+    case analysisSubjectMask
+    case analysisFaceMask
+    case analysisForegroundMask
+    case analysisBackgroundMask
+    case analysisPersonMask
+    case analysisMaskedStatistics
+    case analysisAssembly
+    case analysisTotal
 
     var name: StaticString {
         switch self {
@@ -35,6 +45,16 @@ enum LumoWorkflowStage: CaseIterable {
         case .photoTransfer: return "PhotoTransfer"
         case .photoThumbnail: return "PhotoThumbnail"
         case .photoCollectionInsert: return "PhotoCollectionInsert"
+        case .analysisImagePreparation: return "PhotoAnalysisImagePreparation"
+        case .analysisGlobalTone: return "PhotoAnalysisGlobalTone"
+        case .analysisSubjectMask: return "PhotoAnalysisSubjectMask"
+        case .analysisFaceMask: return "PhotoAnalysisFaceMask"
+        case .analysisForegroundMask: return "PhotoAnalysisForegroundMask"
+        case .analysisBackgroundMask: return "PhotoAnalysisBackgroundMask"
+        case .analysisPersonMask: return "PhotoAnalysisPersonMask"
+        case .analysisMaskedStatistics: return "PhotoAnalysisMaskedStatistics"
+        case .analysisAssembly: return "PhotoAnalysisAssembly"
+        case .analysisTotal: return "PhotoAnalysisTotal"
         }
     }
 }
@@ -138,6 +158,20 @@ enum LumoObservability {
         )
     }
 
+    /// Photo-analysis quality is deliberately kept separate from render quality. The overload
+    /// keeps the common signpost context format while ensuring Instruments can distinguish fast,
+    /// standard, and detailed mask work without exposing a Vision type.
+    static func begin(
+        _ stage: LumoWorkflowStage,
+        source: ImageSource,
+        maskQuality: MaskQuality
+    ) -> LumoSignpostInterval {
+        LumoSignpostInterval(
+            stage,
+            context: LumoTraceContext(sourceToken: source.traceToken, quality: maskQuality.rawValue)
+        )
+    }
+
     static func event(
         _ event: LumoWorkflowEvent,
         source: ImageSource? = nil,
@@ -146,6 +180,21 @@ enum LumoObservability {
     ) {
         let context = source.map { LumoTraceContext(source: $0, quality: quality ?? .preview) }
             ?? .unknown
+        signposter.emitEvent(
+            event.name,
+            "source=\(context.sourceToken, privacy: .public) quality=\(context.quality, privacy: .public) detail=\(detail, privacy: .public)"
+        )
+    }
+
+    static func event(
+        _ event: LumoWorkflowEvent,
+        source: ImageSource,
+        maskQuality: MaskQuality,
+        detail: String = ""
+    ) {
+        let context = LumoTraceContext(
+            sourceToken: source.traceToken, quality: maskQuality.rawValue
+        )
         signposter.emitEvent(
             event.name,
             "source=\(context.sourceToken, privacy: .public) quality=\(context.quality, privacy: .public) detail=\(detail, privacy: .public)"

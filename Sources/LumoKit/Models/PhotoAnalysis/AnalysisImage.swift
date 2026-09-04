@@ -82,7 +82,9 @@ struct AnalysisImage: Sendable, Equatable {
 }
 
 struct AnalysisConfiguration: Sendable, Equatable {
-    // TODO(LUMO-206): benchmark 512/768/1024 before changing this default.
+    // Release benchmark on the reference M1 Pro fixture: 512px 221.3ms, 768px 173.7ms, and
+    // 1024px 299.7ms for subject detection. All three retained the subject signal; 768px remains
+    // the best balanced default. The opt-in harness and checked-in baseline live in LUMO-206.
     var maximumDimension: Int = 768
 
     init(maximumDimension: Int = 768) {
