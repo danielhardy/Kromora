@@ -2,7 +2,7 @@
 id: LUMO-228
 title: "Commit LUMO-218/219 local-mask model work: HEAD does not build without untracked files"
 type: bug
-status: review
+status: done
 priority: urgent
 creation_provenance:
   runner: claude
@@ -13,8 +13,8 @@ labels:
   - blocker
   - masking
 created: 2026-09-05T02:33:04.769Z
-updated: 2026-09-05T04:03:10.425Z
-order: y
+updated: 2026-09-05T04:07:31.258Z
+order: zzzzzzzx
 board: product
 ---
 
