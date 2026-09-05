@@ -2,7 +2,7 @@
 id: LUMO-220
 title: Replace selection-only mask sheet with persistent Masking workspace
 type: feature
-status: claimed
+status: review
 priority: high
 creation_provenance:
   runner: codex
@@ -14,19 +14,14 @@ labels:
   - editor
   - accessibility
 created: 2026-09-04T21:48:29.898Z
-updated: 2026-09-05T04:12:23.884Z
+updated: 2026-09-05T04:42:53.621Z
 depends_on:
   - LUMO-217
   - LUMO-218
   - LUMO-219
+  - LUMO-229
 order: w
 board: product
-claim:
-  actor: codex
-  session: 01MTNV9RRF96LNS12O
-  claimed_at: 2026-09-05T04:12:23.883Z
-  expires_at: 2026-09-05T05:12:23.883Z
-  model: gpt-5.6-luna
 ---
 
 ## Objective
@@ -68,6 +63,42 @@ keyboard/menu commands, `AppViewModel+Masking.swift`, and the new `MaskInteracti
 
 Retire `MaskingPanel.swift` or reduce it to genuinely shared semantic-result UI. Do not leave two
 workflows with conflicting selection or apply semantics.
+
+### Comment — codex @ 2026-09-05T04:34:36.040Z
+
+Implemented in commit 0af0c30. Added persistent masking workspace, document-owned layer/component actions, presentation-only overlay state and canvas guides, source-safe selection reset, crop hit-test ownership, Escape handling, and local adjustment controls. Verification: swift test --filter MaskingWorkspaceTests, swift test --filter AdjustInspectorTests, swift test --filter LocalMaskTests, and dg validate pass. Full swift test reaches 849 tests but currently has 23 pre-existing source-loading/persistence/comparison/export failures unrelated to masking.
+
+### Comment — claude @ 2026-09-05T04:40:28.439Z
+
+{
+  "verdict": "blocked",
+  "reviewer": "claude",
+  "summary": "Correctness bug fixed in place; one unmet acceptance criterion (functional mask overlay/solo inspection) is a genuine feature gap requiring render-pipeline work beyond a localized fix, so this is returned to review rather than completed.",
+  "fixed_in_place": [
+    {
+      "issue": "Pointer mask gestures (brush/linear/radial) always targeted the first enabled component in a layer, ignoring the selected component (MaskInteractionState.selectedComponentID). On any layer with 2+ components, drawing with a tool would silently overwrite the wrong component's saved definition instead of the one the user selected in the inspector.",
+      "files": [
+        "Sources/LumoKit/ViewModels/AppViewModel+Masking.swift (beginMaskGesture, updateMaskGesture, new LocalAdjustmentLayer.targetComponentIndex helper)",
+        "Sources/LumoKit/Views/MaskingWorkspace.swift (MaskCanvasOverlay.draw now targets the same component as the gesture, so guides match what's actually edited)"
+      ],
+      "test": "Tests/LumoKitTests/MaskingWorkspaceTests.swift: testGestureEditsTheSelectedComponentNotJustTheFirstEnabledOne (fails without the fix, passes with it)"
+    }
+  ],
+  "unresolved_blocker": {
+    "summary": "Overlay color-wash/grayscale inspection and per-layer 'Solo' are non-functional: MaskCanvasOverlay only draws vector geometry guides, never the layer's resolved mask alpha, and soloLayerID is set/cleared but read nowhere. docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md Section 5.2 explicitly requires 'The active mask may be soloed to inspect its alpha without changing the document,' which this ticket's implementation notes point to.",
+    "why_not_fixed_here": "Requires rendering the resolved per-pixel mask alpha into the preview overlay, which touches the RenderEngine/CIImage boundary (CLAUDE.md: CIImage/CIFilter/CIContext must stay inside RenderEngine) -- a real feature addition, not a localized/testable fix appropriate for a verification pass.",
+    "child_ticket": "LUMO-229"
+  },
+  "tests_run": [
+    "swift build",
+    "swift test --filter MaskingWorkspaceTests",
+    "swift test --filter AdjustInspectorTests",
+    "swift test --filter LocalMaskTests",
+    "swift test --filter PackageSettingsTests"
+  ],
+  "tests_result": "all passed (26 tests across the four filters, including the new regression test)",
+  "other_notes": "duplicateMask's brush-component branch (`if case .brush(let brush) = ... { component.source = .brush(brush) }`) reassigns the identical value and does nothing observable; harmless but worth cleaning up if this file is touched again. Not filed as a separate ticket given its severity."
+}
 
 ## Agent log
 
