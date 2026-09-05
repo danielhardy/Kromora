@@ -387,6 +387,39 @@ struct MaskingWorkspace: View {
             .accessibilityLabel("Reset linear gradient")
             .accessibilityHint("Restore the angle and falloff of this gradient")
         case .radial(let definition):
+            Toggle(
+                "Select inside",
+                isOn: Binding(
+                    get: {
+                        guard let layer = viewModel.document.localAdjustments.first(where: {
+                            $0.id == layerID
+                        }), let selected = layer.components.first(where: { $0.id == component.id }),
+                        case .radial(let value) = selected.source else { return definition.isInside }
+                        return value.isInside
+                    },
+                    set: { isInside in
+                        viewModel.updateMaskComponent(component.id, in: layerID) { component in
+                            if case .radial(var current) = component.source {
+                                current.isInside = isInside
+                                component.source = .radial(current)
+                            }
+                        }
+                    })
+            )
+            maskSlider(
+                "Angle",
+                value: componentValue(
+                    component.id, layerID: layerID,
+                    get: { source in
+                        if case .radial(let value) = source { return value.rotation * 180 / .pi }
+                        return definition.rotation * 180 / .pi
+                    },
+                    set: { source, value in
+                        if case .radial(var current) = source {
+                            current.rotation = value * .pi / 180
+                            source = .radial(current)
+                        }
+                    }), range: -180...180)
             maskSlider(
                 "Feather",
                 value: componentValue(
@@ -415,6 +448,12 @@ struct MaskingWorkspace: View {
                             source = .radial(current)
                         }
                     }), range: 0...1)
+            Button("Reset radial gradient", systemImage: "arrow.counterclockwise") {
+                viewModel.resetMaskComponent(component.id, in: layerID)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Reset radial gradient")
+            .accessibilityHint("Restore the angle, radii, and feather of this gradient")
         }
     }
 
@@ -716,15 +755,19 @@ struct MaskCanvasOverlay: View {
                             isDrawing = true
                             let handle = linearHandle(
                                 at: value.location, transform: transform) ?? .creation
-                            viewModel.beginMaskGesture(at: point, linearHandle: handle)
+                            let radial = radialHandle(at: value.location, transform: transform)
+                            viewModel.beginMaskGesture(
+                                at: point, linearHandle: handle, radialHandle: radial,
+                                sourceSize: transform.sourceSize,
+                                modifiers: NSEvent.modifierFlags)
                         } else {
-                            viewModel.updateMaskGesture(to: point)
+                            viewModel.updateMaskGesture(to: point, modifiers: NSEvent.modifierFlags)
                         }
                     }
                     .onEnded { value in
                         if let point = transform.sourceNormalizedPoint(forViewport: value.location)
                         {
-                            viewModel.updateMaskGesture(to: point)
+                            viewModel.updateMaskGesture(to: point, modifiers: NSEvent.modifierFlags)
                         }
                         isDrawing = false
                         viewModel.endMaskGesture()
@@ -812,9 +855,11 @@ struct MaskCanvasOverlay: View {
         if let maskImage,
             let imageRect = transform.viewportRect(
                 forSourceNormalized: CGRect(x: 0, y: 0, width: 1, height: 1)
-            ) {
+            ),
+            let visibleRect = transform.viewportRect(forSourceNormalized: transform.cropRect) {
             var maskContext = context
             maskContext.opacity = maskingState.overlayOpacity
+            maskContext.clip(to: Path(visibleRect))
             maskContext.draw(
                 Image(decorative: maskImage, scale: 1, orientation: .up), in: imageRect
             )
@@ -891,22 +936,62 @@ struct MaskCanvasOverlay: View {
             drawHandle(at: end, in: &context, color: guideColor)
             drawHandle(at: rotationHandle, in: &context, color: guideColor)
         case .radial(let definition):
-            guard let center = point(definition.center),
-                let right = point(
-                    CGPoint(
-                        x: definition.center.x + definition.horizontalRadius, y: definition.center.y
-                    )),
-                let bottom = point(
-                    CGPoint(
-                        x: definition.center.x, y: definition.center.y + definition.verticalRadius))
-            else { return }
-            let rect = CGRect(
-                x: center.x - abs(right.x - center.x), y: center.y - abs(bottom.y - center.y),
-                width: abs(right.x - center.x) * 2, height: abs(bottom.y - center.y) * 2)
+            guard let center = point(definition.center) else { return }
+            let outer = radialGuidePoints(
+                definition: definition, scale: 1, transform: transform)
+            let inner = radialGuidePoints(
+                definition: definition, scale: max(0, 1 - definition.feather), transform: transform)
             context.stroke(
-                Path(ellipseIn: rect), with: .color(guideColor),
-                style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+                Path { path in
+                    guard let first = outer.first else { return }
+                    path.move(to: first)
+                    for value in outer.dropFirst() { path.addLine(to: value) }
+                }, with: .color(guideColor), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+            context.stroke(
+                Path { path in
+                    guard let first = inner.first else { return }
+                    path.move(to: first)
+                    for value in inner.dropFirst() { path.addLine(to: value) }
+                }, with: .color(guideColor.opacity(0.75)), style: StrokeStyle(lineWidth: 1.5))
+
             drawHandle(at: center, in: &context, color: guideColor)
+            for parameter in [0.0, .pi / 2, .pi, .pi * 1.5] {
+                if let handle = radialGuidePoint(
+                    definition: definition, parameter: parameter, scale: 1, transform: transform) {
+                    drawHandle(at: handle, in: &context, color: guideColor)
+                }
+            }
+            for parameter in [Double.pi / 4, Double.pi * 3 / 4,
+                              Double.pi * 5 / 4, Double.pi * 7 / 4] {
+                if let handle = radialGuidePoint(
+                    definition: definition, parameter: parameter, scale: 1, transform: transform) {
+                    drawHandle(at: handle, in: &context, color: guideColor)
+                }
+            }
+            if let innerHandle = radialGuidePoint(
+                definition: definition, parameter: 0, scale: max(0, 1 - definition.feather),
+                transform: transform) {
+                drawHandle(at: innerHandle, in: &context, color: guideColor.opacity(0.8))
+            }
+            let outerTop = radialGuidePoint(
+                definition: definition, parameter: -.pi / 2, scale: 1, transform: transform)
+            let rotationHandle: CGPoint
+            if let outerTop {
+                let dx = outerTop.x - center.x
+                let dy = outerTop.y - center.y
+                let length = max(hypot(dx, dy), 0.001)
+                rotationHandle = CGPoint(
+                    x: outerTop.x + dx / length * 30,
+                    y: outerTop.y + dy / length * 30)
+            } else {
+                rotationHandle = CGPoint(x: center.x, y: center.y - 30)
+            }
+            context.stroke(
+                Path { path in
+                    path.move(to: center)
+                    path.addLine(to: rotationHandle)
+                }, with: .color(guideColor), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            drawHandle(at: rotationHandle, in: &context, color: guideColor)
         }
     }
 
@@ -924,18 +1009,34 @@ struct MaskCanvasOverlay: View {
             return "Linear gradient handles: zero-strength edge, center translation bar, "
             + "full-strength edge, and rotation handle"
         }
+        if case .radial = layer.components[index].source {
+            return "Radial gradient handles: center, horizontal and vertical radius, corner, "
+                + "inner feather boundary, and rotation"
+        }
         return "Mask canvas"
     }
 
     private var canvasAccessibilityValue: String {
         guard let layer = activeLayer,
             let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID),
-            case .linear(let definition) = layer.components[index].source
+            let source = Optional(layer.components[index].source)
         else { return "" }
-        let angle = Int(definition.angleDegrees.rounded())
-        let falloff = definition.falloff.formatted(
-            .number.precision(.fractionLength(2)))
-        return "Angle \(angle) degrees, falloff \(falloff)"
+        switch source {
+        case .linear(let definition):
+            let angle = Int(definition.angleDegrees.rounded())
+            let falloff = definition.falloff.formatted(
+                .number.precision(.fractionLength(2)))
+            return "Angle \(angle) degrees, falloff \(falloff)"
+        case .radial(let definition):
+            let angle = Int((definition.rotation * 180 / .pi).rounded())
+            return "Angle \(angle) degrees, horizontal radius "
+                + definition.horizontalRadius.formatted(.number.precision(.fractionLength(2)))
+                + ", vertical radius "
+                + definition.verticalRadius.formatted(.number.precision(.fractionLength(2)))
+                + ", feather \(Int((definition.feather * 100).rounded())) percent"
+        default:
+            return ""
+        }
     }
 
     private func linearHandle(
@@ -972,6 +1073,89 @@ struct MaskCanvasOverlay: View {
             if distanceToSegment(viewportPoint, first, second) <= 14 {
                 return handle
             }
+        }
+        return nil
+    }
+
+    private func radialGuidePoints(
+        definition: RadialGradientDefinition,
+        scale: Double,
+        transform: CanvasMaskTransform
+    ) -> [CGPoint] {
+        (0...64).compactMap { step in
+            radialGuidePoint(
+                definition: definition, parameter: Double(step) / 64 * 2 * .pi,
+                scale: scale, transform: transform)
+        }
+    }
+
+    private func radialGuidePoint(
+        definition: RadialGradientDefinition,
+        parameter: Double,
+        scale: Double,
+        transform: CanvasMaskTransform
+    ) -> CGPoint? {
+        let sourcePoint = RadialGradientMaskMath.point(
+            parameter, horizontalRadius: definition.horizontalRadius * scale,
+            verticalRadius: definition.verticalRadius * scale, center: definition.center,
+            rotation: definition.rotation, sourceSize: transform.sourceSize)
+        return transform.viewportPoint(forSourceNormalized: sourcePoint)
+    }
+
+    private func radialHandle(
+        at viewportPoint: CGPoint, transform: CanvasMaskTransform
+    ) -> MaskInteractionState.RadialHandle? {
+        guard !maskingState.radialCreationPending,
+              let layer = activeLayer,
+              let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID),
+              case .radial(let definition) = layer.components[index].source,
+              let center = transform.viewportPoint(forSourceNormalized: definition.center)
+        else { return nil }
+
+        func distance(_ lhs: CGPoint, _ rhs: CGPoint) -> CGFloat {
+            hypot(lhs.x - rhs.x, lhs.y - rhs.y)
+        }
+
+        let top = radialGuidePoint(
+            definition: definition, parameter: -.pi / 2, scale: 1, transform: transform)
+        let rotation: CGPoint
+        if let top {
+            let dx = top.x - center.x
+            let dy = top.y - center.y
+            let length = max(hypot(dx, dy), 0.001)
+            rotation = CGPoint(x: top.x + dx / length * 30, y: top.y + dy / length * 30)
+        } else {
+            rotation = CGPoint(x: center.x, y: center.y - 30)
+        }
+        if distance(viewportPoint, rotation) <= 16 { return .rotation }
+        if distance(viewportPoint, center) <= 16 { return .center }
+
+        let cardinals: [(MaskInteractionState.RadialHandle, Double)] = [
+            (.horizontalRadius, 0), (.verticalRadius, .pi / 2),
+            (.horizontalRadius, .pi), (.verticalRadius, .pi * 1.5)
+        ]
+        for (handle, parameter) in cardinals {
+            if let candidate = radialGuidePoint(
+                definition: definition, parameter: parameter, scale: 1, transform: transform),
+                distance(viewportPoint, candidate) <= 14 {
+                return handle
+            }
+        }
+
+        for parameter in [Double.pi / 4, Double.pi * 3 / 4,
+                          Double.pi * 5 / 4, Double.pi * 7 / 4] {
+            if let candidate = radialGuidePoint(
+                definition: definition, parameter: parameter, scale: 1, transform: transform),
+                distance(viewportPoint, candidate) <= 14 {
+                return .corner
+            }
+        }
+        if definition.feather > 0,
+            let inner = radialGuidePoint(
+                definition: definition, parameter: 0,
+                scale: max(0, 1 - definition.feather), transform: transform),
+            distance(viewportPoint, inner) <= 14 {
+            return .innerBoundary
         }
         return nil
     }

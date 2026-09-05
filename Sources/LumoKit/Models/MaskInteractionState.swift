@@ -53,15 +53,29 @@ final class MaskInteractionState: ObservableObject {
         case creation
     }
 
+    enum RadialHandle: String, Sendable, Equatable {
+        case center
+        case horizontalRadius
+        case verticalRadius
+        case corner
+        case innerBoundary
+        case rotation
+        case creation
+    }
+
     @Published private(set) var selectedLayerID: UUID?
     @Published private(set) var selectedComponentID: UUID?
     @Published private(set) var activeTool: Tool = .selection
     @Published private(set) var hoverPoint: CGPoint?
     @Published private(set) var draftLayer: LocalAdjustmentLayer?
     @Published private(set) var activeLinearHandle: LinearHandle?
+    @Published private(set) var activeRadialHandle: RadialHandle?
     @Published private(set) var linearCreationPending = false
+    @Published private(set) var radialCreationPending = false
     private(set) var gestureStartPoint: CGPoint?
     private(set) var gestureStartDefinition: LinearGradientDefinition?
+    private(set) var gestureStartRadialDefinition: RadialGradientDefinition?
+    private(set) var gestureSourceSize: CGSize = CGSize(width: 1, height: 1)
 
     // Presentation-only controls. These values intentionally never enter EditDocument, history,
     // or a render request; they describe how the photographer is inspecting the saved recipe.
@@ -79,6 +93,7 @@ final class MaskInteractionState: ObservableObject {
         selectedComponentID = componentID
         if selectionChanged {
             linearCreationPending = false
+            radialCreationPending = false
         }
     }
 
@@ -98,6 +113,13 @@ final class MaskInteractionState: ObservableObject {
         } else {
             gestureStartDefinition = nil
         }
+        if let componentID = selectedComponentID,
+            let component = layer.components.first(where: { $0.id == componentID }),
+            case .radial(let definition) = component.source {
+            gestureStartRadialDefinition = definition
+        } else {
+            gestureStartRadialDefinition = nil
+        }
     }
     func updateDraft(_ layer: LocalAdjustmentLayer) {
         guard draftLayer != nil else { return }
@@ -109,16 +131,22 @@ final class MaskInteractionState: ObservableObject {
         let committed = draftLayer
         draftLayer = nil
         activeLinearHandle = nil
+        activeRadialHandle = nil
         gestureStartPoint = nil
         gestureStartDefinition = nil
+        gestureStartRadialDefinition = nil
+        gestureSourceSize = CGSize(width: 1, height: 1)
         return committed
     }
 
     func cancelDraft() {
         draftLayer = nil
         activeLinearHandle = nil
+        activeRadialHandle = nil
         gestureStartPoint = nil
         gestureStartDefinition = nil
+        gestureStartRadialDefinition = nil
+        gestureSourceSize = CGSize(width: 1, height: 1)
     }
 
     func beginLinearGesture(_ handle: LinearHandle, at point: CGPoint) {
@@ -126,14 +154,28 @@ final class MaskInteractionState: ObservableObject {
         gestureStartPoint = point
     }
 
+    func beginRadialGesture(
+        _ handle: RadialHandle, at point: CGPoint, sourceSize: CGSize
+    ) {
+        activeRadialHandle = handle
+        gestureStartPoint = point
+        gestureSourceSize = sourceSize
+    }
+
     func markLinearCreationPending() { linearCreationPending = true }
     func consumeLinearCreationPending() { linearCreationPending = false }
+    func markRadialCreationPending() { radialCreationPending = true }
+    func consumeRadialCreationPending() { radialCreationPending = false }
 
     func clearGestureHandle() {
         activeLinearHandle = nil
+        activeRadialHandle = nil
         linearCreationPending = false
+        radialCreationPending = false
         gestureStartPoint = nil
         gestureStartDefinition = nil
+        gestureStartRadialDefinition = nil
+        gestureSourceSize = CGSize(width: 1, height: 1)
     }
 
     func toggleSolo(layerID: UUID) {
@@ -149,9 +191,13 @@ final class MaskInteractionState: ObservableObject {
         hoverPoint = nil
         draftLayer = nil
         activeLinearHandle = nil
+        activeRadialHandle = nil
         linearCreationPending = false
+        radialCreationPending = false
         gestureStartPoint = nil
         gestureStartDefinition = nil
+        gestureStartRadialDefinition = nil
+        gestureSourceSize = CGSize(width: 1, height: 1)
         soloLayerID = nil
     }
 }
