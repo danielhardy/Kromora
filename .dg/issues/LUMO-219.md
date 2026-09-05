@@ -2,7 +2,7 @@
 id: LUMO-219
 title: Render ordered local adjustments through resolved soft masks
 type: feature
-status: review
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -14,12 +14,14 @@ labels:
   - rendering
   - performance
 created: 2026-09-04T21:48:29.389Z
-updated: 2026-09-05T02:33:57.286Z
+updated: 2026-09-05T04:12:23.197Z
 depends_on:
   - LUMO-218
   - LUMO-228
 order: w
 board: product
+commits:
+  - 58a690a
 ---
 
 ## Objective
@@ -111,3 +113,5 @@ path. Lease/claim left in place for DispatchGraph's normal handoff.
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-05T04:12:23.188Z: Completed after landing the missing LUMO-218 model prerequisite in fe95f16 and verifying the clean checkout. Render, cache, request, stack, local-mask, and package-settings checks pass; the separate first-component-intersect composition edge case remains tracked as a non-blocking follow-up.
