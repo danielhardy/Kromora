@@ -60,6 +60,42 @@ final class LocalMaskTests: XCTestCase {
         XCTAssertEqual(resized.falloff, 0.3, accuracy: 0.000_001)
     }
 
+    func testRadialGradientMathUsesSourcePixelsForRotationAndFalloff() {
+        let sourceSize = CGSize(width: 400, height: 200)
+        let definition = RadialGradientDefinition(
+            center: CGPoint(x: 0.5, y: 0.5), horizontalRadius: 0.25, verticalRadius: 0.25,
+            rotation: .pi / 2, feather: 0.5, density: 0.8)
+        XCTAssertEqual(try roundTrip(definition), definition)
+
+        // A 90-degree rotation swaps the physical axes: the source point one normalized
+        // vertical radius above the center is on the ellipse's horizontal axis.
+        let rotatedAxis = CGPoint(x: 0.5, y: 0.25)
+        XCTAssertEqual(
+            RadialGradientMaskMath.alpha(
+                at: rotatedAxis, definition: definition, sourceSize: sourceSize),
+            0.8, accuracy: 0.000_001)
+        XCTAssertEqual(
+            RadialGradientMaskMath.alpha(
+                at: CGPoint(x: 0.5, y: 0.125), definition: definition, sourceSize: sourceSize),
+            0.4, accuracy: 0.000_001)
+
+        let inner = RadialGradientMaskMath.innerPoint(
+            -.pi / 2, definition: definition, sourceSize: sourceSize)
+        XCTAssertEqual(inner.x, 0.5625, accuracy: 0.000_001)
+        XCTAssertEqual(inner.y, 0.5, accuracy: 0.000_001)
+
+        var outside = definition
+        outside.isInside = false
+        XCTAssertEqual(
+            RadialGradientMaskMath.alpha(
+                at: definition.center, definition: outside, sourceSize: sourceSize),
+            0, accuracy: 0.000_001)
+        XCTAssertEqual(
+            RadialGradientMaskMath.alpha(
+                at: CGPoint(x: 0.1, y: 0.1), definition: outside, sourceSize: sourceSize),
+            0.8, accuracy: 0.000_001)
+    }
+
     func testV1DocumentMigratesToV2WithEmptyLocalState() throws {
         let decoded = try JSONDecoder().decode(EditDocument.self, from: Data("{\"version\":1}".utf8))
         XCTAssertEqual(decoded.version, EditDocument.currentVersion)

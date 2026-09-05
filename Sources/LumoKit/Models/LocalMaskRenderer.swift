@@ -6,7 +6,7 @@ import Foundation
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
 final class LocalMaskRenderer {
-    static let version = 2
+    static let version = 3
 
     private let analyticKernel: CIKernel? = CIKernel(source: """
     kernel vec4 localAnalyticMask(
@@ -38,15 +38,25 @@ final class LocalMaskRenderer {
             alpha *= controls.y;
         } else {
             vec2 delta = normalized - firstPoint.xy;
+            // Rotation is defined in source-pixel space. Scaling normalized x/y by the
+            // requested extent before rotating keeps an ellipse aligned on non-square sources
+            // at interactive, preview, and export resolutions.
+            delta *= geometry.zw;
             float radialCosine = cos(radial.z);
             float radialSine = sin(radial.z);
-            delta = vec2(delta.x * radialCosine - delta.y * radialSine,
-                         delta.x * radialSine + delta.y * radialCosine);
+            delta = vec2(delta.x * radialCosine + delta.y * radialSine,
+                         -delta.x * radialSine + delta.y * radialCosine);
             float distance = length(delta / max(radial.xy, vec2(0.00001)));
             float inner = max(0.0, 1.0 - radial.w);
-            alpha = 1.0 - smoothstep(inner, 1.0, distance);
-            alpha *= controls.y;
+            if (distance <= inner) {
+                alpha = 1.0;
+            } else if (distance >= 1.0) {
+                alpha = 0.0;
+            } else {
+                alpha = 1.0 - smoothstep(inner, 1.0, distance);
+            }
             if (controls.z < 0.5) { alpha = 1.0 - alpha; }
+            alpha *= controls.y;
         }
         return vec4(0.0, 0.0, 0.0, clamp(alpha, 0.0, 1.0));
     }
@@ -103,13 +113,15 @@ final class LocalMaskRenderer {
         case .radial(let definition):
             let center = transformPoint(definition.center, transform)
             let radii = CGSize(
-                width: max(0.0001, definition.horizontalRadius * abs(transform.scaleX)),
-                height: max(0.0001, definition.verticalRadius * abs(transform.scaleY))
+                width: max(0.0001, definition.horizontalRadius * abs(transform.scaleX) * extent.width),
+                height: max(0.0001, definition.verticalRadius * abs(transform.scaleY) * extent.height)
             )
             return analyticImage(
                 extent: extent, firstPoint: center, secondPoint: .zero,
                 transform: .identity,
-                radial: CIVector(x: radii.width, y: radii.height, z: definition.rotation, w: definition.feather),
+                radial: CIVector(
+                    x: radii.width, y: radii.height,
+                    z: definition.rotation + transform.rotation, w: definition.feather),
                 controls: CIVector(x: 1, y: definition.density, z: definition.isInside ? 1 : 0, w: 0)
             )
         }

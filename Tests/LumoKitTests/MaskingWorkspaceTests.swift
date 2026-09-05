@@ -126,6 +126,99 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertNil(viewModel.maskInteractionState.selectedLayerID)
     }
 
+    func testRadialDragCreatesAndSelectsATransientLayerUntilMouseUp() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.setMaskTool(.radial)
+        viewModel.beginMaskGesture(
+            at: CGPoint(x: 0.3, y: 0.4), sourceSize: CGSize(width: 400, height: 200))
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+
+        viewModel.updateMaskGesture(
+            to: CGPoint(x: 0.55, y: 0.65), modifiers: [])
+        viewModel.endMaskGesture()
+
+        let layer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        XCTAssertEqual(layer.name, "Radial Gradient")
+        guard case .radial(let definition) = try XCTUnwrap(layer.components.first).source else {
+            return XCTFail("radial drag should create a radial component")
+        }
+        XCTAssertEqual(definition.center, CGPoint(x: 0.3, y: 0.4))
+        XCTAssertEqual(definition.horizontalRadius, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(definition.verticalRadius, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID, layer.id)
+    }
+
+    func testRadialHandlesResizeTranslateRotateAndOptionShiftModifiers() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.radial)
+        let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
+        let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
+        let original = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.radialDefinition)
+        let sourceSize = CGSize(width: 400, height: 200)
+        viewModel.setMaskTool(.radial)
+        // The Add-mask action leaves the first canvas drag in creation mode. Consume that
+        // presentation-only pending state here so the following gestures exercise re-editing.
+        viewModel.maskInteractionState.consumeRadialCreationPending()
+
+        let right = CGPoint(x: original.center.x + original.horizontalRadius, y: original.center.y)
+        viewModel.beginMaskGesture(
+            at: right, radialHandle: .horizontalRadius, sourceSize: sourceSize)
+        viewModel.updateMaskGesture(
+            to: CGPoint(x: 0.8, y: original.center.y), modifiers: [])
+        viewModel.endMaskGesture()
+        let resized = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.radialDefinition)
+        XCTAssertEqual(resized.center.x, 0.4, accuracy: 0.000_001)
+        XCTAssertEqual(resized.horizontalRadius, 0.4, accuracy: 0.000_001)
+        XCTAssertEqual(resized.verticalRadius, original.verticalRadius, accuracy: 0.000_001)
+
+        let center = resized.center
+        viewModel.beginMaskGesture(at: center, radialHandle: .center, sourceSize: sourceSize)
+        viewModel.updateMaskGesture(to: CGPoint(x: center.x + 0.1, y: center.y - 0.05))
+        viewModel.endMaskGesture()
+        let moved = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.radialDefinition)
+        XCTAssertEqual(moved.center.x, center.x + 0.1, accuracy: 0.000_001)
+        XCTAssertEqual(moved.center.y, center.y - 0.05, accuracy: 0.000_001)
+
+        let movedRight = CGPoint(x: moved.center.x + moved.horizontalRadius, y: moved.center.y)
+        viewModel.beginMaskGesture(
+            at: movedRight, radialHandle: .horizontalRadius, sourceSize: sourceSize)
+        viewModel.updateMaskGesture(
+            to: CGPoint(x: moved.center.x + 0.2, y: moved.center.y),
+            modifiers: [.option, .shift])
+        viewModel.endMaskGesture()
+        let constrained = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.radialDefinition)
+        XCTAssertEqual(
+            constrained.horizontalRadius * sourceSize.width,
+            constrained.verticalRadius * sourceSize.height,
+            accuracy: 0.000_001)
+        XCTAssertEqual(constrained.center, moved.center)
+
+        viewModel.beginMaskGesture(
+            at: CGPoint(x: constrained.center.x, y: constrained.center.y - constrained.verticalRadius),
+            radialHandle: .rotation, sourceSize: sourceSize)
+        viewModel.updateMaskGesture(to: CGPoint(
+            x: constrained.center.x + 0.1, y: constrained.center.y), modifiers: [])
+        viewModel.endMaskGesture()
+        let rotated = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.radialDefinition)
+        XCTAssertEqual(rotated.rotation, .pi / 2, accuracy: 0.000_001)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedComponentID, componentID)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID, layerID)
+    }
+
+    func testCancellingRadialCreationDoesNotPersistAnEmptyLayer() {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.setMaskTool(.radial)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.3))
+        viewModel.cancelMaskGesture()
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertNil(viewModel.maskInteractionState.selectedLayerID)
+    }
+
     func testSourceSwitchResetClearsTransientMaskPresentationState() {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.brush)

@@ -1,5 +1,6 @@
 import Foundation
 import CoreGraphics
+import AppKit
 
 /// The creation actions exposed by the persistent masking workspace. A layer is created with a
 /// durable recipe immediately; semantic pixels and other render resources remain derived state.
@@ -137,6 +138,8 @@ extension AppViewModel {
         maskInteractionState.select(componentID: component.id, in: layerID)
         if kind == .linear {
             maskInteractionState.markLinearCreationPending()
+        } else if kind == .radial {
+            maskInteractionState.markRadialCreationPending()
         }
         statusMessage = "Created \(name)"
     }
@@ -277,14 +280,22 @@ extension AppViewModel {
             let componentID = maskInteractionState.selectedComponentID,
             let layer = document.localAdjustments.first(where: { $0.id == layerID }),
             let component = layer.components.first(where: { $0.id == componentID }),
-            component.isEnabled,
-            case .linear = component.source
+            component.isEnabled
         else { return false }
         let step = accelerated ? 0.05 : 0.005
         updateMaskComponent(componentID, in: layerID) { component in
-            guard case .linear(let definition) = component.source else { return }
-            component.source = .linear(LinearGradientMaskMath.translated(
-                definition, by: CGPoint(x: dx * step, y: dy * step)))
+            switch component.source {
+            case .linear(let definition):
+                component.source = .linear(LinearGradientMaskMath.translated(
+                    definition, by: CGPoint(x: dx * step, y: dy * step)))
+            case .radial(var definition):
+                definition.center = CGPoint(
+                    x: min(max(definition.center.x + dx * step, 0), 1),
+                    y: min(max(definition.center.y + dy * step, 0), 1))
+                component.source = .radial(definition)
+            default:
+                break
+            }
         }
         return true
     }
@@ -299,7 +310,11 @@ extension AppViewModel {
     }
 
     func beginMaskGesture(
-        at point: CGPoint, linearHandle: MaskInteractionState.LinearHandle? = nil
+        at point: CGPoint,
+        linearHandle: MaskInteractionState.LinearHandle? = nil,
+        radialHandle: MaskInteractionState.RadialHandle? = nil,
+        sourceSize: CGSize = CGSize(width: 1, height: 1),
+        modifiers: NSEvent.ModifierFlags = []
     ) {
         guard maskInteractionState.activeTool != .selection else { return }
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
@@ -308,13 +323,20 @@ extension AppViewModel {
         if let id = maskInteractionState.selectedLayerID,
             let existing = document.localAdjustments.first(where: { $0.id == id }) {
             layer = existing
-        } else if maskInteractionState.activeTool == .linear {
-            // A drag with the Linear tool is also a creation gesture. Keep the new layer transient
-            // until mouse-up so Escape/cancel leaves no empty durable layer behind.
-            let component = MaskComponent(source: .linear(LinearGradientDefinition(
-                zeroStrengthPoint: clamped, fullStrengthPoint: clamped)))
+        } else if maskInteractionState.activeTool == .linear
+                    || maskInteractionState.activeTool == .radial {
+            // A drag with a gradient tool is also a creation gesture. Keep the new layer
+            // transient until mouse-up so Escape/cancel leaves no empty durable layer behind.
+            let source: MaskSource = maskInteractionState.activeTool == .radial
+                ? .radial(RadialGradientDefinition(center: clamped,
+                                                   horizontalRadius: 0, verticalRadius: 0))
+                : .linear(LinearGradientDefinition(
+                    zeroStrengthPoint: clamped, fullStrengthPoint: clamped))
+            let component = MaskComponent(source: source)
             let newLayer = LocalAdjustmentLayer(
-                name: nextMaskName(for: MaskCreationKind.linear.title), components: [component])
+                name: nextMaskName(for: maskInteractionState.activeTool == .radial
+                                   ? MaskCreationKind.radial.title : MaskCreationKind.linear.title),
+                components: [component])
             maskInteractionState.select(componentID: component.id, in: newLayer.id)
             layer = newLayer
         } else {
@@ -344,12 +366,15 @@ extension AppViewModel {
             }
         case .radial:
             if case .radial(let current) = draft.components[componentIndex].source {
-                draft.components[componentIndex].source = .radial(
-                    RadialGradientDefinition(
-                        center: clamped, horizontalRadius: 0, verticalRadius: 0,
-                        rotation: current.rotation, feather: current.feather,
-                        density: current.density, isInside: current.isInside
-                    ))
+                let handle = radialHandle ?? .creation
+                if handle == .creation {
+                    draft.components[componentIndex].source = .radial(
+                        RadialGradientDefinition(
+                            center: clamped, horizontalRadius: 0, verticalRadius: 0,
+                            rotation: current.rotation, feather: current.feather,
+                            density: current.density, isInside: current.isInside
+                        ))
+                }
             }
         default:
             break
@@ -360,12 +385,19 @@ extension AppViewModel {
                 ? .creation : (linearHandle ?? .creation)
             maskInteractionState.beginLinearGesture(handle, at: clamped)
             maskInteractionState.consumeLinearCreationPending()
+        } else if maskInteractionState.activeTool == .radial {
+            let handle = maskInteractionState.radialCreationPending
+                ? .creation : (radialHandle ?? .creation)
+            maskInteractionState.beginRadialGesture(handle, at: clamped, sourceSize: sourceSize)
+            maskInteractionState.consumeRadialCreationPending()
         }
-        updateMaskGesture(to: point)
+        updateMaskGesture(to: point, modifiers: modifiers)
         beginPreviewInteraction()
     }
 
-    func updateMaskGesture(to point: CGPoint) {
+    func updateMaskGesture(
+        to point: CGPoint, modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags
+    ) {
         guard var draft = maskInteractionState.draftLayer,
             let componentIndex = draft.targetComponentIndex(
                 selected: maskInteractionState.selectedComponentID)
@@ -427,16 +459,54 @@ extension AppViewModel {
             guard case .radial(let current) = draft.components[componentIndex].source else {
                 return
             }
-            let center = current.center
-            draft.components[componentIndex].source = .radial(
-                RadialGradientDefinition(
+            let original = maskInteractionState.gestureStartRadialDefinition ?? current
+            let sourceSize = maskInteractionState.gestureSourceSize
+            let handle = maskInteractionState.activeRadialHandle ?? .creation
+            let shift = modifiers.contains(.shift)
+            let option = modifiers.contains(.option)
+            let updated: RadialGradientDefinition
+            switch handle {
+            case .creation:
+                let center = maskInteractionState.gestureStartPoint ?? original.center
+                let local = RadialGradientMaskMath.localPixelPoint(
+                    at: clamped, center: center, rotation: original.rotation,
+                    sourceSize: sourceSize)
+                let radius = shift ? max(abs(local.x), abs(local.y)) : nil
+                updated = RadialGradientDefinition(
                     center: center,
-                    horizontalRadius: abs(clamped.x - center.x),
-                    verticalRadius: abs(clamped.y - center.y),
-                    rotation: current.rotation, feather: current.feather,
-                    density: current.density, isInside: current.isInside
-                )
-            )
+                    horizontalRadius: (radius ?? abs(local.x)) / max(sourceSize.width, 1),
+                    verticalRadius: (radius ?? abs(local.y)) / max(sourceSize.height, 1),
+                    rotation: original.rotation, feather: original.feather,
+                    density: original.density, isInside: original.isInside)
+            case .center:
+                guard let start = maskInteractionState.gestureStartPoint else { return }
+                var moved = original
+                moved.center = CGPoint(
+                    x: min(max(original.center.x + clamped.x - start.x, 0), 1),
+                    y: min(max(original.center.y + clamped.y - start.y, 0), 1))
+                updated = moved
+            case .horizontalRadius, .verticalRadius, .corner:
+                updated = resizedRadial(
+                    original, handle: handle, at: clamped, sourceSize: sourceSize,
+                    symmetric: option, circle: shift,
+                    startPoint: maskInteractionState.gestureStartPoint)
+            case .innerBoundary:
+                var feathered = original
+                let local = RadialGradientMaskMath.localPixelPoint(
+                    at: clamped, center: original.center, rotation: original.rotation,
+                    sourceSize: sourceSize)
+                let outer = max(original.horizontalRadius * sourceSize.width, 0.0001)
+                feathered.feather = min(max(1 - abs(local.x) / outer, 0), 1)
+                updated = feathered
+            case .rotation:
+                var rotated = original
+                let deltaX = (clamped.x - original.center.x) * max(sourceSize.width, 1)
+                let deltaY = (clamped.y - original.center.y) * max(sourceSize.height, 1)
+                guard hypot(deltaX, deltaY) > 0.0001 else { return }
+                rotated.rotation = atan2(deltaY, deltaX) + .pi / 2
+                updated = rotated
+            }
+            draft.components[componentIndex].source = .radial(updated)
         default:
             break
         }
@@ -461,6 +531,89 @@ extension AppViewModel {
             maskInteractionState.select(layerID: nil)
         }
         endPreviewInteraction()
+    }
+
+    private func resizedRadial(
+        _ original: RadialGradientDefinition,
+        handle: MaskInteractionState.RadialHandle,
+        at point: CGPoint,
+        sourceSize: CGSize,
+        symmetric: Bool,
+        circle: Bool,
+        startPoint: CGPoint?
+    ) -> RadialGradientDefinition {
+        let width = sourceSize.width.isFinite && sourceSize.width > 0 ? sourceSize.width : 1
+        let height = sourceSize.height.isFinite && sourceSize.height > 0 ? sourceSize.height : 1
+        let local = RadialGradientMaskMath.localPixelPoint(
+            at: point, center: original.center, rotation: original.rotation,
+            sourceSize: CGSize(width: width, height: height))
+        let startLocal = RadialGradientMaskMath.localPixelPoint(
+            at: startPoint ?? original.center, center: original.center,
+            rotation: original.rotation, sourceSize: CGSize(width: width, height: height))
+        let oldX = max(original.horizontalRadius * width, RadialGradientMaskMath.minimumRadius)
+        let oldY = max(original.verticalRadius * height, RadialGradientMaskMath.minimumRadius)
+        var centerLocal = CGPoint.zero
+        var radiusX = oldX
+        var radiusY = oldY
+
+        switch handle {
+        case .horizontalRadius:
+            let sign = startLocal.x >= 0 ? 1.0 : -1.0
+            if symmetric {
+                radiusX = max(abs(local.x), RadialGradientMaskMath.minimumRadius)
+            } else {
+                let opposite = -sign * oldX
+                let edge = local.x
+                radiusX = max(abs(edge - opposite) * 0.5, RadialGradientMaskMath.minimumRadius)
+                centerLocal.x = (edge + opposite) * 0.5
+            }
+            if circle { radiusY = radiusX }
+        case .verticalRadius:
+            let sign = startLocal.y >= 0 ? 1.0 : -1.0
+            if symmetric {
+                radiusY = max(abs(local.y), RadialGradientMaskMath.minimumRadius)
+            } else {
+                let opposite = -sign * oldY
+                let edge = local.y
+                radiusY = max(abs(edge - opposite) * 0.5, RadialGradientMaskMath.minimumRadius)
+                centerLocal.y = (edge + opposite) * 0.5
+            }
+            if circle { radiusX = radiusY }
+        case .corner:
+            let signX = startLocal.x >= 0 ? 1.0 : -1.0
+            let signY = startLocal.y >= 0 ? 1.0 : -1.0
+            if symmetric {
+                radiusX = max(abs(local.x), RadialGradientMaskMath.minimumRadius)
+                radiusY = max(abs(local.y), RadialGradientMaskMath.minimumRadius)
+            } else {
+                let oppositeX = -signX * oldX
+                let oppositeY = -signY * oldY
+                radiusX = max(abs(local.x - oppositeX) * 0.5,
+                              RadialGradientMaskMath.minimumRadius)
+                radiusY = max(abs(local.y - oppositeY) * 0.5,
+                              RadialGradientMaskMath.minimumRadius)
+                centerLocal = CGPoint(
+                    x: (local.x + oppositeX) * 0.5,
+                    y: (local.y + oppositeY) * 0.5)
+            }
+            if circle {
+                let radius = max(radiusX, radiusY)
+                radiusX = radius
+                radiusY = radius
+            }
+        default:
+            break
+        }
+
+        var result = original
+        result.center = RadialGradientMaskMath.normalizedPoint(
+            fromLocalPixel: centerLocal, around: original.center,
+            rotation: original.rotation, sourceSize: CGSize(width: width, height: height))
+        result.horizontalRadius = min(max(radiusX / width, 0), 1)
+        result.verticalRadius = min(max(radiusY / height, 0), 1)
+        result.center = CGPoint(
+            x: min(max(result.center.x, 0), 1), y: min(max(result.center.y, 0), 1))
+        return result
     }
 
     func restoreMaskSelection() {
