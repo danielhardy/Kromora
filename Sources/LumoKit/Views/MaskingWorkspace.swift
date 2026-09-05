@@ -339,6 +339,34 @@ struct MaskingWorkspace: View {
             .foregroundStyle(.secondary)
         case .linear(let definition):
             maskSlider(
+                "Angle",
+                value: componentValue(
+                    component.id, layerID: layerID,
+                    get: { source in
+                        if case .linear(let value) = source { return value.angleDegrees }
+                        return definition.angleDegrees
+                    },
+                    set: { source, value in
+                        if case .linear(var current) = source {
+                            current.angleDegrees = value
+                            source = .linear(current)
+                        }
+                    }), range: -180...180)
+            maskSlider(
+                "Falloff",
+                value: componentValue(
+                    component.id, layerID: layerID,
+                    get: { source in
+                        if case .linear(let value) = source { return value.falloff }
+                        return definition.falloff
+                    },
+                    set: { source, value in
+                        if case .linear(var current) = source {
+                            current.falloff = value
+                            source = .linear(current)
+                        }
+                    }), range: 0...sqrt(2.0))
+            maskSlider(
                 "Density",
                 value: componentValue(
                     component.id, layerID: layerID,
@@ -352,6 +380,12 @@ struct MaskingWorkspace: View {
                             source = .linear(current)
                         }
                     }), range: 0...1)
+            Button("Reset linear gradient", systemImage: "arrow.counterclockwise") {
+                viewModel.resetMaskComponent(component.id, in: layerID)
+            }
+            .buttonStyle(.borderless)
+            .accessibilityLabel("Reset linear gradient")
+            .accessibilityHint("Restore the angle and falloff of this gradient")
         case .radial(let definition):
             maskSlider(
                 "Feather",
@@ -680,7 +714,9 @@ struct MaskCanvasOverlay: View {
                         else { return }
                         if !isDrawing {
                             isDrawing = true
-                            viewModel.beginMaskGesture(at: point)
+                            let handle = linearHandle(
+                                at: value.location, transform: transform) ?? .creation
+                            viewModel.beginMaskGesture(at: point, linearHandle: handle)
                         } else {
                             viewModel.updateMaskGesture(to: point)
                         }
@@ -703,6 +739,8 @@ struct MaskCanvasOverlay: View {
                     maskingState.updateHoverPoint(nil)
                 }
             }
+            .accessibilityLabel(canvasAccessibilityLabel)
+            .accessibilityValue(canvasAccessibilityValue)
             .task(id: taskID) {
                 maskImage = await viewModel.renderMaskOverlay(
                     layers: layers,
@@ -824,20 +862,34 @@ struct MaskCanvasOverlay: View {
             let dx = end.x - start.x
             let dy = end.y - start.y
             let length = max(sqrt(dx * dx + dy * dy), 0.001)
-            let normal = CGPoint(x: -dy / length * 12, y: dx / length * 12)
-            for offset in [-1.0, 0, 1.0] {
+            let normalUnit = CGPoint(x: -dy / length, y: dx / length)
+            let halfBarLength = min(
+                max(transform.viewportSize.width, transform.viewportSize.height) * 0.12, 64)
+            let center = CGPoint(x: (start.x + end.x) * 0.5, y: (start.y + end.y) * 0.5)
+            let bars = [start, center, end]
+            for (index, bar) in bars.enumerated() {
                 var path = Path()
                 path.move(
-                    to: CGPoint(x: start.x + normal.x * offset, y: start.y + normal.y * offset))
+                    to: CGPoint(x: bar.x - normalUnit.x * halfBarLength,
+                                y: bar.y - normalUnit.y * halfBarLength))
                 path.addLine(
-                    to: CGPoint(x: end.x + normal.x * offset, y: end.y + normal.y * offset))
+                    to: CGPoint(x: bar.x + normalUnit.x * halfBarLength,
+                                y: bar.y + normalUnit.y * halfBarLength))
                 context.stroke(
                     path, with: .color(guideColor),
                     style: StrokeStyle(
-                        lineWidth: offset == 0 ? 2 : 1, dash: offset == 0 ? [] : [4, 3]))
+                        lineWidth: index == 1 ? 2 : 1, dash: index == 1 ? [] : [4, 3]))
             }
+            let rotationHandle = CGPoint(
+                x: center.x + normalUnit.x * 34, y: center.y + normalUnit.y * 34)
+            context.stroke(
+                Path { path in
+                    path.move(to: center)
+                    path.addLine(to: rotationHandle)
+                }, with: .color(guideColor), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
             drawHandle(at: start, in: &context, color: guideColor)
             drawHandle(at: end, in: &context, color: guideColor)
+            drawHandle(at: rotationHandle, in: &context, color: guideColor)
         case .radial(let definition):
             guard let center = point(definition.center),
                 let right = point(
@@ -862,5 +914,79 @@ struct MaskCanvasOverlay: View {
         context.fill(
             Path(ellipseIn: CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10)),
             with: .color(color))
+    }
+
+    private var canvasAccessibilityLabel: String {
+        guard let layer = activeLayer,
+            let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID)
+        else { return "Mask canvas" }
+        if case .linear = layer.components[index].source {
+            return "Linear gradient handles: zero-strength edge, center translation bar, "
+            + "full-strength edge, and rotation handle"
+        }
+        return "Mask canvas"
+    }
+
+    private var canvasAccessibilityValue: String {
+        guard let layer = activeLayer,
+            let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID),
+            case .linear(let definition) = layer.components[index].source
+        else { return "" }
+        let angle = Int(definition.angleDegrees.rounded())
+        let falloff = definition.falloff.formatted(
+            .number.precision(.fractionLength(2)))
+        return "Angle \(angle) degrees, falloff \(falloff)"
+    }
+
+    private func linearHandle(
+        at viewportPoint: CGPoint, transform: CanvasMaskTransform
+    ) -> MaskInteractionState.LinearHandle? {
+        guard !maskingState.linearCreationPending else { return nil }
+        guard let layer = activeLayer,
+            let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID),
+            case .linear(let definition) = layer.components[index].source,
+            let zero = transform.viewportPoint(forSourceNormalized: definition.zeroStrengthPoint),
+            let full = transform.viewportPoint(forSourceNormalized: definition.fullStrengthPoint)
+        else { return nil }
+
+        let center = CGPoint(x: (zero.x + full.x) * 0.5, y: (zero.y + full.y) * 0.5)
+        let dx = full.x - zero.x
+        let dy = full.y - zero.y
+        let length = max(hypot(dx, dy), 0.001)
+        let normal = CGPoint(x: -dy / length, y: dx / length)
+        let halfBarLength = min(
+            max(transform.viewportSize.width, transform.viewportSize.height) * 0.12, 64)
+        let rotation = CGPoint(x: center.x + normal.x * 34, y: center.y + normal.y * 34)
+        let bars = [
+            (MaskInteractionState.LinearHandle.zeroStrength, zero),
+            (.center, center),
+            (.fullStrength, full),
+        ]
+
+        if distance(viewportPoint, rotation) <= 16 { return .rotation }
+        for (handle, bar) in bars {
+            let first = CGPoint(x: bar.x - normal.x * halfBarLength,
+                                y: bar.y - normal.y * halfBarLength)
+            let second = CGPoint(x: bar.x + normal.x * halfBarLength,
+                                 y: bar.y + normal.y * halfBarLength)
+            if distanceToSegment(viewportPoint, first, second) <= 14 {
+                return handle
+            }
+        }
+        return nil
+    }
+
+    private func distance(_ lhs: CGPoint, _ rhs: CGPoint) -> CGFloat {
+        hypot(lhs.x - rhs.x, lhs.y - rhs.y)
+    }
+
+    private func distanceToSegment(_ point: CGPoint, _ start: CGPoint, _ end: CGPoint) -> CGFloat {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let lengthSquared = dx * dx + dy * dy
+        guard lengthSquared > 0 else { return distance(point, start) }
+        let t = min(
+            max(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0), 1)
+        return distance(point, CGPoint(x: start.x + t * dx, y: start.y + t * dy))
     }
 }

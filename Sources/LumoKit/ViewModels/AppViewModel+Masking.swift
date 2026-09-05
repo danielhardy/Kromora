@@ -135,6 +135,9 @@ extension AppViewModel {
                     ? .background : MaskInteractionState.Tool(rawValue: kind.rawValue) ?? .selection
         )
         maskInteractionState.select(componentID: component.id, in: layerID)
+        if kind == .linear {
+            maskInteractionState.markLinearCreationPending()
+        }
         statusMessage = "Created \(name)"
     }
 
@@ -235,6 +238,23 @@ extension AppViewModel {
         }
     }
 
+    func resetMaskComponent(_ componentID: UUID, in layerID: UUID) {
+        updateMaskComponent(componentID, in: layerID) { component in
+            component.isEnabled = true
+            component.isInverted = false
+            switch component.source {
+            case .linear:
+                component.source = .linear(LinearGradientDefinition())
+            case .radial:
+                component.source = .radial(RadialGradientDefinition())
+            case .brush:
+                component.source = .brush(BrushMaskDefinition())
+            case .semantic(let definition):
+                component.source = .semantic(SemanticMaskDefinition(target: definition.target))
+            }
+        }
+    }
+
     func resetSelectedMask() {
         guard let id = maskInteractionState.selectedLayerID else { return }
         resetMask(id)
@@ -251,6 +271,24 @@ extension AppViewModel {
         }
     }
 
+    @discardableResult
+    func nudgeSelectedMask(dx: Double, dy: Double, accelerated: Bool = false) -> Bool {
+        guard let layerID = maskInteractionState.selectedLayerID,
+            let componentID = maskInteractionState.selectedComponentID,
+            let layer = document.localAdjustments.first(where: { $0.id == layerID }),
+            let component = layer.components.first(where: { $0.id == componentID }),
+            component.isEnabled,
+            case .linear = component.source
+        else { return false }
+        let step = accelerated ? 0.05 : 0.005
+        updateMaskComponent(componentID, in: layerID) { component in
+            guard case .linear(let definition) = component.source else { return }
+            component.source = .linear(LinearGradientMaskMath.translated(
+                definition, by: CGPoint(x: dx * step, y: dy * step)))
+        }
+        return true
+    }
+
     func setMaskTool(_ tool: MaskInteractionState.Tool) {
         if maskInteractionState.hasDraft {
             cancelMaskGesture()
@@ -260,14 +298,31 @@ extension AppViewModel {
         maskInteractionState.setTool(tool)
     }
 
-    func beginMaskGesture(at point: CGPoint) {
-        guard let id = maskInteractionState.selectedLayerID,
-            let layer = document.localAdjustments.first(where: { $0.id == id }),
-            maskInteractionState.activeTool != .selection
-        else { return }
-        var draft = layer
+    func beginMaskGesture(
+        at point: CGPoint, linearHandle: MaskInteractionState.LinearHandle? = nil
+    ) {
+        guard maskInteractionState.activeTool != .selection else { return }
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
-        guard let componentIndex = draft.targetComponentIndex(selected: maskInteractionState.selectedComponentID)
+
+        let layer: LocalAdjustmentLayer
+        if let id = maskInteractionState.selectedLayerID,
+            let existing = document.localAdjustments.first(where: { $0.id == id }) {
+            layer = existing
+        } else if maskInteractionState.activeTool == .linear {
+            // A drag with the Linear tool is also a creation gesture. Keep the new layer transient
+            // until mouse-up so Escape/cancel leaves no empty durable layer behind.
+            let component = MaskComponent(source: .linear(LinearGradientDefinition(
+                zeroStrengthPoint: clamped, fullStrengthPoint: clamped)))
+            let newLayer = LocalAdjustmentLayer(
+                name: nextMaskName(for: MaskCreationKind.linear.title), components: [component])
+            maskInteractionState.select(componentID: component.id, in: newLayer.id)
+            layer = newLayer
+        } else {
+            return
+        }
+        var draft = layer
+        guard let componentIndex = draft.targetComponentIndex(
+            selected: maskInteractionState.selectedComponentID)
         else {
             return
         }
@@ -279,11 +334,13 @@ extension AppViewModel {
                 ))
         case .linear:
             if case .linear(let current) = draft.components[componentIndex].source {
-                draft.components[componentIndex].source = .linear(
-                    LinearGradientDefinition(
-                        zeroStrengthPoint: clamped, fullStrengthPoint: clamped,
-                        density: current.density
-                    ))
+                if linearHandle == nil || linearHandle == .creation {
+                    draft.components[componentIndex].source = .linear(
+                        LinearGradientDefinition(
+                            zeroStrengthPoint: clamped, fullStrengthPoint: clamped,
+                            density: current.density
+                        ))
+                }
             }
         case .radial:
             if case .radial(let current) = draft.components[componentIndex].source {
@@ -297,14 +354,21 @@ extension AppViewModel {
         default:
             break
         }
-        maskInteractionState.beginDraft(draft)
+        maskInteractionState.beginDraft(draft, at: clamped)
+        if maskInteractionState.activeTool == .linear {
+            let handle = maskInteractionState.linearCreationPending
+                ? .creation : (linearHandle ?? .creation)
+            maskInteractionState.beginLinearGesture(handle, at: clamped)
+            maskInteractionState.consumeLinearCreationPending()
+        }
         updateMaskGesture(to: point)
         beginPreviewInteraction()
     }
 
     func updateMaskGesture(to point: CGPoint) {
         guard var draft = maskInteractionState.draftLayer,
-            let componentIndex = draft.targetComponentIndex(selected: maskInteractionState.selectedComponentID)
+            let componentIndex = draft.targetComponentIndex(
+                selected: maskInteractionState.selectedComponentID)
         else { return }
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
         switch maskInteractionState.activeTool {
@@ -323,11 +387,42 @@ extension AppViewModel {
             guard case .linear(let current) = draft.components[componentIndex].source else {
                 return
             }
-            draft.components[componentIndex].source = .linear(
-                LinearGradientDefinition(
+            let handle = maskInteractionState.activeLinearHandle ?? .creation
+            let updated: LinearGradientDefinition
+            let original = maskInteractionState.gestureStartDefinition ?? current
+            let directionLength = max(original.falloff, 0.000001)
+            let direction = CGPoint(
+                x: (original.fullStrengthPoint.x - original.zeroStrengthPoint.x)
+                    / directionLength,
+                y: (original.fullStrengthPoint.y - original.zeroStrengthPoint.y)
+                    / directionLength
+            )
+            switch handle {
+            case .zeroStrength:
+                let length = max(0, min(sqrt(2.0),
+                    (original.fullStrengthPoint.x - clamped.x) * direction.x
+                    + (original.fullStrengthPoint.y - clamped.y) * direction.y))
+                updated = original.changingFalloff(to: length, keeping: .fullStrength)
+            case .fullStrength:
+                let length = max(0, min(sqrt(2.0),
+                    (clamped.x - original.zeroStrengthPoint.x) * direction.x
+                    + (clamped.y - original.zeroStrengthPoint.y) * direction.y))
+                updated = original.changingFalloff(to: length, keeping: .zeroStrength)
+            case .creation:
+                updated = LinearGradientDefinition(
                     zeroStrengthPoint: current.zeroStrengthPoint, fullStrengthPoint: clamped,
                     density: current.density)
-            )
+            case .center:
+                guard let start = maskInteractionState.gestureStartPoint,
+                    let original = maskInteractionState.gestureStartDefinition else { return }
+                updated = LinearGradientMaskMath.translated(
+                    original, by: CGPoint(x: clamped.x - start.x, y: clamped.y - start.y))
+            case .rotation:
+                let center = original.centerPoint
+                let targetAngle = atan2(clamped.y - center.y, clamped.x - center.x) - .pi / 2
+                updated = original.changingAngle(to: targetAngle)
+            }
+            draft.components[componentIndex].source = .linear(updated)
         case .radial:
             guard case .radial(let current) = draft.components[componentIndex].source else {
                 return
@@ -350,13 +445,21 @@ extension AppViewModel {
 
     func endMaskGesture() {
         guard let committed = maskInteractionState.commitDraft() else { return }
-        updateMask(committed.id) { $0 = committed }
+        if document.localAdjustments.contains(where: { $0.id == committed.id }) {
+            updateMask(committed.id) { $0 = committed }
+        } else {
+            updateDocument { $0.localAdjustments.append(committed) }
+        }
         endPreviewInteraction()
     }
 
     func cancelMaskGesture() {
         guard maskInteractionState.hasDraft else { return }
+        let selectedID = maskInteractionState.selectedLayerID
         maskInteractionState.cancelDraft()
+        if let selectedID, !document.localAdjustments.contains(where: { $0.id == selectedID }) {
+            maskInteractionState.select(layerID: nil)
+        }
         endPreviewInteraction()
     }
 

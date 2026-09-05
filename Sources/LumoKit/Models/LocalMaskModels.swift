@@ -229,8 +229,121 @@ struct LinearGradientDefinition: Codable, Sendable, Equatable {
         self.density = Self.clamp(density, 0...1, default: 1)
     }
 
+    init(center: CGPoint, angle: Double, falloff: Double = 1, density: Double = 1) {
+        let normalizedCenter = CGPoint(
+            x: Self.clamp(center.x, 0...1, default: 0.5),
+            y: Self.clamp(center.y, 0...1, default: 0.5)
+        )
+        let boundedFalloff = min(max(falloff.isFinite ? falloff : 1, 0), sqrt(2.0))
+        let safeAngle = angle.isFinite ? angle : 0
+        let direction = CGPoint(x: cos(safeAngle), y: sin(safeAngle))
+        self.init(
+            zeroStrengthPoint: CGPoint(
+                x: normalizedCenter.x - direction.x * boundedFalloff * 0.5,
+                y: normalizedCenter.y - direction.y * boundedFalloff * 0.5
+            ),
+            fullStrengthPoint: CGPoint(
+                x: normalizedCenter.x + direction.x * boundedFalloff * 0.5,
+                y: normalizedCenter.y + direction.y * boundedFalloff * 0.5
+            ),
+            density: density
+        )
+    }
+
     var startPoint: CGPoint { zeroStrengthPoint }
     var endPoint: CGPoint { fullStrengthPoint }
+
+    /// The midpoint of the two transition edges. This is the anchor used by the inspector and
+    /// the center-bar translation gesture; changing angle or falloff does not move it.
+    var centerPoint: CGPoint {
+        CGPoint(
+            x: (zeroStrengthPoint.x + fullStrengthPoint.x) * 0.5,
+            y: (zeroStrengthPoint.y + fullStrengthPoint.y) * 0.5
+        )
+    }
+
+    /// Angle in radians in the upper-left oriented-source coordinate system.
+    var angle: Double {
+        get { atan2(fullStrengthPoint.y - zeroStrengthPoint.y,
+                    fullStrengthPoint.x - zeroStrengthPoint.x) }
+        set { self = changingAngle(to: newValue) }
+    }
+
+    var angleDegrees: Double {
+        get { angle * 180 / .pi }
+        set { angle = newValue * .pi / 180 }
+    }
+
+    /// Distance between the zero- and full-strength edges in normalized source coordinates.
+    var falloff: Double {
+        get {
+            hypot(fullStrengthPoint.x - zeroStrengthPoint.x,
+                  fullStrengthPoint.y - zeroStrengthPoint.y)
+        }
+        set { self = changingFalloff(to: newValue) }
+    }
+
+    /// Rotate around the gradient midpoint while retaining its transition width.
+    func changingAngle(to value: Double) -> Self {
+        guard value.isFinite else { return self }
+        var result = self
+        let halfLength = falloff * 0.5
+        let direction = CGPoint(x: cos(value), y: sin(value))
+        result.zeroStrengthPoint = Self.point(CGPoint(
+            x: centerPoint.x - direction.x * halfLength,
+            y: centerPoint.y - direction.y * halfLength
+        ))
+        result.fullStrengthPoint = Self.point(CGPoint(
+            x: centerPoint.x + direction.x * halfLength,
+            y: centerPoint.y + direction.y * halfLength
+        ))
+        return result
+    }
+
+    /// Resize symmetrically around the midpoint. Direct outer-bar edits use
+    /// `changingFalloff(to:keeping:)` so the opposite edge remains fixed.
+    func changingFalloff(to value: Double) -> Self {
+        changingFalloff(to: value, keeping: nil)
+    }
+
+    func changingFalloff(to value: Double, keeping edge: LinearGradientEdge?) -> Self {
+        guard value.isFinite else { return self }
+        let bounded = min(max(value, 0), sqrt(2.0))
+        let direction: CGPoint
+        let currentLength = falloff
+        if currentLength > 0.000001 {
+            direction = CGPoint(
+                x: (fullStrengthPoint.x - zeroStrengthPoint.x) / currentLength,
+                y: (fullStrengthPoint.y - zeroStrengthPoint.y) / currentLength
+            )
+        } else {
+            direction = CGPoint(x: cos(angle), y: sin(angle))
+        }
+
+        var result = self
+        switch edge {
+        case .zeroStrength:
+            result.fullStrengthPoint = Self.point(CGPoint(
+                x: zeroStrengthPoint.x + direction.x * bounded,
+                y: zeroStrengthPoint.y + direction.y * bounded
+            ))
+        case .fullStrength:
+            result.zeroStrengthPoint = Self.point(CGPoint(
+                x: fullStrengthPoint.x - direction.x * bounded,
+                y: fullStrengthPoint.y - direction.y * bounded
+            ))
+        case nil:
+            result.zeroStrengthPoint = Self.point(CGPoint(
+                x: centerPoint.x - direction.x * bounded * 0.5,
+                y: centerPoint.y - direction.y * bounded * 0.5
+            ))
+            result.fullStrengthPoint = Self.point(CGPoint(
+                x: centerPoint.x + direction.x * bounded * 0.5,
+                y: centerPoint.y + direction.y * bounded * 0.5
+            ))
+        }
+        return result
+    }
 
     private enum CodingKeys: String, CodingKey { case zeroStrengthPoint, fullStrengthPoint, density }
     init(from decoder: Decoder) throws {
@@ -246,6 +359,11 @@ struct LinearGradientDefinition: Codable, Sendable, Equatable {
         guard value.isFinite else { return fallback }
         return min(max(value, range.lowerBound), range.upperBound)
     }
+}
+
+enum LinearGradientEdge: String, Codable, Sendable, Equatable {
+    case zeroStrength
+    case fullStrength
 }
 
 struct RadialGradientDefinition: Codable, Sendable, Equatable {
