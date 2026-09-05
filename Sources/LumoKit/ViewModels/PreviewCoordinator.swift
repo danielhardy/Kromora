@@ -317,13 +317,15 @@ final class PreviewCoordinator {
     private static func request(_ request: RenderRequest, quality: RenderQuality) -> RenderRequest {
         RenderRequest(
             source: request.source,
+            assetID: request.assetID,
             document: request.document,
             lut: request.lut,
             targetSize: request.targetSize,
             quality: quality,
             frameBudgetMilliseconds: request.frameBudgetMilliseconds,
             output: .raster,
-            space: request.space
+            space: request.space,
+            requestRevision: request.requestRevision
         )
     }
 }

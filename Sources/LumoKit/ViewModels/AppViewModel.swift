@@ -581,6 +581,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     let photoAnalysisCoordinator: PhotoAnalysisCoordinator
 
     var maskingAssetID: PhotoAssetID? { activeAssetID }
+    var maskingSourceRevision: UInt64 { sourceRevision }
     var maskingSource: ImageSource? { imageSource }
     private let preferences: UserDefaults
     private let previewCoordinator: PreviewCoordinator
@@ -645,7 +646,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         defer { interval.end() }
 
         self.engine = engine
-        self.photoAnalysisCoordinator = photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
+        let analysisCoordinator = photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
+        self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
         self.editStore = editStore
         self.settings = LumoSettings(preferences: preferences)
@@ -664,9 +666,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             userLookFolderURL: settings.ensureUserLookFolder(),
             includeBundled: includeBundledLooks
         )
-        self.export = ExportCoordinator(engine: engine, editStore: editStore)
+        self.export = ExportCoordinator(
+            engine: engine,
+            maskResolver: CoordinatorLocalMaskResolver(coordinator: analysisCoordinator),
+            editStore: editStore
+        )
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
         self.mediaVolumeProvider = mediaVolumeProvider
+
+        if let renderEngine = engine as? RenderEngine {
+            Task { await renderEngine.installSemanticMaskCoordinator(analysisCoordinator) }
+        }
 
         persistence.onStatusChange = { [weak self] status in
             self?.editStoreStatus = status
@@ -2266,9 +2276,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         let (requested, look) = displayRequest
         previewCoordinator.submit(RenderRequest(
-            source: imageSource, document: requested, lut: look,
+            source: imageSource, assetID: activeAssetID, document: requested, lut: look,
             targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .preview,
-            output: .raster, space: .current
+            output: .raster, space: .current, requestRevision: displayRevision
         ), phase: .settled, assetID: activeAssetID, sourceRevision: sourceRevision,
             displayRevision: displayRevision)
     }
@@ -2281,9 +2291,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         cancelHistogram(clear: false, pump: false)
         let (requested, lut) = displayRequest
         previewCoordinator.submit(RenderRequest(
-            source: imageSource, document: requested, lut: lut,
+            source: imageSource, assetID: activeAssetID, document: requested, lut: lut,
             targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .interactive,
-            output: .raster, space: .current
+            output: .raster, space: .current, requestRevision: displayRevision
         ), phase: .interactive, assetID: activeAssetID, sourceRevision: sourceRevision,
         displayRevision: displayRevision)
     }
@@ -2670,7 +2680,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         ) { [weak self, engine] in
             guard !Task.isCancelled, let self else { return }
             let request = RenderRequest(
-                source: imageSource, document: baseline, lut: nil,
+                source: imageSource, assetID: assetID, document: baseline, lut: nil,
                 targetSize: box, quality: .preview, output: .raster, space: .current
             )
             let gpuImage = await engine.makeCIImage(request)
@@ -2916,6 +2926,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         }
         export.exportDialog(
             source: request.source,
+            assetID: activeAssetID,
             document: request.document,
             lut: request.lut,
             suggestedBaseName: request.baseName

@@ -238,7 +238,7 @@ struct AnalysisTimings: Codable, Sendable, Equatable {
             return replacing(saliency: saliency + duration)
         case .face, .faceInstance:
             return replacing(faceDetection: faceDetection + duration)
-        case .foregroundInstance, .background:
+        case .foreground, .foregroundInstance, .background:
             return replacing(foregroundMasking: foregroundMasking + duration)
         case .person:
             return replacing(personSegmentation: personSegmentation + duration)

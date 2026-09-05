@@ -87,6 +87,10 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         let foregrounds = try await provider.foregroundMasks(image: analysisImage, quality: .analysis)
         XCTAssertTrue(foregrounds.isEmpty)
 
+        let foreground = try await provider.mask(for: .foreground, image: analysisImage, quality: .analysis)
+        XCTAssertEqual(foreground.kind, .foreground)
+        XCTAssertEqual(foreground.coverage, 0, accuracy: 0.0001)
+
         let background = try await provider.mask(for: .background, image: analysisImage, quality: .analysis)
         XCTAssertEqual(background.kind, .background)
         XCTAssertEqual(background.coverage, 1, accuracy: 0.0001)

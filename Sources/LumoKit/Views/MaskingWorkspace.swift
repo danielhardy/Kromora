@@ -734,6 +734,9 @@ struct MaskCanvasOverlay: View {
                 layers: layers,
                 selectedLayerID: maskingState.selectedLayerID,
                 soloLayerID: maskingState.soloLayerID,
+                assetID: viewModel.maskingAssetID,
+                sourceFingerprint: viewModel.maskingSource?.cacheFingerprint ?? "missing",
+                requestRevision: viewModel.maskingSourceRevision,
                 targetSize: targetSize,
                 style: style
             )
@@ -785,13 +788,16 @@ struct MaskCanvasOverlay: View {
             .accessibilityLabel(canvasAccessibilityLabel)
             .accessibilityValue(canvasAccessibilityValue)
             .task(id: taskID) {
-                maskImage = await viewModel.renderMaskOverlay(
+                maskImage = nil
+                let resolved = await viewModel.renderMaskOverlay(
                     layers: layers,
                     selectedLayerID: maskingState.selectedLayerID,
                     soloLayerID: maskingState.soloLayerID,
                     targetSize: targetSize,
                     style: style
                 )
+                guard !Task.isCancelled else { return }
+                maskImage = resolved
             }
         }
         .accessibilityElement(children: .contain)

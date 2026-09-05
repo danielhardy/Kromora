@@ -258,7 +258,8 @@ actor RenderEngine: RenderEngining {
         do {
             image = try await buildImage(request.source, request.document, request.lut,
                                          request.renderScale, request.space, quality: request.quality,
-                                         maskTransform: request.maskTransform)
+                                         maskTransform: request.maskTransform,
+                                         assetID: request.assetID, requestRevision: request.requestRevision)
         } catch {
             return nil
         }
@@ -327,7 +328,7 @@ actor RenderEngine: RenderEngining {
         resources.localMaskCache
     }
     private var localMaskRenderer: LocalMaskRenderer { resources.localMaskRenderer }
-    private let localMaskResolver: any LocalMaskResolving
+    private var localMaskResolver: any LocalMaskResolving
     /// The interactive RAW decoder is deliberately a single-entry cache. `CIRAWFilter` is mutable
     /// and is only safe behind this actor; retaining one filter for the visible source avoids
     /// rebuilding its immutable source/decode setup on every pointer tick. It is discarded at the
@@ -347,6 +348,13 @@ actor RenderEngine: RenderEngining {
         self.resources = RenderEngineResources(configuration: configuration)
         self.localMaskResolver = maskResolver
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
+    }
+
+    /// Connects the render actor to the app's shared analysis coordinator after both actors have
+    /// been initialized. Keeping this as an actor-isolated swap avoids a construction cycle between
+    /// `RenderEngine.shared` and `PhotoAnalysisCoordinator` while preserving one Vision/cache path.
+    func installSemanticMaskCoordinator(_ coordinator: PhotoAnalysisCoordinator) {
+        localMaskResolver = CoordinatorLocalMaskResolver(coordinator: coordinator)
     }
 
     /// Inject a context — for tests that need to pin the backend rather than take whatever the
@@ -380,7 +388,8 @@ actor RenderEngine: RenderEngining {
         do {
             image = try await buildImage(
                 request.source, request.document, request.lut, request.renderScale, request.space,
-                quality: request.quality, maskTransform: request.maskTransform
+                quality: request.quality, maskTransform: request.maskTransform,
+                assetID: request.assetID, requestRevision: request.requestRevision
             )
         } catch {
             return nil
@@ -416,7 +425,8 @@ actor RenderEngine: RenderEngining {
         do {
             let masks = try await resolvedLocalMasks(
                 for: [layer], source: request.source, extent: extent,
-                quality: request.quality, transform: request.transform, includeIdentity: true
+                quality: request.quality, transform: request.transform, assetID: request.assetID,
+                requestRevision: request.requestRevision, includeIdentity: true
             )
             guard let mask = masks[layer.id], !Task.isCancelled else { return nil }
             let output: CIImage
@@ -498,11 +508,13 @@ actor RenderEngine: RenderEngining {
                 .decode, source: request.source, quality: request.quality
             )
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
-                                         quality: request.quality, maskTransform: request.maskTransform)
+                                         quality: request.quality, maskTransform: request.maskTransform,
+                                         assetID: request.assetID, requestRevision: request.requestRevision)
             decodeInterval.end()
         } else {
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
-                                         quality: request.quality, maskTransform: request.maskTransform)
+                                         quality: request.quality, maskTransform: request.maskTransform,
+                                         assetID: request.assetID, requestRevision: request.requestRevision)
         }
         guard let image else {
             throw ImageError.processingFailed
@@ -717,7 +729,8 @@ actor RenderEngine: RenderEngining {
         }
         let image: CIImage?
         do {
-            image = try await buildImage(source, document, lut, scale, space, quality: .preview)
+            image = try await buildImage(source, document, lut, scale, space, quality: .preview,
+                                         assetID: nil, requestRevision: 0)
         } catch {
             return nil
         }
@@ -932,7 +945,9 @@ actor RenderEngine: RenderEngining {
         _ scale: RenderScale,
         _ space: WorkingSpace,
         quality: RenderQuality,
-        maskTransform: LocalMaskRenderTransform = .identity
+        maskTransform: LocalMaskRenderTransform = .identity,
+        assetID: PhotoAssetID? = nil,
+        requestRevision: UInt64 = 0
     ) async throws -> CIImage? {
         // These are explicit Core Image resource boundaries even though the transfer function is
         // mathematically source/space independent. A replaced source or working-space switch must
@@ -968,7 +983,8 @@ actor RenderEngine: RenderEngining {
         }
         let masks = try await resolvedLocalMasks(
             for: document.localAdjustments, source: source, extent: upstream.extent,
-            quality: quality, transform: maskTransform
+            quality: quality, transform: maskTransform, assetID: assetID,
+            requestRevision: requestRevision
         )
         let localAdjusted = RenderPipeline.applyLocalAdjustments(
             document.localAdjustments, masks: masks, to: upstream
@@ -989,6 +1005,8 @@ actor RenderEngine: RenderEngining {
         extent: CGRect,
         quality: RenderQuality,
         transform: LocalMaskRenderTransform,
+        assetID: PhotoAssetID?,
+        requestRevision: UInt64,
         includeIdentity: Bool = false
     ) async throws -> [UUID: CIImage] {
         guard !layers.isEmpty,
@@ -1011,12 +1029,14 @@ actor RenderEngine: RenderEngining {
                 )
                 let payload: LocalMaskPayload
                 if let cached = localMaskCache.value(for: key) {
-                    payload = cached
+                    // Request revision guards publication, not derived-resource identity. A cached
+                    // payload is safe to reuse after being stamped with this request's revision.
+                    payload = cached.forRequestRevision(requestRevision)
                 } else {
                     do {
-                        payload = try await localMaskResolver.resolve(LocalMaskResolveRequest(
-                            source: source, component: component, targetSize: targetSize,
-                            quality: quality, transform: transform
+                    payload = try await localMaskResolver.resolve(LocalMaskResolveRequest(
+                            source: source, assetID: assetID, component: component, targetSize: targetSize,
+                            quality: quality, transform: transform, requestRevision: requestRevision
                         ))
                     } catch let error as LocalMaskResolutionError {
                         if case .semanticMaskUnavailable = error,
@@ -1029,13 +1049,18 @@ actor RenderEngine: RenderEngining {
                     } catch is CancellationError {
                         throw CancellationError()
                     }
-                    guard payload.sourceFingerprint == source.cacheFingerprint,
-                          (payload.definitionHash.isEmpty || payload.definitionHash == definitionHash),
-                          payload.targetSize == targetSize,
-                          payload.quality == quality else {
-                        throw LocalMaskResolutionError.sourceMismatch
-                    }
                     localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
+                }
+
+                guard (payload.assetID == nil
+                       || payload.assetID == (assetID ?? PhotoAnalysisCoordinator.assetID(for: source))),
+                      payload.sourceFingerprint == source.cacheFingerprint,
+                      (payload.definitionHash.isEmpty || payload.definitionHash == definitionHash),
+                      payload.targetSize == targetSize,
+                      payload.quality == quality,
+                      !payload.providerVersion.isEmpty,
+                      payload.requestRevision == requestRevision else {
+                    throw LocalMaskResolutionError.sourceMismatch
                 }
 
                 guard let image = localMaskRenderer.image(
