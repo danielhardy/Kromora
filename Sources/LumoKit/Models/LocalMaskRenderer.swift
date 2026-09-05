@@ -6,7 +6,7 @@ import Foundation
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
 final class LocalMaskRenderer {
-    static let version = 1
+    static let version = 2
 
     private let analyticKernel: CIKernel? = CIKernel(source: """
     kernel vec4 localAnalyticMask(
@@ -31,6 +31,9 @@ final class LocalMaskRenderer {
             vec2 direction = secondPoint.xy - firstPoint.xy;
             float denominator = max(dot(direction, direction), 0.0000001);
             float projection = dot(normalized - firstPoint.xy, direction) / denominator;
+            // This is the GPU form of LinearGradientMaskMath.smoothstep(0, 1, projection).
+            // The persisted endpoints encode the falloff width, so no resolution-dependent
+            // feather/raster value is introduced here.
             alpha = smoothstep(0.0, 1.0, projection);
             alpha *= controls.y;
         } else {

@@ -45,11 +45,23 @@ final class MaskInteractionState: ObservableObject {
         }
     }
 
+    enum LinearHandle: String, Sendable, Equatable {
+        case zeroStrength
+        case center
+        case fullStrength
+        case rotation
+        case creation
+    }
+
     @Published private(set) var selectedLayerID: UUID?
     @Published private(set) var selectedComponentID: UUID?
     @Published private(set) var activeTool: Tool = .selection
     @Published private(set) var hoverPoint: CGPoint?
     @Published private(set) var draftLayer: LocalAdjustmentLayer?
+    @Published private(set) var activeLinearHandle: LinearHandle?
+    @Published private(set) var linearCreationPending = false
+    private(set) var gestureStartPoint: CGPoint?
+    private(set) var gestureStartDefinition: LinearGradientDefinition?
 
     // Presentation-only controls. These values intentionally never enter EditDocument, history,
     // or a render request; they describe how the photographer is inspecting the saved recipe.
@@ -62,8 +74,12 @@ final class MaskInteractionState: ObservableObject {
     var hasDraft: Bool { draftLayer != nil }
 
     func select(layerID: UUID?, componentID: UUID? = nil) {
+        let selectionChanged = selectedLayerID != layerID || selectedComponentID != componentID
         selectedLayerID = layerID
         selectedComponentID = componentID
+        if selectionChanged {
+            linearCreationPending = false
+        }
     }
 
     func select(componentID: UUID, in layerID: UUID) {
@@ -72,7 +88,17 @@ final class MaskInteractionState: ObservableObject {
 
     func setTool(_ tool: Tool) { activeTool = tool }
     func updateHoverPoint(_ point: CGPoint?) { hoverPoint = point }
-    func beginDraft(_ layer: LocalAdjustmentLayer) { draftLayer = layer }
+    func beginDraft(_ layer: LocalAdjustmentLayer, at point: CGPoint? = nil) {
+        draftLayer = layer
+        gestureStartPoint = point
+        if let componentID = selectedComponentID,
+            let component = layer.components.first(where: { $0.id == componentID }),
+            case .linear(let definition) = component.source {
+            gestureStartDefinition = definition
+        } else {
+            gestureStartDefinition = nil
+        }
+    }
     func updateDraft(_ layer: LocalAdjustmentLayer) {
         guard draftLayer != nil else { return }
         draftLayer = layer
@@ -82,10 +108,33 @@ final class MaskInteractionState: ObservableObject {
     func commitDraft() -> LocalAdjustmentLayer? {
         let committed = draftLayer
         draftLayer = nil
+        activeLinearHandle = nil
+        gestureStartPoint = nil
+        gestureStartDefinition = nil
         return committed
     }
 
-    func cancelDraft() { draftLayer = nil }
+    func cancelDraft() {
+        draftLayer = nil
+        activeLinearHandle = nil
+        gestureStartPoint = nil
+        gestureStartDefinition = nil
+    }
+
+    func beginLinearGesture(_ handle: LinearHandle, at point: CGPoint) {
+        activeLinearHandle = handle
+        gestureStartPoint = point
+    }
+
+    func markLinearCreationPending() { linearCreationPending = true }
+    func consumeLinearCreationPending() { linearCreationPending = false }
+
+    func clearGestureHandle() {
+        activeLinearHandle = nil
+        linearCreationPending = false
+        gestureStartPoint = nil
+        gestureStartDefinition = nil
+    }
 
     func toggleSolo(layerID: UUID) {
         soloLayerID = soloLayerID == layerID ? nil : layerID
@@ -99,6 +148,10 @@ final class MaskInteractionState: ObservableObject {
         activeTool = .selection
         hoverPoint = nil
         draftLayer = nil
+        activeLinearHandle = nil
+        linearCreationPending = false
+        gestureStartPoint = nil
+        gestureStartDefinition = nil
         soloLayerID = nil
     }
 }

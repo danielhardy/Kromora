@@ -60,6 +60,72 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertFalse(definition.strokes.isEmpty)
     }
 
+    func testLinearDragCreatesAndSelectsATransientLayerUntilMouseUp() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.setMaskTool(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.3))
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertNotNil(viewModel.maskInteractionState.selectedLayerID)
+
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.7))
+        viewModel.endMaskGesture()
+
+        let layer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID, layer.id)
+        guard case .linear(let definition) = try XCTUnwrap(layer.components.first).source else {
+            return XCTFail("linear drag should create a linear component")
+        }
+        XCTAssertEqual(definition.zeroStrengthPoint, CGPoint(x: 0.2, y: 0.3))
+        XCTAssertEqual(definition.fullStrengthPoint, CGPoint(x: 0.8, y: 0.7))
+    }
+
+    func testLinearHandleEditsKeepOppositeEdgeAndCenterStable() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.linear)
+        let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
+        let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
+        let original = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition)
+
+        viewModel.setMaskTool(.linear)
+        viewModel.beginMaskGesture(at: original.fullStrengthPoint, linearHandle: .fullStrength)
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.75, y: 0.5))
+        viewModel.endMaskGesture()
+        let resized = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition)
+        XCTAssertEqual(resized.zeroStrengthPoint, original.zeroStrengthPoint)
+        XCTAssertEqual(resized.angle, original.angle, accuracy: 0.000_001)
+
+        viewModel.beginMaskGesture(at: resized.centerPoint, linearHandle: .center)
+        viewModel.updateMaskGesture(to: CGPoint(x: resized.centerPoint.x + 0.1, y: resized.centerPoint.y + 0.1))
+        viewModel.endMaskGesture()
+        let moved = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition)
+        XCTAssertEqual(moved.centerPoint, CGPoint(x: resized.centerPoint.x + 0.1, y: resized.centerPoint.y + 0.1))
+        XCTAssertEqual(moved.falloff, resized.falloff, accuracy: 0.000_001)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedComponentID, componentID)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID, layerID)
+    }
+
+    func testNewLinearLayerStartsWithCreationDragEvenWhenDefaultGuideIsUnderPointer() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.25, y: 0.25))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.75, y: 0.75))
+        viewModel.endMaskGesture()
+
+        let definition = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition)
+        XCTAssertEqual(definition.zeroStrengthPoint, CGPoint(x: 0.25, y: 0.25))
+        XCTAssertEqual(definition.fullStrengthPoint, CGPoint(x: 0.75, y: 0.75))
+    }
+
+    func testCancellingLinearCreationDoesNotPersistAnEmptyLayer() {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.setMaskTool(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.3))
+        viewModel.cancelMaskGesture()
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertNil(viewModel.maskInteractionState.selectedLayerID)
+    }
+
     func testSourceSwitchResetClearsTransientMaskPresentationState() {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.brush)

@@ -40,6 +40,26 @@ final class LocalMaskTests: XCTestCase {
         XCTAssertEqual(MaskCombineMode.replace.combining(current: 0.4, next: 4), 1)
     }
 
+    func testLinearGradientMathUsesEndpointsForAngleFalloffAndSmoothAlpha() {
+        let definition = LinearGradientDefinition(
+            zeroStrengthPoint: CGPoint(x: 0.2, y: 0.5),
+            fullStrengthPoint: CGPoint(x: 0.8, y: 0.5), density: 0.75)
+
+        XCTAssertEqual(definition.angle, 0, accuracy: 0.000_001)
+        XCTAssertEqual(definition.angleDegrees, 0, accuracy: 0.000_001)
+        XCTAssertEqual(definition.falloff, 0.6, accuracy: 0.000_001)
+        XCTAssertEqual(LinearGradientMaskMath.alpha(at: CGPoint(x: 0.2, y: 0.5), definition: definition), 0)
+        XCTAssertEqual(LinearGradientMaskMath.alpha(at: CGPoint(x: 0.5, y: 0.5), definition: definition), 0.375, accuracy: 0.000_001)
+        XCTAssertEqual(LinearGradientMaskMath.alpha(at: CGPoint(x: 0.8, y: 0.5), definition: definition), 0.75, accuracy: 0.000_001)
+
+        let rotated = definition.changingAngle(to: .pi / 2)
+        XCTAssertEqual(rotated.centerPoint, definition.centerPoint)
+        XCTAssertEqual(rotated.falloff, definition.falloff, accuracy: 0.000_001)
+        let resized = definition.changingFalloff(to: 0.3, keeping: .fullStrength)
+        XCTAssertEqual(resized.fullStrengthPoint, definition.fullStrengthPoint)
+        XCTAssertEqual(resized.falloff, 0.3, accuracy: 0.000_001)
+    }
+
     func testV1DocumentMigratesToV2WithEmptyLocalState() throws {
         let decoded = try JSONDecoder().decode(EditDocument.self, from: Data("{\"version\":1}".utf8))
         XCTAssertEqual(decoded.version, EditDocument.currentVersion)

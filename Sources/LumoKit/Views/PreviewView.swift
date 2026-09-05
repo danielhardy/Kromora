@@ -222,7 +222,7 @@ struct PreviewView: View {
                 }
 
                 if maskingState.showOverlay, viewModel.sourceSize != .zero,
-                   maskingState.selectedLayerID != nil {
+                   (maskingState.selectedLayerID != nil || maskingState.activeTool == .linear) {
                     MaskCanvasOverlay(
                         viewModel: viewModel,
                         maskingState: maskingState,

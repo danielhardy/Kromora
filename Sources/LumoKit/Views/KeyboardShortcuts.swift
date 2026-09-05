@@ -175,12 +175,24 @@ final class KeyMonitor {
             _ = vm.showOriginal(isDown)
             return nil
         case 126: // Up arrow — previous Look
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 0, dy: -1, accelerated: mods.contains(.shift)) {
+                return nil
+            }
             if isDown { vm.selectPreviousLook() }
             return nil
         case 125: // Down arrow — next Look
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 0, dy: 1, accelerated: mods.contains(.shift)) {
+                return nil
+            }
             if isDown { vm.selectNextLook() }
             return nil
         case 123: // Left arrow — previous image
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: -1, dy: 0, accelerated: mods.contains(.shift)) {
+                return nil
+            }
             guard vm.collection.isActive else { return event }
             if isDown {
                 if vm.navigation.isGrid {
@@ -191,6 +203,10 @@ final class KeyMonitor {
             }
             return nil
         case 124: // Right arrow — next image
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 1, dy: 0, accelerated: mods.contains(.shift)) {
+                return nil
+            }
             guard vm.collection.isActive else { return event }
             if isDown {
                 if vm.navigation.isGrid {
