@@ -35,7 +35,7 @@ struct EditDocumentLoadResult: Sendable, Equatable {
 /// All file work is performed inside this actor, so callers on `@MainActor` only await values.
 actor EditDocumentStore {
 
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     enum Status: Sendable, Equatable {
         case notLoaded
@@ -313,7 +313,10 @@ actor EditDocumentStore {
                 guard envelope.schemaVersion <= Self.currentVersion else {
                     return .failure(.unsupported(envelope.schemaVersion))
                 }
-                return .success(DecodedFile(envelope: envelope, migratedFrom: nil))
+                return .success(DecodedFile(
+                    envelope: envelope,
+                    migratedFrom: envelope.schemaVersion < Self.currentVersion ? envelope.schemaVersion : nil
+                ))
             } catch {
                 if let versionless = try? JSONDecoder().decode(VersionlessEnvelope.self, from: data) {
                     return .success(DecodedFile(

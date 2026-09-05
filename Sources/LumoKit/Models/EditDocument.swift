@@ -40,10 +40,13 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// Which LUT, at what strength.
     var lut: LUTSettings = .none
 
-    /// Adding `light`, `color`, `effects`, and `crop` are additive v1 migrations: older documents
-    /// have no key and retain their original ordered adjustment nodes. A schema bump is reserved
-    /// for a format that requires rewriting those nodes, which could change a user's existing look.
-    static let currentVersion = 1
+    /// Ordered, non-destructive local adjustment recipes. Mask pixels are derived at render time;
+    /// only semantic intent, vectors, and analytic geometry live in the document.
+    var localAdjustments: [LocalAdjustmentLayer] = []
+
+    /// v2 reserves the local-mask field. A v1 document decodes with an empty local-layer array;
+    /// a v1 writer therefore cannot accidentally discard a masked document from a newer build.
+    static let currentVersion = 2
 
     init(
         version: Int = EditDocument.currentVersion,
@@ -53,7 +56,8 @@ struct EditDocument: Codable, Sendable, Equatable {
         effects: EffectsAdjustments = .neutral,
         crop: CropAdjustments = .neutral,
         adjustments: [AdjustmentNode] = [],
-        lut: LUTSettings = .none
+        lut: LUTSettings = .none,
+        localAdjustments: [LocalAdjustmentLayer] = []
     ) {
         self.version = version
         self.rawDevelop = rawDevelop
@@ -63,12 +67,13 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.crop = crop
         self.adjustments = adjustments
         self.lut = lut
+        self.localAdjustments = localAdjustments
     }
 
     /// True when this document would leave the source untouched.
     var isIdentity: Bool {
         rawDevelop.isNeutral && light.isIdentity && color.isIdentity && effects.isIdentity && crop.isIdentity &&
-            adjustments.allSatisfy(\.isIdentity) && lut.isIdentity
+            adjustments.allSatisfy(\.isIdentity) && lut.isIdentity && localAdjustments.allSatisfy(\.isIdentity)
     }
 
     /// True when the document contains an edit that changes the photographer-facing look.
@@ -76,7 +81,7 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// developed source, so a develop-only comparison would show identical pixels.
     var hasVisibleLookEdits: Bool {
         !light.isIdentity || !color.isIdentity || !effects.isIdentity || !crop.isIdentity ||
-            !adjustments.allSatisfy(\.isIdentity) || !lut.isIdentity
+            !adjustments.allSatisfy(\.isIdentity) || !lut.isIdentity || localAdjustments.contains(where: \.hasVisibleLook)
     }
 
     /// Stable SHA-256 identity for caches, undo diagnostics, and persistence comparisons.
@@ -100,7 +105,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         EditDocument(
             version: version, rawDevelop: rawDevelop, light: .neutral, color: .neutral,
             effects: .neutral, crop: crop,
-            adjustments: [], lut: .none
+            adjustments: [], lut: .none, localAdjustments: []
         )
     }
 
@@ -110,7 +115,7 @@ struct EditDocument: Codable, Sendable, Equatable {
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case version, rawDevelop, light, color, effects, crop, adjustments, lut
+        case version, rawDevelop, light, color, effects, crop, adjustments, lut, localAdjustments
     }
 
     /// Decoded field by field rather than by synthesis, for two reasons.
@@ -132,7 +137,9 @@ struct EditDocument: Codable, Sendable, Equatable {
                 debugDescription: "Edit was saved by a newer version of Lumo (schema \(version); this build reads \(Self.currentVersion))."
             )
         }
-        self.version = version
+        // Reading an older document is a migration: its missing v2 local layer field is the
+        // neutral empty array, and the next save writes the current schema number.
+        self.version = version < Self.currentVersion ? Self.currentVersion : version
         self.rawDevelop = try container.decodeIfPresent(RAWDevelopSettings.self, forKey: .rawDevelop) ?? .neutral
         self.light = try container.decodeIfPresent(LightAdjustments.self, forKey: .light) ?? .neutral
         self.color = try container.decodeIfPresent(ColorAdjustments.self, forKey: .color) ?? .neutral
@@ -140,5 +147,6 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.crop = try container.decodeIfPresent(CropAdjustments.self, forKey: .crop) ?? .neutral
         self.adjustments = try container.decodeIfPresent([AdjustmentNode].self, forKey: .adjustments) ?? []
         self.lut = try container.decodeIfPresent(LUTSettings.self, forKey: .lut) ?? .none
+        self.localAdjustments = try container.decodeIfPresent([LocalAdjustmentLayer].self, forKey: .localAdjustments) ?? []
     }
 }

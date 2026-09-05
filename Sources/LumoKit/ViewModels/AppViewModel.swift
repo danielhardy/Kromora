@@ -2004,7 +2004,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard updated != document else { return }
 
         let developChanged = updated.rawDevelop != document.rawDevelop
-        let comparisonChanged = developChanged || updated.crop != document.crop
+        let comparisonChanged = developChanged || updated.crop != document.crop ||
+            updated.localAdjustments != document.localAdjustments
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         activeHistory.recordChange(from: document, to: updated)
@@ -2517,7 +2518,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     private func applyHistoryDocument(_ restored: EditDocument) {
         let developChanged = restored.rawDevelop != document.rawDevelop
-        let comparisonChanged = developChanged || restored.crop != document.crop
+        let comparisonChanged = developChanged || restored.crop != document.crop ||
+            restored.localAdjustments != document.localAdjustments
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         document = restored
