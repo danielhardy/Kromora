@@ -37,3 +37,19 @@ is flipped exactly once at the transform boundary. Crop-relative source pixels a
 through the same fit/fill/custom zoom/pan transform as `PreviewSurfaceView`.
 
 The inverse mapping deliberately permits points outside the current crop. Therefore recropping
+does not move or discard a future persisted mask point. Backing scale is applied symmetrically to
+the viewport and drawable transform; 1× and 2× produce the same SwiftUI point result.
+
+## LUMO-227 follow-up status
+
+The sibling-view decision remains accepted pending the required real-pointer trace. LUMO-227 adds
+the opt-in `LumoMaskOverlayCapture` host and `scripts/run-lumo-227-capture.sh`, which record the
+same overlay renderer under `LUMO_MASK_OVERLAY_PROTOTYPE=1` with Metal System Trace and Points of
+Interest. Overlay-specific signposts separate input delivery, presentation encoding, GPU
+completion, and drawable presentation so a future capture can attribute the 16.7 ms gate.
+
+The local attempts available during this implementation recorded zero AppKit pointer events under
+desktop automation, so they cannot establish p95/p99 or distinguish vsync cadence from sibling
+overhead. The existing 40.334 ms synthetic overlay result and 24.645 ms persistent-preview result
+remain unchanged. Do not treat the display gate as met or revise the architecture until a human
+drives the visible capture window and the resulting trace contains a real pointer stream.
