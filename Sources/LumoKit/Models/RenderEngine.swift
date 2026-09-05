@@ -248,8 +248,15 @@ actor RenderEngine: RenderEngining {
 
     func makeCIImage(_ request: RenderRequest) async -> sending CIImage? {
         guard request.output == .raster, !Task.isCancelled else { return nil }
-        guard let image = buildImage(request.source, request.document, request.lut,
-                                     request.renderScale, request.space, quality: request.quality),
+        let image: CIImage?
+        do {
+            image = try await buildImage(request.source, request.document, request.lut,
+                                         request.renderScale, request.space, quality: request.quality,
+                                         maskTransform: request.maskTransform)
+        } catch {
+            return nil
+        }
+        guard let image,
               image.extent.isRasterizable
         else {
             return nil
@@ -310,6 +317,11 @@ actor RenderEngine: RenderEngining {
     private var processingPrefixCache: BoundedLRUCache<ProcessingPrefixCacheKey, CIImage> {
         resources.processingPrefixCache
     }
+    private var localMaskCache: BoundedLRUCache<LocalMaskCacheKey, LocalMaskPayload> {
+        resources.localMaskCache
+    }
+    private var localMaskRenderer: LocalMaskRenderer { resources.localMaskRenderer }
+    private let localMaskResolver: any LocalMaskResolving
     /// The interactive RAW decoder is deliberately a single-entry cache. `CIRAWFilter` is mutable
     /// and is only safe behind this actor; retaining one filter for the visible source avoids
     /// rebuilding its immutable source/decode setup on every pointer tick. It is discarded at the
@@ -322,17 +334,27 @@ actor RenderEngine: RenderEngining {
     private var materializationBudgetSkipCount = 0
     private var memoryPressureSource: DispatchSourceMemoryPressure?
 
-    init(configuration: RenderCacheConfiguration = .default) {
+    init(
+        maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
+        configuration: RenderCacheConfiguration = .default
+    ) {
         self.resources = RenderEngineResources(configuration: configuration)
+        self.localMaskResolver = maskResolver
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
     }
 
     /// Inject a context — for tests that need to pin the backend rather than take whatever the
     /// machine offers.
-    init(context: CIContext, configuration: RenderCacheConfiguration = .default) {
+    init(
+        context: CIContext,
+        maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
+        configuration: RenderCacheConfiguration = .default
+    ) {
         self.resources = RenderEngineResources(context: context, configuration: configuration)
+        self.localMaskResolver = maskResolver
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
     }
+
 
     // MARK: - Rendering
 
@@ -348,10 +370,15 @@ actor RenderEngine: RenderEngining {
         )
         defer { interval.end() }
 
-        let image = buildImage(
-            request.source, request.document, request.lut, request.renderScale, request.space,
-            quality: request.quality
-        )
+        let image: CIImage?
+        do {
+            image = try await buildImage(
+                request.source, request.document, request.lut, request.renderScale, request.space,
+                quality: request.quality, maskTransform: request.maskTransform
+            )
+        } catch {
+            return nil
+        }
         guard let image,
               image.extent.isRasterizable,
               !Task.isCancelled
@@ -403,12 +430,12 @@ actor RenderEngine: RenderEngining {
             var decodeInterval = LumoObservability.begin(
                 .decode, source: request.source, quality: request.quality
             )
-            image = buildImage(request.source, request.document, request.lut, scale, outputSpace,
-                               quality: request.quality)
+            image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
+                                         quality: request.quality, maskTransform: request.maskTransform)
             decodeInterval.end()
         } else {
-            image = buildImage(request.source, request.document, request.lut, scale, outputSpace,
-                               quality: request.quality)
+            image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
+                                         quality: request.quality, maskTransform: request.maskTransform)
         }
         guard let image else {
             throw ImageError.processingFailed
@@ -614,15 +641,20 @@ actor RenderEngine: RenderEngining {
         scale: RenderScale,
         space: WorkingSpace = .current,
         maxDimension: Int = 512
-    ) -> HistogramData? {
+    ) async -> HistogramData? {
         var interval = LumoObservability.begin(.histogram, source: source, quality: .preview)
         defer { interval.end() }
 
-        guard !Task.isCancelled,
-              maxDimension > 0,
-              let image = buildImage(source, document, lut, scale, space, quality: .preview) else {
+        guard !Task.isCancelled, maxDimension > 0 else {
             return nil
         }
+        let image: CIImage?
+        do {
+            image = try await buildImage(source, document, lut, scale, space, quality: .preview)
+        } catch {
+            return nil
+        }
+        guard let image else { return nil }
         guard !Task.isCancelled else { return nil }
         let extent = image.extent
         guard extent.isRasterizable else { return nil }
@@ -760,6 +792,7 @@ actor RenderEngine: RenderEngining {
             preview: previewCache.statistics,
             developedSource: developedSourceCache.statistics,
             processingPrefix: processingPrefixCache.statistics,
+            localMask: localMaskCache.statistics,
             lutFilter: lutCache.statistics
         )
     }
@@ -831,8 +864,9 @@ actor RenderEngine: RenderEngining {
         _ lut: CubeLUT?,
         _ scale: RenderScale,
         _ space: WorkingSpace,
-        quality: RenderQuality
-    ) -> CIImage? {
+        quality: RenderQuality,
+        maskTransform: LocalMaskRenderTransform = .identity
+    ) async throws -> CIImage? {
         // These are explicit Core Image resource boundaries even though the transfer function is
         // mathematically source/space independent. A replaced source or working-space switch must
         // not retain a resource from the prior render session.
@@ -865,10 +899,102 @@ actor RenderEngine: RenderEngining {
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance
             )
         }
+        let masks = try await resolvedLocalMasks(
+            for: document.localAdjustments, source: source, extent: upstream.extent,
+            quality: quality, transform: maskTransform
+        )
+        let localAdjusted = RenderPipeline.applyLocalAdjustments(
+            document.localAdjustments, masks: masks, to: upstream
+        )
         return RenderStageFacade.buildFinalStages(
-            preLUT: upstream, document: document, lut: lut, space: space, lutCache: lutCache,
+            preLUT: localAdjusted, document: document, lut: lut, space: space, lutCache: lutCache,
             grainSeed: RenderPipeline.grainSeed(for: source)
         )
+    }
+
+    /// Resolve and compose only the layers that can affect pixels. The component cache is keyed by
+    /// source and mask definition, never by the document's global look, so slider edits reuse the
+    /// same bounded payloads. Core Image objects are created only after the value-only resolver
+    /// returns and remain inside this actor.
+    private func resolvedLocalMasks(
+        for layers: [LocalAdjustmentLayer],
+        source: ImageSource,
+        extent: CGRect,
+        quality: RenderQuality,
+        transform: LocalMaskRenderTransform
+    ) async throws -> [UUID: CIImage] {
+        guard !layers.isEmpty,
+              extent.width.isFinite, extent.height.isFinite,
+              extent.width > 0, extent.height > 0,
+              extent.width <= CGFloat(Int.max), extent.height <= CGFloat(Int.max)
+        else { return [:] }
+
+        let targetSize = PixelDimensions(width: Int(extent.width), height: Int(extent.height))
+        var result: [UUID: CIImage] = [:]
+        for layer in layers where layer.hasVisibleLook {
+            try Task.checkCancellation()
+            var effective: CIImage?
+            for component in layer.components where component.isUsable {
+                let definitionHash = RenderCacheHash.digest(component.source)
+                let key = LocalMaskCacheKey(
+                    source: RenderSourceFingerprint(source), definitionHash: definitionHash,
+                    targetSize: targetSize, quality: quality, transform: transform,
+                    rendererVersion: LocalMaskRenderer.version
+                )
+                let payload: LocalMaskPayload
+                if let cached = localMaskCache.value(for: key) {
+                    payload = cached
+                } else {
+                    do {
+                        payload = try await localMaskResolver.resolve(LocalMaskResolveRequest(
+                            source: source, component: component, targetSize: targetSize,
+                            quality: quality, transform: transform
+                        ))
+                    } catch let error as LocalMaskResolutionError {
+                        if case .semanticMaskUnavailable = error,
+                           quality.maskQuality != .render {
+                            // A preview may continue to show the last valid image while smart-mask
+                            // work is pending. Export takes the strict path below.
+                            continue
+                        }
+                        throw error
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    }
+                    guard payload.sourceFingerprint == source.cacheFingerprint,
+                          (payload.definitionHash.isEmpty || payload.definitionHash == definitionHash),
+                          payload.targetSize == targetSize,
+                          payload.quality == quality else {
+                        throw LocalMaskResolutionError.sourceMismatch
+                    }
+                    localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
+                }
+
+                guard let image = localMaskRenderer.image(
+                    for: payload, extent: extent, transform: transform
+                ) else { throw LocalMaskResolutionError.invalidPayload }
+                var componentImage = image
+                if component.isInverted {
+                    componentImage = localMaskRenderer.inverted(componentImage, extent: extent)
+                }
+                if let current = effective {
+                    effective = localMaskRenderer.combined(
+                        current, with: componentImage, mode: component.mode, extent: extent
+                    )
+                } else {
+                    // A first subtract/intersect component is defined against an empty mask, so
+                    // composition remains deterministic regardless of component ordering.
+                    effective = localMaskRenderer.combined(
+                        localMaskRenderer.emptyMask(extent: extent), with: componentImage,
+                        mode: component.mode, extent: extent
+                    )
+                }
+            }
+            guard var mask = effective else { continue }
+            if layer.isInverted { mask = localMaskRenderer.inverted(mask, extent: extent) }
+            result[layer.id] = mask
+        }
+        return result
     }
 
     private struct MaterializedImage {
@@ -1391,6 +1517,15 @@ actor RenderEngine: RenderEngining {
         guard request.quality == .thumbnail || request.quality == .interactive || request.quality == .preview else {
             return nil
         }
+        // Semantic masks can be progressive: a resolver may replace a preview payload with a
+        // refined one without changing the durable document. Do not cache the final raster around
+        // that resolver state; the bounded component cache still avoids repeating valid work.
+        guard !request.document.localAdjustments.contains(where: { layer in
+            layer.components.contains { component in
+                if case .semantic = component.source { return true }
+                return false
+            }
+        }) else { return nil }
         return PreviewCacheKey(
             source: RenderSourceFingerprint(request.source),
             documentHash: RenderCacheHash.digest(request.document),

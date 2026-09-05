@@ -31,8 +31,8 @@ enum RenderPipeline {
     /// full 32-bit entropy when passing it to the GPU kernel. v15 adds the post-LUT crop stage.
     /// v16 formalizes the reusable pre-LUT prefix boundary. v17 bounds and sanitizes the Dehaze
     /// output before it can be reused or presented. v18 applies the same finite-input and exact-
-    /// extent contract to Clarity's spatial stage.
-    static let cacheVersion = 18
+    /// extent contract to Clarity's spatial stage. v19 adds the ordered local-mask boundary.
+    static let cacheVersion = 19
 
     /// Build the graph for `document` over `source`.
     ///
@@ -139,6 +139,49 @@ enum RenderPipeline {
             ? document.adjustments
             : document.adjustments.filter { $0.slot != .temperatureTint }
         return applyAdjustments(adjustmentNodes, to: effectsAdjusted)
+    }
+
+    /// Apply ordered local layers after all existing global pre-LUT work. `masks` contains
+    /// renderer-owned, already-composited soft alpha images; keeping resolution and Core Image
+    /// types out of `LocalMaskResolving` makes this function usable for both preview and export.
+    /// Each adjusted variant is derived from the layer's input, then blended back over that exact
+    /// input before the next layer is visited.
+    static func applyLocalAdjustments(
+        _ layers: [LocalAdjustmentLayer],
+        masks: [UUID: CIImage],
+        to image: CIImage
+    ) -> CIImage {
+        layers.reduce(image) { input, layer in
+            guard layer.hasVisibleLook, let mask = masks[layer.id],
+                  input.extent.width.isFinite, input.extent.height.isFinite,
+                  input.extent.width > 0, input.extent.height > 0 else { return input }
+            var adjusted = applyLight(LightAdjustments(
+                exposure: layer.adjustments.exposure,
+                contrast: layer.adjustments.contrast,
+                highlights: layer.adjustments.highlights,
+                shadows: layer.adjustments.shadows,
+                whites: layer.adjustments.whites,
+                blacks: layer.adjustments.blacks
+            ), to: input)
+            adjusted = applyColor(ColorAdjustments(
+                vibrance: layer.adjustments.vibrance,
+                saturation: layer.adjustments.saturation
+            ), to: adjusted)
+            adjusted = applyPreLUTEffects(EffectsAdjustments(
+                texture: layer.adjustments.texture,
+                clarity: layer.adjustments.clarity,
+                dehaze: layer.adjustments.dehaze
+            ), to: adjusted)
+            if layer.adjustments.temperature != 6500 || layer.adjustments.tint != 0 {
+                adjusted = applyAdjustments([.temperatureTint(
+                    temp: layer.adjustments.temperature, tint: layer.adjustments.tint
+                )], to: adjusted)
+            }
+            return blend(
+                effect: adjusted, over: input,
+                amount: CGFloat(layer.amount), mask: mask, extent: input.extent
+            )
+        }
     }
 
     /// Only cache a prefix when it contains work beyond the developed source. A neutral prefix is

@@ -78,6 +78,17 @@ struct ProcessingPrefixCacheKey: Hashable, Sendable {
     let pipelineVersion: Int
 }
 
+/// Identity for one resolved local-mask component. It deliberately contains no document/global
+/// slider hash: changing exposure or a LUT must not invalidate a reusable mask payload.
+struct LocalMaskCacheKey: Hashable, Sendable {
+    let source: RenderSourceFingerprint
+    let definitionHash: String
+    let targetSize: PixelDimensions
+    let quality: RenderQuality
+    let transform: LocalMaskRenderTransform
+    let rendererVersion: Int
+}
+
 /// Cache identity for a display raster. Full-resolution/export requests never create this key.
 struct PreviewCacheKey: Hashable, Sendable {
     let source: RenderSourceFingerprint

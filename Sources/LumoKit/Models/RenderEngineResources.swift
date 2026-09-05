@@ -20,6 +20,8 @@ final class RenderEngineResources {
     let previewCache: BoundedLRUCache<PreviewCacheKey, RenderResult>
     let developedSourceCache: BoundedLRUCache<DevelopedSourceCacheKey, CIImage>
     let processingPrefixCache: BoundedLRUCache<ProcessingPrefixCacheKey, CIImage>
+    let localMaskCache: BoundedLRUCache<LocalMaskCacheKey, LocalMaskPayload>
+    let localMaskRenderer = LocalMaskRenderer()
 
     init(configuration: RenderCacheConfiguration) {
         self.configuration = configuration
@@ -44,6 +46,10 @@ final class RenderEngineResources {
             maxEntries: configuration.processingPrefixMaxEntries,
             maxCostBytes: configuration.processingPrefixMaxCostBytes
         )
+        self.localMaskCache = BoundedLRUCache(
+            maxEntries: configuration.localMaskMaxEntries,
+            maxCostBytes: configuration.localMaskMaxCostBytes
+        )
     }
 
     init(context: CIContext, configuration: RenderCacheConfiguration) {
@@ -65,6 +71,10 @@ final class RenderEngineResources {
             maxEntries: configuration.processingPrefixMaxEntries,
             maxCostBytes: configuration.processingPrefixMaxCostBytes
         )
+        self.localMaskCache = BoundedLRUCache(
+            maxEntries: configuration.localMaskMaxEntries,
+            maxCostBytes: configuration.localMaskMaxCostBytes
+        )
     }
 
     func invalidateLUTDependentCaches() {
@@ -76,6 +86,7 @@ final class RenderEngineResources {
         previewCache.removeAll(countAsEvictions: true)
         developedSourceCache.removeAll(countAsEvictions: true)
         processingPrefixCache.removeAll(countAsEvictions: true)
+        localMaskCache.removeAll(countAsEvictions: true)
         lutCache.removeAll()
         toneCurveCache.removeAll()
         toneCurveSource = nil
@@ -86,6 +97,7 @@ final class RenderEngineResources {
         previewCache.removeAll()
         developedSourceCache.removeAll()
         processingPrefixCache.removeAll()
+        localMaskCache.removeAll()
         toneCurveCache.removeAll()
         toneCurveSource = nil
         toneCurveSpace = nil

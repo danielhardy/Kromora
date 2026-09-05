@@ -30,6 +30,9 @@ struct RenderRequest: Sendable, Equatable {
     let frameBudgetMilliseconds: Double
     let output: Output
     let space: WorkingSpace
+    /// Projection of normalized mask geometry into this render. It is identity for ordinary image
+    /// renders, but remains on the request so preview/export and derived-mask caches share one seam.
+    let maskTransform: LocalMaskRenderTransform
     /// Full export policy when this is an encoded request. Kept separate from `RenderOutput` so the
     /// legacy format/quality spelling remains source-compatible for existing renderer clients.
     let exportOptions: ExportOptions?
@@ -43,7 +46,8 @@ struct RenderRequest: Sendable, Equatable {
         frameBudgetMilliseconds: Double = 16.7,
         output: Output = .raster,
         space: WorkingSpace = .current,
-        exportOptions: ExportOptions? = nil
+        exportOptions: ExportOptions? = nil,
+        maskTransform: LocalMaskRenderTransform = .identity
     ) {
         self.source = source
         self.document = document
@@ -54,6 +58,7 @@ struct RenderRequest: Sendable, Equatable {
         self.output = output
         self.space = space
         self.exportOptions = exportOptions
+        self.maskTransform = maskTransform
     }
 
     /// The scale policy used by the existing deterministic pipeline.
