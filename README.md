@@ -81,6 +81,11 @@ Each photo has a `Codable`, `Sendable`, `Equatable` `EditDocument`. Its current 
 - **Crop** — freeform, non-destructive framing in normalized oriented-image coordinates. Draft
   geometry is transient until Apply; preview and full-resolution export use the same crop.
 - **Look** — an optional `.cube` 3D LUT with adjustable intensity.
+- **Local masking** — ordered foreground/background, brush/erase, linear-gradient, radial-gradient,
+  and smart-mask components with add, subtract, intersect, replace, invert, solo inspection, and
+  non-destructive local adjustments. Brush samples are distance-resampled during the gesture and
+  persisted as one compact undoable stroke; the same mask definition drives preview, overlay,
+  histogram, comparison, copy/paste, and full-resolution export.
 
 Individual controls and whole sections can be reset. Slider gestures use an interactive render path
 and become one undo entry when committed; numeric fields and resets use the settled path.
@@ -165,6 +170,12 @@ imports use a SHA-256 identity for the delivered bytes.
 | `↑` / `↓` | Previous / next Look |
 | `V` | Toggle single-view / side-by-side comparison |
 | `Space` (hold) | Show the comparison baseline |
+| `B` | Select the Brush mask tool |
+| `E` (masking workspace) | Select the Erase mask tool |
+| `L` | Select the Linear Gradient mask tool |
+| `R` | Select the Radial Gradient mask tool |
+| `↑` / `↓` (masking workspace) | Nudge the selected mask; hold `Shift` for a larger step |
+| `[` / `]` (masking workspace) | Decrease / increase brush radius |
 | `⌘I` | Toggle the Info inspector |
 | `⌘O` | Open an image |
 | `⌘⇧I` | Import from Photos |

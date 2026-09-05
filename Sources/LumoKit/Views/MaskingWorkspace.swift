@@ -193,7 +193,7 @@ struct MaskingWorkspace: View {
                     Text(layer.name)
                         .font(.subheadline.weight(.semibold))
                     Spacer()
-                    Text(layer.maskingTypeTitle)
+                    Text(layer.maskingSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -221,9 +221,14 @@ struct MaskingWorkspace: View {
                     .font(.subheadline.weight(.semibold))
                 Spacer()
                 Menu {
-                    ForEach(MaskCreationKind.allCases, id: \.self) { kind in
-                        Button(kind.title) {
-                            viewModel.addMaskComponent(to: layer.id, source: kind.maskSource)
+                    ForEach([MaskCombineMode.add, .subtract, .intersect], id: \.self) { mode in
+                        Menu(mode.title) {
+                            ForEach(MaskCreationKind.allCases.filter { $0 != .erase }, id: \.self) {
+                                kind in
+                                Button(kind.title) {
+                                    viewModel.addMaskComponent(to: layer.id, kind: kind, mode: mode)
+                                }
+                            }
                         }
                     }
                 } label: {
@@ -232,21 +237,48 @@ struct MaskingWorkspace: View {
                 .accessibilityLabel("Add mask component")
             }
 
-            ForEach(layer.components) { component in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
+            ForEach(Array(layer.components.enumerated()), id: \.element.id) { index, component in
+                DisclosureGroup(
+                    isExpanded: Binding(
+                        get: { maskingState.selectedComponentID == component.id },
+                        set: { expanded in
+                            if expanded {
+                                viewModel.selectMaskComponent(component.id, in: layer.id)
+                            } else if maskingState.selectedComponentID == component.id {
+                                viewModel.selectMaskLayer(layer.id)
+                            }
+                        }
+                    )
+                ) {
+                    componentControls(component, layerID: layer.id)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(
+                            systemName: maskingState.selectedComponentID == component.id
+                                ? "checkmark.circle.fill" : "circle")
+                        TextField(
+                            component.source.maskingTypeTitle,
+                            text: Binding(
+                                get: { component.displayName },
+                                set: { viewModel.renameMaskComponent(component.id, in: layer.id, name: $0) }
+                            )
+                        )
+                        .textFieldStyle(.plain)
+                        .font(.caption)
+                        Text(index == 0 ? "Replace" : component.mode.title)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Spacer()
                         Button {
-                            viewModel.selectMaskComponent(component.id, in: layer.id)
+                            maskingState.toggleSolo(componentID: component.id, layerID: layer.id)
                         } label: {
-                            Image(
-                                systemName: maskingState.selectedComponentID == component.id
-                                    ? "checkmark.circle.fill" : "circle")
-                            Text(component.source.maskingTypeTitle)
-                                .font(.caption)
+                            Image(systemName: maskingState.soloComponentID == component.id
+                                ? "eye.fill" : "eye")
                         }
                         .buttonStyle(.borderless)
-                        Spacer()
-                        componentModeMenu(component, layerID: layer.id)
+                        .accessibilityLabel("Solo \(component.displayName)")
+                        .accessibilityValue(
+                            maskingState.soloComponentID == component.id ? "On" : "Off")
                         Toggle(
                             "Enabled",
                             isOn: componentBinding(
@@ -255,16 +287,26 @@ struct MaskingWorkspace: View {
                         .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.mini)
-                        Button(role: .destructive) {
-                            viewModel.deleteMaskComponent(component.id, from: layer.id)
+                        .accessibilityLabel("Enable \(component.displayName)")
+                        Menu {
+                            Button("Move up") { viewModel.moveMaskComponent(component.id, in: layer.id, by: -1) }
+                                .disabled(index == 0)
+                            Button("Move down") { viewModel.moveMaskComponent(component.id, in: layer.id, by: 1) }
+                                .disabled(index == layer.components.count - 1)
+                            Divider()
+                            componentModeMenu(component, layerID: layer.id)
+                            Button("Delete", role: .destructive) {
+                                viewModel.deleteMaskComponent(component.id, from: layer.id)
+                            }
                         } label: {
-                            Image(systemName: "trash")
+                            Image(systemName: "ellipsis.circle")
                         }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("Delete \(component.source.maskingTypeTitle) component")
+                        .menuStyle(.borderlessButton)
+                        .accessibilityLabel("Actions for \(component.displayName)")
                     }
-                    if maskingState.selectedComponentID == component.id {
-                        componentControls(component, layerID: layer.id)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.selectMaskComponent(component.id, in: layer.id)
                     }
                 }
                 .padding(7)
@@ -277,7 +319,7 @@ struct MaskingWorkspace: View {
         Menu {
             ForEach([MaskCombineMode.replace, .add, .subtract, .intersect], id: \.self) { mode in
                 Button {
-                    viewModel.updateMaskComponent(component.id, in: layerID) { $0.mode = mode }
+                    viewModel.setMaskComponentMode(component.id, in: layerID, mode: mode)
                 } label: {
                     Label(mode.title, systemImage: component.mode == mode ? "checkmark" : "")
                 }
@@ -337,6 +379,7 @@ struct MaskingWorkspace: View {
             )
             .font(.caption)
             .foregroundStyle(.secondary)
+            brushControls
         case .linear(let definition):
             maskSlider(
                 "Angle",
@@ -454,6 +497,34 @@ struct MaskingWorkspace: View {
             .buttonStyle(.borderless)
             .accessibilityLabel("Reset radial gradient")
             .accessibilityHint("Restore the angle, radii, and feather of this gradient")
+        }
+    }
+
+    private var brushControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Brush")
+                .font(.caption.weight(.semibold))
+            brushSlider("Size", value: $maskingState.brushRadius, range: 0.001...0.5)
+            brushSlider("Feather", value: $maskingState.brushFeather, range: 0...1)
+            brushSlider("Flow / Intensity", value: $maskingState.brushFlow, range: 0...1)
+            brushSlider("Density", value: $maskingState.brushDensity, range: 0...1)
+            Text("[ ] size · Shift-[ ] feather · Space pan")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func brushSlider(
+        _ title: String, value: Binding<Double>, range: ClosedRange<Double>
+    ) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .frame(width: 92, alignment: .leading)
+            Slider(value: value, in: range)
+            Text(Int(value.wrappedValue * 100).description + "%")
+                .font(.caption2.monospacedDigit())
+                .frame(width: 34, alignment: .trailing)
         }
     }
 
@@ -637,7 +708,7 @@ private struct MaskLayerRow: View {
             .textFieldStyle(.plain)
             .font(.caption.weight(.medium))
 
-            Text(layer.maskingTypeTitle)
+            Text(layer.maskingSummary)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
@@ -662,6 +733,8 @@ private struct MaskLayerRow: View {
                     .disabled(index == total - 1)
                 Divider()
                 Button("Solo") { maskingState.toggleSolo(layerID: layer.id) }
+                    .accessibilityLabel("Solo \(layer.name)")
+                    .accessibilityValue(maskingState.soloLayerID == layer.id ? "On" : "Off")
                 Button("Duplicate") { viewModel.duplicateMask(layer.id) }
                 Button("Reset") { viewModel.resetMask(layer.id) }
                 Button("Delete", role: .destructive) { viewModel.deleteMask(layer.id) }
@@ -687,6 +760,7 @@ extension MaskCreationKind {
         case .foreground: return "person.crop.square"
         case .background: return "photo"
         case .brush: return "paintbrush"
+        case .erase: return "eraser"
         case .linear: return "line.diagonal"
         case .radial: return "oval"
         }
@@ -697,14 +771,11 @@ extension MaskCreationKind {
         case .foreground: return .semantic(SemanticMaskDefinition(target: .foreground))
         case .background: return .semantic(SemanticMaskDefinition(target: .background))
         case .brush: return .brush(BrushMaskDefinition())
+        case .erase: return .brush(BrushMaskDefinition())
         case .linear: return .linear(LinearGradientDefinition())
         case .radial: return .radial(RadialGradientDefinition())
         }
     }
-}
-
-extension MaskCombineMode {
-    fileprivate var title: String { rawValue.capitalized }
 }
 
 /// Lightweight, presentation-only canvas guides for the saved component definition. The renderer
@@ -719,6 +790,7 @@ struct MaskCanvasOverlay: View {
     let backingScale: CGFloat
 
     @State private var isDrawing = false
+    @State private var lastPanPoint: CGPoint?
     @State private var maskImage: CGImage?
 
     var body: some View {
@@ -728,61 +800,48 @@ struct MaskCanvasOverlay: View {
                 viewportSize: geometry.size, backingScale: backingScale
             )
             let targetSize = maskTargetSize(for: transform, viewportSize: geometry.size)
-            let layers = overlayLayers
+            // The cached overlay represents only completed work. The active draft is drawn by
+            // the presentation guide below, so a 30-second stroke cannot invalidate and
+            // rerasterize the entire completed history for every pointer sample.
+            let layers = viewModel.document.localAdjustments
             let style = overlayStyle
             let taskID = OverlayTaskID(
                 layers: layers,
                 selectedLayerID: maskingState.selectedLayerID,
                 soloLayerID: maskingState.soloLayerID,
+                selectedComponentID: maskingState.selectedComponentID,
+                soloComponentID: maskingState.soloComponentID,
                 assetID: viewModel.maskingAssetID,
                 sourceFingerprint: viewModel.maskingSource?.cacheFingerprint ?? "missing",
                 requestRevision: viewModel.maskingSourceRevision,
                 targetSize: targetSize,
                 style: style
             )
-            Canvas { context, _ in
-                draw(
-                    layer: activeLayer, maskImage: maskImage, transform: transform,
-                    in: &context
-                )
-            }
-            .contentShape(Rectangle())
-            .allowsHitTesting(maskingState.activeTool != .selection && !viewModel.isCropToolActive)
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        guard
-                            let point = transform.sourceNormalizedPoint(forViewport: value.location)
-                        else { return }
-                        if !isDrawing {
-                            isDrawing = true
-                            let handle = linearHandle(
-                                at: value.location, transform: transform) ?? .creation
-                            let radial = radialHandle(at: value.location, transform: transform)
-                            viewModel.beginMaskGesture(
-                                at: point, linearHandle: handle, radialHandle: radial,
-                                sourceSize: transform.sourceSize,
-                                modifiers: NSEvent.modifierFlags)
-                        } else {
-                            viewModel.updateMaskGesture(to: point, modifiers: NSEvent.modifierFlags)
-                        }
-                    }
-                    .onEnded { value in
-                        if let point = transform.sourceNormalizedPoint(forViewport: value.location)
-                        {
-                            viewModel.updateMaskGesture(to: point, modifiers: NSEvent.modifierFlags)
-                        }
-                        isDrawing = false
-                        viewModel.endMaskGesture()
-                    }
-            )
-            .onContinuousHover(coordinateSpace: .local) { phase in
-                switch phase {
-                case .active(let point):
-                    maskingState.updateHoverPoint(
-                        transform.sourceNormalizedPoint(forViewport: point))
-                case .ended:
-                    maskingState.updateHoverPoint(nil)
+            ZStack {
+                Canvas { context, _ in
+                    draw(
+                        layer: activeLayer, maskImage: maskImage, transform: transform,
+                        in: &context
+                    )
+                }
+                if maskingState.hasDraft,
+                   (maskingState.activeTool == .brush
+                    || maskingState.activeTool == .erase) {
+                    MaskOverlaySurfaceView(
+                        snapshot: activeBrushMetalSnapshot,
+                        sourceSize: sourceSize,
+                        crop: crop,
+                        navigation: navigation,
+                        backingScale: backingScale,
+                        isInteractive: false,
+                        onPointer: nil
+                    )
+                }
+                MaskPointerSurface(
+                    isInteractive: maskingState.activeTool != .selection
+                        && !viewModel.isCropToolActive
+                ) { event in
+                    handleNativePointer(event, transform: transform, viewportSize: geometry.size)
                 }
             }
             .accessibilityLabel(canvasAccessibilityLabel)
@@ -794,7 +853,9 @@ struct MaskCanvasOverlay: View {
                     selectedLayerID: maskingState.selectedLayerID,
                     soloLayerID: maskingState.soloLayerID,
                     targetSize: targetSize,
-                    style: style
+                    style: style,
+                    selectedComponentID: maskingState.selectedComponentID,
+                    soloComponentID: maskingState.soloComponentID
                 )
                 guard !Task.isCancelled else { return }
                 maskImage = resolved
@@ -803,6 +864,84 @@ struct MaskCanvasOverlay: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mask canvas")
         .accessibilityHint("Drag to edit the selected brush, linear, or radial mask")
+        .accessibilityAction(named: "Move mask left") {
+            _ = viewModel.nudgeSelectedMask(dx: -1, dy: 0)
+        }
+        .accessibilityAction(named: "Move mask right") {
+            _ = viewModel.nudgeSelectedMask(dx: 1, dy: 0)
+        }
+        .accessibilityAction(named: "Move mask up") {
+            _ = viewModel.nudgeSelectedMask(dx: 0, dy: -1)
+        }
+        .accessibilityAction(named: "Move mask down") {
+            _ = viewModel.nudgeSelectedMask(dx: 0, dy: 1)
+        }
+    }
+
+    private func handleNativePointer(
+        _ event: MaskNativePointerEvent, transform: CanvasMaskTransform,
+        viewportSize: CGSize
+    ) {
+        func updateHover(_ sample: MaskNativePointerSample) {
+            maskingState.updateHoverPoint(transform.sourceNormalizedPoint(forViewport: sample.point))
+        }
+        func pan(_ sample: MaskNativePointerSample) {
+            guard let lastPanPoint else { self.lastPanPoint = sample.point; return }
+            viewModel.panCanvas(
+                by: CGSize(width: sample.point.x - lastPanPoint.x,
+                           height: sample.point.y - lastPanPoint.y),
+                viewportSize: viewportSize)
+            self.lastPanPoint = sample.point
+        }
+
+        switch event {
+        case .moved(let samples):
+            if let sample = samples.last { updateHover(sample) }
+        case .began(let samples):
+            guard let first = samples.first else { return }
+            updateHover(first)
+            if maskingState.isSpacePanning {
+                lastPanPoint = first.point
+                return
+            }
+            guard let point = transform.sourceNormalizedPoint(forViewport: first.point) else { return }
+            isDrawing = true
+            let handle = linearHandle(at: first.point, transform: transform) ?? .creation
+            let radial = radialHandle(at: first.point, transform: transform)
+            viewModel.beginMaskGesture(
+                at: point, linearHandle: handle, radialHandle: radial,
+                sourceSize: transform.sourceSize, pressure: first.pressure,
+                modifiers: NSEvent.modifierFlags)
+            for sample in samples.dropFirst() {
+                guard let point = transform.sourceNormalizedPoint(forViewport: sample.point) else { continue }
+                viewModel.updateMaskGesture(
+                    to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags)
+            }
+        case .dragged(let samples):
+            for sample in samples {
+                updateHover(sample)
+                if maskingState.isSpacePanning {
+                    pan(sample)
+                } else if let point = transform.sourceNormalizedPoint(forViewport: sample.point) {
+                    viewModel.updateMaskGesture(
+                        to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags)
+                }
+            }
+        case .ended(let sample):
+            if let sample {
+                updateHover(sample)
+                if maskingState.isSpacePanning {
+                    lastPanPoint = nil
+                } else if let point = transform.sourceNormalizedPoint(forViewport: sample.point) {
+                    viewModel.updateMaskGesture(
+                        to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags)
+                }
+            }
+            if !maskingState.isSpacePanning, isDrawing {
+                isDrawing = false
+                viewModel.endMaskGesture()
+            }
+        }
     }
 
     private var activeLayer: LocalAdjustmentLayer? {
@@ -811,11 +950,17 @@ struct MaskCanvasOverlay: View {
         return viewModel.document.localAdjustments.first(where: { $0.id == id })
     }
 
-    private var overlayLayers: [LocalAdjustmentLayer] {
-        guard let draft = maskingState.draftLayer else {
-            return viewModel.document.localAdjustments
-        }
-        return viewModel.document.localAdjustments.map { $0.id == draft.id ? draft : $0 }
+    private var activeBrushMetalSnapshot: MaskOverlayPrototypeSnapshot {
+        var snapshot = MaskOverlayPrototypeSnapshot()
+        snapshot.tool = .brush
+        snapshot.cursor = maskingState.hoverPoint
+        guard let layer = activeLayer,
+              let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID),
+              case .brush(let definition) = layer.components[index].source,
+              let stroke = definition.strokes.last
+        else { return snapshot }
+        snapshot.brushStroke = stroke.samples.map(\.point)
+        return snapshot
     }
 
     private var overlayStyle: MaskOverlayStyle {
@@ -850,6 +995,11 @@ struct MaskCanvasOverlay: View {
         let layers: [LocalAdjustmentLayer]
         let selectedLayerID: UUID?
         let soloLayerID: UUID?
+        let selectedComponentID: UUID?
+        let soloComponentID: UUID?
+        let assetID: PhotoAssetID?
+        let sourceFingerprint: String
+        let requestRevision: UInt64
         let targetSize: PixelDimensions
         let style: MaskOverlayStyle
     }
@@ -905,6 +1055,23 @@ struct MaskCanvasOverlay: View {
                     path, with: .color(guideColor),
                     style: StrokeStyle(
                         lineWidth: max(2, stroke.radius * 80), lineCap: .round, lineJoin: .round))
+            }
+            if let hover = maskingState.hoverPoint,
+               let center = point(hover),
+               let edge = point(CGPoint(
+                   x: hover.x + maskingState.brushRadius
+                       * Double(min(transform.sourceSize.width, transform.sourceSize.height))
+                       / max(transform.sourceSize.width, 1),
+                   y: hover.y)) {
+                let radius = max(5, abs(edge.x - center.x))
+                context.stroke(
+                    Path(ellipseIn: CGRect(
+                        x: center.x - radius, y: center.y - radius,
+                        width: radius * 2, height: radius * 2)),
+                    with: .color(guideColor), style: StrokeStyle(lineWidth: 1.5))
+                context.fill(
+                    Path(ellipseIn: CGRect(x: center.x - 1, y: center.y - 1, width: 2, height: 2)),
+                    with: .color(guideColor))
             }
         case .linear(let definition):
             guard let start = point(definition.zeroStrengthPoint),

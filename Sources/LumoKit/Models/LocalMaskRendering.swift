@@ -95,7 +95,9 @@ struct MaskOverlayRequest: Sendable, Equatable {
     let assetID: PhotoAssetID?
     let layers: [LocalAdjustmentLayer]
     let selectedLayerID: UUID?
+    let selectedComponentID: UUID?
     let soloLayerID: UUID?
+    let soloComponentID: UUID?
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
@@ -112,13 +114,17 @@ struct MaskOverlayRequest: Sendable, Equatable {
         quality: RenderQuality = .preview,
         transform: LocalMaskRenderTransform = .identity,
         style: MaskOverlayStyle,
-        requestRevision: UInt64 = 0
+        requestRevision: UInt64 = 0,
+        selectedComponentID: UUID? = nil,
+        soloComponentID: UUID? = nil
     ) {
         self.source = source
         self.assetID = assetID
         self.layers = layers
         self.selectedLayerID = selectedLayerID
+        self.selectedComponentID = selectedComponentID
         self.soloLayerID = soloLayerID
+        self.soloComponentID = soloComponentID
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform

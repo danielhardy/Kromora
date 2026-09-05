@@ -6,7 +6,21 @@ import Foundation
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
 final class LocalMaskRenderer {
-    static let version = 3
+    static let version = 4
+    private let maxBrushStrokeCacheEntries = 8
+    private let maxBrushStrokeCacheCostBytes: Int
+    private var brushStrokeCache: [String: [Float]] = [:]
+    private var brushStrokeCacheCosts: [String: Int] = [:]
+    private var brushStrokeCacheOrder: [String] = []
+    private var brushStrokeCacheCostBytes = 0
+
+    init(maxBrushStrokeCacheCostBytes: Int = 64 * 1024 * 1024) {
+        self.maxBrushStrokeCacheCostBytes = max(0, maxBrushStrokeCacheCostBytes)
+    }
+
+    /// Diagnostics exposed to the package tests so the byte bound is testable, not aspirational.
+    var cachedBrushStrokeCount: Int { brushStrokeCache.count }
+    var cachedBrushStrokeCostBytes: Int { brushStrokeCacheCostBytes }
 
     private let analyticKernel: CIKernel? = CIKernel(source: """
     kernel vec4 localAnalyticMask(
@@ -151,6 +165,13 @@ final class LocalMaskRenderer {
         CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0)).cropped(to: extent)
     }
 
+    func removeAllCachedBrushStrokes() {
+        brushStrokeCache.removeAll(keepingCapacity: true)
+        brushStrokeCacheCosts.removeAll(keepingCapacity: true)
+        brushStrokeCacheOrder.removeAll(keepingCapacity: true)
+        brushStrokeCacheCostBytes = 0
+    }
+
     private func analyticImage(
         extent: CGRect,
         firstPoint: CGPoint,
@@ -205,33 +226,86 @@ final class LocalMaskRenderer {
     ) -> CIImage? {
         guard dimensions.width > 0, dimensions.height > 0 else { return nil }
         var values = [Float](repeating: 0, count: dimensions.width * dimensions.height)
-        let shorterSide = Double(min(dimensions.width, dimensions.height))
+        let width = Double(dimensions.width)
+        let height = Double(dimensions.height)
+        let shorterSide = max(min(width, height), 1)
         for stroke in definition.strokes where !stroke.samples.isEmpty && stroke.radius > 0 {
-            let transformed = stroke.samples.map { transformPoint($0.point, transform) }
-            let radius = stroke.radius * shorterSide
-            for y in 0..<dimensions.height {
-                for x in 0..<dimensions.width {
-                    let point = CGPoint(
-                        x: (Double(x) + 0.5) / Double(dimensions.width),
-                        y: (Double(y) + 0.5) / Double(dimensions.height)
-                    )
-                    let distance = closestDistancePixels(point, to: transformed,
-                                                         width: dimensions.width, height: dimensions.height)
-                    guard distance < radius else { continue }
-                    let inner = radius * (1 - stroke.feather)
-                    let falloff = distance <= inner ? 1 :
-                        1 - smoothstep(inner, radius, distance)
-                    let pressure = transformed.isEmpty ? 1 :
-                        max(0, min(1, stroke.samples[0].pressure ?? 1))
-                    let deposited = max(0, min(1, stroke.flow * pressure * falloff))
-                    let index = y * dimensions.width + x
-                    values[index] = Float(min(stroke.density,
-                        1 - (1 - Double(values[index])) * (1 - deposited)))
-                }
+            let key = RenderCacheHash.digest(stroke)
+                + ":\(dimensions.width)x\(dimensions.height):\(RenderCacheHash.digest(transform))"
+            let strokeValues = cachedStrokeRaster(
+                for: stroke, key: key, dimensions: dimensions, width: width,
+                height: height, shorterSide: shorterSide, transform: transform
+            )
+            for index in values.indices {
+                values[index] = Float(BrushMaskMath.accumulatedOpacity(
+                    current: Double(values[index]), stamp: Double(strokeValues[index]),
+                    density: stroke.density
+                ))
             }
         }
         let mask = try? NormalizedMask(size: dimensions, values: values)
         return mask.flatMap { rasterImage($0, extent: extent) }
+    }
+
+    private func cachedStrokeRaster(
+        for stroke: BrushStroke, key: String, dimensions: PixelDimensions,
+        width: Double, height: Double, shorterSide: Double,
+        transform: LocalMaskRenderTransform
+    ) -> [Float] {
+        if let cached = brushStrokeCache[key] {
+            brushStrokeCacheOrder.removeAll { $0 == key }
+            brushStrokeCacheOrder.append(key)
+            return cached
+        }
+        let sourceSize = CGSize(width: width, height: height)
+        let resampled = BrushMaskMath.resampledAndSimplified(
+            stroke.samples, sourceSize: sourceSize, radius: stroke.radius)
+        let transformed = resampled.map { sample in
+            BrushSample(point: transformPoint(sample.point, transform), pressure: sample.pressure)
+        }
+        var result = [Float](repeating: 0, count: dimensions.width * dimensions.height)
+        for y in 0..<dimensions.height {
+            for x in 0..<dimensions.width {
+                let point = CGPoint(
+                    x: (Double(x) + 0.5) / width,
+                    y: (Double(y) + 0.5) / height
+                )
+                let index = y * dimensions.width + x
+                var opacity = 0.0
+                for sample in transformed {
+                    let distance = hypot(
+                        (point.x - sample.point.x) * width,
+                        (point.y - sample.point.y) * height
+                    ) / shorterSide
+                    let deposited = BrushMaskMath.stampAlpha(
+                        distance: distance, radius: stroke.radius, feather: stroke.feather,
+                        flow: stroke.flow, pressure: sample.pressure
+                    )
+                    opacity = BrushMaskMath.accumulatedOpacity(
+                        current: opacity, stamp: deposited, density: stroke.density
+                    )
+                    if opacity >= stroke.density { break }
+                }
+                result[index] = Float(opacity)
+            }
+        }
+        let cost = result.count.multipliedReportingOverflow(by: MemoryLayout<Float>.size)
+        guard !cost.overflow, maxBrushStrokeCacheCostBytes > 0,
+              cost.partialValue <= maxBrushStrokeCacheCostBytes else {
+            return result
+        }
+        while (brushStrokeCache.count >= maxBrushStrokeCacheEntries
+                || brushStrokeCacheCostBytes > maxBrushStrokeCacheCostBytes - cost.partialValue),
+              let oldest = brushStrokeCacheOrder.first {
+            brushStrokeCacheOrder.removeFirst()
+            brushStrokeCacheCostBytes -= brushStrokeCacheCosts.removeValue(forKey: oldest) ?? 0
+            brushStrokeCache.removeValue(forKey: oldest)
+        }
+        brushStrokeCache[key] = result
+        brushStrokeCacheCosts[key] = cost.partialValue
+        brushStrokeCacheOrder.append(key)
+        brushStrokeCacheCostBytes += cost.partialValue
+        return result
     }
 
     private func transformPoint(_ point: CGPoint, _ transform: LocalMaskRenderTransform) -> CGPoint {
@@ -245,34 +319,4 @@ final class LocalMaskRenderer {
         )
     }
 
-    private func closestDistancePixels(
-        _ point: CGPoint, to samples: [CGPoint], width: Int, height: Int
-    ) -> Double {
-        guard !samples.isEmpty else { return .greatestFiniteMagnitude }
-        if samples.count == 1 {
-            return distancePixels(point, samples[0], width: width, height: height)
-        }
-        var result = Double.greatestFiniteMagnitude
-        for pair in zip(samples, samples.dropFirst()) {
-            let ax = pair.0.x * Double(width), ay = pair.0.y * Double(height)
-            let bx = pair.1.x * Double(width), by = pair.1.y * Double(height)
-            let px = point.x * Double(width), py = point.y * Double(height)
-            let dx = bx - ax, dy = by - ay
-            let lengthSquared = dx * dx + dy * dy
-            let t = lengthSquared > 0 ? max(0, min(1, ((px - ax) * dx + (py - ay) * dy) / lengthSquared)) : 0
-            let cx = ax + t * dx, cy = ay + t * dy
-            result = min(result, hypot(px - cx, py - cy))
-        }
-        return result
-    }
-
-    private func distancePixels(_ lhs: CGPoint, _ rhs: CGPoint, width: Int, height: Int) -> Double {
-        hypot((lhs.x - rhs.x) * Double(width), (lhs.y - rhs.y) * Double(height))
-    }
-
-    private func smoothstep(_ edge0: Double, _ edge1: Double, _ value: Double) -> Double {
-        guard edge1 > edge0 else { return value < edge1 ? 1 : 0 }
-        let t = max(0, min(1, (value - edge0) / (edge1 - edge0)))
-        return t * t * (3 - 2 * t)
-    }
 }

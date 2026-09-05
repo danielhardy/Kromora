@@ -21,7 +21,7 @@ final class RenderEngineResources {
     let developedSourceCache: BoundedLRUCache<DevelopedSourceCacheKey, CIImage>
     let processingPrefixCache: BoundedLRUCache<ProcessingPrefixCacheKey, CIImage>
     let localMaskCache: BoundedLRUCache<LocalMaskCacheKey, LocalMaskPayload>
-    let localMaskRenderer = LocalMaskRenderer()
+    let localMaskRenderer: LocalMaskRenderer
 
     init(configuration: RenderCacheConfiguration) {
         self.configuration = configuration
@@ -50,6 +50,8 @@ final class RenderEngineResources {
             maxEntries: configuration.localMaskMaxEntries,
             maxCostBytes: configuration.localMaskMaxCostBytes
         )
+        self.localMaskRenderer = LocalMaskRenderer(
+            maxBrushStrokeCacheCostBytes: configuration.localMaskMaxCostBytes)
     }
 
     init(context: CIContext, configuration: RenderCacheConfiguration) {
@@ -75,6 +77,8 @@ final class RenderEngineResources {
             maxEntries: configuration.localMaskMaxEntries,
             maxCostBytes: configuration.localMaskMaxCostBytes
         )
+        self.localMaskRenderer = LocalMaskRenderer(
+            maxBrushStrokeCacheCostBytes: configuration.localMaskMaxCostBytes)
     }
 
     func invalidateLUTDependentCaches() {
@@ -87,6 +91,7 @@ final class RenderEngineResources {
         developedSourceCache.removeAll(countAsEvictions: true)
         processingPrefixCache.removeAll(countAsEvictions: true)
         localMaskCache.removeAll(countAsEvictions: true)
+        localMaskRenderer.removeAllCachedBrushStrokes()
         lutCache.removeAll()
         toneCurveCache.removeAll()
         toneCurveSource = nil
@@ -98,6 +103,7 @@ final class RenderEngineResources {
         developedSourceCache.removeAll()
         processingPrefixCache.removeAll()
         localMaskCache.removeAll()
+        localMaskRenderer.removeAllCachedBrushStrokes()
         toneCurveCache.removeAll()
         toneCurveSource = nil
         toneCurveSpace = nil

@@ -340,6 +340,11 @@ actor RenderEngine: RenderEngining {
     private var processingPrefixMaterializationCount = 0
     private var materializationBudgetSkipCount = 0
     private var memoryPressureSource: DispatchSourceMemoryPressure?
+    /// Latest in-flight mask request per source. Resolver calls are actor-reentrant, so a newer
+    /// request can arrive while an older semantic request is suspended. This guard is distinct
+    /// from the payload's provenance checks and makes supersession observable at the await boundary.
+    private var latestMaskRequestRevisions: [String: UInt64] = [:]
+    private let maximumTrackedMaskSources = 16
 
     init(
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
@@ -412,6 +417,8 @@ actor RenderEngine: RenderEngining {
               !Task.isCancelled
         else { return nil }
 
+        noteMaskRequest(source: request.source, revision: request.requestRevision)
+
         let extent = CGRect(
             x: 0, y: 0,
             width: CGFloat(request.targetSize.width), height: CGFloat(request.targetSize.height)
@@ -426,7 +433,8 @@ actor RenderEngine: RenderEngining {
             let masks = try await resolvedLocalMasks(
                 for: [layer], source: request.source, extent: extent,
                 quality: request.quality, transform: request.transform, assetID: request.assetID,
-                requestRevision: request.requestRevision, includeIdentity: true
+                requestRevision: request.requestRevision, includeIdentity: true,
+                onlyComponentID: request.soloComponentID
             )
             guard let mask = masks[layer.id], !Task.isCancelled else { return nil }
             let output: CIImage
@@ -891,6 +899,7 @@ actor RenderEngine: RenderEngining {
     func evictForMemoryPressure() {
         resources.evictAll()
         interactiveRAWSession = nil
+        latestMaskRequestRevisions.removeAll(keepingCapacity: true)
         Thumbnails.evictForMemoryPressure()
     }
 
@@ -898,6 +907,7 @@ actor RenderEngine: RenderEngining {
     func invalidateRenderCaches() {
         resources.invalidateAll()
         interactiveRAWSession = nil
+        latestMaskRequestRevisions.removeAll(keepingCapacity: true)
         Thumbnails.invalidateCache()
     }
 
@@ -949,6 +959,7 @@ actor RenderEngine: RenderEngining {
         assetID: PhotoAssetID? = nil,
         requestRevision: UInt64 = 0
     ) async throws -> CIImage? {
+        noteMaskRequest(source: source, revision: requestRevision)
         // These are explicit Core Image resource boundaries even though the transfer function is
         // mathematically source/space independent. A replaced source or working-space switch must
         // not retain a resource from the prior render session.
@@ -1007,7 +1018,8 @@ actor RenderEngine: RenderEngining {
         transform: LocalMaskRenderTransform,
         assetID: PhotoAssetID?,
         requestRevision: UInt64,
-        includeIdentity: Bool = false
+        includeIdentity: Bool = false,
+        onlyComponentID: UUID? = nil
     ) async throws -> [UUID: CIImage] {
         guard !layers.isEmpty,
               extent.width.isFinite, extent.height.isFinite,
@@ -1019,8 +1031,12 @@ actor RenderEngine: RenderEngining {
         var result: [UUID: CIImage] = [:]
         for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
             try Task.checkCancellation()
+            guard isCurrentMaskRequest(source: source, revision: requestRevision) else {
+                throw LocalMaskResolutionError.cancelled
+            }
             var effective: CIImage?
-            for component in layer.components where component.isUsable {
+            for component in layer.components where component.isUsable
+                && (onlyComponentID == nil || component.id == onlyComponentID) {
                 let definitionHash = RenderCacheHash.digest(component.source)
                 let key = LocalMaskCacheKey(
                     source: RenderSourceFingerprint(source), definitionHash: definitionHash,
@@ -1049,7 +1065,16 @@ actor RenderEngine: RenderEngining {
                     } catch is CancellationError {
                         throw CancellationError()
                     }
+                    guard isCurrentMaskRequest(source: source, revision: requestRevision) else {
+                        throw LocalMaskResolutionError.cancelled
+                    }
                     localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
+                }
+
+                // The resolver is allowed to suspend. A newer request for this source may have
+                // superseded it while it was waiting; never turn that late value into a CI graph.
+                guard isCurrentMaskRequest(source: source, revision: requestRevision) else {
+                    throw LocalMaskResolutionError.cancelled
                 }
 
                 guard (payload.assetID == nil
@@ -1088,6 +1113,21 @@ actor RenderEngine: RenderEngining {
             result[layer.id] = mask
         }
         return result
+    }
+
+    private func noteMaskRequest(source: ImageSource, revision: UInt64) {
+        guard revision > 0 else { return }
+        let key = source.cacheFingerprint
+        if let current = latestMaskRequestRevisions[key], current >= revision { return }
+        latestMaskRequestRevisions[key] = revision
+        if latestMaskRequestRevisions.count > maximumTrackedMaskSources,
+           let oldest = latestMaskRequestRevisions.min(by: { $0.value < $1.value })?.key {
+            latestMaskRequestRevisions.removeValue(forKey: oldest)
+        }
+    }
+
+    private func isCurrentMaskRequest(source: ImageSource, revision: UInt64) -> Bool {
+        revision == 0 || latestMaskRequestRevisions[source.cacheFingerprint] == revision
     }
 
     private struct MaterializedImage {
@@ -1354,6 +1394,9 @@ actor RenderEngine: RenderEngining {
     func invalidateSourceCache() {
         developedSourceCache.removeAll()
         processingPrefixCache.removeAll()
+        localMaskCache.removeAll()
+        localMaskRenderer.removeAllCachedBrushStrokes()
+        latestMaskRequestRevisions.removeAll(keepingCapacity: true)
         interactiveRAWSession = nil
         toneCurveCache.removeAll()
         toneCurveSource = nil

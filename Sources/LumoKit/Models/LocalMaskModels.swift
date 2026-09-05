@@ -458,7 +458,22 @@ extension MaskSource {
     }
 }
 
-enum MaskCombineMode: String, Codable, Sendable, Equatable, CaseIterable { case replace, add, subtract, intersect }
+enum MaskCombineMode: String, Codable, Sendable, Equatable, CaseIterable {
+    case replace, add, subtract, intersect
+
+    var title: String { rawValue.capitalized }
+
+    /// The wording used in the inspector and accessibility tree. Keeping this on the value type
+    /// means summaries, menus, and tests cannot drift into subtly different operation names.
+    var summaryWord: String {
+        switch self {
+        case .replace: return "Replace"
+        case .add: return "Add"
+        case .subtract: return "Subtract"
+        case .intersect: return "Intersect"
+        }
+    }
+}
 
 extension MaskCombineMode {
     func combining(current: Double, next: Double) -> Double {
@@ -468,13 +483,34 @@ extension MaskCombineMode {
 
 struct MaskComponent: Codable, Sendable, Equatable, Identifiable {
     var id: UUID
+    /// Optional user label. Empty keeps older documents compact and falls back to the source type.
+    var name: String
     var mode: MaskCombineMode
     var isEnabled: Bool
     var isInverted: Bool
     var source: MaskSource
 
-    init(id: UUID = UUID(), mode: MaskCombineMode = .replace, isEnabled: Bool = true, isInverted: Bool = false, source: MaskSource) {
-        self.id = id; self.mode = mode; self.isEnabled = isEnabled; self.isInverted = isInverted; self.source = source
+    init(id: UUID = UUID(), name: String = "", mode: MaskCombineMode = .replace, isEnabled: Bool = true, isInverted: Bool = false, source: MaskSource) {
+        self.id = id
+        self.name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        self.mode = mode
+        self.isEnabled = isEnabled
+        self.isInverted = isInverted
+        self.source = source
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, mode, isEnabled, isInverted, source }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
+            name: try c.decodeIfPresent(String.self, forKey: .name) ?? "",
+            mode: try c.decodeIfPresent(MaskCombineMode.self, forKey: .mode) ?? .replace,
+            isEnabled: try c.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true,
+            isInverted: try c.decodeIfPresent(Bool.self, forKey: .isInverted) ?? false,
+            source: try c.decode(MaskSource.self, forKey: .source)
+        )
     }
 
     var isUsable: Bool { isEnabled && source.hasPotentialCoverage }

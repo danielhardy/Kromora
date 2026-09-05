@@ -169,6 +169,11 @@ final class KeyMonitor {
             return nil
         case 49:  // Space — hold to compare original
             guard KeyMonitorPolicy.isPlainSpace(modifiers: mods) else { return event }
+            if vm.inspectorState.isMaskingWorkspacePresented,
+               vm.maskInteractionState.activeTool != .selection {
+                vm.maskInteractionState.setSpacePanning(isDown)
+                return nil
+            }
             // A one-off or untouched photo has no meaningful before/after surface. Let Space
             // continue through in that state instead of consuming a key that did nothing.
             guard vm.isComparisonAvailable else { return event }
@@ -255,12 +260,38 @@ final class KeyMonitor {
             if vm.navigate(to: .grid) { return nil }
             return event
         case "e":
+            if vm.inspectorState.isMaskingWorkspacePresented {
+                vm.setMaskTool(.erase)
+                return nil
+            }
             if vm.navigate(to: .edit) { return nil }
             return event
+        case "b":
+            guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
+            vm.setMaskTool(.brush)
+            return nil
+        case "l":
+            guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
+            vm.setMaskTool(.linear)
+            return nil
+        case "r":
+            guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
+            vm.setMaskTool(.radial)
+            return nil
         case "v":
             guard KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods) else { return event }
             return vm.toggleSideBySide() ? nil : event
         case "[":
+            if vm.inspectorState.isMaskingWorkspacePresented,
+               (vm.maskInteractionState.activeTool == .brush
+                || vm.maskInteractionState.activeTool == .erase) {
+                if mods.contains(.shift) {
+                    vm.maskInteractionState.adjustBrushFeather(by: -0.05)
+                } else {
+                    vm.maskInteractionState.adjustBrushRadius(by: -0.005)
+                }
+                return nil
+            }
             guard vm.collection.isActive else { return event }
             if vm.navigation.isGrid {
                 vm.collection.selectPrevious()
@@ -269,6 +300,16 @@ final class KeyMonitor {
             }
             return nil
         case "]":
+            if vm.inspectorState.isMaskingWorkspacePresented,
+               (vm.maskInteractionState.activeTool == .brush
+                || vm.maskInteractionState.activeTool == .erase) {
+                if mods.contains(.shift) {
+                    vm.maskInteractionState.adjustBrushFeather(by: 0.05)
+                } else {
+                    vm.maskInteractionState.adjustBrushRadius(by: 0.005)
+                }
+                return nil
+            }
             guard vm.collection.isActive else { return event }
             if vm.navigation.isGrid {
                 vm.collection.selectNext()

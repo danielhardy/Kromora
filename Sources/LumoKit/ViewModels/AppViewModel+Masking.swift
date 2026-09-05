@@ -5,13 +5,14 @@ import AppKit
 /// The creation actions exposed by the persistent masking workspace. A layer is created with a
 /// durable recipe immediately; semantic pixels and other render resources remain derived state.
 enum MaskCreationKind: String, CaseIterable, Sendable {
-    case foreground, background, brush, linear, radial
+    case foreground, background, brush, erase, linear, radial
 
     var title: String {
         switch self {
         case .foreground: return "Foreground"
         case .background: return "Background"
         case .brush: return "Brush"
+        case .erase: return "Erase Brush"
         case .linear: return "Linear Gradient"
         case .radial: return "Radial Gradient"
         }
@@ -30,9 +31,25 @@ extension MaskSource {
     }
 }
 
+extension MaskComponent {
+    var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? source.maskingTypeTitle : trimmed
+    }
+}
+
 extension LocalAdjustmentLayer {
     var maskingTypeTitle: String {
         components.first?.source.maskingTypeTitle ?? "Empty mask"
+    }
+
+    /// A compact semantic description for layer rows and accessibility. The first component is
+    /// the base selection; later components retain their ordered operation in the summary.
+    var maskingSummary: String {
+        guard let first = components.first else { return "Empty mask" }
+        return ([first.displayName] + components.dropFirst().map {
+            "\($0.mode.summaryWord.lowercased()) \($0.displayName)"
+        }).joined(separator: " · ")
     }
 
     /// The component a pointer gesture should edit: the selected component if it belongs to this
@@ -62,7 +79,9 @@ extension AppViewModel {
         soloLayerID: UUID?,
         targetSize: PixelDimensions,
         style: MaskOverlayStyle,
-        transform: LocalMaskRenderTransform = .identity
+        transform: LocalMaskRenderTransform = .identity,
+        selectedComponentID: UUID? = nil,
+        soloComponentID: UUID? = nil
     ) async -> sending CGImage? {
         guard let source = maskOverlaySource else { return nil }
         return await maskOverlayEngine.makeMaskOverlayImage(MaskOverlayRequest(
@@ -74,7 +93,9 @@ extension AppViewModel {
             targetSize: targetSize,
             transform: transform,
             style: style,
-            requestRevision: maskingSourceRevision
+            requestRevision: maskingSourceRevision,
+            selectedComponentID: selectedComponentID,
+            soloComponentID: soloComponentID
         ))
     }
 
@@ -117,6 +138,8 @@ extension AppViewModel {
             source = .semantic(SemanticMaskDefinition(target: .background))
         case .brush:
             source = .brush(BrushMaskDefinition())
+        case .erase:
+            source = .brush(BrushMaskDefinition())
         case .linear:
             source = .linear(LinearGradientDefinition())
         case .radial:
@@ -128,7 +151,13 @@ extension AppViewModel {
         let name = nextMaskName(for: kind.title)
         updateDocument { document in
             document.localAdjustments.append(
-                LocalAdjustmentLayer(id: layerID, name: name, components: [component])
+                LocalAdjustmentLayer(
+                    id: layerID, name: name,
+                    components: [MaskComponent(
+                        id: component.id, mode: kind == .erase ? .subtract : .replace,
+                        source: source
+                    )]
+                )
             )
         }
         maskInteractionState.setTool(
@@ -215,17 +244,74 @@ extension AppViewModel {
     }
 
     func addMaskComponent(to layerID: UUID, source: MaskSource, mode: MaskCombineMode = .add) {
-        let component = MaskComponent(mode: mode, source: source)
+        let componentMode: MaskCombineMode
+        if document.localAdjustments.first(where: { $0.id == layerID })?.components.isEmpty ?? true {
+            componentMode = .replace
+        } else {
+            componentMode = mode
+        }
+        let component = MaskComponent(mode: componentMode, source: source)
         updateMask(layerID) { $0.components.append(component) }
         maskInteractionState.select(componentID: component.id, in: layerID)
+    }
+
+    func addMaskComponent(to layerID: UUID, kind: MaskCreationKind, mode: MaskCombineMode) {
+        let source: MaskSource
+        switch kind {
+        case .foreground: source = .semantic(SemanticMaskDefinition(target: .foreground))
+        case .background: source = .semantic(SemanticMaskDefinition(target: .background))
+        case .brush, .erase: source = .brush(BrushMaskDefinition())
+        case .linear: source = .linear(LinearGradientDefinition())
+        case .radial: source = .radial(RadialGradientDefinition())
+        }
+        addMaskComponent(to: layerID, source: source, mode: mode)
+    }
+
+    func renameMaskComponent(_ componentID: UUID, in layerID: UUID, name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updateMaskComponent(componentID, in: layerID) { component in
+            component.name = String(trimmed.prefix(80))
+        }
+    }
+
+    func moveMaskComponent(_ componentID: UUID, in layerID: UUID, by offset: Int) {
+        updateMask(layerID) { layer in
+            guard let index = layer.components.firstIndex(where: { $0.id == componentID }) else {
+                return
+            }
+            let destination = min(max(index + offset, 0), layer.components.count - 1)
+            guard destination != index else { return }
+            let component = layer.components.remove(at: index)
+            layer.components.insert(component, at: destination)
+            if !layer.components.isEmpty {
+                layer.components[0].mode = .replace
+            }
+        }
+    }
+
+    func setMaskComponentMode(
+        _ componentID: UUID, in layerID: UUID, mode: MaskCombineMode
+    ) {
+        updateMask(layerID) { layer in
+            guard let index = layer.components.firstIndex(where: { $0.id == componentID }) else {
+                return
+            }
+            layer.components[index].mode = index == 0 ? .replace : mode
+        }
     }
 
     func deleteMaskComponent(_ componentID: UUID, from layerID: UUID) {
         updateMask(layerID) { layer in
             layer.components.removeAll { $0.id == componentID }
+            if !layer.components.isEmpty {
+                layer.components[0].mode = .replace
+            }
         }
         if maskInteractionState.selectedComponentID == componentID {
             maskInteractionState.select(layerID: layerID)
+        }
+        if maskInteractionState.soloComponentID == componentID {
+            maskInteractionState.clearSolo()
         }
     }
 
@@ -316,6 +402,7 @@ extension AppViewModel {
         linearHandle: MaskInteractionState.LinearHandle? = nil,
         radialHandle: MaskInteractionState.RadialHandle? = nil,
         sourceSize: CGSize = CGSize(width: 1, height: 1),
+        pressure: Double? = nil,
         modifiers: NSEvent.ModifierFlags = []
     ) {
         guard maskInteractionState.activeTool != .selection else { return }
@@ -351,11 +438,21 @@ extension AppViewModel {
             return
         }
         switch maskInteractionState.activeTool {
-        case .brush:
-            draft.components[componentIndex].source = .brush(
-                BrushMaskDefinition(
-                    strokes: [BrushStroke(samples: [BrushSample(point: clamped)])]
-                ))
+        case .brush, .erase:
+            guard case .brush(var definition) = draft.components[componentIndex].source else {
+                return
+            }
+            definition.strokes.append(BrushStroke(
+                samples: [BrushSample(point: clamped, pressure: pressure)],
+                radius: maskInteractionState.brushRadius,
+                feather: maskInteractionState.brushFeather,
+                flow: maskInteractionState.brushFlow,
+                density: maskInteractionState.brushDensity
+            ))
+            draft.components[componentIndex].source = .brush(definition)
+            if maskInteractionState.activeTool == .erase {
+                draft.components[componentIndex].mode = .subtract
+            }
         case .linear:
             if case .linear(let current) = draft.components[componentIndex].source {
                 if linearHandle == nil || linearHandle == .creation {
@@ -381,7 +478,10 @@ extension AppViewModel {
         default:
             break
         }
-        maskInteractionState.beginDraft(draft, at: clamped)
+        maskInteractionState.beginDraft(draft, at: clamped, sourceSize: sourceSize)
+        if maskInteractionState.activeTool == .brush || maskInteractionState.activeTool == .erase {
+            maskInteractionState.beginBrushStroke(at: clamped)
+        }
         if maskInteractionState.activeTool == .linear {
             let handle = maskInteractionState.linearCreationPending
                 ? .creation : (linearHandle ?? .creation)
@@ -398,7 +498,8 @@ extension AppViewModel {
     }
 
     func updateMaskGesture(
-        to point: CGPoint, modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags
+        to point: CGPoint, pressure: Double? = nil,
+        modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags
     ) {
         guard var draft = maskInteractionState.draftLayer,
             let componentIndex = draft.targetComponentIndex(
@@ -406,15 +507,19 @@ extension AppViewModel {
         else { return }
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
         switch maskInteractionState.activeTool {
-        case .brush:
+        case .brush, .erase:
             guard case .brush(var definition) = draft.components[componentIndex].source else {
                 return
             }
-            if definition.strokes.isEmpty {
-                definition.strokes = [BrushStroke(samples: [BrushSample(point: clamped)])]
-            } else {
-                definition.strokes[definition.strokes.count - 1].samples.append(
-                    BrushSample(point: clamped))
+            guard let strokeIndex = definition.strokes.indices.last,
+                  maskInteractionState.shouldAcceptBrushSample(
+                      at: clamped, sourceSize: maskInteractionState.gestureSourceSize,
+                      radius: definition.strokes[strokeIndex].radius,
+                      currentCount: definition.strokes[strokeIndex].samples.count)
+            else { return }
+            if !definition.strokes.isEmpty {
+                definition.strokes[definition.strokes.count - 1].samples.append(BrushSample(
+                    point: clamped, pressure: pressure))
             }
             draft.components[componentIndex].source = .brush(definition)
         case .linear:
@@ -516,7 +621,19 @@ extension AppViewModel {
     }
 
     func endMaskGesture() {
-        guard let committed = maskInteractionState.commitDraft() else { return }
+        let sourceSize = maskInteractionState.gestureSourceSize
+        guard var committed = maskInteractionState.commitDraft() else { return }
+        for componentIndex in committed.components.indices {
+            guard case .brush(var definition) = committed.components[componentIndex].source else {
+                continue
+            }
+            for strokeIndex in definition.strokes.indices {
+                let stroke = definition.strokes[strokeIndex]
+                definition.strokes[strokeIndex].samples = BrushMaskMath.resampledAndSimplified(
+                    stroke.samples, sourceSize: sourceSize, radius: stroke.radius)
+            }
+            committed.components[componentIndex].source = .brush(definition)
+        }
         if document.localAdjustments.contains(where: { $0.id == committed.id }) {
             updateMask(committed.id) { $0 = committed }
         } else {

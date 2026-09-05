@@ -372,10 +372,14 @@ final class MaskOverlayRenderer: NSObject, MTKViewDelegate {
             }
         }
 
-        appendLine(snapshot.brushStroke, color: orange)
+        if snapshot.tool == .brush {
+            appendLine(snapshot.brushStroke, color: orange)
+        }
 
         // The linear prototype uses the three familiar guide bars: the two transition edges and
         // the center bar. They are synthetic guides only; no gradient alpha is evaluated here.
+        guard snapshot.tool == .linear || snapshot.tool == .radial else { return result }
+        if snapshot.tool == .linear {
         let linearDX = snapshot.linearEnd.x - snapshot.linearStart.x
         let linearDY = snapshot.linearEnd.y - snapshot.linearStart.y
         let linearLength = max(sqrt(linearDX * linearDX + linearDY * linearDY), 0.000_001)
@@ -394,6 +398,8 @@ final class MaskOverlayRenderer: NSObject, MTKViewDelegate {
             CGPoint(x: snapshot.linearEnd.x - perpendicular.x,
                     y: snapshot.linearEnd.y - perpendicular.y)
         ], color: cyan)
+            return result
+        }
 
         let center = snapshot.radialCenter
         let radius = snapshot.radialRadius

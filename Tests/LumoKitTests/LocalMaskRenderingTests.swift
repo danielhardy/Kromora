@@ -123,6 +123,34 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertTrue(pixels.allSatisfy { $0 <= 255 }, "analytic mask output must stay finite")
     }
 
+    func testBrushRasterCacheIsBoundedByBytesAndCanBeFlushed() throws {
+        let renderer = LocalMaskRenderer(maxBrushStrokeCacheCostBytes: 8 * 8 * MemoryLayout<Float>.size)
+        let extent = CGRect(x: 0, y: 0, width: 8, height: 8)
+        func payload(at point: CGPoint) -> LocalMaskPayload {
+            LocalMaskPayload(
+                sourceFingerprint: "cache-test",
+                targetSize: PixelDimensions(width: 8, height: 8),
+                quality: .preview,
+                descriptor: .brush(BrushMaskDefinition(strokes: [BrushStroke(
+                    samples: [BrushSample(point: point)], radius: 0.1
+                )]))
+            )
+        }
+
+        _ = renderer.image(for: payload(at: CGPoint(x: 0.25, y: 0.5)), extent: extent, transform: .identity)
+        XCTAssertEqual(renderer.cachedBrushStrokeCount, 1)
+        XCTAssertEqual(renderer.cachedBrushStrokeCostBytes, 8 * 8 * MemoryLayout<Float>.size)
+
+        _ = renderer.image(for: payload(at: CGPoint(x: 0.75, y: 0.5)), extent: extent, transform: .identity)
+        XCTAssertEqual(renderer.cachedBrushStrokeCount, 1)
+        XCTAssertLessThanOrEqual(
+            renderer.cachedBrushStrokeCostBytes, 8 * 8 * MemoryLayout<Float>.size)
+
+        renderer.removeAllCachedBrushStrokes()
+        XCTAssertEqual(renderer.cachedBrushStrokeCount, 0)
+        XCTAssertEqual(renderer.cachedBrushStrokeCostBytes, 0)
+    }
+
     func testMaskOverlayUsesResolvedAlphaAndSoloDoesNotChangeExport() async throws {
         let source = try source()
         let linearID = UUID()
@@ -213,6 +241,46 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
             XCTAssertEqual(image.width, 8)
             XCTAssertEqual(image.height, 4)
         }
+    }
+
+    func testGPUCompositionPreservesOrderedOperationsInversionAndDisabledComponents() async throws {
+        let source = try source()
+        let firstID = UUID()
+        let subtractID = UUID()
+        let intersectID = UUID()
+        let disabledID = UUID()
+        let layer = LocalAdjustmentLayer(
+            components: [
+                MaskComponent(id: firstID, mode: .replace,
+                              source: .linear(LinearGradientDefinition())),
+                MaskComponent(id: subtractID, mode: .subtract,
+                              source: .brush(BrushMaskDefinition(strokes: [BrushStroke()]))),
+                MaskComponent(id: intersectID, mode: .intersect,
+                              source: .radial(RadialGradientDefinition())),
+                MaskComponent(id: disabledID, mode: .add, isEnabled: false,
+                              source: .linear(LinearGradientDefinition())),
+            ])
+        let resolver = OverlayMaskResolver(
+            sourceFingerprint: source.cacheFingerprint,
+            values: [firstID: 0.8, subtractID: 0.25, intersectID: 0.9, disabledID: 1])
+        let engine = RenderEngine(maskResolver: resolver)
+        let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+
+        guard let normal = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [layer], selectedLayerID: layer.id, soloLayerID: nil,
+            targetSize: PixelDimensions(width: 4, height: 2), style: style
+        )) else { return XCTFail("composed mask did not render") }
+        let normalPixel = try Pixels.bytes(of: normal)
+        XCTAssertLessThanOrEqual(abs(Int(normalPixel[3]) - 153), 2)
+
+        var inverted = layer
+        inverted.isInverted = true
+        guard let invertedImage = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [inverted], selectedLayerID: inverted.id, soloLayerID: nil,
+            targetSize: PixelDimensions(width: 4, height: 2), style: style
+        )) else { return XCTFail("inverted composed mask did not render") }
+        let invertedPixel = try Pixels.bytes(of: invertedImage)
+        XCTAssertLessThanOrEqual(abs(Int(invertedPixel[3]) - 102), 2)
     }
 }
 
