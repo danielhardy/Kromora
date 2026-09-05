@@ -8,7 +8,7 @@ import Foundation
 /// can later choose categories without replacing the clipboard schema or teaching every caller how
 /// to split an `EditDocument`.
 struct EditClipboardPayload: Codable, Sendable, Equatable {
-    static let currentVersion = 1
+    static let currentVersion = 2
 
     enum Category: String, Codable, CaseIterable, Hashable, Sendable {
         case light
@@ -17,6 +17,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         case crop
         case lut
         case develop
+        case localAdjustments
     }
 
     /// A category's currently supported post-develop stages. Empty is meaningful: it says that the
@@ -61,6 +62,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
     var crop = CropCategory.neutral
     var lut = LUTSettings.none
     var develop = RAWDevelopSettings.neutral
+    var localAdjustments: [LocalAdjustmentLayer] = []
 
     /// Whether explicit RAW settings should replace the destination's settings when both photos
     /// are RAW. The default is to copy explicit user edits; `nil` values remain decoder defaults and
@@ -80,7 +82,8 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         crop: CropCategory = .neutral,
         lut: LUTSettings = .none,
         develop: RAWDevelopSettings = .neutral,
-        developPolicy: DevelopPolicy = .copyExplicitSettings
+        developPolicy: DevelopPolicy = .copyExplicitSettings,
+        localAdjustments: [LocalAdjustmentLayer] = []
     ) {
         self.version = version
         self.light = light
@@ -90,11 +93,12 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.lut = lut
         self.develop = develop
         self.developPolicy = developPolicy
+        self.localAdjustments = localAdjustments
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, light, color, effects, lightAdjustments, colorAdjustments, effectAdjustments,
-             crop, lut, develop, developPolicy
+             crop, lut, develop, developPolicy, localAdjustments
     }
 
     init(from decoder: Decoder) throws {
@@ -107,7 +111,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
                 debugDescription: "Edit clipboard was saved by a newer version of Lumo (schema \(version); this build reads \(Self.currentVersion))."
             )
         }
-        self.version = version
+        self.version = version < Self.currentVersion ? Self.currentVersion : version
         self.light = try container.decodeIfPresent(AdjustmentCategory.self, forKey: .light) ?? .init()
         self.color = try container.decodeIfPresent(AdjustmentCategory.self, forKey: .color) ?? .init()
         self.effects = try container.decodeIfPresent(AdjustmentCategory.self, forKey: .effects) ?? .init()
@@ -118,6 +122,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.lut = try container.decodeIfPresent(LUTSettings.self, forKey: .lut) ?? .none
         self.develop = try container.decodeIfPresent(RAWDevelopSettings.self, forKey: .develop) ?? .neutral
         self.developPolicy = try container.decodeIfPresent(DevelopPolicy.self, forKey: .developPolicy) ?? .copyExplicitSettings
+        self.localAdjustments = try container.decodeIfPresent([LocalAdjustmentLayer].self, forKey: .localAdjustments) ?? []
     }
 
     init(document: EditDocument, developPolicy: DevelopPolicy = .copyExplicitSettings) {
@@ -131,7 +136,8 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
             }.sorted { $0.slot < $1.slot }),
             lut: document.lut,
             develop: document.rawDevelop,
-            developPolicy: developPolicy
+            developPolicy: developPolicy,
+            localAdjustments: document.localAdjustments
         )
         self.lightAdjustments = document.light
         self.colorAdjustments = document.color
@@ -181,6 +187,9 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         if categories.contains(.develop), destinationIsRAW,
            developPolicy == .copyExplicitSettings {
             result.rawDevelop = develop
+        }
+        if categories.contains(.localAdjustments) {
+            result.localAdjustments = localAdjustments
         }
         return result
     }

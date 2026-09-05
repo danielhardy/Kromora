@@ -20,7 +20,8 @@ final class EditDocumentTests: XCTestCase {
     func testDefaultDocumentIsIdentityAndRoundTrips() throws {
         let document = EditDocument()
 
-        XCTAssertEqual(document.version, 1, "version must ship at 1 from the first release")
+        XCTAssertEqual(document.version, EditDocument.currentVersion,
+                       "new documents use the current schema")
         XCTAssertTrue(document.isIdentity, "an empty document must render the source unchanged")
 
         XCTAssertEqual(try roundTrip(document), document)
