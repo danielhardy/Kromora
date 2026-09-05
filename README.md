@@ -258,6 +258,9 @@ scripts/run-lumo-118-capture.sh /absolute/path/to/fixtures/DSC07826.ARW
 
 # Tracing overhead with and without an active Instruments recording.
 LUMO_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark/testMeasureTracingOverhead
+
+# Release mask-overlay trace host; move/drag over its visible window while recording.
+LUMO_MASK_OVERLAY_REAL_POINTER_DURATION=30 scripts/run-lumo-227-capture.sh
 ```
 
 Hardware latency claims require a logged-in display and a Release build; the opt-in Metal benchmark

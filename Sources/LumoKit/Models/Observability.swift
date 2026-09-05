@@ -71,6 +71,10 @@ enum LumoWorkflowEvent: CaseIterable {
     case presentationEncoded
     case drawablePresented
     case staleRevision
+    case maskOverlayPointerInput
+    case maskOverlayPresentationEncoded
+    case maskOverlayGPUComplete
+    case maskOverlayDrawablePresented
 
     var name: StaticString {
         switch self {
@@ -85,6 +89,10 @@ enum LumoWorkflowEvent: CaseIterable {
         case .presentationEncoded: return "PresentationEncoded"
         case .drawablePresented: return "DrawablePresented"
         case .staleRevision: return "StaleRevision"
+        case .maskOverlayPointerInput: return "MaskOverlayPointerInput"
+        case .maskOverlayPresentationEncoded: return "MaskOverlayPresentationEncoded"
+        case .maskOverlayGPUComplete: return "MaskOverlayGPUComplete"
+        case .maskOverlayDrawablePresented: return "MaskOverlayDrawablePresented"
         }
     }
 }
