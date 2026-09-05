@@ -58,16 +58,6 @@ public struct ContentView: View {
             .sheet(isPresented: $viewModel.isRemovableMediaSelectorPresented) {
                 RemovableMediaSelectorView(viewModel: viewModel)
             }
-            .sheet(isPresented: $viewModel.isMaskingPanelPresented) {
-                if let assetID = viewModel.maskingAssetID, let source = viewModel.maskingSource {
-                    MaskingPanel(
-                        coordinator: viewModel.photoAnalysisCoordinator,
-                        assetID: assetID,
-                        source: source,
-                        surface: viewModel.previewSurface
-                    )
-                }
-            }
             .onAppear {
                 viewModel.refreshRemovableMedia()
             }
@@ -260,11 +250,13 @@ public struct ContentView: View {
         .disabled(!viewModel.canRunAutoAdjustment)
 
         Button {
-            viewModel.isMaskingPanelPresented = true
+            viewModel.openMaskingWorkspace()
         } label: {
             Label("Mask", systemImage: "wand.and.rays")
         }
-        .help("Select a subject, person, background, or face mask")
+        .accessibilityLabel("Masking workspace")
+        .accessibilityHint("Open the persistent workspace to create and edit local mask layers")
+        .help("Open the persistent masking workspace")
         .disabled(viewModel.sourceImage == nil || viewModel.maskingAssetID == nil)
 
         // An active retained side-by-side preference remains actionable on an identity document so

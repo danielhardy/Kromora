@@ -154,6 +154,19 @@ final class KeyMonitor {
         // Hardware key codes (US layout independent for arrows/space).
         // ↑/↓ audition Looks; ←/→ step through the source files.
         switch event.keyCode {
+        case 53: // Escape — cancel a mask gesture first, then leave the masking workspace/tool.
+            guard isDown else { return event }
+            if vm.maskInteractionState.hasDraft {
+                vm.cancelMaskGesture()
+            } else if vm.inspectorState.isMaskingWorkspacePresented,
+                      vm.maskInteractionState.activeTool != .selection {
+                vm.setMaskTool(.selection)
+            } else if vm.inspectorState.isMaskingWorkspacePresented {
+                vm.closeMaskingWorkspace()
+            } else {
+                return event
+            }
+            return nil
         case 49:  // Space — hold to compare original
             guard KeyMonitorPolicy.isPlainSpace(modifiers: mods) else { return event }
             // A one-off or untouched photo has no meaningful before/after surface. Let Space

@@ -8,10 +8,12 @@ struct InfoInspectorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
-            // offers a trip to Develop to be told "this image is already rendered" about an image
-            // that does not exist. The empty state alone is the honest answer.
-            if viewModel.sourceImage == nil {
+            if inspectorState.isMaskingWorkspacePresented {
+                MaskingWorkspace(viewModel: viewModel)
+            } else if viewModel.sourceImage == nil {
+                // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
+                // offers a trip to Develop to be told "this image is already rendered" about an image
+                // that does not exist. The empty state alone is the honest answer.
                 emptyState
             } else {
                 tabSwitcher
