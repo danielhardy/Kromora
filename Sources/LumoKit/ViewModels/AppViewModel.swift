@@ -85,6 +85,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     final class InspectorState: ObservableObject {
         @Published var isPresented = false
         @Published var tab: InspectorTab = .info
+        @Published var isMaskingWorkspacePresented = false
     }
 
     // MARK: - Published state
@@ -371,6 +372,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// High-frequency canvas and transient crop state live outside the broad application
     /// publisher. Only the views that observe `canvasState` reevaluate for pointer interaction.
     let canvasState = CanvasInteractionState()
+    let maskInteractionState = MaskInteractionState()
 
     /// Inspector chrome has a separate observation boundary for the same reason. The view model
     /// keeps compatibility accessors below so existing commands and tests retain their API while
@@ -508,6 +510,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Non-nil when a hard failure should be surfaced as a dismissible alert.
     /// Bound to an `.alert` in ContentView; cleared when the user dismisses it.
     @Published var errorMessage: String?
+    /// Compatibility shim for callers that still mention the retired modal sheet.
     @Published var isMaskingPanelPresented = false
 
     @Published var isPhotosPickerPresented: Bool = false
@@ -1101,6 +1104,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         previewSurface.clear()
         originalPreviewSurface.clear()
         canvasState.resetForSource()
+        maskInteractionState.resetForSource()
+        restoreMaskSelection()
         resetResolutionPlanners()
         // Do not let the previous surface briefly show the photo we are leaving while the new
         // source is being decoded.
@@ -1239,6 +1244,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             let documentChanged = document != stored.document
             document = stored.document
             editSessions[request.assetID] = PhotoEditSession(document: document, history: activeHistory)
+            restoreMaskSelection()
             refreshLUTResolutionStatus()
             if documentChanged {
                 documentRevision &+= 1
@@ -2109,6 +2115,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         schedulePreview()
     }
 
+    /// Retry the currently active preview without touching the durable document. This is also the
+    /// recovery action exposed by the masking workspace when a source or mask render fails.
+    func retryPreview() {
+        guard imageSource != nil, sourceImage != nil else { return }
+        previewState = .loading
+        statusMessage = "Retrying preview…"
+        schedulePreview()
+    }
+
     /// Set the LUT strength (0...1) and re-render the preview. Safe to call on
     /// every slider tick: the re-render is debounced and the previous one is
     /// cancelled, so a full-travel drag costs a handful of renders, not one per
@@ -2500,6 +2515,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// toolbar uses this alongside each panel's local reset links so the scope is explicit before
     /// the action is taken; every branch still records through the stage's existing undo path.
     func resetInspectorSection() {
+        if inspectorState.isMaskingWorkspacePresented {
+            resetSelectedMask()
+            return
+        }
         switch inspectorTab {
         case .info:
             statusMessage = "Info has no adjustments to reset"

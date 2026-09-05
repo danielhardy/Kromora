@@ -14,20 +14,14 @@ struct PreviewView: View {
     @State private var magnification: CGFloat = 1
     @State private var isDraggingCanvas = false
     @State private var isMagnifyingCanvas = false
-    @StateObject private var maskOverlayState = MaskOverlayInteractionState()
+    @ObservedObject private var maskingState: MaskInteractionState
 
     init(viewModel: AppViewModel) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
         _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
-        _maskOverlayState = StateObject(wrappedValue: MaskOverlayInteractionState())
-    }
-
-    /// Step 0 is intentionally opt-in. This keeps synthetic geometry out of normal editing while
-    /// allowing a Release build to exercise the real sibling-view lifecycle on a reference Mac.
-    private var maskOverlayPrototypeEnabled: Bool {
-        ProcessInfo.processInfo.environment["LUMO_MASK_OVERLAY_PROTOTYPE"] == "1"
+        _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)
     }
 
     private var maskOverlayBackingScale: CGFloat {
@@ -79,11 +73,6 @@ struct PreviewView: View {
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             handleDrop(providers)
-        }
-        .onAppear {
-            if maskOverlayPrototypeEnabled {
-                maskOverlayState.activate()
-            }
         }
     }
 
@@ -232,48 +221,19 @@ struct PreviewView: View {
                         .simultaneousGesture(magnificationGesture(viewportSize: geometry.size))
                 }
 
-                if maskOverlayPrototypeEnabled, viewModel.sourceSize != .zero {
-                    MaskOverlaySurfaceView(
-                        snapshot: maskOverlayState.snapshot,
+                if maskingState.showOverlay, viewModel.sourceSize != .zero,
+                   maskingState.selectedLayerID != nil {
+                    MaskCanvasOverlay(
+                        viewModel: viewModel,
+                        maskingState: maskingState,
                         sourceSize: viewModel.sourceSize,
                         crop: viewModel.document.crop,
                         navigation: canvasState.navigation,
-                        backingScale: maskOverlayBackingScale,
-                        isInteractive: maskOverlayState.isActive && !canvasState.isCropToolActive,
-                        onPointer: { event in
-                            handleMaskPointer(event, viewportSize: geometry.size)
-                        }
+                        backingScale: maskOverlayBackingScale
                     )
-                    .allowsHitTesting(maskOverlayState.isActive && !canvasState.isCropToolActive)
                 }
             }
         }
-    }
-
-    private func handleMaskPointer(
-        _ event: MaskOverlayPointerEvent, viewportSize: CGSize
-    ) -> MaskOverlayPrototypeSnapshot? {
-        let transform = CanvasMaskTransform(
-            sourceSize: viewModel.sourceSize,
-            crop: viewModel.document.crop,
-            navigation: canvasState.navigation,
-            viewportSize: viewportSize,
-            backingScale: maskOverlayBackingScale
-        )
-        func sourcePoint(_ point: CGPoint) -> CGPoint? {
-            transform.sourceNormalizedPoint(forViewport: point)
-        }
-        switch event {
-        case .moved(let point, let time):
-            if let point = sourcePoint(point) { maskOverlayState.pointerMoved(to: point, time: time) }
-        case .began(let point, let time):
-            if let point = sourcePoint(point) { maskOverlayState.beginPointer(at: point, time: time) }
-        case .dragged(let point, let time):
-            if let point = sourcePoint(point) { maskOverlayState.dragPointer(to: point, time: time) }
-        case .ended(let point):
-            maskOverlayState.endPointer(at: point.flatMap(sourcePoint))
-        }
-        return maskOverlayState.snapshot
     }
 
     private func dragGesture(viewportSize: CGSize) -> some Gesture {

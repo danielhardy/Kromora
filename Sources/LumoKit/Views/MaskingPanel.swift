@@ -1,6 +1,8 @@
 import SwiftUI
 
-/// The v1 masking panel is selection-only. It intentionally has no Vision or Core Image code:
+/// Legacy semantic-result component retained for analysis diagnostics and compatibility tests.
+/// It is not part of the editor workflow; `MaskingWorkspace` owns persistent layer selection and
+/// all document mutations. It intentionally has no Vision or Core Image code:
 /// every selection enters through PhotoAnalysisCoordinator and every combination uses
 /// MaskOperations, so Auto and this UI share one mask representation and cache.
 @MainActor
