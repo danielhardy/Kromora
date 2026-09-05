@@ -9,7 +9,7 @@ import SwiftUI
 @MainActor
 final class MaskInteractionState: ObservableObject {
     enum Tool: String, CaseIterable, Codable, Sendable {
-        case selection, foreground, background, brush, linear, radial
+        case selection, foreground, background, brush, erase, linear, radial
 
         var title: String {
             switch self {
@@ -17,6 +17,7 @@ final class MaskInteractionState: ObservableObject {
             case .foreground: return "Foreground"
             case .background: return "Background"
             case .brush: return "Brush"
+            case .erase: return "Erase"
             case .linear: return "Linear"
             case .radial: return "Radial"
             }
@@ -28,6 +29,7 @@ final class MaskInteractionState: ObservableObject {
             case .foreground: return "person.crop.square"
             case .background: return "photo"
             case .brush: return "paintbrush"
+            case .erase: return "eraser"
             case .linear: return "line.diagonal"
             case .radial: return "oval"
             }
@@ -72,10 +74,20 @@ final class MaskInteractionState: ObservableObject {
     @Published private(set) var activeRadialHandle: RadialHandle?
     @Published private(set) var linearCreationPending = false
     @Published private(set) var radialCreationPending = false
+    /// Transient controls used by the active brush. They are copied into a stroke at begin time;
+    /// changing a slider never mutates the document or the in-progress stroke retroactively.
+    @Published var brushRadius = BrushMaskMath.defaultRadius
+    @Published var brushFeather = BrushMaskMath.defaultFeather
+    @Published var brushFlow = BrushMaskMath.defaultFlow
+    @Published var brushDensity = BrushMaskMath.defaultDensity
+    @Published private(set) var isSpacePanning = false
     private(set) var gestureStartPoint: CGPoint?
     private(set) var gestureStartDefinition: LinearGradientDefinition?
     private(set) var gestureStartRadialDefinition: RadialGradientDefinition?
     private(set) var gestureSourceSize: CGSize = CGSize(width: 1, height: 1)
+    private var brushLastRawPoint: CGPoint?
+    private var brushDistanceSinceAcceptedSample = 0.0
+    private let maximumLiveBrushSamples = 4_096
 
     // Presentation-only controls. These values intentionally never enter EditDocument, history,
     // or a render request; they describe how the photographer is inspecting the saved recipe.
@@ -84,6 +96,7 @@ final class MaskInteractionState: ObservableObject {
     @Published var overlayColor: Color = .orange
     @Published var overlayOpacity: Double = 0.35
     @Published private(set) var soloLayerID: UUID?
+    @Published private(set) var soloComponentID: UUID?
 
     var hasDraft: Bool { draftLayer != nil }
 
@@ -102,10 +115,48 @@ final class MaskInteractionState: ObservableObject {
     }
 
     func setTool(_ tool: Tool) { activeTool = tool }
+    func setSpacePanning(_ isPanning: Bool) { isSpacePanning = isPanning }
+
+    func beginBrushStroke(at point: CGPoint) {
+        brushLastRawPoint = point
+        brushDistanceSinceAcceptedSample = 0
+    }
+
+    /// Return whether a pointer sample should be retained by the live draft. The raw pointer stream
+    /// can be much denser than the saved recipe; accepting only distance-separated samples keeps
+    /// main-actor memory bounded throughout a long stroke, rather than only after mouse-up.
+    func shouldAcceptBrushSample(
+        at point: CGPoint, sourceSize: CGSize, radius: Double, currentCount: Int
+    ) -> Bool {
+        guard let previous = brushLastRawPoint else {
+            brushLastRawPoint = point
+            return currentCount < maximumLiveBrushSamples
+        }
+        brushDistanceSinceAcceptedSample += BrushMaskMath.physicalDistance(
+            previous, point, sourceSize: sourceSize)
+        brushLastRawPoint = point
+        guard currentCount < maximumLiveBrushSamples else { return false }
+        guard brushDistanceSinceAcceptedSample >= BrushMaskMath.samplingSpacing(
+            sourceSize: sourceSize, radius: radius) else { return false }
+        brushDistanceSinceAcceptedSample = 0
+        return true
+    }
+
+    func adjustBrushRadius(by delta: Double) {
+        brushRadius = min(max(brushRadius + delta, 0.001), 1)
+    }
+
+    func adjustBrushFeather(by delta: Double) {
+        brushFeather = min(max(brushFeather + delta, 0), 1)
+    }
     func updateHoverPoint(_ point: CGPoint?) { hoverPoint = point }
-    func beginDraft(_ layer: LocalAdjustmentLayer, at point: CGPoint? = nil) {
+    func beginDraft(
+        _ layer: LocalAdjustmentLayer, at point: CGPoint? = nil,
+        sourceSize: CGSize = CGSize(width: 1, height: 1)
+    ) {
         draftLayer = layer
         gestureStartPoint = point
+        gestureSourceSize = sourceSize
         if let componentID = selectedComponentID,
             let component = layer.components.first(where: { $0.id == componentID }),
             case .linear(let definition) = component.source {
@@ -136,6 +187,8 @@ final class MaskInteractionState: ObservableObject {
         gestureStartDefinition = nil
         gestureStartRadialDefinition = nil
         gestureSourceSize = CGSize(width: 1, height: 1)
+        brushLastRawPoint = nil
+        brushDistanceSinceAcceptedSample = 0
         return committed
     }
 
@@ -147,6 +200,8 @@ final class MaskInteractionState: ObservableObject {
         gestureStartDefinition = nil
         gestureStartRadialDefinition = nil
         gestureSourceSize = CGSize(width: 1, height: 1)
+        brushLastRawPoint = nil
+        brushDistanceSinceAcceptedSample = 0
     }
 
     func beginLinearGesture(_ handle: LinearHandle, at point: CGPoint) {
@@ -180,9 +235,24 @@ final class MaskInteractionState: ObservableObject {
 
     func toggleSolo(layerID: UUID) {
         soloLayerID = soloLayerID == layerID ? nil : layerID
+        soloComponentID = nil
     }
 
-    func clearSolo() { soloLayerID = nil }
+    func toggleSolo(componentID: UUID, layerID: UUID? = nil) {
+        if soloComponentID == componentID {
+            soloComponentID = nil
+            soloLayerID = nil
+        } else {
+            soloComponentID = componentID
+            soloLayerID = layerID
+        }
+    }
+
+    func clearComponentSolo() { soloComponentID = nil }
+    func clearSolo() {
+        soloLayerID = nil
+        soloComponentID = nil
+    }
 
     func resetForSource() {
         selectedLayerID = nil
@@ -198,6 +268,10 @@ final class MaskInteractionState: ObservableObject {
         gestureStartDefinition = nil
         gestureStartRadialDefinition = nil
         gestureSourceSize = CGSize(width: 1, height: 1)
+        brushLastRawPoint = nil
+        brushDistanceSinceAcceptedSample = 0
         soloLayerID = nil
+        soloComponentID = nil
+        isSpacePanning = false
     }
 }

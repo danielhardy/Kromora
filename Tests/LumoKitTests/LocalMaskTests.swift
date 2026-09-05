@@ -40,6 +40,89 @@ final class LocalMaskTests: XCTestCase {
         XCTAssertEqual(MaskCombineMode.replace.combining(current: 0.4, next: 4), 1)
     }
 
+    func testMaskCompositionIsOrderedAndStableForDisabledAndEmptyComponents() {
+        let first = 0.8
+        let add = MaskCombineMode.add.combining(current: first, next: 0.3)
+        let subtract = MaskCombineMode.subtract.combining(current: add, next: 0.25)
+        let intersect = MaskCombineMode.intersect.combining(current: subtract, next: 0.9)
+        XCTAssertEqual(add, 0.8, accuracy: 0.000_001)
+        XCTAssertEqual(subtract, 0.6, accuracy: 0.000_001)
+        XCTAssertEqual(intersect, 0.6, accuracy: 0.000_001)
+
+        let empty = MaskComponent(isEnabled: false, source: .brush(BrushMaskDefinition()))
+        XCTAssertFalse(empty.isUsable)
+        XCTAssertEqual(MaskComposition.inverted(intersect), 0.4, accuracy: 0.000_001)
+        XCTAssertEqual(
+            MaskComposition.inverted(MaskComposition.inverted(intersect)), intersect,
+            accuracy: 0.000_001)
+    }
+
+    func testMaskComponentNameAndOperationRoundTripWithLegacyPayload() throws {
+        let component = MaskComponent(
+            name: "Sky Brush", mode: .subtract, isInverted: true,
+            source: .brush(BrushMaskDefinition()))
+        XCTAssertEqual(try roundTrip(component), component)
+
+        var legacyComponent = component
+        legacyComponent.mode = .add
+        legacyComponent.name = ""
+        var legacyObject = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(legacyComponent)) as? [String: Any])
+        legacyObject.removeValue(forKey: "name")
+        let decoded = try JSONDecoder().decode(
+            MaskComponent.self,
+            from: try JSONSerialization.data(withJSONObject: legacyObject))
+        XCTAssertEqual(decoded.name, "")
+        XCTAssertEqual(decoded.mode, .add)
+    }
+
+    func testComponentOperationAndNameParticipateInDocumentHash() {
+        let id = UUID()
+        let source = MaskSource.linear(LinearGradientDefinition())
+        let base = EditDocument(localAdjustments: [LocalAdjustmentLayer(
+            components: [MaskComponent(id: id, source: source)]
+        )])
+        var operationChanged = base
+        operationChanged.localAdjustments[0].components[0].mode = .subtract
+        var nameChanged = base
+        nameChanged.localAdjustments[0].components[0].name = "Sky"
+
+        XCTAssertNotEqual(base.editHash, operationChanged.editHash)
+        XCTAssertNotEqual(base.editHash, nameChanged.editHash)
+    }
+
+    func testBrushMathUsesMousePressureAndSmoothRepeatedStampAccumulation() {
+        XCTAssertEqual(BrushMaskMath.normalizedPressure(nil), 1)
+        XCTAssertEqual(BrushMaskMath.normalizedPressure(2), 1)
+        XCTAssertEqual(
+            BrushMaskMath.stampAlpha(
+                distance: 0, radius: 0.1, feather: 0.5, flow: 0.4, pressure: nil),
+            0.4, accuracy: 0.000_001)
+        let first = BrushMaskMath.accumulatedOpacity(current: 0, stamp: 0.4, density: 0.7)
+        let second = BrushMaskMath.accumulatedOpacity(current: first, stamp: 0.4, density: 0.7)
+        XCTAssertEqual(first, 0.4, accuracy: 0.000_001)
+        XCTAssertEqual(second, 0.64, accuracy: 0.000_001)
+        XCTAssertLessThanOrEqual(second, 0.7)
+        XCTAssertEqual(
+            BrushMaskMath.stampAlpha(
+                distance: 0.1, radius: 0.1, feather: 0.5, flow: 1, pressure: nil), 0)
+    }
+
+    func testBrushResamplingIsDistanceBasedAndBoundedForLongGestures() {
+        let samples = (0..<30_000).map { index in
+            BrushSample(point: CGPoint(
+                x: min(Double(index) / 30_000, 1),
+                y: 0.5 + sin(Double(index) * 0.02) * 0.001
+            ))
+        }
+        let compact = BrushMaskMath.resampledAndSimplified(
+            samples, sourceSize: CGSize(width: 6_000, height: 4_000), radius: 0.04)
+        XCTAssertLessThanOrEqual(compact.count, 4_096)
+        XCTAssertEqual(compact.first?.point, samples.first?.point)
+        XCTAssertEqual(compact.last?.point, samples.last?.point)
+        XCTAssertLessThan(compact.count, samples.count)
+    }
+
     func testLinearGradientMathUsesEndpointsForAngleFalloffAndSmoothAlpha() {
         let definition = LinearGradientDefinition(
             zeroStrengthPoint: CGPoint(x: 0.2, y: 0.5),

@@ -60,6 +60,105 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertFalse(definition.strokes.isEmpty)
     }
 
+    func testBrushGestureCommitsOneCompactStrokeWithSettings() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.brush)
+        viewModel.maskingState.brushRadius = 0.03
+        viewModel.maskingState.brushFeather = 0.25
+        viewModel.maskingState.brushFlow = 0.6
+        viewModel.maskingState.brushDensity = 0.8
+        viewModel.setMaskTool(.brush)
+        viewModel.beginMaskGesture(
+            at: CGPoint(x: 0.1, y: 0.5), sourceSize: CGSize(width: 6_000, height: 4_000))
+        for index in 1...10_000 {
+            viewModel.updateMaskGesture(
+                to: CGPoint(x: 0.1 + Double(index) / 12_500, y: 0.5),
+                pressure: index.isMultiple(of: 2) ? 0.5 : nil)
+        }
+        viewModel.endMaskGesture()
+
+        let layer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let stroke = try XCTUnwrap(layer.components.first?.source.brushDefinition?.strokes.first)
+        XCTAssertEqual(stroke.radius, 0.03, accuracy: 0.000_001)
+        XCTAssertEqual(stroke.feather, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(stroke.flow, 0.6, accuracy: 0.000_001)
+        XCTAssertEqual(stroke.density, 0.8, accuracy: 0.000_001)
+        XCTAssertLessThanOrEqual(stroke.samples.count, 4_096)
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 1)
+    }
+
+    func testSeparateBrushGesturesAppendStrokesWithoutRewritingHistory() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.brush)
+        viewModel.setMaskTool(.brush)
+
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.1, y: 0.5))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.2, y: 0.5))
+        viewModel.endMaskGesture()
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.7, y: 0.5))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.5))
+        viewModel.endMaskGesture()
+
+        let definition = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.brushDefinition)
+        XCTAssertEqual(definition.strokes.count, 2)
+        XCTAssertEqual(definition.strokes[0].samples.first?.point, CGPoint(x: 0.1, y: 0.5))
+        XCTAssertEqual(definition.strokes[1].samples.first?.point, CGPoint(x: 0.7, y: 0.5))
+    }
+
+    func testEraseBrushIsASeparateSubtractingComponent() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.erase)
+        let component = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first)
+        XCTAssertEqual(component.mode, .subtract)
+        XCTAssertEqual(viewModel.maskingState.activeTool, .erase)
+    }
+
+    func testComponentCreationSupportsEverySourceAndOperationWithExplicitFirstReplace() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.foreground)
+        let layerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
+
+        let sources: [MaskSource] = [
+            .semantic(SemanticMaskDefinition(target: .background)),
+            .brush(BrushMaskDefinition()),
+            .linear(LinearGradientDefinition()),
+            .radial(RadialGradientDefinition()),
+        ]
+        let modes: [MaskCombineMode] = [.add, .subtract, .intersect, .add]
+        for (source, mode) in zip(sources, modes) {
+            viewModel.addMaskComponent(to: layerID, source: source, mode: mode)
+        }
+
+        let components = try XCTUnwrap(viewModel.document.localAdjustments.first?.components)
+        XCTAssertEqual(components.map(\.mode), [.replace, .add, .subtract, .intersect, .add])
+        XCTAssertEqual(components.map(\.source.maskingTypeTitle), [
+            "Foreground", "Background", "Brush", "Linear Gradient", "Radial Gradient",
+        ])
+    }
+
+    func testComponentActionsPreserveOrderNamesAndSoloInspection() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.foreground)
+        let layerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
+        viewModel.addMaskComponent(
+            to: layerID, source: .brush(BrushMaskDefinition()), mode: .subtract)
+        let brushID = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.last?.id)
+
+        viewModel.renameMaskComponent(brushID, in: layerID, name: "Sky Brush")
+        viewModel.moveMaskComponent(brushID, in: layerID, by: -1)
+        XCTAssertEqual(viewModel.document.localAdjustments.first?.components.first?.name, "Sky Brush")
+        XCTAssertEqual(viewModel.document.localAdjustments.first?.components.first?.mode, .replace)
+        XCTAssertEqual(viewModel.document.localAdjustments.first?.maskingSummary, "Sky Brush · replace Foreground")
+
+        viewModel.maskingState.toggleSolo(componentID: brushID, layerID: layerID)
+        XCTAssertEqual(viewModel.maskingState.soloComponentID, brushID)
+        XCTAssertEqual(viewModel.maskingState.soloLayerID, layerID)
+        viewModel.deleteMaskComponent(brushID, from: layerID)
+        XCTAssertNil(viewModel.maskingState.soloComponentID)
+        XCTAssertEqual(viewModel.document.localAdjustments.first?.components.count, 1)
+    }
+
     func testLinearDragCreatesAndSelectsATransientLayerUntilMouseUp() throws {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
         viewModel.setMaskTool(.linear)
