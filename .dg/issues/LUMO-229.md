@@ -2,7 +2,7 @@
 id: LUMO-229
 title: "Masking workspace: implement functional mask alpha overlay (color-wash/grayscale/solo)"
 type: bug
-status: backlog
+status: review
 priority: high
 creation_provenance:
   runner: claude
@@ -13,8 +13,8 @@ labels:
   - masking
   - epic:masking
 created: 2026-09-05T04:39:51.202Z
-updated: 2026-09-05T04:40:10.534Z
-order: zzy
+updated: 2026-09-05T13:38:33.025Z
+order: y
 board: product
 ---
 
@@ -76,3 +76,22 @@ verification pass for LUMO-220.
   of the `LocalMaskResolving` boundary this overlay should reuse to get alpha without duplicating
   mask-resolution logic.
 - Plan: `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md` Section 5.2, Step 8.
+
+## Agent log
+
+- 2026-09-05T12:11:58.144Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTOC36LZ8NQ2S89W
+Summary: Implemented presentation-only resolved mask alpha overlays with color-wash/grayscale inspection, solo isolation, geometry-guide preservation, and render/export isolation. Added brush/linear/radial/semantic, solo, grayscale, and pixel-invariance coverage.

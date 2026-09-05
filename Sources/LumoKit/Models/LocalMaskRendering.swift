@@ -55,6 +55,66 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
     }
 }
 
+/// Presentation-only styling for the mask inspection surface. These values never enter an
+/// `EditDocument` or a normal `RenderRequest`; they only describe how resolved alpha is displayed.
+struct MaskOverlayStyle: Sendable, Equatable {
+    enum Inspection: String, Sendable, Equatable {
+        case colorWash
+        case grayscale
+    }
+
+    let inspection: Inspection
+    let red: Double
+    let green: Double
+    let blue: Double
+
+    init(inspection: Inspection = .colorWash, red: Double, green: Double, blue: Double) {
+        self.inspection = inspection
+        self.red = Self.clamp(red)
+        self.green = Self.clamp(green)
+        self.blue = Self.clamp(blue)
+    }
+
+    private static func clamp(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, 0), 1)
+    }
+}
+
+/// Value-only request for the presentation mask inspection image. It deliberately carries layers,
+/// selection, and solo state instead of a document mutation: rendering this image must never alter
+/// edit history, exported pixels, or the normal preview request.
+struct MaskOverlayRequest: Sendable, Equatable {
+    let source: ImageSource
+    let layers: [LocalAdjustmentLayer]
+    let selectedLayerID: UUID?
+    let soloLayerID: UUID?
+    let targetSize: PixelDimensions
+    let quality: RenderQuality
+    let transform: LocalMaskRenderTransform
+    let style: MaskOverlayStyle
+
+    init(
+        source: ImageSource,
+        layers: [LocalAdjustmentLayer],
+        selectedLayerID: UUID?,
+        soloLayerID: UUID?,
+        targetSize: PixelDimensions,
+        quality: RenderQuality = .preview,
+        transform: LocalMaskRenderTransform = .identity,
+        style: MaskOverlayStyle
+    ) {
+        self.source = source
+        self.layers = layers
+        self.selectedLayerID = selectedLayerID
+        self.soloLayerID = soloLayerID
+        self.targetSize = targetSize
+        self.quality = quality
+        self.transform = transform
+        self.style = style
+    }
+}
+
 /// A resolved mask is still a sendable value. Raster payloads use upper-left row order, matching
 /// the persisted brush/analytic coordinate contract. Procedural payloads are evaluated by the
 /// renderer at the requested extent, so they do not need a semantic cache or a pixel buffer.

@@ -122,6 +122,98 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         let pixels = try Pixels.bytes(of: image(from: result))
         XCTAssertTrue(pixels.allSatisfy { $0 <= 255 }, "analytic mask output must stay finite")
     }
+
+    func testMaskOverlayUsesResolvedAlphaAndSoloDoesNotChangeExport() async throws {
+        let source = try source()
+        let linearID = UUID()
+        let radialID = UUID()
+        let linear = LocalAdjustmentLayer(
+            components: [MaskComponent(id: linearID, source: .linear(LinearGradientDefinition()))]
+        )
+        let radial = LocalAdjustmentLayer(
+            components: [MaskComponent(id: radialID, source: .radial(RadialGradientDefinition()))]
+        )
+        let resolver = OverlayMaskResolver(
+            sourceFingerprint: source.cacheFingerprint,
+            values: [linearID: 0.2, radialID: 0.8]
+        )
+        let engine = RenderEngine(maskResolver: resolver)
+        let style = MaskOverlayStyle(inspection: .colorWash, red: 1, green: 0, blue: 0)
+
+        guard let normal = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [linear, radial], selectedLayerID: linear.id,
+            soloLayerID: nil, targetSize: PixelDimensions(width: 4, height: 2), style: style
+        )) else { return XCTFail("linear mask overlay did not render") }
+        guard let solo = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [linear, radial], selectedLayerID: linear.id,
+            soloLayerID: radial.id, targetSize: PixelDimensions(width: 4, height: 2), style: style
+        )) else { return XCTFail("solo mask overlay did not render") }
+        let normalPixel = try Pixels.bytes(of: normal)
+        let soloPixel = try Pixels.bytes(of: solo)
+        XCTAssertLessThanOrEqual(abs(Int(normalPixel[3]) - 51), 2)
+        XCTAssertLessThanOrEqual(abs(Int(soloPixel[3]) - 204), 2)
+        XCTAssertGreaterThan(Int(soloPixel[3]), Int(normalPixel[3]))
+
+        guard let grayscale = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [linear], selectedLayerID: linear.id,
+            soloLayerID: nil, targetSize: PixelDimensions(width: 4, height: 2),
+            style: MaskOverlayStyle(inspection: .grayscale, red: 1, green: 0, blue: 0)
+        )) else { return XCTFail("grayscale mask overlay did not render") }
+        let grayscalePixel = try Pixels.bytes(of: grayscale)
+        XCTAssertEqual(grayscalePixel[0], grayscalePixel[1])
+        XCTAssertEqual(grayscalePixel[1], grayscalePixel[2])
+        XCTAssertEqual(grayscalePixel[3], 255)
+
+        let before = try await engine.render(RenderRequest(
+            source: source, document: EditDocument(), targetSize: CGSize(width: 8, height: 4),
+            quality: .preview, output: .raster
+        ))
+        guard await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [linear], selectedLayerID: linear.id,
+            soloLayerID: nil, targetSize: PixelDimensions(width: 4, height: 2), style: style
+        )) != nil else { return XCTFail("mask overlay did not render") }
+        let after = try await engine.render(RenderRequest(
+            source: source, document: EditDocument(), targetSize: CGSize(width: 8, height: 4),
+            quality: .preview, output: .raster
+        ))
+        assertPixelsEqual(
+            try Pixels.bytes(of: image(from: before)), try Pixels.bytes(of: image(from: after)),
+            "presentation-only mask inspection must not alter exported/rendered pixels"
+        )
+    }
+
+    func testMaskOverlayUsesTheSharedResolverForBrushAndSemanticLayers() async throws {
+        let source = try source()
+        let brush = LocalAdjustmentLayer(components: [MaskComponent(source: .brush(
+            BrushMaskDefinition(strokes: [BrushStroke(
+                samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))], radius: 0.4
+            )])
+        ))])
+        let linear = LocalAdjustmentLayer(
+            components: [MaskComponent(source: .linear(LinearGradientDefinition()))]
+        )
+        let radial = LocalAdjustmentLayer(
+            components: [MaskComponent(source: .radial(RadialGradientDefinition()))]
+        )
+        let semantic = LocalAdjustmentLayer(
+            components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: .subject)))]
+        )
+        let engine = RenderEngine(maskResolver: RepresentativeOverlayResolver(
+            sourceFingerprint: source.cacheFingerprint
+        ))
+        let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+
+        for layer in [brush, linear, radial, semantic] {
+            guard let image = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+                source: source, layers: [layer], selectedLayerID: layer.id,
+                soloLayerID: nil, targetSize: PixelDimensions(width: 8, height: 4), style: style
+            )) else {
+                return XCTFail("overlay did not render (layer.maskingTypeTitle)")
+            }
+            XCTAssertEqual(image.width, 8)
+            XCTAssertEqual(image.height, 4)
+        }
+    }
 }
 
 private struct TestMaskResolver: LocalMaskResolving {
@@ -140,5 +232,46 @@ private struct TestMaskResolver: LocalMaskResolving {
             quality: request.quality,
             descriptor: .raster(mask)
         )
+    }
+}
+
+private struct OverlayMaskResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+    let values: [UUID: Float]
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        let value = values[request.component.id] ?? 0
+        let count = request.targetSize.width * request.targetSize.height
+        let mask = try NormalizedMask(
+            size: request.targetSize, values: Array(repeating: value, count: count)
+        )
+        return LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            descriptor: .raster(mask)
+        )
+    }
+}
+
+private struct RepresentativeOverlayResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        if case .semantic = request.component.source {
+            let count = request.targetSize.width * request.targetSize.height
+            let mask = try NormalizedMask(
+                size: request.targetSize, values: Array(repeating: 0.6, count: count)
+            )
+            return LocalMaskPayload(
+                sourceFingerprint: sourceFingerprint,
+                definitionHash: RenderCacheHash.digest(request.component.source),
+                targetSize: request.targetSize,
+                quality: request.quality,
+                descriptor: .raster(mask)
+            )
+        }
+        return try await DefaultLocalMaskResolver().resolve(request)
     }
 }

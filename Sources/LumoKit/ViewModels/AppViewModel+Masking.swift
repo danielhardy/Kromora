@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// The creation actions exposed by the persistent masking workspace. A layer is created with a
 /// durable recipe immediately; semantic pixels and other render resources remain derived state.
@@ -51,6 +52,28 @@ extension AppViewModel {
     /// One narrow observation boundary owns selection, transient creation, and presentation state
     /// for the masking workspace. The document itself remains owned by AppViewModel.
     var maskingState: MaskInteractionState { maskInteractionState }
+
+    /// Render only the presentation overlay for the masking canvas. The request carries transient
+    /// selection/style state and never goes through `schedulePreview`, persistence, or history.
+    func renderMaskOverlay(
+        layers: [LocalAdjustmentLayer],
+        selectedLayerID: UUID?,
+        soloLayerID: UUID?,
+        targetSize: PixelDimensions,
+        style: MaskOverlayStyle,
+        transform: LocalMaskRenderTransform = .identity
+    ) async -> sending CGImage? {
+        guard let source = maskOverlaySource else { return nil }
+        return await maskOverlayEngine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source,
+            layers: layers,
+            selectedLayerID: selectedLayerID,
+            soloLayerID: soloLayerID,
+            targetSize: targetSize,
+            transform: transform,
+            style: style
+        ))
+    }
 
     func openMaskingWorkspace() {
         guard sourceImage != nil, maskingAssetID != nil else { return }
