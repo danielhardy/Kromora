@@ -38,6 +38,10 @@ protocol RenderEngining: Sendable {
     /// preview frames do not pay for an encoded PNG that is immediately decoded again.
     func makeCGImage(_ request: RenderRequest) async -> sending CGImage?
 
+    /// Produce the presentation-only resolved alpha overlay for the masking workspace. This is a
+    /// separate seam from `RenderRequest` so inspection state can never affect preview or export.
+    func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage?
+
     /// Tally `document` over `source` into a 256-bin per-channel histogram.
     ///
     /// On the protocol rather than left to the caller because tallying needs a rasterizer, and the
@@ -123,6 +127,8 @@ extension RenderEngining {
         else { return nil }
         return image
     }
+
+    func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage? { nil }
 
     func maskedHistogram(
         source: ImageSource,
@@ -388,6 +394,67 @@ actor RenderEngine: RenderEngining {
         return context.createCGImage(
             image, from: rect, format: .RGBA8, colorSpace: request.space.cgColorSpace
         )
+    }
+
+    func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage? {
+        guard request.targetSize.width > 0, request.targetSize.height > 0,
+              request.targetSize.width <= Int.max / 4,
+              request.targetSize.height <= Int.max / 4,
+              !Task.isCancelled
+        else { return nil }
+
+        let extent = CGRect(
+            x: 0, y: 0,
+            width: CGFloat(request.targetSize.width), height: CGFloat(request.targetSize.height)
+        )
+        guard extent.isRasterizable else { return nil }
+
+        let selectedID = request.soloLayerID ?? request.selectedLayerID
+        guard let selectedID,
+              let layer = request.layers.first(where: { $0.id == selectedID }) else { return nil }
+
+        do {
+            let masks = try await resolvedLocalMasks(
+                for: [layer], source: request.source, extent: extent,
+                quality: request.quality, transform: request.transform, includeIdentity: true
+            )
+            guard let mask = masks[layer.id], !Task.isCancelled else { return nil }
+            let output: CIImage
+            switch request.style.inspection {
+            case .colorWash:
+                let color = CIImage(
+                    color: CIColor(
+                        red: CGFloat(request.style.red), green: CGFloat(request.style.green),
+                        blue: CGFloat(request.style.blue), alpha: 1
+                    )
+                ).cropped(to: extent)
+                let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0))
+                    .cropped(to: extent)
+                let blend = CIFilter.blendWithAlphaMask()
+                blend.inputImage = color
+                blend.backgroundImage = clear
+                blend.maskImage = mask
+                output = blend.outputImage?.cropped(to: extent) ?? clear
+            case .grayscale:
+                // The alpha channel is the resolved coverage. Copy it into RGB and make the
+                // inspection image opaque so zero coverage reads as black rather than revealing
+                // the photographic preview underneath it.
+                output = mask.applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                    "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                    "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                    "inputBiasVector": CIVector(x: 0, y: 0, z: 0, w: 1),
+                ]).cropped(to: extent)
+            }
+            return context.createCGImage(
+                output, from: extent, format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+            )
+        } catch is CancellationError {
+            return nil
+        } catch {
+            return nil
+        }
     }
 
     func render(_ request: RenderRequest) async throws -> RenderResult {
@@ -921,7 +988,8 @@ actor RenderEngine: RenderEngining {
         source: ImageSource,
         extent: CGRect,
         quality: RenderQuality,
-        transform: LocalMaskRenderTransform
+        transform: LocalMaskRenderTransform,
+        includeIdentity: Bool = false
     ) async throws -> [UUID: CIImage] {
         guard !layers.isEmpty,
               extent.width.isFinite, extent.height.isFinite,
@@ -931,7 +999,7 @@ actor RenderEngine: RenderEngining {
 
         let targetSize = PixelDimensions(width: Int(extent.width), height: Int(extent.height))
         var result: [UUID: CIImage] = [:]
-        for layer in layers where layer.hasVisibleLook {
+        for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
             try Task.checkCancellation()
             var effective: CIImage?
             for component in layer.components where component.isUsable {

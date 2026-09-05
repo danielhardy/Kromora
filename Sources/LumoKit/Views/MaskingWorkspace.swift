@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Persistent local-mask editor. The workspace is an inspector tab, so it stays beside the canvas
 /// while the photographer changes layers, reopens saved recipes, or switches tools.
@@ -645,6 +646,7 @@ struct MaskCanvasOverlay: View {
     let backingScale: CGFloat
 
     @State private var isDrawing = false
+    @State private var maskImage: CGImage?
 
     var body: some View {
         GeometryReader { geometry in
@@ -652,8 +654,21 @@ struct MaskCanvasOverlay: View {
                 sourceSize: sourceSize, crop: crop, navigation: navigation,
                 viewportSize: geometry.size, backingScale: backingScale
             )
+            let targetSize = maskTargetSize(for: transform, viewportSize: geometry.size)
+            let layers = overlayLayers
+            let style = overlayStyle
+            let taskID = OverlayTaskID(
+                layers: layers,
+                selectedLayerID: maskingState.selectedLayerID,
+                soloLayerID: maskingState.soloLayerID,
+                targetSize: targetSize,
+                style: style
+            )
             Canvas { context, _ in
-                draw(layer: activeLayer, transform: transform, in: &context)
+                draw(
+                    layer: activeLayer, maskImage: maskImage, transform: transform,
+                    in: &context
+                )
             }
             .contentShape(Rectangle())
             .allowsHitTesting(maskingState.activeTool != .selection && !viewModel.isCropToolActive)
@@ -688,6 +703,15 @@ struct MaskCanvasOverlay: View {
                     maskingState.updateHoverPoint(nil)
                 }
             }
+            .task(id: taskID) {
+                maskImage = await viewModel.renderMaskOverlay(
+                    layers: layers,
+                    selectedLayerID: maskingState.selectedLayerID,
+                    soloLayerID: maskingState.soloLayerID,
+                    targetSize: targetSize,
+                    style: style
+                )
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Mask canvas")
@@ -700,10 +724,64 @@ struct MaskCanvasOverlay: View {
         return viewModel.document.localAdjustments.first(where: { $0.id == id })
     }
 
+    private var overlayLayers: [LocalAdjustmentLayer] {
+        guard let draft = maskingState.draftLayer else {
+            return viewModel.document.localAdjustments
+        }
+        return viewModel.document.localAdjustments.map { $0.id == draft.id ? draft : $0 }
+    }
+
+    private var overlayStyle: MaskOverlayStyle {
+        let color = NSColor(maskingState.overlayColor).usingColorSpace(.sRGB) ?? .orange
+        var red: CGFloat = 1
+        var green: CGFloat = 0.5
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 1
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return MaskOverlayStyle(
+            inspection: maskingState.overlayInspection == .grayscale ? .grayscale : .colorWash,
+            red: red, green: green, blue: blue
+        )
+    }
+
+    private func maskTargetSize(
+        for transform: CanvasMaskTransform, viewportSize: CGSize
+    ) -> PixelDimensions {
+        let source = transform.sourceSize
+        let maximumDimension = max(
+            256,
+            max(viewportSize.width, viewportSize.height) * max(backingScale, 1)
+        )
+        let scale = min(1, maximumDimension / max(source.width, source.height))
+        return PixelDimensions(
+            width: max(1, Int((source.width * scale).rounded())),
+            height: max(1, Int((source.height * scale).rounded()))
+        )
+    }
+
+    private struct OverlayTaskID: Equatable {
+        let layers: [LocalAdjustmentLayer]
+        let selectedLayerID: UUID?
+        let soloLayerID: UUID?
+        let targetSize: PixelDimensions
+        let style: MaskOverlayStyle
+    }
+
     private func draw(
-        layer: LocalAdjustmentLayer?, transform: CanvasMaskTransform,
+        layer: LocalAdjustmentLayer?, maskImage: CGImage?, transform: CanvasMaskTransform,
         in context: inout GraphicsContext
     ) {
+        if let maskImage,
+            let imageRect = transform.viewportRect(
+                forSourceNormalized: CGRect(x: 0, y: 0, width: 1, height: 1)
+            ) {
+            var maskContext = context
+            maskContext.opacity = maskingState.overlayOpacity
+            maskContext.draw(
+                Image(decorative: maskImage, scale: 1, orientation: .up), in: imageRect
+            )
+        }
+
         guard let layer,
             let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID)
         else { return }

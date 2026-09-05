@@ -571,6 +571,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// The renderer. An `any RenderEngining` rather than the concrete actor so a test can drive the
     /// preview flow without a GPU — the reason Step 4 introduced the protocol.
     private let engine: any RenderEngining
+
+    /// Narrow presentation-only accessors for the masking canvas. The backing source and renderer
+    /// remain owned by the view model; callers receive only the values needed for an overlay task.
+    var maskOverlaySource: ImageSource? { imageSource }
+    var maskOverlayEngine: any RenderEngining { engine }
     /// Shared photo-understanding coordinator. Auto consumes its scalar result; it never reaches
     /// through to Vision, Core Image, or mask pixels.
     let photoAnalysisCoordinator: PhotoAnalysisCoordinator
