@@ -704,7 +704,10 @@ struct MaskCanvasOverlay: View {
         layer: LocalAdjustmentLayer?, transform: CanvasMaskTransform,
         in context: inout GraphicsContext
     ) {
-        guard let component = layer?.components.first(where: { $0.isEnabled }) else { return }
+        guard let layer,
+            let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID)
+        else { return }
+        let component = layer.components[index]
         let guideColor =
             maskingState.overlayInspection == .grayscale
             ? Color.white.opacity(maskingState.overlayOpacity)

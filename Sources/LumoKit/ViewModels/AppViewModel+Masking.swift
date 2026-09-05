@@ -32,6 +32,19 @@ extension LocalAdjustmentLayer {
     var maskingTypeTitle: String {
         components.first?.source.maskingTypeTitle ?? "Empty mask"
     }
+
+    /// The component a pointer gesture should edit: the selected component if it belongs to this
+    /// layer and is enabled, otherwise the first enabled component. Without this, a gesture always
+    /// hit the first enabled component regardless of which one was selected in the inspector,
+    /// silently overwriting the wrong component's saved definition on layers with more than one.
+    func targetComponentIndex(selected componentID: UUID?) -> Int? {
+        if let componentID,
+            let index = components.firstIndex(where: { $0.id == componentID && $0.isEnabled })
+        {
+            return index
+        }
+        return components.firstIndex(where: { $0.isEnabled })
+    }
 }
 
 extension AppViewModel {
@@ -231,7 +244,8 @@ extension AppViewModel {
         else { return }
         var draft = layer
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
-        guard let componentIndex = draft.components.firstIndex(where: { $0.isEnabled }) else {
+        guard let componentIndex = draft.targetComponentIndex(selected: maskInteractionState.selectedComponentID)
+        else {
             return
         }
         switch maskInteractionState.activeTool {
@@ -267,7 +281,7 @@ extension AppViewModel {
 
     func updateMaskGesture(to point: CGPoint) {
         guard var draft = maskInteractionState.draftLayer,
-            let componentIndex = draft.components.firstIndex(where: { $0.isEnabled })
+            let componentIndex = draft.targetComponentIndex(selected: maskInteractionState.selectedComponentID)
         else { return }
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
         switch maskInteractionState.activeTool {
