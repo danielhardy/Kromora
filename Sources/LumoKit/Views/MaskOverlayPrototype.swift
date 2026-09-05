@@ -20,6 +20,7 @@ struct MaskOverlayPrototypeSnapshot: Equatable, Sendable {
     var radialCenter = CGPoint(x: 0.68, y: 0.54)
     var radialRadius = CGSize(width: 0.18, height: 0.24)
     var inputTime: TimeInterval?
+    var inputSequence: UInt64 = 0
 }
 
 /// Narrow observation boundary for pointer-frequency overlay state. The snapshot contains only
@@ -49,6 +50,7 @@ final class MaskOverlayInteractionState: ObservableObject {
 
     func pointerMoved(to sourcePoint: CGPoint, time: TimeInterval = LiveEditTelemetryClock.now) {
         guard isActive, sourcePoint.x.isFinite, sourcePoint.y.isFinite else { return }
+        snapshot.inputSequence &+= 1
         snapshot.cursor = sourcePoint
         snapshot.inputTime = time
     }
@@ -147,6 +149,7 @@ final class MaskOverlayMTKView: MTKView {
     private var tracking: NSTrackingArea?
 
     override var isOpaque: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
 
     func configure(
         snapshot: MaskOverlayPrototypeSnapshot, sourceSize: CGSize, crop: CropAdjustments,
@@ -172,7 +175,7 @@ final class MaskOverlayMTKView: MTKView {
         if let tracking { removeTrackingArea(tracking) }
         guard isInteractive else { return }
         let area = NSTrackingArea(
-            rect: bounds, options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow],
+            rect: bounds, options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
             owner: self, userInfo: nil
         )
         addTrackingArea(area)
@@ -203,6 +206,10 @@ final class MaskOverlayMTKView: MTKView {
     private func send(_ event: MaskOverlayPointerEvent) {
         guard isInteractive else { return }
         if let snapshot = onPointer?(event), let renderer = delegate as? MaskOverlayRenderer {
+            LumoObservability.event(
+                .maskOverlayPointerInput,
+                detail: "surface=maskOverlay input_sequence=\(snapshot.inputSequence)"
+            )
             renderer.update(snapshot: snapshot)
         }
         // Keep the draw asynchronous so drawable acquisition never blocks the main actor. The
@@ -224,6 +231,7 @@ final class MaskOverlayRenderer: NSObject, MTKViewDelegate {
     private let device = RenderEngine.presentationDevice
     private weak var view: MTKView?
     var onPresented: (@Sendable (TimeInterval, Double) -> Void)?
+    var onGPUCompleted: (@Sendable (TimeInterval, TimeInterval) -> Void)?
     private var isDrawing = false
 
     override init() {
@@ -308,8 +316,18 @@ final class MaskOverlayRenderer: NSObject, MTKViewDelegate {
         commandBuffer.present(drawable)
         let presentationHandler = onPresented
         let inputTime = snapshot.inputTime
+        let inputSequence = snapshot.inputSequence
+        LumoObservability.event(
+            .maskOverlayPresentationEncoded,
+            detail: "surface=maskOverlay input_sequence=\(inputSequence)"
+        )
         drawable.addPresentedHandler { drawable in
             let presented = drawable.presentedTime > 0 ? drawable.presentedTime : CACurrentMediaTime()
+            let latency = inputTime.map { max(0.0, presented - $0) * 1_000 } ?? 0.0
+            LumoObservability.event(
+                .maskOverlayDrawablePresented,
+                detail: "surface=maskOverlay input_sequence=\(inputSequence) latency_ms=\(String(format: "%.3f", Double(latency)))"
+            )
             guard let inputTime else {
                 presentationHandler?(presented, 0)
                 return
@@ -317,7 +335,15 @@ final class MaskOverlayRenderer: NSObject, MTKViewDelegate {
             presentationHandler?(presented, max(0, presented - inputTime) * 1_000)
         }
         commandBuffer.addCompletedHandler { [weak self, weak view] _ in
+            let completed = CACurrentMediaTime()
+            LumoObservability.event(
+                .maskOverlayGPUComplete,
+                detail: "surface=maskOverlay input_sequence=\(inputSequence) gpu_ms=\(String(format: "%.3f", Double(inputTime.map { max(0.0, completed - $0) * 1_000 } ?? 0.0)))"
+            )
             Task { @MainActor in
+                if let inputTime {
+                    self?.onGPUCompleted?(inputTime, completed)
+                }
                 self?.isDrawing = false
                 view?.setNeedsDisplay(view?.bounds ?? .zero)
             }

@@ -86,3 +86,28 @@ swift test --filter MaskOverlayPerformanceBenchmark
 ```
 
 The second command is intentionally skipped unless the benchmark environment variable is set.
+
+## LUMO-227 trace follow-up status
+
+The follow-up now includes a Release-only, standalone AppKit capture host and wrapper:
+
+```sh
+LUMO_MASK_OVERLAY_REAL_POINTER_DURATION=30 \
+LUMO_CAPTURE_OUTPUT_DIR=/tmp/lumo-227-capture \
+scripts/run-lumo-227-capture.sh
+```
+
+The host uses `LUMO_MASK_OVERLAY_PROTOTYPE=1`, a real `NSWindow` containing the same
+`MaskOverlayMTKView`/`MaskOverlayRenderer` path, and `xctrace` with Metal System Trace plus Points
+of Interest. It emits overlay-specific `MaskOverlayPointerInput`, `MaskOverlayPresentationEncoded`,
+`MaskOverlayGPUComplete`, and `MaskOverlayDrawablePresented` events so drawable/vsync cadence,
+GPU completion, and presentation scheduling can be inspected independently.
+
+Three local capture attempts on the reference host produced valid trace files, but the available
+desktop automation did not deliver pointer events to the capture process (`input_events=0`,
+`presentations=0`). Those traces are diagnostic only and are not evidence for a real-pointer p95 or
+p99. The last attempt is `/tmp/lumo-227-real4/LUMO-227-mask-overlay-20260904-164958.trace`.
+Consequently the real-pointer p95/p99 table and the cadence-versus-sibling attribution remain
+pending a human-driven gesture session; the 40.334 ms synthetic result and 24.645 ms persistent
+preview comparison above remain the only measured numbers. The 16.7 ms gate is still explicitly
+unclosed, and no architecture change is claimed.
