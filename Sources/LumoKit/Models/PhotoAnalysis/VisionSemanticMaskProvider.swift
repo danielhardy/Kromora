@@ -73,6 +73,8 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         )
         defer { interval.end() }
         switch kind {
+        case .foreground:
+            return try await foregroundUnionMask(image: image, quality: quality)
         case .subject:
             return try await subjectMask(image: image, quality: quality)
         case .face:
@@ -94,6 +96,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
 
     private static func signpostStage(for kind: SemanticMaskKind) -> LumoWorkflowStage {
         switch kind {
+        case .foreground: return .analysisForegroundMask
         case .subject: return .analysisSubjectMask
         case .face, .faceInstance: return .analysisFaceMask
         case .foregroundInstance: return .analysisForegroundMask
@@ -101,6 +104,33 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         case .person: return .analysisPersonMask
         case .unknown: return .analysisForegroundMask
         }
+    }
+
+    /// Returns the stable Foreground target used by durable local-mask recipes. The union is
+    /// cached separately from the numbered instances so Background and Foreground can share one
+    /// segmentation result, including the empty-result case.
+    private func foregroundUnionMask(image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        let key = cacheKey(for: .foreground, image: image, quality: quality)
+        if let reference = await store.mask(for: key, quality: quality),
+           let pixels = await store.pixels(for: reference) {
+            return RegionMask(kind: .foreground, bounds: bounds(of: pixels), quality: quality,
+                              reference: reference, confidence: 1, coverage: pixels.coverage)
+        }
+
+        let instances = try await foregroundMasks(image: image, quality: quality)
+        var union = try NormalizedMask(
+            size: image.dimensions,
+            values: Array(repeating: 0, count: image.dimensions.width * image.dimensions.height)
+        )
+        for instance in instances {
+            guard let pixels = await store.pixels(for: instance.reference) else {
+                throw RegionMaskError.missingPixels
+            }
+            union = try MaskOperations.union(union, pixels)
+        }
+        let reference = try await store.store(union, for: key, quality: quality)
+        return RegionMask(kind: .foreground, bounds: bounds(of: union), quality: quality,
+                          reference: reference, confidence: 1, coverage: union.coverage)
     }
 
     /// Returns every detected face as an independently cached `RegionMask`. `.face` is the
@@ -332,27 +362,14 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
                               reference: reference, confidence: 1, coverage: pixels.coverage)
         }
 
-        let foregrounds = try await foregroundMasks(image: image, quality: quality)
-        let union: NormalizedMask
-        if let first = foregrounds.first, let pixels = await store.pixels(for: first.reference) {
-            var combined = pixels
-            for foreground in foregrounds.dropFirst() {
-                guard let next = await store.pixels(for: foreground.reference) else {
-                    throw RegionMaskError.missingPixels
-                }
-                combined = try MaskOperations.union(combined, next)
-            }
-            union = combined
-        } else {
-            union = try NormalizedMask(
-                size: image.dimensions,
-                values: Array(repeating: 0, count: image.dimensions.width * image.dimensions.height)
-            )
+        let union = try await foregroundUnionMask(image: image, quality: quality)
+        guard let unionPixels = await store.pixels(for: union.reference) else {
+            throw RegionMaskError.missingPixels
         }
 
         // Background is intentionally the complement of the shared foreground union. Keeping
         // this composition on MaskOperations prevents a second, subtly different pixel path.
-        let pixels = try MaskOperations.invert(union)
+        let pixels = try MaskOperations.invert(unionPixels)
         let reference = try await store.store(pixels, for: key, quality: quality)
         return RegionMask(kind: .background, bounds: bounds(of: pixels), quality: quality,
                           reference: reference, confidence: 1, coverage: pixels.coverage)
@@ -464,7 +481,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             fingerprint = .data(data)
             assetID = .data(data)
         }
-        return MaskCacheKey(assetID: assetID, sourceFingerprint: fingerprint, kind: kind,
+        return MaskCacheKey(assetID: image.assetID ?? assetID, sourceFingerprint: fingerprint, kind: kind,
                             quality: quality, providerVersion: configuration.providerVersion)
     }
 

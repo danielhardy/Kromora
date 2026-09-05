@@ -22,6 +22,9 @@ struct RenderRequest: Sendable, Equatable {
     typealias Output = RenderOutput
 
     let source: ImageSource
+    /// Optional durable identity. When absent, the renderer derives the identity from the source;
+    /// editor/export callers with a Photos-backed ID should provide it explicitly.
+    let assetID: PhotoAssetID?
     let document: EditDocument
     let lut: CubeLUT?
     /// Maximum output dimensions for preview tiers. Export sizing is carried by exportOptions.
@@ -33,12 +36,14 @@ struct RenderRequest: Sendable, Equatable {
     /// Projection of normalized mask geometry into this render. It is identity for ordinary image
     /// renders, but remains on the request so preview/export and derived-mask caches share one seam.
     let maskTransform: LocalMaskRenderTransform
+    let requestRevision: UInt64
     /// Full export policy when this is an encoded request. Kept separate from `RenderOutput` so the
     /// legacy format/quality spelling remains source-compatible for existing renderer clients.
     let exportOptions: ExportOptions?
 
     init(
         source: ImageSource,
+        assetID: PhotoAssetID? = nil,
         document: EditDocument,
         lut: CubeLUT? = nil,
         targetSize: CGSize? = nil,
@@ -47,9 +52,11 @@ struct RenderRequest: Sendable, Equatable {
         output: Output = .raster,
         space: WorkingSpace = .current,
         exportOptions: ExportOptions? = nil,
-        maskTransform: LocalMaskRenderTransform = .identity
+        maskTransform: LocalMaskRenderTransform = .identity,
+        requestRevision: UInt64 = 0
     ) {
         self.source = source
+        self.assetID = assetID
         self.document = document
         self.lut = lut
         self.targetSize = targetSize
@@ -59,6 +66,7 @@ struct RenderRequest: Sendable, Equatable {
         self.space = space
         self.exportOptions = exportOptions
         self.maskTransform = maskTransform
+        self.requestRevision = requestRevision
     }
 
     /// The scale policy used by the existing deterministic pipeline.

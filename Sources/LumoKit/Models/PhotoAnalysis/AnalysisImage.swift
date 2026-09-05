@@ -71,11 +71,18 @@ struct NormalizedRect: Codable, Sendable, Equatable, Hashable {
 /// reproducible source and the one chosen working resolution across actor boundaries.
 struct AnalysisImage: Sendable, Equatable {
     let source: ImageSource
+    /// The durable asset identity is carried into the provider so cache entries cannot be published
+    /// under a source-derived identity when the same bytes represent a Photos asset.
+    let assetID: PhotoAssetID?
     let dimensions: PixelDimensions
     let configuration: AnalysisConfiguration
 
-    init(source: ImageSource, dimensions: PixelDimensions, configuration: AnalysisConfiguration) {
+    init(
+        source: ImageSource, assetID: PhotoAssetID? = nil, dimensions: PixelDimensions,
+        configuration: AnalysisConfiguration
+    ) {
         self.source = source
+        self.assetID = assetID
         self.dimensions = dimensions
         self.configuration = configuration
     }
@@ -93,7 +100,10 @@ struct AnalysisConfiguration: Sendable, Equatable {
 }
 
 enum AnalysisImageFactory {
-    static func make(from source: ImageSource, configuration: AnalysisConfiguration = .init()) throws -> AnalysisImage {
+    static func make(
+        from source: ImageSource, assetID: PhotoAssetID? = nil,
+        configuration: AnalysisConfiguration = .init()
+    ) throws -> AnalysisImage {
         guard source.nativeExtent.width.isFinite, source.nativeExtent.height.isFinite,
               source.nativeExtent.width >= 1, source.nativeExtent.height >= 1 else {
             throw ImageError.processingFailed
@@ -104,7 +114,7 @@ enum AnalysisImageFactory {
         let width = max(1, Int((Double(source.nativeExtent.width) * scale).rounded()))
         let height = max(1, Int((Double(source.nativeExtent.height) * scale).rounded()))
         return AnalysisImage(
-            source: source,
+            source: source, assetID: assetID,
             dimensions: PixelDimensions(width: width, height: height),
             configuration: configuration
         )

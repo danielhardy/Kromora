@@ -67,12 +67,14 @@ extension AppViewModel {
         guard let source = maskOverlaySource else { return nil }
         return await maskOverlayEngine.makeMaskOverlayImage(MaskOverlayRequest(
             source: source,
+            assetID: maskingAssetID,
             layers: layers,
             selectedLayerID: selectedLayerID,
             soloLayerID: soloLayerID,
             targetSize: targetSize,
             transform: transform,
-            style: style
+            style: style,
+            requestRevision: maskingSourceRevision
         ))
     }
 

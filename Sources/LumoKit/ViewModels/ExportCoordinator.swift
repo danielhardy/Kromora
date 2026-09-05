@@ -70,13 +70,15 @@ final class ExportCoordinator: ObservableObject {
     init(
         engine: any RenderEngining = RenderEngine.shared,
         exportEngine: (any RenderEngining)? = nil,
+        maskResolver: (any LocalMaskResolving)? = nil,
         editStore: EditDocumentStore? = nil,
         lutResolver: ((LUTID?) -> CubeLUT?)? = nil,
         photosDelivery: (any PhotosDelivering)? = PhotoKitDelivery()
     ) {
         // Test renderers are deliberately shared so request assertions remain simple. The real
         // renderer gets isolated mutable Core Image state for export work.
-        self.exportEngine = exportEngine ?? (engine is RenderEngine ? RenderEngine() : engine)
+        self.exportEngine = exportEngine ?? (engine is RenderEngine
+            ? RenderEngine(maskResolver: maskResolver ?? DefaultLocalMaskResolver()) : engine)
         self.photosDelivery = photosDelivery
         self.editStore = editStore
         self.lutResolver = lutResolver
@@ -171,6 +173,7 @@ final class ExportCoordinator: ObservableObject {
     /// extension comes from the current format.
     func exportDialog(
         source: ImageSource,
+        assetID: PhotoAssetID? = nil,
         document: EditDocument,
         lut: CubeLUT?,
         suggestedBaseName: String
@@ -190,6 +193,7 @@ final class ExportCoordinator: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         performExport(
             source: source,
+            assetID: assetID,
             document: document,
             lut: lut,
             options: ExportOptions(
@@ -211,13 +215,14 @@ final class ExportCoordinator: ObservableObject {
     /// half-written file (`RenderEngining.encode` returns `Data` for exactly this reason).
     func performExport(
         source: ImageSource,
+        assetID: PhotoAssetID? = nil,
         document: EditDocument,
         lut: CubeLUT?,
         format: ExportFormat,
         to url: URL
     ) {
         performExport(
-            source: source, document: document, lut: lut,
+            source: source, assetID: assetID, document: document, lut: lut,
             options: ExportOptions(format: format, destination: .file(url)), to: url
         )
     }
@@ -225,6 +230,7 @@ final class ExportCoordinator: ObservableObject {
     /// Validate and start one export from a complete, panel-independent policy.
     func performExport(
         source: ImageSource,
+        assetID: PhotoAssetID? = nil,
         document: EditDocument,
         lut: CubeLUT?,
         options: ExportOptions,
@@ -250,7 +256,7 @@ final class ExportCoordinator: ObservableObject {
             do {
                 try Task.checkCancellation()
                 let data = try await exportEngine.render(RenderRequest(
-                    source: source, document: document, lut: lut,
+                    source: source, assetID: assetID, document: document, lut: lut,
                     quality: .export,
                     output: .encoded(
                         format: options.format, quality: CGFloat(options.quality)
@@ -481,7 +487,7 @@ final class ExportCoordinator: ObservableObject {
                     var interval = LumoObservability.begin(.export, source: source, quality: .export)
                     defer { interval.end() }
                     let data = try await exportEngine.render(RenderRequest(
-                        source: source, document: itemDocument, lut: itemLUT,
+                        source: source, assetID: item.assetID, document: itemDocument, lut: itemLUT,
                         quality: .export,
                         output: .encoded(
                             format: options.format, quality: CGFloat(options.quality)

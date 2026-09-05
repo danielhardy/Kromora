@@ -1,6 +1,9 @@
 import Foundation
 
 enum SemanticMaskKind: Codable, Sendable, Equatable, Hashable {
+    /// The stable user-facing foreground selection. Instance kinds remain available for analysis
+    /// and diagnostics, but callers should use this union for durable editing recipes.
+    case foreground
     case subject
     case background
     case person

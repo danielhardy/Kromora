@@ -35,23 +35,29 @@ struct LocalMaskRenderTransform: Codable, Hashable, Sendable, Equatable {
 /// the analytic/brush descriptor already present in the request.
 struct LocalMaskResolveRequest: Sendable, Equatable {
     let source: ImageSource
+    let assetID: PhotoAssetID
     let component: MaskComponent
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
+    let requestRevision: UInt64
 
     init(
         source: ImageSource,
+        assetID: PhotoAssetID? = nil,
         component: MaskComponent,
         targetSize: PixelDimensions,
         quality: RenderQuality,
-        transform: LocalMaskRenderTransform = .identity
+        transform: LocalMaskRenderTransform = .identity,
+        requestRevision: UInt64 = 0
     ) {
         self.source = source
+        self.assetID = assetID ?? PhotoAnalysisCoordinator.assetID(for: source)
         self.component = component
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform
+        self.requestRevision = requestRevision
     }
 }
 
@@ -86,31 +92,37 @@ struct MaskOverlayStyle: Sendable, Equatable {
 /// edit history, exported pixels, or the normal preview request.
 struct MaskOverlayRequest: Sendable, Equatable {
     let source: ImageSource
+    let assetID: PhotoAssetID?
     let layers: [LocalAdjustmentLayer]
     let selectedLayerID: UUID?
     let soloLayerID: UUID?
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
+    let requestRevision: UInt64
     let style: MaskOverlayStyle
 
     init(
         source: ImageSource,
+        assetID: PhotoAssetID? = nil,
         layers: [LocalAdjustmentLayer],
         selectedLayerID: UUID?,
         soloLayerID: UUID?,
         targetSize: PixelDimensions,
         quality: RenderQuality = .preview,
         transform: LocalMaskRenderTransform = .identity,
-        style: MaskOverlayStyle
+        style: MaskOverlayStyle,
+        requestRevision: UInt64 = 0
     ) {
         self.source = source
+        self.assetID = assetID
         self.layers = layers
         self.selectedLayerID = selectedLayerID
         self.soloLayerID = soloLayerID
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform
+        self.requestRevision = requestRevision
         self.style = style
     }
 }
@@ -126,10 +138,13 @@ struct LocalMaskPayload: Sendable, Equatable {
         case brush(BrushMaskDefinition)
     }
 
+    let assetID: PhotoAssetID?
     let sourceFingerprint: String
     let definitionHash: String
     let targetSize: PixelDimensions
     let quality: RenderQuality
+    let providerVersion: String
+    let requestRevision: UInt64
     let descriptor: Descriptor
 
     init(
@@ -137,12 +152,18 @@ struct LocalMaskPayload: Sendable, Equatable {
         definitionHash: String = "",
         targetSize: PixelDimensions,
         quality: RenderQuality,
+        assetID: PhotoAssetID? = nil,
+        providerVersion: String = "local-1",
+        requestRevision: UInt64 = 0,
         descriptor: Descriptor
     ) {
+        self.assetID = assetID
         self.sourceFingerprint = sourceFingerprint
         self.definitionHash = definitionHash
         self.targetSize = targetSize
         self.quality = quality
+        self.providerVersion = providerVersion
+        self.requestRevision = requestRevision
         self.descriptor = descriptor
     }
 
@@ -155,10 +176,20 @@ struct LocalMaskPayload: Sendable, Equatable {
             return 1024
         }
     }
+
+    func forRequestRevision(_ revision: UInt64) -> LocalMaskPayload {
+        LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint, definitionHash: definitionHash,
+            targetSize: targetSize, quality: quality, assetID: assetID,
+            providerVersion: providerVersion, requestRevision: revision, descriptor: descriptor
+        )
+    }
 }
 
 enum LocalMaskResolutionError: Error, Sendable, Equatable, CustomStringConvertible {
     case semanticMaskUnavailable(target: SemanticTarget, quality: MaskQuality)
+    case incompatibleDefinition(target: SemanticTarget, version: Int)
+    case providerFailure(target: SemanticTarget, reason: String)
     case sourceMismatch
     case invalidPayload
     case cancelled
@@ -167,6 +198,10 @@ enum LocalMaskResolutionError: Error, Sendable, Equatable, CustomStringConvertib
         switch self {
         case .semanticMaskUnavailable(let target, let quality):
             return "The \(target.rawValue) mask is not available at \(quality.rawValue) quality for this source. Resolve it or choose an explicit lower-quality export."
+        case .incompatibleDefinition(let target, let version):
+            return "The saved \(target.rawValue) mask was created by an incompatible generation version (\(version)). Retry regeneration after updating the definition."
+        case .providerFailure(let target, let reason):
+            return "The \(target.rawValue) mask could not be regenerated: \(reason)"
         case .sourceMismatch:
             return "The resolved mask belongs to a different source and was rejected."
         case .invalidPayload:
@@ -209,6 +244,8 @@ struct DefaultLocalMaskResolver: LocalMaskResolving {
             definitionHash: definitionHash,
             targetSize: request.targetSize,
             quality: request.quality,
+            assetID: request.assetID,
+            requestRevision: request.requestRevision,
             descriptor: descriptor
         )
     }
@@ -219,6 +256,7 @@ struct DefaultLocalMaskResolver: LocalMaskResolving {
 /// still rejects stale pixels even if an adapter is accidentally reused across image switches.
 struct ResolvedSemanticMask: LocalMaskResolving {
     let mask: NormalizedMask
+    let assetID: PhotoAssetID
     let sourceFingerprint: String
     let definitionHash: String
     let quality: RenderQuality
@@ -226,6 +264,7 @@ struct ResolvedSemanticMask: LocalMaskResolving {
     func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
         try Task.checkCancellation()
         guard sourceFingerprint == request.source.cacheFingerprint,
+              assetID == request.assetID,
               definitionHash == RenderCacheHash.digest(request.component.source),
               mask.size == request.targetSize else {
             throw LocalMaskResolutionError.sourceMismatch
@@ -235,8 +274,162 @@ struct ResolvedSemanticMask: LocalMaskResolving {
             definitionHash: definitionHash,
             targetSize: mask.size,
             quality: quality,
+            assetID: assetID,
+            requestRevision: request.requestRevision,
             descriptor: .raster(mask)
         )
+    }
+}
+
+/// Resolves durable semantic recipes through the existing coordinator/provider/store path. The
+/// resolver deliberately returns values only; Core Image construction remains in RenderEngine.
+actor CoordinatorLocalMaskResolver: LocalMaskResolving {
+    private let coordinator: PhotoAnalysisCoordinator
+
+    init(coordinator: PhotoAnalysisCoordinator) {
+        self.coordinator = coordinator
+    }
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        try Task.checkCancellation()
+        guard case .semantic(let definition) = request.component.source else {
+            return try await DefaultLocalMaskResolver().resolve(request)
+        }
+        guard definition.generationVersion <= SemanticMaskDefinition.currentGenerationVersion else {
+            throw LocalMaskResolutionError.incompatibleDefinition(
+                target: definition.target, version: definition.generationVersion
+            )
+        }
+
+        let kind = definition.target.semanticMaskKind
+        let requestedQuality = request.quality.maskQuality
+        let mask: RegionMask
+        do {
+            mask = try await resolveMask(
+                assetID: request.assetID, source: request.source, kind: kind,
+                quality: requestedQuality, targetSize: request.targetSize
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as LocalMaskResolutionError {
+            throw error
+        } catch {
+            throw LocalMaskResolutionError.providerFailure(
+                target: definition.target, reason: String(describing: error)
+            )
+        }
+
+        guard mask.reference.cacheKey.assetID == request.assetID,
+              mask.reference.cacheKey.sourceFingerprint.cacheKey
+                == PhotoAnalysisCoordinator.sourceFingerprint(for: request.source).cacheKey,
+              mask.reference.cacheKey.kind == kind,
+              mask.reference.cacheKey.quality == mask.quality,
+              !mask.reference.cacheKey.providerVersion.isEmpty,
+              mask.quality == requestedQuality || requestedQuality == .render else {
+            throw LocalMaskResolutionError.sourceMismatch
+        }
+        guard let pixels = await coordinator.pixels(for: mask.reference) else {
+            throw LocalMaskResolutionError.semanticMaskUnavailable(
+                target: definition.target, quality: requestedQuality
+            )
+        }
+        let resized = try Self.resized(pixels, to: request.targetSize)
+        let adjusted = try Self.apply(definition, to: resized)
+        return LocalMaskPayload(
+            sourceFingerprint: request.source.cacheFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            assetID: request.assetID,
+            providerVersion: mask.reference.cacheKey.providerVersion,
+            requestRevision: request.requestRevision,
+            descriptor: .raster(adjusted)
+        )
+    }
+
+    private func resolveMask(
+        assetID: PhotoAssetID, source: ImageSource, kind: SemanticMaskKind,
+        quality: MaskQuality, targetSize: PixelDimensions
+    ) async throws -> RegionMask {
+        do {
+            let mask = try await coordinator.mask(
+                assetID: assetID, source: source, kind: kind, quality: quality
+            )
+            if quality == .render, mask.quality != .render {
+                return try await coordinator.refineMask(
+                    mask, source: source, targetDimensions: targetSize
+                )
+            }
+            return mask
+        } catch {
+            guard quality == .render else { throw error }
+            // A provider may expose only preview quality. Upgrade that validated seed through the
+            // shared refinement service rather than silently exporting the preview pixels.
+            let preview = try await coordinator.mask(
+                assetID: assetID, source: source, kind: kind, quality: .preview
+            )
+            return try await coordinator.refineMask(
+                preview, source: source, targetDimensions: targetSize
+            )
+        }
+    }
+
+    private static func resized(_ mask: NormalizedMask, to size: PixelDimensions) throws -> NormalizedMask {
+        guard size.width > 0, size.height > 0 else {
+            throw LocalMaskResolutionError.invalidPayload
+        }
+        guard mask.size != size else { return mask }
+        var values: [Float] = []
+        values.reserveCapacity(size.width * size.height)
+        for y in 0..<size.height {
+            let sourceY = Double(y) / Double(max(1, size.height - 1)) * Double(max(1, mask.size.height - 1))
+            for x in 0..<size.width {
+                let sourceX = Double(x) / Double(max(1, size.width - 1)) * Double(max(1, mask.size.width - 1))
+                values.append(bilinear(mask, x: sourceX, y: sourceY))
+            }
+        }
+        return try NormalizedMask(size: size, values: values)
+    }
+
+    private static func apply(_ definition: SemanticMaskDefinition, to mask: NormalizedMask) throws -> NormalizedMask {
+        var result = mask
+        if definition.edgeFeather > 0 {
+            let radius = max(1, Int((definition.edgeFeather * Double(min(mask.size.width, mask.size.height)) * 0.05).rounded()))
+            result = try MaskOperations.feather(result, radius: radius)
+        }
+        let values = result.values.map { value in
+            let shifted = min(max(Double(value) + definition.edgeShift, 0), 1)
+            return Float(shifted * definition.density)
+        }
+        return try NormalizedMask(size: result.size, values: values)
+    }
+
+    private static func bilinear(_ mask: NormalizedMask, x: Double, y: Double) -> Float {
+        let clampedX = min(max(0, x), Double(mask.size.width - 1))
+        let clampedY = min(max(0, y), Double(mask.size.height - 1))
+        let x0 = Int(clampedX.rounded(.down)), y0 = Int(clampedY.rounded(.down))
+        let x1 = min(mask.size.width - 1, x0 + 1), y1 = min(mask.size.height - 1, y0 + 1)
+        let fx = Float(clampedX - Double(x0)), fy = Float(clampedY - Double(y0))
+        func value(_ x: Int, _ y: Int) -> Float { mask.values[y * mask.size.width + x] }
+        let top = value(x0, y0) * (1 - fx) + value(x1, y0) * fx
+        let bottom = value(x0, y1) * (1 - fx) + value(x1, y1) * fx
+        return top * (1 - fy) + bottom * fy
+    }
+}
+
+extension SemanticMaskDefinition {
+    static let currentGenerationVersion = 1
+}
+
+extension SemanticTarget {
+    var semanticMaskKind: SemanticMaskKind {
+        switch self {
+        case .foreground: return .foreground
+        case .background: return .background
+        case .subject: return .subject
+        case .person: return .person
+        case .face: return .face
+        }
     }
 }
 

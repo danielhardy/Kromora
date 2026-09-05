@@ -162,7 +162,9 @@ actor PhotoAnalysisCoordinator {
         } else {
             task = Task { [self] in
                 do {
-                    let result = try await performMask(source: source, kind: kind, quality: quality)
+                    let result = try await performMask(
+                        assetID: assetID, source: source, kind: kind, quality: quality
+                    )
                     inFlightMasks.removeValue(forKey: key)
                     return result
                 } catch {
@@ -214,7 +216,7 @@ actor PhotoAnalysisCoordinator {
         var preparationInterval = LumoObservability.begin(
             .analysisImagePreparation, source: source, maskQuality: .analysis
         )
-        let image = try AnalysisImageFactory.make(from: source)
+        let image = try AnalysisImageFactory.make(from: source, assetID: assetID)
         preparationInterval.end()
         var timings = AnalysisTimings(
             imagePreparation: preparationStart.duration(to: clock.now)
@@ -266,17 +268,72 @@ actor PhotoAnalysisCoordinator {
     }
 
     private func performMask(
+        assetID: PhotoAssetID,
         source: ImageSource,
         kind: SemanticMaskKind,
         quality: MaskQuality
     ) async throws -> RegionMask {
         try Task.checkCancellation()
+        if kind == .background {
+            // Background is the complement of the stable Foreground target. Going through the
+            // coordinator's existing foreground request key means concurrent Foreground and
+            // Background requests share one provider task, not merely one serialized Vision actor.
+            let foreground = try await mask(
+                assetID: assetID, source: source, kind: .foreground, quality: quality
+            )
+            guard let foregroundPixels = await maskStore.pixels(for: foreground.reference) else {
+                throw RegionMaskError.missingPixels
+            }
+            let backgroundPixels = try MaskOperations.invert(foregroundPixels)
+            let backgroundKey = foreground.reference.cacheKey.with(kind: .background, quality: quality)
+            if let reference = await maskStore.mask(for: backgroundKey, quality: quality),
+               let cachedPixels = await maskStore.pixels(for: reference) {
+                return RegionMask(
+                    kind: .background, bounds: normalizedBounds(of: cachedPixels), quality: quality,
+                    reference: reference, confidence: foreground.confidence,
+                    coverage: cachedPixels.coverage
+                )
+            }
+            let reference = try await maskStore.store(
+                backgroundPixels, for: backgroundKey, quality: quality
+            )
+            return RegionMask(
+                kind: .background, bounds: normalizedBounds(of: backgroundPixels), quality: quality,
+                reference: reference, confidence: foreground.confidence,
+                coverage: backgroundPixels.coverage
+            )
+        }
         var preparationInterval = LumoObservability.begin(
             .analysisImagePreparation, source: source, maskQuality: quality
         )
-        let image = try AnalysisImageFactory.make(from: source)
+        let image = try AnalysisImageFactory.make(from: source, assetID: assetID)
         preparationInterval.end()
         return try await performMask(image: image, kind: kind, quality: quality)
+    }
+
+    private func normalizedBounds(of mask: NormalizedMask) -> NormalizedRect {
+        guard mask.size.width > 0, mask.size.height > 0 else {
+            return NormalizedRect(x: 0, y: 0, width: 0, height: 0)
+        }
+        var minX = mask.size.width
+        var minY = mask.size.height
+        var maxX = -1
+        var maxY = -1
+        for y in 0..<mask.size.height {
+            for x in 0..<mask.size.width where mask.values[y * mask.size.width + x] > 0.001 {
+                minX = min(minX, x); minY = min(minY, y)
+                maxX = max(maxX, x); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else {
+            return NormalizedRect(x: 0, y: 0, width: 0, height: 0)
+        }
+        return NormalizedRect(
+            x: Double(minX) / Double(max(1, mask.size.width - 1)),
+            y: Double(minY) / Double(max(1, mask.size.height - 1)),
+            width: Double(maxX - minX) / Double(max(1, mask.size.width - 1)),
+            height: Double(maxY - minY) / Double(max(1, mask.size.height - 1))
+        )
     }
 
     private func performMask(
@@ -349,10 +406,24 @@ actor PhotoAnalysisCoordinator {
         ],
     ]
 
-    private static func fingerprint(for source: ImageSource) -> PhotoSourceFingerprint {
+    static func sourceFingerprint(for source: ImageSource) -> PhotoSourceFingerprint {
         switch source.backing {
         case .url(let url):
             return .file(at: url)
+        case .data(let data):
+            return .data(data)
+        }
+    }
+
+    private static func fingerprint(for source: ImageSource) -> PhotoSourceFingerprint {
+        sourceFingerprint(for: source)
+    }
+
+    static func assetID(for source: ImageSource) -> PhotoAssetID {
+        switch source.backing {
+        case .url(let url):
+            let fingerprint = PhotoSourceFingerprint.file(at: url)
+            return .file(url, fingerprint: fingerprint)
         case .data(let data):
             return .data(data)
         }

@@ -14,6 +14,7 @@ final class MaskingPanelModel: ObservableObject {
 
         var title: String {
             switch kind {
+            case .foreground: return "Foreground"
             case .subject: return "Subject"
             case .person: return "Person"
             case .background: return "Background"

@@ -20,6 +20,7 @@ final class AnalysisDebugPanelModel: ObservableObject {
 
         var title: String {
             switch kind {
+            case .foreground: return "Foreground"
             case .subject: return "Subject"
             case .background: return "Background"
             case .person: return "Person"
