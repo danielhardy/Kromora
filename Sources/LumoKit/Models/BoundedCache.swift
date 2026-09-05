@@ -22,6 +22,8 @@ struct RenderCacheConfiguration: Sendable, Equatable {
     /// source budget.
     var processingPrefixMaxEntries = 4
     var processingPrefixMaxCostBytes = 256 * 1024 * 1024
+    var localMaskMaxEntries = 32
+    var localMaskMaxCostBytes = 64 * 1024 * 1024
 
     static let `default` = Self()
 }
@@ -30,6 +32,7 @@ struct RenderCacheStatistics: Sendable, Equatable {
     let preview: CacheStatistics
     let developedSource: CacheStatistics
     let processingPrefix: CacheStatistics
+    let localMask: CacheStatistics
     let lutFilter: CacheStatistics
 }
 
