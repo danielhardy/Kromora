@@ -2,7 +2,7 @@
 id: LUMO-220
 title: Replace selection-only mask sheet with persistent Masking workspace
 type: feature
-status: ready
+status: claimed
 priority: high
 creation_provenance:
   runner: codex
@@ -14,13 +14,19 @@ labels:
   - editor
   - accessibility
 created: 2026-09-04T21:48:29.898Z
-updated: 2026-09-04T21:54:13.792Z
+updated: 2026-09-05T04:12:23.884Z
 depends_on:
   - LUMO-217
   - LUMO-218
   - LUMO-219
 order: w
 board: product
+claim:
+  actor: codex
+  session: 01MTNV9RRF96LNS12O
+  claimed_at: 2026-09-05T04:12:23.883Z
+  expires_at: 2026-09-05T05:12:23.883Z
+  model: gpt-5.6-luna
 ---
 
 ## Objective
