@@ -69,7 +69,7 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         }
     }
 
-    func testNoForegroundIsEmptyAndBackgroundIsItsComplement() async throws {
+    func testNoForegroundIsEmptyAndBackgroundIsItsComplementThroughCoordinator() async throws {
         let directory = try Fixtures.makeTempDirectory("ForegroundMaskTests")
         defer { try? FileManager.default.removeItem(at: directory) }
         let image = try Fixtures.makeCGImage(width: 64, height: 48, red: 0.25, green: 0.25, blue: 0.25)
@@ -82,19 +82,37 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
 
         let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 48))
         let analysisImage = try AnalysisImageFactory.make(from: source, configuration: .init(maximumDimension: 64))
-        let provider = VisionSemanticMaskProvider(store: MaskStore(directory: directory))
+        let store = MaskStore(directory: directory)
+        let provider = VisionSemanticMaskProvider(store: store)
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store, maskProvider: provider, stages: [:]
+        )
 
         let foregrounds = try await provider.foregroundMasks(image: analysisImage, quality: .analysis)
         XCTAssertTrue(foregrounds.isEmpty)
 
-        let foreground = try await provider.mask(for: .foreground, image: analysisImage, quality: .analysis)
+        let assetID = PhotoAnalysisCoordinator.assetID(for: source)
+        let foreground = try await coordinator.mask(
+            assetID: assetID, source: source, kind: .foreground, quality: .analysis
+        )
         XCTAssertEqual(foreground.kind, .foreground)
         XCTAssertEqual(foreground.coverage, 0, accuracy: 0.0001)
 
-        let background = try await provider.mask(for: .background, image: analysisImage, quality: .analysis)
+        let background = try await coordinator.mask(
+            assetID: assetID, source: source, kind: .background, quality: .analysis
+        )
         XCTAssertEqual(background.kind, .background)
         XCTAssertEqual(background.coverage, 1, accuracy: 0.0001)
         XCTAssertEqual(background.bounds, NormalizedRect(x: 0, y: 0, width: 1, height: 1))
+
+        let foregroundPixels = await store.pixels(for: foreground.reference)
+        let backgroundPixels = await store.pixels(for: background.reference)
+        XCTAssertEqual(backgroundPixels?.values, foregroundPixels?.values.map { 1 - $0 })
+
+        let cachedBackground = try await coordinator.mask(
+            assetID: assetID, source: source, kind: .background, quality: .analysis
+        )
+        XCTAssertEqual(cachedBackground.reference, background.reference)
     }
 
     func testPersonSegmentationIsGatedWithoutCachedSignals() async throws {

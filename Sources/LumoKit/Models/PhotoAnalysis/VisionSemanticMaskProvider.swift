@@ -84,7 +84,9 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         case .foregroundInstance(let index):
             return try await foregroundMask(index: index, image: image, quality: quality)
         case .background:
-            return try await backgroundMask(image: image, quality: quality)
+            // Background composition belongs to PhotoAnalysisCoordinator, which owns the
+            // foreground/background request de-duplication and shared cache identity.
+            throw VisionSemanticMaskError.unsupported(kind)
         case .person:
             return try await personMask(image: image, quality: quality)
         case .unknown:
@@ -351,27 +353,6 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         }
         let reference = try await store.store(pixels, for: key, quality: quality)
         return RegionMask(kind: .person, bounds: bounds(of: pixels), quality: quality,
-                          reference: reference, confidence: 1, coverage: pixels.coverage)
-    }
-
-    private func backgroundMask(image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
-        let key = cacheKey(for: .background, image: image, quality: quality)
-        if let reference = await store.mask(for: key, quality: quality),
-           let pixels = await store.pixels(for: reference) {
-            return RegionMask(kind: .background, bounds: bounds(of: pixels), quality: quality,
-                              reference: reference, confidence: 1, coverage: pixels.coverage)
-        }
-
-        let union = try await foregroundUnionMask(image: image, quality: quality)
-        guard let unionPixels = await store.pixels(for: union.reference) else {
-            throw RegionMaskError.missingPixels
-        }
-
-        // Background is intentionally the complement of the shared foreground union. Keeping
-        // this composition on MaskOperations prevents a second, subtly different pixel path.
-        let pixels = try MaskOperations.invert(unionPixels)
-        let reference = try await store.store(pixels, for: key, quality: quality)
-        return RegionMask(kind: .background, bounds: bounds(of: pixels), quality: quality,
                           reference: reference, confidence: 1, coverage: pixels.coverage)
     }
 
