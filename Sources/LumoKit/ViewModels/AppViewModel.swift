@@ -85,7 +85,32 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     final class InspectorState: ObservableObject {
         @Published var isPresented = false
         @Published var tab: InspectorTab = .info
-        @Published var isMaskingWorkspacePresented = false
+
+        /// Masking is an inspector tab, not a second presentation mode. Keep the previous tab so
+        /// Done/Escape can return to the edit control the user came from.
+        private var tabBeforeMasking: InspectorTab = .info
+
+        /// Compatibility access for masking commands and tests. `tab` remains the one source of
+        /// truth for which inspector surface is active; changing this value only translates the
+        /// old presentation vocabulary into a tab transition.
+        var isMaskingWorkspacePresented: Bool {
+            get { tab == .masking }
+            set {
+                if newValue {
+                    if tab != .masking { tabBeforeMasking = tab }
+                    tab = .masking
+                } else if tab == .masking {
+                    tab = tabBeforeMasking
+                }
+            }
+        }
+
+        func select(_ requestedTab: InspectorTab) {
+            if requestedTab == .masking, tab != .masking {
+                tabBeforeMasking = tab
+            }
+            tab = requestedTab
+        }
     }
 
     // MARK: - Published state
@@ -265,7 +290,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     var availableInspectorTabs: [InspectorTab] {
         InspectorTab.availableTabs(
             hasImage: sourceImage != nil,
-            developPanelState: developPanelState
+            developPanelState: developPanelState,
+            hasMaskingTarget: maskingAssetID != nil
         )
     }
 
@@ -402,7 +428,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     var inspectorTab: InspectorTab {
         get { inspectorState.tab }
-        set { inspectorState.tab = newValue }
+        set { selectInspectorTab(newValue) }
+    }
+
+    /// Route every inspector-tab selection through the shared workspace transition. Masking keeps
+    /// its persistent editor and selection semantics; the other tabs remain ordinary inspector
+    /// navigation and implicitly return from Masking when selected.
+    func selectInspectorTab(_ requestedTab: InspectorTab) {
+        if requestedTab == .masking {
+            openMaskingWorkspace()
+        } else {
+            inspectorState.select(requestedTab)
+        }
     }
 
     var hasCropAdjustments: Bool { !document.crop.isIdentity }
@@ -411,13 +448,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// the one on screen — so we don't tally pixels for a panel nobody's looking at.
     enum InspectorTab: String, CaseIterable, Sendable {
         case info, light, develop, adjust
-        case effects
-        case look
+        case effects, look, masking
 
         /// The view surface selected by this tab. Keep `.adjust` as the stored compatibility case;
         /// its photographer-facing name is Color.
         enum Content: Equatable, Sendable {
-            case info, light, develop, color, effects, look
+            case info, light, develop, color, effects, look, masking
         }
 
         var content: Content {
@@ -428,6 +464,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             case .adjust: return .color
             case .effects: return .effects
             case .look: return .look
+            case .masking: return .masking
             }
         }
 
@@ -439,6 +476,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             case .adjust: return "paintpalette"
             case .effects: return "sparkles"
             case .look: return "wand.and.stars"
+            case .masking: return "wand.and.rays"
             }
         }
 
@@ -450,6 +488,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             case .adjust: return "Color"
             case .effects: return "Effects"
             case .look: return "Look"
+            case .masking: return "Masking"
             }
         }
 
@@ -462,6 +501,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             case .adjust: return "Color adjustments"
             case .effects: return "Texture, clarity, and dehaze effects"
             case .look: return "Browse and apply a Look"
+            case .masking: return "Create and edit local masks"
             }
         }
 
@@ -469,11 +509,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         static func availableTabs(
             hasImage: Bool,
-            developPanelState: DevelopPanelState
+            developPanelState: DevelopPanelState,
+            hasMaskingTarget: Bool = true
         ) -> [InspectorTab] {
             guard hasImage else { return [] }
             return allCases.filter { tab in
-                tab != .develop || developPanelState.offersDevelopTab
+                switch tab {
+                case .develop:
+                    return developPanelState.offersDevelopTab
+                case .masking:
+                    return hasMaskingTarget
+                default:
+                    return true
+                }
             }
         }
     }
@@ -2603,6 +2651,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             resetAllEffects()
         case .look:
             resetLook()
+        case .masking:
+            resetSelectedMask()
         }
     }
 

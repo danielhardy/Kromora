@@ -220,7 +220,7 @@ extension AppViewModel {
         } else if maskInteractionState.selectedLayerID == nil {
             restoreMaskSelection()
         }
-        inspectorState.isMaskingWorkspacePresented = true
+        inspectorState.select(.masking)
         inspectorState.isPresented = true
         isMaskingPanelPresented = false
     }
