@@ -226,6 +226,9 @@ extension AppViewModel {
     }
 
     func selectMaskLayer(_ id: UUID?) {
+        if let draftID = maskInteractionState.draftLayer?.id, draftID != id {
+            cancelMaskGesture()
+        }
         guard let id, document.localAdjustments.contains(where: { $0.id == id }) else {
             maskInteractionState.select(layerID: nil)
             return
@@ -234,6 +237,9 @@ extension AppViewModel {
     }
 
     func selectMaskComponent(_ componentID: UUID, in layerID: UUID) {
+        if let draftID = maskInteractionState.draftLayer?.id, draftID != layerID {
+            cancelMaskGesture()
+        }
         guard
             document.localAdjustments.contains(where: {
                 $0.id == layerID && $0.components.contains(where: { $0.id == componentID })
@@ -243,6 +249,11 @@ extension AppViewModel {
     }
 
     func createMask(_ kind: MaskCreationKind) {
+        if maskInteractionState.hasDraft {
+            cancelMaskGesture()
+        } else {
+            endUndoGrouping()
+        }
         let source: MaskSource
         switch kind {
         case .subject:
@@ -268,6 +279,24 @@ extension AppViewModel {
         let layerID = UUID()
         let component = MaskComponent(source: source)
         let name = nextMaskName(for: kind.title)
+
+        // Gradient creation is intentionally a two-stage operation. Keep the layer out of the
+        // document while the photographer is deciding whether/how to drag it; this makes Escape,
+        // a tool switch, and a cancelled click leave the document and its history untouched.
+        if kind == .linear {
+            maskInteractionState.beginPendingCreation(
+                LocalAdjustmentLayer(
+                    id: layerID, name: name,
+                    components: [MaskComponent(
+                        id: component.id, mode: .replace, source: source
+                    )]
+                ),
+                tool: .linear
+            )
+            statusMessage = "Drag across the canvas to create \(name)"
+            return
+        }
+
         updateDocument { document in
             document.localAdjustments.append(
                 LocalAdjustmentLayer(
@@ -664,9 +693,19 @@ extension AppViewModel {
 
     @discardableResult
     func nudgeSelectedMask(dx: Double, dy: Double, accelerated: Bool = false) -> Bool {
+        let selectedLayer: LocalAdjustmentLayer?
+        if let draft = maskInteractionState.draftLayer,
+            draft.id == maskInteractionState.selectedLayerID
+        {
+            selectedLayer = draft
+        } else {
+            selectedLayer = document.localAdjustments.first(where: {
+                $0.id == maskInteractionState.selectedLayerID
+            })
+        }
         guard let layerID = maskInteractionState.selectedLayerID,
             let componentID = maskInteractionState.selectedComponentID,
-            let layer = document.localAdjustments.first(where: { $0.id == layerID }),
+            let layer = selectedLayer,
             let component = layer.components.first(where: { $0.id == componentID }),
             component.isEnabled
         else { return false }
@@ -690,6 +729,12 @@ extension AppViewModel {
 
     func setMaskTool(_ tool: MaskInteractionState.Tool) {
         if maskInteractionState.hasDraft {
+            if maskInteractionState.activeTool == tool,
+                maskInteractionState.linearCreationPending
+                    || maskInteractionState.radialCreationPending
+            {
+                return
+            }
             cancelMaskGesture()
         } else {
             endUndoGrouping()
@@ -709,8 +754,11 @@ extension AppViewModel {
         let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
 
         let layer: LocalAdjustmentLayer
-        if let id = maskInteractionState.selectedLayerID,
-            let existing = document.localAdjustments.first(where: { $0.id == id }) {
+        if let draft = maskInteractionState.draftLayer,
+           draft.id == maskInteractionState.selectedLayerID {
+            layer = draft
+        } else if let id = maskInteractionState.selectedLayerID,
+                  let existing = document.localAdjustments.first(where: { $0.id == id }) {
             layer = existing
         } else if maskInteractionState.activeTool == .linear
                     || maskInteractionState.activeTool == .radial {
@@ -922,6 +970,19 @@ extension AppViewModel {
 
     func endMaskGesture() {
         let sourceSize = maskInteractionState.gestureSourceSize
+        let activeLinearHandle = maskInteractionState.activeLinearHandle
+        if activeLinearHandle == .creation,
+            let draft = maskInteractionState.draftLayer,
+            let componentIndex = draft.targetComponentIndex(
+                selected: maskInteractionState.selectedComponentID),
+            case .linear(let definition) = draft.components[componentIndex].source,
+            definition.falloff <= 0.000001
+        {
+            // A click, or a drag that never separated its endpoints, is not a creation. Discard
+            // the transient layer (or leave an existing component unchanged) without history.
+            cancelMaskGesture()
+            return
+        }
         guard var committed = maskInteractionState.commitDraft() else { return }
         for componentIndex in committed.components.indices {
             guard case .brush(var definition) = committed.components[componentIndex].source else {
@@ -945,8 +1006,19 @@ extension AppViewModel {
     func cancelMaskGesture() {
         guard maskInteractionState.hasDraft else { return }
         let selectedID = maskInteractionState.selectedLayerID
+        let previousSelection = maskInteractionState.selectionBeforePendingCreation
         maskInteractionState.cancelDraft()
-        if let selectedID, !document.localAdjustments.contains(where: { $0.id == selectedID }) {
+        maskInteractionState.clearPendingCreationSelection()
+        if let previousLayerID = previousSelection.layerID,
+           document.localAdjustments.contains(where: { $0.id == previousLayerID }) {
+            let previousComponentID = previousSelection.componentID.flatMap { componentID in
+                document.localAdjustments.first(where: { $0.id == previousLayerID })?.components
+                    .first(where: { $0.id == componentID && $0.isEnabled })?.id
+            }
+            maskInteractionState.select(
+                layerID: previousLayerID, componentID: previousComponentID)
+        } else if let selectedID,
+            !document.localAdjustments.contains(where: { $0.id == selectedID }) {
             maskInteractionState.select(layerID: nil)
         }
         endPreviewInteraction()
@@ -1036,6 +1108,9 @@ extension AppViewModel {
     }
 
     func restoreMaskSelection() {
+        if maskInteractionState.hasDraft {
+            return
+        }
         guard let first = document.localAdjustments.first else {
             maskInteractionState.select(layerID: nil)
             return
@@ -1044,10 +1119,18 @@ extension AppViewModel {
             document.localAdjustments.contains(where: {
                 $0.id == maskInteractionState.selectedLayerID
             }) ? maskInteractionState.selectedLayerID : first.id
-        maskInteractionState.select(layerID: selected)
+        let component = selected.flatMap { layerID in
+            document.localAdjustments.first(where: { $0.id == layerID })?.components.first(where: {
+                $0.id == maskInteractionState.selectedComponentID && $0.isEnabled
+            })?.id
+        }
+        maskInteractionState.select(layerID: selected, componentID: component)
     }
 
     func resetMaskingWorkspace() {
+        if maskInteractionState.hasDraft {
+            cancelMaskGesture()
+        }
         endUndoGrouping()
         updateDocument { $0.localAdjustments.removeAll() }
         maskInteractionState.select(layerID: nil)
@@ -1055,6 +1138,9 @@ extension AppViewModel {
     }
 
     func closeMaskingWorkspace() {
+        if maskInteractionState.hasDraft {
+            cancelMaskGesture()
+        }
         inspectorState.isMaskingWorkspacePresented = false
     }
 

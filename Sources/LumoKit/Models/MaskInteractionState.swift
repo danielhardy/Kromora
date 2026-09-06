@@ -121,6 +121,8 @@ final class MaskInteractionState: ObservableObject {
     private var brushLastRawPoint: CGPoint?
     private var brushDistanceSinceAcceptedSample = 0.0
     private let maximumLiveBrushSamples = 4_096
+    private var selectionBeforePendingCreationLayerID: UUID?
+    private var selectionBeforePendingCreationComponentID: UUID?
 
     // Presentation-only controls. These values intentionally never enter EditDocument, history,
     // or a render request; they describe how the photographer is inspecting the saved recipe.
@@ -214,6 +216,31 @@ final class MaskInteractionState: ObservableObject {
             gestureStartRadialDefinition = nil
         }
     }
+
+    /// Install a gradient layer as presentation-only state. The layer becomes selected immediately
+    /// so the inspector and canvas can describe the pending operation, but it is not part of the
+    /// durable document until the first valid creation drag is committed by the view model.
+    func beginPendingCreation(_ layer: LocalAdjustmentLayer, tool: Tool) {
+        selectionBeforePendingCreationLayerID = selectedLayerID
+        selectionBeforePendingCreationComponentID = selectedComponentID
+        cancelDraft()
+        draftLayer = layer
+        selectedLayerID = layer.id
+        selectedComponentID = layer.components.first?.id
+        activeTool = tool
+        linearCreationPending = tool == .linear
+        radialCreationPending = tool == .radial
+        hoveredLinearHandle = nil
+    }
+
+    var selectionBeforePendingCreation: (layerID: UUID?, componentID: UUID?) {
+        (selectionBeforePendingCreationLayerID, selectionBeforePendingCreationComponentID)
+    }
+
+    func clearPendingCreationSelection() {
+        selectionBeforePendingCreationLayerID = nil
+        selectionBeforePendingCreationComponentID = nil
+    }
     func updateDraft(_ layer: LocalAdjustmentLayer) {
         guard draftLayer != nil else { return }
         draftLayer = layer
@@ -222,6 +249,7 @@ final class MaskInteractionState: ObservableObject {
     @discardableResult
     func commitDraft() -> LocalAdjustmentLayer? {
         let committed = draftLayer
+        clearPendingCreationSelection()
         draftLayer = nil
         activeLinearHandle = nil
         activeRadialHandle = nil
@@ -319,6 +347,8 @@ final class MaskInteractionState: ObservableObject {
         brushDistanceSinceAcceptedSample = 0
         soloLayerID = nil
         soloComponentID = nil
+        resolutionState = .idle
         isSpacePanning = false
+        clearPendingCreationSelection()
     }
 }
