@@ -216,6 +216,38 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertEqual(definition.fullStrengthPoint, CGPoint(x: 0.75, y: 0.75))
     }
 
+    func testInspectorChangesFollowTheLiveLinearDraftUntilMouseUp() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.linear)
+        let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
+        let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
+
+        viewModel.setMaskTool(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.5))
+        viewModel.updateMaskComponent(componentID, in: layerID) { component in
+            if case .linear(var definition) = component.source {
+                definition.density = 0.4
+                component.source = .linear(definition)
+            }
+        }
+
+        XCTAssertEqual(
+            viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition?.density,
+            1
+        )
+        XCTAssertEqual(
+            viewModel.maskInteractionState.draftLayer?.components.first?.source.linearDefinition?.density,
+            0.4
+        )
+
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.5))
+        viewModel.endMaskGesture()
+        XCTAssertEqual(
+            viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition?.density,
+            0.4
+        )
+    }
+
     func testCancellingLinearCreationDoesNotPersistAnEmptyLayer() {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
         viewModel.setMaskTool(.linear)

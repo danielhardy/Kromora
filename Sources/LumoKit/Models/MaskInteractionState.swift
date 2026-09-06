@@ -53,6 +53,16 @@ final class MaskInteractionState: ObservableObject {
         case fullStrength
         case rotation
         case creation
+
+        var accessibilityTitle: String {
+            switch self {
+            case .zeroStrength: return "zero-strength edge"
+            case .center: return "center translation"
+            case .fullStrength: return "full-strength edge"
+            case .rotation: return "rotation"
+            case .creation: return "creation"
+            }
+        }
     }
 
     enum RadialHandle: String, Sendable, Equatable {
@@ -71,6 +81,7 @@ final class MaskInteractionState: ObservableObject {
     @Published private(set) var hoverPoint: CGPoint?
     @Published private(set) var draftLayer: LocalAdjustmentLayer?
     @Published private(set) var activeLinearHandle: LinearHandle?
+    @Published private(set) var hoveredLinearHandle: LinearHandle?
     @Published private(set) var activeRadialHandle: RadialHandle?
     @Published private(set) var linearCreationPending = false
     @Published private(set) var radialCreationPending = false
@@ -107,6 +118,7 @@ final class MaskInteractionState: ObservableObject {
         if selectionChanged {
             linearCreationPending = false
             radialCreationPending = false
+            hoveredLinearHandle = nil
         }
     }
 
@@ -209,6 +221,10 @@ final class MaskInteractionState: ObservableObject {
         gestureStartPoint = point
     }
 
+    func updateLinearHover(_ handle: LinearHandle?) {
+        hoveredLinearHandle = handle
+    }
+
     func beginRadialGesture(
         _ handle: RadialHandle, at point: CGPoint, sourceSize: CGSize
     ) {
@@ -261,6 +277,7 @@ final class MaskInteractionState: ObservableObject {
         hoverPoint = nil
         draftLayer = nil
         activeLinearHandle = nil
+        hoveredLinearHandle = nil
         activeRadialHandle = nil
         linearCreationPending = false
         radialCreationPending = false
