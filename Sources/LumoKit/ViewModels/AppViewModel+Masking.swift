@@ -85,6 +85,81 @@ extension LocalAdjustmentLayer {
 }
 
 extension AppViewModel {
+    /// Turn a validated result already shown by the Info inspector into the durable semantic
+    /// recipe used by the masking workspace. The result is intentionally passed in from the Info
+    /// model: the inspector must not start a second, debug-only inference path. Render and export
+    /// continue to resolve the saved recipe through `PhotoAnalysisCoordinator`.
+    func useInfoAnalysisMask(
+        _ kind: SemanticMaskKind,
+        demonstrated result: RegionMask,
+        pixels: NormalizedMask
+    ) {
+        guard let target = kind.infoEditingTarget,
+              let source = maskingSource,
+              let assetID = maskingAssetID else {
+            let message = "\(kind.infoTitle) mask is unavailable because no supported photo is open."
+            maskInteractionState.markMaskUnavailable(message)
+            statusMessage = message
+            return
+        }
+
+        let expectedFingerprint = PhotoAnalysisCoordinator.sourceFingerprint(for: source).cacheKey
+        guard result.kind == kind,
+              result.reference.cacheKey.assetID == assetID,
+              result.reference.cacheKey.sourceFingerprint.cacheKey == expectedFingerprint,
+              result.reference.quality == result.quality,
+              result.reference.cacheKey.kind == kind,
+              pixels.size == result.reference.size,
+              pixels.coverage > 0,
+              MaskPresentationPolicy.decision(for: result) == .actionable else {
+            let message = "The demonstrated \(kind.infoTitle) result is no longer available for this photo."
+            maskInteractionState.markMaskUnavailable(message)
+            statusMessage = message
+            return
+        }
+
+        smartMaskCreationTask?.cancel()
+        smartMaskCreationTask = nil
+        smartMaskRetryKind = nil
+        if maskInteractionState.hasDraft {
+            cancelMaskGesture()
+        } else {
+            endUndoGrouping()
+        }
+
+        let existing = document.localAdjustments.first { layer in
+            layer.components.contains { component in
+                component.source.semanticDefinition?.target == target
+            }
+        }
+        let layerID: UUID
+        let componentID: UUID
+        if let existing,
+           let component = existing.components.first(where: {
+               $0.source.semanticDefinition?.target == target
+           }) {
+            layerID = existing.id
+            componentID = component.id
+            statusMessage = "Selected \(kind.infoTitle) mask"
+        } else {
+            let component = MaskComponent(
+                source: .semantic(SemanticMaskDefinition(target: target))
+            )
+            let layer = LocalAdjustmentLayer(
+                name: nextMaskName(for: kind.infoTitle), components: [component]
+            )
+            layerID = layer.id
+            componentID = component.id
+            updateDocument { $0.localAdjustments.append(layer) }
+            statusMessage = "Created \(kind.infoTitle) editing mask"
+        }
+
+        maskInteractionState.setTool(.selection)
+        maskInteractionState.select(componentID: componentID, in: layerID)
+        maskInteractionState.markMaskResolved()
+        openMaskingWorkspace()
+    }
+
     /// The preview coordinator intentionally reports only a failed render, not Core Image or
     /// provider errors. Recover the user-facing semantic context from the request so an unavailable
     /// smart mask cannot be presented as a generic, unexplained preview failure.

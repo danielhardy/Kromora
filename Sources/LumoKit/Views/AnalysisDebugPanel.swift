@@ -30,6 +30,15 @@ final class AnalysisDebugPanelModel: ObservableObject {
             case .unknown(let name): return name
             }
         }
+
+        var editingMaskUnavailableMessage: String {
+            if let providerError, !providerError.isEmpty {
+                return "\(title) editing mask unavailable: \(providerError)"
+            }
+            guard let mask else { return "\(title) editing mask unavailable" }
+            return MaskPresentationPolicy.decision(for: mask).userMessage
+                ?? "\(title) editing mask pixels are unavailable"
+        }
     }
 
     @Published private(set) var analysis: PhotoAnalysis?
@@ -77,8 +86,9 @@ final class AnalysisDebugPanelModel: ObservableObject {
                     for kind in candidates {
                         group.addTask { [coordinator, assetID, source] in
                             do {
+                                let quality: MaskQuality = kind.isInfoEditingMask ? .preview : .analysis
                                 let mask = try await coordinator.mask(
-                                    assetID: assetID, source: source, kind: kind, quality: .analysis
+                                    assetID: assetID, source: source, kind: kind, quality: quality
                                 )
                                 let pixels = await coordinator.pixels(for: mask.reference)
                                 return MaskEntry(kind: kind, mask: mask, pixels: pixels, providerError: nil)
@@ -273,6 +283,7 @@ struct PhotoAnalysisInspectSection: View {
     @ObservedObject private var surface: PreviewSurface
     let histogram: HistogramData?
     @Binding var isExpanded: Bool
+    let onUseEditingMask: (SemanticMaskKind, RegionMask, NormalizedMask) -> Void
 
     init(
         coordinator: PhotoAnalysisCoordinator,
@@ -280,7 +291,8 @@ struct PhotoAnalysisInspectSection: View {
         source: ImageSource,
         surface: PreviewSurface,
         histogram: HistogramData?,
-        isExpanded: Binding<Bool>
+        isExpanded: Binding<Bool>,
+        onUseEditingMask: @escaping (SemanticMaskKind, RegionMask, NormalizedMask) -> Void
     ) {
         _model = StateObject(wrappedValue: AnalysisDebugPanelModel(
             coordinator: coordinator, assetID: assetID, source: source
@@ -288,6 +300,7 @@ struct PhotoAnalysisInspectSection: View {
         _surface = ObservedObject(wrappedValue: surface)
         self.histogram = histogram
         _isExpanded = isExpanded
+        self.onUseEditingMask = onUseEditingMask
     }
 
     var body: some View {
@@ -311,6 +324,8 @@ struct PhotoAnalysisInspectSection: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    Button("Retry analysis") { model.load() }
+                        .buttonStyle(.borderless)
                 }
             }
             .padding(.top, 8)
@@ -391,7 +406,37 @@ struct PhotoAnalysisInspectSection: View {
                     }
                 }
                 .font(.caption)
+
+                if entry.kind.isInfoEditingMask {
+                    infoEditingMaskAction(for: entry)
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func infoEditingMaskAction(for entry: AnalysisDebugPanelModel.MaskEntry) -> some View {
+        if model.isLoading {
+            Label("Analyzing \(entry.title) editing mask…", systemImage: "hourglass")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        } else if let mask = entry.mask, let pixels = entry.pixels,
+                  MaskPresentationPolicy.decision(for: mask) == .actionable {
+            Button {
+                onUseEditingMask(entry.kind, mask, pixels)
+            } label: {
+                Label("Use \(entry.title) as editing mask", systemImage: "wand.and.rays")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .accessibilityLabel("Use \(entry.title) as editing mask")
+            .accessibilityHint("Create or select the \(entry.title) mask in the Masking workflow")
+        } else {
+            Label(entry.editingMaskUnavailableMessage, systemImage: "slash.circle")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -411,5 +456,14 @@ struct PhotoAnalysisInspectSection: View {
         let milliseconds = Double(components.seconds) * 1_000
             + Double(components.attoseconds) / 1_000_000_000_000_000
         return String(format: "%.1f ms", milliseconds)
+    }
+}
+
+private extension SemanticMaskKind {
+    var isInfoEditingMask: Bool {
+        switch self {
+        case .subject, .person: return true
+        default: return false
+        }
     }
 }

@@ -79,7 +79,11 @@ struct InfoInspectorView: View {
                         source: source,
                         surface: viewModel.previewSurface,
                         histogram: viewModel.histogram,
-                        isExpanded: $analysisExpanded
+                        isExpanded: $analysisExpanded,
+                        onUseEditingMask: { kind, result, pixels in
+                            viewModel.useInfoAnalysisMask(
+                                kind, demonstrated: result, pixels: pixels)
+                        }
                     )
                     .id(assetID)
                 }

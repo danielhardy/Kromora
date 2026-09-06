@@ -460,6 +460,118 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertEqual(viewModel.maskingState.selectedComponentID, component.id)
         XCTAssertEqual(viewModel.maskingState.resolutionState, .ready)
     }
+
+    func testInfoAnalysisMaskCreatesAndReusesTheDemonstratedSemanticMask() async throws {
+        let directory = try Fixtures.makeTempDirectory("InfoSemanticMask")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "info.png", in: directory)
+        let viewModel = AppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json"))
+        )
+
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
+        let source = try XCTUnwrap(viewModel.maskingSource)
+        let assetID = try XCTUnwrap(viewModel.maskingAssetID)
+        let size = PixelDimensions(width: 4, height: 4)
+        let pixels = try NormalizedMask(size: size, values: Array(repeating: 1, count: 16))
+        let key = MaskCacheKey(
+            assetID: assetID,
+            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: source),
+            kind: .subject, quality: .preview, providerVersion: "info-test-1"
+        )
+        let result = RegionMask(
+            kind: .subject,
+            bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            quality: .preview,
+            reference: RegionMaskReference(cacheKey: key, size: size),
+            confidence: 1,
+            coverage: pixels.coverage
+        )
+
+        viewModel.useInfoAnalysisMask(.subject, demonstrated: result, pixels: pixels)
+        let firstLayer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let firstComponent = try XCTUnwrap(firstLayer.components.first)
+        XCTAssertEqual(firstComponent.source.semanticDefinition?.target, .subject)
+        XCTAssertEqual(viewModel.maskingState.selectedLayerID, firstLayer.id)
+        XCTAssertEqual(viewModel.maskingState.selectedComponentID, firstComponent.id)
+        XCTAssertTrue(viewModel.inspectorState.isMaskingWorkspacePresented)
+
+        viewModel.useInfoAnalysisMask(.subject, demonstrated: result, pixels: pixels)
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 1)
+        XCTAssertEqual(viewModel.maskingState.selectedLayerID, firstLayer.id)
+        XCTAssertEqual(viewModel.maskingState.selectedComponentID, firstComponent.id)
+
+        await viewModel.flushPendingWrites()
+        let reopened = AppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json"))
+        )
+        reopened.openImage(url: imageURL)
+        try await waitUntil("the persisted mask to reopen") {
+            reopened.document.localAdjustments.count == 1
+        }
+        XCTAssertEqual(
+            reopened.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
+            .subject
+        )
+
+        let secondURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "other.png", in: directory)
+        viewModel.openImage(url: secondURL)
+        try await waitUntil("the second source to load") {
+            viewModel.maskingSource != nil
+                && viewModel.maskingSource?.cacheFingerprint != source.cacheFingerprint
+        }
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the first source mask to restore") {
+            viewModel.document.localAdjustments.count == 1
+        }
+        XCTAssertEqual(
+            viewModel.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
+            .subject
+        )
+    }
+
+    func testInfoAnalysisMaskRejectsAResultFromAnotherSourceWithoutCreatingARecipe() async throws {
+        let directory = try Fixtures.makeTempDirectory("InfoStaleSemanticMask")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "info-stale.png", in: directory)
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
+        let source = try XCTUnwrap(viewModel.maskingSource)
+        let assetID = try XCTUnwrap(viewModel.maskingAssetID)
+        let size = PixelDimensions(width: 4, height: 4)
+        let key = MaskCacheKey(
+            assetID: assetID,
+            sourceFingerprint: PhotoSourceFingerprint.data(Data("different".utf8)),
+            kind: .person, quality: .preview, providerVersion: "info-test-1"
+        )
+        let result = RegionMask(
+            kind: .person,
+            bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            quality: .preview,
+            reference: RegionMaskReference(cacheKey: key, size: size),
+            confidence: 1,
+            coverage: 1
+        )
+
+        let pixels = try NormalizedMask(size: size, values: Array(repeating: 1, count: 16))
+        viewModel.useInfoAnalysisMask(.person, demonstrated: result, pixels: pixels)
+
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertEqual(
+            viewModel.maskingState.resolutionState,
+            .unavailable("The demonstrated Person result is no longer available for this photo.")
+        )
+        XCTAssertFalse(viewModel.inspectorState.isMaskingWorkspacePresented)
+        _ = source // Keep the active source assertion explicit for this identity-focused test.
+    }
 }
 
 private actor ProductionSmartMaskProvider: SemanticMaskProviding {
