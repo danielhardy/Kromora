@@ -288,8 +288,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// mode and render-scale changes that do not change the edit document.
     private var displayRevision: UInt64 = 0
     /// Baseline generation changes when the source or a comparison-frame stage (develop/crop)
-    /// changes. Look-stage edits must not invalidate an in-flight baseline that is still correct.
+    /// changes. Look-stage edits and RAW white-balance Temperature must not invalidate an in-flight
+    /// baseline that is still correct.
     private var comparisonRevision: UInt64 = 0
+    /// Presentation-only snapshot of the before image. `EditDocument.originalForComparison` is a
+    /// useful value projection, but it is derived from the live document; RAW Temperature is part of
+    /// `rawDevelop` and would therefore mutate that projection during a slider gesture. Keeping the
+    /// snapshot outside the persisted edit document lets ordinary Temperature edits remain undoable
+    /// without moving the comparison reference.
+    private var comparisonBaselineDocument = EditDocument().comparisonBaseline
+    /// The baseline revision already queued or published for the Original surface. A visible
+    /// adjusted render can follow every Temperature tick, but it must not enqueue the same Original
+    /// request again when the baseline revision is unchanged.
+    private var comparisonPreviewScheduledRevision: UInt64?
     /// The last settled request confirmed by the presentation surface. Supporting work is never
     /// admitted before this lifecycle boundary.
     private var lastPresentedVisibleRequest: RenderRequest?
@@ -1117,6 +1128,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         activeSourceReference = sourceReference
         let session = editSessions[assetID]
         document = session?.document ?? EditDocument()
+        comparisonBaselineDocument = document.comparisonBaseline
         activeHistory = session?.history ?? EditHistory()
         lastReportedMissingLUT = nil
         lutResolutionStatus = nil
@@ -1152,6 +1164,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         metadataTask?.cancel()
         metadata = ImageMetadata()
         cancelComparisonPreview(pump: false)
+        comparisonPreviewScheduledRevision = nil
         workScheduler.cancel(id: adjacentPreviewPrefetchJobID, pump: false)
         prefetchDelayTask?.cancel()
         prefetchDelayTask = nil
@@ -1270,6 +1283,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             activeHistory = EditHistory()
             let documentChanged = document != stored.document
             document = stored.document
+            comparisonBaselineDocument = document.comparisonBaseline
             editSessions[request.assetID] = PhotoEditSession(document: document, history: activeHistory)
             restoreMaskSelection()
             refreshLUTResolutionStatus()
@@ -2029,14 +2043,31 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// the control stays glued to the pointer and `document` is always the truth. Deferring the
     /// document as well would mean a read-back mid-drag saw a stale value.
     ///
-    /// Worth the machinery because a develop change costs *two* renders — `scheduleOriginalPreview`
-    /// as well as `schedulePreview`, since the comparison baseline moves with develop.
+    /// Worth the machinery because a comparison-frame develop change costs *two* renders —
+    /// `scheduleOriginalPreview` as well as `schedulePreview`. White-balance Temperature is the
+    /// exception: it is evaluated against, rather than incorporated into, the comparison frame.
+    private static func rawDevelopChangedComparisonFrame(
+        from old: RAWDevelopSettings, to new: RAWDevelopSettings
+    ) -> Bool {
+        // Temperature is an edit evaluated against the current developed source. It must not move
+        // the before pane while the user is evaluating it. Keep the other RAW develop controls in
+        // the documented baseline semantics: changing one intentionally establishes a new
+        // developed-source comparison frame.
+        var oldFrame = old
+        var newFrame = new
+        oldFrame.neutralTemperature = nil
+        newFrame.neutralTemperature = nil
+        return oldFrame != newFrame
+    }
+
     func updateDocument(debounced: Bool, _ transform: (inout EditDocument) -> Void) {
         var updated = document
         transform(&updated)
         guard updated != document else { return }
 
-        let developChanged = updated.rawDevelop != document.rawDevelop
+        let developChanged = Self.rawDevelopChangedComparisonFrame(
+            from: document.rawDevelop, to: updated.rawDevelop
+        )
         let comparisonChanged = developChanged || updated.crop != document.crop ||
             updated.localAdjustments != document.localAdjustments
         displayRevision &+= 1
@@ -2047,11 +2078,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         refreshLUTResolutionStatus()
         saveActiveDocument()
         documentRevision &+= 1
-        // Look edits leave the baseline unchanged, so an in-flight baseline remains useful. A RAW
-        // develop edit changes the explicit before-image and must invalidate that work; it will be
-        // queued again after the new visible result publishes.
+        // Look edits and RAW Temperature leave the baseline unchanged, so an in-flight baseline
+        // remains useful. Other RAW develop edits change the explicit before-image and must
+        // invalidate that work; it will be queued again after the new visible result publishes.
         if comparisonChanged {
+            comparisonBaselineDocument = updated.comparisonBaseline
             comparisonRevision &+= 1
+            comparisonPreviewScheduledRevision = nil
             cancelComparisonPreview(pump: false)
             originalPreviewSurface.clear()
         }
@@ -2256,7 +2289,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// describe the pixels on screen, and it stopped doing so precisely because it derived its image
     /// separately. Reading the request from one place is what makes that structural.
     private var displayRequest: (document: EditDocument, lut: CubeLUT?) {
-        var requested = isShowingOriginal ? document.comparisonBaseline : document
+        var requested = isShowingOriginal ? comparisonBaselineDocument : document
 
         // Crop is a composition stage. While the tool is open the overlay is expressed in the
         // full, oriented source coordinate space, so the pixels underneath it must be the same
@@ -2535,7 +2568,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Return every edit on the current photo to its neutral state as one reversible operation.
     func resetPhoto() {
         endUndoGrouping()
+        let previousDocument = document
         updateDocument { $0 = EditDocument() }
+        guard document != previousDocument else { return }
+        // Reset Photo is an explicit comparison-baseline invalidation even when the previous
+        // document differed only by RAW Temperature, which is intentionally ignored by the normal
+        // develop-frame comparison check.
+        comparisonBaselineDocument = document.comparisonBaseline
+        comparisonRevision &+= 1
+        comparisonPreviewScheduledRevision = nil
+        cancelComparisonPreview(pump: false)
+        originalPreviewSurface.clear()
+        pendingDevelopChange = true
     }
 
     /// Reset the currently visible inspector stage without crossing into another stage. The
@@ -2563,17 +2607,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     private func applyHistoryDocument(_ restored: EditDocument) {
-        let developChanged = restored.rawDevelop != document.rawDevelop
+        let developChanged = Self.rawDevelopChangedComparisonFrame(
+            from: document.rawDevelop, to: restored.rawDevelop
+        )
         let comparisonChanged = developChanged || restored.crop != document.crop ||
             restored.localAdjustments != document.localAdjustments
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         document = restored
+        if comparisonChanged {
+            comparisonBaselineDocument = restored.comparisonBaseline
+            comparisonPreviewScheduledRevision = nil
+        }
         refreshLUTResolutionStatus()
         saveActiveDocument(force: true)
         documentRevision &+= 1
         if comparisonChanged {
             comparisonRevision &+= 1
+            comparisonPreviewScheduledRevision = nil
             cancelComparisonPreview(pump: false)
             originalPreviewSurface.clear()
         }
@@ -2678,15 +2729,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard (lastPresentedVisibleRequest != nil || hasCurrentPreviewCandidate),
               (isSideBySideVisible || allowHiddenPreparation),
               let imageSource else {
+            comparisonPreviewScheduledRevision = nil
             cancelComparisonPreview()
             originalPreviewSurface.clear()
             return
         }
-        let baseline = document.comparisonBaseline
+        guard comparisonPreviewScheduledRevision != comparisonRevision else { return }
+        let baseline = comparisonBaselineDocument
         let box = previewRenderTargetSize(for: baseline, surface: .comparisonBaseline)
         let sourceRevision = self.sourceRevision
         let comparisonRevision = self.comparisonRevision
         let assetID = self.activeAssetID
+        comparisonPreviewScheduledRevision = comparisonRevision
 
         workScheduler.enqueue(
             id: comparisonPreviewJobID, lane: .editor, priority: .comparison
@@ -2759,6 +2813,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
         } else {
             cancelComparisonPreview()
+            comparisonPreviewScheduledRevision = nil
             originalPreviewSurface.clear()
         }
         return true
