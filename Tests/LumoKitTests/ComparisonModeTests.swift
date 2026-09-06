@@ -252,6 +252,138 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         })
     }
 
+    /// Standard-image Temperature is a post-render adjustment and has historically been stripped
+    /// from `EditDocument.comparisonBaseline`. Keep that contract visible at the request boundary:
+    /// the adjusted request receives the new value while the Original request remains unchanged.
+    func testStandardTemperatureEditLeavesOriginalRequestAtItsBaseline() async throws {
+        let defaults = makeDefaults()
+        let fake = FakeRenderEngine()
+        let viewModel = AppViewModel(
+            engine: fake,
+            editStore: EditDocumentStore(
+                fileURL: tempDirectory.appendingPathComponent("standard-temperature-edits.json")
+            ),
+            preferences: defaults
+        )
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "standard-temperature.png", in: tempDirectory
+        )
+
+        viewModel.openImage(url: image)
+        try await waitUntil("the settled standard preview") {
+            viewModel.sourceName == image.lastPathComponent && viewModel.previewSurface.image != nil
+        }
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        try await waitUntil("the adjusted standard preview") {
+            await fake.previewRequests.contains { $0.document.adjustments == [.exposure(ev: 0.5)] }
+        }
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        try await waitUntil("the standard baseline preview") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+
+        let baseline = viewModel.document.comparisonBaseline
+        let beforeTemperature = await fake.previewRequests
+        viewModel.whiteBalanceBinding(for: .temperature).wrappedValue = 9000
+
+        try await waitUntil("the adjusted standard temperature preview") {
+            await fake.previewRequests.contains {
+                $0.document.adjustments.contains {
+                    if case .temperatureTint(let temp, _) = $0 { return temp == 4000 }
+                    return false
+                }
+            }
+        }
+        let afterTemperature = await fake.previewRequests
+        let newRequests = Array(afterTemperature.dropFirst(beforeTemperature.count))
+        XCTAssertTrue(newRequests.contains { $0.document.adjustments.contains { $0.slot == .temperatureTint } })
+        XCTAssertTrue(
+            newRequests.filter {
+                !$0.document.adjustments.contains { $0.slot == .temperatureTint }
+            }.allSatisfy { $0.document == baseline },
+            "every Original-side request after a standard Temperature edit must keep the baseline"
+        )
+
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        try await waitUntil("the reopened standard baseline preview") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+        let reopenedRequests = await fake.previewRequests
+        XCTAssertTrue(
+            reopenedRequests.last?.document == baseline,
+            "reopening split view must reuse the same standard-image baseline"
+        )
+    }
+
+    /// RAW Temperature lives in `rawDevelop`, so a dynamic `originalForComparison` would otherwise
+    /// change under the slider. The request log proves both sides of the split: only the adjusted
+    /// request receives the new decoder temperature, while the Original request keeps the snapshot
+    /// captured before the edit.
+    func testRAWTemperatureEditLeavesOriginalRequestAtItsBaseline() async throws {
+        let defaults = makeDefaults()
+        let fake = FakeRenderEngine()
+        let viewModel = AppViewModel(
+            engine: fake,
+            editStore: EditDocumentStore(
+                fileURL: tempDirectory.appendingPathComponent("raw-temperature-edits.json")
+            ),
+            preferences: defaults
+        )
+        // FakeRenderEngine models RAW preparation from the extension, so the fixture need not be a
+        // licensed camera file. This covers the RAW-aware routing without depending on a decoder.
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "raw-temperature.dng", in: tempDirectory
+        )
+
+        viewModel.openImage(url: image)
+        try await waitUntil("the settled RAW preview") {
+            viewModel.sourceName == image.lastPathComponent
+                && viewModel.sourceIsRAW
+                && viewModel.previewSurface.image != nil
+        }
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        try await waitUntil("the adjusted RAW preview") {
+            await fake.previewRequests.contains { $0.document.adjustments == [.exposure(ev: 0.5)] }
+        }
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        try await waitUntil("the RAW baseline preview") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+
+        let baseline = viewModel.document.comparisonBaseline
+        let beforeTemperature = await fake.previewRequests
+        viewModel.whiteBalanceBinding(for: .temperature).wrappedValue = 9000
+
+        try await waitUntil("the adjusted RAW temperature preview") {
+            await fake.previewRequests.contains {
+                $0.document.rawDevelop.neutralTemperature == 9000
+            }
+        }
+        let afterTemperature = await fake.previewRequests
+        let newRequests = Array(afterTemperature.dropFirst(beforeTemperature.count))
+        XCTAssertTrue(
+            newRequests.contains { $0.document.rawDevelop.neutralTemperature == 9000 },
+            "the adjusted RAW request must receive the new Temperature"
+        )
+        XCTAssertTrue(
+            newRequests.filter { $0.document.rawDevelop.neutralTemperature != 9000 }
+                .allSatisfy { $0.document == baseline },
+            "no non-adjusted request may adopt the new RAW Temperature"
+        )
+
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        try await waitUntil("the reopened RAW baseline preview") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+        let reopenedRequests = await fake.previewRequests
+        XCTAssertTrue(
+            reopenedRequests.last?.document == baseline,
+            "reopening split view must reuse the same RAW baseline"
+        )
+    }
+
     func testLateBaselineFromPreviousPhotoCannotPublish() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
