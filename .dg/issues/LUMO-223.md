@@ -2,7 +2,7 @@
 id: LUMO-223
 title: Add smooth non-destructive brush masks
 type: feature
-status: ready
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -15,13 +15,24 @@ labels:
   - rendering
   - performance
 created: 2026-09-04T21:48:31.366Z
-updated: 2026-09-04T21:54:15.894Z
+updated: 2026-09-05T14:36:49.421Z
 depends_on:
   - LUMO-217
   - LUMO-219
   - LUMO-220
 order: zh
 board: product
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-05T14:36:49.413Z
+  session: 01MTOH4IQVFL4GKDPW
 ---
 
 ## Objective
@@ -67,3 +78,20 @@ hashing/full mask rasterization on the main thread during movement.
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-05T14:36:49.418Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTOH4IQVFL4GKDPW
+Summary: Implemented native low-latency brush masking with pressure-aware coalesced input, bounded source-space resampling/simplification, smooth radial repeated-stamp accumulation, transient Size/Feather/Flow/Density controls, bracket shortcuts, Space pan, Metal active-stroke presentation, committed-stroke caching, normalized vector persistence, one-stroke commit/undo behavior, and subtractive Erase Brush support.

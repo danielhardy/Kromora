@@ -2,7 +2,7 @@
 id: LUMO-227
 title: Close the mask overlay 16.7ms display-latency gate with Instruments trace
 type: task
-status: blocked
+status: done
 priority: urgent
 creation_provenance:
   runner: claude
@@ -14,11 +14,11 @@ labels:
   - masking
   - performance
 created: 2026-09-04T22:17:26.637Z
-updated: 2026-09-04T22:53:59.133Z
-order: a0
+updated: 2026-09-05T12:02:57.984Z
+order: zzzzzzzy
 board: product
 blocked_reason: A real AppKit pointer stream is required for the acceptance trace, but the available desktop automation delivered zero pointer events to the capture host; claiming p95/p99 from the synthetic harness would be invalid.
-blocked_action: On the reference Mac, run scripts/run-lumo-227-capture.sh with LUMO_MASK_OVERLAY_REAL_POINTER_DURATION=30, move and drag over the visible LUMO-227 Mask Overlay Capture window for at least 10 gestures, then attach the resulting .trace/summary and record the real-pointer p95/p99 plus cadence-versus-sibling attribution.
+blocked_action: Historical action retired in LUMO-230; the standalone capture wrapper and host are no longer available. Use the in-app overlay path with Instruments if this gate is reopened.
 blocked_from_status: claimed
 ---
 

@@ -68,8 +68,9 @@ retired in LUMO-230, so the real-pointer capture workflow is no longer available
 
 ## Remaining handoff gate
 
-Run the wrapper on the reference Mac with a human moving and dragging over the visible capture
-window, then attach the resulting trace/summary and record p95/p99 for brush, gradient handles,
-smart refinement, source switching, zoom/pan, ten layers, 45 MP input, and full-resolution export.
+Use Instruments on the in-app Lumo mask-overlay path on the reference Mac with a human moving and
+dragging over the visible editor, then attach the resulting trace/summary and record p95/p99 for
+brush, gradient handles, smart refinement, source switching, zoom/pan, ten layers, 45 MP input, and
+full-resolution export.
 This is the only remaining action that requires a human display/gesture session rather than a code or
 ordinary dependency change.

@@ -2,7 +2,7 @@
 id: LUMO-226
 title: Harden masking accessibility, correctness, and performance
 type: task
-status: ready
+status: blocked
 priority: high
 creation_provenance:
   runner: codex
@@ -15,11 +15,14 @@ labels:
   - accessibility
   - performance
 created: 2026-09-04T21:48:32.962Z
-updated: 2026-09-04T21:54:17.742Z
+updated: 2026-09-05T15:28:55.091Z
 depends_on:
   - LUMO-225
-order: zx
+order: a0
 board: product
+blocked_reason: The required Release Instruments evidence needs a human-driven logged-in display gesture session; this headless run could compile the benchmark but could not obtain a drawable/pointer presentation callback.
+blocked_action: Use Instruments on the in-app Lumo mask-overlay path on the reference Mac with a human-driven display gesture session, then attach the trace/summary and record p95/p99 for the required masking scenarios.
+blocked_from_status: claimed
 ---
 
 ## Objective
@@ -66,6 +69,10 @@ DG tickets for unrelated findings rather than expanding this gate indefinitely.
 
 The epic is not complete if a required mask type works only in the overlay, only in preview, or only
 in export. The same saved definition must drive every quality tier.
+
+### Comment — codex @ 2026-09-05T15:28:54.678Z
+
+Implemented and committed as 9833e1b (LUMO-226: Harden masking integration). Added bounded live brush sampling and stroke-history preservation, byte-bounded/flushable brush raster caching, async mask revision supersession guards, source/cache/memory-pressure invalidation, composed overlay solo/inspection/accessibility actions, masking keyboard shortcuts/help, and regression coverage. Focused mask/cache/accessibility lane passes 59 tests with one intentional RAW skip; Release app bundle, package asset/signature checks, dg validate, and git diff --check pass. Full parallel suite still reproduces the known unrelated LUMO-231 failures. Published methodology/results in docs/LUMO-226-MASKING-HARDENING-REPORT-2026-09-05.md; no hardware p95 claim is made because this session could not obtain a drawable/pointer callback.
 
 ## Agent log
 
