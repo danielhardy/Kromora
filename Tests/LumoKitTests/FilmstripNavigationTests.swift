@@ -53,10 +53,13 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         while await engine.sourcePreparationCount < 1 { await Task.yield() }
         viewModel.openImage(url: second)
         viewModel.openImage(url: third)
+        let managedThirdURL = try XCTUnwrap(
+            viewModel.collection.items.first(where: { $0.displayName == "third" })?.url
+        )
 
         await engine.releaseSourcePreparation()
         let deadline = Date().addingTimeInterval(2)
-        while viewModel.sourceURL != third {
+        while viewModel.sourceURL != managedThirdURL {
             if Date() > deadline { return XCTFail("the newest source did not finish loading") }
             await Task.yield()
         }

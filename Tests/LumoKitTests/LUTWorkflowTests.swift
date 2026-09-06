@@ -229,6 +229,8 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("paste.json"))
         )
+        relaunched.collection.loadFromFolder(first.deletingLastPathComponent())
+        await relaunched.collection.scanCompletion()
         relaunched.library.setFolder(lookFolder)
         while relaunched.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
         relaunched.openImage(url: second)

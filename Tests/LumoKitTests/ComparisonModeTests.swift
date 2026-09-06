@@ -201,10 +201,11 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         }
         let requests = await fake.previewRequests
         XCTAssertGreaterThan(requests.count, requestCountBeforeToggle)
+        let managedURL = try XCTUnwrap(viewModel.sourceURL)
         XCTAssertTrue(requests.contains {
             $0.document == viewModel.document.comparisonBaseline
                 && $0.lutID == nil
-                && $0.source?.backing == .url(image)
+                && $0.source?.backing == .url(managedURL)
         })
         XCTAssertNotNil(viewModel.previewSurface.image)
         XCTAssertNotNil(viewModel.originalPreviewSurface.image)
@@ -271,13 +272,14 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         viewModel.openImage(url: first)
         try await waitUntil("the first main preview request") { await fake.previewRequests.count >= 1 }
         try await waitUntil("the first main preview") { viewModel.previewSurface.image != nil }
+        let firstManagedURL = try XCTUnwrap(viewModel.sourceURL)
 
         await fake.gatePreviews()
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
         try await waitUntil("the edited first preview request") {
             let requests = await fake.previewRequests
             return requests.contains {
-                $0.source?.backing == .url(first) && $0.document == viewModel.document
+                $0.source?.backing == .url(firstManagedURL) && $0.document == viewModel.document
             }
         }
         XCTAssertTrue(viewModel.toggleSideBySide())
@@ -288,6 +290,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         XCTAssertNil(viewModel.originalPreviewSurface.image,
                      "the source switch must clear the previous baseline immediately")
         try await waitUntil("the second source") { viewModel.sourceName == second.lastPathComponent }
+        let secondManagedURL = try XCTUnwrap(viewModel.sourceURL)
         await fake.releaseNextPreview()
         try await waitUntil("the second main preview request") { await fake.previewRequests.count >= 4 }
         XCTAssertNil(viewModel.originalPreviewSurface.image,
@@ -300,9 +303,9 @@ final class ComparisonModeTests: TempDirectoryTestCase {
                 && viewModel.originalPreviewSurface.image != nil
         }
         let requests = await fake.previewRequests
-        XCTAssertTrue(requests.contains { $0.source?.backing == .url(first) && $0.document == EditDocument() })
-        XCTAssertTrue(requests.contains { $0.source?.backing == .url(second) && $0.document == EditDocument() })
-        XCTAssertTrue(requests.filter { $0.source?.backing == .url(second) }.allSatisfy {
+        XCTAssertTrue(requests.contains { $0.source?.backing == .url(firstManagedURL) && $0.document == EditDocument() })
+        XCTAssertTrue(requests.contains { $0.source?.backing == .url(secondManagedURL) && $0.document == EditDocument() })
+        XCTAssertTrue(requests.filter { $0.source?.backing == .url(secondManagedURL) }.allSatisfy {
             $0.document == EditDocument()
         })
     }
@@ -342,7 +345,8 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let requests = await fake.previewRequests
         XCTAssertGreaterThanOrEqual(requests.count, 2)
         XCTAssertTrue(requests.allSatisfy { $0.document.isIdentity })
-        XCTAssertTrue(requests.allSatisfy { $0.source?.backing == .url(image) })
+        let managedURL = try XCTUnwrap(viewModel.sourceURL)
+        XCTAssertTrue(requests.allSatisfy { $0.source?.backing == .url(managedURL) })
         XCTAssertEqual(viewModel.sourceName, image.lastPathComponent)
     }
 

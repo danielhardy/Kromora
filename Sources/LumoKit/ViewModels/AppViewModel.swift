@@ -2636,7 +2636,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard assetID == activeAssetID,
               sourceRevision == self.sourceRevision,
               displayRevision == self.displayRevision,
-              request.source == imageSource else { return }
+              request.source == imageSource,
+              request.document == displayRequest.document else { return }
         previewState = .ready
         if !isAutoAdjustmentInProgress { autoAdjustmentState = .ready }
         lastPresentedVisibleRequest = request
@@ -2679,6 +2680,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             id: comparisonPreviewJobID, lane: .editor, priority: .comparison
         ) { [weak self, engine] in
             guard !Task.isCancelled, let self else { return }
+            // Cancellation can arrive after this job has been admitted to the scheduler but
+            // before the renderer call begins. Check the same source/revision fence before asking
+            // the engine, otherwise an obsolete baseline still consumes a render and looks like a
+            // cross-photo comparison request even though its eventual publication is discarded.
+            guard assetID == self.activeAssetID,
+                  sourceRevision == self.sourceRevision,
+                  comparisonRevision == self.comparisonRevision,
+                  self.imageSource == imageSource else { return }
             let request = RenderRequest(
                 source: imageSource, assetID: assetID, document: baseline, lut: nil,
                 targetSize: box, quality: .preview, output: .raster, space: .current
@@ -2941,7 +2950,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// `docs/CODE_REVIEW.md` §5 already records for every other panel in the app.
     var exportRequest: (source: ImageSource, document: EditDocument, lut: CubeLUT?, baseName: String)? {
         guard let imageSource else { return nil }
-        let base = sourceURL?.deletingPathExtension().lastPathComponent ?? "image"
+        // `sourceURL` is the managed copy for one-off opens and may carry Lumo's internal
+        // de-duplication prefix. The user-facing name is retained separately in `sourceName`.
+        let base = sourceName.isEmpty
+            ? (sourceURL?.deletingPathExtension().lastPathComponent ?? "image")
+            : URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
         return (
             source: imageSource,
             document: document,
