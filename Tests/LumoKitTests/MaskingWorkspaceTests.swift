@@ -652,6 +652,52 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertEqual(viewModel.maskingState.resolutionState, .ready)
     }
 
+    func testRetryingFailedSmartComponentReattemptsTheOriginalLayerAdd() async throws {
+        let directory = try Fixtures.makeTempDirectory("SmartMaskComponentRetry")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "retry.png", in: directory)
+        let store = MaskStore(directory: directory.appendingPathComponent("masks"))
+        let provider = RetryingSmartMaskProvider(store: store)
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store, maskProvider: provider, stages: [:]
+        )
+        let viewModel = AppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json")),
+            photoAnalysisCoordinator: coordinator
+        )
+
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
+        viewModel.createMask(.brush)
+        let layerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
+
+        viewModel.addSmartMaskComponent(to: layerID, kind: .subject, mode: .add)
+        try await waitUntil("the first component analysis to fail") {
+            if case .unavailable = viewModel.maskingState.resolutionState { return true }
+            return false
+        }
+        let firstCallCount = await provider.callCount
+        XCTAssertEqual(firstCallCount, 1)
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 1)
+        XCTAssertEqual(viewModel.document.localAdjustments.first?.components.count, 1)
+
+        viewModel.retryMaskAnalysis()
+        try await waitUntil("the retried component to resolve") {
+            viewModel.maskingState.resolutionState == .ready
+                && viewModel.document.localAdjustments.first?.components.count == 2
+        }
+
+        let retryCallCount = await provider.callCount
+        XCTAssertEqual(retryCallCount, 2)
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 1)
+        let layer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        XCTAssertEqual(layer.id, layerID)
+        XCTAssertEqual(layer.components.last?.source.semanticDefinition?.target, .subject)
+        XCTAssertEqual(layer.components.last?.mode, .add)
+    }
+
     func testInfoAnalysisMaskCreatesAndReusesTheDemonstratedSemanticMask() async throws {
         let directory = try Fixtures.makeTempDirectory("InfoSemanticMask")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -818,6 +864,44 @@ private actor ProductionSmartMaskProvider: SemanticMaskProviding {
             kind: kind,
             quality: quality,
             providerVersion: "production-test-1"
+        )
+        let reference = try await store.store(pixels, for: key, quality: quality)
+        return RegionMask(
+            kind: kind,
+            bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            quality: quality,
+            reference: reference,
+            confidence: 1,
+            coverage: pixels.coverage
+        )
+    }
+}
+
+private enum RetryingSmartMaskProviderError: Error {
+    case transient
+}
+
+private actor RetryingSmartMaskProvider: SemanticMaskProviding {
+    private(set) var callCount = 0
+    private let store: MaskStore
+
+    init(store: MaskStore) { self.store = store }
+
+    func mask(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        callCount += 1
+        guard callCount > 1 else { throw RetryingSmartMaskProviderError.transient }
+
+        let pixels = try NormalizedMask(
+            size: image.dimensions,
+            values: Array(repeating: 1, count: image.dimensions.width * image.dimensions.height)
+        )
+        let assetID = image.assetID ?? PhotoAnalysisCoordinator.assetID(for: image.source)
+        let key = MaskCacheKey(
+            assetID: assetID,
+            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: image.source),
+            kind: kind,
+            quality: quality,
+            providerVersion: "retry-test-1"
         )
         let reference = try await store.store(pixels, for: key, quality: quality)
         return RegionMask(

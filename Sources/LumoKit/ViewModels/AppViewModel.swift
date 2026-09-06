@@ -556,7 +556,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Smart-mask creation performs provider work before inserting the durable recipe. This keeps
     /// unsupported sources and failed analysis from leaving an inert component in the document.
     var smartMaskCreationTask: Task<Void, Never>?
-    var smartMaskRetryKind: MaskCreationKind?
+    var smartMaskRetryContext: SmartMaskRetryContext?
 
     @Published var isLoading: Bool = false
     enum PreviewState: Equatable, Sendable {
@@ -1167,7 +1167,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         cancelAutoAdjustment()
         smartMaskCreationTask?.cancel()
         smartMaskCreationTask = nil
-        smartMaskRetryKind = nil
+        smartMaskRetryContext = nil
         // Discrete edits are queued normally; switching sources is a durability boundary for them.
         // Do not rewrite an unchanged document merely because navigation occurred.
         requestPersistenceFlush()
