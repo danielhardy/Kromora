@@ -206,6 +206,46 @@ final class CanvasNavigationTests: XCTestCase {
         assertPoint(try XCTUnwrap(twoX.sourceNormalizedPoint(forViewport: twoPoint)), equals: sourcePoint)
     }
 
+    func testMaskTransformConvertsViewportDeltaWithoutCropOrBackingAmplification() throws {
+        let sourceSize = CGSize(width: 2400, height: 1200)
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.15, y: 0.2, width: 0.65, height: 0.5)
+        )
+        var navigation = CanvasNavigation()
+        navigation.fill()
+        navigation.setZoom(3)
+        navigation.pan(
+            by: CGSize(width: -180, height: 44),
+            imageExtent: CGRect(origin: .zero, size: sourceSize),
+            viewportSize: CGSize(width: 640, height: 420)
+        )
+        let transform = CanvasMaskTransform(
+            sourceSize: sourceSize, crop: crop, navigation: navigation,
+            viewportSize: CGSize(width: 640, height: 420), backingScale: 2
+        )
+        let center = CGPoint(x: 0.52, y: 0.58)
+        let start = try XCTUnwrap(transform.viewportPoint(forSourceNormalized: center))
+        let viewportDelta = CGSize(width: 10, height: -6)
+        let normalizedDelta = try XCTUnwrap(
+            transform.sourceNormalizedDelta(forViewportDelta: viewportDelta)
+        )
+        let moved = CGPoint(x: center.x + normalizedDelta.x, y: center.y + normalizedDelta.y)
+        let movedViewport = try XCTUnwrap(transform.viewportPoint(forSourceNormalized: moved))
+
+        XCTAssertEqual(movedViewport.x - start.x, viewportDelta.width, accuracy: 0.000_001)
+        XCTAssertEqual(movedViewport.y - start.y, viewportDelta.height, accuracy: 0.000_001)
+        XCTAssertEqual(
+            normalizedDelta.x,
+            viewportDelta.width * 2 / transform.canvasTransform.scale / sourceSize.width,
+            accuracy: 0.000_000_001
+        )
+        XCTAssertEqual(
+            normalizedDelta.y,
+            viewportDelta.height * 2 / transform.canvasTransform.scale / sourceSize.height,
+            accuracy: 0.000_000_001
+        )
+    }
+
     func testMaskTransformFollowsFitFillZoomPanAndWindowResize() throws {
         let sourceSize = CGSize(width: 1200, height: 800)
         let sourcePoint = CGPoint(x: 0.25, y: 0.65)

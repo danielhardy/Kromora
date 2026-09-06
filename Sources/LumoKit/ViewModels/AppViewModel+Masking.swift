@@ -847,7 +847,8 @@ extension AppViewModel {
 
     func updateMaskGesture(
         to point: CGPoint, pressure: Double? = nil,
-        modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags
+        modifiers: NSEvent.ModifierFlags = NSEvent.modifierFlags,
+        sourceDelta: CGPoint? = nil
     ) {
         guard var draft = maskInteractionState.draftLayer,
             let componentIndex = draft.targetComponentIndex(
@@ -903,7 +904,8 @@ extension AppViewModel {
                 guard let start = maskInteractionState.gestureStartPoint,
                     let original = maskInteractionState.gestureStartDefinition else { return }
                 updated = LinearGradientMaskMath.translated(
-                    original, by: CGPoint(x: clamped.x - start.x, y: clamped.y - start.y))
+                    original,
+                    by: sourceDelta ?? CGPoint(x: clamped.x - start.x, y: clamped.y - start.y))
             case .rotation:
                 let center = original.centerPoint
                 let targetAngle = atan2(clamped.y - center.y, clamped.x - center.x) - .pi / 2
@@ -936,9 +938,11 @@ extension AppViewModel {
             case .center:
                 guard let start = maskInteractionState.gestureStartPoint else { return }
                 var moved = original
+                let delta = sourceDelta ?? CGPoint(
+                    x: clamped.x - start.x, y: clamped.y - start.y)
                 moved.center = CGPoint(
-                    x: min(max(original.center.x + clamped.x - start.x, 0), 1),
-                    y: min(max(original.center.y + clamped.y - start.y, 0), 1))
+                    x: min(max(original.center.x + delta.x, 0), 1),
+                    y: min(max(original.center.y + delta.y, 0), 1))
                 updated = moved
             case .horizontalRadius, .verticalRadius, .corner:
                 updated = resizedRadial(

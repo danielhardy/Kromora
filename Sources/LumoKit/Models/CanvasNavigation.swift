@@ -340,6 +340,22 @@ struct CanvasMaskTransform: Equatable, Sendable {
         )
     }
 
+    /// Convert a viewport translation directly into oriented-source normalized coordinates.
+    ///
+    /// Gesture code must use a delta for translation handles. Converting two absolute points and
+    /// subtracting them is subtly unsafe at crop/pan boundaries because each point can be clamped
+    /// independently before it reaches the mask model. Keeping the scale conversion here also
+    /// makes the Retina backing conversion explicit: the caller supplies SwiftUI points, while the
+    /// canvas transform operates in drawable pixels.
+    func sourceNormalizedDelta(forViewportDelta delta: CGSize) -> CGPoint? {
+        guard isValid, canvasTransform.scale.isFinite, canvasTransform.scale > 0,
+              delta.width.isFinite, delta.height.isFinite else { return nil }
+        return CGPoint(
+            x: delta.width * backingScale / canvasTransform.scale / sourceSize.width,
+            y: delta.height * backingScale / canvasTransform.scale / sourceSize.height
+        )
+    }
+
     func viewportRect(forSourceNormalized rect: CGRect) -> CGRect? {
         guard let topLeft = viewportPoint(forSourceNormalized: rect.origin),
               let bottomRight = viewportPoint(forSourceNormalized: CGPoint(x: rect.maxX, y: rect.maxY))

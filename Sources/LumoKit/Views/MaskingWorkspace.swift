@@ -944,6 +944,7 @@ struct MaskCanvasOverlay: View {
 
     @State private var isDrawing = false
     @State private var lastPanPoint: CGPoint?
+    @State private var gestureStartViewportPoint: CGPoint?
     @State private var maskImage: CGImage?
 
     var body: some View {
@@ -1073,6 +1074,14 @@ struct MaskCanvasOverlay: View {
             self.lastPanPoint = sample.point
         }
 
+        func sourceDelta(for sample: MaskNativePointerSample) -> CGPoint? {
+            guard let start = gestureStartViewportPoint else { return nil }
+            return transform.sourceNormalizedDelta(forViewportDelta: CGSize(
+                width: sample.point.x - start.x,
+                height: sample.point.y - start.y
+            ))
+        }
+
         switch event {
         case .moved(let samples):
             if let sample = samples.last { updateHover(sample) }
@@ -1085,6 +1094,7 @@ struct MaskCanvasOverlay: View {
             }
             guard let point = transform.sourceNormalizedPoint(forViewport: first.point) else { return }
             isDrawing = true
+            gestureStartViewportPoint = first.point
             let handle = linearHandle(at: first.point, transform: transform) ?? .creation
             let radial = radialHandle(at: first.point, transform: transform)
             viewModel.beginMaskGesture(
@@ -1094,7 +1104,8 @@ struct MaskCanvasOverlay: View {
             for sample in samples.dropFirst() {
                 guard let point = transform.sourceNormalizedPoint(forViewport: sample.point) else { continue }
                 viewModel.updateMaskGesture(
-                    to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags)
+                    to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags,
+                    sourceDelta: sourceDelta(for: sample))
             }
         case .dragged(let samples):
             for sample in samples {
@@ -1103,7 +1114,8 @@ struct MaskCanvasOverlay: View {
                     pan(sample)
                 } else if let point = transform.sourceNormalizedPoint(forViewport: sample.point) {
                     viewModel.updateMaskGesture(
-                        to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags)
+                        to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags,
+                        sourceDelta: sourceDelta(for: sample))
                 }
             }
         case .ended(let sample):
@@ -1113,11 +1125,13 @@ struct MaskCanvasOverlay: View {
                     lastPanPoint = nil
                 } else if let point = transform.sourceNormalizedPoint(forViewport: sample.point) {
                     viewModel.updateMaskGesture(
-                        to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags)
+                        to: point, pressure: sample.pressure, modifiers: NSEvent.modifierFlags,
+                        sourceDelta: sourceDelta(for: sample))
                 }
             }
             if !maskingState.isSpacePanning, isDrawing {
                 isDrawing = false
+                gestureStartViewportPoint = nil
                 viewModel.endMaskGesture()
             }
         }
