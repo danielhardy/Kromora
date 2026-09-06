@@ -151,6 +151,82 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         }
     }
 
+    func testSemanticPreviewRejectsAnUnavailableMaskInsteadOfSilentlySkippingIt() async throws {
+        let source = try source()
+        let semantic = LocalAdjustmentLayer(
+            components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: .foreground)))],
+            adjustments: LocalAdjustments(exposure: 1)
+        )
+
+        do {
+            _ = try await RenderEngine().render(RenderRequest(
+                source: source, document: EditDocument(localAdjustments: [semantic]),
+                targetSize: CGSize(width: 8, height: 4), quality: .preview, output: .raster
+            ))
+            XCTFail("an unavailable semantic mask must not render as an unmasked success")
+        } catch let error as LocalMaskResolutionError {
+            XCTAssertEqual(
+                error,
+                .semanticMaskUnavailable(target: .foreground, quality: .preview)
+            )
+        }
+    }
+
+    func testForegroundAndBackgroundSemanticMasksChangePixelsInPreviewAndExport() async throws {
+        let source = try source()
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("semantic-masks"))
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store,
+            maskProvider: SplitSemanticMaskProvider(store: store),
+            stages: [:]
+        )
+        let engine = RenderEngine(maskResolver: CoordinatorLocalMaskResolver(coordinator: coordinator))
+        let base = try await engine.render(RenderRequest(
+            source: source, document: EditDocument(), targetSize: CGSize(width: 8, height: 4),
+            quality: .preview, output: .raster
+        ))
+
+        func semanticLayer(_ target: SemanticTarget, exposure: Double) -> LocalAdjustmentLayer {
+            LocalAdjustmentLayer(
+                components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: target)))],
+                adjustments: LocalAdjustments(exposure: exposure)
+            )
+        }
+        let foreground = try await engine.render(RenderRequest(
+            source: source,
+            document: EditDocument(localAdjustments: [semanticLayer(.foreground, exposure: 2)]),
+            targetSize: CGSize(width: 8, height: 4), quality: .preview, output: .raster
+        ))
+        let background = try await engine.render(RenderRequest(
+            source: source,
+            document: EditDocument(localAdjustments: [semanticLayer(.background, exposure: -2)]),
+            targetSize: CGSize(width: 8, height: 4), quality: .preview, output: .raster
+        ))
+
+        let basePixels = try Pixels.bytes(of: image(from: base))
+        let foregroundPixels = try Pixels.bytes(of: image(from: foreground))
+        let backgroundPixels = try Pixels.bytes(of: image(from: background))
+        func difference(_ lhs: [UInt8], _ rhs: [UInt8], x: Int, y: Int) -> Int {
+            let offset = (y * 8 + x) * 4
+            return (0..<3).reduce(0) { $0 + abs(Int(lhs[offset + $1]) - Int(rhs[offset + $1])) }
+        }
+
+        XCTAssertGreaterThan(difference(foregroundPixels, basePixels, x: 1, y: 2), 10)
+        XCTAssertLessThan(difference(foregroundPixels, basePixels, x: 6, y: 2), 3)
+        XCTAssertLessThan(difference(backgroundPixels, basePixels, x: 1, y: 2), 3)
+        XCTAssertGreaterThan(difference(backgroundPixels, basePixels, x: 6, y: 2), 10)
+
+        let foregroundExport = try await engine.render(RenderRequest(
+            source: source,
+            document: EditDocument(localAdjustments: [semanticLayer(.foreground, exposure: 2)]),
+            quality: .export, output: .raster
+        ))
+        assertPixelsEqual(
+            foregroundPixels, try Pixels.bytes(of: image(from: foregroundExport)), tolerance: 1,
+            "semantic foreground preview and export must share the local adjustment graph"
+        )
+    }
+
     func testBuiltInResolverRendersAnalyticLinearAndRadialMasks() async throws {
         let source = try source()
         let linear = layer(adjustments: LocalAdjustments(exposure: 1))
@@ -522,5 +598,39 @@ private struct RepresentativeOverlayResolver: LocalMaskResolving {
             )
         }
         return try await DefaultLocalMaskResolver().resolve(request)
+    }
+}
+
+private actor SplitSemanticMaskProvider: SemanticMaskProviding {
+    private let store: MaskStore
+
+    init(store: MaskStore) { self.store = store }
+
+    func mask(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        guard kind == .foreground || kind == .subject || kind == .person else {
+            throw VisionSemanticMaskError.unsupported(kind)
+        }
+        let size = image.dimensions
+        let values = (0..<size.height).flatMap { _ in
+            (0..<size.width).map { $0 < size.width / 2 ? Float(1) : Float(0) }
+        }
+        let pixels = try NormalizedMask(size: size, values: values)
+        let assetID = image.assetID ?? PhotoAnalysisCoordinator.assetID(for: image.source)
+        let key = MaskCacheKey(
+            assetID: assetID,
+            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: image.source),
+            kind: kind,
+            quality: quality,
+            providerVersion: "split-test-1"
+        )
+        let reference = try await store.store(pixels, for: key, quality: quality)
+        return RegionMask(
+            kind: .foreground,
+            bounds: NormalizedRect(x: 0, y: 0, width: 0.5, height: 1),
+            quality: quality,
+            reference: reference,
+            confidence: 1,
+            coverage: pixels.coverage
+        )
     }
 }

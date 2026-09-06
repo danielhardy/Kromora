@@ -332,10 +332,22 @@ struct MaskingWorkspace: View {
                 Menu {
                     ForEach([MaskCombineMode.add, .subtract, .intersect], id: \.self) { mode in
                         Menu(mode.title) {
-                            ForEach(MaskCreationKind.allCases.filter { $0 != .erase }, id: \.self) {
+                            Section("Smart masks") {
+                                ForEach(MaskCreationKind.smartKinds, id: \.self) { kind in
+                                    Button(kind.title) {
+                                        viewModel.addSmartMaskComponent(
+                                            to: layer.id, kind: kind, mode: mode)
+                                    }
+                                }
+                            }
+                            Section("Paint and gradients") {
+                                ForEach(MaskCreationKind.allCases.filter {
+                                    !$0.isSmart && $0 != .erase
+                                }, id: \.self) {
                                 kind in
                                 Button(kind.title) {
                                     viewModel.addMaskComponent(to: layer.id, kind: kind, mode: mode)
+                                }
                                 }
                             }
                         }

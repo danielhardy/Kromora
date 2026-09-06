@@ -1156,3 +1156,21 @@ extension AppViewModel {
         return "\(base) \(ordinal)"
     }
 }
+
+private extension SemanticMaskKind {
+    var infoEditingTarget: SemanticTarget? {
+        switch self {
+        case .subject: return .subject
+        case .person: return .person
+        default: return nil
+        }
+    }
+
+    var infoTitle: String {
+        switch self {
+        case .subject: return "Subject"
+        case .person: return "Person"
+        default: return String(describing: self)
+        }
+    }
+}
