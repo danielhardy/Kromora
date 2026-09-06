@@ -687,18 +687,26 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     // MARK: - Init
 
     public convenience init() {
-        self.init(engine: RenderEngine.shared, editStore: EditDocumentStore(), includeBundledLooks: false)
+        self.init(
+            engine: RenderEngine.shared,
+            editStore: EditDocumentStore.makeDefaultStore(),
+            includeBundledLooks: false
+        )
     }
 
     /// Production entry points opt into the packaged starter library. The plain initializer stays
     /// bundle-free for headless/test clients that intentionally provide their own Look folder.
     public convenience init(includeBundledLooks: Bool) {
-        self.init(engine: RenderEngine.shared, editStore: EditDocumentStore(), includeBundledLooks: includeBundledLooks)
+        self.init(
+            engine: RenderEngine.shared,
+            editStore: EditDocumentStore.makeDefaultStore(),
+            includeBundledLooks: includeBundledLooks
+        )
     }
 
     init(
         engine: any RenderEngining = RenderEngine.shared,
-        editStore: EditDocumentStore = EditDocumentStore(),
+        editStore: EditDocumentStore = EditDocumentStore.makeDefaultStore(),
         preferences: UserDefaults = .standard,
         mediaVolumeProvider: any MediaVolumeProviding = MountedMediaVolumeProvider(),
         includeBundledLooks: Bool = false,
