@@ -572,6 +572,42 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertFalse(viewModel.inspectorState.isMaskingWorkspacePresented)
         _ = source // Keep the active source assertion explicit for this identity-focused test.
     }
+
+    func testInfoAnalysisMaskRejectsALowConfidenceResultWithoutCreatingARecipe() async throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let directory = try Fixtures.makeTempDirectory("InfoLowConfidenceSemanticMask")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "info-low-confidence.png", in: directory)
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
+        let source = try XCTUnwrap(viewModel.maskingSource)
+        let assetID = try XCTUnwrap(viewModel.maskingAssetID)
+        let size = PixelDimensions(width: 4, height: 4)
+        let pixels = try NormalizedMask(size: size, values: Array(repeating: 1, count: 16))
+        let key = MaskCacheKey(
+            assetID: assetID,
+            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: source),
+            kind: .subject, quality: .preview, providerVersion: "info-test-1"
+        )
+        let result = RegionMask(
+            kind: .subject,
+            bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            quality: .preview,
+            reference: RegionMaskReference(cacheKey: key, size: size),
+            confidence: 0.1,
+            coverage: pixels.coverage
+        )
+
+        viewModel.useInfoAnalysisMask(.subject, demonstrated: result, pixels: pixels)
+
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertEqual(
+            viewModel.maskingState.resolutionState,
+            .unavailable("The demonstrated Subject result is no longer available for this photo.")
+        )
+        XCTAssertFalse(viewModel.inspectorState.isMaskingWorkspacePresented)
+    }
 }
 
 private actor ProductionSmartMaskProvider: SemanticMaskProviding {
