@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import LumoKit
 
 @MainActor
@@ -14,19 +15,6 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         while !condition() {
             if Date() > deadline {
                 return XCTFail("timed out waiting for \(description)")
-            }
-            try await Task.sleep(for: .milliseconds(10))
-        }
-    }
-
-    private func waitUntilStoreReady(
-        _ store: EditDocumentStore,
-        timeout: TimeInterval = 5
-    ) async throws {
-        let deadline = Date().addingTimeInterval(timeout)
-        while await store.status != .ready {
-            if Date() > deadline {
-                return XCTFail("timed out waiting for the edit store")
             }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -47,7 +35,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             firstLaunch.sourceName == imageURL.lastPathComponent
         }
         firstLaunch.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
-        try await waitUntilStoreReady(firstLaunch.editStore)
+        await firstLaunch.flushPendingWrites()
 
         let secondLaunch = AppViewModel(
             engine: FakeRenderEngine(),
@@ -145,7 +133,8 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
         let writeCount = await store.writeCount
         XCTAssertEqual(writeCount, 1)
-        let restored = EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("slow-flush-edits.json"))
+        let restored = EditDocumentStore(
+            fileURL: tempDirectory.appendingPathComponent("slow-flush-edits.json"))
         let item = try XCTUnwrap(viewModel.collection.items.first)
         let result = await restored.load(for: EditSourceReference(assetID: item.id, url: item.url))
         XCTAssertEqual(result.document.adjustments, [.exposure(ev: 0.6)])
@@ -193,8 +182,9 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             return XCTFail("a failed termination flush must report failure")
         }
         XCTAssertFalse(result.succeeded)
-        XCTAssertEqual(viewModel.pendingPersistenceCount, 1,
-                       "failed edits must remain dirty instead of being approved as saved")
+        XCTAssertEqual(
+            viewModel.pendingPersistenceCount, 1,
+            "failed edits must remain dirty instead of being approved as saved")
 
         let retry = await viewModel.flushPendingWrites()
         XCTAssertTrue(retry.succeeded)

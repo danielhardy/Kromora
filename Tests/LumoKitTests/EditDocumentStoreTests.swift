@@ -1,11 +1,12 @@
 import Foundation
 import XCTest
+
 @testable import LumoKit
 
 final class EditDocumentStoreTests: TempDirectoryTestCase {
 
-    private func makeStore() -> (EditDocumentStore, URL) {
-        let url = tempDirectory.appendingPathComponent("edit-records.json")
+    private func makeStore(named name: String = "EditStore.store") -> (EditDocumentStore, URL) {
+        let url = tempDirectory.appendingPathComponent(name)
         return (EditDocumentStore(fileURL: url), url)
     }
 
@@ -22,104 +23,42 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         )
     }
 
-    func testRoundTripUsesASeparateJSONRecordAndLeavesSourceUntouched() async throws {
+    func testRoundTripUsesSwiftDataStoreAndLeavesSourceUntouched() async throws {
         let (store, fileURL) = makeStore()
-        let source = source()
+        let photo = source()
         let original = Data("source bytes stay source bytes".utf8)
-        try original.write(to: try XCTUnwrap(source.url))
+        try original.write(to: try XCTUnwrap(photo.url))
 
-        try await store.save(editedDocument, for: source)
-        let result = await store.load(for: source)
+        try await store.save(editedDocument, for: photo)
+        let result = await store.load(for: photo)
 
         XCTAssertTrue(result.found)
         XCTAssertEqual(result.document, editedDocument)
-        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(source.url)), original)
+        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(photo.url)), original)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
         XCTAssertTrue(
-            String(decoding: try Data(contentsOf: fileURL), as: UTF8.self).contains("\"schemaVersion\"")
+            String(decoding: try Data(contentsOf: fileURL).prefix(15), as: UTF8.self)
+                .hasPrefix("SQLite format 3")
         )
     }
 
-    func testASecondWriteKeepsThePreviousPrimaryAsLastKnownGoodBackup() async throws {
-        let (store, fileURL) = makeStore()
-        let source = source()
-        let first = EditDocument(adjustments: [.exposure(ev: 0.1)])
-        let second = EditDocument(adjustments: [.exposure(ev: 0.9)])
+    func testEachPhotoIsAnIndependentSwiftDataRecord() async throws {
+        let (store, _) = makeStore()
+        let first = source(named: "first.jpg")
+        let second = source(named: "second.jpg")
+        let firstDocument = EditDocument(adjustments: [.exposure(ev: 0.1)])
+        let secondDocument = EditDocument(adjustments: [.exposure(ev: 0.9)])
 
-        try await store.save(first, for: source)
-        try await store.save(second, for: source)
+        try await store.save(firstDocument, for: first)
+        try await store.save(secondDocument, for: second)
+        try await store.save(EditDocument(adjustments: [.exposure(ev: 0.2)]), for: first)
 
-        let backupURL = fileURL.appendingPathExtension("bak")
-        let backupStore = EditDocumentStore(fileURL: backupURL)
-        let backupResult = await backupStore.load(for: source)
-        XCTAssertEqual(backupResult.document, first)
-    }
-
-    func testCorruptPrimaryRecoversTheLastKnownGoodDocument() async throws {
-        let (store, fileURL) = makeStore()
-        let source = source()
-        let expected = editedDocument
-        try await store.save(expected, for: source)
-        try await store.save(EditDocument(adjustments: [.vibrance(amount: 0.2)]), for: source)
-
-        try Data("{\"schemaVersion\":1,\"records\":".utf8).write(to: fileURL)
-
-        let recovered = EditDocumentStore(fileURL: fileURL)
-        let result = await recovered.load(for: source)
-        XCTAssertEqual(result.document, expected)
-        XCTAssertEqual(result.status, .recoveredFromBackup)
-        XCTAssertTrue(result.status.message?.contains("last known-good") == true)
-    }
-
-    func testMalformedStoreFailsSafeWithActionableStatusAndDoesNotInventEdits() async throws {
-        let (store, fileURL) = makeStore()
-        try Data("partially written".utf8).write(to: fileURL)
-
-        let result = await store.load(for: source())
-        XCTAssertFalse(result.found)
-        XCTAssertTrue(result.document.isIdentity)
-        guard case .corrupt = result.status else {
-            return XCTFail("expected malformed JSON to be reported as corrupt")
-        }
-        XCTAssertTrue(result.status.message?.contains("neutral edits") == true)
-    }
-
-    func testUnsupportedStoreVersionIsRejectedWithoutAllowingOverwrite() async throws {
-        let (store, fileURL) = makeStore()
-        let futureJSON = #"{"schemaVersion":99,"records":{}}"#
-        try futureJSON.data(using: .utf8)!.write(to: fileURL)
-
-        let result = await store.load(for: source())
-        XCTAssertEqual(result.status, .unsupportedVersion(99))
-        do {
-            try await store.save(editedDocument, for: source())
-            XCTFail("a newer store must not be overwritten")
-        } catch {
-            XCTAssertEqual(error as? EditDocumentStore.StoreError, .newerSchema(99))
-        }
-        XCTAssertEqual(
-            try String(contentsOf: fileURL, encoding: .utf8),
-            futureJSON
-        )
-    }
-
-    func testLegacyBareMapMigratesOnTheNextWrite() async throws {
-        let (store, fileURL) = makeStore()
-        let source = source()
-        let legacy: [String: EditDocument] = [source.assetID.description: editedDocument]
-        try JSONEncoder().encode(legacy).write(to: fileURL)
-
-        let result = await store.load(for: source)
-        XCTAssertEqual(result.document, editedDocument)
-        XCTAssertEqual(result.status, .migrated(from: 0))
-
-        try await store.save(result.document, for: source)
-        let canonical = try JSONDecoder().decode(
-            [String: JSONValue].self,
-            from: try Data(contentsOf: fileURL)
-        )
-        XCTAssertNotNil(canonical["schemaVersion"])
-        XCTAssertNotNil(canonical["records"])
+        let restoredFirst = await store.load(for: first)
+        let restoredSecond = await store.load(for: second)
+        let writeCount = await store.writeCount
+        XCTAssertEqual(restoredFirst.document.adjustments, [.exposure(ev: 0.2)])
+        XCTAssertEqual(restoredSecond.document, secondDocument)
+        XCTAssertEqual(writeCount, 3)
     }
 
     func testMovedFileRelinksByBookmarkAndRekeysTheRecord() async throws {
@@ -131,11 +70,14 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         try await store.save(editedDocument, for: oldSource)
         try FileManager.default.moveItem(at: oldURL, to: newURL)
 
-        let result = await store.load(for: EditSourceReference(assetID: .file(newURL), url: newURL))
+        let result = await store.load(
+            for: EditSourceReference(assetID: .file(newURL), url: newURL)
+        )
         XCTAssertEqual(result.document, editedDocument)
         XCTAssertEqual(result.status, .relinked)
 
-        let relaunch = EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("edit-records.json"))
+        let relaunch = EditDocumentStore(
+            fileURL: tempDirectory.appendingPathComponent("EditStore.store"))
         let relaunched = await relaunch.load(
             for: EditSourceReference(assetID: .file(newURL), url: newURL)
         )
@@ -145,17 +87,17 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
     func testPersistenceIORunsOffTheMainActor() async throws {
         let (store, _) = makeStore()
         _ = await store.load(for: source())
-        let didRunOnMainThread = await store.lastIOWasMainThread
-        XCTAssertFalse(didRunOnMainThread)
+        let lastIOWasMainThread = await store.lastIOWasMainThread
+        XCTAssertFalse(lastIOWasMainThread)
     }
 
     func testFailingStoreCanRetryTheCompleteSnapshot() async throws {
-        let url = tempDirectory.appendingPathComponent("failing-edits.json")
+        let url = tempDirectory.appendingPathComponent("failing.store")
         let store = EditDocumentStore(fileURL: url, failuresBeforeSuccess: 1)
-        let source = source()
+        let photo = source()
 
         do {
-            try await store.save(editedDocument, for: source)
+            try await store.save(editedDocument, for: photo)
             XCTFail("the injected failure should be surfaced")
         } catch {
             XCTAssertTrue(error.localizedDescription.contains("injected persistence failure"))
@@ -165,29 +107,13 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(failedWriteCount, 0)
         XCTAssertEqual(failedAttemptCount, 1)
 
-        try await store.save(editedDocument, for: source)
+        try await store.save(editedDocument, for: photo)
         let restored = EditDocumentStore(fileURL: url)
-        let result = await restored.load(for: source)
+        let result = await restored.load(for: photo)
         XCTAssertEqual(result.document, editedDocument)
     }
-}
-/// Small JSON inspection value used only to assert the outer migration envelope without depending on
-/// the store's private implementation types.
-private enum JSONValue: Decodable {
-    case object([String: JSONValue])
-    case array([JSONValue])
-    case string(String)
-    case number(Double)
-    case bool(Bool)
-    case null
 
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if container.decodeNil() { self = .null }
-        else if let value = try? container.decode(Bool.self) { self = .bool(value) }
-        else if let value = try? container.decode(Double.self) { self = .number(value) }
-        else if let value = try? container.decode(String.self) { self = .string(value) }
-        else if let value = try? container.decode([String: JSONValue].self) { self = .object(value) }
-        else { self = .array(try container.decode([JSONValue].self)) }
+    func testDefaultStoreUsesEditStoreStore() {
+        XCTAssertEqual(EditDocumentStore.defaultFileURL.lastPathComponent, "EditStore.store")
     }
 }
