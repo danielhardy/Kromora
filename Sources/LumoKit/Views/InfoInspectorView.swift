@@ -8,9 +8,7 @@ struct InfoInspectorView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if inspectorState.isMaskingWorkspacePresented {
-                MaskingWorkspace(viewModel: viewModel)
-            } else if viewModel.sourceImage == nil {
+            if viewModel.sourceImage == nil {
                 // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
                 // offers a trip to Develop to be told "this image is already rendered" about an image
                 // that does not exist. The empty state alone is the honest answer.
@@ -33,6 +31,8 @@ struct InfoInspectorView: View {
                     EffectsInspectorView(viewModel: viewModel)
                 case .look:
                     LookInspectorView(viewModel: viewModel)
+                case .masking:
+                    MaskingWorkspace(viewModel: viewModel)
                 }
             }
         }
@@ -41,7 +41,10 @@ struct InfoInspectorView: View {
     }
 
     private var tabSwitcher: some View {
-        Picker("Inspector view", selection: $inspectorState.tab) {
+        Picker("Inspector view", selection: Binding(
+            get: { inspectorState.tab },
+            set: { viewModel.inspectorTab = $0 }
+        )) {
             ForEach(viewModel.availableInspectorTabs, id: \.self) { tab in
                 Label(tab.title, systemImage: tab.iconName)
                     // Keep the full title in the semantic label while showing only the compact

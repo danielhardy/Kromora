@@ -18,6 +18,63 @@ final class MaskingWorkspaceTests: XCTestCase {
         }
     }
 
+    func testMaskingIsAnInspectorTabAndReturnsToThePreviousEditControl() {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+
+        viewModel.inspectorState.select(.effects)
+        viewModel.inspectorState.select(.masking)
+
+        XCTAssertEqual(viewModel.inspectorTab, .masking)
+        XCTAssertTrue(viewModel.inspectorState.isMaskingWorkspacePresented)
+        XCTAssertEqual(AppViewModel.InspectorTab.masking.title, "Masking")
+        XCTAssertEqual(
+            AppViewModel.InspectorTab.masking.helpText,
+            "Masking: Create and edit local masks"
+        )
+
+        viewModel.closeMaskingWorkspace()
+
+        XCTAssertEqual(viewModel.inspectorTab, .effects)
+        XCTAssertFalse(viewModel.inspectorState.isMaskingWorkspacePresented)
+    }
+
+    func testMaskingInspectorTabStaysWithTheActivePhotoAndRestoresItsDocument() async throws {
+        let directory = try Fixtures.makeTempDirectory("MaskingInspectorNavigation")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let firstURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "first.png", in: directory)
+        let secondURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "second.png", in: directory)
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+
+        viewModel.openImage(url: firstURL)
+        try await waitUntil("the first photo to load") { viewModel.maskingSource != nil }
+        XCTAssertTrue(viewModel.availableInspectorTabs.contains(.masking))
+        viewModel.inspectorTab = .effects
+        viewModel.selectInspectorTab(.masking)
+        viewModel.createMask(.brush)
+        let firstLayerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
+
+        viewModel.openImage(url: secondURL)
+        try await waitUntil("the second photo to load") {
+            viewModel.maskingSource?.cacheFingerprint != nil
+                && viewModel.sourceName == "second.png"
+        }
+
+        XCTAssertEqual(viewModel.inspectorTab, .masking)
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+
+        viewModel.closeMaskingWorkspace()
+        XCTAssertEqual(viewModel.inspectorTab, .effects)
+
+        viewModel.openImage(url: firstURL)
+        try await waitUntil("the first photo to restore") {
+            viewModel.sourceName == "first.png"
+                && viewModel.document.localAdjustments.contains(where: { $0.id == firstLayerID })
+        }
+        XCTAssertEqual(viewModel.inspectorTab, .effects)
+    }
+
     func testLayerActionsPersistThroughTheDocumentAndUndo() throws {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
 

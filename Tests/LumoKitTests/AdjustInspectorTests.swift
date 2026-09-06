@@ -185,17 +185,18 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
 
 extension AdjustInspectorTests {
 
-    /// Look joins the existing inspector tabs without changing their order.
-    func testTheInspectorHasSixTabsInPipelineOrder() {
+    /// Look and Masking join the existing inspector tabs without changing their order.
+    func testTheInspectorHasSevenTabsInPipelineOrder() {
         XCTAssertEqual(
             AppViewModel.InspectorTab.allCases,
-            [.info, .light, .develop, .adjust, .effects, .look]
+            [.info, .light, .develop, .adjust, .effects, .look, .masking]
         )
         XCTAssertEqual(AppViewModel.InspectorTab.adjust.rawValue, "adjust")
         XCTAssertEqual(AppViewModel.InspectorTab.adjust.title, "Color")
         XCTAssertEqual(AppViewModel.InspectorTab.adjust.content, .color)
         XCTAssertEqual(AppViewModel.InspectorTab.effects.title, "Effects")
         XCTAssertEqual(AppViewModel.InspectorTab.look.title, "Look")
+        XCTAssertEqual(AppViewModel.InspectorTab.masking.title, "Masking")
     }
 
     func testInspectorTabsExposeCompactSymbolsAndAccessiblePurposes() {
@@ -205,7 +206,8 @@ extension AdjustInspectorTests {
             .develop: ("camera.aperture", "RAW decoder controls"),
             .adjust: ("paintpalette", "Color adjustments"),
             .effects: ("sparkles", "Texture, clarity, and dehaze effects"),
-            .look: ("wand.and.stars", "Browse and apply a Look")
+            .look: ("wand.and.stars", "Browse and apply a Look"),
+            .masking: ("wand.and.rays", "Create and edit local masks")
         ]
 
         for tab in AppViewModel.InspectorTab.allCases {
