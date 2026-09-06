@@ -2679,6 +2679,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             originalPreviewSurface.clear()
         }
         pendingDevelopChange = comparisonChanged
+        restoreMaskSelection()
         schedulePreview()
     }
 
