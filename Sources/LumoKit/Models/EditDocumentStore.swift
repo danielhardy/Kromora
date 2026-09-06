@@ -101,6 +101,14 @@ actor EditDocumentStore {
         return try ModelContainer(for: schema, configurations: [configuration])
     }
 
+    /// Creates a store backed by the requested on-disk SwiftData container.
+    ///
+    /// App-owned callers should use `makeDefaultStore()` so a container failure remains a
+    /// recoverable, user-visible persistence warning rather than escaping during app startup.
+    static func makePersistentStore(fileURL: URL) throws -> EditDocumentStore {
+        EditDocumentStore(modelContainer: try makeContainer(url: fileURL))
+    }
+
     private static func makeInMemoryContainer() -> ModelContainer {
         let schema = Schema([EditRecord.self])
         let configuration = ModelConfiguration(
@@ -111,6 +119,21 @@ actor EditDocumentStore {
         )
         // A schema made from the same model that is accepted by makeContainer cannot fail here.
         return try! ModelContainer(for: schema, configurations: [configuration])
+    }
+
+    /// Creates the production store while preserving the app's never-crash persistence policy.
+    /// A failed on-disk container is replaced by an isolated in-memory store and remains visible
+    /// to the app through the store's actionable status.
+    static func makeDefaultStore() -> EditDocumentStore {
+        do {
+            return try makePersistentStore(fileURL: defaultFileURL)
+        } catch {
+            return EditDocumentStore(
+                modelContainer: makeInMemoryContainer(),
+                initialStatus: .writeFailure(error.localizedDescription),
+                persistenceUnavailable: true
+            )
+        }
     }
 
     /// Creates a persistent store, degrading to an in-memory store if the URL cannot be opened.
