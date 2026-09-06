@@ -907,6 +907,8 @@ struct MaskCanvasOverlay: View {
             // rerasterize the entire completed history for every pointer sample.
             let layers = viewModel.document.localAdjustments
             let style = overlayStyle
+            let presentation = MaskOverlayPresentation(
+                coverageOpacity: maskingState.overlayOpacity)
             let taskID = OverlayTaskID(
                 layers: layers,
                 selectedLayerID: maskingState.selectedLayerID,
@@ -923,7 +925,7 @@ struct MaskCanvasOverlay: View {
                 Canvas { context, _ in
                     draw(
                         layer: activeLayer, maskImage: maskImage, transform: transform,
-                        in: &context
+                        presentation: presentation, in: &context
                     )
                 }
                 if maskingState.hasDraft,
@@ -950,6 +952,15 @@ struct MaskCanvasOverlay: View {
             .accessibilityValue(canvasAccessibilityValue)
             .task(id: taskID) {
                 maskImage = nil
+                let semanticTarget = selectedSemanticTarget(
+                    in: layers,
+                    selectedLayerID: maskingState.selectedLayerID,
+                    selectedComponentID: maskingState.selectedComponentID,
+                    soloComponentID: maskingState.soloComponentID
+                )
+                if semanticTarget != nil {
+                    maskingState.beginMaskResolution()
+                }
                 let resolved = await viewModel.renderMaskOverlay(
                     layers: layers,
                     selectedLayerID: maskingState.selectedLayerID,
@@ -961,6 +972,17 @@ struct MaskCanvasOverlay: View {
                 )
                 guard !Task.isCancelled else { return }
                 maskImage = resolved
+                if semanticTarget != nil {
+                    if resolved == nil {
+                        maskingState.markMaskUnavailable(
+                            "The selected semantic mask could not be resolved for this photo."
+                        )
+                    } else {
+                        maskingState.markMaskResolved()
+                    }
+                } else {
+                    maskingState.markMaskResolved()
+                }
             }
         }
         .accessibilityElement(children: .contain)
@@ -1056,6 +1078,19 @@ struct MaskCanvasOverlay: View {
         return viewModel.document.localAdjustments.first(where: { $0.id == id })
     }
 
+    private func selectedSemanticTarget(
+        in layers: [LocalAdjustmentLayer], selectedLayerID: UUID?,
+        selectedComponentID: UUID?, soloComponentID: UUID?
+    ) -> SemanticTarget? {
+        guard let selectedLayerID,
+              let layer = layers.first(where: { $0.id == selectedLayerID }) else { return nil }
+        let componentID = soloComponentID ?? selectedComponentID
+        let component = componentID.flatMap { id in layer.components.first(where: { $0.id == id }) }
+            ?? layer.components.first
+        guard let component, case .semantic(let definition) = component.source else { return nil }
+        return definition.target
+    }
+
     private var activeBrushMetalSnapshot: MaskOverlayPrototypeSnapshot {
         var snapshot = MaskOverlayPrototypeSnapshot()
         snapshot.tool = .brush
@@ -1112,7 +1147,7 @@ struct MaskCanvasOverlay: View {
 
     private func draw(
         layer: LocalAdjustmentLayer?, maskImage: CGImage?, transform: CanvasMaskTransform,
-        in context: inout GraphicsContext
+        presentation: MaskOverlayPresentation, in context: inout GraphicsContext
     ) {
         if let maskImage,
             let imageRect = transform.viewportRect(
@@ -1120,7 +1155,7 @@ struct MaskCanvasOverlay: View {
             ),
             let visibleRect = transform.viewportRect(forSourceNormalized: transform.cropRect) {
             var maskContext = context
-            maskContext.opacity = maskingState.overlayOpacity
+            maskContext.opacity = presentation.coverageOpacity
             maskContext.clip(to: Path(visibleRect))
             maskContext.draw(
                 Image(decorative: maskImage, scale: 1, orientation: .up), in: imageRect
@@ -1133,8 +1168,10 @@ struct MaskCanvasOverlay: View {
         let component = layer.components[index]
         let guideColor =
             maskingState.overlayInspection == .grayscale
-            ? Color.white.opacity(maskingState.overlayOpacity)
-            : maskingState.overlayColor.opacity(maskingState.overlayOpacity)
+            ? Color.white.opacity(presentation.toolingOpacity)
+            : Color(
+                red: overlayStyle.red, green: overlayStyle.green, blue: overlayStyle.blue
+            ).opacity(presentation.toolingOpacity)
 
         func point(_ normalized: CGPoint) -> CGPoint? {
             transform.viewportPoint(forSourceNormalized: normalized)
