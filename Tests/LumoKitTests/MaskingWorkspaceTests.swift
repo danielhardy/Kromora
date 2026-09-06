@@ -79,6 +79,9 @@ final class MaskingWorkspaceTests: XCTestCase {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
 
         viewModel.createMask(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.5))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.5))
+        viewModel.endMaskGesture()
         let original = try XCTUnwrap(viewModel.document.localAdjustments.first)
         XCTAssertEqual(original.name, "Linear Gradient")
 
@@ -108,6 +111,9 @@ final class MaskingWorkspaceTests: XCTestCase {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
 
         viewModel.createMask(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.1, y: 0.5))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.9, y: 0.5))
+        viewModel.endMaskGesture()
         let layerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
         viewModel.addMaskComponent(to: layerID, source: .brush(BrushMaskDefinition()))
         let brushComponentID = try XCTUnwrap(
@@ -254,9 +260,13 @@ final class MaskingWorkspaceTests: XCTestCase {
         viewModel.createMask(.linear)
         let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
         let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
-        let original = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition)
 
         viewModel.setMaskTool(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.5))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.5))
+        viewModel.endMaskGesture()
+        let original = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition)
+
         viewModel.beginMaskGesture(at: original.fullStrengthPoint, linearHandle: .fullStrength)
         viewModel.updateMaskGesture(to: CGPoint(x: 0.75, y: 0.5))
         viewModel.endMaskGesture()
@@ -304,7 +314,7 @@ final class MaskingWorkspaceTests: XCTestCase {
 
         XCTAssertEqual(
             viewModel.document.localAdjustments.first?.components.first?.source.linearDefinition?.density,
-            1
+            nil
         )
         XCTAssertEqual(
             viewModel.maskInteractionState.draftLayer?.components.first?.source.linearDefinition?.density,
@@ -321,11 +331,78 @@ final class MaskingWorkspaceTests: XCTestCase {
 
     func testCancellingLinearCreationDoesNotPersistAnEmptyLayer() {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
-        viewModel.setMaskTool(.linear)
-        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.3))
+        viewModel.createMask(.linear)
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertTrue(viewModel.maskInteractionState.linearCreationPending)
         viewModel.cancelMaskGesture()
         XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
         XCTAssertNil(viewModel.maskInteractionState.selectedLayerID)
+        XCTAssertFalse(viewModel.maskInteractionState.hasDraft)
+    }
+
+    func testFreshLinearCreationSelectsLayerAndComponentAndCommitsOneUndoableMask() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+
+        viewModel.createMask(.linear)
+        let pendingLayerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
+        let pendingComponentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
+        XCTAssertTrue(viewModel.maskInteractionState.linearCreationPending)
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.3))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.7))
+        viewModel.endMaskGesture()
+
+        let layer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let component = try XCTUnwrap(layer.components.first)
+        XCTAssertEqual(layer.id, pendingLayerID)
+        XCTAssertEqual(component.id, pendingComponentID)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID, layer.id)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedComponentID, component.id)
+        XCTAssertGreaterThan(component.source.linearDefinition?.falloff ?? 0, 0)
+        XCTAssertEqual(viewModel.undoDepth, 1)
+
+        viewModel.undo()
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+    }
+
+    func testLinearCreationAfterExistingSelectionDoesNotEditPreviousLayer() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.foreground)
+        let existing = try XCTUnwrap(viewModel.document.localAdjustments.first)
+
+        viewModel.createMask(.linear)
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 1)
+        XCTAssertNotEqual(viewModel.maskInteractionState.selectedLayerID, existing.id)
+        XCTAssertEqual(viewModel.maskInteractionState.draftLayer?.components.count, 1)
+
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.15, y: 0.5))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.85, y: 0.5))
+        viewModel.endMaskGesture()
+
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 2)
+        XCTAssertEqual(viewModel.document.localAdjustments.first?.id, existing.id)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID,
+                       viewModel.document.localAdjustments.last?.id)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedComponentID,
+                       viewModel.document.localAdjustments.last?.components.first?.id)
+    }
+
+    func testClickWithoutAValidLinearDragLeavesDocumentAndHistoryUnchanged() {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.foreground)
+        let before = viewModel.document
+        let undoBefore = viewModel.undoDepth
+
+        viewModel.createMask(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.5, y: 0.5))
+        viewModel.endMaskGesture()
+
+        XCTAssertEqual(viewModel.document, before)
+        XCTAssertEqual(viewModel.undoDepth, undoBefore)
+        XCTAssertFalse(viewModel.maskInteractionState.hasDraft)
+        XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID,
+                       before.localAdjustments.first?.id)
     }
 
     func testRadialDragCreatesAndSelectsATransientLayerUntilMouseUp() throws {

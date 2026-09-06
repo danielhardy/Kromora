@@ -17,6 +17,7 @@ struct MaskingWorkspace: View {
             VStack(alignment: .leading, spacing: 14) {
                 header
                 toolPicker
+                creationPrompt
                 overlayControls
                 renderStatus
                 layerList
@@ -87,6 +88,35 @@ struct MaskingWorkspace: View {
                         maskingState.activeTool == tool ? "Selected" : "Not selected")
                 }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var creationPrompt: some View {
+        if maskingState.linearCreationPending {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "hand.draw")
+                    .foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Create linear gradient")
+                        .font(.caption.weight(.semibold))
+                    Text(
+                        "Drag from the zero-strength edge to the full-strength edge on the canvas."
+                    )
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                Button("Cancel") { viewModel.cancelMaskGesture() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .accessibilityLabel("Cancel linear gradient creation")
+            }
+            .padding(9)
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Linear gradient creation pending")
+            .accessibilityHint("Drag across the canvas to create the gradient, or cancel")
         }
     }
 
@@ -197,12 +227,13 @@ struct MaskingWorkspace: View {
 
     @ViewBuilder
     private var layerList: some View {
+        let layers = visibleLayers
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Layers")
                     .font(.headline)
                 Spacer()
-                Text("\(viewModel.document.localAdjustments.count)")
+                Text("\(layers.count)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -211,7 +242,7 @@ struct MaskingWorkspace: View {
                 ContentUnavailableView(
                     "No photo", systemImage: "photo",
                     description: Text("Open a photo to edit masks."))
-            } else if viewModel.document.localAdjustments.isEmpty {
+            } else if layers.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("No mask layers yet", systemImage: "rectangle.dashed")
                         .font(.subheadline.weight(.semibold))
@@ -223,18 +254,30 @@ struct MaskingWorkspace: View {
                 }
                 .padding(.vertical, 8)
             } else {
-                ForEach(Array(viewModel.document.localAdjustments.enumerated()), id: \.element.id) {
+                ForEach(Array(layers.enumerated()), id: \.element.id) {
                     index, layer in
                     MaskLayerRow(
                         viewModel: viewModel,
                         maskingState: maskingState,
                         layer: layer,
                         index: index,
-                        total: viewModel.document.localAdjustments.count
+                        total: layers.count,
+                        isTransient: !viewModel.document.localAdjustments.contains(where: {
+                            $0.id == layer.id
+                        })
                     )
                 }
             }
         }
+    }
+
+    private var visibleLayers: [LocalAdjustmentLayer] {
+        var layers = viewModel.document.localAdjustments
+        if let draft = maskingState.draftLayer,
+           !layers.contains(where: { $0.id == draft.id }) {
+            layers.append(draft)
+        }
+        return layers
     }
 
     @ViewBuilder
@@ -771,6 +814,7 @@ private struct MaskLayerRow: View {
     let layer: LocalAdjustmentLayer
     let index: Int
     let total: Int
+    let isTransient: Bool
 
     var body: some View {
         HStack(spacing: 7) {
@@ -824,16 +868,23 @@ private struct MaskLayerRow: View {
 
             Menu {
                 Button("Move up") { viewModel.moveMask(layer.id, by: -1) }
-                    .disabled(index == 0)
+                    .disabled(isTransient || index == 0)
                 Button("Move down") { viewModel.moveMask(layer.id, by: 1) }
-                    .disabled(index == total - 1)
+                    .disabled(isTransient || index == total - 1)
                 Divider()
                 Button("Solo") { maskingState.toggleSolo(layerID: layer.id) }
                     .accessibilityLabel("Solo \(layer.name)")
                     .accessibilityValue(maskingState.soloLayerID == layer.id ? "On" : "Off")
                 Button("Duplicate") { viewModel.duplicateMask(layer.id) }
+                    .disabled(isTransient)
                 Button("Reset") { viewModel.resetMask(layer.id) }
-                Button("Delete", role: .destructive) { viewModel.deleteMask(layer.id) }
+                Button("Delete", role: .destructive) {
+                    if isTransient {
+                        viewModel.cancelMaskGesture()
+                    } else {
+                        viewModel.deleteMask(layer.id)
+                    }
+                }
             } label: {
                 Image(systemName: "ellipsis.circle")
             }
