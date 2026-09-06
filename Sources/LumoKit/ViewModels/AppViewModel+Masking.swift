@@ -37,6 +37,14 @@ enum MaskCreationKind: String, CaseIterable, Sendable {
     }
 }
 
+/// Identifies the exact smart-mask operation that can be retried after provider failure. A
+/// component add must retain its destination layer and combine mode; retrying only the semantic
+/// kind could accidentally create a new top-level layer or fall back to a preview retry.
+enum SmartMaskRetryContext: Sendable, Equatable {
+    case create(MaskCreationKind)
+    case addComponent(layerID: UUID, kind: MaskCreationKind, mode: MaskCombineMode)
+}
+
 extension MaskSource {
     var maskingTypeTitle: String {
         switch self {
@@ -120,7 +128,7 @@ extension AppViewModel {
 
         smartMaskCreationTask?.cancel()
         smartMaskCreationTask = nil
-        smartMaskRetryKind = nil
+        smartMaskRetryContext = nil
         if maskInteractionState.hasDraft {
             cancelMaskGesture()
         } else {
@@ -333,7 +341,7 @@ extension AppViewModel {
         }
         smartMaskCreationTask?.cancel()
         smartMaskCreationTask = nil
-        smartMaskRetryKind = kind
+        smartMaskRetryContext = .create(kind)
         if maskInteractionState.hasDraft {
             cancelMaskGesture()
         } else {
@@ -384,7 +392,7 @@ extension AppViewModel {
                     return
                 }
                 self.insertDurableMask(kind)
-                self.smartMaskRetryKind = nil
+                self.smartMaskRetryContext = nil
                 self.maskInteractionState.markMaskResolved()
                 self.statusMessage = "Created \(kind.title) mask"
             } catch is CancellationError {
@@ -425,9 +433,12 @@ extension AppViewModel {
     }
 
     func retryMaskAnalysis() {
-        if let kind = smartMaskRetryKind {
+        switch smartMaskRetryContext {
+        case .create(let kind):
             createSmartMask(kind)
-        } else {
+        case .addComponent(let layerID, let kind, let mode):
+            addSmartMaskComponent(to: layerID, kind: kind, mode: mode)
+        case nil:
             maskInteractionState.beginMaskResolution()
             retryPreview()
         }
@@ -542,6 +553,7 @@ extension AppViewModel {
         }
         guard document.localAdjustments.contains(where: { $0.id == layerID }) else { return }
         smartMaskCreationTask?.cancel()
+        smartMaskRetryContext = .addComponent(layerID: layerID, kind: kind, mode: mode)
         guard let source = maskingSource, let assetID = maskingAssetID else {
             let message = "Smart mask components require an open photo with supported analysis."
             maskInteractionState.markMaskUnavailable(message)
@@ -580,7 +592,7 @@ extension AppViewModel {
                 self.addMaskComponent(
                     to: layerID,
                     source: .semantic(SemanticMaskDefinition(target: target)), mode: mode)
-                self.smartMaskRetryKind = nil
+                self.smartMaskRetryContext = nil
                 self.maskInteractionState.markMaskResolved()
                 self.statusMessage = "Added \(kind.title) component"
             } catch is CancellationError {
