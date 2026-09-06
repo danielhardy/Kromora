@@ -384,6 +384,73 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         )
     }
 
+    /// RAW Tint, like RAW Temperature, is evaluated against the developed source. The request log
+    /// proves that only the adjusted request receives the new decoder tint while the Original
+    /// request keeps the snapshot captured before the edit.
+    func testRAWTintEditLeavesOriginalRequestAtItsBaseline() async throws {
+        let defaults = makeDefaults()
+        let fake = FakeRenderEngine()
+        let viewModel = AppViewModel(
+            engine: fake,
+            editStore: EditDocumentStore(
+                fileURL: tempDirectory.appendingPathComponent("raw-tint-edits.json")
+            ),
+            preferences: defaults
+        )
+        // FakeRenderEngine models RAW preparation from the extension, so the fixture need not be a
+        // licensed camera file. This covers the RAW-aware routing without depending on a decoder.
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "raw-tint.dng", in: tempDirectory
+        )
+
+        viewModel.openImage(url: image)
+        try await waitUntil("the settled RAW preview") {
+            viewModel.sourceName == image.lastPathComponent
+                && viewModel.sourceIsRAW
+                && viewModel.previewSurface.image != nil
+        }
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        try await waitUntil("the adjusted RAW preview") {
+            await fake.previewRequests.contains { $0.document.adjustments == [.exposure(ev: 0.5)] }
+        }
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        try await waitUntil("the RAW baseline preview") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+
+        let baseline = viewModel.document.comparisonBaseline
+        let beforeTint = await fake.previewRequests
+        viewModel.whiteBalanceBinding(for: .tint).wrappedValue = 22
+
+        try await waitUntil("the adjusted RAW tint preview") {
+            await fake.previewRequests.contains {
+                $0.document.rawDevelop.neutralTint == 22
+            }
+        }
+        let afterTint = await fake.previewRequests
+        let newRequests = Array(afterTint.dropFirst(beforeTint.count))
+        XCTAssertTrue(
+            newRequests.contains { $0.document.rawDevelop.neutralTint == 22 },
+            "the adjusted RAW request must receive the new Tint"
+        )
+        XCTAssertTrue(
+            newRequests.filter { $0.document.rawDevelop.neutralTint != 22 }
+                .allSatisfy { $0.document == baseline },
+            "no non-adjusted request may adopt the new RAW Tint"
+        )
+
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        try await waitUntil("the reopened RAW baseline preview") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+        let reopenedRequests = await fake.previewRequests
+        XCTAssertTrue(
+            reopenedRequests.last?.document == baseline,
+            "reopening split view must reuse the same RAW baseline"
+        )
+    }
+
     func testLateBaselineFromPreviousPhotoCannotPublish() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
