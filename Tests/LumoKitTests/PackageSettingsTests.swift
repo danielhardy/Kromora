@@ -44,15 +44,15 @@ final class PackageSettingsTests: XCTestCase {
         let manifest = try Self.manifest
         let declared = manifest.components(separatedBy: ".swiftLanguageMode(.v6)").count - 1
         XCTAssertEqual(
-            declared, 4,
+            declared, 3,
             """
-            All four targets — LumoKit, Lumo, LumoMaskOverlayCapture, LumoKitTests — must declare Swift 6 language mode. \
+            All three targets — LumoKit, Lumo, LumoKitTests — must declare Swift 6 language mode. \
             A 6.x tools version already defaults to it, so dropping these would not fail the build \
             today; it would only make the next tools-version change silently load-bearing. Found \
             \(declared) declaration(s).
             """
         )
-        for target in ["LumoKit", "Lumo", "LumoMaskOverlayCapture", "LumoKitTests"] {
+        for target in ["LumoKit", "Lumo", "LumoKitTests"] {
             XCTAssertTrue(manifest.contains("name: \"\(target)\""), "\(target) is missing from the manifest")
         }
     }

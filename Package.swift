@@ -118,7 +118,6 @@ let package = Package(
     platforms: [.macOS(.v14)],
     products: [
         .executable(name: "Lumo", targets: ["Lumo"]),
-        .executable(name: "LumoMaskOverlayCapture", targets: ["LumoMaskOverlayCapture"]),
         .library(name: "LumoKit", targets: ["LumoKit"]),
     ],
     targets: [
@@ -140,11 +139,6 @@ let package = Package(
             // not Swift source; scripts/build-macos-app.sh consumes the
             // entitlements explicitly when signing the completed bundle.
             exclude: ["Assets.xcassets", "Branding", "Info.plist", "Lumo.entitlements"],
-            swiftSettings: [.swiftLanguageMode(.v6)]
-        ),
-        .executableTarget(
-            name: "LumoMaskOverlayCapture",
-            dependencies: ["LumoKit"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

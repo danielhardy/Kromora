@@ -270,9 +270,11 @@ scripts/run-lumo-118-capture.sh /absolute/path/to/fixtures/DSC07826.ARW
 # Tracing overhead with and without an active Instruments recording.
 LUMO_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark/testMeasureTracingOverhead
 
-# Release mask-overlay trace host; move/drag over its visible window while recording.
-LUMO_MASK_OVERLAY_REAL_POINTER_DURATION=30 scripts/run-lumo-227-capture.sh
 ```
+
+The historical LUMO-227 standalone mask-overlay capture host has been retired. Existing trace
+measurements remain documented in the performance records, but that capture workflow is no longer
+available from this checkout.
 
 Hardware latency claims require a logged-in display and a Release build; the opt-in Metal benchmark
 does not turn CI timings into a product claim. See [Instruments capture recipe](docs/INSTRUMENTS.md)

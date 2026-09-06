@@ -63,9 +63,8 @@ swift test -c release --disable-sandbox \
 
 Compilation completed, but this session did not produce a drawable/pointer presentation callback;
 therefore no new p95/p99 claim is made. The required real AppKit gesture and Instruments trace still
-needs a human-driven logged-in display session. The reproducible wrapper is
-`scripts/run-lumo-227-capture.sh`; it records Metal System Trace plus Points of Interest for a real
-pointer stream and writes the operator summary alongside the trace.
+needs a human-driven logged-in display session. The historical wrapper used for this attempt was
+retired in LUMO-230, so the real-pointer capture workflow is no longer available from this checkout.
 
 ## Remaining handoff gate
 

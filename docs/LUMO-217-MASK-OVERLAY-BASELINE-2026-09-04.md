@@ -87,15 +87,11 @@ swift test --filter MaskOverlayPerformanceBenchmark
 
 The second command is intentionally skipped unless the benchmark environment variable is set.
 
-## LUMO-227 trace follow-up status
+## LUMO-227 trace follow-up status (historical; workflow retired)
 
-The follow-up now includes a Release-only, standalone AppKit capture host and wrapper:
-
-```sh
-LUMO_MASK_OVERLAY_REAL_POINTER_DURATION=30 \
-LUMO_CAPTURE_OUTPUT_DIR=/tmp/lumo-227-capture \
-scripts/run-lumo-227-capture.sh
-```
+The follow-up previously included a Release-only, standalone AppKit capture host and wrapper. That
+capture workflow was retired in LUMO-230 after the historical attempts below; the host and wrapper
+are no longer available from this checkout.
 
 The host uses `LUMO_MASK_OVERLAY_PROTOTYPE=1`, a real `NSWindow` containing the same
 `MaskOverlayMTKView`/`MaskOverlayRenderer` path, and `xctrace` with Metal System Trace plus Points
