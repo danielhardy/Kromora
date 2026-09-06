@@ -228,6 +228,11 @@ extension AppViewModel {
     func updateMask(
         _ id: UUID, debounced: Bool = false, _ transform: (inout LocalAdjustmentLayer) -> Void
     ) {
+        if var draft = maskInteractionState.draftLayer, draft.id == id {
+            transform(&draft)
+            maskInteractionState.updateDraft(draft)
+            return
+        }
         updateDocument(debounced: debounced) { document in
             guard let index = document.localAdjustments.firstIndex(where: { $0.id == id }) else {
                 return

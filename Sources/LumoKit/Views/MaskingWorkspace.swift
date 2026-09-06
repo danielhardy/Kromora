@@ -183,7 +183,7 @@ struct MaskingWorkspace: View {
     @ViewBuilder
     private var selectedInspector: some View {
         if let id = maskingState.selectedLayerID,
-            let layer = viewModel.document.localAdjustments.first(where: { $0.id == id })
+            let layer = inspectorLayer(id: id)
         {
             VStack(alignment: .leading, spacing: 10) {
                 Divider()
@@ -212,6 +212,15 @@ struct MaskingWorkspace: View {
                 .accessibilityHint("Restore this layer's saved controls to their defaults")
             }
         }
+    }
+
+    /// During a canvas gesture the draft is the source of truth for the visible controls. Reading
+    /// only the committed document here made the inspector appear to lag until mouse-up.
+    private func inspectorLayer(id: UUID) -> LocalAdjustmentLayer? {
+        if let draft = maskingState.draftLayer, draft.id == id {
+            return draft
+        }
+        return viewModel.document.localAdjustments.first(where: { $0.id == id })
     }
 
     private func componentInspector(_ layer: LocalAdjustmentLayer) -> some View {
@@ -381,6 +390,22 @@ struct MaskingWorkspace: View {
             .foregroundStyle(.secondary)
             brushControls
         case .linear(let definition):
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Canvas guide")
+                    .font(.caption.weight(.semibold))
+                HStack(spacing: 8) {
+                    linearGuideSwatch(.gray, title: "Zero")
+                    linearGuideSwatch(.orange, title: "Transition")
+                    linearGuideSwatch(.cyan, title: "Full")
+                }
+                Text("Drag the edge bars to resize, the orange center bar to move, or the purple handle to rotate.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Linear gradient guide: zero strength, transition, and full strength")
+            .accessibilityHint("Use the canvas bars to resize, move, or rotate the gradient")
             maskSlider(
                 "Angle",
                 value: componentValue(
@@ -582,8 +607,7 @@ struct MaskingWorkspace: View {
     ) -> some View {
         let binding = Binding<Double>(
             get: {
-                viewModel.document.localAdjustments.first(where: { $0.id == layerID })?.adjustments[
-                    keyPath: keyPath] ?? 0
+                inspectorLayer(id: layerID)?.adjustments[keyPath: keyPath] ?? 0
             },
             set: { value in
                 viewModel.updateMask(layerID, debounced: true) {
@@ -630,8 +654,7 @@ struct MaskingWorkspace: View {
         let fallbackValue = fallbackLayer[keyPath: keyPath]
         return Binding(
             get: {
-                viewModel.document.localAdjustments.first(where: { $0.id == id })?[keyPath: keyPath]
-                    ?? fallbackValue
+                inspectorLayer(id: id)?[keyPath: keyPath] ?? fallbackValue
             },
             set: { value in viewModel.updateMask(id) { layer in layer[keyPath: keyPath] = value } }
         )
@@ -642,7 +665,7 @@ struct MaskingWorkspace: View {
     ) -> Binding<Bool> {
         Binding(
             get: {
-                viewModel.document.localAdjustments.first(where: { $0.id == layerID })?.components
+                inspectorLayer(id: layerID)?.components
                     .first(where: { $0.id == componentID })?[keyPath: keyPath] ?? false
             },
             set: { value in
@@ -659,10 +682,9 @@ struct MaskingWorkspace: View {
     ) -> Binding<Double> {
         Binding(
             get: {
-                guard
-                    let component = viewModel.document.localAdjustments.first(where: {
-                        $0.id == layerID
-                    })?.components.first(where: { $0.id == componentID })
+                guard let component = inspectorLayer(id: layerID)?.components.first(where: {
+                    $0.id == componentID
+                })
                 else { return 0 }
                 return get(component.source)
             },
@@ -673,6 +695,17 @@ struct MaskingWorkspace: View {
     }
 
     private func percentage(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+
+    private func linearGuideSwatch(_ color: Color, title: String) -> some View {
+        HStack(spacing: 3) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(title)
+                .font(.caption2)
+        }
+        .foregroundStyle(.secondary)
+    }
 }
 
 private struct MaskLayerRow: View {
@@ -890,6 +923,10 @@ struct MaskCanvasOverlay: View {
     ) {
         func updateHover(_ sample: MaskNativePointerSample) {
             maskingState.updateHoverPoint(transform.sourceNormalizedPoint(forViewport: sample.point))
+            maskingState.updateLinearHover(
+                maskingState.activeTool == .linear
+                    ? linearHandle(at: sample.point, transform: transform) : nil
+            )
         }
         func pan(_ sample: MaskNativePointerSample) {
             guard let lastPanPoint else { self.lastPanPoint = sample.point; return }
@@ -1083,37 +1120,10 @@ struct MaskCanvasOverlay: View {
             guard let start = point(definition.zeroStrengthPoint),
                 let end = point(definition.fullStrengthPoint)
             else { return }
-            let dx = end.x - start.x
-            let dy = end.y - start.y
-            let length = max(sqrt(dx * dx + dy * dy), 0.001)
-            let normalUnit = CGPoint(x: -dy / length, y: dx / length)
-            let halfBarLength = min(
-                max(transform.viewportSize.width, transform.viewportSize.height) * 0.12, 64)
-            let center = CGPoint(x: (start.x + end.x) * 0.5, y: (start.y + end.y) * 0.5)
-            let bars = [start, center, end]
-            for (index, bar) in bars.enumerated() {
-                var path = Path()
-                path.move(
-                    to: CGPoint(x: bar.x - normalUnit.x * halfBarLength,
-                                y: bar.y - normalUnit.y * halfBarLength))
-                path.addLine(
-                    to: CGPoint(x: bar.x + normalUnit.x * halfBarLength,
-                                y: bar.y + normalUnit.y * halfBarLength))
-                context.stroke(
-                    path, with: .color(guideColor),
-                    style: StrokeStyle(
-                        lineWidth: index == 1 ? 2 : 1, dash: index == 1 ? [] : [4, 3]))
-            }
-            let rotationHandle = CGPoint(
-                x: center.x + normalUnit.x * 34, y: center.y + normalUnit.y * 34)
-            context.stroke(
-                Path { path in
-                    path.move(to: center)
-                    path.addLine(to: rotationHandle)
-                }, with: .color(guideColor), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-            drawHandle(at: start, in: &context, color: guideColor)
-            drawHandle(at: end, in: &context, color: guideColor)
-            drawHandle(at: rotationHandle, in: &context, color: guideColor)
+            drawLinearGuide(
+                start: start, end: end, transform: transform,
+                in: &context
+            )
         case .radial(let definition):
             guard let center = point(definition.center) else { return }
             let outer = radialGuidePoints(
@@ -1180,6 +1190,112 @@ struct MaskCanvasOverlay: View {
             with: .color(color))
     }
 
+    /// Draw the linear guide as three explicit strength zones. The mask renderer remains the
+    /// source of truth for pixels; these translucent zones only explain which side is zero, where
+    /// the smooth transition happens, and which side is full strength.
+    private func drawLinearGuide(
+        start: CGPoint, end: CGPoint, transform: CanvasMaskTransform,
+        in context: inout GraphicsContext
+    ) {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let length = max(hypot(dx, dy), 0.001)
+        let direction = CGPoint(x: dx / length, y: dy / length)
+        let normal = CGPoint(x: -direction.y, y: direction.x)
+        let extent = max(transform.viewportSize.width, transform.viewportSize.height) * 2 + length
+        let before = CGPoint(
+            x: start.x - direction.x * extent, y: start.y - direction.y * extent)
+        let after = CGPoint(x: end.x + direction.x * extent, y: end.y + direction.y * extent)
+
+        func offset(_ point: CGPoint, by distance: CGFloat) -> CGPoint {
+            CGPoint(x: point.x + normal.x * distance, y: point.y + normal.y * distance)
+        }
+        func polygon(_ points: [CGPoint]) -> Path {
+            Path { path in
+                guard let first = points.first else { return }
+                path.move(to: first)
+                for point in points.dropFirst() { path.addLine(to: point) }
+                path.closeSubpath()
+            }
+        }
+
+        guard let visibleRect = transform.viewportRect(forSourceNormalized: transform.cropRect)
+        else { return }
+
+        var zoneContext = context
+        zoneContext.clip(to: Path(visibleRect))
+        zoneContext.fill(
+            polygon([offset(before, by: -extent), offset(before, by: extent),
+                     offset(start, by: extent), offset(start, by: -extent)]),
+            with: .color(Color.black.opacity(0.18)))
+        zoneContext.fill(
+            polygon([offset(start, by: -extent), offset(start, by: extent),
+                     offset(end, by: extent), offset(end, by: -extent)]),
+            with: .color(Color.orange.opacity(0.16)))
+        zoneContext.fill(
+            polygon([offset(end, by: -extent), offset(end, by: extent),
+                     offset(after, by: extent), offset(after, by: -extent)]),
+            with: .color(Color.white.opacity(0.16)))
+
+        let center = CGPoint(x: (start.x + end.x) * 0.5, y: (start.y + end.y) * 0.5)
+        let halfBarLength = min(
+            max(transform.viewportSize.width, transform.viewportSize.height) * 0.12, 64)
+        let rotationHandle = CGPoint(
+            x: center.x + normal.x * 34, y: center.y + normal.y * 34)
+        let isToolActive = maskingState.activeTool == .linear
+        let baseOpacity = isToolActive ? 1.0 : 0.55
+        let handles: [(MaskInteractionState.LinearHandle, CGPoint, Color, Bool)] = [
+            (.zeroStrength, start, Color.gray, false),
+            (.center, center, Color.orange, true),
+            (.fullStrength, end, Color.cyan, false),
+            (.rotation, rotationHandle, Color.purple, false),
+        ]
+
+        for (handle, point, color, solid) in handles {
+            let isActive = maskingState.activeLinearHandle == handle
+            let isHovered = maskingState.hoveredLinearHandle == handle
+            let lineWidth: CGFloat = isActive ? 4 : (isHovered ? 3 : (solid ? 2 : 1.5))
+            let style = StrokeStyle(
+                lineWidth: lineWidth, lineCap: .round, dash: solid ? [] : [5, 3])
+            let barPath: Path
+            if handle == .rotation {
+                barPath = Path { path in
+                    path.move(to: center)
+                    path.addLine(to: point)
+                }
+            } else {
+                let barStart = CGPoint(
+                    x: point.x - normal.x * halfBarLength,
+                    y: point.y - normal.y * halfBarLength)
+                let barEnd = CGPoint(
+                    x: point.x + normal.x * halfBarLength,
+                    y: point.y + normal.y * halfBarLength)
+                barPath = Path { path in
+                    path.move(to: barStart)
+                    path.addLine(to: barEnd)
+                }
+            }
+            context.stroke(
+                barPath, with: .color(Color.black.opacity(0.7 * baseOpacity)),
+                style: StrokeStyle(
+                    lineWidth: lineWidth + 3, lineCap: .round, dash: style.dash))
+            context.stroke(
+                barPath, with: .color(color.opacity(baseOpacity)), style: style)
+
+            let radius: CGFloat = isActive ? 8 : (isHovered ? 7 : 6)
+            context.fill(
+                Path(ellipseIn: CGRect(
+                    x: point.x - radius, y: point.y - radius,
+                    width: radius * 2, height: radius * 2)),
+                with: .color(Color.black.opacity(0.8)))
+            context.fill(
+                Path(ellipseIn: CGRect(
+                    x: point.x - radius + 1.5, y: point.y - radius + 1.5,
+                    width: (radius - 1.5) * 2, height: (radius - 1.5) * 2)),
+                with: .color(color.opacity(baseOpacity)))
+        }
+    }
+
     private var canvasAccessibilityLabel: String {
         guard let layer = activeLayer,
             let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID)
@@ -1205,7 +1321,11 @@ struct MaskCanvasOverlay: View {
             let angle = Int(definition.angleDegrees.rounded())
             let falloff = definition.falloff.formatted(
                 .number.precision(.fractionLength(2)))
-            return "Angle \(angle) degrees, falloff \(falloff)"
+            let active = maskingState.activeLinearHandle.map {
+                ", editing \($0.accessibilityTitle)"
+            } ?? ""
+            return "Zero-strength side to full-strength side, angle \(angle) degrees, "
+                + "transition width \(falloff)\(active)"
         case .radial(let definition):
             let angle = Int((definition.rotation * 180 / .pi).rounded())
             return "Angle \(angle) degrees, horizontal radius "
