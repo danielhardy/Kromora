@@ -869,8 +869,10 @@ final class ImageCollection: ObservableObject {
             )
             if !FileManager.default.fileExists(atPath: destinationURL.path) {
                 try FileManager.default.copyItem(at: canonicalSource, to: destinationURL)
-            } else if PhotoSourceFingerprint.file(at: canonicalSource)
-                != PhotoSourceFingerprint.file(at: destinationURL) {
+            } else if !sameCopiedContent(
+                PhotoSourceFingerprint.file(at: canonicalSource),
+                PhotoSourceFingerprint.file(at: destinationURL)
+            ) {
                 let temporaryURL = canonicalLibrary.appendingPathComponent(
                     ".(UUID().uuidString)-(canonicalSource.lastPathComponent)"
                 )
@@ -881,6 +883,19 @@ final class ImageCollection: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    /// A managed copy intentionally has a different resource identifier and usually a different
+    /// modification date from its source. Those fields still belong in render/cache fingerprints,
+    /// but using the complete fingerprint here makes every reopen replace the copy and therefore
+    /// changes its file-resource asset ID. Compare only the bounded content signature when deciding
+    /// whether the deterministic managed destination is already current.
+    private func sameCopiedContent(
+        _ source: PhotoSourceFingerprint,
+        _ destination: PhotoSourceFingerprint
+    ) -> Bool {
+        source.byteCount == destination.byteCount
+            && source.sampleDigest == destination.sampleDigest
     }
 
     /// Stop a folder scan before appending. Existing items are deliberately retained; the import

@@ -112,8 +112,9 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let restored = EditDocumentStore(
             fileURL: tempDirectory.appendingPathComponent("coalesced-edits.json")
         )
+        let item = try XCTUnwrap(viewModel.collection.items.first)
         let result = await restored.load(
-            for: EditSourceReference(assetID: .file(imageURL), url: imageURL)
+            for: EditSourceReference(assetID: item.id, url: item.url)
         )
         XCTAssertEqual(result.document.adjustments, [.exposure(ev: 1.0)])
         let writeCount = await store.writeCount
@@ -145,7 +146,8 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let writeCount = await store.writeCount
         XCTAssertEqual(writeCount, 1)
         let restored = EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("slow-flush-edits.json"))
-        let result = await restored.load(for: EditSourceReference(assetID: .file(imageURL), url: imageURL))
+        let item = try XCTUnwrap(viewModel.collection.items.first)
+        let result = await restored.load(for: EditSourceReference(assetID: item.id, url: item.url))
         XCTAssertEqual(result.document.adjustments, [.exposure(ev: 0.6)])
     }
 

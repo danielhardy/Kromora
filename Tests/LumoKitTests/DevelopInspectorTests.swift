@@ -405,7 +405,10 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         // A comparison-baseline render is exactly a request whose document has no adjustments —
         // `originalForComparison` strips them. Counting before and after is what makes the extra
         // render visible; both images legitimately produce one on open.
-        let baselinesBefore = await fake.previewRequests.filter { $0.document.adjustments.isEmpty }.count
+        let secondSource = try XCTUnwrap(viewModel.sourceURL)
+        let baselinesBefore = await fake.previewRequests.filter {
+            $0.document.adjustments.isEmpty && $0.source?.backing == .url(secondSource)
+        }.count
 
         // An edit on the new image that touches nothing in `rawDevelop`. The baseline only moves
         // with develop, so this must not re-rasterize it.
@@ -415,7 +418,9 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         }
         try await Task.sleep(for: .milliseconds(150))
 
-        let baselinesAfter = await fake.previewRequests.filter { $0.document.adjustments.isEmpty }.count
+        let baselinesAfter = await fake.previewRequests.filter {
+            $0.document.adjustments.isEmpty && $0.source?.backing == .url(secondSource)
+        }.count
         XCTAssertEqual(
             baselinesAfter, baselinesBefore,
             "an edit that changed no develop setting re-rasterized the comparison baseline, so the "
