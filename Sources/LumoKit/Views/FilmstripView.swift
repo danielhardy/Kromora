@@ -15,11 +15,11 @@ struct FilmstripView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 8) {
                     ForEach(entries) { entry in
-                        if let index = entry.itemIndex {
-                            let item = collection.items[index]
+                        if let resolved = collection.resolvedItem(for: entry) {
+                            let item = resolved.item
                             Button {
                                 let modifiers = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                                onSelect(index, modifiers.contains(.command))
+                                onSelect(resolved.index, modifiers.contains(.command))
                             } label: {
                                 FilmstripThumbnail(
                                     item: item,

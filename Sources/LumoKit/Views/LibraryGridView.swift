@@ -91,8 +91,9 @@ private struct LibraryMosaicRow: View {
     let onOpen: () -> Void
 
     private var cells: [LibraryMosaicCellLayout] {
-        zip(row.itemIndices, row.itemWidths).map { offset, width in
-            LibraryMosaicCellLayout(
+        zip(row.itemIndices, row.itemWidths).compactMap { offset, width in
+            guard entries.indices.contains(offset) else { return nil }
+            return LibraryMosaicCellLayout(
                 offset: offset,
                 width: width,
                 id: entries[offset].id
@@ -104,8 +105,8 @@ private struct LibraryMosaicRow: View {
         HStack(alignment: .top, spacing: CGFloat(spacing)) {
             ForEach(cells) { cell in
                 let entry = entries[cell.offset]
-                if let index = entry.itemIndex {
-                    let item = collection.items[index]
+                if let resolved = collection.resolvedItem(for: entry) {
+                    let item = resolved.item
                     LibraryGridCell(
                         item: item,
                         settings: settings,
@@ -125,11 +126,11 @@ private struct LibraryMosaicRow: View {
                         collection.releaseThumbnail(for: item.id)
                     }
                     .onTapGesture {
-                        onSelect(index)
+                        onSelect(resolved.index)
                     }
                     .simultaneousGesture(
                         TapGesture(count: 2).onEnded {
-                            onSelect(index)
+                            onSelect(resolved.index)
                             onOpen()
                         }
                     )

@@ -89,6 +89,29 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertEqual(cache.recomputeCount, 2, "a changed item order must invalidate the mosaic")
     }
 
+    func testProjectedEntryResolvesByStableIDWhenItsIndexIsStale() async throws {
+        for name in ["a.jpg", "b.jpg", "c.jpg"] {
+            try Fixtures.writeJPEG(
+                width: 16, height: 12, orientation: 1, named: name, in: tempDirectory
+            )
+        }
+
+        let collection = ImageCollection()
+        collection.loadFromFolder(tempDirectory)
+        await collection.scanCompletion()
+
+        let entry = try XCTUnwrap(collection.thumbnailEntries.dropFirst().first)
+        let expectedID = try XCTUnwrap(entry.itemIndex.map { collection.items[$0].id })
+
+        // Simulate SwiftUI retaining a row while an earlier item disappears. The projected index
+        // is now stale, but the entry's stable ID still identifies the correct current item.
+        collection.items.removeFirst()
+
+        let resolved = try XCTUnwrap(collection.resolvedItem(for: entry))
+        XCTAssertEqual(resolved.index, 0)
+        XCTAssertEqual(resolved.item.id, expectedID)
+    }
+
     func testDemandDrivenGridWaitsForMaterializedCellsBeforeDecoding() async throws {
         for index in 0..<64 {
             try Fixtures.writeJPEG(

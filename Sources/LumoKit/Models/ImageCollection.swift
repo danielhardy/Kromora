@@ -1091,6 +1091,24 @@ final class ImageCollection: ObservableObject {
         collectionProjection.thumbnailEntries
     }
 
+    /// Resolve a projected entry against the current item array.
+    ///
+    /// SwiftUI can keep a row alive for one update after an item is inserted or removed. The
+    /// projection's index is therefore only a fast path; the stable asset ID is authoritative.
+    /// Returning nil for an entry that was removed lets the view drop that stale cell safely.
+    func resolvedItem(for entry: ThumbnailEntry) -> (index: Int, item: Item)? {
+        guard let projectedIndex = entry.itemIndex else { return nil }
+
+        if items.indices.contains(projectedIndex), items[projectedIndex].id == entry.id {
+            return (projectedIndex, items[projectedIndex])
+        }
+
+        guard let currentIndex = items.firstIndex(where: { $0.id == entry.id }) else {
+            return nil
+        }
+        return (currentIndex, items[currentIndex])
+    }
+
     private var collectionProjection: CollectionProjection.Snapshot {
         projectionCache.snapshot(
             items: items,
