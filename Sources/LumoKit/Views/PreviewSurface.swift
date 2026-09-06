@@ -175,8 +175,13 @@ final class PreviewSurface: ObservableObject {
         if pendingGPURevision == revision { pendingGPURevision = nil }
     }
 
-    fileprivate func markDrawablePresented(revision: UInt64, time: TimeInterval) {
-        guard let pending = telemetryByRevision[revision] else { return }
+    /// Returns `true` when Metal skipped this drawable and the caller should request another draw.
+    /// A skipped drawable is still a completed render candidate, so settle the UI state here as
+    /// well; otherwise a fast source replacement can leave AppViewModel waiting forever for a
+    /// presentation callback that will never arrive.
+    @discardableResult
+    func markDrawablePresented(revision: UInt64, time: TimeInterval) -> Bool {
+        guard let pending = telemetryByRevision[revision] else { return false }
         if time > 0 {
             pending.telemetry.mark(revision, drawablePresentation: time)
         } else if let fallback = zeroPresentedTimeFallback {
@@ -187,10 +192,15 @@ final class PreviewSurface: ObservableObject {
             pending.telemetry.mark(revision, drawablePresentation: fallback())
         } else {
             // Metal reports zero when a drawable was skipped. Do not turn a skipped frame into a
-            // false presentation sample, but release its association so the next frame can be tracked.
+            // false presentation sample. The render itself is valid, though, so complete the
+            // settled-preview handshake and ask the paused MTKView to put the image in a fresh
+            // drawable. This is common while SwiftUI is replacing the canvas during rapid
+            // thumbnail navigation.
+            let confirmation = presentationConfirmations.removeValue(forKey: revision)
             telemetryByRevision.removeValue(forKey: revision)
             submittedTelemetryRevisions.remove(revision)
-            return
+            confirmation?()
+            return true
         }
         if let source = pending.source {
             LumoObservability.liveEdit(.drawablePresented, source: source, quality: pending.quality,
@@ -200,6 +210,7 @@ final class PreviewSurface: ObservableObject {
         submittedTelemetryRevisions.remove(revision)
         let confirmation = presentationConfirmations.removeValue(forKey: revision)
         confirmation?()
+        return false
     }
     func clear() {
         image = nil
@@ -273,6 +284,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
         private var lastDrawnRevision: UInt64?
         private var lastDrawnNavigation: CanvasNavigation?
         private var lastDrawableSize: (width: Int, height: Int)?
+        /// A drawable can be skipped after its command buffer has been submitted. Remember which
+        /// draw needs replaying so the completion handler cannot mark the skipped revision as the
+        /// settled frame and suppress the retry.
+        private var skippedDrawNeedsRetry = false
         /// Keep one drawable submission in flight and redraw only the newest surface state when it
         /// completes. Processing has already completed on RenderEngine's queue; this pacer bounds
         /// only the small transform/compositing pass and drawable submissions.
@@ -372,10 +387,15 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 }
             }
             if let revision = presentationRevision {
-                drawable.addPresentedHandler { [weak surface] drawable in
+                drawable.addPresentedHandler { [weak self, weak surface] drawable in
                     let presentationTime = drawable.presentedTime
                     Task { @MainActor in
-                        surface?.markDrawablePresented(revision: revision, time: presentationTime)
+                        let skipped = surface?.markDrawablePresented(
+                            revision: revision, time: presentationTime
+                        ) == true
+                        if skipped {
+                            self?.retrySkippedDraw()
+                        }
                     }
                 }
             }
@@ -423,11 +443,17 @@ struct PreviewSurfaceView: NSViewRepresentable {
             drawRevision: UInt64, navigation: CanvasNavigation,
             drawableSize: (width: Int, height: Int), succeeded: Bool
         ) {
+            let retry = skippedDrawNeedsRetry
+            skippedDrawNeedsRetry = false
             isDrawing = false
             // Do not record a draw as complete until its command buffer completed successfully.
             // The surface may also have advanced while the buffer evaluated; in that case this
             // completion only frees the pacer and the newest revision is redrawn below.
-            if succeeded, let surface, surface.revision == drawRevision, surface.image != nil {
+            if retry {
+                lastDrawnRevision = nil
+                lastDrawnNavigation = nil
+                lastDrawableSize = nil
+            } else if succeeded, let surface, surface.revision == drawRevision, surface.image != nil {
                 lastDrawnRevision = drawRevision
                 lastDrawnNavigation = navigation
                 lastDrawableSize = drawableSize
@@ -439,6 +465,22 @@ struct PreviewSurfaceView: NSViewRepresentable {
             // The surface may have advanced while this buffer evaluated. One redraw now consumes
             // that latest revision rather than replaying every superseded pointer update.
             if let view { view.setNeedsDisplay(view.bounds) }
+        }
+
+        private func retrySkippedDraw() {
+            guard let view else { return }
+            if isDrawing {
+                // The presented handler and command-buffer completion can arrive in either order.
+                // Let drawingFinished preserve the retry when completion is still pending.
+                skippedDrawNeedsRetry = true
+            } else {
+                // Completion already recorded this revision as drawn; invalidate that marker so
+                // the paused view does not reject the fresh-draw request as redundant.
+                lastDrawnRevision = nil
+                lastDrawnNavigation = nil
+                lastDrawableSize = nil
+            }
+            view.setNeedsDisplay(view.bounds)
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {

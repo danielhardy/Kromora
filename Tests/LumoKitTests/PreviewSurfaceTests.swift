@@ -42,6 +42,28 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertTrue(confirmed, "headless tests should not wait for a drawable that does not exist")
     }
 
+    func testSkippedDrawableConfirmsAndRequestsAnotherDraw() {
+        let surface = PreviewSurface()
+        surface.attachPresentationLifecycle()
+        let telemetry = LiveEditTelemetry()
+        let source = ImageSource(
+            url: URL(fileURLWithPath: "/tmp/skipped-presentation-test.png"),
+            nativeExtent: CGSize(width: 2, height: 2)
+        )
+        var confirmed = false
+
+        surface.present(
+            CIImage(color: .red), revision: 1, telemetry: telemetry, source: source,
+            onPresented: { confirmed = true }
+        )
+
+        XCTAssertTrue(
+            surface.markDrawablePresented(revision: 1, time: 0),
+            "a skipped drawable must be replayed into a fresh drawable"
+        )
+        XCTAssertTrue(confirmed, "a valid completed render must not leave the preview loading")
+    }
+
     func testAFailedReplacementKeepsTheLastValidFrame() throws {
         let surface = PreviewSurface()
         let first = CIImage(color: .red)
