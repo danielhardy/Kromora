@@ -314,18 +314,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// mode and render-scale changes that do not change the edit document.
     private var displayRevision: UInt64 = 0
     /// Baseline generation changes when the source or a comparison-frame stage (develop/crop)
-    /// changes. Look-stage edits and RAW white-balance Temperature must not invalidate an in-flight
-    /// baseline that is still correct.
+    /// changes. Look-stage edits and RAW white-balance Temperature/Tint must not invalidate an
+    /// in-flight baseline that is still correct.
     private var comparisonRevision: UInt64 = 0
     /// Presentation-only snapshot of the before image. `EditDocument.originalForComparison` is a
-    /// useful value projection, but it is derived from the live document; RAW Temperature is part of
-    /// `rawDevelop` and would therefore mutate that projection during a slider gesture. Keeping the
-    /// snapshot outside the persisted edit document lets ordinary Temperature edits remain undoable
-    /// without moving the comparison reference.
+    /// useful value projection, but it is derived from the live document; RAW Temperature/Tint are
+    /// part of `rawDevelop` and would therefore mutate that projection during a slider gesture.
+    /// Keeping the snapshot outside the persisted edit document lets ordinary Temperature/Tint edits
+    /// remain undoable without moving the comparison reference.
     private var comparisonBaselineDocument = EditDocument().comparisonBaseline
     /// The baseline revision already queued or published for the Original surface. A visible
-    /// adjusted render can follow every Temperature tick, but it must not enqueue the same Original
-    /// request again when the baseline revision is unchanged.
+    /// adjusted render can follow every Temperature/Tint tick, but it must not enqueue the same
+    /// Original request again when the baseline revision is unchanged.
     private var comparisonPreviewScheduledRevision: UInt64?
     /// The last settled request confirmed by the presentation surface. Supporting work is never
     /// admitted before this lifecycle boundary.
@@ -2077,7 +2077,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// it is what the inspector will call. Keeping `document` `private(set)` behind it means every
     /// mutation goes through one place that knows to re-render.
     func updateDocument(_ transform: (inout EditDocument) -> Void) {
-        updateDocument(debounced: false, transform)
+        updateDocument(debounced: false, invalidatesComparisonBaseline: false, transform)
     }
 
     /// Mutate the document and re-render, optionally coalescing a burst of edits into one render.
@@ -2092,23 +2092,34 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// document as well would mean a read-back mid-drag saw a stale value.
     ///
     /// Worth the machinery because a comparison-frame develop change costs *two* renders —
-    /// `scheduleOriginalPreview` as well as `schedulePreview`. White-balance Temperature is the
-    /// exception: it is evaluated against, rather than incorporated into, the comparison frame.
+    /// `scheduleOriginalPreview` as well as `schedulePreview`. White-balance Temperature/Tint are
+    /// the exception: they are evaluated against, rather than incorporated into, the comparison
+    /// frame.
     private static func rawDevelopChangedComparisonFrame(
         from old: RAWDevelopSettings, to new: RAWDevelopSettings
     ) -> Bool {
-        // Temperature is an edit evaluated against the current developed source. It must not move
-        // the before pane while the user is evaluating it. Keep the other RAW develop controls in
-        // the documented baseline semantics: changing one intentionally establishes a new
-        // developed-source comparison frame.
+        // White-balance Temperature and Tint are edits evaluated against the current developed
+        // source. They must not move the before pane while the user is evaluating them. Keep the
+        // other RAW develop controls in the documented baseline semantics: changing one
+        // intentionally establishes a new developed-source comparison frame.
         var oldFrame = old
         var newFrame = new
         oldFrame.neutralTemperature = nil
         newFrame.neutralTemperature = nil
+        oldFrame.neutralTint = nil
+        newFrame.neutralTint = nil
         return oldFrame != newFrame
     }
 
     func updateDocument(debounced: Bool, _ transform: (inout EditDocument) -> Void) {
+        updateDocument(debounced: debounced, invalidatesComparisonBaseline: false, transform)
+    }
+
+    func updateDocument(
+        debounced: Bool,
+        invalidatesComparisonBaseline: Bool,
+        _ transform: (inout EditDocument) -> Void
+    ) {
         var updated = document
         transform(&updated)
         guard updated != document else { return }
@@ -2116,8 +2127,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let developChanged = Self.rawDevelopChangedComparisonFrame(
             from: document.rawDevelop, to: updated.rawDevelop
         )
-        let comparisonChanged = developChanged || updated.crop != document.crop ||
-            updated.localAdjustments != document.localAdjustments
+        let cropChanged = updated.crop != document.crop
+        let localAdjustmentsChanged = updated.localAdjustments != document.localAdjustments
+        let frameChanged = invalidatesComparisonBaseline || developChanged
+        let comparisonChanged = frameChanged || cropChanged || localAdjustmentsChanged
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         activeHistory.recordChange(from: document, to: updated)
@@ -2126,9 +2139,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         refreshLUTResolutionStatus()
         saveActiveDocument()
         documentRevision &+= 1
-        // Look edits and RAW Temperature leave the baseline unchanged, so an in-flight baseline
-        // remains useful. Other RAW develop edits change the explicit before-image and must
-        // invalidate that work; it will be queued again after the new visible result publishes.
+        // Look edits and RAW Temperature/Tint leave the baseline unchanged, so an in-flight
+        // baseline remains useful. Other RAW develop edits change the explicit before-image and
+        // must invalidate that work; it will be queued again after the new visible result publishes.
         if comparisonChanged {
             comparisonBaselineDocument = updated.comparisonBaseline
             comparisonRevision &+= 1
