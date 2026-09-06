@@ -622,10 +622,16 @@ struct MaskingWorkspace: View {
     private func layerBinding<Value>(
         id: UUID, keyPath: WritableKeyPath<LocalAdjustmentLayer, Value>
     ) -> Binding<Value> {
-        Binding(
+        // SwiftUI can evaluate a binding captured by the inspector after its layer has been
+        // deleted, but before the inspector subtree is removed. Keep a value snapshot for that
+        // short transition instead of indexing into an array that may already be empty.
+        let fallbackLayer = viewModel.document.localAdjustments.first(where: { $0.id == id })
+            ?? LocalAdjustmentLayer()
+        let fallbackValue = fallbackLayer[keyPath: keyPath]
+        return Binding(
             get: {
                 viewModel.document.localAdjustments.first(where: { $0.id == id })?[keyPath: keyPath]
-                    ?? viewModel.document.localAdjustments[0][keyPath: keyPath]
+                    ?? fallbackValue
             },
             set: { value in viewModel.updateMask(id) { layer in layer[keyPath: keyPath] = value } }
         )
