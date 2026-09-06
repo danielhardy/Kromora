@@ -494,6 +494,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         "Open a supported photo to enable Auto."
     )
     private var autoAdjustmentTask: Task<Void, Never>?
+    /// Smart-mask creation performs provider work before inserting the durable recipe. This keeps
+    /// unsupported sources and failed analysis from leaving an inert component in the document.
+    var smartMaskCreationTask: Task<Void, Never>?
+    var smartMaskRetryKind: MaskCreationKind?
 
     @Published var isLoading: Bool = false
     enum PreviewState: Equatable, Sendable {
@@ -1097,6 +1101,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let assetID = importPlan.assetID
         endUndoGrouping()
         cancelAutoAdjustment()
+        smartMaskCreationTask?.cancel()
+        smartMaskCreationTask = nil
+        smartMaskRetryKind = nil
         // Discrete edits are queued normally; switching sources is a durability boundary for them.
         // Do not rewrite an unchanged document merely because navigation occurred.
         requestPersistenceFlush()

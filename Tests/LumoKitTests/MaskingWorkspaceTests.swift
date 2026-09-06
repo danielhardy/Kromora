@@ -1,9 +1,23 @@
+import CoreGraphics
+import Foundation
 import XCTest
 
 @testable import LumoKit
 
 @MainActor
 final class MaskingWorkspaceTests: XCTestCase {
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 5,
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     func testLayerActionsPersistThroughTheDocumentAndUndo() throws {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
 
@@ -362,5 +376,100 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertNil(viewModel.maskInteractionState.selectedLayerID)
         XCTAssertNil(viewModel.maskInteractionState.soloLayerID)
         XCTAssertFalse(viewModel.maskInteractionState.hasDraft)
+    }
+
+    func testProductionCreationExposesEverySupportedSmartKindAndPersistsIt() throws {
+        XCTAssertEqual(MaskCreationKind.smartKinds, [
+            .subject, .person, .face, .foreground, .background,
+        ])
+
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        for kind in MaskCreationKind.smartKinds {
+            viewModel.createMask(kind)
+        }
+
+        let layers = viewModel.document.localAdjustments
+        XCTAssertEqual(layers.count, MaskCreationKind.smartKinds.count)
+        XCTAssertEqual(
+            layers.compactMap { $0.components.first?.source.semanticDefinition?.target },
+            MaskCreationKind.smartKinds.compactMap(\.semanticTarget)
+        )
+
+        let reopened = try JSONDecoder().decode(
+            EditDocument.self, from: JSONEncoder().encode(viewModel.document)
+        )
+        XCTAssertEqual(reopened.localAdjustments, layers)
+    }
+
+    func testSmartCreationFailureWithoutSupportedSourceDoesNotCreateAnInertLayer() {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+
+        viewModel.createSmartMask(.subject)
+
+        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertEqual(
+            viewModel.maskingState.resolutionState,
+            .unavailable("Smart masks require an open photo with supported analysis.")
+        )
+    }
+
+    func testSmartActionPreflightsSharedProviderThenSelectsDurableMask() async throws {
+        let directory = try Fixtures.makeTempDirectory("ProductionSmartMask")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "smart.png", in: directory)
+        let store = MaskStore(directory: directory.appendingPathComponent("masks"))
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store,
+            maskProvider: ProductionSmartMaskProvider(store: store),
+            stages: [:]
+        )
+        let viewModel = AppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json")),
+            photoAnalysisCoordinator: coordinator
+        )
+
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the photo to load") { viewModel.sourceImage != nil }
+        viewModel.createSmartMask(.subject)
+        try await waitUntil("the smart mask to be created") {
+            viewModel.document.localAdjustments.count == 1
+        }
+
+        let component = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first)
+        XCTAssertEqual(component.source.semanticDefinition?.target, .subject)
+        XCTAssertEqual(viewModel.maskingState.selectedComponentID, component.id)
+        XCTAssertEqual(viewModel.maskingState.resolutionState, .ready)
+    }
+}
+
+private actor ProductionSmartMaskProvider: SemanticMaskProviding {
+    private let store: MaskStore
+
+    init(store: MaskStore) { self.store = store }
+
+    func mask(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+        let pixels = try NormalizedMask(
+            size: image.dimensions,
+            values: Array(repeating: 1, count: image.dimensions.width * image.dimensions.height)
+        )
+        let assetID = image.assetID ?? PhotoAnalysisCoordinator.assetID(for: image.source)
+        let key = MaskCacheKey(
+            assetID: assetID,
+            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: image.source),
+            kind: kind,
+            quality: quality,
+            providerVersion: "production-test-1"
+        )
+        let reference = try await store.store(pixels, for: key, quality: quality)
+        return RegionMask(
+            kind: kind,
+            bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            quality: quality,
+            reference: reference,
+            confidence: 1,
+            coverage: pixels.coverage
+        )
     }
 }
