@@ -1045,14 +1045,15 @@ actor RenderEngine: RenderEngining {
                 )
                 let payload: LocalMaskPayload
                 if let cached = localMaskCache.value(for: key) {
-                    // Request revision guards publication, not derived-resource identity. A cached
-                    // payload is safe to reuse after being stamped with this request's revision.
-                    payload = cached.forRequestRevision(requestRevision)
+                    // Request revision guards supersession, not derived-resource identity. A
+                    // cached payload is safe to reuse directly; AppViewModel's publication gate
+                    // owns the UI-level source/display staleness decision.
+                    payload = cached
                 } else {
                     do {
                     payload = try await localMaskResolver.resolve(LocalMaskResolveRequest(
                             source: source, assetID: assetID, component: component, targetSize: targetSize,
-                            quality: quality, transform: transform, requestRevision: requestRevision
+                            quality: quality, transform: transform
                         ))
                     } catch let error as LocalMaskResolutionError {
                         if case .semanticMaskUnavailable = error,
@@ -1083,8 +1084,7 @@ actor RenderEngine: RenderEngining {
                       (payload.definitionHash.isEmpty || payload.definitionHash == definitionHash),
                       payload.targetSize == targetSize,
                       payload.quality == quality,
-                      !payload.providerVersion.isEmpty,
-                      payload.requestRevision == requestRevision else {
+                      !payload.providerVersion.isEmpty else {
                     throw LocalMaskResolutionError.sourceMismatch
                 }
 

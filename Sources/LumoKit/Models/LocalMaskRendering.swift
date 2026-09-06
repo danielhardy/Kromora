@@ -32,7 +32,8 @@ struct LocalMaskRenderTransform: Codable, Hashable, Sendable, Equatable {
 
 /// The value-only request crossing from `RenderEngine` to a mask resolver. No Core Image or Metal
 /// object is allowed here. A resolver may use a semantic cache, a Vision provider, or simply return
-/// the analytic/brush descriptor already present in the request.
+/// the analytic/brush descriptor already present in the request. Request revisions stay in the
+/// engine's supersession checks rather than crossing into reusable resolver payloads.
 struct LocalMaskResolveRequest: Sendable, Equatable {
     let source: ImageSource
     let assetID: PhotoAssetID
@@ -40,7 +41,6 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
-    let requestRevision: UInt64
 
     init(
         source: ImageSource,
@@ -48,8 +48,7 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
         component: MaskComponent,
         targetSize: PixelDimensions,
         quality: RenderQuality,
-        transform: LocalMaskRenderTransform = .identity,
-        requestRevision: UInt64 = 0
+        transform: LocalMaskRenderTransform = .identity
     ) {
         self.source = source
         self.assetID = assetID ?? PhotoAnalysisCoordinator.assetID(for: source)
@@ -57,7 +56,6 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform
-        self.requestRevision = requestRevision
     }
 }
 
@@ -101,6 +99,7 @@ struct MaskOverlayRequest: Sendable, Equatable {
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
+    /// RenderEngine-local supersession token; it is not part of the resolved payload identity.
     let requestRevision: UInt64
     let style: MaskOverlayStyle
 
@@ -136,6 +135,8 @@ struct MaskOverlayRequest: Sendable, Equatable {
 /// A resolved mask is still a sendable value. Raster payloads use upper-left row order, matching
 /// the persisted brush/analytic coordinate contract. Procedural payloads are evaluated by the
 /// renderer at the requested extent, so they do not need a semantic cache or a pixel buffer.
+/// Staleness is checked by `RenderEngine` before this value is cached or rendered, and by
+/// `AppViewModel`/`PreviewCoordinator` before a completed frame is published.
 struct LocalMaskPayload: Sendable, Equatable {
     enum Descriptor: Sendable, Equatable {
         case raster(NormalizedMask)
@@ -150,7 +151,6 @@ struct LocalMaskPayload: Sendable, Equatable {
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let providerVersion: String
-    let requestRevision: UInt64
     let descriptor: Descriptor
 
     init(
@@ -160,7 +160,6 @@ struct LocalMaskPayload: Sendable, Equatable {
         quality: RenderQuality,
         assetID: PhotoAssetID? = nil,
         providerVersion: String = "local-1",
-        requestRevision: UInt64 = 0,
         descriptor: Descriptor
     ) {
         self.assetID = assetID
@@ -169,7 +168,6 @@ struct LocalMaskPayload: Sendable, Equatable {
         self.targetSize = targetSize
         self.quality = quality
         self.providerVersion = providerVersion
-        self.requestRevision = requestRevision
         self.descriptor = descriptor
     }
 
@@ -181,14 +179,6 @@ struct LocalMaskPayload: Sendable, Equatable {
         case .linear, .radial, .brush:
             return 1024
         }
-    }
-
-    func forRequestRevision(_ revision: UInt64) -> LocalMaskPayload {
-        LocalMaskPayload(
-            sourceFingerprint: sourceFingerprint, definitionHash: definitionHash,
-            targetSize: targetSize, quality: quality, assetID: assetID,
-            providerVersion: providerVersion, requestRevision: revision, descriptor: descriptor
-        )
     }
 }
 
@@ -251,7 +241,6 @@ struct DefaultLocalMaskResolver: LocalMaskResolving {
             targetSize: request.targetSize,
             quality: request.quality,
             assetID: request.assetID,
-            requestRevision: request.requestRevision,
             descriptor: descriptor
         )
     }
@@ -281,7 +270,6 @@ struct ResolvedSemanticMask: LocalMaskResolving {
             targetSize: mask.size,
             quality: quality,
             assetID: assetID,
-            requestRevision: request.requestRevision,
             descriptor: .raster(mask)
         )
     }
@@ -348,7 +336,6 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
             quality: request.quality,
             assetID: request.assetID,
             providerVersion: mask.reference.cacheKey.providerVersion,
-            requestRevision: request.requestRevision,
             descriptor: .raster(adjusted)
         )
     }

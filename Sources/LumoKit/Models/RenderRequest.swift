@@ -36,6 +36,8 @@ struct RenderRequest: Sendable, Equatable {
     /// Projection of normalized mask geometry into this render. It is identity for ordinary image
     /// renders, but remains on the request so preview/export and derived-mask caches share one seam.
     let maskTransform: LocalMaskRenderTransform
+    /// RenderEngine-local supersession token. UI publication staleness is checked independently by
+    /// PreviewCoordinator/AppViewModel and is never encoded into a reusable mask payload.
     let requestRevision: UInt64
     /// Full export policy when this is an encoded request. Kept separate from `RenderOutput` so the
     /// legacy format/quality spelling remains source-compatible for existing renderer clients.

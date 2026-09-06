@@ -34,8 +34,7 @@ final class SmartMaskTests: XCTestCase {
         let component = MaskComponent(source: .semantic(SemanticMaskDefinition(target: .subject)))
         let request = LocalMaskResolveRequest(
             source: source, assetID: assetID, component: component,
-            targetSize: PixelDimensions(width: 4, height: 4), quality: .preview,
-            requestRevision: 12
+            targetSize: PixelDimensions(width: 4, height: 4), quality: .preview
         )
         let resolver = CoordinatorLocalMaskResolver(coordinator: coordinator)
 
@@ -62,14 +61,12 @@ final class SmartMaskTests: XCTestCase {
         let component = MaskComponent(source: .semantic(SemanticMaskDefinition(target: .foreground)))
         let request = LocalMaskResolveRequest(
             source: source, assetID: assetID, component: component,
-            targetSize: PixelDimensions(width: 8, height: 8), quality: .export,
-            requestRevision: 99
+            targetSize: PixelDimensions(width: 8, height: 8), quality: .export
         )
         let payload = try await CoordinatorLocalMaskResolver(coordinator: coordinator).resolve(request)
 
         XCTAssertEqual(payload.assetID, assetID)
         XCTAssertEqual(payload.quality, .export)
-        XCTAssertEqual(payload.requestRevision, 99)
         XCTAssertEqual(payload.targetSize, PixelDimensions(width: 8, height: 8))
         guard case .raster(let mask) = payload.descriptor else {
             return XCTFail("smart render should resolve to a raster payload")
