@@ -57,8 +57,8 @@ struct AnalyzedRegion: Sendable, Codable, Equatable, Identifiable {
 /// self-contained and avoids placeholder domain models.
 ///
 /// `regions` contains only successfully analyzed masks supplied by the caller. Assembly never
-/// invents a background region: it is present when the foreground provider returned its derived
-/// `.background` mask (including the provider's full-background result when no foreground exists).
+/// invents a background region: it is present when the coordinator returned its derived
+/// `.background` mask (including the full-background result when no foreground exists).
 struct PhotoAnalysis: Sendable, Codable, Equatable {
     let version: AnalysisVersion
     let globalTone: ToneStatistics
