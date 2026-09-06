@@ -109,7 +109,7 @@ Findings:
 Fixes:
 - None
 Verification commits:
-- None
+- da64900
 Actor: codex
 Resolved model: gpt-5.6-luna
 Pickup session: 01MTOJFSQK9BNMRV7Q
