@@ -4,6 +4,16 @@ import XCTest
 @testable import LumoKit
 
 final class MaskPresentationPolicyTests: XCTestCase {
+    func testOverlayOpacityOnlyControlsCoverageAndToolingStaysOpaque() {
+        let low = MaskOverlayPresentation(coverageOpacity: 0.08)
+        let high = MaskOverlayPresentation(coverageOpacity: 0.8)
+
+        XCTAssertEqual(low.coverageOpacity, 0.08, accuracy: 0.000_001)
+        XCTAssertEqual(high.coverageOpacity, 0.8, accuracy: 0.000_001)
+        XCTAssertEqual(low.toolingOpacity, 1)
+        XCTAssertEqual(high.toolingOpacity, 1)
+    }
+
     func testStrongSubjectIsActionable() {
         XCTAssertEqual(MaskPresentationPolicy.decision(for: makeMask(.subject, confidence: 0.9, coverage: 0.2)), .actionable)
     }

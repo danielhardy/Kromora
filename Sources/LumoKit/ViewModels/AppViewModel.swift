@@ -748,7 +748,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             guard let self, request.source == self.imageSource else { return }
             self.previewState = .failed
             self.autoAdjustmentState = .unavailable("Auto is unavailable because the photo preview failed.")
-            self.statusMessage = "Could not render \(self.sourceName)"
+            if let message = self.semanticMaskFailureMessage(for: request.document) {
+                self.maskInteractionState.markMaskFailed(message)
+                self.statusMessage = message
+            } else {
+                self.statusMessage = "Could not render \(self.sourceName)"
+            }
         }
 
         wireCoordinators()

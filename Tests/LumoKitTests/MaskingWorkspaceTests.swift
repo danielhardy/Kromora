@@ -378,6 +378,24 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertFalse(viewModel.maskInteractionState.hasDraft)
     }
 
+    func testOverlayPresentationControlsDoNotChangeDocumentOrUndoHistory() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.brush)
+        let before = viewModel.document
+        let undoBefore = viewModel.undoDepth
+        let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
+
+        viewModel.maskInteractionState.showOverlay = false
+        viewModel.maskInteractionState.overlayInspection = .grayscale
+        viewModel.maskInteractionState.overlayColor = .blue
+        viewModel.maskInteractionState.overlayOpacity = 0.08
+        viewModel.maskInteractionState.toggleSolo(layerID: layerID)
+
+        XCTAssertEqual(viewModel.document, before)
+        XCTAssertEqual(viewModel.undoDepth, undoBefore)
+        XCTAssertEqual(viewModel.maskInteractionState.soloLayerID, layerID)
+    }
+
     func testProductionCreationExposesEverySupportedSmartKindAndPersistsIt() throws {
         XCTAssertEqual(MaskCreationKind.smartKinds, [
             .subject, .person, .face, .foreground, .background,

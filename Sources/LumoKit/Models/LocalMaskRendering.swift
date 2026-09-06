@@ -85,6 +85,19 @@ struct MaskOverlayStyle: Sendable, Equatable {
     }
 }
 
+/// Presentation opacity policy for the inspection surface. Coverage is intentionally the only
+/// value controlled by the overlay opacity slider; guides are composited separately by the view
+/// and remain fully opaque so they do not disappear into the photo while coverage is softened.
+struct MaskOverlayPresentation: Sendable, Equatable {
+    let coverageOpacity: Double
+    let toolingOpacity: Double
+
+    init(coverageOpacity: Double) {
+        self.coverageOpacity = min(max(coverageOpacity.isFinite ? coverageOpacity : 0, 0), 1)
+        toolingOpacity = 1
+    }
+}
+
 /// Value-only request for the presentation mask inspection image. It deliberately carries layers,
 /// selection, and solo state instead of a document mutation: rendering this image must never alter
 /// edit history, exported pixels, or the normal preview request.

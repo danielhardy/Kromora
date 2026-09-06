@@ -85,6 +85,26 @@ extension LocalAdjustmentLayer {
 }
 
 extension AppViewModel {
+    /// The preview coordinator intentionally reports only a failed render, not Core Image or
+    /// provider errors. Recover the user-facing semantic context from the request so an unavailable
+    /// smart mask cannot be presented as a generic, unexplained preview failure.
+    func semanticMaskFailureMessage(for document: EditDocument) -> String? {
+        guard let selectedLayerID = maskInteractionState.selectedLayerID,
+              let layer = document.localAdjustments.first(where: { $0.id == selectedLayerID }),
+              let component = layer.components.first(where: { component in
+                  guard component.id == maskInteractionState.selectedComponentID,
+                        component.isEnabled else { return false }
+                  if case .semantic = component.source { return true }
+                  return false
+              }) ?? layer.components.first(where: { component in
+                  guard component.isEnabled else { return false }
+                  if case .semantic = component.source { return true }
+                  return false
+              }), case .semantic(let definition) = component.source else { return nil }
+        return "The \(definition.target.rawValue) mask could not be analyzed for this photo. "
+            + "Retry mask analysis or choose another photo."
+    }
+
     /// One narrow observation boundary owns selection, transient creation, and presentation state
     /// for the masking workspace. The document itself remains owned by AppViewModel.
     var maskingState: MaskInteractionState { maskInteractionState }

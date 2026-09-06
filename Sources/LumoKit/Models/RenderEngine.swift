@@ -434,7 +434,7 @@ actor RenderEngine: RenderEngining {
                 for: [layer], source: request.source, extent: extent,
                 quality: request.quality, transform: request.transform, assetID: request.assetID,
                 requestRevision: request.requestRevision, includeIdentity: true,
-                onlyComponentID: request.soloComponentID
+                onlyComponentID: request.soloComponentID ?? request.selectedComponentID
             )
             guard let mask = masks[layer.id], !Task.isCancelled else { return nil }
             let output: CIImage
@@ -1055,14 +1055,6 @@ actor RenderEngine: RenderEngining {
                             source: source, assetID: assetID, component: component, targetSize: targetSize,
                             quality: quality, transform: transform
                         ))
-                    } catch let error as LocalMaskResolutionError {
-                        if case .semanticMaskUnavailable = error,
-                           quality.maskQuality != .render {
-                            // A preview may continue to show the last valid image while smart-mask
-                            // work is pending. Export takes the strict path below.
-                            continue
-                        }
-                        throw error
                     } catch is CancellationError {
                         throw CancellationError()
                     }
@@ -1097,14 +1089,15 @@ actor RenderEngine: RenderEngining {
                 }
                 if let current = effective {
                     effective = localMaskRenderer.combined(
-                        current, with: componentImage, mode: component.mode, extent: extent
+                        current, with: componentImage,
+                        mode: onlyComponentID == nil ? component.mode : .replace, extent: extent
                     )
                 } else {
                     // A first subtract/intersect component is defined against an empty mask, so
                     // composition remains deterministic regardless of component ordering.
                     effective = localMaskRenderer.combined(
                         localMaskRenderer.emptyMask(extent: extent), with: componentImage,
-                        mode: component.mode, extent: extent
+                        mode: onlyComponentID == nil ? component.mode : .replace, extent: extent
                     )
                 }
             }
