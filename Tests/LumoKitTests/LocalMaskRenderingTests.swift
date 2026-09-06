@@ -86,6 +86,49 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertEqual(stats.localMask.hits, 3, "global slider edits must not invalidate mask payloads")
     }
 
+    /// The payload is a reusable derived resource and has no request revision of its own. The
+    /// engine's request revision must still reject a resolver result that arrives after a newer
+    /// render for the same source has started.
+    func testSupersededMaskResolutionIsRejectedBeforeItReachesTheRenderGraph() async throws {
+        let source = try source()
+        let document = EditDocument(localAdjustments: [layer()])
+        let resolver = SupersedingMaskResolver(sourceFingerprint: source.cacheFingerprint)
+        let engine = RenderEngine(maskResolver: resolver)
+
+        let first = Task { () -> LocalMaskResolutionError? in
+            do {
+                _ = try await engine.render(RenderRequest(
+                    source: source, document: document, targetSize: CGSize(width: 8, height: 4),
+                    quality: .preview, output: .raster, requestRevision: 1
+                ))
+                return nil
+            } catch let error as LocalMaskResolutionError {
+                return error
+            } catch {
+                return nil
+            }
+        }
+        await resolver.waitForFirstCall()
+
+        let second = Task { () -> Bool in
+            do {
+                _ = try await engine.render(RenderRequest(
+                    source: source, document: document, targetSize: CGSize(width: 8, height: 4),
+                    quality: .preview, output: .raster, requestRevision: 2
+                ))
+                return true
+            } catch {
+                return false
+            }
+        }
+        let secondSucceeded = await second.value
+        XCTAssertTrue(secondSucceeded)
+
+        await resolver.releaseFirstCall()
+        let firstError = await first.value
+        XCTAssertEqual(firstError, .cancelled)
+    }
+
     func testSemanticExportRejectsAnUnresolvedMaskWithAnActionableError() async throws {
         let source = try source()
         let semantic = LocalAdjustmentLayer(
@@ -293,6 +336,54 @@ private struct TestMaskResolver: LocalMaskResolving {
         let payloadValues = values.isEmpty ? Array(repeating: Float(0), count: count) :
             (0..<count).map { values[$0 % values.count] }
         let mask = try NormalizedMask(size: request.targetSize, values: payloadValues)
+        return LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            descriptor: .raster(mask)
+        )
+    }
+}
+
+private actor SupersedingMaskResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+    private var callCount = 0
+    private var firstCallSeen = false
+    private var firstCallWaiter: CheckedContinuation<Void, Never>?
+    private var firstCallRelease: CheckedContinuation<Void, Never>?
+
+    init(sourceFingerprint: String) {
+        self.sourceFingerprint = sourceFingerprint
+    }
+
+    func waitForFirstCall() async {
+        guard !firstCallSeen else { return }
+        await withCheckedContinuation { continuation in
+            firstCallWaiter = continuation
+        }
+    }
+
+    func releaseFirstCall() {
+        firstCallRelease?.resume()
+        firstCallRelease = nil
+    }
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        callCount += 1
+        if callCount == 1 {
+            firstCallSeen = true
+            firstCallWaiter?.resume()
+            firstCallWaiter = nil
+            await withCheckedContinuation { continuation in
+                firstCallRelease = continuation
+            }
+        }
+
+        let count = request.targetSize.width * request.targetSize.height
+        let mask = try NormalizedMask(
+            size: request.targetSize, values: Array(repeating: Float(1), count: count)
+        )
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
             definitionHash: RenderCacheHash.digest(request.component.source),
