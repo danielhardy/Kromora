@@ -489,6 +489,63 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID, layerID)
     }
 
+    func testRadialCenterDragUsesTheViewportDeltaAtZoomAndPreservesDefinition() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.radial)
+        let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
+        let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
+        let original = RadialGradientDefinition(
+            center: CGPoint(x: 0.42, y: 0.58), horizontalRadius: 0.18,
+            verticalRadius: 0.11, rotation: 0.37, feather: 0.29,
+            density: 0.63, isInside: false
+        )
+        viewModel.updateMaskComponent(componentID, in: layerID) { component in
+            component.source = .radial(original)
+        }
+        viewModel.setMaskTool(.radial)
+        viewModel.maskingState.consumeRadialCreationPending()
+
+        var navigation = CanvasNavigation()
+        navigation.fill()
+        navigation.setZoom(2.75)
+        let transform = CanvasMaskTransform(
+            sourceSize: CGSize(width: 2400, height: 1200), navigation: navigation,
+            viewportSize: CGSize(width: 640, height: 420), backingScale: 2
+        )
+        let startViewport = try XCTUnwrap(transform.viewportPoint(forSourceNormalized: original.center))
+        let viewportDelta = CGSize(width: 10, height: -6)
+        let sourceDelta = try XCTUnwrap(
+            transform.sourceNormalizedDelta(forViewportDelta: viewportDelta)
+        )
+        let startSource = try XCTUnwrap(
+            transform.sourceNormalizedPoint(forViewport: startViewport)
+        )
+        let endSource = CGPoint(x: startSource.x + sourceDelta.x, y: startSource.y + sourceDelta.y)
+
+        viewModel.beginMaskGesture(
+            at: startSource, radialHandle: .center,
+            sourceSize: CGSize(width: 2400, height: 1200)
+        )
+        viewModel.updateMaskGesture(to: endSource, sourceDelta: sourceDelta)
+        viewModel.endMaskGesture()
+
+        let moved = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.radialDefinition
+        )
+        XCTAssertEqual(moved.center.x - original.center.x, sourceDelta.x, accuracy: 0.000_000_001)
+        XCTAssertEqual(moved.center.y - original.center.y, sourceDelta.y, accuracy: 0.000_000_001)
+        XCTAssertEqual(moved.horizontalRadius, original.horizontalRadius, accuracy: 0.000_001)
+        XCTAssertEqual(moved.verticalRadius, original.verticalRadius, accuracy: 0.000_001)
+        XCTAssertEqual(moved.rotation, original.rotation, accuracy: 0.000_001)
+        XCTAssertEqual(moved.feather, original.feather, accuracy: 0.000_001)
+        XCTAssertEqual(moved.density, original.density, accuracy: 0.000_001)
+        XCTAssertEqual(moved.isInside, original.isInside)
+
+        let movedViewport = try XCTUnwrap(transform.viewportPoint(forSourceNormalized: moved.center))
+        XCTAssertEqual(movedViewport.x - startViewport.x, viewportDelta.width, accuracy: 0.000_001)
+        XCTAssertEqual(movedViewport.y - startViewport.y, viewportDelta.height, accuracy: 0.000_001)
+    }
+
     func testCancellingRadialCreationDoesNotPersistAnEmptyLayer() {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
         viewModel.setMaskTool(.radial)
