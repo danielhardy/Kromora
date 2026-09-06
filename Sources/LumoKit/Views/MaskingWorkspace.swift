@@ -41,11 +41,22 @@ struct MaskingWorkspace: View {
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Close masking workspace")
             Menu {
-                ForEach(MaskCreationKind.allCases, id: \.self) { kind in
-                    Button {
-                        viewModel.createMask(kind)
-                    } label: {
-                        Label(kind.title, systemImage: kind.iconName)
+                Section("Smart masks") {
+                    ForEach(MaskCreationKind.smartKinds, id: \.self) { kind in
+                        Button {
+                            viewModel.createSmartMask(kind)
+                        } label: {
+                            Label(kind.title, systemImage: kind.iconName)
+                        }
+                    }
+                }
+                Section("Paint and gradients") {
+                    ForEach(MaskCreationKind.allCases.filter { !$0.isSmart }, id: \.self) { kind in
+                        Button {
+                            viewModel.createMask(kind)
+                        } label: {
+                            Label(kind.title, systemImage: kind.iconName)
+                        }
                     }
                 }
             } label: {
@@ -114,6 +125,52 @@ struct MaskingWorkspace: View {
 
     @ViewBuilder
     private var renderStatus: some View {
+        switch maskingState.resolutionState {
+        case .loading:
+            Label("Analyzing mask…", systemImage: "hourglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Selected mask is loading")
+        case .empty:
+            Label(
+                maskingState.resolutionState.message ?? "Mask is empty",
+                systemImage: "circle.dashed"
+            )
+            .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("Selected mask is empty")
+        case .unavailable(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Mask analysis unavailable", systemImage: "exclamationmark.triangle")
+                    .font(.caption.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Retry mask analysis") {
+                    viewModel.retryMaskAnalysis()
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(8)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Mask analysis failed", systemImage: "exclamationmark.triangle")
+                    .font(.caption.weight(.semibold))
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("Retry mask analysis") {
+                    viewModel.retryMaskAnalysis()
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(8)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+        case .idle, .ready:
+            EmptyView()
+        }
+
         switch viewModel.previewState {
         case .loading:
             Label("Rendering preview…", systemImage: "hourglass")
@@ -796,6 +853,9 @@ private struct MaskLayerRow: View {
 extension MaskCreationKind {
     fileprivate var iconName: String {
         switch self {
+        case .subject: return "person.crop.square"
+        case .person: return "figure.stand"
+        case .face: return "face.smiling"
         case .foreground: return "person.crop.square"
         case .background: return "photo"
         case .brush: return "paintbrush"
@@ -807,6 +867,9 @@ extension MaskCreationKind {
 
     fileprivate var maskSource: MaskSource {
         switch self {
+        case .subject: return .semantic(SemanticMaskDefinition(target: .subject))
+        case .person: return .semantic(SemanticMaskDefinition(target: .person))
+        case .face: return .semantic(SemanticMaskDefinition(target: .face))
         case .foreground: return .semantic(SemanticMaskDefinition(target: .foreground))
         case .background: return .semantic(SemanticMaskDefinition(target: .background))
         case .brush: return .brush(BrushMaskDefinition())

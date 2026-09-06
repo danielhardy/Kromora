@@ -5,10 +5,28 @@ import AppKit
 /// The creation actions exposed by the persistent masking workspace. A layer is created with a
 /// durable recipe immediately; semantic pixels and other render resources remain derived state.
 enum MaskCreationKind: String, CaseIterable, Sendable {
-    case foreground, background, brush, erase, linear, radial
+    case subject, person, face, foreground, background, brush, erase, linear, radial
+
+    static let smartKinds: [MaskCreationKind] = [.subject, .person, .face, .foreground, .background]
+
+    var isSmart: Bool { semanticTarget != nil }
+
+    var semanticTarget: SemanticTarget? {
+        switch self {
+        case .subject: return .subject
+        case .person: return .person
+        case .face: return .face
+        case .foreground: return .foreground
+        case .background: return .background
+        case .brush, .erase, .linear, .radial: return nil
+        }
+    }
 
     var title: String {
         switch self {
+        case .subject: return "Subject"
+        case .person: return "Person"
+        case .face: return "Face"
         case .foreground: return "Foreground"
         case .background: return "Background"
         case .brush: return "Brush"
@@ -132,6 +150,12 @@ extension AppViewModel {
     func createMask(_ kind: MaskCreationKind) {
         let source: MaskSource
         switch kind {
+        case .subject:
+            source = .semantic(SemanticMaskDefinition(target: .subject))
+        case .person:
+            source = .semantic(SemanticMaskDefinition(target: .person))
+        case .face:
+            source = .semantic(SemanticMaskDefinition(target: .face))
         case .foreground:
             source = .semantic(SemanticMaskDefinition(target: .foreground))
         case .background:
@@ -173,6 +197,116 @@ extension AppViewModel {
             maskInteractionState.markRadialCreationPending()
         }
         statusMessage = "Created \(name)"
+    }
+
+    /// Preflight a smart-mask request through the shared analysis coordinator before committing
+    /// the recipe. A durable semantic component is only added after the provider returns a
+    /// validated result, so an unsupported source cannot leave a layer that renders as a no-op.
+    func createSmartMask(_ kind: MaskCreationKind) {
+        guard let target = kind.semanticTarget else {
+            createMask(kind)
+            return
+        }
+        smartMaskCreationTask?.cancel()
+        smartMaskCreationTask = nil
+        smartMaskRetryKind = kind
+        if maskInteractionState.hasDraft {
+            cancelMaskGesture()
+        } else {
+            endUndoGrouping()
+        }
+        guard let source = maskingSource, let assetID = maskingAssetID else {
+            let message = "Smart masks require an open photo with supported analysis."
+            maskInteractionState.markMaskUnavailable(message)
+            statusMessage = message
+            return
+        }
+        let sourceRevision = maskingSourceRevision
+        let sourceFingerprint = source.cacheFingerprint
+        let coordinator = photoAnalysisCoordinator
+        maskInteractionState.beginMaskResolution()
+        statusMessage = "Analyzing \(kind.title) mask…"
+        smartMaskCreationTask = Task { @MainActor [weak self] in
+            do {
+                // Person segmentation is deliberately gated by the shared provider. Detailed
+                // analysis establishes the face/foreground signal without exposing diagnostics.
+                if target == .person {
+                    if (try? await coordinator.analyze(
+                        assetID: assetID, source: source, level: .detailed)) != nil {
+                        self?.statusMessage = "Initial photo analysis is ready; refining the Person mask…"
+                    }
+                }
+                let mask = try await coordinator.mask(
+                    assetID: assetID, source: source,
+                    kind: target.semanticMaskKind, quality: .preview
+                )
+                try Task.checkCancellation()
+                guard let self,
+                      self.maskingSourceRevision == sourceRevision,
+                      self.maskingSource?.cacheFingerprint == sourceFingerprint,
+                      self.maskingAssetID == assetID else { return }
+                switch MaskPresentationPolicy.decision(for: mask) {
+                case .actionable:
+                    break
+                case .empty:
+                    self.maskInteractionState.markMaskEmpty()
+                    self.statusMessage = "The \(kind.title) mask contains no usable region."
+                    return
+                case .lowConfidence:
+                    let message = MaskPresentationPolicy.Decision.lowConfidence.userMessage
+                        ?? "The \(kind.title) mask is unavailable for this photo."
+                    self.maskInteractionState.markMaskUnavailable(message)
+                    self.statusMessage = message
+                    return
+                }
+                self.insertDurableMask(kind)
+                self.smartMaskRetryKind = nil
+                self.maskInteractionState.markMaskResolved()
+                self.statusMessage = "Created \(kind.title) mask"
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      self.maskingSourceRevision == sourceRevision,
+                      self.maskingSource?.cacheFingerprint == sourceFingerprint,
+                      self.maskingAssetID == assetID else { return }
+                let message = self.userFacingSmartMaskError(error, target: target)
+                self.maskInteractionState.markMaskUnavailable(message)
+                self.statusMessage = message
+            }
+        }
+    }
+
+    private func insertDurableMask(_ kind: MaskCreationKind) {
+        guard let target = kind.semanticTarget else { return }
+        let source = MaskSource.semantic(SemanticMaskDefinition(target: target))
+        let layerID = UUID()
+        let component = MaskComponent(source: source)
+        let name = nextMaskName(for: kind.title)
+        updateDocument { document in
+            document.localAdjustments.append(LocalAdjustmentLayer(
+                id: layerID, name: name, components: [component]
+            ))
+        }
+        maskInteractionState.setTool(.selection)
+        maskInteractionState.select(componentID: component.id, in: layerID)
+    }
+
+    private func userFacingSmartMaskError(_ error: Error, target: SemanticTarget) -> String {
+        if let localized = error as? LocalizedError, let description = localized.errorDescription,
+           !description.isEmpty {
+            return "\(target.rawValue.capitalized) mask unavailable: \(description)."
+        }
+        return "The \(target.rawValue) mask is unavailable for this photo. Try another photo or retry."
+    }
+
+    func retryMaskAnalysis() {
+        if let kind = smartMaskRetryKind {
+            createSmartMask(kind)
+        } else {
+            maskInteractionState.beginMaskResolution()
+            retryPreview()
+        }
     }
 
     func duplicateMask(_ id: UUID) {
@@ -263,6 +397,9 @@ extension AppViewModel {
     func addMaskComponent(to layerID: UUID, kind: MaskCreationKind, mode: MaskCombineMode) {
         let source: MaskSource
         switch kind {
+        case .subject: source = .semantic(SemanticMaskDefinition(target: .subject))
+        case .person: source = .semantic(SemanticMaskDefinition(target: .person))
+        case .face: source = .semantic(SemanticMaskDefinition(target: .face))
         case .foreground: source = .semantic(SemanticMaskDefinition(target: .foreground))
         case .background: source = .semantic(SemanticMaskDefinition(target: .background))
         case .brush, .erase: source = .brush(BrushMaskDefinition())
@@ -270,6 +407,69 @@ extension AppViewModel {
         case .radial: source = .radial(RadialGradientDefinition())
         }
         addMaskComponent(to: layerID, source: source, mode: mode)
+    }
+
+    /// The component equivalent of `createSmartMask`. Preflight keeps a failed semantic request
+    /// from changing an existing layer while still using the same coordinator/cache boundary.
+    func addSmartMaskComponent(to layerID: UUID, kind: MaskCreationKind, mode: MaskCombineMode) {
+        guard let target = kind.semanticTarget else {
+            addMaskComponent(to: layerID, kind: kind, mode: mode)
+            return
+        }
+        guard document.localAdjustments.contains(where: { $0.id == layerID }) else { return }
+        smartMaskCreationTask?.cancel()
+        guard let source = maskingSource, let assetID = maskingAssetID else {
+            let message = "Smart mask components require an open photo with supported analysis."
+            maskInteractionState.markMaskUnavailable(message)
+            statusMessage = message
+            return
+        }
+        let sourceRevision = maskingSourceRevision
+        let sourceFingerprint = source.cacheFingerprint
+        let coordinator = photoAnalysisCoordinator
+        maskInteractionState.beginMaskResolution()
+        statusMessage = "Analyzing \(kind.title) component…"
+        smartMaskCreationTask = Task { @MainActor [weak self] in
+            do {
+                if target == .person { _ = try? await coordinator.analyze(
+                    assetID: assetID, source: source, level: .detailed)
+                }
+                let mask = try await coordinator.mask(
+                    assetID: assetID, source: source,
+                    kind: target.semanticMaskKind, quality: .preview
+                )
+                try Task.checkCancellation()
+                guard let self,
+                      self.maskingSourceRevision == sourceRevision,
+                      self.maskingSource?.cacheFingerprint == sourceFingerprint,
+                      self.maskingAssetID == assetID,
+                      self.document.localAdjustments.contains(where: { $0.id == layerID })
+                else { return }
+                guard MaskPresentationPolicy.decision(for: mask) == .actionable else {
+                    self.maskInteractionState.markMaskUnavailable(
+                        "The \(kind.title) mask is unavailable because no usable region was found."
+                    )
+                    self.statusMessage = self.maskInteractionState.resolutionState.message
+                        ?? "Mask unavailable"
+                    return
+                }
+                self.addMaskComponent(
+                    to: layerID,
+                    source: .semantic(SemanticMaskDefinition(target: target)), mode: mode)
+                self.smartMaskRetryKind = nil
+                self.maskInteractionState.markMaskResolved()
+                self.statusMessage = "Added \(kind.title) component"
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                      self.maskingSourceRevision == sourceRevision,
+                      self.maskingSource?.cacheFingerprint == sourceFingerprint else { return }
+                let message = self.userFacingSmartMaskError(error, target: target)
+                self.maskInteractionState.markMaskUnavailable(message)
+                self.statusMessage = message
+            }
+        }
     }
 
     func renameMaskComponent(_ componentID: UUID, in layerID: UUID, name: String) {

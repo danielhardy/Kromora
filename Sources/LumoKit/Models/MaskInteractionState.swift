@@ -3,6 +3,27 @@ import CoreGraphics
 import Foundation
 import SwiftUI
 
+/// Presentation state for the selected semantic mask. An empty result is different from an
+/// unavailable result: the former is a valid analysis with zero coverage, while the latter means
+/// the component could not be evaluated and must not quietly look like a successful no-op.
+enum MaskResolutionState: Equatable, Sendable {
+    case idle
+    case loading
+    case ready
+    case empty
+    case unavailable(String)
+    case failed(String)
+
+    var message: String? {
+        switch self {
+        case .idle, .ready: return nil
+        case .loading: return "Analyzing the selected mask…"
+        case .empty: return "Analysis completed, but this mask contains no covered pixels."
+        case .unavailable(let message), .failed(let message): return message
+        }
+    }
+}
+
 /// Pointer-frequency mask state. A draft is committed to `EditDocument` by the owning view model
 /// once, on gesture completion; it is never encoded, hashed, or sent through the app-wide model
 /// while the pointer is moving.
@@ -85,6 +106,7 @@ final class MaskInteractionState: ObservableObject {
     @Published private(set) var activeRadialHandle: RadialHandle?
     @Published private(set) var linearCreationPending = false
     @Published private(set) var radialCreationPending = false
+    @Published private(set) var resolutionState: MaskResolutionState = .idle
     /// Transient controls used by the active brush. They are copied into a stroke at begin time;
     /// changing a slider never mutates the document or the in-progress stroke retroactively.
     @Published var brushRadius = BrushMaskMath.defaultRadius
@@ -119,6 +141,7 @@ final class MaskInteractionState: ObservableObject {
             linearCreationPending = false
             radialCreationPending = false
             hoveredLinearHandle = nil
+            resolutionState = .idle
         }
     }
 
@@ -162,6 +185,13 @@ final class MaskInteractionState: ObservableObject {
         brushFeather = min(max(brushFeather + delta, 0), 1)
     }
     func updateHoverPoint(_ point: CGPoint?) { hoverPoint = point }
+
+    func beginMaskResolution() { resolutionState = .loading }
+    func markMaskResolved() { resolutionState = .ready }
+    func markMaskEmpty() { resolutionState = .empty }
+    func markMaskUnavailable(_ message: String) { resolutionState = .unavailable(message) }
+    func markMaskFailed(_ message: String) { resolutionState = .failed(message) }
+
     func beginDraft(
         _ layer: LocalAdjustmentLayer, at point: CGPoint? = nil,
         sourceSize: CGSize = CGSize(width: 1, height: 1)
