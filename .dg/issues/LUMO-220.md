@@ -2,7 +2,7 @@
 id: LUMO-220
 title: Replace selection-only mask sheet with persistent Masking workspace
 type: feature
-status: review
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -14,14 +14,25 @@ labels:
   - editor
   - accessibility
 created: 2026-09-04T21:48:29.898Z
-updated: 2026-09-05T04:42:53.621Z
+updated: 2026-09-05T13:44:23.008Z
 depends_on:
   - LUMO-217
   - LUMO-218
   - LUMO-219
   - LUMO-229
-order: w
+order: a0
 board: product
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-05T13:44:23.005Z
+  session: 01MTOFNGVK36JI167N
 ---
 
 ## Objective
@@ -103,3 +114,19 @@ Implemented in commit 0af0c30. Added persistent masking workspace, document-owne
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-05T13:44:23.006Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MTOFNGVK36JI167N

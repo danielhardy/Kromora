@@ -42,11 +42,12 @@ the viewport and drawable transform; 1× and 2× produce the same SwiftUI point 
 
 ## LUMO-227 follow-up status
 
-The sibling-view decision remains accepted pending the required real-pointer trace. LUMO-227 adds
-the opt-in `LumoMaskOverlayCapture` host and `scripts/run-lumo-227-capture.sh`, which record the
-same overlay renderer under `LUMO_MASK_OVERLAY_PROTOTYPE=1` with Metal System Trace and Points of
-Interest. Overlay-specific signposts separate input delivery, presentation encoding, GPU
-completion, and drawable presentation so a future capture can attribute the 16.7 ms gate.
+The sibling-view decision remains accepted pending the required real-pointer trace. LUMO-227
+historically added an opt-in `LumoMaskOverlayCapture` host and
+`scripts/run-lumo-227-capture.sh`, which recorded the same overlay renderer under
+`LUMO_MASK_OVERLAY_PROTOTYPE=1` with Metal System Trace and Points of Interest. That standalone
+capture workflow was retired in LUMO-230; the overlay-specific signposts remain available for the
+in-app path, but the dedicated host and wrapper are no longer available.
 
 The local attempts available during this implementation recorded zero AppKit pointer events under
 desktop automation, so they cannot establish p95/p99 or distinguish vsync cadence from sibling

@@ -2,7 +2,7 @@
 id: LUMO-229
 title: "Masking workspace: implement functional mask alpha overlay (color-wash/grayscale/solo)"
 type: bug
-status: review
+status: done
 priority: high
 creation_provenance:
   runner: claude
@@ -13,9 +13,35 @@ labels:
   - masking
   - epic:masking
 created: 2026-09-05T04:39:51.202Z
-updated: 2026-09-05T13:38:33.025Z
+updated: 2026-09-05T13:42:42.373Z
 order: y
 board: product
+commits:
+  - 21aee1d
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Show resolved mask alpha in color-wash and grayscale inspection modes
+      result: pass
+    - criterion: Solo isolates the selected layer mask
+      result: pass
+    - criterion: Overlay state does not alter exported pixels or durable edit state
+      result: pass
+    - criterion: Preserve geometry guides alongside the alpha overlay
+      result: pass
+    - criterion: Cover brush, linear, radial, semantic, solo, and export-invariance behavior
+      result: pass
+  checks_run:
+    - swift test --filter MaskingWorkspaceTests|LocalMaskRenderingTests|PackageSettingsTests (12 tests, 0 failures)
+    - swift build (passes)
+    - git diff --cached --check (passes)
+  findings: []
+  fixes: []
+  verification_commits:
+    - 21aee1d
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-05T13:42:42.367Z
 ---
 
 ## Objective
@@ -95,3 +121,25 @@ Actor: codex
 Resolved model: gpt-5.6-luna
 Pickup session: 01MTOC36LZ8NQ2S89W
 Summary: Implemented presentation-only resolved mask alpha overlays with color-wash/grayscale inspection, solo isolation, geometry-guide preservation, and render/export isolation. Added brush/linear/radial/semantic, solo, grayscale, and pixel-invariance coverage.
+
+- 2026-09-05T13:42:42.372Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Show resolved mask alpha in color-wash and grayscale inspection modes (pass)
+- [x] Solo isolates the selected layer mask (pass)
+- [x] Overlay state does not alter exported pixels or durable edit state (pass)
+- [x] Preserve geometry guides alongside the alpha overlay (pass)
+- [x] Cover brush, linear, radial, semantic, solo, and export-invariance behavior (pass)
+Checks run:
+- swift test --filter MaskingWorkspaceTests|LocalMaskRenderingTests|PackageSettingsTests (12 tests, 0 failures)
+- swift build (passes)
+- git diff --cached --check (passes)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- 21aee1d
+Actor: codex
+Resolved model: unknown
+Summary: Implemented presentation-only resolved mask alpha overlays with color-wash/grayscale inspection, solo isolation, geometry-guide preservation, and export/render isolation.
