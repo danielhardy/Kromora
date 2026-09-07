@@ -4,20 +4,6 @@ title: Fixture photo corpus + golden semantic expectations
 type: task
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:57.584Z
-updated: 2026-09-04T17:27:24.615Z
-depends_on:
-  - LUMO-200
-order: a0
-board: product
-commits:
-  - 95ea9dc
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -30,6 +16,20 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T17:27:24.612Z
   session: 01MTN80C2607DNJZZN
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:57.584Z
+updated: 2026-09-07T04:02:45.945Z
+depends_on:
+  - LUMO-200
+order: dtnwjkyo
+board: product
+commits:
+  - 95ea9dc
 ---
 
 **Type:** Task

@@ -4,24 +4,6 @@ title: Compose mask components with Add, Subtract, and Intersect
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - epic:masking
-  - masking
-  - editor
-  - rendering
-created: 2026-09-04T21:48:32.438Z
-updated: 2026-09-05T15:09:49.310Z
-depends_on:
-  - LUMO-221
-  - LUMO-222
-  - LUMO-223
-  - LUMO-224
-order: zv
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -63,6 +45,24 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-05T15:09:49.303Z
   session: 01MTOIEWTOOYDN9D2I
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - epic:masking
+  - masking
+  - editor
+  - rendering
+created: 2026-09-04T21:48:32.438Z
+updated: 2026-09-07T04:02:52.652Z
+depends_on:
+  - LUMO-221
+  - LUMO-222
+  - LUMO-223
+  - LUMO-224
+order: sd8xeon5
+board: product
 ---
 
 ## Objective

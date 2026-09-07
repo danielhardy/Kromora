@@ -4,17 +4,6 @@ title: Rewrite persistence tests for SwiftData
 type: task
 status: done
 priority: medium
-labels:
-  - persistence
-  - testing
-created: 2026-09-06T04:06:26.874Z
-updated: 2026-09-06T23:49:18.161Z
-depends_on:
-  - LUMO-244
-  - LUMO-246
-  - LUMO-247
-order: y
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -38,6 +27,17 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T23:49:18.157Z
   session: 01MTQGI8CT7T49NO4A
+labels:
+  - persistence
+  - testing
+created: 2026-09-06T04:06:26.874Z
+updated: 2026-09-07T04:02:50.262Z
+depends_on:
+  - LUMO-244
+  - LUMO-246
+  - LUMO-247
+order: ngzpmqyv
+board: product
 ---
 
 ## Objective

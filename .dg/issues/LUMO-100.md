@@ -10,8 +10,8 @@ labels:
   - epic:editor
   - phase:8
 created: 2026-09-01T17:47:14.815Z
-updated: 2026-09-01T19:49:28.935Z
-order: zy
+updated: 2026-09-07T04:02:52.924Z
+order: sxzf9i0l
 board: product
 commits:
   - e39fb73

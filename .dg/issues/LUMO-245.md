@@ -4,15 +4,6 @@ title: "Spike: validate SwiftData under Swift 6 strict concurrency"
 type: spike
 status: done
 priority: medium
-labels:
-  - persistence
-  - spike
-created: 2026-09-06T04:06:24.051Z
-updated: 2026-09-06T23:25:45.525Z
-depends_on:
-  - LUMO-244
-order: n
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -33,6 +24,15 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T23:25:45.522Z
   session: 01MTQFSCUTJ63E2JZ7
+labels:
+  - persistence
+  - spike
+created: 2026-09-06T04:06:24.051Z
+updated: 2026-09-07T04:02:48.231Z
+depends_on:
+  - LUMO-244
+order: iv3qs7zb
+board: product
 ---
 
 ## Objective

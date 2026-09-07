@@ -4,23 +4,6 @@ title: Dead requestRevision guard in RenderEngine.resolvedLocalMasks gives false
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-  - masking
-  - rendering
-created: 2026-09-05T14:58:51.372Z
-updated: 2026-09-06T02:44:07.989Z
-parent: LUMO-224
-depends_on:
-  - LUMO-224
-order: w
-board: product
-commits:
-  - 49f8b65
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -44,6 +27,23 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T02:44:07.982Z
   session: 01MTP7CD1HGF6FNTO9
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+  - masking
+  - rendering
+created: 2026-09-05T14:58:51.372Z
+updated: 2026-09-07T04:02:49.551Z
+parent: LUMO-224
+depends_on:
+  - LUMO-224
+order: lvyuj06w
+board: product
+commits:
+  - 49f8b65
 ---
 
 ## Objective

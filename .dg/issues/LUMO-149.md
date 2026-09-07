@@ -4,27 +4,6 @@ title: Add a deterministic one-click Auto photo adjustment
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - mvp
-  - ux
-  - light
-  - color
-  - photo-adjustments
-created: 2026-09-03T01:12:26.779Z
-updated: 2026-09-03T04:30:24.837Z
-depends_on:
-  - LUMO-028
-  - LUMO-034
-  - LUMO-048
-estimate: 8
-order: a0
-board: product
-commits:
-  - 25ee155
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -53,6 +32,27 @@ verification_report:
   actor: codex
   resolved_model: unknown
   completed_at: 2026-09-03T04:30:24.834Z
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - mvp
+  - ux
+  - light
+  - color
+  - photo-adjustments
+created: 2026-09-03T01:12:26.779Z
+updated: 2026-09-07T04:02:44.436Z
+depends_on:
+  - LUMO-028
+  - LUMO-034
+  - LUMO-048
+estimate: 8
+order: ad8xeoq0
+board: product
+commits:
+  - 25ee155
 ---
 
 ## Objective

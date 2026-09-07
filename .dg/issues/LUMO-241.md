@@ -4,20 +4,6 @@ title: Place Masking beside the other edit controls in the Info right sidebar
 type: bug
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - masking
-  - editor
-  - epic:masking
-created: 2026-09-06T03:35:25.379Z
-updated: 2026-09-06T06:22:23.851Z
-order: y
-board: product
-commits:
-  - a3fca75
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -54,6 +40,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T06:22:23.847Z
   session: 01MTPEX5YZTWWE5JSC
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - masking
+  - editor
+  - epic:masking
+created: 2026-09-06T03:35:25.379Z
+updated: 2026-09-07T04:02:50.212Z
+order: nbt361mi
+board: product
+commits:
+  - a3fca75
 ---
 
 ## Objective

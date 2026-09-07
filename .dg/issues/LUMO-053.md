@@ -4,20 +4,6 @@ title: Add batch progress, cancellation, collision handling, and failure isolati
 type: task
 status: done
 priority: high
-labels:
-  - mvp
-  - epic:export
-  - phase:9
-created: 2026-08-30T18:30:35.423Z
-updated: 2026-09-02T17:12:52.287Z
-depends_on:
-  - LUMO-052
-  - LUMO-015
-estimate: 5
-order: a0
-board: product
-commits:
-  - 749082a
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -30,6 +16,20 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-02T17:12:52.286Z
   session: 01MTKCOBJ9GP13Q4MP
+labels:
+  - mvp
+  - epic:export
+  - phase:9
+created: 2026-08-30T18:30:35.423Z
+updated: 2026-09-07T04:02:41.214Z
+depends_on:
+  - LUMO-052
+  - LUMO-015
+estimate: 5
+order: 3llllll1
+board: product
+commits:
+  - 749082a
 ---
 
 ## Objective

@@ -10,14 +10,14 @@ labels:
   - epic:rendering
   - phase:2
 created: 2026-08-30T18:30:20.810Z
-updated: 2026-08-31T14:19:09.177Z
+updated: 2026-09-07T04:02:39.908Z
 depends_on:
   - LUMO-012
   - LUMO-013
   - LUMO-014
   - LUMO-015
   - LUMO-016
-order: a0
+order: 0fjve413
 board: product
 commits:
   - ee28124

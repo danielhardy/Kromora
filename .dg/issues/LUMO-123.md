@@ -13,11 +13,11 @@ labels:
   - performance
   - scheduling
 created: 2026-09-02T04:15:36.899Z
-updated: 2026-09-02T18:47:36.929Z
+updated: 2026-09-07T04:02:53.144Z
 parent: LUMO-113
 depends_on:
   - LUMO-113
-order: zz
+order: t8co6wpb
 board: product
 commits:
   - ee407fa

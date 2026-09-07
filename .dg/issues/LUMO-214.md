@@ -4,19 +4,6 @@ title: Show the current photo name and file type in the Inspect panel
 type: bug
 status: done
 priority: low
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ux
-  - photo-library
-created: 2026-09-04T19:08:10.869Z
-updated: 2026-09-04T19:49:13.787Z
-order: z
-board: product
-commits:
-  - a3aa2fc
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -32,6 +19,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T19:49:13.784Z
   session: 01MTND3JYKJ75K4SLA
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ux
+  - photo-library
+created: 2026-09-04T19:08:10.869Z
+updated: 2026-09-07T04:02:51.342Z
+order: prxp20gn
+board: product
+commits:
+  - a3aa2fc
 ---
 
 ## Objective

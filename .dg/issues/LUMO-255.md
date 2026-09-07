@@ -4,18 +4,6 @@ title: MaskStore pixel payloads out of JSON (binary storage + render-cache reuse
 type: task
 status: done
 priority: high
-labels:
-  - persistence
-  - masking
-created: 2026-09-06T22:58:06.369Z
-updated: 2026-09-07T00:09:20.626Z
-depends_on:
-  - LUMO-244
-  - LUMO-245
-order: a0
-board: product
-commits:
-  - 8c5e72fef66f72645e687070754f46c5f6063568
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -41,6 +29,18 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-07T00:09:20.619Z
   session: 01MTQH9F8M1M0V37NA
+labels:
+  - persistence
+  - masking
+created: 2026-09-06T22:58:06.369Z
+updated: 2026-09-07T04:02:47.091Z
+depends_on:
+  - LUMO-244
+  - LUMO-245
+order: g9sifjst
+board: product
+commits:
+  - 8c5e72fef66f72645e687070754f46c5f6063568
 ---
 
 ## Objective

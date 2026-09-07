@@ -2,14 +2,14 @@
 id: LUMO-269
 title: Parallelize independent detailed-analysis stages
 type: task
-status: backlog
+status: ready
 priority: low
 labels:
   - masking
   - performance
 created: 2026-09-07T01:14:47.482Z
-updated: 2026-09-07T01:28:01.897Z
-order: weeeeee0
+updated: 2026-09-07T04:03:04.199Z
+order: n
 board: product
 ---
 

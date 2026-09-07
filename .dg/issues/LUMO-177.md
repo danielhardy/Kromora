@@ -4,16 +4,6 @@ title: Regression test for LUMO-175 raced flush does not exercise the fix
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-04T11:39:19.207Z
-updated: 2026-09-04T14:28:15.560Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -40,6 +30,16 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T14:28:15.555Z
   session: 01MTN1PBYD8953784B
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-04T11:39:19.207Z
+updated: 2026-09-07T04:02:45.484Z
+order: ctdjank5
+board: product
 ---
 
 Parent: LUMO-175 (verification finding, non-blocking)

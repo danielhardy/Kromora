@@ -9,12 +9,12 @@ labels:
   - epic:rendering
   - phase:2
 created: 2026-08-30T18:30:22.050Z
-updated: 2026-08-31T14:01:55.229Z
+updated: 2026-09-07T04:02:40.008Z
 depends_on:
   - LUMO-013
   - LUMO-014
 estimate: 5
-order: a0
+order: 0px4bipt
 board: product
 commits:
   - d3b441b

@@ -2,14 +2,14 @@
 id: LUMO-265
 title: Resample semantic masks with vImage instead of Swift loops
 type: task
-status: backlog
+status: ready
 priority: high
 labels:
   - masking
   - performance
 created: 2026-09-07T01:14:45.167Z
-updated: 2026-09-07T01:28:01.762Z
-order: p777776w
+updated: 2026-09-07T04:16:49.593Z
+order: yq
 board: product
 ---
 

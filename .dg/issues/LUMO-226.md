@@ -2,7 +2,7 @@
 id: LUMO-226
 title: Harden masking accessibility, correctness, and performance
 type: task
-status: blocked
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -15,10 +15,10 @@ labels:
   - accessibility
   - performance
 created: 2026-09-04T21:48:32.962Z
-updated: 2026-09-05T15:28:55.091Z
+updated: 2026-09-07T04:02:55.981Z
 depends_on:
   - LUMO-225
-order: a0
+order: zpmr2l5k
 board: product
 blocked_reason: The required Release Instruments evidence needs a human-driven logged-in display gesture session; this headless run could compile the benchmark but could not obtain a drawable/pointer presentation callback.
 blocked_action: Use Instruments on the in-app Lumo mask-overlay path on the reference Mac with a human-driven display gesture session, then attach the trace/summary and record p95/p99 for the required masking scenarios.

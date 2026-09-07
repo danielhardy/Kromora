@@ -4,23 +4,6 @@ title: Open the Info inspector after the first successful Photos import
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - import
-  - ux
-  - navigation
-created: 2026-09-03T01:12:22.295Z
-updated: 2026-09-03T03:44:49.360Z
-depends_on:
-  - LUMO-129
-estimate: 2
-order: a0
-board: product
-commits:
-  - 64cd386
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -51,6 +34,23 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T03:44:49.354Z
   session: 01MTKZ3SF92D4E3SOP
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - import
+  - ux
+  - navigation
+created: 2026-09-03T01:12:22.295Z
+updated: 2026-09-07T04:02:44.073Z
+depends_on:
+  - LUMO-129
+estimate: 2
+order: 9nbt3607
+board: product
+commits:
+  - 64cd386
 ---
 
 ## Objective

@@ -10,14 +10,14 @@ labels:
   - epic:color
   - phase:5
 created: 2026-08-30T18:30:26.827Z
-updated: 2026-08-31T21:12:12.258Z
+updated: 2026-09-07T04:02:53.416Z
 depends_on:
   - LUMO-030
   - LUMO-031
   - LUMO-032
   - LUMO-033
   - LUMO-034
-order: zzx
+order: tt361q2r
 board: product
 commits:
   - 3ceeedc

@@ -2,15 +2,15 @@
 id: LUMO-264
 title: Track the SwiftData concurrency probe test
 type: task
-status: backlog
+status: ready
 priority: low
 labels:
   - persistence
 created: 2026-09-07T01:10:27.950Z
-updated: 2026-09-07T01:28:01.727Z
+updated: 2026-09-07T04:17:02.461Z
 depends_on:
   - LUMO-245
-order: neeeeee4
+order: y3
 board: product
 ---
 

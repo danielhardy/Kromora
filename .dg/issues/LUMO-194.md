@@ -4,24 +4,6 @@ title: PhotoAnalysis domain model assembly
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:53.354Z
-updated: 2026-09-04T15:32:41.713Z
-depends_on:
-  - LUMO-188
-  - LUMO-189
-  - LUMO-190
-  - LUMO-191
-  - LUMO-193
-order: n
-board: product
-commits:
-  - 2d16392
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -51,6 +33,24 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T15:32:41.710Z
   session: 01MTN3YWC3YMK778NP
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:53.354Z
+updated: 2026-09-07T04:02:47.764Z
+depends_on:
+  - LUMO-188
+  - LUMO-189
+  - LUMO-190
+  - LUMO-191
+  - LUMO-193
+order: hutdjaks
+board: product
+commits:
+  - 2d16392
 ---
 
 **Type:** Feature

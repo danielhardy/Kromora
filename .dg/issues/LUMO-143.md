@@ -4,26 +4,6 @@ title: Fix intermittent black canvas and stuck histogram when switching photo th
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - bug
-  - regression
-  - navigation
-  - photo-loading
-  - rendering
-  - histogram
-created: 2026-09-03T01:12:23.443Z
-updated: 2026-09-03T02:14:02.213Z
-depends_on:
-  - LUMO-048
-  - LUMO-109
-  - LUMO-130
-estimate: 5
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -54,6 +34,26 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T02:14:02.206Z
   session: 01MTKVXSIC5M97FQ50
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - bug
+  - regression
+  - navigation
+  - photo-loading
+  - rendering
+  - histogram
+created: 2026-09-03T01:12:23.443Z
+updated: 2026-09-07T04:02:44.241Z
+depends_on:
+  - LUMO-048
+  - LUMO-109
+  - LUMO-130
+estimate: 5
+order: 9xp20kox
+board: product
 ---
 
 ## Objective

@@ -4,19 +4,6 @@ title: Foreground and Background mask components have no observable effect
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - masking
-  - rendering
-  - editor
-  - epic:masking
-created: 2026-09-06T03:14:52.682Z
-updated: 2026-09-06T04:35:33.684Z
-order: n
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -45,6 +32,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T04:35:33.677Z
   session: 01MTPB2898YODMPOMA
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - masking
+  - rendering
+  - editor
+  - epic:masking
+created: 2026-09-06T03:14:52.682Z
+updated: 2026-09-07T04:02:48.127Z
+order: ipx4bimy
+board: product
 ---
 
 ## Objective

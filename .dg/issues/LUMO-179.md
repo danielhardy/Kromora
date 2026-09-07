@@ -4,16 +4,6 @@ title: Imported photos should be durable / remain in the library
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - persistence
-created: 2026-09-04T13:26:53.529Z
-updated: 2026-09-04T14:17:45.452Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -25,6 +15,16 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T14:17:45.445Z
   session: 01MTN0403N3BA7XDZ4
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - persistence
+created: 2026-09-04T13:26:53.529Z
+updated: 2026-09-07T04:02:45.631Z
+order: d3qs828v
+board: product
 ---
 
 **Type:** Feature

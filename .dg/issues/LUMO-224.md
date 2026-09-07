@@ -4,24 +4,6 @@ title: Add persistent smart Foreground and Background local masks
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - epic:masking
-  - masking
-  - photo-intelligence
-  - rendering
-created: 2026-09-04T21:48:31.831Z
-updated: 2026-09-05T15:00:14.328Z
-depends_on:
-  - LUMO-201
-  - LUMO-202
-  - LUMO-219
-  - LUMO-220
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -59,6 +41,24 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-05T15:00:14.325Z
   session: 01MTOI9MQOZK4BWMWN
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - epic:masking
+  - masking
+  - photo-intelligence
+  - rendering
+created: 2026-09-04T21:48:31.831Z
+updated: 2026-09-07T04:02:46.633Z
+depends_on:
+  - LUMO-201
+  - LUMO-202
+  - LUMO-219
+  - LUMO-220
+order: f9i56mea
+board: product
 ---
 
 ## Objective

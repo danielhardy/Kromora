@@ -10,8 +10,8 @@ labels:
   - ux
   - epic:color
 created: 2026-09-01T14:35:34.567Z
-updated: 2026-09-01T15:27:37.871Z
-order: z
+updated: 2026-09-07T04:02:51.142Z
+order: pcdtnwfk
 board: product
 ---
 

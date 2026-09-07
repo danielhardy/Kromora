@@ -4,21 +4,6 @@ title: "Analysis coordinator: cancellation + request dedup"
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:53.761Z
-updated: 2026-09-04T15:49:02.313Z
-depends_on:
-  - LUMO-187
-  - LUMO-192
-order: a0
-board: product
-commits:
-  - c5237a8b6e7b48a70713dfed0732263ae1875fbd
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -57,6 +42,21 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T15:49:02.309Z
   session: 01MTN4FNOCJMA29HH6
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:53.761Z
+updated: 2026-09-07T04:02:45.835Z
+depends_on:
+  - LUMO-187
+  - LUMO-192
+order: djanm69y
+board: product
+commits:
+  - c5237a8b6e7b48a70713dfed0732263ae1875fbd
 ---
 
 **Type:** Task

@@ -4,16 +4,6 @@ title: flushPendingWrites can misreport .cancelled after a raced replacement wor
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-04T02:18:16.890Z
-updated: 2026-09-04T11:43:22.903Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -39,6 +29,16 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T11:43:22.900Z
   session: 01MTMVMWC8FUBU8W43
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-04T02:18:16.890Z
+updated: 2026-09-07T04:02:45.356Z
+order: cj0ad8vf
+board: product
 ---
 
 Parent: LUMO-166 (verification finding, non-blocking)

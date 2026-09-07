@@ -4,20 +4,6 @@ title: Debug analysis and mask visualization overlay
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:57.189Z
-updated: 2026-09-04T17:21:02.583Z
-depends_on:
-  - LUMO-194
-order: zv
-board: product
-commits:
-  - 69f5c4f
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -30,6 +16,20 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T17:21:02.580Z
   session: 01MTN7Y80HBQC6GH5Z
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:57.189Z
+updated: 2026-09-07T04:02:52.598Z
+depends_on:
+  - LUMO-194
+order: s82axzas
+board: product
+commits:
+  - 69f5c4f
 ---
 
 **Type:** Task

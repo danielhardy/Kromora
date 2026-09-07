@@ -11,11 +11,11 @@ labels:
   - zoom
   - crop
 created: 2026-09-01T22:05:10.052Z
-updated: 2026-09-02T02:51:45.530Z
+updated: 2026-09-07T04:02:42.812Z
 depends_on:
   - LUMO-106
   - LUMO-107
-order: a0
+order: 6wty9shc
 board: product
 commits:
   - 79b96cb

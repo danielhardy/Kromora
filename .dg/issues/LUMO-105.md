@@ -7,10 +7,10 @@ priority: low
 labels:
   - verification
 created: 2026-09-01T19:32:47.463Z
-updated: 2026-09-01T21:23:26.125Z
+updated: 2026-09-07T04:02:49.237Z
 depends_on:
   - LUMO-095
-order: w
+order: l61q7hh3
 board: product
 commits:
   - 724ad99

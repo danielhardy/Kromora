@@ -36,11 +36,11 @@ labels:
   - comparison
   - rendering
 created: 2026-09-06T05:40:18.787Z
-updated: 2026-09-06T15:56:55.339Z
+updated: 2026-09-07T04:02:48.344Z
 parent: LUMO-240
 depends_on:
   - LUMO-240
-order: n
+order: j5gzpmo1
 board: product
 commits:
   - c739949

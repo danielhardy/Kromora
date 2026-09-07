@@ -11,12 +11,12 @@ labels:
   - epic:export
   - phase:9
 created: 2026-08-30T18:30:34.634Z
-updated: 2026-09-02T16:46:56.258Z
+updated: 2026-09-07T04:02:41.161Z
 depends_on:
   - LUMO-012
   - LUMO-008
 estimate: 5
-order: a0
+order: 3gez4w8o
 board: product
 ---
 

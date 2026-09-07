@@ -4,18 +4,6 @@ title: Side-by-side comparison opens with a missing Original image
 type: bug
 status: done
 priority: high
-labels:
-  - comparison
-  - preview
-  - canvas
-  - rendering
-  - verification
-created: 2026-09-03T14:44:27.552Z
-updated: 2026-09-03T15:33:30.212Z
-order: t
-board: product
-commits:
-  - 4d53a51
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -28,6 +16,18 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-03T15:33:30.206Z
   session: 01MTLNYSVQ2TE9GM5Y
+labels:
+  - comparison
+  - preview
+  - canvas
+  - rendering
+  - verification
+created: 2026-09-03T14:44:27.552Z
+updated: 2026-09-07T04:02:48.593Z
+order: jq7hkg1h
+board: product
+commits:
+  - 4d53a51
 ---
 
 ## Objective

@@ -9,11 +9,11 @@ labels:
   - epic:domain
   - phase:1
 created: 2026-08-30T18:30:18.849Z
-updated: 2026-08-31T03:09:06.404Z
+updated: 2026-09-07T04:02:49.699Z
 depends_on:
   - LUMO-004
 estimate: 3
-order: y
+order: m6c3gevm
 board: product
 ---
 

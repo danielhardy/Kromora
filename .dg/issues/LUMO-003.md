@@ -11,11 +11,11 @@ labels:
   - epic:identity
   - phase:0
 created: 2026-08-30T18:30:17.974Z
-updated: 2026-08-31T03:10:00.000Z
+updated: 2026-09-07T04:02:39.809Z
 depends_on:
   - LUMO-002
 estimate: 2
-order: a0
+order: 056mgpcd
 board: product
 ---
 

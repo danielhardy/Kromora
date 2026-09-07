@@ -6,13 +6,6 @@ status: done
 priority: medium
 verification_agent: pi
 verification_model: openrouter/z-ai/glm-5.3-flash
-labels:
-  - import
-  - ux
-created: 2026-09-02T12:45:18.820Z
-updated: 2026-09-02T17:58:40.221Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -23,6 +16,13 @@ verification_report:
   actor: pi
   resolved_model: unknown
   completed_at: 2026-09-02T17:58:40.219Z
+labels:
+  - import
+  - ux
+created: 2026-09-02T12:45:18.820Z
+updated: 2026-09-07T04:02:43.599Z
+order: 8hutdj9b
+board: product
 ---
 
 ## Objective

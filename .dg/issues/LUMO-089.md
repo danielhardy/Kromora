@@ -9,8 +9,8 @@ labels:
   - ux
   - accessibility
 created: 2026-09-01T14:35:34.852Z
-updated: 2026-09-01T16:04:24.228Z
-order: a0
+updated: 2026-09-07T04:02:42.396Z
+order: 61q7hkf6
 board: product
 commits:
   - 14ec468

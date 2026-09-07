@@ -2,15 +2,15 @@
 id: LUMO-258
 title: Shrink the edit-store public surface back to internal
 type: task
-status: backlog
+status: ready
 priority: medium
 labels:
   - persistence
 created: 2026-09-07T01:10:24.868Z
-updated: 2026-09-07T01:28:01.499Z
+updated: 2026-09-07T04:14:06.559Z
 depends_on:
   - LUMO-250
-order: cllllllg
+order: yh
 board: product
 ---
 

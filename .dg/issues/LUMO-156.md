@@ -4,15 +4,6 @@ title: Replace Look color swatches with photo thumbnails showing the applied Loo
 type: feature
 status: done
 priority: medium
-labels:
-  - looks
-  - ux
-  - preview
-  - verification
-created: 2026-09-03T14:41:57.393Z
-updated: 2026-09-03T16:21:23.081Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -49,6 +40,15 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T16:21:23.078Z
   session: 01MTLQAHA1ITB25GQ0
+labels:
+  - looks
+  - ux
+  - preview
+  - verification
+created: 2026-09-03T14:41:57.393Z
+updated: 2026-09-07T04:02:44.740Z
+order: b361q7ft
+board: product
 ---
 
 ## Objective

@@ -4,21 +4,6 @@ title: Add editable linear gradient masks
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - epic:masking
-  - masking
-  - editor
-  - rendering
-created: 2026-09-04T21:48:30.417Z
-updated: 2026-09-05T14:08:42.445Z
-depends_on:
-  - LUMO-220
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -49,6 +34,21 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-05T14:08:42.442Z
   session: 01MTOG3QY9R9K62FOB
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - epic:masking
+  - masking
+  - editor
+  - rendering
+created: 2026-09-04T21:48:30.417Z
+updated: 2026-09-07T04:02:46.581Z
+depends_on:
+  - LUMO-220
+order: f4bipx1x
+board: product
 ---
 
 ## Objective

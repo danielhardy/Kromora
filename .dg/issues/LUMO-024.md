@@ -9,11 +9,11 @@ labels:
   - epic:light
   - phase:4
 created: 2026-08-30T18:30:24.972Z
-updated: 2026-08-31T19:25:45.859Z
+updated: 2026-09-07T04:02:47.197Z
 depends_on:
   - LUMO-012
 estimate: 3
-order: n
+order: gk5rcyhj
 board: product
 commits:
   - 0ddada9

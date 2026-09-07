@@ -4,15 +4,6 @@ title: Remove obsolete whole-catalog-rewrite benchmark
 type: task
 status: done
 priority: medium
-labels:
-  - persistence
-created: 2026-09-06T04:06:27.772Z
-updated: 2026-09-06T23:51:44.533Z
-depends_on:
-  - LUMO-244
-  - LUMO-246
-order: y8
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -33,6 +24,15 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T23:51:44.529Z
   session: 01MTQGRBGDSHI2I25B
+labels:
+  - persistence
+created: 2026-09-06T04:06:27.772Z
+updated: 2026-09-07T04:02:50.569Z
+depends_on:
+  - LUMO-244
+  - LUMO-246
+order: o6wty9oo
+board: product
 ---
 
 ## Objective

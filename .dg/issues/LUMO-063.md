@@ -7,8 +7,8 @@ priority: medium
 labels:
   - verification
 created: 2026-08-31T13:15:02.990Z
-updated: 2026-08-31T15:23:34.160Z
-order: n
+updated: 2026-09-07T04:02:47.316Z
+order: guj0ad69
 board: product
 branch: agent/lumo-063
 commits:

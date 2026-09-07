@@ -9,12 +9,12 @@ labels:
   - epic:color
   - phase:5
 created: 2026-08-30T18:30:27.022Z
-updated: 2026-08-31T20:25:42.164Z
+updated: 2026-09-07T04:02:47.248Z
 depends_on:
   - LUMO-007
   - LUMO-024
 estimate: 5
-order: n
+order: gpcdtntw
 board: product
 commits:
   - "0376e89"

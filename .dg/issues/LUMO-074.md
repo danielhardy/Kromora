@@ -7,10 +7,10 @@ priority: low
 labels:
   - verification
 created: 2026-08-31T23:22:31.174Z
-updated: 2026-09-01T00:00:46.826Z
+updated: 2026-09-07T04:02:41.789Z
 depends_on:
   - LUMO-071
-order: a0
+order: 4r2lb8bx
 board: product
 ---
 

@@ -11,11 +11,11 @@ labels:
   - epic:editor
   - phase:8
 created: 2026-09-01T17:47:14.516Z
-updated: 2026-09-01T19:15:24.836Z
+updated: 2026-09-07T04:02:51.207Z
 depends_on:
   - LUMO-047
   - LUMO-049
-order: z
+order: phkg4lrx
 board: product
 ---
 

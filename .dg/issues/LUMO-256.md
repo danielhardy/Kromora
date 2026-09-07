@@ -4,20 +4,6 @@ title: EditRecord.document silently drops corrupt/undecodable edits without surf
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-06T23:21:12.777Z
-updated: 2026-09-07T00:42:07.753Z
-depends_on:
-  - LUMO-244
-order: w
-board: product
-commits:
-  - d704cc5
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -41,6 +27,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-07T00:42:07.746Z
   session: 01MTQI84TEA4K3EE6K
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-06T23:21:12.777Z
+updated: 2026-09-07T04:02:49.648Z
+depends_on:
+  - LUMO-244
+order: m15gzpj9
+board: product
+commits:
+  - d704cc5
 ---
 
 ## Finding (verification of LUMO-244 / commit c2b7851)

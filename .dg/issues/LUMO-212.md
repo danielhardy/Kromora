@@ -4,20 +4,6 @@ title: Hide low-value mask result diagnostics outside Developer mode
 type: bug
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ux
-  - masking
-  - developer
-created: 2026-09-04T19:08:04.604Z
-updated: 2026-09-04T19:39:09.288Z
-order: w
-board: product
-commits:
-  - 587b7a7
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -33,6 +19,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T19:39:09.282Z
   session: 01MTNCS0B2LKEZVFBY
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ux
+  - masking
+  - developer
+created: 2026-09-04T19:08:04.604Z
+updated: 2026-09-07T04:02:49.438Z
+order: lllllli6
+board: product
+commits:
+  - 587b7a7
 ---
 
 ## Objective

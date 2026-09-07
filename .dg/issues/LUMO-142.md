@@ -4,23 +4,6 @@ title: Fix black comparison surface when a new unedited photo loads
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - bug
-  - comparison
-  - rendering
-  - regression
-created: 2026-09-03T01:12:22.879Z
-updated: 2026-09-03T01:49:56.240Z
-depends_on:
-  - LUMO-099
-  - LUMO-109
-estimate: 3
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -32,6 +15,23 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T01:49:56.237Z
   session: 01MTKV68KH0J6PRG58
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - bug
+  - comparison
+  - rendering
+  - regression
+created: 2026-09-03T01:12:22.879Z
+updated: 2026-09-07T04:02:44.186Z
+depends_on:
+  - LUMO-099
+  - LUMO-109
+estimate: 3
+order: 9sifjvck
+board: product
 ---
 
 ## Objective

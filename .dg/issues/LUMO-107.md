@@ -10,10 +10,10 @@ labels:
   - rendering
   - live-preview
 created: 2026-09-01T22:05:09.766Z
-updated: 2026-09-02T02:26:03.600Z
+updated: 2026-09-07T04:02:42.744Z
 depends_on:
   - LUMO-114
-order: a0
+order: 6rnbt34z
 board: product
 commits:
   - "3195e55"

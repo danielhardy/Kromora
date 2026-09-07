@@ -4,19 +4,6 @@ title: "Audit: move folder scan I/O off main actor and remove quadratic work"
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - performance
-  - library
-  - scanning
-  - audit
-created: 2026-09-03T23:31:00.000Z
-updated: 2026-09-04T09:01:05.308Z
-order: t
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -48,6 +35,19 @@ verification_report:
   actor: codex
   resolved_model: unknown
   completed_at: 2026-09-04T09:01:05.301Z
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - performance
+  - library
+  - scanning
+  - audit
+created: 2026-09-03T23:31:00.000Z
+updated: 2026-09-07T04:02:48.701Z
+order: k0kqhuq7
+board: product
 ---
 
 ## Objective

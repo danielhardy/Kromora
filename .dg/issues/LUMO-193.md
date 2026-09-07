@@ -4,23 +4,6 @@ title: Masked regional statistics engine
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:52.925Z
-updated: 2026-09-04T15:27:31.699Z
-depends_on:
-  - LUMO-184
-  - LUMO-186
-  - LUMO-192
-order: a0
-board: product
-branch: main
-commits:
-  - 918f224
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -33,6 +16,23 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T15:27:31.696Z
   session: 01MTN3Y4WV9MHYL0JC
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:52.925Z
+updated: 2026-09-07T04:02:45.736Z
+depends_on:
+  - LUMO-184
+  - LUMO-186
+  - LUMO-192
+order: de415gxl
+board: product
+branch: main
+commits:
+  - 918f224
 ---
 
 **Type:** Feature

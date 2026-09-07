@@ -4,27 +4,6 @@ title: Restore Histogram and Auto after thumbnail photo switching
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - bug
-  - regression
-  - navigation
-  - photo-loading
-  - rendering
-  - histogram
-  - auto
-created: 2026-09-04T20:31:53.304Z
-updated: 2026-09-04T21:36:24.906Z
-depends_on:
-  - LUMO-143
-  - LUMO-209
-order: a0
-board: product
-commits:
-  - d8b0b91
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -50,6 +29,27 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T21:36:24.901Z
   session: 01MTNGNRQVXVLFLIC3
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - bug
+  - regression
+  - navigation
+  - photo-loading
+  - rendering
+  - histogram
+  - auto
+created: 2026-09-04T20:31:53.304Z
+updated: 2026-09-07T04:02:46.381Z
+depends_on:
+  - LUMO-143
+  - LUMO-209
+order: eornbt0u
+board: product
+commits:
+  - d8b0b91
 ---
 
 ## Objective

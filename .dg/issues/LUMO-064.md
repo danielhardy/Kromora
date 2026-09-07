@@ -7,8 +7,8 @@ priority: urgent
 labels:
   - verification
 created: 2026-08-31T14:47:48.412Z
-updated: 2026-08-31T15:24:00.616Z
-order: zzh
+updated: 2026-09-07T04:02:53.198Z
+order: tdjanm1o
 board: product
 branch: agent/lumo-064
 commits:

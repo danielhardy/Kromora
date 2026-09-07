@@ -4,16 +4,6 @@ title: Add HEIF export format when cleanly testable (Epic 9 MVP gap)
 type: task
 status: done
 priority: low
-labels:
-  - verification
-created: 2026-09-02T17:36:12.415Z
-updated: 2026-09-02T20:02:06.620Z
-depends_on:
-  - LUMO-050
-order: a0
-board: product
-commits:
-  - c6b971a
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -40,6 +30,16 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-02T20:02:06.618Z
   session: 01MTKIRAW1QV723ERY
+labels:
+  - verification
+created: 2026-09-02T17:36:12.415Z
+updated: 2026-09-07T04:02:43.926Z
+depends_on:
+  - LUMO-050
+order: 97rxp1z4
+board: product
+commits:
+  - c6b971a
 ---
 
 ## Objective

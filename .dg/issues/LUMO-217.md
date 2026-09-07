@@ -4,19 +4,6 @@ title: Prototype mask canvas overlay and record interaction performance baseline
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - epic:masking
-  - masking
-  - performance
-  - canvas
-created: 2026-09-04T21:48:28.536Z
-updated: 2026-09-05T02:02:04.898Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -50,6 +37,19 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-05T02:02:04.890Z
   session: 01MTNQEEU2BYS2BG9J
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - epic:masking
+  - masking
+  - performance
+  - canvas
+created: 2026-09-04T21:48:28.536Z
+updated: 2026-09-07T04:02:46.433Z
+order: ety9sid7
+board: product
 ---
 
 ## Objective

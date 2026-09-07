@@ -4,23 +4,6 @@ title: Verify EditPersistenceCoordinator flush() cancelled+empty-pending success
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-  - maintainability
-  - persistence
-created: 2026-09-04T03:02:22.104Z
-updated: 2026-09-04T13:00:56.979Z
-parent: LUMO-168
-depends_on:
-  - LUMO-168
-order: a0
-board: product
-commits:
-  - 94569ae
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -43,6 +26,23 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T13:00:56.976Z
   session: 01MTMYFCEMPKAMZUP0
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+  - maintainability
+  - persistence
+created: 2026-09-04T03:02:22.104Z
+updated: 2026-09-07T04:02:45.429Z
+parent: LUMO-168
+depends_on:
+  - LUMO-168
+order: co6wty7s
+board: product
+commits:
+  - 94569ae
 ---
 
 ## Objective

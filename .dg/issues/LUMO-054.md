@@ -23,11 +23,11 @@ labels:
   - epic:export
   - phase:9
 created: 2026-08-30T18:30:35.848Z
-updated: 2026-09-02T19:18:48.267Z
+updated: 2026-09-07T04:02:41.269Z
 depends_on:
   - LUMO-053
 estimate: 5
-order: a0
+order: 3qs82axe
 board: product
 commits:
   - "02e6541"

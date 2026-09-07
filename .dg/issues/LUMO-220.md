@@ -4,24 +4,6 @@ title: Replace selection-only mask sheet with persistent Masking workspace
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - epic:masking
-  - masking
-  - editor
-  - accessibility
-created: 2026-09-04T21:48:29.898Z
-updated: 2026-09-05T13:44:23.008Z
-depends_on:
-  - LUMO-217
-  - LUMO-218
-  - LUMO-219
-  - LUMO-229
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -33,6 +15,24 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-05T13:44:23.005Z
   session: 01MTOFNGVK36JI167N
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - epic:masking
+  - masking
+  - editor
+  - accessibility
+created: 2026-09-04T21:48:29.898Z
+updated: 2026-09-07T04:02:46.485Z
+depends_on:
+  - LUMO-217
+  - LUMO-218
+  - LUMO-219
+  - LUMO-229
+order: ez4w97pk
+board: product
 ---
 
 ## Objective

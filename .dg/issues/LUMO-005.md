@@ -10,14 +10,14 @@ labels:
   - epic:domain
   - phase:1
 created: 2026-08-30T18:30:18.651Z
-updated: 2026-08-31T13:27:33.090Z
+updated: 2026-09-07T04:02:52.818Z
 depends_on:
   - LUMO-006
   - LUMO-007
   - LUMO-008
   - LUMO-009
   - LUMO-010
-order: zy
+order: sssssso8
 board: product
 ---
 

@@ -9,10 +9,10 @@ labels:
   - epic:lut
   - phase:7
 created: 2026-09-01T14:08:37.323Z
-updated: 2026-09-01T14:44:21.317Z
+updated: 2026-09-07T04:02:42.136Z
 depends_on:
   - LUMO-043
-order: a0
+order: 5gzpmr1q
 board: product
 commits:
   - 41daca6

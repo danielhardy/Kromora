@@ -2,16 +2,16 @@
 id: LUMO-259
 title: Reveal-in-Finder must handle a not-yet-created store file
 type: task
-status: backlog
+status: ready
 priority: medium
 labels:
   - persistence
   - ui
 created: 2026-09-07T01:10:25.405Z
-updated: 2026-09-07T01:28:01.542Z
+updated: 2026-09-07T04:14:09.813Z
 depends_on:
   - LUMO-250
-order: eeeeeee8
+order: y8
 board: product
 ---
 

@@ -4,20 +4,6 @@ title: Reduce duplication between addFromURLs and addFromMediaVolume
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-04T13:38:03.144Z
-updated: 2026-09-04T14:46:57.249Z
-depends_on:
-  - LUMO-178
-order: a0
-board: product
-commits:
-  - ffcecca373d98b9dba17888a61994f31fd475515
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -40,6 +26,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T14:46:57.243Z
   session: 01MTN2CZ6RUXWUNZ6E
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-04T13:38:03.144Z
+updated: 2026-09-07T04:02:45.685Z
+depends_on:
+  - LUMO-178
+order: d8xeorl8
+board: product
+commits:
+  - ffcecca373d98b9dba17888a61994f31fd475515
 ---
 
 ## Objective

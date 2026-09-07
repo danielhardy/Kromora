@@ -9,13 +9,13 @@ labels:
   - epic:editor
   - phase:8
 created: 2026-08-30T18:30:33.766Z
-updated: 2026-09-01T18:21:39.403Z
+updated: 2026-09-07T04:02:54.945Z
 depends_on:
   - LUMO-045
   - LUMO-022
   - LUMO-009
 estimate: 5
-order: zzzzzh
+order: x9i56mbf
 board: product
 ---
 

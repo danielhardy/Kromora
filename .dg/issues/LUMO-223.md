@@ -4,24 +4,6 @@ title: Add smooth non-destructive brush masks
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - epic:masking
-  - masking
-  - editor
-  - rendering
-  - performance
-created: 2026-09-04T21:48:31.366Z
-updated: 2026-09-05T14:36:49.421Z
-depends_on:
-  - LUMO-217
-  - LUMO-219
-  - LUMO-220
-order: zh
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -33,6 +15,24 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-05T14:36:49.413Z
   session: 01MTOH4IQVFL4GKDPW
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - epic:masking
+  - masking
+  - editor
+  - rendering
+  - performance
+created: 2026-09-04T21:48:31.366Z
+updated: 2026-09-07T04:02:52.093Z
+depends_on:
+  - LUMO-217
+  - LUMO-219
+  - LUMO-220
+order: r2lb8cjw
+board: product
 ---
 
 ## Objective

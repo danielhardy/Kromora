@@ -4,19 +4,6 @@ title: Preserve Apple Photos original names and make photo-name display configur
 type: bug
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ux
-  - photo-library
-created: 2026-09-04T19:07:58.571Z
-updated: 2026-09-04T19:34:29.320Z
-order: n
-board: product
-commits:
-  - 7e891c8
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -34,6 +21,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T19:34:29.314Z
   session: 01MTNCNQ2S69ML5V0B
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ux
+  - photo-library
+created: 2026-09-04T19:07:58.571Z
+updated: 2026-09-07T04:02:47.819Z
+order: hzzzzzx5
+board: product
+commits:
+  - 7e891c8
 ---
 
 ## Objective

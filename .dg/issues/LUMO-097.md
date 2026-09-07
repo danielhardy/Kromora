@@ -10,10 +10,10 @@ labels:
   - epic:editor
   - phase:8
 created: 2026-09-01T17:47:13.799Z
-updated: 2026-09-01T19:46:29.025Z
+updated: 2026-09-07T04:02:55.133Z
 depends_on:
   - LUMO-085
-order: zzzzzx
+order: xp20kqci
 board: product
 ---
 

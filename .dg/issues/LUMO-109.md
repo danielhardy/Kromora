@@ -11,10 +11,10 @@ labels:
   - raw
   - navigation
 created: 2026-09-01T22:05:10.331Z
-updated: 2026-09-02T03:37:07.174Z
+updated: 2026-09-07T04:02:42.924Z
 depends_on:
   - LUMO-111
-order: a0
+order: 720kqhtp
 board: product
 commits:
   - 67c56b5

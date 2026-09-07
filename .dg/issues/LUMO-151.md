@@ -4,24 +4,6 @@ title: Create and integrate Lumo's product icon
 type: feature
 status: done
 priority: low
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - release
-  - icon
-  - branding
-  - macos
-  - design
-  - human-in-loop
-created: 2026-09-03T01:12:27.938Z
-updated: 2026-09-03T05:21:38.209Z
-estimate: 5
-order: a0
-board: product
-commits:
-  - "4180292"
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -42,6 +24,24 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T05:21:38.203Z
   session: 01MTL2PR920FGVQ6OQ
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - release
+  - icon
+  - branding
+  - macos
+  - design
+  - human-in-loop
+created: 2026-09-03T01:12:27.938Z
+updated: 2026-09-07T04:02:44.551Z
+estimate: 5
+order: anm6c3eq
+board: product
+commits:
+  - "4180292"
 ---
 
 ## Objective

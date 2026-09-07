@@ -2,16 +2,16 @@
 id: LUMO-262
 title: Scope load status to the photo that produced it
 type: task
-status: backlog
+status: ready
 priority: low
 labels:
   - persistence
   - ui
 created: 2026-09-07T01:10:27.053Z
-updated: 2026-09-07T01:28:01.655Z
+updated: 2026-09-07T04:14:20.285Z
 depends_on:
   - LUMO-244
-order: jssssssk
+order: x8
 board: product
 ---
 

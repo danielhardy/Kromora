@@ -2,7 +2,7 @@
 id: LUMO-216
 title: Masking and local adjustments (epic)
 type: feature
-status: ready
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -14,7 +14,7 @@ labels:
   - masking
   - local-adjustments
 created: 2026-09-04T21:48:28.079Z
-updated: 2026-09-04T21:54:11.401Z
+updated: 2026-09-07T04:02:56.077Z
 depends_on:
   - LUMO-217
   - LUMO-218
@@ -26,7 +26,7 @@ depends_on:
   - LUMO-224
   - LUMO-225
   - LUMO-226
-order: a0
+order: zutdjahx
 board: product
 ---
 

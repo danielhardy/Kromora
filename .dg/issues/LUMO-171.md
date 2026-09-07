@@ -4,19 +4,6 @@ title: "Audit: coalesce and cancel stale Look thumbnail renders"
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - performance
-  - rendering
-  - look
-  - audit
-created: 2026-09-03T23:31:00.000Z
-updated: 2026-09-04T04:22:15.543Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -48,6 +35,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T04:22:15.538Z
   session: 01MTMFPQCJZ164YRNA
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - performance
+  - rendering
+  - look
+  - audit
+created: 2026-09-03T23:31:00.000Z
+updated: 2026-09-07T04:02:45.197Z
+order: c8n1fu6p
+board: product
 ---
 
 ## Objective

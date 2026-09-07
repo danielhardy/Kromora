@@ -2,15 +2,15 @@
 id: LUMO-260
 title: Make edit-document encoding failures loud at write time
 type: task
-status: backlog
+status: ready
 priority: medium
 labels:
   - persistence
 created: 2026-09-07T01:10:25.971Z
-updated: 2026-09-07T01:28:01.582Z
+updated: 2026-09-07T04:14:12.627Z
 depends_on:
   - LUMO-244
-order: g7777770
+order: x
 board: product
 ---
 

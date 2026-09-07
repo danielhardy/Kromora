@@ -9,7 +9,7 @@ labels:
   - epic:effects
   - phase:6
 created: 2026-08-30T18:30:30.238Z
-updated: 2026-09-01T05:17:59.838Z
+updated: 2026-09-07T04:02:40.814Z
 depends_on:
   - LUMO-036
   - LUMO-037
@@ -17,7 +17,7 @@ depends_on:
   - LUMO-013
   - LUMO-009
 estimate: 5
-order: a0
+order: 2qhutdiv
 board: product
 commits:
   - afea245

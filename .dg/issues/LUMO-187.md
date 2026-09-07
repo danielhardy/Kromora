@@ -4,22 +4,6 @@ title: Vision semantic mask provider boundary
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:50.510Z
-updated: 2026-09-04T14:59:09.244Z
-depends_on:
-  - LUMO-183
-  - LUMO-184
-order: zh
-board: product
-branch: main
-commits:
-  - f004c7da5acc72a5ce93b227ef3266dab0576f46
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -44,6 +28,22 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T14:59:09.241Z
   session: 01MTN2XNAL3076F6FN
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:50.510Z
+updated: 2026-09-07T04:02:51.930Z
+depends_on:
+  - LUMO-183
+  - LUMO-184
+order: qs82axv6
+board: product
+branch: main
+commits:
+  - f004c7da5acc72a5ce93b227ef3266dab0576f46
 ---
 
 **Type:** Feature

@@ -9,11 +9,11 @@ labels:
   - epic:color
   - phase:5
 created: 2026-08-30T18:30:27.784Z
-updated: 2026-08-31T20:48:35.237Z
+updated: 2026-09-07T04:02:40.637Z
 depends_on:
   - LUMO-024
 estimate: 8
-order: a0
+order: 2axzf9hs
 board: product
 commits:
   - ea79753

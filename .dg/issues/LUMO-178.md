@@ -4,18 +4,6 @@ title: Open Image… allows selecting multiple images
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - multi-select
-created: 2026-09-04T13:26:37.174Z
-updated: 2026-09-04T13:40:06.196Z
-order: a0
-board: product
-commits:
-  - f4e5593
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -56,6 +44,18 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T13:40:06.192Z
   session: 01MTMZXINA894HG05U
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - multi-select
+created: 2026-09-04T13:26:37.174Z
+updated: 2026-09-07T04:02:45.578Z
+order: cyk5rcwi
+board: product
+commits:
+  - f4e5593
 ---
 
 **Type:** Feature

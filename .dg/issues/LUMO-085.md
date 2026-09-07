@@ -9,8 +9,8 @@ labels:
   - ux
   - epic:lut
 created: 2026-09-01T14:35:33.676Z
-updated: 2026-09-01T15:23:55.472Z
-order: a0
+updated: 2026-09-07T04:02:42.336Z
+order: 5wjl0v2t
 board: product
 commits:
   - 47b08b9

@@ -4,20 +4,6 @@ title: Primary subject ensemble scoring
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:54.584Z
-updated: 2026-09-04T16:03:09.100Z
-depends_on:
-  - LUMO-194
-order: a0
-board: product
-commits:
-  - 25cb0d6
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -52,6 +38,20 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T16:03:09.096Z
   session: 01MTN51YBJHUTNMA73
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:54.584Z
+updated: 2026-09-07T04:02:45.887Z
+depends_on:
+  - LUMO-194
+order: doha2vmb
+board: product
+commits:
+  - 25cb0d6
 ---
 
 **Type:** Feature

@@ -9,11 +9,11 @@ labels:
   - performance
   - rendering
 created: 2026-09-02T02:48:45.878Z
-updated: 2026-09-02T12:46:43.160Z
+updated: 2026-09-07T04:02:43.207Z
 parent: LUMO-108
 depends_on:
   - LUMO-108
-order: a0
+order: 7rxp20ji
 board: product
 commits:
   - 955cc36

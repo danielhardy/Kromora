@@ -4,20 +4,6 @@ title: Auto Light engine (pure function, composable evaluators)
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:55.845Z
-updated: 2026-09-04T17:13:48.427Z
-depends_on:
-  - LUMO-199
-order: yc
-board: product
-commits:
-  - 7e990f0
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -30,6 +16,20 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T17:13:48.424Z
   session: 01MTN7IUJQVZAOAJON
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:55.845Z
+updated: 2026-09-07T04:02:50.792Z
+depends_on:
+  - LUMO-199
+order: omgpcdpr
+board: product
+commits:
+  - 7e990f0
 ---
 
 **Type:** Feature

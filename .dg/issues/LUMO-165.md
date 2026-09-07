@@ -4,19 +4,6 @@ title: "Audit: complete Look preview jobs on cancellation and eviction"
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - bug
-  - performance
-  - look
-  - audit
-created: 2026-09-03T23:28:46.385Z
-updated: 2026-09-04T02:05:01.391Z
-order: n
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -28,6 +15,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T02:05:01.386Z
   session: 01MTMAWET3EBTEE3CA
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - bug
+  - performance
+  - look
+  - audit
+created: 2026-09-03T23:28:46.385Z
+updated: 2026-09-07T04:02:47.617Z
+order: hkg4lvw2
+board: product
 ---
 
 ## Objective

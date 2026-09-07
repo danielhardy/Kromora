@@ -9,12 +9,12 @@ labels:
   - epic:library
   - phase:3
 created: 2026-08-30T18:30:24.083Z
-updated: 2026-08-31T18:22:01.814Z
+updated: 2026-09-07T04:02:40.247Z
 depends_on:
   - LUMO-019
   - LUMO-020
 estimate: 5
-order: a0
+order: 1anm6c39
 board: product
 commits:
   - 54917a0

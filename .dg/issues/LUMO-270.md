@@ -2,14 +2,14 @@
 id: LUMO-270
 title: Person masks are unrecoverable on a cold mask store
 type: bug
-status: review
+status: done
 priority: high
 labels:
   - masking
   - analysis
 created: 2026-09-07T01:28:01.115Z
-updated: 2026-09-07T01:40:25.350Z
-order: y
+updated: 2026-09-07T04:02:50.368Z
+order: nrcyk5nl
 board: product
 branch: fix/lumo-270-person-cold-store
 ---
@@ -78,3 +78,8 @@ speculative calls from explicit user requests ("make me a Person mask"), not del
 ### Comment — pi @ 2026-09-07T01:40:15.602Z
 
 Implemented on fix/lumo-270-person-cold-store (c80bab8). 5 new regression tests pass; negative control verified (creation test fails pre-fix with the incident's exact error). Full suite: 925 tests, 0 failures. Ready for review.
+
+
+### Comment — codex @ 2026-09-07T03:42:49.190Z
+
+Merged to main (d9ff4b1c) alongside LUMO-272: combined overlay wash coverage (gate warming + stale-selection fallback). Full suite on main: 927 tests, 0 failures.
