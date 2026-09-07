@@ -259,6 +259,7 @@ one remaining site, deliberately deferred out of that pass's scope.
   `WorkingSpace` seam — remain the load-bearing parts of the spec.
 - `.gitignore` claimed "Package.resolved is intentionally committed" for a project with zero
   dependencies and no `Package.resolved`. **[fixed]**
+- The obsolete whole-catalog-rewrite persistence benchmark and report were removed; row-level SwiftData persistence resolves the finding under epic LUMO-244. **[fixed]**
 
 ---
 

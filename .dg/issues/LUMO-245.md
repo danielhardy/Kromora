@@ -2,17 +2,37 @@
 id: LUMO-245
 title: "Spike: validate SwiftData under Swift 6 strict concurrency"
 type: spike
-status: backlog
+status: done
 priority: medium
 labels:
   - persistence
   - spike
 created: 2026-09-06T04:06:24.051Z
-updated: 2026-09-06T04:06:34.958Z
+updated: 2026-09-06T23:25:45.525Z
 depends_on:
   - LUMO-244
-order: zzzzx
+order: n
 board: product
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: A throwaway @Model + @ModelActor build/test compiles and runs under Swift 6 strict concurrency with zero opt-outs
+      result: pass
+    - criterion: ModelContainer crosses the actor boundary and ModelContext remains actor-confined
+      result: pass
+  checks_run:
+    - swift test --filter SwiftDataConcurrencyProbeTests.testModelAndModelActorAreSwift6ConcurrencySafe -- 1 passed
+    - swift test --filter PackageSettingsTests -- 3 passed
+    - swift test -- 913 executed, 41 skipped, 0 failures
+    - git diff --check -- passed
+    - probe source contains no @unchecked Sendable, nonisolated(unsafe), or @preconcurrency
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-06T23:25:45.522Z
+  session: 01MTQFSCUTJ63E2JZ7
 ---
 
 ## Objective
@@ -45,3 +65,27 @@ epic is only worth doing if SwiftData's `@Model`/`@ModelActor` pattern compiles 
 ## Depends on
 
 None (first ticket in the epic).
+
+## Agent log
+
+- 2026-09-06T23:25:45.523Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] A throwaway @Model + @ModelActor build/test compiles and runs under Swift 6 strict concurrency with zero opt-outs (pass)
+- [x] ModelContainer crosses the actor boundary and ModelContext remains actor-confined (pass)
+Checks run:
+- swift test --filter SwiftDataConcurrencyProbeTests.testModelAndModelActorAreSwift6ConcurrencySafe -- 1 passed
+- swift test --filter PackageSettingsTests -- 3 passed
+- swift test -- 913 executed, 41 skipped, 0 failures
+- git diff --check -- passed
+- probe source contains no @unchecked Sendable, nonisolated(unsafe), or @preconcurrency
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTQFSCUTJ63E2JZ7
+Summary: Swift 6 SwiftData concurrency probe passes. Added an isolated @Model and @ModelActor test that passes ModelContainer through a detached @Sendable task, performs actor-confined ModelContext insert/save/fetch, and returns only a Sendable Int. No concurrency opt-outs were added. Verification: focused probe passed; PackageSettingsTests passed; full swift test passed (913 executed, 41 skipped, 0 failures).
