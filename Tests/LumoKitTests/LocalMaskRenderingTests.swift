@@ -360,6 +360,49 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertLessThanOrEqual(abs(Int(try Pixels.bytes(of: solo)[3]) - 204), 2)
     }
 
+    func testStaleSelectedComponentFallsBackToUsableComponents() async throws {
+        // LUMO-272: a selected component id can go stale while the layer selection survives
+        // (undo, component delete, fresh draft ids during creation). The tooling draws via
+        // its first-enabled fallback, so strict overlay filtering showed handles with no wash
+        // and no banner. The overlay must fall back the same way; solo isolation stays strict.
+        let source = try source()
+        let draftComponent = MaskComponent(source: .linear(LinearGradientDefinition()))
+        let draft = LocalAdjustmentLayer(components: [draftComponent])
+        let engine = RenderEngine()
+        let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+        let targetSize = PixelDimensions(width: 4, height: 4)
+
+        guard let wash = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [draft], selectedLayerID: draft.id, soloLayerID: nil,
+            targetSize: targetSize, style: style, selectedComponentID: UUID()
+        )) else {
+            return XCTFail("stale selection must fall back to usable components")
+        }
+        // Default definition fades top-zero to bottom-full: corners must differ. (Pixel
+        // centers sample inside the edge, so the top reads a small ramp value, not exact 0.)
+        let bytes = try Pixels.bytes(of: wash)
+        XCTAssertLessThan(Int(bytes[0]), 30)
+        let bottomOffset = (targetSize.height - 1) * targetSize.width * 4
+        XCTAssertGreaterThan(Int(bytes[bottomOffset]), 200)
+    }
+
+    func testStaleSoloComponentStaysStrict() async throws {
+        // Solo isolation is explicit: an unknown solo component resolves nothing.
+        let source = try source()
+        let draftComponent = MaskComponent(source: .linear(LinearGradientDefinition()))
+        let draft = LocalAdjustmentLayer(components: [draftComponent])
+        let engine = RenderEngine()
+        let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+
+        let wash = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [draft], selectedLayerID: draft.id,
+            soloLayerID: draft.id,
+            targetSize: PixelDimensions(width: 4, height: 4), style: style,
+            selectedComponentID: nil, soloComponentID: UUID()
+        ))
+        XCTAssertNil(wash, "stale solo selection must stay strict")
+    }
+
     func testRasterPayloadRowsRenderTopDownInOverlay() async throws {
         // Regression: rasterImage used to flip rows ("Core Image bitmap rows are bottom-up"),
         // which vertically mirrored every rasterized mask — semantic regions and brush strokes —
