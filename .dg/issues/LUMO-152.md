@@ -4,18 +4,6 @@ title: Grant App Sandbox entitlement for removable-media read access
 type: bug
 status: done
 priority: urgent
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-  - import
-  - macos
-created: 2026-09-03T02:31:06.756Z
-updated: 2026-09-03T03:14:59.223Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -41,6 +29,18 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T03:14:59.220Z
   session: 01MTKY5OLNOPC0HCNI
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+  - import
+  - macos
+created: 2026-09-03T02:31:06.756Z
+updated: 2026-09-07T04:02:44.632Z
+order: asssssr3
+board: product
 ---
 
 ## Objective

@@ -4,23 +4,6 @@ title: Duplicate background-mask composition path left dead in VisionSemanticMas
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-  - masking
-  - rendering
-created: 2026-09-05T14:58:51.848Z
-updated: 2026-09-06T02:48:56.532Z
-parent: LUMO-224
-depends_on:
-  - LUMO-224
-order: y
-board: product
-commits:
-  - 6f7327d
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -44,6 +27,23 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T02:48:56.529Z
   session: 01MTP7KPP4SD6UR6VJ
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+  - masking
+  - rendering
+created: 2026-09-05T14:58:51.848Z
+updated: 2026-09-07T04:02:50.119Z
+parent: LUMO-224
+depends_on:
+  - LUMO-224
+order: n6mgpca5
+board: product
+commits:
+  - 6f7327d
 ---
 
 ## Objective

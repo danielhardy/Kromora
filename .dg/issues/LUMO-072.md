@@ -11,12 +11,12 @@ labels:
   - live-preview
   - verification
 created: 2026-08-31T22:56:14.305Z
-updated: 2026-09-01T01:22:49.306Z
+updated: 2026-09-07T04:02:49.186Z
 depends_on:
   - LUMO-069
   - LUMO-070
   - LUMO-071
-order: w
+order: l0v3qs4q
 board: product
 commits:
   - 20f07bc

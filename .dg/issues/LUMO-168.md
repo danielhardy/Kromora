@@ -4,19 +4,6 @@ title: "Audit: split oversized application and rendering coordinators"
 type: task
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - maintainability
-  - architecture
-  - dx
-  - audit
-created: 2026-09-03T23:28:49.685Z
-updated: 2026-09-04T03:05:26.532Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -43,6 +30,19 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T03:05:26.529Z
   session: 01MTMD9ABBU9RKI2GF
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - maintainability
+  - architecture
+  - dx
+  - audit
+created: 2026-09-03T23:28:49.685Z
+updated: 2026-09-07T04:02:45.088Z
+order: by9sifhz
+board: product
 ---
 
 ## Objective

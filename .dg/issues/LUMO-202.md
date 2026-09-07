@@ -4,21 +4,6 @@ title: High-quality mask refinement for local adjustments
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:56.683Z
-updated: 2026-09-04T17:19:13.505Z
-depends_on:
-  - LUMO-201
-  - LUMO-186
-order: zq
-board: product
-commits:
-  - 827c34b
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -31,6 +16,21 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T17:19:13.501Z
   session: 01MTN7VMR3IO7G1BHH
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:56.683Z
+updated: 2026-09-07T04:02:52.302Z
+depends_on:
+  - LUMO-201
+  - LUMO-186
+order: rnbt35xc
+board: product
+commits:
+  - 827c34b
 ---
 
 **Type:** Feature

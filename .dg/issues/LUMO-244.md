@@ -4,13 +4,6 @@ title: SwiftData-backed edit persistence
 type: task
 status: done
 priority: medium
-labels:
-  - epic
-  - persistence
-created: 2026-09-06T04:06:14.013Z
-updated: 2026-09-06T23:22:15.039Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -34,6 +27,13 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-06T23:22:15.036Z
   session: 01MTQFLY8Z0IZT95QN
+labels:
+  - epic
+  - persistence
+created: 2026-09-06T04:06:14.013Z
+updated: 2026-09-07T04:02:46.884Z
+order: fu8n1frq
+board: product
 ---
 
 ## Context

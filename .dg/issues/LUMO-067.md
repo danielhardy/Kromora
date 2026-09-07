@@ -9,11 +9,11 @@ labels:
   - epic:light
   - performance
 created: 2026-08-31T20:46:44.961Z
-updated: 2026-08-31T22:36:18.448Z
+updated: 2026-09-07T04:02:41.491Z
 depends_on:
   - LUMO-028
 estimate: 5
-order: a0
+order: 46c3geyh
 board: product
 ---
 

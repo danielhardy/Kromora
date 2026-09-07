@@ -4,22 +4,6 @@ title: Global tone + color statistics analyzer (Tier 0)
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:52.506Z
-updated: 2026-09-04T15:16:44.538Z
-depends_on:
-  - LUMO-182
-  - LUMO-183
-order: zzzzy
-board: product
-branch: main
-commits:
-  - 31748f5
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -51,6 +35,22 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T15:16:44.534Z
   session: 01MTN3K9I38U3X3C1E
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:52.506Z
+updated: 2026-09-07T04:02:54.791Z
+depends_on:
+  - LUMO-182
+  - LUMO-183
+order: wz4w97mp
+board: product
+branch: main
+commits:
+  - 31748f5
 ---
 
 **Type:** Feature

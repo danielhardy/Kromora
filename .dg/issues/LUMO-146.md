@@ -45,12 +45,12 @@ labels:
   - lut
   - settings
 created: 2026-09-03T01:12:25.086Z
-updated: 2026-09-03T04:14:01.296Z
+updated: 2026-09-07T04:02:53.753Z
 depends_on:
   - LUMO-083
   - LUMO-042
 estimate: 8
-order: zzz1
+order: uj0ad8sk
 board: product
 ---
 

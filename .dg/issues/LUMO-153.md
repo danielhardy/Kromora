@@ -4,18 +4,6 @@ title: Removable-volume list shows non-photo/unreadable volumes indefinitely
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-03T03:14:15.176Z
-updated: 2026-09-03T05:26:58.516Z
-order: zzzq
-board: product
-commits:
-  - 1a8941b
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -38,6 +26,18 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-03T05:26:58.513Z
   session: 01MTL2V49RBGD8J6Q7
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-03T03:14:15.176Z
+updated: 2026-09-07T04:02:53.909Z
+order: uyk5rctn
+board: product
+commits:
+  - 1a8941b
 ---
 
 Parent: LUMO-152 (verification finding, non-blocking)

@@ -9,11 +9,11 @@ labels:
   - epic:effects
   - phase:6
 created: 2026-08-30T18:30:29.106Z
-updated: 2026-09-01T04:43:14.095Z
+updated: 2026-09-07T04:02:40.756Z
 depends_on:
   - LUMO-024
 estimate: 8
-order: a0
+order: 2lb8co6i
 board: product
 commits:
   - 44c6b8a

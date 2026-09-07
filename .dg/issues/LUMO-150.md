@@ -4,26 +4,6 @@ title: Bundle a small, licensed starter library of Looks
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - lut
-  - looks
-  - assets
-  - licensing
-  - ux
-created: 2026-09-03T01:12:27.350Z
-updated: 2026-09-03T05:05:24.614Z
-depends_on:
-  - LUMO-042
-  - LUMO-146
-estimate: 8
-order: a0
-board: product
-commits:
-  - c1cb5378666ba17367b0b1cfbec5d2da030d4803
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -37,6 +17,26 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T05:05:24.611Z
   session: 01MTL208F6K58677MN
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - lut
+  - looks
+  - assets
+  - licensing
+  - ux
+created: 2026-09-03T01:12:27.350Z
+updated: 2026-09-07T04:02:44.484Z
+depends_on:
+  - LUMO-042
+  - LUMO-146
+estimate: 8
+order: aifjve2d
+board: product
+commits:
+  - c1cb5378666ba17367b0b1cfbec5d2da030d4803
 ---
 
 ## Objective

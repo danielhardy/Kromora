@@ -9,7 +9,7 @@ labels:
   - epic:color
   - phase:5
 created: 2026-08-30T18:30:28.536Z
-updated: 2026-08-31T21:08:30.752Z
+updated: 2026-09-07T04:02:49.753Z
 depends_on:
   - LUMO-030
   - LUMO-031
@@ -18,7 +18,7 @@ depends_on:
   - LUMO-013
   - LUMO-009
 estimate: 5
-order: y
+order: mbipx47z
 board: product
 commits:
   - 3ceeedc

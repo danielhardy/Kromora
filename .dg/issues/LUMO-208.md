@@ -4,19 +4,6 @@ title: Fix missing string interpolation in AutoLightEngine exposure rationale
 type: bug
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-04T18:51:42.916Z
-updated: 2026-09-04T19:11:07.545Z
-parent: LUMO-207
-order: a0
-board: product
-commits:
-  - 81e34dc
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -40,6 +27,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T19:11:07.542Z
   session: 01MTNBVMB1WLS3RSI9
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-04T18:51:42.916Z
+updated: 2026-09-07T04:02:46.242Z
+parent: LUMO-207
+order: eeeeeec4
+board: product
+commits:
+  - 81e34dc
 ---
 
 ## Objective

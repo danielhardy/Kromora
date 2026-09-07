@@ -4,20 +4,6 @@ title: Visual regression harness
 type: task
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:58.024Z
-updated: 2026-09-04T17:29:57.340Z
-depends_on:
-  - LUMO-204
-order: a0
-board: product
-commits:
-  - eaf1913
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -30,6 +16,20 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T17:29:57.336Z
   session: 01MTN88EGY27DTUS3C
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:58.024Z
+updated: 2026-09-07T04:02:46.000Z
+depends_on:
+  - LUMO-204
+order: dyuj0ab1
+board: product
+commits:
+  - eaf1913
 ---
 
 **Type:** Task

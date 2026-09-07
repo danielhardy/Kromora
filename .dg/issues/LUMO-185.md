@@ -4,21 +4,6 @@ title: "MaskStore: mask caching and versioning"
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:49.718Z
-updated: 2026-09-04T14:56:48.039Z
-depends_on:
-  - LUMO-184
-order: y
-board: product
-branch: main
-commits:
-  - aeea1094e14c5924decbcad26690aa1a8f555b5a
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -43,6 +28,21 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T14:56:48.036Z
   session: 01MTN2UMBYAS8DP2XA
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:49.718Z
+updated: 2026-09-07T04:02:49.969Z
+depends_on:
+  - LUMO-184
+order: mr2lb892
+board: product
+branch: main
+commits:
+  - aeea1094e14c5924decbcad26690aa1a8f555b5a
 ---
 
 **Type:** Task

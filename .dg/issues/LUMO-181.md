@@ -4,19 +4,6 @@ title: Photo Intelligence & subject-aware Auto (epic)
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-  - epic
-created: 2026-09-04T13:45:19.425Z
-updated: 2026-09-04T17:32:11.005Z
-order: yb
-board: product
-commits:
-  - eaf1913
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -29,6 +16,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T17:32:11.001Z
   session: 01MTN7EBEK6WNA00Y5
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+  - epic
+created: 2026-09-04T13:45:19.425Z
+updated: 2026-09-07T04:02:50.618Z
+order: oc3gez11
+board: product
+commits:
+  - eaf1913
 ---
 
 **Type:** Epic

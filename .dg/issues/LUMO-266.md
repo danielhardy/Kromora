@@ -2,14 +2,14 @@
 id: LUMO-266
 title: Build mask bitmaps at 8-bit instead of RGBAf
 type: task
-status: backlog
+status: ready
 priority: high
 labels:
   - masking
   - performance
 created: 2026-09-07T01:14:45.729Z
-updated: 2026-09-07T01:28:01.796Z
-order: qzzzzzzo
+updated: 2026-09-07T04:03:11.995Z
+order: y
 board: product
 ---
 

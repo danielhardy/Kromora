@@ -25,10 +25,10 @@ labels:
   - domain
   - persistence
 created: 2026-09-04T21:48:28.936Z
-updated: 2026-09-05T04:03:09.711Z
+updated: 2026-09-07T04:02:47.874Z
 depends_on:
   - LUMO-217
-order: n
+order: i56mgp9i
 board: product
 ---
 

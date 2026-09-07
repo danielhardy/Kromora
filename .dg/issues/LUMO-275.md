@@ -2,21 +2,15 @@
 id: LUMO-275
 title: Preview displayRevisions permanently cancel every mask overlay resolve
 type: bug
-status: claimed
+status: done
 priority: urgent
 labels:
   - masking
   - render
 created: 2026-09-07T03:53:52.800Z
-updated: 2026-09-07T03:58:53.374Z
-order: zh
+updated: 2026-09-07T04:02:52.145Z
+order: r7rxp1w9
 board: product
-claim:
-  actor: pi
-  session: 01MTQPHUD2X0G6OFIG
-  claimed_at: 2026-09-07T03:54:01.334Z
-  expires_at: 2026-09-07T04:54:01.334Z
-  branch: fix/overlay-revision-exempt
 branch: fix/overlay-revision-exempt
 ---
 
@@ -63,3 +57,8 @@ overlay note could cancel main renders until `displayRevision` caught up.
       (`testOverlayResolveIsExemptFromRenderRevisionSupersession`).
 - [ ] Negative control verified (production test fails pre-fix with nil wash).
 - [ ] `swift build`, `swift test` pass with zero Swift 6 diagnostics and zero opt-outs.
+
+
+### Comment — pi @ 2026-09-07T03:59:14.547Z
+
+Merged to main (3416ca8). One-line production change (overlay requestRevision 0) + 2 regression tests. Full suite on branch: 929 tests, 0 failures. Verified on main.

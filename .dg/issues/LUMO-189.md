@@ -4,22 +4,6 @@ title: Face detection + face mask provider
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:51.306Z
-updated: 2026-09-04T15:09:35.202Z
-depends_on:
-  - LUMO-187
-  - LUMO-185
-order: zv
-board: product
-branch: main
-commits:
-  - 10e276d
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -51,6 +35,22 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T15:09:35.199Z
   session: 01MTN3B2AT6W0CB0WK
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:51.306Z
+updated: 2026-09-07T04:02:52.496Z
+depends_on:
+  - LUMO-187
+  - LUMO-185
+order: s2voh9yf
+board: product
+branch: main
+commits:
+  - 10e276d
 ---
 
 **Type:** Feature

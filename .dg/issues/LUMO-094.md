@@ -10,10 +10,10 @@ labels:
   - epic:editor
   - phase:8
 created: 2026-09-01T17:47:12.724Z
-updated: 2026-09-01T18:29:51.064Z
+updated: 2026-09-07T04:02:47.518Z
 depends_on:
   - LUMO-046
-order: n
+order: ha2voh7c
 board: product
 ---
 

@@ -9,11 +9,11 @@ labels:
   - epic:identity
   - phase:0
 created: 2026-08-30T18:30:17.648Z
-updated: 2026-08-31T02:47:33.379Z
+updated: 2026-09-07T04:02:47.145Z
 depends_on:
   - LUMO-060
 estimate: 5
-order: n
+order: gez4w956
 board: product
 ---
 

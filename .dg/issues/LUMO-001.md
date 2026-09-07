@@ -10,12 +10,12 @@ labels:
   - epic:identity
   - phase:0
 created: 2026-08-30T18:25:25.896Z
-updated: 2026-08-31T03:02:52.093Z
+updated: 2026-09-07T04:02:49.131Z
 depends_on:
   - LUMO-002
   - LUMO-003
   - LUMO-004
-order: w
+order: kvoha2sd
 board: product
 ---
 

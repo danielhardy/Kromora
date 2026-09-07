@@ -11,11 +11,11 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:54.177Z
-updated: 2026-09-04T16:11:18.457Z
+updated: 2026-09-07T04:02:49.386Z
 depends_on:
   - LUMO-195
   - LUMO-194
-order: w
+order: lgez4w5t
 board: product
 commits:
   - e839d4c

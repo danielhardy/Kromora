@@ -4,21 +4,6 @@ title: "MaskOperations: invert/intersect/union/subtract/feather/refine"
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:50.102Z
-updated: 2026-09-04T14:56:48.657Z
-depends_on:
-  - LUMO-184
-order: z
-board: product
-branch: main
-commits:
-  - aeea1094e14c5924decbcad26690aa1a8f555b5a
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -43,6 +28,21 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T14:56:48.653Z
   session: 01MTN2UMTTOEAXJX97
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:50.102Z
+updated: 2026-09-07T04:02:51.275Z
+depends_on:
+  - LUMO-184
+order: pmr2lb4a
+board: product
+branch: main
+commits:
+  - aeea1094e14c5924decbcad26690aa1a8f555b5a
 ---
 
 **Type:** Feature

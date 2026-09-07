@@ -9,12 +9,12 @@ labels:
   - epic:effects
   - phase:6
 created: 2026-08-30T18:30:29.865Z
-updated: 2026-09-01T05:03:10.795Z
+updated: 2026-09-07T04:02:53.856Z
 depends_on:
   - LUMO-024
   - LUMO-014
 estimate: 8
-order: zzzq
+order: utdjanha
 board: product
 ---
 

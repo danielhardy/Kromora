@@ -2,15 +2,15 @@
 id: LUMO-261
 title: Handle assetID collision when relinking onto an existing record
 type: task
-status: backlog
+status: ready
 priority: medium
 labels:
   - persistence
 created: 2026-09-07T01:10:26.550Z
-updated: 2026-09-07T01:28:01.620Z
+updated: 2026-09-07T04:14:15.550Z
 depends_on:
   - LUMO-244
-order: hzzzzzzs
+order: xh
 board: product
 ---
 

@@ -4,20 +4,6 @@ title: Move Photo Analysis debug details into a collapsible Inspect section
 type: bug
 status: done
 priority: low
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ux
-  - photo-intelligence
-  - developer
-created: 2026-09-04T19:08:07.500Z
-updated: 2026-09-04T19:43:30.825Z
-order: y
-board: product
-commits:
-  - 587b7a7
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -34,6 +20,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T19:43:30.814Z
   session: 01MTNCXZ1W7TRISKOO
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ux
+  - photo-intelligence
+  - developer
+created: 2026-09-04T19:08:07.500Z
+updated: 2026-09-07T04:02:50.017Z
+order: mw97rxlf
+board: product
+commits:
+  - 587b7a7
 ---
 
 ## Objective

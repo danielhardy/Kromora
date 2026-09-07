@@ -9,13 +9,13 @@ labels:
   - epic:library
   - phase:3
 created: 2026-08-30T18:30:23.027Z
-updated: 2026-08-31T15:19:16.176Z
+updated: 2026-09-07T04:02:53.253Z
 depends_on:
   - LUMO-004
   - LUMO-006
   - LUMO-064
 estimate: 5
-order: zzq
+order: tipx4be1
 board: product
 branch: agent/lumo-018
 commits:

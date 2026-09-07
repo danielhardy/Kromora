@@ -4,15 +4,6 @@ title: Update EditDocumentStore callers (AppViewModel, ExportCoordinator)
 type: task
 status: done
 priority: medium
-labels:
-  - persistence
-created: 2026-09-06T04:06:25.910Z
-updated: 2026-09-06T23:42:21.756Z
-depends_on:
-  - LUMO-244
-  - LUMO-246
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -38,6 +29,15 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-06T23:42:21.752Z
   session: 01MTQGA368FWM4D0L6
+labels:
+  - persistence
+created: 2026-09-06T04:06:25.910Z
+updated: 2026-09-07T04:02:46.941Z
+depends_on:
+  - LUMO-244
+  - LUMO-246
+order: fzf9i543
+board: product
 ---
 
 ## Objective

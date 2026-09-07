@@ -4,20 +4,6 @@ title: Retry after a failed smart-mask component add does not retry the mask fet
 type: bug
 status: done
 priority: urgent
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - masking
-  - verification
-created: 2026-09-06T04:59:26.037Z
-updated: 2026-09-06T15:34:13.977Z
-parent: LUMO-238
-order: n
-board: product
-commits:
-  - 9fe440a998b5aa077a05f81beadb980e1b3e5e8d
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -42,6 +28,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T15:34:13.974Z
   session: 01MTPYW8FG47EFLU0S
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - masking
+  - verification
+created: 2026-09-06T04:59:26.037Z
+updated: 2026-09-07T04:02:48.297Z
+parent: LUMO-238
+order: j0ad8xbo
+board: product
+commits:
+  - 9fe440a998b5aa077a05f81beadb980e1b3e5e8d
 ---
 
 ## Objective

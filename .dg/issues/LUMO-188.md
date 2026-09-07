@@ -4,22 +4,6 @@ title: Attention saliency -> subject mask provider
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:50.916Z
-updated: 2026-09-04T14:59:09.867Z
-depends_on:
-  - LUMO-187
-  - LUMO-185
-order: zq
-board: product
-branch: main
-commits:
-  - f004c7da5acc72a5ce93b227ef3266dab0576f46
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -46,6 +30,22 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T14:59:09.864Z
   session: 01MTN2XNRZIXHAODM1
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:50.916Z
+updated: 2026-09-07T04:02:52.251Z
+depends_on:
+  - LUMO-187
+  - LUMO-185
+order: ri56mgkz
+board: product
+branch: main
+commits:
+  - f004c7da5acc72a5ce93b227ef3266dab0576f46
 ---
 
 **Type:** Feature

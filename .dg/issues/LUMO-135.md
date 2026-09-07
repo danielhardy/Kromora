@@ -4,16 +4,6 @@ title: "ExportOptions: remove dead speculative aliases and clarify non-encoded-o
 type: task
 status: done
 priority: low
-labels:
-  - verification
-created: 2026-09-02T16:43:12.601Z
-updated: 2026-09-02T19:52:33.202Z
-depends_on:
-  - LUMO-051
-order: a0
-board: product
-commits:
-  - 801b152
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -26,6 +16,16 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-02T19:52:33.201Z
   session: 01MTKIFSTFITQZ5ZDO
+labels:
+  - verification
+created: 2026-09-02T16:43:12.601Z
+updated: 2026-09-07T04:02:43.878Z
+depends_on:
+  - LUMO-051
+order: 92lb8cmr
+board: product
+commits:
+  - 801b152
 ---
 
 ## Objective

@@ -14,8 +14,8 @@ labels:
   - masking
   - performance
 created: 2026-09-04T22:17:26.637Z
-updated: 2026-09-05T12:02:57.984Z
-order: zzzzzzzy
+updated: 2026-09-07T04:02:55.930Z
+order: zkg4lvt7
 board: product
 blocked_reason: A real AppKit pointer stream is required for the acceptance trace, but the available desktop automation delivered zero pointer events to the capture host; claiming p95/p99 from the synthetic harness would be invalid.
 blocked_action: Historical action retired in LUMO-230; the standalone capture wrapper and host are no longer available. Use the in-app overlay path with Instruments if this gate is reopened.

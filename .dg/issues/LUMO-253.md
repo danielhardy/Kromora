@@ -2,7 +2,7 @@
 id: LUMO-253
 title: Unattributed reconciliation commit (a42c5cf) exposes the known-broken addSmartMaskComponent retry path in production and leaves LUMO-237 untraced
 type: bug
-status: backlog
+status: ready
 priority: urgent
 creation_provenance:
   runner: claude
@@ -12,11 +12,11 @@ labels:
   - masking
   - verification
 created: 2026-09-06T14:28:13.713Z
-updated: 2026-09-07T01:28:01.446Z
+updated: 2026-09-07T04:13:59.893Z
 parent: LUMO-243
 depends_on:
   - LUMO-251
-order: asssssso
+order: z
 board: product
 ---
 

@@ -4,22 +4,6 @@ title: Foreground instance + background mask provider
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:51.702Z
-updated: 2026-09-04T15:12:39.985Z
-depends_on:
-  - LUMO-187
-  - LUMO-185
-order: zzzzv
-board: product
-branch: main
-commits:
-  - 4f8adcf
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -51,6 +35,22 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T15:12:39.982Z
   session: 01MTN3F0VS8NS8L8J3
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:51.702Z
+updated: 2026-09-07T04:02:54.491Z
+depends_on:
+  - LUMO-187
+  - LUMO-185
+order: w97rxoww
+board: product
+branch: main
+commits:
+  - 4f8adcf
 ---
 
 **Type:** Feature

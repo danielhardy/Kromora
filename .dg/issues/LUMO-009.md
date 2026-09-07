@@ -9,11 +9,11 @@ labels:
   - epic:domain
   - phase:1
 created: 2026-08-30T18:30:20.143Z
-updated: 2026-08-31T03:47:04.260Z
+updated: 2026-09-07T04:02:51.717Z
 depends_on:
   - LUMO-007
 estimate: 5
-order: zh
+order: qco6wtu3
 board: product
 commits:
   - c77ef55

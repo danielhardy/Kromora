@@ -11,13 +11,13 @@ labels:
   - performance
   - live-preview
 created: 2026-08-31T22:56:13.158Z
-updated: 2026-09-01T02:28:19.022Z
+updated: 2026-09-07T04:02:41.551Z
 depends_on:
   - LUMO-069
   - LUMO-070
   - LUMO-071
   - LUMO-072
-order: a0
+order: 4bipx4au
 board: product
 ---
 

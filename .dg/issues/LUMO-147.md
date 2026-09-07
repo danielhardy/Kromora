@@ -4,26 +4,6 @@ title: Save the LUT-compatible part of a photo's edits as a Look
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - lut
-  - look
-  - export
-  - color
-  - editing
-created: 2026-09-03T01:12:25.648Z
-updated: 2026-09-03T02:49:17.908Z
-depends_on:
-  - LUMO-042
-  - LUMO-085
-estimate: 8
-order: zzy
-board: product
-commits:
-  - d10303f
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -35,6 +15,26 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-03T02:49:17.901Z
   session: 01MTKWSKJET92G8QIQ
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - lut
+  - look
+  - export
+  - color
+  - editing
+created: 2026-09-03T01:12:25.648Z
+updated: 2026-09-07T04:02:53.588Z
+depends_on:
+  - LUMO-042
+  - LUMO-085
+estimate: 8
+order: u8n1fu3u
+board: product
+commits:
+  - d10303f
 ---
 
 ## Objective

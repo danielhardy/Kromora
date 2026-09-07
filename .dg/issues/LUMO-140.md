@@ -4,12 +4,6 @@ title: Fix RenderScale rounding mismatch for extreme aspect-ratio long-edge expo
 type: task
 status: done
 priority: urgent
-labels:
-  - verification
-created: 2026-09-02T19:41:55.343Z
-updated: 2026-09-02T21:10:28.389Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -21,6 +15,12 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-02T21:10:28.382Z
   session: 01MTKL3NF8GDGY13ME
+labels:
+  - verification
+created: 2026-09-02T19:41:55.343Z
+updated: 2026-09-07T04:02:44.025Z
+order: 9i56mgnu
+board: product
 ---
 
 ## Objective

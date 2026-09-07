@@ -4,21 +4,6 @@ title: Use the demonstrated Person or Subject result in Info as an editing mask
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - masking
-  - analysis
-  - editor
-  - epic:masking
-created: 2026-09-06T03:37:57.301Z
-updated: 2026-09-06T06:10:13.617Z
-order: a0
-board: product
-commits:
-  - 4623a3d
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -59,6 +44,21 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-06T06:10:13.614Z
   session: 01MTPEJMFBMJ1AOOT0
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - masking
+  - analysis
+  - editor
+  - epic:masking
+created: 2026-09-06T03:37:57.301Z
+updated: 2026-09-07T04:02:46.831Z
+order: fp20kqfd
+board: product
+commits:
+  - 4623a3d
 ---
 
 ## Objective

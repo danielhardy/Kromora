@@ -4,17 +4,6 @@ title: EditRecord model + SwiftData-backed EditDocumentStore
 type: task
 status: done
 priority: medium
-labels:
-  - persistence
-created: 2026-09-06T04:06:24.937Z
-updated: 2026-09-06T23:30:41.049Z
-depends_on:
-  - LUMO-244
-  - LUMO-245
-order: t
-board: product
-commits:
-  - c2b7851
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -42,6 +31,17 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T23:30:41.046Z
   session: 01MTQFX8CFTLU7YFPP
+labels:
+  - persistence
+created: 2026-09-06T04:06:24.937Z
+updated: 2026-09-07T04:02:49.080Z
+depends_on:
+  - LUMO-244
+  - LUMO-245
+order: kqhutdg0
+board: product
+commits:
+  - c2b7851
 ---
 
 ## Objective

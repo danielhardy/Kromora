@@ -14,11 +14,11 @@ labels:
   - rendering
   - performance
 created: 2026-09-04T21:48:29.389Z
-updated: 2026-09-05T04:12:23.197Z
+updated: 2026-09-07T04:02:49.493Z
 depends_on:
   - LUMO-218
   - LUMO-228
-order: w
+order: lqs82auj
 board: product
 commits:
   - 58a690a

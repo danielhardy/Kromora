@@ -4,20 +4,6 @@ title: Remove duplicate no-op Settings menu item
 type: bug
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - settings
-  - menu
-  - macos
-created: 2026-09-03T18:15:23.391Z
-updated: 2026-09-03T18:29:33.532Z
-order: a0
-board: product
-commits:
-  - af7cdef
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -45,6 +31,20 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T18:29:33.526Z
   session: 01MTLUTCT6IYYHHISV
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - settings
+  - menu
+  - macos
+created: 2026-09-03T18:15:23.391Z
+updated: 2026-09-07T04:02:44.789Z
+order: b8co6ws6
+board: product
+commits:
+  - af7cdef
 ---
 
 ## Objective

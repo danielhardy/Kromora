@@ -4,21 +4,6 @@ title: "Audit: restore repository and CI quality guardrails"
 type: task
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ci
-  - dx
-  - quality
-  - audit
-created: 2026-09-03T23:28:50.102Z
-updated: 2026-09-04T04:09:07.757Z
-order: a0
-board: product
-commits:
-  - "502e211"
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -56,6 +41,21 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T04:09:07.747Z
   session: 01MTMFIC1TH9QE2ZDU
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ci
+  - dx
+  - quality
+  - audit
+created: 2026-09-03T23:28:50.102Z
+updated: 2026-09-07T04:02:45.141Z
+order: c3gez4uc
+board: product
+commits:
+  - "502e211"
 ---
 
 ## Objective

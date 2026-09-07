@@ -4,21 +4,6 @@ title: "Audit: bound Photos import memory and avoid repeated hashing"
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - performance
-  - memory
-  - photos-import
-  - audit
-created: 2026-09-03T23:30:00.844Z
-updated: 2026-09-04T02:31:09.084Z
-order: zh
-board: product
-commits:
-  - a10ddac
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -48,6 +33,21 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T02:31:09.078Z
   session: 01MTMBUKJNM5NQLBDU
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - performance
+  - memory
+  - photos-import
+  - audit
+created: 2026-09-03T23:30:00.844Z
+updated: 2026-09-07T04:02:51.881Z
+order: qn1fu8it
+board: product
+commits:
+  - a10ddac
 ---
 
 ## Objective

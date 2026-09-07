@@ -14,9 +14,9 @@ labels:
   - settings
   - macos
 created: 2026-09-03T15:08:14.723Z
-updated: 2026-09-03T15:31:04.280Z
+updated: 2026-09-07T04:02:55.573Z
 parent: LUMO-155
-order: zzzzzzy
+order: ypcdtnr1
 board: product
 ---
 

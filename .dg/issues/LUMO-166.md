@@ -4,19 +4,6 @@ title: "Audit: prevent termination after failed edit persistence flush"
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - bug
-  - data-loss
-  - persistence
-  - audit
-created: 2026-09-03T23:28:48.445Z
-updated: 2026-09-04T02:20:55.329Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -44,6 +31,19 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T02:20:55.326Z
   session: 01MTMBLWWZUNOKVJUK
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - bug
+  - data-loss
+  - persistence
+  - audit
+created: 2026-09-03T23:28:48.445Z
+updated: 2026-09-07T04:02:44.985Z
+order: bnwjl0t9
+board: product
 ---
 
 ## Objective

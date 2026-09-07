@@ -4,21 +4,6 @@ title: "Audit: sign packaged app and apply entitlements"
 type: bug
 status: done
 priority: urgent
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - security
-  - release
-  - packaging
-  - audit
-created: 2026-09-03T23:28:32.167Z
-updated: 2026-09-04T01:46:48.327Z
-order: a0
-board: product
-commits:
-  - 29d2798
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -54,6 +39,21 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T01:46:48.323Z
   session: 01MTMAHXXX8JOLKVG8
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - security
+  - release
+  - packaging
+  - audit
+created: 2026-09-03T23:28:32.167Z
+updated: 2026-09-07T04:02:44.837Z
+order: bdjanm4j
+board: product
+commits:
+  - 29d2798
 ---
 
 ## Objective

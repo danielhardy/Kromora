@@ -4,19 +4,6 @@ title: Core analysis value types (ToneStatistics, ColorStatistics, quality/timin
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:48.514Z
-updated: 2026-09-04T14:53:33.301Z
-order: n
-board: product
-branch: main
-commits:
-  - d85e6cce5ba9129573193b543ef9b74607b7ec10
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -41,6 +28,19 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T14:53:33.298Z
   session: 01MTN2Q9BLNLXVVFKE
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:48.514Z
+updated: 2026-09-07T04:02:47.713Z
+order: hpmr2l8f
+board: product
+branch: main
+commits:
+  - d85e6cce5ba9129573193b543ef9b74607b7ec10
 ---
 
 **Type:** Feature

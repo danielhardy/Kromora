@@ -11,8 +11,8 @@ labels:
   - interaction
   - verification
 created: 2026-09-03T14:43:49.871Z
-updated: 2026-09-03T16:35:28.844Z
-order: zzzzzzz
+updated: 2026-09-07T04:02:55.623Z
+order: yuj0ad3e
 board: product
 claim:
   actor: claude

@@ -4,23 +4,6 @@ title: Add editable radial gradient masks
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - epic:masking
-  - masking
-  - editor
-  - rendering
-created: 2026-09-04T21:48:30.922Z
-updated: 2026-09-05T14:23:54.880Z
-depends_on:
-  - LUMO-221
-order: z
-board: product
-commits:
-  - 8cae573
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -48,6 +31,23 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-05T14:23:54.876Z
   session: 01MTOGKN3RBAMUK8O5
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - epic:masking
+  - masking
+  - editor
+  - rendering
+created: 2026-09-04T21:48:30.922Z
+updated: 2026-09-07T04:02:51.457Z
+depends_on:
+  - LUMO-221
+order: px4bipt0
+board: product
+commits:
+  - 8cae573
 ---
 
 ## Objective

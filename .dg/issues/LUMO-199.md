@@ -4,20 +4,6 @@ title: Scene characteristics (backlighting / high-key / low-key)
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:55.442Z
-updated: 2026-09-04T17:07:30.780Z
-depends_on:
-  - LUMO-198
-order: ybh
-board: product
-commits:
-  - e20c572
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -30,6 +16,20 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T17:07:30.777Z
   session: 01MTN7FES695SELDC0
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:55.442Z
+updated: 2026-09-07T04:02:50.692Z
+depends_on:
+  - LUMO-198
+order: oha2vode
+board: product
+commits:
+  - e20c572
 ---
 
 **Type:** Feature

@@ -2,15 +2,15 @@
 id: LUMO-263
 title: Two-phase relink with predicate pushdown
 type: task
-status: backlog
+status: ready
 priority: low
 labels:
   - persistence
 created: 2026-09-07T01:10:27.518Z
-updated: 2026-09-07T01:28:01.692Z
+updated: 2026-09-07T04:14:23.439Z
 depends_on:
   - LUMO-244
-order: lllllllc
+order: x3
 board: product
 ---
 

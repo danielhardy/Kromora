@@ -4,16 +4,6 @@ title: Define projection behaviour when import filters hide newly arrived photos
 type: task
 status: done
 priority: low
-labels:
-  - verification
-created: 2026-09-02T17:56:59.805Z
-updated: 2026-09-02T21:25:07.344Z
-depends_on:
-  - LUMO-129
-order: a0
-board: product
-commits:
-  - 2fbec7b
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -31,6 +21,16 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-02T21:25:07.342Z
   session: 01MTKLMIJ5HLFCX0LS
+labels:
+  - verification
+created: 2026-09-02T17:56:59.805Z
+updated: 2026-09-07T04:02:43.975Z
+depends_on:
+  - LUMO-129
+order: 9cyk5rbh
+board: product
+commits:
+  - 2fbec7b
 ---
 
 ## Objective

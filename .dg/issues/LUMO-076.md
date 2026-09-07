@@ -9,8 +9,8 @@ verification_model: openrouter/~deepseek/deepseek-v4-flash-latest
 labels:
   - verification
 created: 2026-08-31T23:55:56.514Z
-updated: 2026-09-01T02:32:57.040Z
-order: a0
+updated: 2026-09-07T04:02:41.850Z
+order: 4w97rxoa
 board: product
 ---
 

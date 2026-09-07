@@ -4,16 +4,6 @@ title: Add real view-rendering snapshot/UI coverage for LookInspectorView empty-
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-03T03:57:40.347Z
-updated: 2026-09-03T05:40:55.456Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -30,6 +20,16 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T05:40:55.453Z
   session: 01MTL3FOBX08OLKZQ1
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-03T03:57:40.347Z
+updated: 2026-09-07T04:02:44.694Z
+order: axzf9i3g
+board: product
 ---
 
 Parent: LUMO-144 (verification finding, non-blocking)

@@ -4,16 +4,6 @@ title: "Settings: reveal edit database in Finder"
 type: task
 status: done
 priority: medium
-labels:
-  - persistence
-  - ui
-created: 2026-09-06T04:19:30.857Z
-updated: 2026-09-06T23:56:47.820Z
-depends_on:
-  - LUMO-244
-  - LUMO-246
-order: yh
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -41,6 +31,16 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T23:56:47.813Z
   session: 01MTQGUMKWNJJ6ZCEK
+labels:
+  - persistence
+  - ui
+created: 2026-09-06T04:19:30.857Z
+updated: 2026-09-07T04:02:50.904Z
+depends_on:
+  - LUMO-244
+  - LUMO-246
+order: owty9seh
+board: product
 ---
 
 ## Objective

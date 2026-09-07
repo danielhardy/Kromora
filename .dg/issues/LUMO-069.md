@@ -11,10 +11,10 @@ labels:
   - live-preview
   - rendering
 created: 2026-08-31T22:56:13.438Z
-updated: 2026-09-01T01:15:41.933Z
+updated: 2026-09-07T04:02:41.662Z
 depends_on:
   - LUMO-073
-order: a0
+order: 4gpcdtn7
 board: product
 commits:
   - e01d5e7

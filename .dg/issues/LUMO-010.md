@@ -9,12 +9,12 @@ labels:
   - epic:domain
   - phase:1
 created: 2026-08-30T18:30:20.477Z
-updated: 2026-08-31T03:58:37.477Z
+updated: 2026-09-07T04:02:39.859Z
 depends_on:
   - LUMO-007
   - LUMO-009
 estimate: 5
-order: a0
+order: 0ad8xeoq
 board: product
 commits:
   - "256e922"

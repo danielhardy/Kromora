@@ -9,8 +9,8 @@ labels:
   - ux
   - epic:color
 created: 2026-09-01T14:35:36.026Z
-updated: 2026-09-01T16:10:43.493Z
-order: a0
+updated: 2026-09-07T04:02:42.567Z
+order: 6c3gez3w
 board: product
 commits:
   - 59b3a2e

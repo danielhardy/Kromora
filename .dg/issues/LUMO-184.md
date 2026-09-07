@@ -4,21 +4,6 @@ title: RegionMask core abstraction (mask type, semantic kinds, quality levels)
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:49.295Z
-updated: 2026-09-04T14:53:48.255Z
-depends_on:
-  - LUMO-183
-order: w
-board: product
-branch: main
-commits:
-  - d85e6cce5ba9129573193b543ef9b74607b7ec10
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -43,6 +28,21 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T14:53:48.252Z
   session: 01MTN2QRLZE28F4ODN
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:49.295Z
+updated: 2026-09-07T04:02:49.289Z
+depends_on:
+  - LUMO-183
+order: lb8co6tg
+board: product
+branch: main
+commits:
+  - d85e6cce5ba9129573193b543ef9b74607b7ec10
 ---
 
 **Type:** Feature

@@ -9,12 +9,12 @@ labels:
   - epic:editor
   - phase:8
 created: 2026-08-30T18:30:32.585Z
-updated: 2026-09-01T16:54:38.526Z
+updated: 2026-09-07T04:02:54.890Z
 depends_on:
   - LUMO-045
   - LUMO-013
 estimate: 5
-order: zzzzz
+order: x4bipwz2
 board: product
 ---
 

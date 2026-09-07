@@ -4,20 +4,6 @@ title: Remove unused LumoMaskOverlayCapture executable
 type: task
 status: done
 priority: low
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - tooling
-  - cleanup
-  - masking
-created: 2026-09-05T12:06:59.891Z
-updated: 2026-09-05T15:35:58.124Z
-order: n
-board: product
-commits:
-  - da64900
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -49,6 +35,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-05T15:35:58.120Z
   session: 01MTOJFSQK9BNMRV7Q
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - tooling
+  - cleanup
+  - masking
+created: 2026-09-05T12:06:59.891Z
+updated: 2026-09-07T04:02:47.973Z
+order: iad8xelv
+board: product
+commits:
+  - da64900
 ---
 
 ## Objective

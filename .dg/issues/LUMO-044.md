@@ -10,7 +10,7 @@ labels:
   - epic:editor
   - phase:8
 created: 2026-08-30T18:30:31.996Z
-updated: 2026-09-01T18:55:38.504Z
+updated: 2026-09-07T04:02:54.995Z
 depends_on:
   - LUMO-045
   - LUMO-046
@@ -18,7 +18,7 @@ depends_on:
   - LUMO-048
   - LUMO-049
   - LUMO-104
-order: zzzzzq
+order: xeornbns
 board: product
 ---
 

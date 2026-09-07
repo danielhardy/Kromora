@@ -4,16 +4,6 @@ title: Linear gradient mask wash should fade vertically by default
 type: bug
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - masking
-created: 2026-09-06T22:24:28.664Z
-updated: 2026-09-07T00:23:45.654Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -40,6 +30,16 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-07T00:23:45.650Z
   session: 01MTQHV6WR7P34ICCW
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - masking
+created: 2026-09-06T22:24:28.664Z
+updated: 2026-09-07T04:02:47.024Z
+order: g4lvyugg
+board: product
 ---
 
 ## Objective

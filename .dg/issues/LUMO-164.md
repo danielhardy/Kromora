@@ -4,21 +4,6 @@ title: "Audit: make export location metadata privacy explicit"
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - security
-  - privacy
-  - export
-  - audit
-created: 2026-09-03T23:28:45.962Z
-updated: 2026-09-04T01:54:09.350Z
-order: a0
-board: product
-commits:
-  - 9b84776
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -50,6 +35,21 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T01:54:09.347Z
   session: 01MTMAMP4VBR8DIKMC
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - security
+  - privacy
+  - export
+  - audit
+created: 2026-09-03T23:28:45.962Z
+updated: 2026-09-07T04:02:44.934Z
+order: bipx4bgw
+board: product
+commits:
+  - 9b84776
 ---
 
 ## Objective

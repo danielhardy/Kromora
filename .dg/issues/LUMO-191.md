@@ -4,22 +4,6 @@ title: Person segmentation mask provider
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:52.110Z
-updated: 2026-09-04T15:14:26.740Z
-depends_on:
-  - LUMO-189
-  - LUMO-190
-order: zzzzx
-board: product
-branch: main
-commits:
-  - ee65dbc
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -51,6 +35,22 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T15:14:26.737Z
   session: 01MTN3HB8RST8T1KDX
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:52.110Z
+updated: 2026-09-07T04:02:54.638Z
+depends_on:
+  - LUMO-189
+  - LUMO-190
+order: wjl0v3lm
+board: product
+branch: main
+commits:
+  - ee65dbc
 ---
 
 **Type:** Feature

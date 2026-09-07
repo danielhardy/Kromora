@@ -9,12 +9,12 @@ labels:
   - epic:lut
   - phase:7
 created: 2026-08-30T18:30:30.848Z
-updated: 2026-09-01T13:38:39.078Z
+updated: 2026-09-07T04:02:54.061Z
 depends_on:
   - LUMO-008
   - LUMO-014
 estimate: 3
-order: zzzx
+order: v8xeorid
 board: product
 ---
 

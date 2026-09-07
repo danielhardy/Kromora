@@ -9,13 +9,13 @@ labels:
   - epic:export
   - phase:9
 created: 2026-08-30T18:30:35.046Z
-updated: 2026-09-02T16:58:33.004Z
+updated: 2026-09-07T04:02:54.112Z
 depends_on:
   - LUMO-051
   - LUMO-021
   - LUMO-041
 estimate: 5
-order: zzzx
+order: ve415guq
 board: product
 commits:
   - 92e95ec

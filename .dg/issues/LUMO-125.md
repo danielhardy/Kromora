@@ -8,8 +8,8 @@ labels:
   - crop
   - ux
 created: 2026-09-02T12:45:17.320Z
-updated: 2026-09-02T15:22:33.837Z
-order: a0
+updated: 2026-09-07T04:02:43.371Z
+order: 82axzf88
 board: product
 commits:
   - ec78249

@@ -4,20 +4,6 @@ title: Auto action is not offered for every loaded photo
 type: bug
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ux
-  - auto
-created: 2026-09-04T19:07:55.165Z
-updated: 2026-09-04T19:31:21.498Z
-order: a0
-board: product
-commits:
-  - a9fd6d2
-  - ecbb7bb
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -46,6 +32,20 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T19:31:21.491Z
   session: 01MTNCCRSGBHOX7HMK
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ux
+  - auto
+created: 2026-09-04T19:07:55.165Z
+updated: 2026-09-07T04:02:46.310Z
+order: ejl0v3oh
+board: product
+commits:
+  - a9fd6d2
+  - ecbb7bb
 ---
 
 ## Objective

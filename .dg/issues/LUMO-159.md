@@ -4,18 +4,6 @@ title: Opening a second image leaves the app stuck on the loading spinner
 type: bug
 status: done
 priority: high
-labels:
-  - loading
-  - preview
-  - image-switching
-  - lifecycle
-  - verification
-created: 2026-09-03T15:06:01.276Z
-updated: 2026-09-03T16:11:53.325Z
-order: t
-board: product
-commits:
-  - deaa14d
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -41,6 +29,18 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-03T16:11:53.319Z
   session: 01MTLPQCPLHW56EKD1
+labels:
+  - loading
+  - preview
+  - image-switching
+  - lifecycle
+  - verification
+created: 2026-09-03T15:06:01.276Z
+updated: 2026-09-07T04:02:48.647Z
+order: jve415du
+board: product
+commits:
+  - deaa14d
 ---
 
 ## Objective

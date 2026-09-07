@@ -4,25 +4,6 @@ title: Polish the Look inspector empty state and add-look action
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ux
-  - looks
-  - accessibility
-  - design-system
-created: 2026-09-03T01:12:24.018Z
-updated: 2026-09-03T03:58:10.057Z
-depends_on:
-  - LUMO-085
-  - LUMO-090
-estimate: 3
-order: a0
-board: product
-commits:
-  - 3059ae3
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -56,6 +37,25 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T03:58:10.053Z
   session: 01MTKZQ47GV5OER2RA
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ux
+  - looks
+  - accessibility
+  - design-system
+created: 2026-09-03T01:12:24.018Z
+updated: 2026-09-07T04:02:44.293Z
+depends_on:
+  - LUMO-085
+  - LUMO-090
+estimate: 3
+order: a2voha1a
+board: product
+commits:
+  - 3059ae3
 ---
 
 ## Objective

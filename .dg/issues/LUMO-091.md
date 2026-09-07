@@ -12,10 +12,10 @@ labels:
   - ux
   - regression
 created: 2026-09-01T14:35:35.443Z
-updated: 2026-09-01T14:54:30.819Z
+updated: 2026-09-07T04:02:54.391Z
 depends_on:
   - LUMO-080
-order: zzzzq
+order: vyuj0a86
 board: product
 ---
 

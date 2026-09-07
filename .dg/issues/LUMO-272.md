@@ -2,13 +2,13 @@
 id: LUMO-272
 title: Stale component selection blinds the mask overlay
 type: bug
-status: review
+status: done
 priority: high
 labels:
   - masking
 created: 2026-09-07T01:57:58.869Z
-updated: 2026-09-07T02:02:54.990Z
-order: y
+updated: 2026-09-07T04:02:50.418Z
+order: nwjl0uzy
 board: product
 branch: fix/linear-overlay-stale-selection
 ---

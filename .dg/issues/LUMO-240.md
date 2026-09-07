@@ -4,21 +4,6 @@ title: White balance temperature adjustment updates the Original pane in split v
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - color
-  - comparison
-  - rendering
-  - editor
-created: 2026-09-06T03:32:15.654Z
-updated: 2026-09-06T05:44:01.517Z
-order: a0
-board: product
-commits:
-  - 4c3ca82
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -50,6 +35,21 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-06T05:44:01.514Z
   session: 01MTPDMHWU1E4ZXNPB
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - color
+  - comparison
+  - rendering
+  - editor
+created: 2026-09-06T03:32:15.654Z
+updated: 2026-09-07T04:02:46.734Z
+order: fjve4130
+board: product
+commits:
+  - 4c3ca82
 ---
 
 ## Objective

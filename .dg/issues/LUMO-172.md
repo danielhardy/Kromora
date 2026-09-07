@@ -4,19 +4,6 @@ title: "Audit: avoid materializing uncacheable high-resolution intermediates"
 type: task
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - performance
-  - memory
-  - rendering
-  - audit
-created: 2026-09-03T23:31:00.000Z
-updated: 2026-09-04T07:20:03.062Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -50,6 +37,19 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T07:20:03.059Z
   session: 01MTMMFSIO80D7VEW1
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - performance
+  - memory
+  - rendering
+  - audit
+created: 2026-09-03T23:31:00.000Z
+updated: 2026-09-07T04:02:45.286Z
+order: cdtnwjj2
+board: product
 ---
 
 ## Objective

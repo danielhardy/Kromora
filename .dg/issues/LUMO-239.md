@@ -4,21 +4,6 @@ title: Mask overlay must show resolved alpha alongside full-opacity tooling
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - masking
-  - rendering
-  - editor
-  - epic:masking
-created: 2026-09-06T03:14:53.832Z
-updated: 2026-09-06T05:21:57.936Z
-order: t
-board: product
-commits:
-  - 19ca31b
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -54,6 +39,21 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T05:21:57.933Z
   session: 01MTPCHX0EYG036JW9
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - masking
+  - rendering
+  - editor
+  - epic:masking
+created: 2026-09-06T03:14:53.832Z
+updated: 2026-09-07T04:02:48.959Z
+order: klb8co3n
+board: product
+commits:
+  - 19ca31b
 ---
 
 ## Objective

@@ -4,21 +4,6 @@ title: AnalysisImage pipeline + normalized point/rect coordinate system
 type: feature
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:48.908Z
-updated: 2026-09-04T14:53:47.602Z
-depends_on:
-  - LUMO-182
-order: t
-board: product
-branch: main
-commits:
-  - d85e6cce5ba9129573193b543ef9b74607b7ec10
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -43,6 +28,21 @@ verification_report:
   resolved_model: unknown
   completed_at: 2026-09-04T14:53:47.596Z
   session: 01MTN2QR46FP4LX3Q5
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:48.908Z
+updated: 2026-09-07T04:02:48.801Z
+depends_on:
+  - LUMO-182
+order: k5rcyk2k
+board: product
+branch: main
+commits:
+  - d85e6cce5ba9129573193b543ef9b74607b7ec10
 ---
 
 **Type:** Feature

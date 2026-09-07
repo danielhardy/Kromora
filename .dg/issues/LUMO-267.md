@@ -2,14 +2,14 @@
 id: LUMO-267
 title: Fuse validation and coverage into mask generation
 type: task
-status: backlog
+status: ready
 priority: medium
 labels:
   - masking
   - performance
 created: 2026-09-07T01:14:46.343Z
-updated: 2026-09-07T01:28:01.830Z
-order: sssssssg
+updated: 2026-09-07T04:03:09.538Z
+order: w
 board: product
 ---
 

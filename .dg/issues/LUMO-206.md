@@ -23,11 +23,11 @@ creation_provenance:
 labels:
   - photo-intelligence
 created: 2026-09-04T14:27:58.504Z
-updated: 2026-09-04T18:39:23.245Z
+updated: 2026-09-07T04:02:46.099Z
 depends_on:
   - LUMO-196
   - LUMO-190
-order: a0
+order: e415gzne
 board: product
 commits:
   - 71a770658a9cf64d19725fbe5f5140baf185070f

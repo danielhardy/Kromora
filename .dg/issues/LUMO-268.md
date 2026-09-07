@@ -2,14 +2,14 @@
 id: LUMO-268
 title: Cap preview-quality mask working resolution
 type: task
-status: backlog
+status: ready
 priority: medium
 labels:
   - masking
   - performance
 created: 2026-09-07T01:14:46.878Z
-updated: 2026-09-07T01:28:01.864Z
-order: ullllll8
+updated: 2026-09-07T04:03:07.483Z
+order: t
 board: product
 ---
 

@@ -4,16 +4,6 @@ title: Avoid per-slot linear scans in ImageCollection.thumbnailEntries during st
 type: task
 status: done
 priority: low
-labels:
-  - verification
-created: 2026-09-02T17:56:57.146Z
-updated: 2026-09-02T20:07:34.105Z
-depends_on:
-  - LUMO-129
-order: zzzzy
-board: product
-commits:
-  - 657d94c
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -31,6 +21,16 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-02T20:07:34.099Z
   session: 01MTKIVK1P0OJLP1WL
+labels:
+  - verification
+created: 2026-09-02T17:56:57.146Z
+updated: 2026-09-07T04:02:54.740Z
+depends_on:
+  - LUMO-129
+order: wty9siac
+board: product
+commits:
+  - 657d94c
 ---
 
 ## Objective

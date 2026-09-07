@@ -4,24 +4,6 @@ title: Create a tone-curve point when dragging an empty curve location
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - light
-  - ux
-  - live-preview
-  - accessibility
-  - tone-curve
-created: 2026-09-03T01:12:26.210Z
-updated: 2026-09-03T03:28:53.777Z
-depends_on:
-  - LUMO-080
-  - LUMO-091
-estimate: 3
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -51,6 +33,24 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-03T03:28:53.774Z
   session: 01MTKYNTCLXVRS8EJK
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - light
+  - ux
+  - live-preview
+  - accessibility
+  - tone-curve
+created: 2026-09-03T01:12:26.210Z
+updated: 2026-09-07T04:02:44.389Z
+depends_on:
+  - LUMO-080
+  - LUMO-091
+estimate: 3
+order: a82axzdn
+board: product
 ---
 
 ## Objective

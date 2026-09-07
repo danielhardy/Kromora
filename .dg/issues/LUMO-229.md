@@ -4,20 +4,6 @@ title: "Masking workspace: implement functional mask alpha overlay (color-wash/g
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-  - masking
-  - epic:masking
-created: 2026-09-05T04:39:51.202Z
-updated: 2026-09-05T13:42:42.373Z
-order: y
-board: product
-commits:
-  - 21aee1d
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -42,6 +28,20 @@ verification_report:
   actor: codex
   resolved_model: unknown
   completed_at: 2026-09-05T13:42:42.367Z
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+  - masking
+  - epic:masking
+created: 2026-09-05T04:39:51.202Z
+updated: 2026-09-07T04:02:50.070Z
+order: n1fu8mxs
+board: product
+commits:
+  - 21aee1d
 ---
 
 ## Objective

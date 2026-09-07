@@ -4,24 +4,6 @@ title: User-facing Masking UI (Select Subject/Person/Background/Face)
 type: feature
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: unknown
-  actor: claude
-labels:
-  - photo-intelligence
-created: 2026-09-04T14:27:56.274Z
-updated: 2026-09-04T17:17:11.519Z
-depends_on:
-  - LUMO-186
-  - LUMO-188
-  - LUMO-189
-  - LUMO-190
-  - LUMO-191
-order: zh
-board: product
-commits:
-  - e7f5625
 verification_report:
   verdict: pass
   acceptance_criteria: []
@@ -33,6 +15,24 @@ verification_report:
   actor: codex
   resolved_model: unknown
   completed_at: 2026-09-04T17:17:11.511Z
+creation_provenance:
+  runner: claude
+  model: unknown
+  actor: claude
+labels:
+  - photo-intelligence
+created: 2026-09-04T14:27:56.274Z
+updated: 2026-09-07T04:02:51.977Z
+depends_on:
+  - LUMO-186
+  - LUMO-188
+  - LUMO-189
+  - LUMO-190
+  - LUMO-191
+order: qxeorn7j
+board: product
+commits:
+  - e7f5625
 ---
 
 **Type:** Feature

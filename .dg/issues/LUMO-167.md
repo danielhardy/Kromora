@@ -4,19 +4,6 @@ title: "Audit: cap and stream user-provided Cube LUT parsing"
 type: bug
 status: done
 priority: medium
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - security
-  - robustness
-  - lut
-  - audit
-created: 2026-09-03T23:28:48.865Z
-updated: 2026-09-04T02:47:25.673Z
-order: a0
-board: product
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -45,6 +32,19 @@ verification_report:
   resolved_model: sonnet
   completed_at: 2026-09-04T02:47:25.666Z
   session: 01MTMCN5B930L5KXKS
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - security
+  - robustness
+  - lut
+  - audit
+created: 2026-09-03T23:28:48.865Z
+updated: 2026-09-07T04:02:45.037Z
+order: bt361q5m
+board: product
 ---
 
 ## Objective

@@ -4,19 +4,6 @@ title: Make masking selection actionable with a clear apply workflow
 type: bug
 status: done
 priority: high
-creation_provenance:
-  runner: codex
-  model: gpt-5.6-luna
-  actor: codex
-labels:
-  - ux
-  - masking
-created: 2026-09-04T19:08:01.642Z
-updated: 2026-09-04T19:18:19.629Z
-order: t
-board: product
-commits:
-  - 131495f
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -47,6 +34,19 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-04T19:18:19.622Z
   session: 01MTNBXZY0LK993HIE
+creation_provenance:
+  runner: codex
+  model: gpt-5.6-luna
+  actor: codex
+labels:
+  - ux
+  - masking
+created: 2026-09-04T19:08:01.642Z
+updated: 2026-09-07T04:02:48.855Z
+order: kaxzf9ex
+board: product
+commits:
+  - 131495f
 ---
 
 ## Objective

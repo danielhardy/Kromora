@@ -4,20 +4,6 @@ title: EditDocumentStore relink fallback does a full-table fetch+deserialize on 
 type: task
 status: done
 priority: medium
-creation_provenance:
-  runner: claude
-  model: sonnet
-  actor: claude
-labels:
-  - verification
-created: 2026-09-06T23:21:34.576Z
-updated: 2026-09-07T00:30:10.197Z
-depends_on:
-  - LUMO-244
-order: y
-board: product
-commits:
-  - c9d449b
 verification_report:
   verdict: pass
   acceptance_criteria:
@@ -42,6 +28,20 @@ verification_report:
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-07T00:30:10.195Z
   session: 01MTQHZGIDTDTM1FFN
+creation_provenance:
+  runner: claude
+  model: sonnet
+  actor: claude
+labels:
+  - verification
+created: 2026-09-06T23:21:34.576Z
+updated: 2026-09-07T04:02:50.314Z
+depends_on:
+  - LUMO-244
+order: nm6c3gb8
+board: product
+commits:
+  - c9d449b
 ---
 
 ## Finding (verification of LUMO-244 / commit c2b7851)
