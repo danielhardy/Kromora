@@ -429,12 +429,26 @@ actor RenderEngine: RenderEngining {
         guard let selectedID,
               let layer = request.layers.first(where: { $0.id == selectedID }) else { return nil }
 
+        // A selected component id can go stale while the layer selection survives (undo,
+        // component delete, fresh draft ids during creation). Resolving strictly would render
+        // nothing even though usable components exist — while the tooling keeps drawing from
+        // the same layer via its first-enabled fallback, so handles show with no wash and no
+        // banner. Fall back to all usable components for *selection* staleness; solo
+        // isolation stays strict because it is an explicit user request.
+        let onlyComponentID: UUID? = {
+            guard request.soloComponentID == nil,
+                  let selectedComponentID = request.selectedComponentID
+            else { return request.soloComponentID ?? request.selectedComponentID }
+            return layer.components.contains(where: { $0.id == selectedComponentID })
+                ? selectedComponentID : nil
+        }()
+
         do {
             let masks = try await resolvedLocalMasks(
                 for: [layer], source: request.source, extent: extent,
                 quality: request.quality, transform: request.transform, assetID: request.assetID,
                 requestRevision: request.requestRevision, includeIdentity: true,
-                onlyComponentID: request.soloComponentID ?? request.selectedComponentID
+                onlyComponentID: onlyComponentID
             )
             guard let mask = masks[layer.id], !Task.isCancelled else { return nil }
             let output: CIImage
