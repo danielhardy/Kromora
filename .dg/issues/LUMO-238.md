@@ -19,6 +19,9 @@ depends_on:
   - LUMO-251
 order: w
 board: product
+commits:
+  - c0aed13
+  - a42c5cfafb9370b4e746ed96934814417295912d
 ---
 
 ## Objective

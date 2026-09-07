@@ -27,7 +27,8 @@ verification_report:
   findings:
     - The Swift format check still reports pre-existing violations across already-dirty masking files; no formatting-only rewrite was applied to preserve unrelated work.
   fixes: []
-  verification_commits: []
+  verification_commits:
+    - a42c5cfafb9370b4e746ed96934814417295912d
   actor: codex
   resolved_model: gpt-5.6-luna
   completed_at: 2026-09-06T04:35:33.677Z
@@ -45,6 +46,8 @@ created: 2026-09-06T03:14:52.682Z
 updated: 2026-09-07T04:02:48.127Z
 order: ipx4bimy
 board: product
+commits:
+  - a42c5cfafb9370b4e746ed96934814417295912d
 ---
 
 ## Objective
