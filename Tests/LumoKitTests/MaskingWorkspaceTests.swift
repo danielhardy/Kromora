@@ -284,6 +284,60 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertEqual(viewModel.maskInteractionState.selectedLayerID, layerID)
     }
 
+    func testLinearZeroStrengthHandleResizesWithoutReplacingDefinition() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.2))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.8))
+        viewModel.endMaskGesture()
+
+        let originalLayer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let originalComponent = try XCTUnwrap(originalLayer.components.first)
+        let original = try XCTUnwrap(originalComponent.source.linearDefinition)
+
+        viewModel.beginMaskGesture(at: original.zeroStrengthPoint, linearHandle: .zeroStrength)
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.35, y: 0.35))
+        viewModel.endMaskGesture()
+
+        let updatedLayer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let updatedComponent = try XCTUnwrap(updatedLayer.components.first)
+        let updated = try XCTUnwrap(updatedComponent.source.linearDefinition)
+        XCTAssertEqual(updatedLayer.id, originalLayer.id)
+        XCTAssertEqual(updatedComponent.id, originalComponent.id)
+        XCTAssertEqual(updatedComponent.mode, originalComponent.mode)
+        XCTAssertEqual(updatedComponent.source.linearDefinition?.density, original.density)
+        XCTAssertEqual(updated.fullStrengthPoint, original.fullStrengthPoint)
+        XCTAssertEqual(updated.angle, original.angle, accuracy: 0.000_001)
+        XCTAssertEqual(updated.falloff, hypot(0.8 - 0.35, 0.8 - 0.35), accuracy: 0.000_001)
+    }
+
+    func testLinearFullStrengthHandleResizesWithoutReplacingDefinition() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.2))
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.8))
+        viewModel.endMaskGesture()
+
+        let originalLayer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let originalComponent = try XCTUnwrap(originalLayer.components.first)
+        let original = try XCTUnwrap(originalComponent.source.linearDefinition)
+
+        viewModel.beginMaskGesture(at: original.fullStrengthPoint, linearHandle: .fullStrength)
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.65, y: 0.65))
+        viewModel.endMaskGesture()
+
+        let updatedLayer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let updatedComponent = try XCTUnwrap(updatedLayer.components.first)
+        let updated = try XCTUnwrap(updatedComponent.source.linearDefinition)
+        XCTAssertEqual(updatedLayer.id, originalLayer.id)
+        XCTAssertEqual(updatedComponent.id, originalComponent.id)
+        XCTAssertEqual(updatedComponent.mode, originalComponent.mode)
+        XCTAssertEqual(updatedComponent.source.linearDefinition?.density, original.density)
+        XCTAssertEqual(updated.zeroStrengthPoint, original.zeroStrengthPoint)
+        XCTAssertEqual(updated.angle, original.angle, accuracy: 0.000_001)
+        XCTAssertEqual(updated.falloff, hypot(0.65 - 0.2, 0.65 - 0.2), accuracy: 0.000_001)
+    }
+
     func testNewLinearLayerStartsWithCreationDragEvenWhenDefaultGuideIsUnderPointer() throws {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)

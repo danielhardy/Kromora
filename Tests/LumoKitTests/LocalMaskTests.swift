@@ -141,6 +141,23 @@ final class LocalMaskTests: XCTestCase {
         let resized = definition.changingFalloff(to: 0.3, keeping: .fullStrength)
         XCTAssertEqual(resized.fullStrengthPoint, definition.fullStrengthPoint)
         XCTAssertEqual(resized.falloff, 0.3, accuracy: 0.000_001)
+
+        let zeroEdited = LinearGradientMaskMath.endpointEdited(
+            definition, edge: .zeroStrength, to: CGPoint(x: 0.4, y: 0.52))
+        XCTAssertEqual(zeroEdited.fullStrengthPoint, definition.fullStrengthPoint)
+        XCTAssertEqual(zeroEdited.angle, definition.angle, accuracy: 0.000_001)
+        XCTAssertEqual(zeroEdited.falloff, 0.4, accuracy: 0.000_001)
+
+        let fullEdited = LinearGradientMaskMath.endpointEdited(
+            definition, edge: .fullStrength, to: CGPoint(x: 0.6, y: 0.48))
+        XCTAssertEqual(fullEdited.zeroStrengthPoint, definition.zeroStrengthPoint)
+        XCTAssertEqual(fullEdited.angle, definition.angle, accuracy: 0.000_001)
+        XCTAssertEqual(fullEdited.falloff, 0.4, accuracy: 0.000_001)
+
+        let crossed = LinearGradientMaskMath.endpointEdited(
+            definition, edge: .fullStrength, to: CGPoint(x: 0.1, y: 0.5))
+        XCTAssertEqual(crossed.zeroStrengthPoint, definition.zeroStrengthPoint)
+        XCTAssertGreaterThanOrEqual(crossed.falloff, 0)
     }
 
     func testNewLinearGradientsDefaultToVerticalWithoutChangingEndpointSemantics() {
