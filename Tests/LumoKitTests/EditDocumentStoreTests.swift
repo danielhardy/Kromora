@@ -1,4 +1,5 @@
 import Foundation
+import SwiftData
 import XCTest
 
 @testable import LumoKit
@@ -115,5 +116,36 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
 
     func testDefaultStoreUsesEditStoreStore() {
         XCTAssertEqual(EditDocumentStore.defaultFileURL.lastPathComponent, "EditStore.store")
+    }
+
+    func testCorruptRecordSurfacesActionableStatusWithoutInventingEdits() async throws {
+        let schema = Schema([EditRecord.self])
+        let configuration = ModelConfiguration(
+            "LumoKitTests.CorruptEditStore",
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let photo = source()
+        let context = ModelContext(container)
+        let record = EditRecord(assetID: photo.assetID.description, document: editedDocument)
+        record.documentData = Data("partially written".utf8)
+        context.insert(record)
+        try context.save()
+
+        let store = EditDocumentStore(modelContainer: container)
+        let result = await store.load(for: photo)
+
+        XCTAssertTrue(result.found)
+        XCTAssertTrue(result.document.isIdentity)
+        guard case .corrupt(let detail) = result.status else {
+            return XCTFail("expected an undecodable record to be reported as corrupt")
+        }
+        XCTAssertFalse(detail.isEmpty)
+        XCTAssertTrue(result.status.isActionable)
+        XCTAssertTrue(result.status.message?.contains("neutral edits") == true)
+        let storeStatus = await store.status
+        XCTAssertEqual(storeStatus, result.status)
     }
 }
