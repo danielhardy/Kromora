@@ -362,11 +362,17 @@ extension AppViewModel {
             do {
                 // Person segmentation is deliberately gated by the shared provider. Detailed
                 // analysis establishes the face/foreground signal without exposing diagnostics.
+                // That preflight can short-circuit on the disk analysis cache without
+                // repopulating the mask store, so establish the gate signals explicitly: cheap
+                // cache hits when warm, Vision-backed computation when cold.
                 if target == .person {
                     if (try? await coordinator.analyze(
                         assetID: assetID, source: source, level: .detailed)) != nil {
                         self?.statusMessage = "Initial photo analysis is ready; refining the Person mask…"
                     }
+                    await coordinator.preparePersonSignals(
+                        assetID: assetID, source: source, quality: .preview
+                    )
                 }
                 let mask = try await coordinator.mask(
                     assetID: assetID, source: source,
@@ -439,9 +445,42 @@ extension AppViewModel {
         case .addComponent(let layerID, let kind, let mode):
             addSmartMaskComponent(to: layerID, kind: kind, mode: mode)
         case nil:
+            // A bare re-render cannot heal a cold mask store: with no warmed signals the
+            // overlay fails identically, forever. Warm explicit person requests first, then
+            // force the overlay task to re-resolve through the epoch below.
             maskInteractionState.beginMaskResolution()
+            if selectedSemanticTarget == .person {
+                Task { [weak self] in
+                    await self?.warmPersonSignals()
+                    await MainActor.run { self?.maskInteractionState.requestMaskReResolve() }
+                }
+            }
             retryPreview()
         }
+    }
+
+    /// The overlay's selected semantic target, if the selection names an enabled semantic
+    /// component (falling back to the layer's first enabled component, like gestures do).
+    var selectedSemanticTarget: SemanticTarget? {
+        guard let layerID = maskInteractionState.selectedLayerID,
+              let layer = document.localAdjustments.first(where: { $0.id == layerID })
+        else { return nil }
+        let componentID = maskInteractionState.selectedComponentID
+        let component = componentID.flatMap { id in
+            layer.components.first(where: { $0.id == id && $0.isEnabled })
+        } ?? layer.components.first(where: { $0.isEnabled })
+        guard let component, case .semantic(let definition) = component.source else { return nil }
+        return definition.target
+    }
+
+    /// Establish the person gate signals for the open photo at overlay quality. Cheap cache
+    /// hits when warm, Vision-backed computation when cold. Only meaningful for explicit
+    /// person requests — the provider gate stays cache-only for speculative callers.
+    func warmPersonSignals() async {
+        guard let source = maskingSource, let assetID = maskingAssetID else { return }
+        await photoAnalysisCoordinator.preparePersonSignals(
+            assetID: assetID, source: source, quality: .preview
+        )
     }
 
     func duplicateMask(_ id: UUID) {
@@ -567,8 +606,12 @@ extension AppViewModel {
         statusMessage = "Analyzing \(kind.title) component…"
         smartMaskCreationTask = Task { @MainActor [weak self] in
             do {
-                if target == .person { _ = try? await coordinator.analyze(
-                    assetID: assetID, source: source, level: .detailed)
+                if target == .person {
+                    _ = try? await coordinator.analyze(
+                        assetID: assetID, source: source, level: .detailed)
+                    await coordinator.preparePersonSignals(
+                        assetID: assetID, source: source, quality: .preview
+                    )
                 }
                 let mask = try await coordinator.mask(
                     assetID: assetID, source: source,
