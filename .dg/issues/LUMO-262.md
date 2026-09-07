@@ -8,10 +8,10 @@ labels:
   - persistence
   - ui
 created: 2026-09-07T01:10:27.053Z
-updated: 2026-09-07T01:11:08.606Z
+updated: 2026-09-07T01:28:01.655Z
 depends_on:
   - LUMO-244
-order: zzzzzzy
+order: jssssssk
 board: product
 ---
 
