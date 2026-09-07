@@ -940,24 +940,13 @@ extension AppViewModel {
             let handle = maskInteractionState.activeLinearHandle ?? .creation
             let updated: LinearGradientDefinition
             let original = maskInteractionState.gestureStartDefinition ?? current
-            let directionLength = max(original.falloff, 0.000001)
-            let direction = CGPoint(
-                x: (original.fullStrengthPoint.x - original.zeroStrengthPoint.x)
-                    / directionLength,
-                y: (original.fullStrengthPoint.y - original.zeroStrengthPoint.y)
-                    / directionLength
-            )
             switch handle {
             case .zeroStrength:
-                let length = max(0, min(sqrt(2.0),
-                    (original.fullStrengthPoint.x - clamped.x) * direction.x
-                    + (original.fullStrengthPoint.y - clamped.y) * direction.y))
-                updated = original.changingFalloff(to: length, keeping: .fullStrength)
+                updated = LinearGradientMaskMath.endpointEdited(
+                    original, edge: .zeroStrength, to: clamped)
             case .fullStrength:
-                let length = max(0, min(sqrt(2.0),
-                    (clamped.x - original.zeroStrengthPoint.x) * direction.x
-                    + (clamped.y - original.zeroStrengthPoint.y) * direction.y))
-                updated = original.changingFalloff(to: length, keeping: .zeroStrength)
+                updated = LinearGradientMaskMath.endpointEdited(
+                    original, edge: .fullStrength, to: clamped)
             case .creation:
                 updated = LinearGradientDefinition(
                     zeroStrengthPoint: current.zeroStrengthPoint, fullStrengthPoint: clamped,

@@ -44,6 +44,45 @@ enum LinearGradientMaskMath {
         return result
     }
 
+    /// Resize one endpoint from a normalized source-space pointer while keeping the opposite
+    /// endpoint anchored. Projection onto the gesture-start axis deliberately ignores pointer
+    /// movement perpendicular to the gradient: endpoint editing changes only the transition
+    /// length, never its angle or placement.
+    static func endpointEdited(
+        _ definition: LinearGradientDefinition,
+        edge: LinearGradientEdge,
+        to point: CGPoint
+    ) -> LinearGradientDefinition {
+        let currentLength = definition.falloff
+        guard currentLength.isFinite, point.x.isFinite, point.y.isFinite else {
+            return definition
+        }
+
+        // A decoded or nearly collapsed definition still needs a finite edit direction. For a
+        // nonzero segment, use its exact direction; for a collapsed segment, retain the model's
+        // angle fallback so the endpoint edit remains bounded rather than becoming a redraw.
+        let direction: CGPoint
+        if currentLength > 0.000001 {
+            direction = CGPoint(
+                x: (definition.fullStrengthPoint.x - definition.zeroStrengthPoint.x) / currentLength,
+                y: (definition.fullStrengthPoint.y - definition.zeroStrengthPoint.y) / currentLength
+            )
+        } else {
+            direction = CGPoint(x: cos(definition.angle), y: sin(definition.angle))
+        }
+        let length: Double
+        switch edge {
+        case .zeroStrength:
+            length = (definition.fullStrengthPoint.x - point.x) * direction.x
+                + (definition.fullStrengthPoint.y - point.y) * direction.y
+            return definition.changingFalloff(to: max(0, length), keeping: .fullStrength)
+        case .fullStrength:
+            length = (point.x - definition.zeroStrengthPoint.x) * direction.x
+                + (point.y - definition.zeroStrengthPoint.y) * direction.y
+            return definition.changingFalloff(to: max(0, length), keeping: .zeroStrength)
+        }
+    }
+
     private static func normalized(_ point: CGPoint) -> CGPoint {
         CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
     }

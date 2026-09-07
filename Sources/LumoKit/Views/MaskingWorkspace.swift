@@ -1550,16 +1550,15 @@ struct MaskCanvasOverlay: View {
         ]
 
         if distance(viewportPoint, rotation) <= 16 { return .rotation }
-        for (handle, bar) in bars {
+        let hits = bars.compactMap { handle, bar -> (handle: MaskInteractionState.LinearHandle, distance: CGFloat)? in
             let first = CGPoint(x: bar.x - normal.x * halfBarLength,
                                 y: bar.y - normal.y * halfBarLength)
             let second = CGPoint(x: bar.x + normal.x * halfBarLength,
                                  y: bar.y + normal.y * halfBarLength)
-            if distanceToSegment(viewportPoint, first, second) <= 14 {
-                return handle
-            }
+            let distance = distanceToSegment(viewportPoint, first, second)
+            return distance <= 14 ? (handle, distance) : nil
         }
-        return nil
+        return hits.min { $0.distance < $1.distance }?.handle
     }
 
     private func radialGuidePoints(
