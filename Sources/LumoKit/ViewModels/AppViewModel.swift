@@ -605,7 +605,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     let workScheduler: ImageWorkScheduler
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
-    let editStore: EditDocumentStore
+    public let editStore: EditDocumentStore
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
     /// file I/O remains inside `EditDocumentStore`.
     let persistence: EditPersistenceCoordinator

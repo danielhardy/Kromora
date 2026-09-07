@@ -50,8 +50,7 @@ final class CoordinatorBoundaryTests: TempDirectoryTestCase {
     }
 
     func testPersistenceCoordinatorCoalescesSnapshotsAndPreservesFlushCompatibility() async throws {
-        let storeURL = tempDirectory.appendingPathComponent("coordinator-edits.json")
-        let store = EditDocumentStore(fileURL: storeURL)
+        let store = makeInMemoryEditStore()
         let coordinator = EditPersistenceCoordinator(store: store)
         let sourceURL = tempDirectory.appendingPathComponent("photo.png")
         let reference = EditSourceReference(assetID: .file(sourceURL), url: sourceURL)

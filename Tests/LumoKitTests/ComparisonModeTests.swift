@@ -14,15 +14,10 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         return defaults
     }
 
-    private func makeViewModel(
-        defaults: UserDefaults,
-        storeURL: URL? = nil
-    ) -> AppViewModel {
+    private func makeViewModel(defaults: UserDefaults) -> AppViewModel {
         AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(
-                fileURL: storeURL ?? tempDirectory.appendingPathComponent("edit-records.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
     }
@@ -89,9 +84,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("no-record-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         enableSideBySide(on: viewModel)
@@ -110,8 +103,8 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let image = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "empty-record.png", in: tempDirectory
         )
-        let storeURL = tempDirectory.appendingPathComponent("empty-record-edits.json")
-        let store = EditDocumentStore(fileURL: storeURL)
+        let container = makeInMemoryEditContainer()
+        let store = EditDocumentStore(modelContainer: container)
         try await store.save(
             EditDocument(),
             for: EditSourceReference(assetID: .file(image), url: image)
@@ -120,7 +113,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(fileURL: storeURL),
+            editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults
         )
         enableSideBySide(on: viewModel)
@@ -135,9 +128,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("reset-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         enableSideBySide(on: viewModel)
@@ -170,9 +161,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("settled-entry-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         let image = try Fixtures.writeGradientPNG(
@@ -216,9 +205,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("drawable-entry-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         // The real MTKView owns this lifecycle. Modeling it here keeps the regression test focused
@@ -260,9 +247,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("standard-temperature-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         let image = try Fixtures.writeGradientPNG(
@@ -325,9 +310,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("raw-temperature-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         // FakeRenderEngine models RAW preparation from the extension, so the fixture need not be a
@@ -392,9 +375,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("raw-tint-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         // FakeRenderEngine models RAW preparation from the extension, so the fixture need not be a
@@ -456,9 +437,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(
-                fileURL: tempDirectory.appendingPathComponent("late-baseline-edits.json")
-            ),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults
         )
         let first = try Fixtures.writeGradientPNG(
