@@ -214,7 +214,14 @@ extension AppViewModel {
             targetSize: targetSize,
             transform: transform,
             style: style,
-            requestRevision: maskingSourceRevision,
+            // The overlay is exempt from mask-request revision supersession: previews note
+            // displayRevision, which grows without bound and shares one max-slot per source
+            // with the overlay's sourceRevision — after the first couple of preview renders
+            // every overlay resolve was cancelled forever, for every mask type (LUMO-275).
+            // Staleness stays owned by the workspace `.task(id:)` teardown, which restarts on
+            // any layer/selection/size/style change; revision 0 skips noting and always
+            // reads current.
+            requestRevision: 0,
             selectedComponentID: selectedComponentID,
             soloComponentID: soloComponentID
         ))

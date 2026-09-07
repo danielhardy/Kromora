@@ -386,6 +386,88 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertGreaterThan(Int(bytes[bottomOffset]), 200)
     }
 
+    func testOverlayResolveIsExemptFromRenderRevisionSupersession() async throws {
+        // LUMO-275: previews note displayRevision (unbounded) into the same max-slot the
+        // overlay's sourceRevision used — after the first preview renders, every overlay
+        // resolve was cancelled forever, for every mask type. The overlay path is exempt
+        // (revision 0 skips noting and always reads current); the render domain keeps its
+        // guards, so a lagging nonzero overlay request is still superseded.
+        let source = try source()
+        let component = MaskComponent(source: .linear(LinearGradientDefinition()))
+        let layer = LocalAdjustmentLayer(components: [component])
+        let engine = RenderEngine()
+        let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+        let targetSize = PixelDimensions(width: 8, height: 4)
+        var document = EditDocument()
+        document.localAdjustments = [layer]
+        _ = try await engine.render(RenderRequest(
+            source: source, document: document,
+            targetSize: CGSize(width: 8, height: 4),
+            quality: .preview, requestRevision: 5
+        ))
+
+        func overlay(revision: UInt64) async -> CGImage? {
+            await engine.makeMaskOverlayImage(MaskOverlayRequest(
+                source: source, layers: [layer], selectedLayerID: layer.id,
+                soloLayerID: nil, targetSize: targetSize, style: style,
+                requestRevision: revision, selectedComponentID: component.id,
+                soloComponentID: nil
+            ))
+        }
+        let supersededWash = await overlay(revision: 1)
+        XCTAssertNil(
+            supersededWash,
+            "a lagging nonzero revision stays superseded"
+        )
+        let exemptWash = await overlay(revision: 0)
+        XCTAssertNotNil(
+            exemptWash,
+            "the exempt overlay revision must resolve despite noted renders"
+        )
+    }
+
+    @MainActor
+    func testProductionOverlayPathSurvivesPreviewRenders() async throws {
+        // End-to-end through AppViewModel.renderMaskOverlay: the production overlay request
+        // must resolve after main-preview renders noted higher revisions on the shared engine.
+        let url = try Fixtures.writeGradientPNG(
+            width: 64, height: 48, named: "exempt-overlay.png", in: tempDirectory)
+        let engine = RenderEngine()
+        let viewModel = AppViewModel(engine: engine, editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitForOverlayTest("the image to load") { viewModel.sourceImage != nil }
+        let source = try XCTUnwrap(viewModel.maskingSource)
+        var document = EditDocument()
+        let component = MaskComponent(source: .linear(LinearGradientDefinition()))
+        let layer = LocalAdjustmentLayer(components: [component])
+        document.localAdjustments = [layer]
+        _ = try await engine.render(RenderRequest(
+            source: source, document: document,
+            targetSize: CGSize(width: 64, height: 48),
+            quality: .preview, requestRevision: 9
+        ))
+
+        let wash = await viewModel.renderMaskOverlay(
+            layers: [layer], selectedLayerID: layer.id, soloLayerID: nil,
+            targetSize: PixelDimensions(width: 64, height: 48),
+            style: MaskOverlayStyle(red: 1, green: 0, blue: 0),
+            selectedComponentID: component.id, soloComponentID: nil
+        )
+        XCTAssertNotNil(wash, "production overlay must survive noted preview revisions")
+    }
+
+    @MainActor
+    private func waitForOverlayTest(
+        _ description: String, timeout: TimeInterval = 10,
+        _ condition: @MainActor () async -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while await !condition() {
+            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     func testStaleSoloComponentStaysStrict() async throws {
         // Solo isolation is explicit: an unknown solo component resolves nothing.
         let source = try source()
