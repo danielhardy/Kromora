@@ -6,9 +6,8 @@ import XCTest
 
 final class EditDocumentStoreTests: TempDirectoryTestCase {
 
-    private func makeStore(named name: String = "EditStore.store") -> (EditDocumentStore, URL) {
-        let url = tempDirectory.appendingPathComponent(name)
-        return (EditDocumentStore(fileURL: url), url)
+    private func makeStore() -> EditDocumentStore {
+        makeInMemoryEditStore()
     }
 
     private func source(named name: String = "photo.jpg") -> EditSourceReference {
@@ -24,8 +23,8 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         )
     }
 
-    func testRoundTripUsesSwiftDataStoreAndLeavesSourceUntouched() async throws {
-        let (store, fileURL) = makeStore()
+    func testRoundTripUsesInMemorySwiftDataStoreAndLeavesSourceUntouched() async throws {
+        let store = makeStore()
         let photo = source()
         let original = Data("source bytes stay source bytes".utf8)
         try original.write(to: try XCTUnwrap(photo.url))
@@ -36,15 +35,10 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertTrue(result.found)
         XCTAssertEqual(result.document, editedDocument)
         XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(photo.url)), original)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path))
-        XCTAssertTrue(
-            String(decoding: try Data(contentsOf: fileURL).prefix(15), as: UTF8.self)
-                .hasPrefix("SQLite format 3")
-        )
     }
 
     func testEachPhotoIsAnIndependentSwiftDataRecord() async throws {
-        let (store, _) = makeStore()
+        let store = makeStore()
         let first = source(named: "first.jpg")
         let second = source(named: "second.jpg")
         let firstDocument = EditDocument(adjustments: [.exposure(ev: 0.1)])
@@ -63,7 +57,8 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
     }
 
     func testMovedFileRelinksByBookmarkAndRekeysTheRecord() async throws {
-        let (store, _) = makeStore()
+        let container = makeInMemoryEditContainer()
+        let store = EditDocumentStore(modelContainer: container)
         let oldURL = tempDirectory.appendingPathComponent("old.jpg")
         let newURL = tempDirectory.appendingPathComponent("new.jpg")
         try Data("photo".utf8).write(to: oldURL)
@@ -77,8 +72,7 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(result.document, editedDocument)
         XCTAssertEqual(result.status, .relinked)
 
-        let relaunch = EditDocumentStore(
-            fileURL: tempDirectory.appendingPathComponent("EditStore.store"))
+        let relaunch = EditDocumentStore(modelContainer: container)
         let relaunched = await relaunch.load(
             for: EditSourceReference(assetID: .file(newURL), url: newURL)
         )
@@ -86,15 +80,15 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
     }
 
     func testPersistenceIORunsOffTheMainActor() async throws {
-        let (store, _) = makeStore()
+        let store = makeStore()
         _ = await store.load(for: source())
         let lastIOWasMainThread = await store.lastIOWasMainThread
         XCTAssertFalse(lastIOWasMainThread)
     }
 
     func testFailingStoreCanRetryTheCompleteSnapshot() async throws {
-        let url = tempDirectory.appendingPathComponent("failing.store")
-        let store = EditDocumentStore(fileURL: url, failuresBeforeSuccess: 1)
+        let container = makeInMemoryEditContainer()
+        let store = makeInMemoryEditStore(container: container, failuresBeforeSuccess: 1)
         let photo = source()
 
         do {
@@ -109,13 +103,9 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(failedAttemptCount, 1)
 
         try await store.save(editedDocument, for: photo)
-        let restored = EditDocumentStore(fileURL: url)
+        let restored = EditDocumentStore(modelContainer: container)
         let result = await restored.load(for: photo)
         XCTAssertEqual(result.document, editedDocument)
-    }
-
-    func testDefaultStoreUsesEditStoreStore() {
-        XCTAssertEqual(EditDocumentStore.defaultFileURL.lastPathComponent, "EditStore.store")
     }
 
     func testCorruptRecordSurfacesActionableStatusWithoutInventingEdits() async throws {
@@ -147,5 +137,56 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertTrue(result.status.message?.contains("neutral edits") == true)
         let storeStatus = await store.status
         XCTAssertEqual(storeStatus, result.status)
+    }
+
+    func testConcurrentSavesSerializeModelContextAccess() async throws {
+        let store = makeStore()
+        let entries = (0..<8).map { index in
+            (
+                source: source(named: "concurrent-\(index).jpg"),
+                document: EditDocument(adjustments: [.exposure(ev: Double(index) / 10)])
+            )
+        }
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            for entry in entries {
+                group.addTask {
+                    try await store.save(entry.document, for: entry.source)
+                }
+            }
+            try await group.waitForAll()
+        }
+
+        for entry in entries {
+            let result = await store.load(for: entry.source)
+            XCTAssertTrue(result.found)
+            XCTAssertEqual(result.document, entry.document)
+        }
+        let saveAttemptCount = await store.saveAttemptCount
+        let writeCount = await store.writeCount
+        XCTAssertEqual(saveAttemptCount, entries.count)
+        XCTAssertEqual(writeCount, entries.count)
+    }
+
+    func testDefaultStoreUsesEditStoreStore() {
+        XCTAssertEqual(EditDocumentStore.defaultFileURL.lastPathComponent, "EditStore.store")
+    }
+
+    func testPersistentStoreExposesItsOnDiskFileURL() async throws {
+        let fileURL = tempDirectory.appendingPathComponent("EditStore.store")
+        let store = try EditDocumentStore.makePersistentStore(fileURL: fileURL)
+        let exposedURL = await store.onDiskFileURL
+
+        XCTAssertEqual(exposedURL, fileURL)
+    }
+
+    func testStoreThatFallsBackToMemoryDoesNotExposeAnOnDiskFileURL() async throws {
+        let parentFile = tempDirectory.appendingPathComponent("not-a-directory")
+        try Data("not a directory".utf8).write(to: parentFile)
+        let requestedURL = parentFile.appendingPathComponent("EditStore.store")
+        let store = EditDocumentStore(fileURL: requestedURL)
+        let exposedURL = await store.onDiskFileURL
+
+        XCTAssertNil(exposedURL)
     }
 }

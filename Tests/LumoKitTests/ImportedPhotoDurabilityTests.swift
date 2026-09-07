@@ -53,14 +53,14 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
 
     func testEditsFollowImportedCopyAcrossRelaunch() async throws {
         let libraryFolder = try Fixtures.makeTempDirectory("LumoImportLibrary")
-        let editStoreURL = tempDirectory.appendingPathComponent("edit-records.json")
+        let container = makeInMemoryEditContainer()
         let defaults = UserDefaults(suiteName: "LumoImportedPhotoDurability-\(UUID().uuidString)")!
         let source = try Fixtures.writeGradientPNG(
             width: 20, height: 12, named: "edited.png", in: tempDirectory
         )
         let first = AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: editStoreURL),
+            editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults,
             libraryFolderURL: libraryFolder
         )
@@ -74,7 +74,7 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
 
         let relaunched = AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: editStoreURL),
+            editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults,
             libraryFolderURL: libraryFolder
         )

@@ -5,11 +5,14 @@ import AppKit
 /// open source/Look folders: changing one changes where a future panel starts, not existing files.
 public struct LumoSettingsView: View {
     @ObservedObject private var settings: LumoSettings
+    private let editStore: EditDocumentStore
     @State private var sourceTestMessage = ""
     @State private var exportTestMessage = ""
+    @State private var editDatabaseURL: URL?
 
-    public init(settings: LumoSettings) {
+    public init(settings: LumoSettings, editStore: EditDocumentStore) {
         _settings = ObservedObject(wrappedValue: settings)
+        self.editStore = editStore
     }
 
     public var body: some View {
@@ -56,12 +59,38 @@ public struct LumoSettingsView: View {
             } header: {
                 Text("Look storage")
             }
+
+            Section {
+                if let editDatabaseURL {
+                    HStack {
+                        Label("Edit database", systemImage: "externaldrive")
+                        Spacer()
+                        Text(editDatabaseURL.lastPathComponent)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Button("Reveal Edit Database in Finder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([editDatabaseURL])
+                    }
+                    .accessibilityLabel("Reveal Edit Database in Finder")
+                    .accessibilityHint("Open Finder with Lumo's edit database selected")
+                } else {
+                    Text("The edit database is running in memory and cannot be revealed in Finder.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Edit storage")
+            } footer: {
+                Text("Reveal the on-disk edit database for backup or support requests.")
+            }
         }
         .formStyle(.grouped)
         .padding()
         .frame(width: 560)
         .task {
             settings.refreshFolderStatus()
+            editDatabaseURL = await editStore.onDiskFileURL
         }
     }
 

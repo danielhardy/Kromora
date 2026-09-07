@@ -82,7 +82,7 @@ final class LookLUTExportTests: TempDirectoryTestCase {
     @MainActor
     func testSavingRegistersWithoutChangingTheActiveDocument() async throws {
         let source = try Fixtures.writeGradientPNG(width: 8, height: 8, named: "save-look.png", in: tempDirectory)
-        let store = EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("edits.json"))
+        let store = makeInMemoryEditStore()
         let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: source)
         let deadline = Date().addingTimeInterval(5)

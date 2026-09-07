@@ -25,7 +25,7 @@ struct EditDocumentLoadResult: Sendable, Equatable {
 /// store deliberately has no migration path from the former JSON catalog: the product has not
 /// shipped, so old local edits may be orphaned when this schema is first opened.
 @ModelActor
-actor EditDocumentStore {
+public actor EditDocumentStore {
 
     enum Status: Sendable, Equatable {
         case ready
@@ -78,6 +78,12 @@ actor EditDocumentStore {
     private var failuresRemaining: Int = 0
     private var persistenceUnavailable = false
     private(set) var status: Status = .ready
+    private var persistentFileURL: URL? = nil
+
+    /// The store file to expose for backup and support workflows, or `nil` when this store is
+    /// running in memory because its on-disk container could not be opened (or because a test
+    /// supplied an in-memory container).
+    var onDiskFileURL: URL? { persistentFileURL }
 
     /// The production store lives beside the other Lumo application-support data.
     static var defaultFileURL: URL {
@@ -109,7 +115,10 @@ actor EditDocumentStore {
     /// App-owned callers should use `makeDefaultStore()` so a container failure remains a
     /// recoverable, user-visible persistence warning rather than escaping during app startup.
     static func makePersistentStore(fileURL: URL) throws -> EditDocumentStore {
-        EditDocumentStore(modelContainer: try makeContainer(url: fileURL))
+        EditDocumentStore(
+            modelContainer: try makeContainer(url: fileURL),
+            persistentFileURL: fileURL
+        )
     }
 
     private static func makeInMemoryContainer() -> ModelContainer {
@@ -134,7 +143,8 @@ actor EditDocumentStore {
             return EditDocumentStore(
                 modelContainer: makeInMemoryContainer(),
                 initialStatus: .writeFailure(error.localizedDescription),
-                persistenceUnavailable: true
+                persistenceUnavailable: true,
+                persistentFileURL: nil
             )
         }
     }
@@ -163,6 +173,7 @@ actor EditDocumentStore {
             modelContainer: container,
             initialStatus: initialStatus,
             persistenceUnavailable: persistenceUnavailable,
+            persistentFileURL: persistenceUnavailable ? nil : fileURL,
             artificialWriteDelay: artificialWriteDelay,
             failuresBeforeSuccess: failuresBeforeSuccess,
             writeStartSignal: writeStartSignal
@@ -174,6 +185,7 @@ actor EditDocumentStore {
         modelContainer: ModelContainer,
         initialStatus: Status = .ready,
         persistenceUnavailable: Bool = false,
+        persistentFileURL: URL? = nil,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
         writeStartSignal: AsyncStream<Void>.Continuation? = nil
@@ -184,6 +196,7 @@ actor EditDocumentStore {
         self.artificialWriteDelay = artificialWriteDelay
         self.failuresRemaining = failuresBeforeSuccess
         self.persistenceUnavailable = persistenceUnavailable
+        self.persistentFileURL = persistentFileURL
         self.writeStartSignal = writeStartSignal
         self.status = initialStatus
     }

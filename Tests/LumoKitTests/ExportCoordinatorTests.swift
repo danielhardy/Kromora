@@ -381,7 +381,7 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         let urls = try ["first", "second"].map {
             try Fixtures.writeGradientPNG(width: 48, height: 32, named: "\($0).png", in: sourceFolder)
         }
-        let store = EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("edits.json"))
+        let store = makeInMemoryEditStore()
         let firstDocument = EditDocument(adjustments: [.exposure(ev: 0.25)])
         let secondDocument = EditDocument(adjustments: [.vibrance(amount: 0.75)])
         for (url, document) in zip(urls, [firstDocument, secondDocument]) {
@@ -414,7 +414,7 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         let urls = try ["one", "two", "three"].map {
             try Fixtures.writeGradientPNG(width: 40, height: 24, named: "\($0).png", in: libraryFolder)
         }
-        let store = EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("selected-edits.json"))
+        let store = makeInMemoryEditStore()
         let documents = [
             EditDocument(adjustments: [.exposure(ev: 0.1)]),
             EditDocument(adjustments: [.exposure(ev: 0.2)]),

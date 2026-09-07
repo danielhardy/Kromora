@@ -54,10 +54,10 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
     func testLUTSurvivesNavigationAndRelaunchForItsPhoto() async throws {
         let (first, second) = try makePhotoFolder()
         let (lookFolder, lut) = try makeLUTFolder()
-        let storeURL = tempDirectory.appendingPathComponent("edits.json")
+        let container = makeInMemoryEditContainer()
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
-            engine: fake, editStore: EditDocumentStore(fileURL: storeURL)
+            engine: fake, editStore: EditDocumentStore(modelContainer: container)
         )
 
         viewModel.library.setFolder(lookFolder)
@@ -80,7 +80,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
 
         await viewModel.flushPendingWrites()
         let relaunched = AppViewModel(
-            engine: FakeRenderEngine(), editStore: EditDocumentStore(fileURL: storeURL)
+            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
         )
         relaunched.library.setFolder(lookFolder)
         while relaunched.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
@@ -151,10 +151,10 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         let lookURL = try Fixtures.writeCube(
             Fixtures.identityCubeText(size: 2), named: "External Look.cube", in: tempDirectory
         )
-        let storeURL = tempDirectory.appendingPathComponent("import-edits.json")
+        let container = makeInMemoryEditContainer()
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
-            engine: fake, editStore: EditDocumentStore(fileURL: storeURL)
+            engine: fake, editStore: EditDocumentStore(modelContainer: container)
         )
         viewModel.openImage(url: source)
         try await waitUntil("the source image") { viewModel.sourceName == "import-source.png" }
@@ -181,7 +181,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         viewModel.setLookIntensity(0.35)
         await viewModel.flushPendingWrites()
         let relaunched = AppViewModel(
-            engine: FakeRenderEngine(), editStore: EditDocumentStore(fileURL: storeURL)
+            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
         )
         while relaunched.library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
         relaunched.openImage(url: source)
@@ -197,9 +197,10 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         let (first, second) = try makePhotoFolder()
         let third = try Fixtures.writeGradientPNG(width: 24, height: 16, named: "three.png", in: first.deletingLastPathComponent())
         let (lookFolder, lut) = try makeLUTFolder()
+        let container = makeInMemoryEditContainer()
         let viewModel = AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("paste.json"))
+            editStore: EditDocumentStore(modelContainer: container)
         )
         viewModel.collection.loadFromFolder(first.deletingLastPathComponent())
         await viewModel.collection.scanCompletion()
@@ -227,7 +228,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         await viewModel.flushPendingWrites()
         let relaunched = AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("paste.json"))
+            editStore: EditDocumentStore(modelContainer: container)
         )
         relaunched.collection.loadFromFolder(first.deletingLastPathComponent())
         await relaunched.collection.scanCompletion()

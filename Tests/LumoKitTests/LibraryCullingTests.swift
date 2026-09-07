@@ -93,7 +93,7 @@ final class LibraryCullingTests: TempDirectoryTestCase {
         let defaults = makeDefaults()
         let viewModel = AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("edits.json")),
+            editStore: makeInMemoryEditStore(),
             preferences: defaults,
             libraryFolderURL: tempDirectory.appendingPathComponent("managed-library", isDirectory: true)
         )

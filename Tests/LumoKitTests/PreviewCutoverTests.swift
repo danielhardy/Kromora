@@ -25,7 +25,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     private func makeRealViewModel() -> AppViewModel {
         AppViewModel(
             engine: RenderEngine(),
-            editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("edits.json"))
+            editStore: makeInMemoryEditStore()
         )
     }
 

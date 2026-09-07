@@ -111,7 +111,10 @@ struct LumoApp: App {
         .commands { LumoCommands(settings: appDelegate.viewModel.settings) }
 
         Settings {
-            LumoSettingsView(settings: appDelegate.viewModel.settings)
+            LumoSettingsView(
+                settings: appDelegate.viewModel.settings,
+                editStore: appDelegate.viewModel.editStore
+            )
         }
     }
 }

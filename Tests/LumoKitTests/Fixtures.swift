@@ -1,10 +1,38 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import SwiftData
 import UniformTypeIdentifiers
 import XCTest
 
 @testable import LumoKit
+
+/// Builds the same local-only schema used by the edit store without touching the filesystem.
+/// Tests that model a relaunch should retain this container and inject it into both stores.
+func makeInMemoryEditContainer() -> ModelContainer {
+    let schema = Schema([EditRecord.self])
+    let configuration = ModelConfiguration(
+        "LumoKitTests.EditStore",
+        schema: schema,
+        isStoredInMemoryOnly: true,
+        cloudKitDatabase: .none
+    )
+    return try! ModelContainer(for: schema, configurations: [configuration])
+}
+
+func makeInMemoryEditStore(
+    container: ModelContainer = makeInMemoryEditContainer(),
+    artificialWriteDelay: Duration = .zero,
+    failuresBeforeSuccess: Int = 0,
+    writeStartSignal: AsyncStream<Void>.Continuation? = nil
+) -> EditDocumentStore {
+    EditDocumentStore(
+        modelContainer: container,
+        artificialWriteDelay: artificialWriteDelay,
+        failuresBeforeSuccess: failuresBeforeSuccess,
+        writeStartSignal: writeStartSignal
+    )
+}
 
 /// Test fixtures are **generated**, never checked in: Lumo's inputs are RAWs
 /// and LUT files that run to tens of MB, and a repo full of binary fixtures ages

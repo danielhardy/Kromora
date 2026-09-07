@@ -276,7 +276,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "workflow.png", in: tempDirectory)
         let viewModel = AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("edits.json"))
+            editStore: makeInMemoryEditStore()
         )
         viewModel.openImage(url: url)
         try await waitUntil("the source image") { viewModel.sourceImage != nil }
@@ -307,7 +307,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "preset-workflow.png", in: tempDirectory)
         let viewModel = AppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("preset-edits.json"))
+            editStore: makeInMemoryEditStore()
         )
         viewModel.openImage(url: url)
         try await waitUntil("the source image") { viewModel.sourceImage != nil }
@@ -338,7 +338,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = AppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(fileURL: tempDirectory.appendingPathComponent("edits.json"))
+            editStore: makeInMemoryEditStore()
         )
         viewModel.openImage(url: url)
         try await waitUntil("the source image") { viewModel.sourceImage != nil }
@@ -384,8 +384,10 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
     func testCommittedCropSurvivesRelaunch() async throws {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "persisted.png", in: tempDirectory)
-        let storeURL = tempDirectory.appendingPathComponent("persisted-edits.json")
-        let first = AppViewModel(engine: FakeRenderEngine(), editStore: EditDocumentStore(fileURL: storeURL))
+        let container = makeInMemoryEditContainer()
+        let first = AppViewModel(
+            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
+        )
         first.openImage(url: url)
         try await waitUntil("the first source") { first.sourceImage != nil }
         first.beginCrop()
@@ -393,7 +395,9 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         first.commitCrop()
         await first.flushPendingWrites()
 
-        let second = AppViewModel(engine: FakeRenderEngine(), editStore: EditDocumentStore(fileURL: storeURL))
+        let second = AppViewModel(
+            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
+        )
         second.openImage(url: url)
         try await waitUntil("the restored crop") {
             second.sourceImage != nil && second.document.crop == CropAdjustments(
