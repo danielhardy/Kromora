@@ -30,6 +30,7 @@ actor EditDocumentStore {
     enum Status: Sendable, Equatable {
         case ready
         case relinked
+        case corrupt(String)
         case writeFailure(String)
 
         var message: String? {
@@ -38,6 +39,8 @@ actor EditDocumentStore {
                 return nil
             case .relinked:
                 return "Restored edits after the source photo moved."
+            case .corrupt(let detail):
+                return "Could not read edit record (\(detail)); using neutral edits until the record is repaired."
             case .writeFailure(let detail):
                 return "Could not save edit records: \(detail)"
             }
@@ -47,7 +50,7 @@ actor EditDocumentStore {
             switch self {
             case .ready:
                 return false
-            case .relinked, .writeFailure:
+            case .relinked, .corrupt, .writeFailure:
                 return true
             }
         }
@@ -191,6 +194,14 @@ actor EditDocumentStore {
 
         do {
             if let record = try fetchRecord(assetID: key) {
+                let document: EditDocument
+                do {
+                    document = try record.decodeDocument()
+                } catch {
+                    status = .corrupt(error.localizedDescription)
+                    return EditDocumentLoadResult(
+                        document: EditDocument(), found: true, status: status)
+                }
                 if let url = source.url, sourcePath(for: url) != record.sourcePath {
                     let previousStatus = status
                     updateLocator(on: record, for: url)
@@ -203,7 +214,7 @@ actor EditDocumentStore {
                     restoreActionableStatus(after: previousStatus)
                 }
                 return EditDocumentLoadResult(
-                    document: record.document, found: true, status: status)
+                    document: document, found: true, status: status)
             }
 
             guard let url = source.url,
@@ -211,6 +222,15 @@ actor EditDocumentStore {
             else {
                 return EditDocumentLoadResult(
                     document: EditDocument(), found: false, status: status)
+            }
+
+            let document: EditDocument
+            do {
+                document = try record.decodeDocument()
+            } catch {
+                status = .corrupt(error.localizedDescription)
+                return EditDocumentLoadResult(
+                    document: EditDocument(), found: true, status: status)
             }
 
             record.assetID = key
@@ -223,7 +243,7 @@ actor EditDocumentStore {
                 status = .writeFailure(error.localizedDescription)
             }
             restoreActionableStatus(after: previousStatus)
-            return EditDocumentLoadResult(document: record.document, found: true, status: status)
+            return EditDocumentLoadResult(document: document, found: true, status: status)
         } catch {
             status = .writeFailure(error.localizedDescription)
             return EditDocumentLoadResult(document: EditDocument(), found: false, status: status)

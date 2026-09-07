@@ -17,8 +17,17 @@ final class EditRecord {
     var sourceBookmark: Data?
 
     var document: EditDocument {
-        get { (try? JSONDecoder().decode(EditDocument.self, from: documentData)) ?? EditDocument() }
+        get { (try? decodeDocument()) ?? EditDocument() }
         set { documentData = (try? JSONEncoder().encode(newValue)) ?? Data() }
+    }
+
+    /// Decodes the stored document without hiding corruption from the persistence layer.
+    ///
+    /// The computed `document` property intentionally keeps its identity fallback for callers
+    /// that need a value façade. `EditDocumentStore` uses this throwing path so a damaged row can
+    /// be reported through its load status instead of looking like a valid blank edit.
+    func decodeDocument() throws -> EditDocument {
+        try JSONDecoder().decode(EditDocument.self, from: documentData)
     }
 
     init(
