@@ -2,21 +2,15 @@
 id: LUMO-272
 title: Stale component selection blinds the mask overlay
 type: bug
-status: claimed
+status: review
 priority: high
 labels:
   - masking
 created: 2026-09-07T01:57:58.869Z
-updated: 2026-09-07T02:02:47.681Z
-order: z
+updated: 2026-09-07T02:02:54.990Z
+order: y
 board: product
 branch: fix/linear-overlay-stale-selection
-claim:
-  actor: pi
-  session: 01MTQLISXRBX98CW9C
-  claimed_at: 2026-09-07T02:02:47.679Z
-  expires_at: 2026-09-07T03:02:47.679Z
-  branch: fix/linear-overlay-stale-selection
 ---
 
 ## Objective
@@ -59,3 +53,8 @@ semantic, so the failure is silent by design.
       (`testStaleSoloComponentStaysStrict`).
 - [ ] Negative control verified (fallback test fails pre-fix, solo test passes both ways).
 - [ ] `swift build`, `swift test` pass with zero Swift 6 diagnostics and zero opt-outs.
+
+
+### Comment — pi @ 2026-09-07T02:02:54.140Z
+
+Implemented on fix/linear-overlay-stale-selection. Engine-level fallback in makeMaskOverlayImage; render path unaffected (never passes onlyComponentID). 2 new regression tests; negative control verified (fallback test fails pre-fix, solo test passes both ways). Full suite: 922 tests, 0 failures. Ready for review.
