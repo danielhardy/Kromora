@@ -223,7 +223,10 @@ struct LinearGradientDefinition: Codable, Sendable, Equatable {
     var fullStrengthPoint: CGPoint
     var density: Double { didSet { density = Self.clamp(density, 0...1, default: 1) } }
 
-    init(zeroStrengthPoint: CGPoint = CGPoint(x: 0, y: 0.5), fullStrengthPoint: CGPoint = CGPoint(x: 1, y: 0.5), density: Double = 1) {
+    /// New gradients run from the top edge to the bottom edge. These are still stored as the
+    /// zero/full-strength endpoint pair, so changing the default does not reinterpret any
+    /// persisted definitions.
+    init(zeroStrengthPoint: CGPoint = CGPoint(x: 0.5, y: 0), fullStrengthPoint: CGPoint = CGPoint(x: 0.5, y: 1), density: Double = 1) {
         self.zeroStrengthPoint = Self.point(zeroStrengthPoint)
         self.fullStrengthPoint = Self.point(fullStrengthPoint)
         self.density = Self.clamp(density, 0...1, default: 1)

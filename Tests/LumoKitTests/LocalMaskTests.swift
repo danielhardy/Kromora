@@ -143,6 +143,26 @@ final class LocalMaskTests: XCTestCase {
         XCTAssertEqual(resized.falloff, 0.3, accuracy: 0.000_001)
     }
 
+    func testNewLinearGradientsDefaultToVerticalWithoutChangingEndpointSemantics() {
+        let definition = LinearGradientDefinition()
+
+        XCTAssertEqual(definition.zeroStrengthPoint, CGPoint(x: 0.5, y: 0))
+        XCTAssertEqual(definition.fullStrengthPoint, CGPoint(x: 0.5, y: 1))
+        XCTAssertEqual(definition.angleDegrees, 90, accuracy: 0.000_001)
+        XCTAssertEqual(
+            LinearGradientMaskMath.alpha(at: CGPoint(x: 0.5, y: 0), definition: definition), 0)
+        XCTAssertEqual(
+            LinearGradientMaskMath.alpha(at: CGPoint(x: 0.5, y: 0.5), definition: definition), 0.5,
+            accuracy: 0.000_001)
+        XCTAssertEqual(
+            LinearGradientMaskMath.alpha(at: CGPoint(x: 0.5, y: 1), definition: definition), 1)
+
+        let persisted = LinearGradientDefinition(
+            zeroStrengthPoint: CGPoint(x: 0.1, y: 0.8),
+            fullStrengthPoint: CGPoint(x: 0.9, y: 0.2), density: 0.7)
+        XCTAssertEqual(try? roundTrip(persisted), persisted)
+    }
+
     func testRadialGradientMathUsesSourcePixelsForRotationAndFalloff() {
         let sourceSize = CGSize(width: 400, height: 200)
         let definition = RadialGradientDefinition(

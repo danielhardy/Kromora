@@ -966,10 +966,16 @@ struct MaskCanvasOverlay: View {
                 viewportSize: geometry.size, backingScale: backingScale
             )
             let targetSize = maskTargetSize(for: transform, viewportSize: geometry.size)
-            // The cached overlay represents only completed work. The active draft is drawn by
-            // the presentation guide below, so a 30-second stroke cannot invalidate and
-            // rerasterize the entire completed history for every pointer sample.
-            let layers = viewModel.document.localAdjustments
+            // The cached overlay represents only completed work for brush strokes: the
+            // active brush draft is drawn by the Metal presentation guide below, so a
+            // 30-second stroke cannot invalidate and rerasterize the entire completed
+            // history for every pointer sample. Linear/radial drafts are the opposite:
+            // the single analytic definition *is* the mask, so the draft is folded into
+            // the overlay layers. Without this the gradient wash never appears during a
+            // drag (linear only looked alive because of its synthetic zone fills, and
+            // radial showed just its ellipse tooling).
+            let documentLayers = viewModel.document.localAdjustments
+            let layers = overlayLayers(document: documentLayers, draft: gradientDraftForOverlay)
             let style = overlayStyle
             let presentation = MaskOverlayPresentation(
                 coverageOpacity: maskingState.overlayOpacity)
@@ -1194,6 +1200,36 @@ struct MaskCanvasOverlay: View {
         )
     }
 
+    /// The in-progress draft, but only when it targets a gradient component. Brush drafts
+    /// stay on the Metal fast path and must not join the rasterized overlay layers; gradient
+    /// drafts are single analytic definitions whose wash (including feather falloff) should
+    /// track the pointer live, during creation as well as handle drags and slider edits.
+    private var gradientDraftForOverlay: LocalAdjustmentLayer? {
+        guard let draft = maskingState.draftLayer,
+              let index = draft.targetComponentIndex(
+                selected: maskingState.selectedComponentID)
+        else { return nil }
+        switch draft.components[index].source {
+        case .linear, .radial:
+            return draft
+        case .brush, .semantic:
+            return nil
+        }
+    }
+
+    private func overlayLayers(
+        document: [LocalAdjustmentLayer], draft: LocalAdjustmentLayer?
+    ) -> [LocalAdjustmentLayer] {
+        guard let draft else { return document }
+        var combined = document
+        if let index = combined.firstIndex(where: { $0.id == draft.id }) {
+            combined[index] = draft
+        } else {
+            combined.append(draft)
+        }
+        return combined
+    }
+
     private func maskTargetSize(
         for transform: CanvasMaskTransform, viewportSize: CGSize
     ) -> PixelDimensions {
@@ -1367,9 +1403,9 @@ struct MaskCanvasOverlay: View {
             with: .color(color))
     }
 
-    /// Draw the linear guide as three explicit strength zones. The mask renderer remains the
-    /// source of truth for pixels; these translucent zones only explain which side is zero, where
-    /// the smooth transition happens, and which side is full strength.
+    /// Draw the linear guide handles. The resolved overlay image above is the source of truth for
+    /// coverage and already contains the renderer's smoothstep falloff. Constant-opacity zone
+    /// fills here used to sit on top of that image and made the color wash read like a flat tint.
     private func drawLinearGuide(
         start: CGPoint, end: CGPoint, transform: CanvasMaskTransform,
         in context: inout GraphicsContext
@@ -1379,41 +1415,6 @@ struct MaskCanvasOverlay: View {
         let length = max(hypot(dx, dy), 0.001)
         let direction = CGPoint(x: dx / length, y: dy / length)
         let normal = CGPoint(x: -direction.y, y: direction.x)
-        let extent = max(transform.viewportSize.width, transform.viewportSize.height) * 2 + length
-        let before = CGPoint(
-            x: start.x - direction.x * extent, y: start.y - direction.y * extent)
-        let after = CGPoint(x: end.x + direction.x * extent, y: end.y + direction.y * extent)
-
-        func offset(_ point: CGPoint, by distance: CGFloat) -> CGPoint {
-            CGPoint(x: point.x + normal.x * distance, y: point.y + normal.y * distance)
-        }
-        func polygon(_ points: [CGPoint]) -> Path {
-            Path { path in
-                guard let first = points.first else { return }
-                path.move(to: first)
-                for point in points.dropFirst() { path.addLine(to: point) }
-                path.closeSubpath()
-            }
-        }
-
-        guard let visibleRect = transform.viewportRect(forSourceNormalized: transform.cropRect)
-        else { return }
-
-        var zoneContext = context
-        zoneContext.clip(to: Path(visibleRect))
-        zoneContext.fill(
-            polygon([offset(before, by: -extent), offset(before, by: extent),
-                     offset(start, by: extent), offset(start, by: -extent)]),
-            with: .color(Color.black.opacity(0.18)))
-        zoneContext.fill(
-            polygon([offset(start, by: -extent), offset(start, by: extent),
-                     offset(end, by: extent), offset(end, by: -extent)]),
-            with: .color(Color.orange.opacity(0.16)))
-        zoneContext.fill(
-            polygon([offset(end, by: -extent), offset(end, by: extent),
-                     offset(after, by: extent), offset(after, by: -extent)]),
-            with: .color(Color.white.opacity(0.16)))
-
         let center = CGPoint(x: (start.x + end.x) * 0.5, y: (start.y + end.y) * 0.5)
         let halfBarLength = min(
             max(transform.viewportSize.width, transform.viewportSize.height) * 0.12, 64)

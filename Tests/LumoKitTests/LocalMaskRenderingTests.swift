@@ -360,6 +360,32 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertLessThanOrEqual(abs(Int(try Pixels.bytes(of: solo)[3]) - 204), 2)
     }
 
+    func testLinearColorWashUsesRenderedSmoothstepFalloffInsteadOfAFlatTint() async throws {
+        let source = try source()
+        let definition = LinearGradientDefinition(
+            zeroStrengthPoint: CGPoint(x: 0.5, y: 0.2),
+            fullStrengthPoint: CGPoint(x: 0.5, y: 0.8))
+        let layer = LocalAdjustmentLayer(components: [MaskComponent(
+            source: .linear(definition)
+        )])
+        let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+
+        guard let overlay = await RenderEngine().makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [layer], selectedLayerID: layer.id, soloLayerID: nil,
+            targetSize: PixelDimensions(width: 1, height: 9), style: style
+        )) else { return XCTFail("linear color-wash overlay did not render") }
+
+        let pixels = try Pixels.bytes(of: overlay)
+        let alphaAtRow = { (row: Int) in pixels[row * 4 + 3] }
+        let alpha = (0..<9).map(alphaAtRow)
+        XCTAssertEqual(alpha.first, 0, "the zero-strength edge must remain clear")
+        XCTAssertEqual(alpha.last, 255, "the full-strength edge must be fully washed")
+        XCTAssertGreaterThan(alpha[4], alpha[2], "the wash must increase through the transition")
+        XCTAssertGreaterThan(alpha[6], alpha[4], "the wash must continue toward full strength")
+        XCTAssertGreaterThan(alpha[4], 40, "the transition midpoint must be visibly washed")
+        XCTAssertLessThan(alpha[4], 215, "the transition midpoint must not be a flat full tint")
+    }
+
     func testMaskOverlayPreservesPartialCoverageInColorAndGrayscaleModes() async throws {
         let source = try source()
         let componentID = UUID()
