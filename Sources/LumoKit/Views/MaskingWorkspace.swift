@@ -989,7 +989,8 @@ struct MaskCanvasOverlay: View {
                 sourceFingerprint: viewModel.maskingSource?.cacheFingerprint ?? "missing",
                 requestRevision: viewModel.maskingSourceRevision,
                 targetSize: targetSize,
-                style: style
+                style: style,
+                resolveEpoch: maskingState.maskResolveEpoch
             )
             ZStack {
                 Canvas { context, _ in
@@ -1030,6 +1031,12 @@ struct MaskCanvasOverlay: View {
                 )
                 if semanticTarget != nil {
                     maskingState.beginMaskResolution()
+                }
+                // Explicit person requests establish the provider gate signals first: cached
+                // hits when warm, Vision-backed computation when cold. Without this a cold
+                // store fails the gate permanently — the overlay has no analyze preflight.
+                if semanticTarget == .person {
+                    await viewModel.warmPersonSignals()
                 }
                 let resolved = await viewModel.renderMaskOverlay(
                     layers: layers,
@@ -1256,6 +1263,7 @@ struct MaskCanvasOverlay: View {
         let requestRevision: UInt64
         let targetSize: PixelDimensions
         let style: MaskOverlayStyle
+        let resolveEpoch: UInt64
     }
 
     private func draw(

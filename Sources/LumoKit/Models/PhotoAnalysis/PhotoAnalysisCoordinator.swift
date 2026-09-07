@@ -188,6 +188,24 @@ actor PhotoAnalysisCoordinator {
         await maskStore.pixels(for: reference)
     }
 
+    /// Explicitly establish the face/foreground signals the person gate requires.
+    ///
+    /// The person gate is deliberately cache-only so speculative callers (Info panel prefetch,
+    /// analysis stages) never pay for detection on a landscape. But that turns a cold mask store
+    /// into a trap: `analyze()` can short-circuit on the disk analysis cache without repopulating
+    /// the mask store, after which person resolution fails permanently. User-driven paths
+    /// (creation, overlay recovery, retry) must call this first: it resolves face and
+    /// foregroundInstance(0) directly — cheap cache hits when warm, Vision-backed computation
+    /// when cold — swallowing individual failures so one missing signal never blocks the other.
+    func preparePersonSignals(
+        assetID: PhotoAssetID, source: ImageSource, quality: MaskQuality
+    ) async {
+        _ = try? await mask(assetID: assetID, source: source, kind: .face, quality: quality)
+        _ = try? await mask(
+            assetID: assetID, source: source, kind: .foregroundInstance(0), quality: quality
+        )
+    }
+
     /// Compose an inverted mask through the coordinator's shared store. Keeping this operation on
     /// the coordinator gives interactive consumers the same RegionMask-producing seam as semantic
     /// generation, rather than asking a view to manufacture a second mask representation from its
