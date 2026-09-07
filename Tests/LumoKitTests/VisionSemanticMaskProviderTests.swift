@@ -133,4 +133,75 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
             XCTAssertEqual(error, .personNotApplicable)
         }
     }
+
+    func testForegroundUnionAcceptsInstanceMasksAtProviderResolution() async throws {
+        // Regression: Vision reports instance masks at its own output resolution (e.g. a square
+        // 512×512 buffer for a 3:2 source), so seeding the union at the analysis dimensions made
+        // MaskOperations.union throw incompatibleSizes for every real Foreground/Background mask.
+        let directory = try Fixtures.makeTempDirectory("ForegroundUnionSizeTests")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MaskStore(directory: directory)
+        let provider = VisionSemanticMaskProvider(store: store)
+
+        let source = ImageSource(
+            backing: .data(Data([7, 8, 9])), kind: .standard,
+            nativeExtent: CGSize(width: 96, height: 64)
+        )
+        let image = try AnalysisImageFactory.make(
+            from: source, configuration: .init(maximumDimension: 96)
+        )
+        XCTAssertNotEqual(image.dimensions, PixelDimensions(width: 16, height: 16))
+
+        // Two instance entries at Vision-style dimensions that differ from the analysis dims.
+        let instanceSize = PixelDimensions(width: 16, height: 16)
+        let first = try NormalizedMask(
+            size: instanceSize,
+            values: (0..<256).map { $0 % 16 < 8 ? Float(1) : Float(0) }
+        )
+        let second = try NormalizedMask(
+            size: instanceSize,
+            values: (0..<256).map { $0 / 16 < 4 ? Float(0.5) : Float(0) }
+        )
+        for (kind, pixels) in [(SemanticMaskKind.foregroundInstance(0), first),
+                               (.foregroundInstance(1), second)] {
+            let key = await provider.cacheKey(for: kind, image: image, quality: .analysis)
+            _ = try await store.store(pixels, for: key, quality: .analysis)
+        }
+
+        let union = try await provider.foregroundUnionMask(image: image, quality: .analysis)
+        XCTAssertEqual(union.kind, .foreground)
+        let maybeUnionPixels = await store.pixels(for: union.reference)
+        let unionPixels = try XCTUnwrap(maybeUnionPixels)
+        XCTAssertEqual(unionPixels.size, instanceSize, "the union must adopt the instance resolution")
+        let expected = try MaskOperations.union(first, second)
+        XCTAssertEqual(unionPixels.values, expected.values)
+    }
+
+    func testCachedPersonMaskIsReturnedWithoutGatingSignals() async throws {
+        // Regression: the person gate ran before the cache lookup, so an already-paid person
+        // matte failed with personNotApplicable whenever the face/foreground entries were not
+        // cached at the same quality — surfacing as "could not be resolved" on photo re-opens.
+        let directory = try Fixtures.makeTempDirectory("PersonCacheGateTests")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = MaskStore(directory: directory)
+        let provider = VisionSemanticMaskProvider(store: store)
+
+        let source = ImageSource(
+            backing: .data(Data([3, 1, 4])), kind: .standard,
+            nativeExtent: CGSize(width: 32, height: 32)
+        )
+        let image = try AnalysisImageFactory.make(
+            from: source, configuration: .init(maximumDimension: 32)
+        )
+        let pixels = try NormalizedMask(
+            size: PixelDimensions(width: 8, height: 8),
+            values: (0..<64).map { $0 % 8 < 3 ? Float(1) : Float(0) }
+        )
+        let key = await provider.cacheKey(for: .person, image: image, quality: .analysis)
+        let reference = try await store.store(pixels, for: key, quality: .analysis)
+
+        let mask = try await provider.mask(for: .person, image: image, quality: .analysis)
+        XCTAssertEqual(mask.reference, reference)
+        XCTAssertEqual(mask.coverage, pixels.coverage, accuracy: 0.0001)
+    }
 }
