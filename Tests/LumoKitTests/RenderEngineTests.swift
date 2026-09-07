@@ -71,6 +71,95 @@ final class RenderEngineTests: TempDirectoryTestCase {
                           "completed preview pixels must match the actor-owned raster path")
     }
 
+    /// A nonzero vignette must remain one frame-wide field after the completed texture is handed
+    /// to the presentation context. This intentionally uses a large source and crosses the same
+    /// fit/zoom transitions that move the production planner between preview detail levels.
+    @MainActor
+    func testLargeVignetteCompletedTextureHasNoZoomTileSeams() async throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal is unavailable on this host")
+        }
+
+        let largeURL = try Fixtures.writeGradientPNG(
+            width: 2048, height: 1365, named: "large-vignette.png", in: tempDirectory
+        )
+        let largeSource = ImageSource(
+            url: largeURL, nativeExtent: CGSize(width: 2048, height: 1365)
+        )
+        let document = EditDocument(effects: EffectsAdjustments(
+            vignette: VignetteAdjustments(amount: 15.947309, midpoint: 50, feather: 55)
+        ))
+        let engine = RenderEngine()
+        let maybeImage = await engine.makeCIImage(RenderRequest(
+            source: largeSource,
+            document: document,
+            targetSize: CGSize(width: 2048, height: 1365),
+            quality: .preview,
+            output: .raster
+        ))
+        let image = try XCTUnwrap(maybeImage)
+        let maybeBaseline = await engine.makeCIImage(RenderRequest(
+            source: largeSource,
+            document: EditDocument(),
+            targetSize: CGSize(width: 2048, height: 1365),
+            quality: .preview,
+            output: .raster
+        ))
+        let baseline = try XCTUnwrap(maybeBaseline)
+        let destination = CGRect(x: 0, y: 0, width: 640, height: 426)
+
+        for zoom in [1.0, 3.0, 8.0, 1.25, 4.0, 1.0, 6.0, 1.0] {
+            var navigation = CanvasNavigation()
+            navigation.setZoom(zoom)
+            let presentation = try XCTUnwrap(
+                PreviewSurfaceView.Coordinator.presentationImage(
+                    image, navigation: navigation, destination: destination
+                )
+            )
+            let rendered = try XCTUnwrap(
+                RenderEngine.presentationContext.createCGImage(presentation, from: destination)
+            )
+            let bytes = try Pixels.bytes(of: rendered)
+            let middleY = rendered.height / 2
+            let middleX = rendered.width / 2
+            if zoom == 1.0 {
+                let baselinePresentation = try XCTUnwrap(
+                    PreviewSurfaceView.Coordinator.presentationImage(
+                        baseline, navigation: navigation, destination: destination
+                    )
+                )
+                let baselineRendered = try XCTUnwrap(
+                    RenderEngine.presentationContext.createCGImage(
+                        baselinePresentation, from: destination
+                    )
+                )
+                assertPixelsDiffer(
+                    bytes, try Pixels.bytes(of: baselineRendered),
+                    "the large-frame regression must exercise a nonzero vignette"
+                )
+            }
+
+            // A tile boundary cannot introduce a visible step into this smooth gradient. Check
+            // the largest local step on the center scan lines around likely GPU tile boundaries.
+            for x in [159, 160, 319, 320, 479, 480] where x + 1 < rendered.width {
+                let left = (middleY * rendered.width + x) * 4
+                let right = left + 4
+                XCTAssertLessThanOrEqual(
+                    abs(Int(bytes[right]) - Int(bytes[left])), 12,
+                    "zoom \(zoom) introduced a horizontal presentation seam at x=\(x)"
+                )
+            }
+            for y in [105, 106, 212, 213, 319, 320] where y + 1 < rendered.height {
+                let upper = (y * rendered.width + middleX) * 4
+                let lower = ((y + 1) * rendered.width + middleX) * 4
+                XCTAssertLessThanOrEqual(
+                    abs(Int(bytes[lower]) - Int(bytes[upper])), 12,
+                    "zoom \(zoom) introduced a vertical presentation seam at y=\(y)"
+                )
+            }
+        }
+    }
+
     /// RAW develop edits must survive the completed-texture boundary, not only the lazy graph path.
     func testCompletedRAWPreviewReflectsDevelopSettings() async throws {
         guard let rawURL = Fixtures.localRAWURL else {
