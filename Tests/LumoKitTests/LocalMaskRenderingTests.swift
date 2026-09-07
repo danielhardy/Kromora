@@ -360,6 +360,49 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertLessThanOrEqual(abs(Int(try Pixels.bytes(of: solo)[3]) - 204), 2)
     }
 
+    func testRasterPayloadRowsRenderTopDownInOverlay() async throws {
+        // Regression: rasterImage used to flip rows ("Core Image bitmap rows are bottom-up"),
+        // which vertically mirrored every rasterized mask — semantic regions and brush strokes —
+        // because `CIImage(bitmapData:)` memory row 0 already renders as the top output row
+        // through the same RGBAf + blend + createCGImage chain the overlay uses.
+        let source = try source()
+        let componentID = UUID()
+        let layer = LocalAdjustmentLayer(components: [MaskComponent(
+            id: componentID, source: .semantic(SemanticMaskDefinition(target: .subject))
+        )])
+        // Only the top row of the mask has coverage.
+        struct TopRowResolver: LocalMaskResolving {
+            let sourceFingerprint: String
+            func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+                let mask = try NormalizedMask(
+                    size: request.targetSize,
+                    values: (0..<request.targetSize.width * request.targetSize.height).map {
+                        $0 < request.targetSize.width ? Float(1) : Float(0)
+                    }
+                )
+                return LocalMaskPayload(
+                    sourceFingerprint: sourceFingerprint,
+                    definitionHash: RenderCacheHash.digest(request.component.source),
+                    targetSize: request.targetSize,
+                    quality: request.quality,
+                    descriptor: .raster(mask)
+                )
+            }
+        }
+        let engine = RenderEngine(maskResolver: TopRowResolver(
+            sourceFingerprint: source.cacheFingerprint))
+        guard let overlay = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [layer], selectedLayerID: layer.id, soloLayerID: nil,
+            targetSize: PixelDimensions(width: 8, height: 4),
+            style: MaskOverlayStyle(inspection: .grayscale, red: 1, green: 0, blue: 0)
+        )) else { return XCTFail("overlay did not render") }
+        let pixels = try Pixels.bytes(of: overlay)
+        // Grayscale inspection copies coverage into RGB and forces alpha opaque.
+        let coverageAt = { (x: Int, y: Int) in pixels[(y * 8 + x) * 4] }
+        XCTAssertEqual(coverageAt(0, 0), 255, "top mask row must render at the top output row")
+        XCTAssertLessThan(coverageAt(0, 3), 5, "bottom output rows must stay uncovered")
+    }
+
     func testLinearColorWashUsesRenderedSmoothstepFalloffInsteadOfAFlatTint() async throws {
         let source = try source()
         let definition = LinearGradientDefinition(

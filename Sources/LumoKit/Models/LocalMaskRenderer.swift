@@ -202,10 +202,13 @@ final class LocalMaskRenderer {
         let width = mask.size.width
         let height = mask.size.height
         for y in 0..<height {
-            // Persisted mask rows are upper-left oriented; Core Image bitmap rows are bottom-up.
-            let sourceRow = height - 1 - y
+            // Persisted mask rows and `CIImage(bitmapData:)` memory rows are both upper-left
+            // oriented as consumed by `CIContext.createCGImage`: memory row 0 renders as the top
+            // output row (verified end-to-end through the same RGBAf + blendWithAlphaMask +
+            // createCGImage chain this graph uses). No row flip belongs here — inverting this
+            // mirrors every rasterized mask (semantic regions and brush strokes) vertically.
             for x in 0..<width {
-                let value = mask.values[sourceRow * width + x]
+                let value = mask.values[y * width + x]
                 let index = (y * width + x) * 4
                 pixels[index + 3] = value
             }

@@ -111,7 +111,10 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
     /// Returns the stable Foreground target used by durable local-mask recipes. The union is
     /// cached separately from the numbered instances so Background and Foreground can share one
     /// segmentation result, including the empty-result case.
-    private func foregroundUnionMask(image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
+    /// Internal for the size-mismatch regression test; the union path only misbehaves when the
+    /// cached instance-mask dimensions differ from the analysis dimensions, which needs seeded
+    /// store entries rather than a live Vision call.
+    func foregroundUnionMask(image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
         let key = cacheKey(for: .foreground, image: image, quality: quality)
         if let reference = await store.mask(for: key, quality: quality),
            let pixels = await store.pixels(for: reference) {
@@ -120,15 +123,27 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         }
 
         let instances = try await foregroundMasks(image: image, quality: quality)
-        var union = try NormalizedMask(
-            size: image.dimensions,
-            values: Array(repeating: 0, count: image.dimensions.width * image.dimensions.height)
-        )
-        for instance in instances {
+        // Seed from the instances themselves, never from `image.dimensions`: Vision reports
+        // instance masks at its own output resolution (a square buffer regardless of source
+        // aspect), so combining them with an analysis-sized seed threw incompatibleSizes for
+        // every real image.
+        guard let seed = instances.first, let seedPixels = await store.pixels(for: seed.reference) else {
+            // Documented empty-result case: a zero-coverage union at the analysis dimensions so
+            // Background can still be produced as its complement.
+            let empty = try NormalizedMask(
+                size: image.dimensions,
+                values: Array(repeating: 0, count: image.dimensions.width * image.dimensions.height)
+            )
+            let reference = try await store.store(empty, for: key, quality: quality)
+            return RegionMask(kind: .foreground, bounds: bounds(of: empty), quality: quality,
+                              reference: reference, confidence: 1, coverage: empty.coverage)
+        }
+        var union = seedPixels
+        for instance in instances.dropFirst() {
             guard let pixels = await store.pixels(for: instance.reference) else {
                 throw RegionMaskError.missingPixels
             }
-            union = try MaskOperations.union(union, pixels)
+            union = try MaskOperations.union(union, MaskOperations.resized(pixels, to: union.size))
         }
         let reference = try await store.store(union, for: key, quality: quality)
         return RegionMask(kind: .foreground, bounds: bounds(of: union), quality: quality,
@@ -298,6 +313,17 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         guard quality != .render else {
             throw VisionSemanticMaskError.unsupportedQuality(.render, .person)
         }
+        // A cached person matte is valid regardless of the gating signals: the caller that
+        // produced it already paid the gate. Checking the cache first keeps retries, photo
+        // re-opens, and overlay resolution from failing with personNotApplicable just because
+        // the face/foreground entries were evicted or have not landed yet.
+        let key = cacheKey(for: .person, image: image, quality: quality)
+        if let reference = await store.mask(for: key, quality: quality),
+           let pixels = await store.pixels(for: reference) {
+            return RegionMask(kind: .person, bounds: bounds(of: pixels), quality: quality,
+                              reference: reference, confidence: 1, coverage: pixels.coverage)
+        }
+
         // Gating is deliberately cache-only. The coordinator/provider that requests person
         // segmentation must have already requested face or foreground analysis; this prevents a
         // landscape from paying for a full person matte merely because a caller asked for `.person`.
@@ -309,13 +335,6 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         ) != nil
         guard hasFaceSignal || hasForegroundSignal else {
             throw VisionSemanticMaskError.personNotApplicable
-        }
-
-        let key = cacheKey(for: .person, image: image, quality: quality)
-        if let reference = await store.mask(for: key, quality: quality),
-           let pixels = await store.pixels(for: reference) {
-            return RegionMask(kind: .person, bounds: bounds(of: pixels), quality: quality,
-                              reference: reference, confidence: 1, coverage: pixels.coverage)
         }
 
         guard #available(macOS 12.0, *) else {
@@ -451,7 +470,8 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         return VNImageRequestHandler(ciImage: ciImage, options: [:])
     }
 
-    private func cacheKey(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) -> MaskCacheKey {
+    /// Internal for the regression tests that seed the store under the provider's own keys.
+    func cacheKey(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) -> MaskCacheKey {
         let assetID: PhotoAssetID
         let fingerprint: PhotoSourceFingerprint
         switch image.source.backing {
