@@ -2,17 +2,46 @@
 id: LUMO-246
 title: EditRecord model + SwiftData-backed EditDocumentStore
 type: task
-status: backlog
+status: done
 priority: medium
 labels:
   - persistence
 created: 2026-09-06T04:06:24.937Z
-updated: 2026-09-06T04:06:37.150Z
+updated: 2026-09-06T23:30:41.049Z
 depends_on:
   - LUMO-244
   - LUMO-245
-order: zzzzy
+order: t
 board: product
+commits:
+  - c2b7851
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: EditRecord and SwiftData-backed EditDocumentStore replace the JSON catalog while preserving the caller-facing API
+      result: pass
+    - criterion: Relink-on-move, minimal Status, counters, and persistence test seams work against SwiftData
+      result: pass
+    - criterion: makeContainer uses local no-CloudKit storage and degrades to in-memory storage with writeFailure status
+      result: pass
+    - criterion: Swift 6 concurrency checks and opt-out scan pass
+      result: pass
+  checks_run:
+    - swift test --filter EditDocumentStoreTests|EditPersistenceIntegrationTests|PackageSettingsTests|SwiftDataConcurrencyProbeTests -- 21 passed
+    - swift test -- 913 executed, 41 skipped, 0 failures
+    - swift build -c release -- passed
+    - git diff --check -- passed
+    - dg validate -- passed with existing unknown pickup-model warning
+  findings:
+    - The requested direct EditDocument property triggers a SwiftData runtime Composite Coder fatal error for this nested Codable document, and .transformable is rejected by the SDK macro; the durable document is therefore represented by the working Data attribute plus a document value facade.
+    - CoreData teardown I/O messages appear when tests delete temporary directories while actor stores finish, but all tests pass.
+  fixes: []
+  verification_commits:
+    - c2b7851
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-06T23:30:41.046Z
+  session: 01MTQFX8CFTLU7YFPP
 ---
 
 ## Objective
@@ -82,3 +111,30 @@ degrade to neutral edits" resilience property.
 ## Depends on
 
 Child 1 (spike).
+
+## Agent log
+
+- 2026-09-06T23:30:41.048Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] EditRecord and SwiftData-backed EditDocumentStore replace the JSON catalog while preserving the caller-facing API (pass)
+- [x] Relink-on-move, minimal Status, counters, and persistence test seams work against SwiftData (pass)
+- [x] makeContainer uses local no-CloudKit storage and degrades to in-memory storage with writeFailure status (pass)
+- [x] Swift 6 concurrency checks and opt-out scan pass (pass)
+Checks run:
+- swift test --filter EditDocumentStoreTests|EditPersistenceIntegrationTests|PackageSettingsTests|SwiftDataConcurrencyProbeTests -- 21 passed
+- swift test -- 913 executed, 41 skipped, 0 failures
+- swift build -c release -- passed
+- git diff --check -- passed
+- dg validate -- passed with existing unknown pickup-model warning
+Findings:
+- The requested direct EditDocument property triggers a SwiftData runtime Composite Coder fatal error for this nested Codable document, and .transformable is rejected by the SDK macro; the durable document is therefore represented by the working Data attribute plus a document value facade.
+- CoreData teardown I/O messages appear when tests delete temporary directories while actor stores finish, but all tests pass.
+Fixes:
+- None
+Verification commits:
+- c2b7851
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTQFX8CFTLU7YFPP
+Summary: SwiftData EditRecord and @ModelActor-backed EditDocumentStore are implemented in c2b7851. Verification passed: full swift test (913 executed, 41 skipped, 0 failures), focused persistence/concurrency lane (21 passed), swift build -c release, git diff --check, and dg validate. The store uses local SwiftData with row-level FetchDescriptor queries, bookmark relinking, actor-isolated counters/test seams, and in-memory fallback with actionable writeFailure status.
