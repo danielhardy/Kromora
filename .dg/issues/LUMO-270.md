@@ -2,22 +2,16 @@
 id: LUMO-270
 title: Person masks are unrecoverable on a cold mask store
 type: bug
-status: claimed
+status: review
 priority: high
 labels:
   - masking
   - analysis
 created: 2026-09-07T01:28:01.115Z
-updated: 2026-09-07T01:30:40.986Z
-order: y777776s
+updated: 2026-09-07T01:40:25.350Z
+order: y
 board: product
 branch: fix/lumo-270-person-cold-store
-claim:
-  actor: pi
-  session: 01MTQKDIACLLTQBIV0
-  claimed_at: 2026-09-07T01:30:40.980Z
-  expires_at: 2026-09-07T02:30:40.980Z
-  branch: fix/lumo-270-person-cold-store
 ---
 
 ## Objective
@@ -79,3 +73,8 @@ speculative calls from explicit user requests ("make me a Person mask"), not del
       no-usable-region/empty state — never a repeat of the same failure.
 - [ ] Info panel person entry no longer flakes depending on task-group completion order.
 - [ ] `swift build`, `swift test` pass with zero Swift 6 diagnostics and zero opt-outs.
+
+
+### Comment — pi @ 2026-09-07T01:40:15.602Z
+
+Implemented on fix/lumo-270-person-cold-store (c80bab8). 5 new regression tests pass; negative control verified (creation test fails pre-fix with the incident's exact error). Full suite: 925 tests, 0 failures. Ready for review.
