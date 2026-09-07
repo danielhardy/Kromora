@@ -340,7 +340,7 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
                 target: definition.target, quality: requestedQuality
             )
         }
-        let resized = try Self.resized(pixels, to: request.targetSize)
+        let resized = try MaskOperations.resized(pixels, to: request.targetSize)
         let adjusted = try Self.apply(definition, to: resized)
         return LocalMaskPayload(
             sourceFingerprint: request.source.cacheFingerprint,
@@ -380,24 +380,12 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
         }
     }
 
-    private static func resized(_ mask: NormalizedMask, to size: PixelDimensions) throws -> NormalizedMask {
-        guard size.width > 0, size.height > 0 else {
-            throw LocalMaskResolutionError.invalidPayload
-        }
-        guard mask.size != size else { return mask }
-        var values: [Float] = []
-        values.reserveCapacity(size.width * size.height)
-        for y in 0..<size.height {
-            let sourceY = Double(y) / Double(max(1, size.height - 1)) * Double(max(1, mask.size.height - 1))
-            for x in 0..<size.width {
-                let sourceX = Double(x) / Double(max(1, size.width - 1)) * Double(max(1, mask.size.width - 1))
-                values.append(bilinear(mask, x: sourceX, y: sourceY))
-            }
-        }
-        return try NormalizedMask(size: size, values: values)
-    }
-
     private static func apply(_ definition: SemanticMaskDefinition, to mask: NormalizedMask) throws -> NormalizedMask {
+        // An untouched definition must not pay for a full-resample pass: at render quality this
+        // maps tens of millions of values for no change.
+        if definition.edgeFeather <= 0 && definition.edgeShift == 0 && definition.density == 1 {
+            return mask
+        }
         var result = mask
         if definition.edgeFeather > 0 {
             let radius = max(1, Int((definition.edgeFeather * Double(min(mask.size.width, mask.size.height)) * 0.05).rounded()))
@@ -408,18 +396,6 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
             return Float(shifted * definition.density)
         }
         return try NormalizedMask(size: result.size, values: values)
-    }
-
-    private static func bilinear(_ mask: NormalizedMask, x: Double, y: Double) -> Float {
-        let clampedX = min(max(0, x), Double(mask.size.width - 1))
-        let clampedY = min(max(0, y), Double(mask.size.height - 1))
-        let x0 = Int(clampedX.rounded(.down)), y0 = Int(clampedY.rounded(.down))
-        let x1 = min(mask.size.width - 1, x0 + 1), y1 = min(mask.size.height - 1, y0 + 1)
-        let fx = Float(clampedX - Double(x0)), fy = Float(clampedY - Double(y0))
-        func value(_ x: Int, _ y: Int) -> Float { mask.values[y * mask.size.width + x] }
-        let top = value(x0, y0) * (1 - fx) + value(x1, y0) * fx
-        let bottom = value(x0, y1) * (1 - fx) + value(x1, y1) * fx
-        return top * (1 - fy) + bottom * fy
     }
 }
 

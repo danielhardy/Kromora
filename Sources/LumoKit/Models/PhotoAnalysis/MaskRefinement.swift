@@ -26,12 +26,31 @@ actor MaskRefinementService {
         tileSize: Int = 256
     ) async throws -> RegionMask {
         guard tileSize > 0 else { throw MaskRefinementError.invalidTileSize }
-        guard let seed = await store.pixels(for: mask.reference) else {
-            throw MaskRefinementError.missingSeedPixels
-        }
         let dimensions = targetDimensions ?? Self.dimensions(for: source)
         guard dimensions.width > 0, dimensions.height > 0 else {
             throw MaskRefinementError.invalidTargetDimensions
+        }
+
+        // A refinement is deterministic for its inputs, so a stored result is reused as-is.
+        // Without this every photo open recomputed (and re-persisted) the full-resolution
+        // mask — minutes on a 60MP source.
+        let targetKey = mask.reference.cacheKey.with(kind: mask.kind, quality: .render)
+        if let existing = await store.mask(for: targetKey, quality: .render),
+           existing.size == dimensions,
+           let existingPixels = await store.pixels(for: existing) {
+            return RegionMask(
+                id: mask.id,
+                kind: mask.kind,
+                bounds: mask.bounds,
+                quality: .render,
+                reference: existing,
+                confidence: mask.confidence,
+                coverage: existingPixels.coverage
+            )
+        }
+
+        guard let seed = await store.pixels(for: mask.reference) else {
+            throw MaskRefinementError.missingSeedPixels
         }
 
         var values: [Float] = []
