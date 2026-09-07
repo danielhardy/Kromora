@@ -107,6 +107,11 @@ final class MaskInteractionState: ObservableObject {
     @Published private(set) var linearCreationPending = false
     @Published private(set) var radialCreationPending = false
     @Published private(set) var resolutionState: MaskResolutionState = .idle
+    /// Monotonic generation forcing mask overlay tasks to re-resolve without disturbing the
+    /// selection. Retry must heal a cold store by warming signals and then re-running the
+    /// overlay task, but warming alone changes none of the task's inputs — without this the
+    /// `.task(id:)` never restarts and the banner it was meant to clear persists.
+    @Published private(set) var maskResolveEpoch: UInt64 = 0
     /// Transient controls used by the active brush. They are copied into a stroke at begin time;
     /// changing a slider never mutates the document or the in-progress stroke retroactively.
     @Published var brushRadius = BrushMaskMath.defaultRadius
@@ -190,6 +195,9 @@ final class MaskInteractionState: ObservableObject {
 
     func beginMaskResolution() { resolutionState = .loading }
     func markMaskResolved() { resolutionState = .ready }
+    /// Request a fresh overlay resolution pass, e.g. after Retry warmed the signals backing
+    /// the selected semantic mask.
+    func requestMaskReResolve() { maskResolveEpoch &+= 1 }
     func markMaskEmpty() { resolutionState = .empty }
     func markMaskUnavailable(_ message: String) { resolutionState = .unavailable(message) }
     func markMaskFailed(_ message: String) { resolutionState = .failed(message) }
