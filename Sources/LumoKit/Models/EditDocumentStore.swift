@@ -207,7 +207,7 @@ actor EditDocumentStore {
             }
 
             guard let url = source.url,
-                let record = try fetchRecords().first(where: { matches($0, url: url) })
+                let record = try fetchRecordsForRelinking().first(where: { matches($0, url: url) })
             else {
                 return EditDocumentLoadResult(
                     document: EditDocument(), found: false, status: status)
@@ -282,8 +282,18 @@ actor EditDocumentStore {
         return try modelContext.fetch(descriptor).first
     }
 
-    private func fetchRecords() throws -> [EditRecord] {
-        try modelContext.fetch(FetchDescriptor<EditRecord>())
+    /// Fetches only the fields needed to identify a moved source. `documentData` can be a large
+    /// encoded edit graph, so leaving it out keeps an unedited-photo open from deserializing every
+    /// saved document before the matching record is known. Accessing `record.document` below still
+    /// faults in the document for the one record that actually matches.
+    private func fetchRecordsForRelinking() throws -> [EditRecord] {
+        var descriptor = FetchDescriptor<EditRecord>()
+        descriptor.propertiesToFetch = [
+            \EditRecord.assetID,
+            \EditRecord.sourcePath,
+            \EditRecord.sourceBookmark,
+        ]
+        return try modelContext.fetch(descriptor)
     }
 
     private func persist() throws {
