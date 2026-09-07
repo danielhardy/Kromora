@@ -6,7 +6,7 @@ import Foundation
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
 final class LocalMaskRenderer {
-    static let version = 4
+    static let version = 5
     private let maxBrushStrokeCacheEntries = 8
     private let maxBrushStrokeCacheCostBytes: Int
     private var brushStrokeCache: [String: [Float]] = [:]
@@ -197,26 +197,31 @@ final class LocalMaskRenderer {
     }
 
     private func rasterImage(_ mask: NormalizedMask, extent: CGRect) -> CIImage? {
-        guard mask.size.width > 0, mask.size.height > 0 else { return nil }
-        var pixels = [Float](repeating: 0, count: mask.values.count * 4)
+        guard mask.size.width > 0, mask.size.height > 0,
+              mask.size.width <= Int.max / 4,
+              mask.values.count <= Int.max / 4 else { return nil }
         let width = mask.size.width
-        let height = mask.size.height
-        for y in 0..<height {
-            // Persisted mask rows and `CIImage(bitmapData:)` memory rows are both upper-left
-            // oriented as consumed by `CIContext.createCGImage`: memory row 0 renders as the top
-            // output row (verified end-to-end through the same RGBAf + blendWithAlphaMask +
-            // createCGImage chain this graph uses). No row flip belongs here — inverting this
-            // mirrors every rasterized mask (semantic regions and brush strokes) vertically.
-            for x in 0..<width {
-                let value = mask.values[y * width + x]
-                let index = (y * width + x) * 4
-                pixels[index + 3] = value
+        let bytesPerRow = width * 4
+        let byteCount = mask.values.count * 4
+
+        // The mask is consumed only through the alpha channel by blendWithAlphaMask. Keeping
+        // that channel in RGBA8 avoids the old 4x Float staging buffer (and its Data copy): a
+        // 60MP mask now needs 60MB for bitmap data, or 120MB if Core Image makes its own copy.
+        var data = Data(count: byteCount)
+        data.withUnsafeMutableBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            let bytes = baseAddress.assumingMemoryBound(to: UInt8.self)
+            for index in mask.values.indices {
+                // Persisted mask rows and `CIImage(bitmapData:)` memory rows are both upper-left
+                // oriented as consumed by `CIContext.createCGImage`: memory row 0 renders as the
+                // top output row. No row flip belongs here.
+                let value = min(max(mask.values[index], 0), 1)
+                bytes[index * 4 + 3] = UInt8((value * 255).rounded())
             }
         }
-        let data = pixels.withUnsafeBytes { Data($0) }
         let image = CIImage(
-            bitmapData: data, bytesPerRow: width * 4 * MemoryLayout<Float>.size,
-            size: extent.size, format: .RGBAf, colorSpace: nil
+            bitmapData: data, bytesPerRow: bytesPerRow,
+            size: extent.size, format: .RGBA8, colorSpace: nil
         )
         return image.transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
     }

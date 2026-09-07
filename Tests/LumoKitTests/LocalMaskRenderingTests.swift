@@ -1,4 +1,5 @@
 import CoreGraphics
+import CoreImage
 import ImageIO
 import XCTest
 @testable import LumoKit
@@ -526,6 +527,78 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         let coverageAt = { (x: Int, y: Int) in pixels[(y * 8 + x) * 4] }
         XCTAssertEqual(coverageAt(0, 0), 255, "top mask row must render at the top output row")
         XCTAssertLessThan(coverageAt(0, 3), 5, "bottom output rows must stay uncovered")
+    }
+
+    func testRasterPayloadRGBA8MatchesPreviousRGBAfOverlayOnFeatheredFixture() async throws {
+        let source = try source()
+        let width = 8
+        let height = 4
+        let values = (0..<(width * height)).map { index in
+            // A soft, non-binary coverage ramp exercises the quantization boundary throughout
+            // the same alpha-mask blend used by the production overlay.
+            Float(index) / Float(width * height - 1)
+        }
+        let component = MaskComponent(
+            source: .semantic(SemanticMaskDefinition(target: .subject))
+        )
+        let layer = LocalAdjustmentLayer(components: [component])
+
+        struct FeatheredResolver: LocalMaskResolving {
+            let sourceFingerprint: String
+            let values: [Float]
+            let size: PixelDimensions
+
+            func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+                let mask = try NormalizedMask(size: size, values: values)
+                return LocalMaskPayload(
+                    sourceFingerprint: sourceFingerprint,
+                    definitionHash: RenderCacheHash.digest(request.component.source),
+                    targetSize: request.targetSize,
+                    quality: request.quality,
+                    descriptor: .raster(mask)
+                )
+            }
+        }
+
+        let engine = RenderEngine(maskResolver: FeatheredResolver(
+            sourceFingerprint: source.cacheFingerprint,
+            values: values,
+            size: PixelDimensions(width: width, height: height)
+        ))
+        let style = MaskOverlayStyle(red: 0.85, green: 0.2, blue: 0.05)
+        guard let actual = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [layer], selectedLayerID: layer.id, soloLayerID: nil,
+            targetSize: PixelDimensions(width: width, height: height), style: style
+        )) else { return XCTFail("feathered raster overlay did not render") }
+
+        // Recreate the pre-LUMO-266 RGBAf bitmap path as the independent reference. The two
+        // images then take the same blendWithAlphaMask and RGBA8 output path end-to-end.
+        var floatPixels = [Float](repeating: 0, count: values.count * 4)
+        for index in values.indices { floatPixels[index * 4 + 3] = values[index] }
+        let floatData = floatPixels.withUnsafeBytes { Data($0) }
+        let floatMask = CIImage(
+            bitmapData: floatData,
+            bytesPerRow: width * 4 * MemoryLayout<Float>.size,
+            size: CGSize(width: width, height: height), format: .RGBAf, colorSpace: nil
+        )
+        let color = CIImage(color: CIColor(red: style.red, green: style.green,
+                                            blue: style.blue, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+        let clear = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0))
+            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+        let blend = CIFilter.blendWithAlphaMask()
+        blend.inputImage = color
+        blend.backgroundImage = clear
+        blend.maskImage = floatMask
+        let expected = try XCTUnwrap(Pixels.context.createCGImage(
+            try XCTUnwrap(blend.outputImage), from: floatMask.extent,
+            format: .RGBA8, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)
+        ))
+
+        assertPixelsEqual(
+            try Pixels.bytes(of: actual), try Pixels.bytes(of: expected), tolerance: 1,
+            "RGBA8 alpha masks must match the previous RGBAf overlay path"
+        )
     }
 
     func testLinearColorWashUsesRenderedSmoothstepFalloffInsteadOfAFlatTint() async throws {
