@@ -244,6 +244,71 @@ final class MetalPresentationBenchmark: XCTestCase {
         print("METAL_PRESENTATION_BENCHMARK \(output)")
     }
 
+    /// Opt-in regression for the issue path: a nonzero vignette is evaluated into a large
+    /// completed texture, repeatedly transformed at fit/deep zoom, and presented through real
+    /// CAMetalDrawables. The deterministic RenderEngineTests counterpart checks pixels; this test
+    /// keeps the drawable lifecycle in the coverage loop as well.
+    func testRealMetalVignettePresentationRegression() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["LUMO_METAL_BENCHMARK"] != nil,
+            "set LUMO_METAL_BENCHMARK=1 on a logged-in macOS display to run the hardware regression"
+        )
+        guard let device = MTLCreateSystemDefaultDevice(),
+              let queue = device.makeCommandQueue() else {
+            throw XCTSkip("Metal is unavailable")
+        }
+
+        let layer = CAMetalLayer()
+        layer.device = device
+        layer.pixelFormat = .bgra8Unorm
+        layer.framebufferOnly = false
+        layer.drawableSize = CGSize(width: 1280, height: 800)
+        layer.frame = CGRect(x: 0, y: 0, width: 1280, height: 800)
+        let window = NSWindow(contentRect: layer.frame, styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        let host = CALayer()
+        host.frame = layer.frame
+        host.addSublayer(layer)
+        window.contentView?.layer = host
+        window.contentView?.wantsLayer = true
+        window.isReleasedWhenClosed = false
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil); window.close() }
+
+        let scratch = try Fixtures.makeTempDirectory("MetalVignetteRegression")
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        let sourceURL = try Fixtures.writeGradientPNG(
+            width: 4096, height: 2731, named: "large-vignette.png", in: scratch
+        )
+        let source = ImageSource(url: sourceURL, nativeExtent: CGSize(width: 4096, height: 2731))
+        let maybeImage = await RenderEngine().makeCIImage(RenderRequest(
+            source: source,
+            document: EditDocument(effects: EffectsAdjustments(
+                vignette: VignetteAdjustments(amount: 15.947309, feather: 55)
+            )),
+            targetSize: CGSize(width: 2048, height: 1365),
+            quality: .preview,
+            output: .raster
+        ))
+        let image = try XCTUnwrap(maybeImage)
+
+        window.displayIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        let bounds = CGRect(origin: .zero, size: layer.drawableSize)
+        for iteration in 0..<12 {
+            _ = try present(
+                image,
+                inputTime: CACurrentMediaTime(),
+                transformIteration: iteration,
+                layer: layer,
+                context: RenderEngine.presentationContext,
+                queue: queue,
+                bounds: bounds,
+                initialMemory: residentMemory()
+            )
+        }
+    }
+
     private func present(
         _ image: CIImage,
         inputTime: TimeInterval,

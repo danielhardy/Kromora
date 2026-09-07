@@ -32,7 +32,9 @@ enum RenderPipeline {
     /// v16 formalizes the reusable pre-LUT prefix boundary. v17 bounds and sanitizes the Dehaze
     /// output before it can be reused or presented. v18 applies the same finite-input and exact-
     /// extent contract to Clarity's spatial stage. v19 adds the ordered local-mask boundary.
-    static let cacheVersion = 19
+    /// v20 evaluates the vignette as a destination-coordinate color kernel so tiled GPU evaluation
+    /// cannot reinterpret the full-frame geometry through a sampler tile.
+    static let cacheVersion = 20
 
     /// Build the graph for `document` over `source`.
     ///
@@ -563,7 +565,6 @@ enum RenderPipeline {
         let highlight = CIVector(x: vignette.highlights / 100, y: 0, z: 0, w: 0)
         return kernel.apply(
             extent: extent,
-            roiCallback: { _, rect in rect },
             arguments: [image, geometry, shape, highlight]
         )?.cropped(to: extent) ?? image
     }
@@ -761,19 +762,22 @@ enum RenderPipeline {
     }
     """)
 
-    private static let vignetteKernel = CIKernel(source: """
+    /// Vignette is pointwise, and its mask is defined in the complete output frame. A color kernel
+    /// keeps `destCoord()` in that frame when Core Image splits a large render into tiles; a
+    /// sampler kernel's `samplerCoord(image)` can be reinterpreted in the sampler tile/transform
+    /// coordinate space and produce rectangular seams in the completed Metal presentation path.
+    private static let vignetteKernel = CIColorKernel(source: """
     kernel vec4 effectsVignette(
-        sampler image,
+        __sample pixel,
         vec4 geometry,
         vec4 shape,
         vec4 highlightControls
     ) {
-        vec2 coordinate = samplerCoord(image);
-        vec4 pixel = sample(image, coordinate);
         if (pixel.a <= 0.00001) { return pixel; }
 
         // Normalize independently by half-width/half-height: crop aspect ratio is part of the
         // geometry, while the vignette values remain resolution independent.
+        vec2 coordinate = destCoord();
         vec2 normalized = (coordinate - geometry.xy) / max(geometry.zw, vec2(0.00001));
         float roundness = clamp(shape.y, -1.0, 1.0);
         // p=4 is squarer and p=2 is circular. Positive Roundness therefore rounds the corners.
