@@ -1,4 +1,9 @@
+import Accelerate
 import Foundation
+
+enum MaskResamplingError: Error, Sendable, Equatable {
+    case vImageScaleFailed(Int32)
+}
 
 enum MaskOperations {
     static func invert(_ mask: NormalizedMask) throws -> NormalizedMask {
@@ -45,36 +50,70 @@ enum MaskOperations {
         try feather(mask, radius: 1)
     }
 
-    /// Bilinear resize. Providers report masks at their own output resolution (Vision returns
-    /// fixed square buffers regardless of source aspect), so every consumer that combines masks
-    /// from different origins needs this bridge.
+    /// Resize a mask. Providers report masks at their own output resolution (Vision returns fixed
+    /// square buffers regardless of source aspect), so every consumer that combines masks from
+    /// different origins needs this bridge.
     static func resized(_ mask: NormalizedMask, to size: PixelDimensions) throws -> NormalizedMask {
         guard size.width > 0, size.height > 0 else {
             throw RegionMaskError.incompatibleSizes
         }
         guard mask.size != size else { return mask }
-        var values: [Float] = []
-        values.reserveCapacity(size.width * size.height)
-        for y in 0..<size.height {
-            let sourceY = Double(y) / Double(max(1, size.height - 1)) * Double(max(1, mask.size.height - 1))
-            for x in 0..<size.width {
-                let sourceX = Double(x) / Double(max(1, size.width - 1)) * Double(max(1, mask.size.width - 1))
-                values.append(bilinear(mask, x: sourceX, y: sourceY))
-            }
-        }
-        return try NormalizedMask(size: size, values: values)
+
+        return NormalizedMask(resampledSize: size, values: try scaleValues(mask, to: size))
     }
 
-    private static func bilinear(_ mask: NormalizedMask, x: Double, y: Double) -> Float {
-        let clampedX = min(max(0, x), Double(mask.size.width - 1))
-        let clampedY = min(max(0, y), Double(mask.size.height - 1))
-        let x0 = Int(clampedX.rounded(.down)), y0 = Int(clampedY.rounded(.down))
-        let x1 = min(mask.size.width - 1, x0 + 1), y1 = min(mask.size.height - 1, y0 + 1)
-        let fx = Float(clampedX - Double(x0)), fy = Float(clampedY - Double(y0))
-        func value(_ x: Int, _ y: Int) -> Float { mask.values[y * mask.size.width + x] }
-        let top = value(x0, y0) * (1 - fx) + value(x1, y0) * fx
-        let bottom = value(x0, y1) * (1 - fx) + value(x1, y1) * fx
-        return top * (1 - fy) + bottom * fy
+    /// Shared PlanarF bridge for every semantic-mask upscale. vImage's default resampling kernel
+    /// is a SIMD/multithreaded, bilinear-equivalent filter for these soft semantic boundaries. It
+    /// is not bit-for-bit bilinear: its small high-quality edge response is intentionally bounded
+    /// by NormalizedMask's existing [0, 1] normalization. `kvImageEdgeExtend` preserves the old
+    /// clamp-to-edge behavior, including the one-pixel source/target dimensions guarded above.
+    static func scaleValues(_ mask: NormalizedMask, to size: PixelDimensions) throws -> [Float] {
+        guard mask.size.width > 0, mask.size.height > 0,
+              size.width > 0, size.height > 0 else {
+            throw RegionMaskError.incompatibleSizes
+        }
+
+        var values = [Float](repeating: 0, count: size.width * size.height)
+        let error = mask.values.withUnsafeBufferPointer { source in
+            values.withUnsafeMutableBufferPointer { destination in
+                var sourceBuffer = vImage_Buffer(
+                    data: UnsafeMutableRawPointer(mutating: source.baseAddress!),
+                    height: vImagePixelCount(mask.size.height),
+                    width: vImagePixelCount(mask.size.width),
+                    rowBytes: mask.size.width * MemoryLayout<Float>.stride
+                )
+                var destinationBuffer = vImage_Buffer(
+                    data: destination.baseAddress!,
+                    height: vImagePixelCount(size.height),
+                    width: vImagePixelCount(size.width),
+                    rowBytes: size.width * MemoryLayout<Float>.stride
+                )
+                return vImageScale_PlanarF(
+                    &sourceBuffer,
+                    &destinationBuffer,
+                    nil,
+                    vImage_Flags(kvImageEdgeExtend)
+                )
+            }
+        }
+        guard error == kvImageNoError else {
+            throw MaskResamplingError.vImageScaleFailed(Int32(error))
+        }
+
+        // vImage's resampling kernel can ring slightly at a hard mask edge. Clip in Accelerate
+        // before handing the result to NormalizedMask's trusted resampled-value initializer; this
+        // preserves its public [0, 1] invariant without another scalar validation/copy pass.
+        values.withUnsafeMutableBufferPointer { buffer in
+            var lowerBound: Float = 0
+            var upperBound: Float = 1
+            vDSP_vclip(
+                buffer.baseAddress!, 1,
+                &lowerBound, &upperBound,
+                buffer.baseAddress!, 1,
+                vDSP_Length(buffer.count)
+            )
+        }
+        return values
     }
 
     /// Region operations always persist their result through the same store as provider output.

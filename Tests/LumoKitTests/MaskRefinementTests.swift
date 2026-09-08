@@ -38,11 +38,16 @@ final class MaskRefinementTests: XCTestCase {
 
         let refined = try await service.refine(mask: seed, source: source, tileSize: 2)
         let pixels = await store.pixels(for: refined.reference)
+        let expected = try MaskOperations.resized(
+            seedPixels, to: PixelDimensions(width: 8, height: 8)
+        )
+        let actual = try XCTUnwrap(pixels)
 
         XCTAssertEqual(refined.quality, .render)
         XCTAssertEqual(refined.reference.quality, .render)
         XCTAssertEqual(refined.reference.cacheKey.quality, .render)
         XCTAssertEqual(pixels?.size, PixelDimensions(width: 8, height: 8))
+        XCTAssertEqual(actual, expected, "refinement must use the shared mask resampler")
         XCTAssertEqual(pixels?.values.first, 1)
         XCTAssertEqual(pixels?.values.last, 0)
         XCTAssertEqual(refined.confidence, seed.confidence)

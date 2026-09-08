@@ -126,6 +126,7 @@ let package = Package(
             resources: [.copy("Resources")],
             swiftSettings: [.swiftLanguageMode(.v6)],
             linkerSettings: [
+                .linkedFramework("Accelerate"),
                 .linkedFramework("Photos"),
                 .linkedFramework("PhotosUI"),
                 .linkedFramework("Vision"),

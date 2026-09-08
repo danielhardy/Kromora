@@ -85,6 +85,14 @@ struct NormalizedMask: Codable, Sendable, Equatable {
         self.values = values.map { min(max($0, 0), 1) }
     }
 
+    /// Used only by Accelerate-backed producers after they have validated the dimensions and
+    /// clipped the finite vImage output. Keeping this fast path beside the checked initializer
+    /// avoids a second scalar validation/copy over multi-megapixel render masks.
+    init(resampledSize size: PixelDimensions, values: [Float]) {
+        self.size = size
+        self.values = values
+    }
+
     var coverage: Float {
         guard !values.isEmpty else { return 0 }
         return values.reduce(0, +) / Float(values.count)

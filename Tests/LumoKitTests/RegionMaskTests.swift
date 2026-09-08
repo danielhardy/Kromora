@@ -104,6 +104,31 @@ final class RegionMaskTests: XCTestCase {
         )
         let wide = try MaskOperations.resized(corners, to: PixelDimensions(width: 4, height: 3))
         XCTAssertEqual(wide.values[1 * 4 + 1], 0.5, accuracy: 0.0001)
+        // vImage's default high-quality kernel is not bit-for-bit bilinear, but remains within
+        // this stated tolerance on the existing asymmetric fixture while preserving the shape.
+        let bilinearFixture = [
+            0, 1.0 / 3, 2.0 / 3, 1,
+            0.5, 0.5, 0.5, 0.5,
+            1, 2.0 / 3, 1.0 / 3, 0,
+        ]
+        for (actual, expected) in zip(wide.values, bilinearFixture) {
+            XCTAssertEqual(actual, Float(expected), accuracy: 0.2)
+        }
+    }
+
+    func testResizeUsesClampToEdgeForSinglePixelDimensions() throws {
+        let source = try NormalizedMask(
+            size: PixelDimensions(width: 1, height: 1), values: [0.37]
+        )
+
+        let resized = try MaskOperations.resized(
+            source, to: PixelDimensions(width: 3, height: 2)
+        )
+
+        XCTAssertEqual(resized.values.count, 6)
+        for value in resized.values {
+            XCTAssertEqual(value, 0.37, accuracy: 0.0001)
+        }
     }
 
     func testMaskStoreRoundTripsPixelsThroughSidecar() async throws {
