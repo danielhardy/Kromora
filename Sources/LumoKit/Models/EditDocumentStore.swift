@@ -272,16 +272,14 @@ public actor EditDocumentStore {
                     document: EditDocument(), found: true, status: status)
             }
 
-            // The record being relinked is the newest observation, so it wins a collision with
-            // an existing target record. `relink` deletes the loser before changing the unique
-            // key and rolls back both changes if the durable write fails.
-            let occupiedRecord = try fetchRecord(assetID: key)
+            // No record occupies `key` (the direct-key fetch above already established that), so
+            // this is a plain rekey with nothing to replace.
             return relink(
                 record,
                 document: document,
                 to: key,
                 for: url,
-                replacing: occupiedRecord
+                replacing: nil
             )
         } catch {
             status = .writeFailure(error.localizedDescription)
