@@ -24,6 +24,10 @@ final class PreviewSurface: ObservableObject {
     private var currentDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
     private var pendingDisplayID: UInt64?
     private var pendingGPURevision: UInt64?
+    /// The paused MTKView does not continuously redraw. Keep the active destination weakly so a
+    /// completed publication can invalidate it immediately, even when SwiftUI does not schedule
+    /// an NSViewRepresentable update for the nested surface object.
+    private weak var displayView: MTKView?
     private struct PendingTelemetry {
         let telemetry: LiveEditTelemetry
         let source: ImageSource?
@@ -47,6 +51,24 @@ final class PreviewSurface: ObservableObject {
     /// Called by the Metal view, and by lifecycle tests that model a drawable-managed surface.
     func attachPresentationLifecycle() {
         hasManagedPresentationLifecycle = true
+    }
+
+    /// Bind the current Metal destination and request its first draw. A render can complete before
+    /// SwiftUI creates the representable, so attaching the view must replay the already-published
+    /// frame as well as future publications.
+    func attachDisplayView(_ view: MTKView) {
+        displayView = view
+        view.setNeedsDisplay(view.bounds)
+    }
+
+    func detachDisplayView(_ view: MTKView) {
+        if displayView === view {
+            displayView = nil
+        }
+    }
+
+    private func requestDisplay() {
+        displayView?.setNeedsDisplay(displayView?.bounds ?? .zero)
     }
 
     @discardableResult
@@ -103,6 +125,7 @@ final class PreviewSurface: ObservableObject {
             presentationConfirmations.removeValue(forKey: revision)
             onPresented()
         }
+        requestDisplay()
         return true
     }
     fileprivate func pendingPresentationRevision() -> UInt64? { pendingGPURevision }
@@ -123,6 +146,7 @@ final class PreviewSurface: ObservableObject {
         space = lastValidSpace
         currentDetail = lastValidDetail
         revision &+= 1
+        requestDisplay()
         onPresentationFailure?()
     }
 
@@ -243,6 +267,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
     func makeNSView(context: Context) -> MTKView {
         let view = PreviewMTKView(frame: .zero, device: context.coordinator.device)
         surface.attachPresentationLifecycle()
+        surface.attachDisplayView(view)
         context.coordinator.surface = surface
         context.coordinator.navigation = navigation
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
@@ -258,6 +283,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: MTKView, context: Context) {
+        if context.coordinator.surface !== surface {
+            context.coordinator.surface?.detachDisplayView(view)
+            surface.attachDisplayView(view)
+        }
         context.coordinator.surface = surface
         context.coordinator.navigation = navigation
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
@@ -269,6 +298,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
         // NavigationSplitView is replacing the selected image). The delegate will retry when the
         // view is laid out and when it receives its next drawable instead of losing this revision.
         view.setNeedsDisplay(view.bounds)
+    }
+
+    static func dismantleNSView(_ view: MTKView, coordinator: Coordinator) {
+        coordinator.surface?.detachDisplayView(view)
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }

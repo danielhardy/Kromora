@@ -59,14 +59,6 @@ final class ConcurrentExportEditingBenchmark: XCTestCase {
         }
     }
 
-    /// Holds the installed MTKView so the benchmark can request draws. In production SwiftUI's
-    /// `updateNSView` issues the display request; in a bare hosting view it does not flush, so the
-    /// benchmark triggers it explicitly (the coordinator's pacer keeps later frames flowing).
-    private final class MTKViewBox {
-        weak var view: MTKView?
-        func requestDraw() { view?.setNeedsDisplay(view?.bounds ?? .zero) }
-    }
-
     private static func findMTKView(in view: NSView) -> MTKView? {
         if let mtk = view as? MTKView { return mtk }
         for subview in view.subviews {
@@ -154,9 +146,8 @@ final class ConcurrentExportEditingBenchmark: XCTestCase {
         window.displayIfNeeded()
         // Let AppKit commit the layer and the MTKView into the window before rendering.
         try await Task.sleep(for: .milliseconds(300))
-        let mtkViewBox = MTKViewBox()
-        mtkViewBox.view = Self.findMTKView(in: hosting)
-        try XCTSkipIf(mtkViewBox.view == nil, "PreviewSurfaceView did not install an MTKView")
+        try XCTSkipIf(Self.findMTKView(in: hosting) == nil,
+                      "PreviewSurfaceView did not install an MTKView")
 
         // --- Shipping editors/scheduler/export wiring -----------------------
         let workScheduler = ImageWorkScheduler()
@@ -192,7 +183,6 @@ final class ConcurrentExportEditingBenchmark: XCTestCase {
                     detailFactor: detailFactor,
                     onPresented: presentationConfirmation
                 )
-                mtkViewBox.requestDraw()
             }
             if publication.phase == .settled, gpuImage != nil {
                 workScheduler.enqueue(id: histogramJobID, lane: .editor, priority: .histogram) {

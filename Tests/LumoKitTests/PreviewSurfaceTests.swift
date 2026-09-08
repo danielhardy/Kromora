@@ -1,9 +1,19 @@
 import XCTest
 import CoreImage
+import MetalKit
 @testable import LumoKit
 
 @MainActor
 final class PreviewSurfaceTests: XCTestCase {
+
+    private final class TrackingMTKView: MTKView {
+        private(set) var redrawRequestCount = 0
+
+        override func setNeedsDisplay(_ rect: NSRect) {
+            redrawRequestCount += 1
+            super.setNeedsDisplay(rect)
+        }
+    }
 
     func testPresentStoresTheWorkingSpaceForThePresentedImage() {
         let surface = PreviewSurface()
@@ -40,6 +50,28 @@ final class PreviewSurfaceTests: XCTestCase {
         )
 
         XCTAssertTrue(confirmed, "headless tests should not wait for a drawable that does not exist")
+    }
+
+    func testPublicationRequestsRedrawOnAnExistingMetalView() {
+        let surface = PreviewSurface()
+        let view = TrackingMTKView(frame: CGRect(x: 0, y: 0, width: 32, height: 24), device: nil)
+        surface.attachDisplayView(view)
+        let requestsBeforePublication = view.redrawRequestCount
+
+        XCTAssertTrue(surface.present(CIImage(color: .red)))
+        XCTAssertGreaterThan(view.redrawRequestCount, requestsBeforePublication,
+                             "publishing a frame must invalidate a paused MTKView")
+    }
+
+    func testAttachingAViewRequestsAFramePublishedBeforeTheViewWasCreated() {
+        let surface = PreviewSurface()
+        XCTAssertTrue(surface.present(CIImage(color: .red)))
+
+        let view = TrackingMTKView(frame: CGRect(x: 0, y: 0, width: 32, height: 24), device: nil)
+        surface.attachDisplayView(view)
+
+        XCTAssertGreaterThan(view.redrawRequestCount, 0,
+                             "a newly-created view must draw an already-published frame")
     }
 
     func testSkippedDrawableConfirmsAndRequestsAnotherDraw() {
