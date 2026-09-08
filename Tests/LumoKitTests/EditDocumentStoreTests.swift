@@ -79,6 +79,27 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(relaunched.document, editedDocument)
     }
 
+    func testPathRelinkUsesPredicateBeforeBookmarkFallbackScan() async throws {
+        let store = makeStore()
+        let url = tempDirectory.appendingPathComponent("path-match.jpg")
+        let savedSource = EditSourceReference(
+            assetID: .photos(localIdentifier: "saved-under-a-different-key"), url: url)
+        try await store.save(editedDocument, for: savedSource)
+
+        let result = await store.load(
+            for: EditSourceReference(assetID: .file(url), url: url))
+
+        XCTAssertTrue(result.found)
+        XCTAssertEqual(result.document, editedDocument)
+        XCTAssertEqual(result.status, .relinked)
+        let fallbackScanCount = await store.relinkFallbackScanCount
+        XCTAssertEqual(
+            fallbackScanCount,
+            0,
+            "an exact source-path match must be resolved by the predicate phase"
+        )
+    }
+
     func testRelinkOntoOccupiedAssetIDKeepsNewestRecordAndSubsequentLoadsSucceed() async throws {
         let container = makeInMemoryEditContainer()
         let store = EditDocumentStore(modelContainer: container)

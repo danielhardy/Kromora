@@ -8,6 +8,9 @@ import SwiftData
 /// cannot be silently turned into a blank edit by a value façade.
 @Model
 final class EditRecord {
+    // SwiftData's #Index macro is only available from macOS 15, while Lumo supports macOS 14.
+    // Keep this locator queryable and let the source-path predicate avoid materializing the
+    // catalog; add the schema index when the deployment target can support it.
     @Attribute(.unique) var assetID: String
     var documentData: Data
     var sourcePath: String?
