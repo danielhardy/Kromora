@@ -11,7 +11,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !(await condition()) {
-            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            if Date() > deadline {
+                throw TestSynchronizationError.timedOut(description, "published state did not settle")
+            }
             try await Task.sleep(for: .milliseconds(5))
         }
     }
@@ -70,6 +72,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "sequential-second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
         let viewModel = makeAppViewModel(engine: engine)
 
         viewModel.openImage(url: first)
@@ -80,9 +83,16 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         })?.url else {
             return XCTFail("one-off open should add the first managed-library item")
         }
-        try await waitUntil("the first preview") {
-            viewModel.sourceURL == firstManagedURL && viewModel.previewState == .ready
-                && viewModel.previewSurface.image != nil
+        let firstPreview = try await TestSynchronization.nextEvent(from: reader, "the first preview") {
+            if case .previewCompleted(let request) = $0 {
+                return request.source?.backing == .url(firstManagedURL)
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
+        }
+        if case .previewCompleted(let request) = firstPreview {
+            XCTAssertEqual(request.source?.backing, .url(firstManagedURL))
         }
 
         // Keep the replacement renderer in flight. The test releases only B and never performs a
@@ -94,18 +104,25 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         })?.url else {
             return XCTFail("one-off open should add the second managed-library item")
         }
-        try await waitUntil("the second preview request") {
-            let requests = await engine.previewRequests
-            return viewModel.sourceURL == secondManagedURL
-                && requests.contains { $0.source?.backing == .url(secondManagedURL) }
+        _ = try await TestSynchronization.nextEvent(from: reader, "the second preview request") {
+            if case .previewRequested(let request) = $0 {
+                return request.source?.backing == .url(secondManagedURL)
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
         XCTAssertEqual(viewModel.previewState, .loading)
         XCTAssertFalse(viewModel.isLoading, "source preparation is complete while B renders")
 
         await engine.releaseNextPreview()
-        try await waitUntil("the second preview") {
-            viewModel.sourceURL == secondManagedURL && viewModel.previewState == .ready
-                && viewModel.previewSurface.image != nil
+        _ = try await TestSynchronization.nextEvent(from: reader, "the second preview completion") {
+            if case .previewCompleted(let request) = $0 {
+                return request.source?.backing == .url(secondManagedURL)
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
         XCTAssertFalse(viewModel.isLoading)
     }
@@ -118,32 +135,69 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
         await engine.gateSourcePreparation()
         let viewModel = makeAppViewModel(engine: engine)
         try await loadCollection(viewModel, first: first, second: second)
 
         viewModel.selectCollectionImage(at: 0)
-        try await waitUntil("the first source preparation") {
-            await engine.sourcePreparationCount == 1
+        _ = try await TestSynchronization.nextEvent(from: reader, "the first source preparation") {
+            if case .sourcePreparationStarted = $0 { return true }
+            return false
+        } diagnostics: {
+            "source preparations=\(await engine.sourcePreparationCount)"
         }
         viewModel.selectCollectionImage(at: 1)
         await engine.releaseSourcePreparation()
 
-        try await waitUntil("the latest photo presentation") {
-            viewModel.sourceURL == second && viewModel.previewState == .ready
-                && viewModel.previewSurface.image != nil
+        _ = try await TestSynchronization.nextEvent(from: reader, "the latest source preparation") {
+            if case .sourcePreparationCompleted(let source, _) = $0 {
+                return source.backing == .url(second)
+            }
+            return false
+        } diagnostics: {
+            "source preparations=\(await engine.sourcePreparationCount)"
+        }
+        let secondPreview = try await TestSynchronization.nextEvent(from: reader, "the latest preview") {
+            if case .previewRequested(let request) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: {
+            "source preparations=\(await engine.sourcePreparationCount), previews=\(await engine.previewRequests.count)"
+        }
+        if case .previewRequested(let request) = secondPreview {
+            _ = try await TestSynchronization.nextEvent(from: reader, "the latest preview completion") {
+                if case .previewCompleted(let completed) = $0 { return completed == request }
+                return false
+            } diagnostics: {
+                "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
+            }
         }
         XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[1].id)
         XCTAssertNotEqual(viewModel.sourceURL, first)
 
         await engine.gateHistogram()
         viewModel.isInspectorPresented = true
-        try await waitUntil("the current histogram request") {
-            await engine.histogramRequests.contains { $0.source?.backing == .url(second) }
+        _ = try await TestSynchronization.nextEvent(from: reader, "the current histogram request") {
+            if case .histogramRequested(let request) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await engine.histogramRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
         viewModel.selectCollectionImage(at: 0)
         await engine.releaseHistograms()
 
+        _ = try await TestSynchronization.nextEvent(from: reader, "the first histogram completion") {
+            if case .histogramCompleted(let request, let result) = $0 {
+                return request.source?.backing == .url(first) && result != nil
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await engine.histogramRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
+        }
         try await waitUntil("the first photo after the switch back") {
             viewModel.sourceURL == first && viewModel.previewState == .ready
                 && viewModel.histogram != nil
@@ -161,18 +215,32 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "auto-second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
         let viewModel = makeAppViewModel(engine: engine)
         try await loadCollection(viewModel, first: first, second: second)
 
         viewModel.selectCollectionImage(at: 0)
-        try await waitUntil("the first photo presentation") {
+        _ = try await TestSynchronization.nextEvent(from: reader, "the first photo preview") {
+            if case .previewCompleted(let request) = $0 {
+                return request.source?.backing == .url(first)
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
+        }
+        try await waitUntil("the first photo readiness") {
             viewModel.previewState == .ready && viewModel.canRunAutoAdjustment
         }
 
         await engine.gateHistogram()
         viewModel.runAutoAdjustment()
-        try await waitUntil("the delayed Auto analysis") {
-            await engine.histogramRequests.contains { $0.source?.backing == .url(first) }
+        _ = try await TestSynchronization.nextEvent(from: reader, "the delayed Auto analysis") {
+            if case .histogramRequested(let request) = $0 {
+                return request.source?.backing == .url(first)
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await engine.histogramRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
 
         await engine.gatePreviews()
@@ -183,16 +251,33 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         ))
 
         await engine.releaseHistograms()
-        try await Task.sleep(for: .milliseconds(100))
+        _ = try await TestSynchronization.nextEvent(from: reader, "the delayed Auto completion") {
+            if case .histogramCompleted(let request, _) = $0 {
+                return request.source?.backing == .url(first)
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await engine.histogramRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
+        }
         XCTAssertEqual(viewModel.autoAdjustmentState, .unavailable(
             "Auto is available when the photo preview is ready."
         ), "the old analysis must not publish ready for the loading photo")
         XCTAssertFalse(viewModel.canRunAutoAdjustment)
 
         await engine.releasePreviews()
+        _ = try await TestSynchronization.nextEvent(from: reader, "the next photo presentation") {
+            if case .previewCompleted(let request) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
+        }
         try await waitUntil("the next photo presentation") {
             viewModel.previewState == .ready && viewModel.canRunAutoAdjustment
         }
+        XCTAssertEqual(viewModel.previewState, .ready)
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
     }
 
     func testLibraryGridHandoffPresentsTheSelectedPhotoWithoutTabSwitching() async throws {

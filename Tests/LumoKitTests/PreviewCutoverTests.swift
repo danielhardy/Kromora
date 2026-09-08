@@ -40,7 +40,9 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
-            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            if Date() > deadline {
+                throw TestSynchronizationError.timedOut(description, "published state did not settle")
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -50,6 +52,22 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         try await waitUntil("the image to load") { viewModel.sourceImage != nil }
     }
 
+    /// Open a fake-backed image using the renderer's source-preparation milestone. Preview events
+    /// remain in the reader so each test can await the exact opening or edited request it asserts.
+    private func openImage(
+        _ viewModel: AppViewModel, using fake: FakeRenderEngine
+    ) async throws -> FakeRenderEventReader {
+        let reader = FakeRenderEventReader(await fake.eventStream())
+        viewModel.openImage(url: try makeImageFile())
+        _ = try await TestSynchronization.nextEvent(from: reader, "source preparation") {
+            if case .sourcePreparationCompleted = $0 { return true }
+            return false
+        } diagnostics: {
+            "source preparations=\(await fake.sourcePreparationCount)"
+        }
+        return reader
+    }
+
     /// Wait for a render request matching `predicate`.
     ///
     /// Polling for "the last request" is not good enough: several renders are in flight at once (the
@@ -57,19 +75,25 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     /// loose condition by accident — which is exactly how the first draft of the A/B test passed
     /// against the *opening* render instead of the one it meant to check.
     private func awaitRequest(
+        _ reader: FakeRenderEventReader,
         _ fake: FakeRenderEngine,
         _ description: String,
         timeout: TimeInterval = 5,
-        matching predicate: (FakeRenderEngine.Request) -> Bool
+        matching predicate: @Sendable @escaping (FakeRenderEngine.Request) -> Bool
     ) async throws -> FakeRenderEngine.Request {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if let match = await fake.previewRequests.first(where: predicate) { return match }
-            try await Task.sleep(for: .milliseconds(10))
+        let event = try await TestSynchronization.nextEvent(
+            from: reader, description, timeout: .seconds(timeout), matching: { event in
+                if case .previewRequested(let request) = event { return predicate(request) }
+                return false
+            }, diagnostics: {
+                let seen = await fake.previewRequests
+                return "preview requests=\(seen.count), revisions=\(await fake.renderRequests.map(\.requestRevision)), seen=\(seen)"
+            }
+        )
+        guard case .previewRequested(let request) = event else {
+            throw TestSynchronizationError.streamEnded(description)
         }
-        let seen = await fake.previewRequests
-        XCTFail("timed out waiting for \(description); saw \(seen.count) request(s): \(seen)")
-        throw XCTSkip("no matching request")
+        return request
     }
 
     private func previewBytes(_ viewModel: AppViewModel) throws -> [UInt8] {
@@ -86,9 +110,9 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     func testTheDocumentReachesTheEngine() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        try await openImage(viewModel)
+        let reader = try await openImage(viewModel, using: fake)
 
-        let first = try await awaitRequest(fake, "the opening render") { _ in true }
+        let first = try await awaitRequest(reader, fake, "the opening render") { _ in true }
         XCTAssertEqual(first.document, EditDocument(), "an unedited image renders the empty document")
         XCTAssertNil(first.lutID)
         XCTAssertEqual(first.space, .current)
@@ -114,7 +138,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     func testFitFillAndExplicitZoomPublishNonBlankSurfaceFrames() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        try await openImage(viewModel)
+        _ = try await openImage(viewModel, using: fake)
         try await waitUntil("the opening surface") { viewModel.previewSurface.image != nil }
 
         for action in [
@@ -144,7 +168,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     func testZoomJustAboveAndFarAbove100PercentUsesNativePreviewAndKeepsSurfaceFrame() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        try await openImage(viewModel)
+        _ = try await openImage(viewModel, using: fake)
         try await waitUntil("the opening surface") { viewModel.previewSurface.image != nil }
 
         for zoom in [1.01, 8.0] {
@@ -172,7 +196,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     func testDevelopAdjustmentsAndIntensityAllReachTheEngine() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        try await openImage(viewModel)
+        let reader = try await openImage(viewModel, using: fake)
 
         let lut = TestImages.warmLUT()
         viewModel.selectLUT(lut)
@@ -183,7 +207,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         }
 
         // Match on the fully edited document, not on one field — several renders are in flight.
-        let request = try await awaitRequest(fake, "the fully edited document") {
+        let request = try await awaitRequest(reader, fake, "the fully edited document") {
             $0.document.rawDevelop.exposure == 0.75 && !$0.document.adjustments.isEmpty
         }
         XCTAssertEqual(request.document.rawDevelop.exposure, 0.75, "develop must reach the renderer")
@@ -199,7 +223,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     func testShowingOriginalRequestsTheDevelopAppliedBaseline() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        try await openImage(viewModel)
+        let reader = try await openImage(viewModel, using: fake)
 
         viewModel.selectLUT(TestImages.warmLUT())
         viewModel.updateDocument {
@@ -213,7 +237,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         let expected = EditDocument(
             rawDevelop: RAWDevelopSettings(exposure: 1.25), adjustments: [], lut: .none
         )
-        let request = try await awaitRequest(fake, "the A/B baseline render") {
+        let request = try await awaitRequest(reader, fake, "the A/B baseline render") {
             $0.document == expected
         }
         XCTAssertEqual(request.document.rawDevelop.exposure, 1.25,

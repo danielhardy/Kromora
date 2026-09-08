@@ -54,6 +54,19 @@ extension RAWCapabilities {
 /// mutable state.
 actor FakeRenderEngine: RenderEngining {
 
+    /// Lifecycle signals emitted at the same actor-isolated points as the recorded calls. Tests
+    /// consume these through `FakeRenderEventReader` instead of polling the arrays with sleeps.
+    enum Event: Sendable, Equatable {
+        case sourcePreparationStarted(ImageSource)
+        case sourcePreparationCompleted(ImageSource, ImageSourcePreparation?)
+        case previewRequested(Request)
+        case previewCompleted(Request)
+        case histogramRequested(Request)
+        case histogramCompleted(Request, HistogramData?)
+        case encodeRequested(Request)
+        case encodeCompleted(Request)
+    }
+
     /// Every request sent through the UI-independent renderer API, in order.
     private(set) var renderRequests: [RenderRequest] = []
 
@@ -70,8 +83,9 @@ actor FakeRenderEngine: RenderEngining {
     private var shouldFailHistogram = false
     private var previewIsGated = false
     private var parkedPreviews: [CheckedContinuation<Void, Never>] = []
+    private var eventContinuation: AsyncStream<Event>.Continuation?
 
-    struct Request: Equatable {
+    struct Request: Sendable, Equatable {
         let document: EditDocument
         let lutID: LUTID?
         let scale: RenderScale
@@ -126,6 +140,19 @@ actor FakeRenderEngine: RenderEngining {
         self.previewResult = previewResult
     }
 
+    /// Create the stream before starting the operation under test. The stream is deliberately
+    /// single-consumer: a reader preserves event order while allowing unrelated milestones to be
+    /// skipped without accidentally re-reading or losing events between awaits.
+    func eventStream() -> AsyncStream<Event> {
+        let (stream, continuation) = AsyncStream<Event>.makeStream()
+        eventContinuation = continuation
+        return stream
+    }
+
+    private func emit(_ event: Event) {
+        eventContinuation?.yield(event)
+    }
+
     func render(_ request: RenderRequest) async throws -> RenderResult {
         try Task.checkCancellation()
         renderRequests.append(request)
@@ -133,6 +160,7 @@ actor FakeRenderEngine: RenderEngining {
         switch request.output {
         case .raster:
             previewRequests.append(record)
+            emit(.previewRequested(record))
             if previewIsGated {
                 await withCheckedContinuation { parkedPreviews.append($0) }
             }
@@ -140,6 +168,7 @@ actor FakeRenderEngine: RenderEngining {
                   let data = Self.pngData(for: image)
             else { throw ImageError.processingFailed }
             try Task.checkCancellation()
+            emit(.previewCompleted(record))
             return RenderResult(
                 data: data, extent: CGSize(width: image.width, height: image.height),
                 colorSpace: request.space, quality: request.quality, output: request.output
@@ -147,6 +176,7 @@ actor FakeRenderEngine: RenderEngining {
 
         case .encoded(let format, _):
             encodeRequests.append(record)
+            emit(.encodeRequested(record))
             activeEncodes += 1
             maxConcurrentEncodes = max(maxConcurrentEncodes, activeEncodes)
             defer { activeEncodes -= 1 }
@@ -155,6 +185,7 @@ actor FakeRenderEngine: RenderEngining {
             }
             try Task.checkCancellation()
             if shouldFailEncode { throw ImageError.exportFailed }
+            emit(.encodeCompleted(record))
             return RenderResult(
                 data: Data("fake-\(format.rawValue)".utf8), extent: .zero,
                 colorSpace: request.space, quality: request.quality, output: request.output
@@ -170,14 +201,19 @@ actor FakeRenderEngine: RenderEngining {
         space: WorkingSpace,
         maxDimension: Int
     ) async -> HistogramData? {
-        histogramRequests.append(Request(
+        let record = Request(
             document: document, lutID: lut?.lutID, scale: scale, space: space, format: nil,
             source: source
-        ))
+        )
+        histogramRequests.append(record)
+        emit(.histogramRequested(record))
         if histogramIsGated {
             await withCheckedContinuation { parkedHistograms.append($0) }
         }
-        if shouldFailHistogram { return nil }
+        if shouldFailHistogram {
+            emit(.histogramCompleted(record, nil))
+            return nil
+        }
         // A recognisable tally rather than `nil`: a caller that drops the result would otherwise be
         // indistinguishable from one that publishes it.
         var bins = [Int](repeating: 0, count: 256)
@@ -189,7 +225,9 @@ actor FakeRenderEngine: RenderEngining {
             0, min(255, Int(((document.rawDevelop.exposure ?? 0) + adjustmentExposure + 10) * 10))
         )
         bins[marker] = 1
-        return HistogramData(red: bins, green: bins, blue: bins, luma: bins)
+        let result = HistogramData(red: bins, green: bins, blue: bins, luma: bins)
+        emit(.histogramCompleted(record, result))
+        return result
     }
 
     /// Hold histogram responses until the test has arranged a newer display revision.
@@ -257,27 +295,35 @@ actor FakeRenderEngine: RenderEngining {
 
     func prepareSource(_ source: ImageSource) async -> ImageSourcePreparation? {
         sourcePreparationCount += 1
+        emit(.sourcePreparationStarted(source))
         if sourcePreparationIsGated {
             await withCheckedContinuation { parkedSourcePreparation = $0 }
         }
+        let preparation: ImageSourcePreparation?
         if source.kind == .raw {
             // The fake has no decoder, but it still needs to model the value-state transition that
             // production performs with CIRAWFilter.nativeSize.
             let extent = source.nativeExtent == .zero
                 ? CGSize(width: 4_000, height: 3_000) : source.nativeExtent
-            return ImageSourcePreparation(source: ImageSource(
+            preparation = ImageSourcePreparation(source: ImageSource(
                 backing: source.backing, kind: .raw, nativeExtent: extent
             ))
+        } else {
+            let extent: CGSize?
+            switch source.backing {
+            case .url(let url): extent = try? ImageDecoder.prepareStandard(from: url)
+            case .data(let data): extent = try? ImageDecoder.prepareStandard(from: data, name: "fake")
+            }
+            guard let extent else {
+                emit(.sourcePreparationCompleted(source, nil))
+                return nil
+            }
+            preparation = ImageSourcePreparation(source: ImageSource(
+                backing: source.backing, kind: source.kind, nativeExtent: extent
+            ))
         }
-        let extent: CGSize?
-        switch source.backing {
-        case .url(let url): extent = try? ImageDecoder.prepareStandard(from: url)
-        case .data(let data): extent = try? ImageDecoder.prepareStandard(from: data, name: "fake")
-        }
-        guard let extent else { return nil }
-        return ImageSourcePreparation(source: ImageSource(
-            backing: source.backing, kind: source.kind, nativeExtent: extent
-        ))
+        emit(.sourcePreparationCompleted(source, preparation))
+        return preparation
     }
 
     /// What the fake reports. `nil` models a standard image.
