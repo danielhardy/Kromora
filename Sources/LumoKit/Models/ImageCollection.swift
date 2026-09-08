@@ -65,6 +65,13 @@ final class ImageCollection: ObservableObject {
     final class Item: ObservableObject, Identifiable {
         @Published var asset: PhotoAsset
         @Published var thumbnail: NSImage?
+        /// The source thumbnail remains available while an edited render is being produced. Keeping
+        /// it separate prevents a slow edited render from turning a useful cell into a spinner and
+        /// lets a failed render fall back to the original source image.
+        private var originalThumbnail: NSImage?
+        private var editedThumbnail: NSImage?
+        private var editedThumbnailUsesFallback = false
+        private(set) var editedThumbnailRevision: String?
         /// Filled after discovery. A nil value means deferred metadata work has not completed.
         @Published var metadata: ImageMetadata? = nil
         /// Relative directory from the source-folder root ("" for top level).
@@ -76,6 +83,11 @@ final class ImageCollection: ObservableObject {
         var displayName: String { asset.displayName }
         var imageData: Data? { asset.source.data }
         var dataFingerprint: String? { asset.source.fingerprint.sampleDigest }
+        var thumbnailNativeExtent: CGSize {
+            guard let dimensions = asset.dimensions,
+                  dimensions.width > 0, dimensions.height > 0 else { return .zero }
+            return CGSize(width: dimensions.width, height: dimensions.height)
+        }
 
         /// The upright display ratio is available from deferred metadata as soon as ImageIO has
         /// read it. Until then use a photographic 4:3 placeholder, which keeps the first layout
@@ -96,8 +108,31 @@ final class ImageCollection: ObservableObject {
         ) {
             self.asset = asset
             self.thumbnail = thumbnail
+            self.originalThumbnail = thumbnail
             self.metadata = metadata
             self.subfolder = subfolder
+        }
+
+        func setOriginalThumbnail(_ thumbnail: NSImage?) {
+            originalThumbnail = thumbnail
+            if editedThumbnailRevision == nil || editedThumbnailUsesFallback {
+                self.thumbnail = thumbnail
+            }
+        }
+
+        func invalidateEditedThumbnail() {
+            editedThumbnailRevision = nil
+            editedThumbnail = nil
+            editedThumbnailUsesFallback = false
+            thumbnail = originalThumbnail
+        }
+
+        func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
+            guard editedThumbnailRevision == nil || editedThumbnailRevision != revision else { return }
+            editedThumbnailRevision = revision
+            editedThumbnail = thumbnail
+            editedThumbnailUsesFallback = thumbnail == nil
+            self.thumbnail = thumbnail ?? originalThumbnail
         }
 
         /// UI compatibility initializer. The durable record is built first; the AppKit thumbnail
@@ -144,6 +179,10 @@ final class ImageCollection: ObservableObject {
     /// The persistent user-selected source folder, if one is set. Imported files live in
     /// `libraryFolderURL` and are present regardless of this value.
     @Published var sourceFolderURL: URL?
+
+    /// AppViewModel supplies the edit-aware half of thumbnail generation. The collection owns
+    /// admission and the shared item bitmap; the app model owns edit-store and Look resolution.
+    var onThumbnailDemand: (@MainActor @Sendable (PhotoAssetID, ImageWorkScheduler.Priority) -> Void)?
 
     /// Lumo's managed, durable destination for files imported from Photos or one-off opens.
     /// This is intentionally injectable for tests and remains separate from a user's source folder.
@@ -1183,9 +1222,13 @@ final class ImageCollection: ObservableObject {
         for id: PhotoAssetID,
         priority: ImageWorkScheduler.Priority = .visibleGrid
     ) {
-        guard isThumbnailDemandDriven,
-              let index = items.firstIndex(where: { $0.id == id }),
-              items[index].thumbnail == nil else { return }
+        guard isThumbnailDemandDriven, let index = items.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        // Edited thumbnails are a separate layer and may be needed even after the original
+        // fallback has finished. Notify the app model before the source-thumbnail fast path.
+        onThumbnailDemand?(id, priority)
+        guard items[index].thumbnail == nil else { return }
         thumbnailDemandIDs.insert(id)
         thumbnailDemandPriorities[id] = priority
         let jobID = thumbnailJobID(for: items[index])
@@ -1404,9 +1447,24 @@ final class ImageCollection: ObservableObject {
         guard generation == thumbnailGeneration,
               let index = items.firstIndex(where: { $0.id == itemID }) else { return }
         thumbnailJobIDs.remove(thumbnailJobID(for: items[index]))
-        items[index].thumbnail = thumbnail
+        items[index].setOriginalThumbnail(thumbnail)
         items[index].asset.thumbnailState = thumbnail == nil ? .failed : .ready
         fillThumbnailQueue()
+    }
+
+    /// Replace the displayed thumbnail only if it still belongs to the requested edit revision.
+    /// Both the filmstrip and grid observe this same Item, so a single edited render updates both
+    /// browsing surfaces without duplicate work.
+    func invalidateEditedThumbnail(for id: PhotoAssetID) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        item.invalidateEditedThumbnail()
+    }
+
+    func applyEditedThumbnail(
+        _ thumbnail: NSImage?, for id: PhotoAssetID, revision: String
+    ) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        item.applyEditedThumbnail(thumbnail, revision: revision)
     }
 
     /// Admit the next useful work after a worker finishes. The scan can discover thousands of files,
@@ -1457,6 +1515,7 @@ final class ImageCollection: ObservableObject {
         }
         for id in prepared {
             thumbnailDemandPriorities[id] = .adjacentFilmstrip
+            onThumbnailDemand?(id, .adjacentFilmstrip)
         }
         for id in obsolete where !thumbnailDemandIDs.contains(id) {
             guard let item = items.first(where: { $0.id == id }), item.thumbnail == nil else { continue }

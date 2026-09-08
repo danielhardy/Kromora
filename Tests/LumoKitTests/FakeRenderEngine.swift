@@ -69,6 +69,9 @@ actor FakeRenderEngine: RenderEngining {
 
     /// Every request sent through the UI-independent renderer API, in order.
     private(set) var renderRequests: [RenderRequest] = []
+    /// Browsing thumbnails have a separate recording seam so support renders do not look like
+    /// additional visible canvas frames in lifecycle tests.
+    private(set) var thumbnailRequests: [RenderRequest] = []
 
     /// Every `makeCGImage` call, in order.
     private(set) var previewRequests: [Request] = []
@@ -191,6 +194,19 @@ actor FakeRenderEngine: RenderEngining {
                 colorSpace: request.space, quality: request.quality, output: request.output
             )
         }
+    }
+
+    func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult {
+        try Task.checkCancellation()
+        thumbnailRequests.append(request)
+        guard request.output == .raster,
+              let image = previewResult ?? Self.solidImage(),
+              let data = Self.pngData(for: image)
+        else { throw ImageError.processingFailed }
+        return RenderResult(
+            data: data, extent: CGSize(width: image.width, height: image.height),
+            colorSpace: request.space, quality: request.quality, output: request.output
+        )
     }
 
     func histogram(

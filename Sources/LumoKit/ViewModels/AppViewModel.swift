@@ -604,6 +604,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     public let settings: LumoSettings
     let library: LUTLibrary
     let workScheduler: ImageWorkScheduler
+    /// Edited thumbnails share the collection's bounded thumbnail lane. A stable job per asset
+    /// lets filmstrip and grid demand one render rather than producing duplicate work.
+    private var editedThumbnailGenerations: [PhotoAssetID: UInt64] = [:]
+    private let editedThumbnailJobPrefix = "edited-thumbnail-"
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
     let editStore: EditDocumentStore
@@ -765,6 +769,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
         self.mediaVolumeProvider = mediaVolumeProvider
 
+        collection.onThumbnailDemand = { [weak self] assetID, priority in
+            self?.requestEditedThumbnail(for: assetID, priority: priority)
+        }
+
         if let renderEngine = engine as? RenderEngine {
             semanticCoordinatorInstallTask = Task {
                 await renderEngine.installSemanticMaskCoordinator(analysisCoordinator)
@@ -884,8 +892,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             self.lutCacheInvalidationTask?.cancel()
             let engine = self.engine
             guard self.sourceImage != nil else {
-                self.lutCacheInvalidationTask = Task { [engine] in
+                self.lutCacheInvalidationTask = Task { [weak self, engine] in
                     await engine.invalidateLUTCache()
+                    guard let self, !self.isShuttingDown else { return }
+                    self.refreshMaterializedEditedThumbnails()
                 }
                 return
             }
@@ -895,6 +905,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 await engine.invalidateLUTCache()
                 guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
                 self.schedulePreview()
+                self.refreshMaterializedEditedThumbnails()
             }
         }
 
@@ -1387,6 +1398,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 comparisonRevision &+= 1
                 schedulePreview()
                 scheduleAdjacentPreviewPrefetch()
+                requestEditedThumbnail(for: request.assetID, priority: .activeEditor, force: true)
             }
         }
         if stored.status.isActionable {
@@ -1889,6 +1901,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard collection.items.indices.contains(index) else { return }
         collection.select(at: index, modifiers: additive ? [.command] : [])
         let item = collection.items[index]
+        requestEditedThumbnail(for: item.id, priority: .activeEditor)
 
         if let url = item.url {
             openImage(url: url, assetID: item.id)
@@ -1897,6 +1910,119 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 name: item.displayName, url: nil, data: data, assetID: item.id,
                 dataFingerprint: item.dataFingerprint
             )
+        }
+    }
+
+    // MARK: - Edit-aware thumbnails
+
+    /// Request one bounded edited-thumbnail render for a photo. The original thumbnail is already
+    /// visible while this work runs, so a slow RAW or LUT render never blocks the editor or blanks a
+    /// browsing cell. The job identity is per photo; the document hash and resolved Look fingerprint
+    /// are the effective pixel revision applied at publication time.
+    private func requestEditedThumbnail(
+        for assetID: PhotoAssetID,
+        priority: ImageWorkScheduler.Priority,
+        force: Bool = false
+    ) {
+        guard !isShuttingDown,
+              let item = collection.items.first(where: { $0.id == assetID }) else { return }
+
+        let jobID = ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw)
+        if workScheduler.contains(jobID) {
+            if force {
+                workScheduler.cancel(id: jobID, pump: false)
+            } else {
+                workScheduler.updatePriority(for: jobID, to: priority)
+                return
+            }
+        }
+
+        // A completed result is shared by both surfaces. Repeated SwiftUI appearance callbacks
+        // should not re-render it; a force request is reserved for explicit edit/look changes.
+        if !force, item.editedThumbnailRevision != nil { return }
+
+        let generation = (editedThumbnailGenerations[assetID] ?? 0) &+ 1
+        editedThumbnailGenerations[assetID] = generation
+        collection.invalidateEditedThumbnail(for: assetID)
+
+        let source: ImageSource?
+        if let url = item.url {
+            source = ImageSource(url: url, nativeExtent: item.thumbnailNativeExtent)
+        } else if let data = item.imageData {
+            source = ImageSource(
+                data: data, nativeExtent: item.thumbnailNativeExtent,
+                dataFingerprint: item.dataFingerprint
+            )
+        } else {
+            source = nil
+        }
+        guard let source else { return }
+
+        let inMemoryDocument = editSessions[assetID]?.document
+        let sourceReference = EditSourceReference(assetID: assetID, url: item.url)
+        let engine = self.engine
+        let editStore = self.editStore
+        workScheduler.enqueue(
+            id: jobID, lane: .thumbnail, priority: priority
+        ) { [weak self, engine, editStore, source, sourceReference, assetID, generation] in
+            guard let self, !self.isShuttingDown,
+                  self.editedThumbnailGenerations[assetID] == generation else { return }
+
+            let document: EditDocument
+            if let inMemoryDocument {
+                document = inMemoryDocument
+            } else {
+                document = await editStore.load(for: sourceReference).document
+            }
+            guard !Task.isCancelled, !self.isShuttingDown,
+                  self.editedThumbnailGenerations[assetID] == generation else { return }
+
+            let lut = self.resolvedLUT(document.lut.lutID)
+            let revision = self.editedThumbnailRevision(document: document, lut: lut)
+            guard !document.isIdentity else {
+                self.collection.applyEditedThumbnail(nil, for: assetID, revision: revision)
+                return
+            }
+
+            // Metadata normally supplies the extent before a cell appears. Preparing the source
+            // here is the safe fallback for a just-discovered cell and keeps the thumbnail render
+            // at preview scale instead of accidentally rasterizing a full-resolution image.
+            let renderSource = await engine.prepareSource(source)?.source ?? source
+            let request = RenderRequest(
+                source: renderSource,
+                assetID: assetID,
+                document: document,
+                lut: lut,
+                targetSize: CGSize(width: Thumbnails.defaultMaxPixelSize,
+                                   height: Thumbnails.defaultMaxPixelSize),
+                quality: .thumbnail,
+                output: .raster,
+                space: .current
+            )
+            let image: NSImage?
+            if let result = try? await engine.renderThumbnail(request) {
+                image = NSImage(data: result.data)
+            } else {
+                image = nil
+            }
+            guard !Task.isCancelled, !self.isShuttingDown,
+                  self.editedThumbnailGenerations[assetID] == generation else { return }
+            self.collection.applyEditedThumbnail(image, for: assetID, revision: revision)
+        }
+    }
+
+    private func editedThumbnailRevision(document: EditDocument, lut: CubeLUT?) -> String {
+        document.editHash + ":" + (lut?.cacheFingerprint ?? "unresolved")
+    }
+
+    /// A LUT scan can resolve or replace a file-backed Look without changing the edit document.
+    /// Only items that already produced an edited thumbnail are revisited; demand admission still
+    /// keeps the work bounded and avoids a full-library render after every Look-folder scan.
+    private func refreshMaterializedEditedThumbnails() {
+        for item in collection.items where item.editedThumbnailRevision != nil {
+            let priority: ImageWorkScheduler.Priority = item.id == activeAssetID
+                ? .activeEditor : .visibleGrid
+            requestEditedThumbnail(for: item.id, priority: priority, force: true)
         }
     }
 
@@ -1964,6 +2090,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 session.history.recordChange(from: session.document, to: updated)
                 session.document = updated
                 editSessions[assetID] = session
+                requestEditedThumbnail(for: assetID, priority: .visibleGrid, force: true)
                 queuePersistence(
                     updated,
                     for: EditSourceReference(assetID: assetID, url: item.url),
@@ -2186,6 +2313,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         refreshLUTResolutionStatus()
         saveActiveDocument()
         documentRevision &+= 1
+        if let activeAssetID {
+            requestEditedThumbnail(for: activeAssetID, priority: .activeEditor, force: true)
+        }
         // Look edits and RAW Temperature/Tint leave the baseline unchanged, so an in-flight
         // baseline remains useful. Other RAW develop edits change the explicit before-image and
         // must invalidate that work; it will be queued again after the new visible result publishes.
@@ -2306,6 +2436,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         activeHistory.recordChange(from: oldDocument, to: document)
         saveActiveDocument()
         documentRevision &+= 1
+        if let activeAssetID {
+            requestEditedThumbnail(for: activeAssetID, priority: .activeEditor, force: true)
+        }
         if isPreviewInteractionActive {
             scheduleInteractivePreview()
         } else {
@@ -2742,6 +2875,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         refreshLUTResolutionStatus()
         saveActiveDocument(force: true)
         documentRevision &+= 1
+        if let activeAssetID {
+            requestEditedThumbnail(for: activeAssetID, priority: .activeEditor, force: true)
+        }
         if comparisonChanged {
             comparisonRevision &+= 1
             comparisonPreviewScheduledRevision = nil
