@@ -329,6 +329,9 @@ actor RenderEngine: RenderEngining {
     }
     private var localMaskRenderer: LocalMaskRenderer { resources.localMaskRenderer }
     private var localMaskResolver: any LocalMaskResolving
+    /// `nil` is used by focused comparison tests to exercise the previous full-resolution path.
+    /// Production engines use the bounded preview policy below; render/export remains uncapped.
+    private let semanticMaskPreviewCap: PixelDimensions?
     /// The interactive RAW decoder is deliberately a single-entry cache. `CIRAWFilter` is mutable
     /// and is only safe behind this actor; retaining one filter for the visible source avoids
     /// rebuilding its immutable source/decode setup on every pointer tick. It is discarded at the
@@ -348,10 +351,12 @@ actor RenderEngine: RenderEngining {
 
     init(
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
-        configuration: RenderCacheConfiguration = .default
+        configuration: RenderCacheConfiguration = .default,
+        semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap
     ) {
         self.resources = RenderEngineResources(configuration: configuration)
         self.localMaskResolver = maskResolver
+        self.semanticMaskPreviewCap = semanticMaskPreviewCap
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
     }
 
@@ -367,10 +372,12 @@ actor RenderEngine: RenderEngining {
     init(
         context: CIContext,
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
-        configuration: RenderCacheConfiguration = .default
+        configuration: RenderCacheConfiguration = .default,
+        semanticMaskPreviewCap: PixelDimensions? = SemanticMaskPreviewResolution.defaultCap
     ) {
         self.resources = RenderEngineResources(context: context, configuration: configuration)
         self.localMaskResolver = maskResolver
+        self.semanticMaskPreviewCap = semanticMaskPreviewCap
         Task { [weak self] in await self?.installMemoryPressureMonitor() }
     }
 
@@ -1041,7 +1048,6 @@ actor RenderEngine: RenderEngining {
               extent.width <= CGFloat(Int.max), extent.height <= CGFloat(Int.max)
         else { return [:] }
 
-        let targetSize = PixelDimensions(width: Int(extent.width), height: Int(extent.height))
         var result: [UUID: CIImage] = [:]
         for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
             try Task.checkCancellation()
@@ -1052,9 +1058,12 @@ actor RenderEngine: RenderEngining {
             for component in layer.components where component.isUsable
                 && (onlyComponentID == nil || component.id == onlyComponentID) {
                 let definitionHash = RenderCacheHash.digest(component.source)
+                let componentTargetSize = maskTargetSize(
+                    for: component, extent: extent, quality: quality
+                )
                 let key = LocalMaskCacheKey(
                     source: RenderSourceFingerprint(source), definitionHash: definitionHash,
-                    targetSize: targetSize, quality: quality, transform: transform,
+                    targetSize: componentTargetSize, quality: quality, transform: transform,
                     rendererVersion: LocalMaskRenderer.version
                 )
                 let payload: LocalMaskPayload
@@ -1066,7 +1075,8 @@ actor RenderEngine: RenderEngining {
                 } else {
                     do {
                     payload = try await localMaskResolver.resolve(LocalMaskResolveRequest(
-                            source: source, assetID: assetID, component: component, targetSize: targetSize,
+                            source: source, assetID: assetID, component: component,
+                            targetSize: componentTargetSize,
                             quality: quality, transform: transform
                         ))
                     } catch is CancellationError {
@@ -1088,7 +1098,7 @@ actor RenderEngine: RenderEngining {
                        || payload.assetID == (assetID ?? PhotoAnalysisCoordinator.assetID(for: source))),
                       payload.sourceFingerprint == source.cacheFingerprint,
                       (payload.definitionHash.isEmpty || payload.definitionHash == definitionHash),
-                      payload.targetSize == targetSize,
+                      payload.targetSize == componentTargetSize,
                       payload.quality == quality,
                       !payload.providerVersion.isEmpty else {
                     throw LocalMaskResolutionError.sourceMismatch
@@ -1120,6 +1130,17 @@ actor RenderEngine: RenderEngining {
             result[layer.id] = mask
         }
         return result
+    }
+
+    private func maskTargetSize(
+        for component: MaskComponent, extent: CGRect, quality: RenderQuality
+    ) -> PixelDimensions {
+        let fullSize = PixelDimensions(width: Int(extent.width), height: Int(extent.height))
+        guard quality.maskQuality == .preview,
+              case .semantic = component.source else { return fullSize }
+        return SemanticMaskPreviewResolution.targetSize(
+            for: fullSize, cap: semanticMaskPreviewCap
+        )
     }
 
     private func noteMaskRequest(source: ImageSource, revision: UInt64) {

@@ -38,6 +38,8 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
     let source: ImageSource
     let assetID: PhotoAssetID
     let component: MaskComponent
+    /// The working extent for this component. Preview semantic rasters may be smaller than the
+    /// display extent; `LocalMaskRenderer` upscales those values when building the CI graph.
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let transform: LocalMaskRenderTransform
@@ -56,6 +58,41 @@ struct LocalMaskResolveRequest: Sendable, Equatable {
         self.targetSize = targetSize
         self.quality = quality
         self.transform = transform
+    }
+}
+
+/// Preview semantic masks carry low-frequency information, so resolving them at the full display
+/// extent wastes memory and CPU when the canvas is zoomed to a large source. The raster remains
+/// smooth when Core Image samples it at the display extent. Full-resolution/export requests do
+/// not use this policy.
+enum SemanticMaskPreviewResolution {
+    static let maximumPixelCount = 4_000_000
+    static let maximumLongEdge = 2_560
+    static let defaultCap = PixelDimensions(width: maximumLongEdge, height: maximumLongEdge)
+
+    static func targetSize(for size: PixelDimensions, cap: PixelDimensions?) -> PixelDimensions {
+        guard let cap,
+              size.width > 0, size.height > 0,
+              cap.width > 0, cap.height > 0 else { return size }
+
+        let width = Double(size.width)
+        let height = Double(size.height)
+        let pixelScale = sqrt(Double(maximumPixelCount) / (width * height))
+        let longEdgeScale = Double(maximumLongEdge) / max(width, height)
+        let scale = min(1, pixelScale, longEdgeScale,
+                        Double(cap.width) / width, Double(cap.height) / height)
+        guard scale < 1 else { return size }
+
+        var resultWidth = max(1, Int((width * scale).rounded(.down)))
+        var resultHeight = max(1, Int((height * scale).rounded(.down)))
+        while resultWidth * resultHeight > maximumPixelCount {
+            if resultWidth >= resultHeight {
+                resultWidth -= 1
+            } else {
+                resultHeight -= 1
+            }
+        }
+        return PixelDimensions(width: resultWidth, height: resultHeight)
     }
 }
 
@@ -161,6 +198,8 @@ struct LocalMaskPayload: Sendable, Equatable {
     let assetID: PhotoAssetID?
     let sourceFingerprint: String
     let definitionHash: String
+    /// The descriptor's working extent. A preview semantic raster may be smaller than the render
+    /// extent and is upscaled only at the Core Image boundary.
     let targetSize: PixelDimensions
     let quality: RenderQuality
     let providerVersion: String

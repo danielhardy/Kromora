@@ -6,7 +6,7 @@ import Foundation
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
 final class LocalMaskRenderer {
-    static let version = 5
+    static let version = 6
     private let maxBrushStrokeCacheEntries = 8
     private let maxBrushStrokeCacheCostBytes: Int
     private var brushStrokeCache: [String: [Float]] = [:]
@@ -108,15 +108,17 @@ final class LocalMaskRenderer {
     ) -> CIImage? {
         let dimensions = PixelDimensions(width: Int(extent.width), height: Int(extent.height))
         guard extent.width.isFinite, extent.height.isFinite,
-              extent.width > 0, extent.height > 0,
-              payload.targetSize == dimensions else { return nil }
+              extent.width > 0, extent.height > 0 else { return nil }
 
         switch payload.descriptor {
         case .raster(let mask):
+            guard payload.targetSize == mask.size else { return nil }
             return rasterImage(mask, extent: extent)
         case .brush(let brush):
+            guard payload.targetSize == dimensions else { return nil }
             return brushImage(brush, dimensions: dimensions, extent: extent, transform: transform)
         case .linear(let definition):
+            guard payload.targetSize == dimensions else { return nil }
             let points = [transformPoint(definition.zeroStrengthPoint, transform),
                           transformPoint(definition.fullStrengthPoint, transform)]
             return analyticImage(
@@ -125,6 +127,7 @@ final class LocalMaskRenderer {
                 controls: CIVector(x: 0, y: definition.density, z: 1, w: 0)
             )
         case .radial(let definition):
+            guard payload.targetSize == dimensions else { return nil }
             let center = transformPoint(definition.center, transform)
             let radii = CGSize(
                 width: max(0.0001, definition.horizontalRadius * abs(transform.scaleX) * extent.width),
@@ -221,9 +224,20 @@ final class LocalMaskRenderer {
         }
         let image = CIImage(
             bitmapData: data, bytesPerRow: bytesPerRow,
-            size: extent.size, format: .RGBA8, colorSpace: nil
+            size: CGSize(width: width, height: mask.size.height), format: .RGBA8, colorSpace: nil
         )
-        return image.transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+        let scale = CGAffineTransform(
+            scaleX: extent.width / CGFloat(width), y: extent.height / CGFloat(mask.size.height)
+        )
+        // Preserve hard semantic definitions when a binary raster is enlarged. Smooth sampling
+        // is correct for Vision's soft person boundaries, but it would introduce a visible
+        // one-pixel transition into density-1/no-feather definitions.
+        let sampled = mask.values.allSatisfy { $0 == 0 || $0 == 1 }
+            ? image.samplingNearest() : image.samplingLinear()
+        return sampled
+            .transformed(by: scale)
+            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+            .cropped(to: extent)
     }
 
     private func brushImage(
