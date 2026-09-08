@@ -28,6 +28,55 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.collection.items.map(\.url), [first, second])
     }
 
+    func testEditedThumbnailUsesCurrentDocumentAndIsSharedByBrowsingSurfaces() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "edited-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "edited-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: first, second: second)
+        viewModel.collection.beginThumbnailDemand()
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the first photo") {
+            viewModel.sourceURL == first && viewModel.previewState == .ready
+        }
+        let firstThumbnailRequestCount = await engine.thumbnailRequests.filter {
+            $0.quality == .thumbnail && $0.assetID == viewModel.collection.items[0].id
+        }.count
+
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
+        try await waitUntil("the edited thumbnail refresh") {
+            await engine.thumbnailRequests.filter {
+                $0.quality == .thumbnail && $0.assetID == viewModel.collection.items[0].id
+            }.count > firstThumbnailRequestCount
+        }
+
+        let thumbnailRequests = await engine.thumbnailRequests.filter {
+            $0.quality == .thumbnail && $0.assetID == viewModel.collection.items[0].id
+        }
+        XCTAssertEqual(thumbnailRequests.last?.document.adjustments, [.exposure(ev: 0.8)])
+        XCTAssertNotNil(viewModel.collection.items[0].thumbnail)
+        XCTAssertNotNil(viewModel.collection.items[0].editedThumbnailRevision)
+
+        // Navigation demands a second photo through the same collection path. Its request is
+        // independent, while the first photo's completed edited bitmap remains shared by every
+        // consumer that observes the Item (filmstrip and grid).
+        viewModel.selectCollectionImage(at: 1)
+        try await waitUntil("the second photo") {
+            viewModel.sourceURL == second && viewModel.previewState == .ready
+        }
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: -0.4)] }
+        try await waitUntil("the second photo edited thumbnail") {
+            await engine.thumbnailRequests.contains {
+                $0.quality == .thumbnail && $0.assetID == viewModel.collection.items[1].id
+            }
+        }
+    }
+
     func testFilmstripSelectionPresentsRepeatedSelectionAndSettlesHistogram() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "first.png", in: tempDirectory

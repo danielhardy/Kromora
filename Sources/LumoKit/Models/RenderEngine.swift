@@ -31,6 +31,10 @@ protocol RenderEngining: Sendable {
     /// Render one UI-independent request through the deterministic pipeline.
     func render(_ request: RenderRequest) async throws -> RenderResult
 
+    /// Render a bounded browsing thumbnail through the same document/look pipeline while keeping
+    /// thumbnail work distinct from the editor preview lifecycle.
+    func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult
+
     /// Produce a display image for a request without changing the Sendable render-result boundary.
     ///
     /// The default keeps conformers that only implement `render` source-compatible. The real
@@ -102,6 +106,10 @@ struct RenderWorkStatistics: Sendable, Equatable {
 }
 
 extension RenderEngining {
+    func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult {
+        try await render(request)
+    }
+
     func prepareSource(_ source: ImageSource) async -> ImageSourcePreparation? {
         guard source.kind == .standard else { return nil }
         let extent: CGSize?
