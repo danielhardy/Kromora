@@ -9,9 +9,9 @@ This is a distillation. The original draft ran 4,180 lines of multi-agent output
 itself across sections and spent a good fraction of its length arguing with earlier drafts about bugs
 that never existed. Everything load-bearing is below; the original is in git history at `05ac1d6`.
 
-**Current inventory:** the repository contains **735 XCTest methods**. Counts in the migration table
-are historical ship-gate snapshots; the current CI lanes run the complete deterministic suite and
-report the optional RAW/hardware lane separately.
+**Current inventory:** the repository contains **958 XCTest methods**. Counts in the migration table
+are historical ship-gate snapshots; the current CI lanes run disjoint deterministic/model and
+serialized render/UI required lanes, with RAW/benchmark methods kept optional.
 
 **Baseline note:** the original was written against the pre-review codebase. Several of its premises
 have since been fixed and are marked ✅ below — do not re-solve them.
@@ -36,7 +36,7 @@ a baked image, which buys four things at once:
 
 | | |
 |---|---|
-| ✅ `LumoKit` library + thin `@main` executable, 735 current XCTest methods, `swift test` in CI | Step 0 is **done**; the original 95-test gate is historical |
+| ✅ `LumoKit` library + thin `@main` executable, 958 current XCTest methods, `swift test` in CI | Step 0 is **done**; the original 95-test gate is historical |
 | ✅ Preview rasterization and decode run off the main actor; intensity slider debounced | the "full filter graph on the main thread" bug is **fixed** |
 | ✅ LUT intensity ships today — `lutIntensity`, `CubeLUT.apply(to:intensity:)`, toolbar slider | the original called this "NEW behavior… exists nowhere". It exists. |
 | ✅ EXIF orientation baked at load for every non-RAW decode | the original's "standard images have NO orientation baking" is stale |
@@ -299,7 +299,7 @@ leaf by leaf, delete the old path last.
 
 | Step | Work | Ship gate |
 |---|---|---|
-| ~~0~~ | ~~`LumoKit` split + test harness~~ | ✅ **done** — historical 95-test gate; current suite has 735 methods and CI is green |
+| ~~0~~ | ~~`LumoKit` split + test harness~~ | ✅ **done** — historical 95-test gate; current suite has 958 methods and CI is green |
 | ~~1~~ | ~~`WorkingSpace`; route all six colour sites through it~~ | ✅ **done** — export, preview pixels and histogram byte-identical at sRGB; parity + lockstep tests added |
 | ~~2~~ | ~~`EditDocument`, `RAWDevelopSettings`, `AdjustmentNode`, `LUTSettings`, `LUTID`, `ImageSource` — **defined but unused**~~ | ✅ **done** — plus `RenderScale`; 132 tests, nothing in the app references them, app launches unchanged |
 | ~~3~~ | ~~`RenderPipeline.buildImage` + the actor-side LUT filter cache — **defined but unused**~~ | ✅ **done** — 162 tests; identity is pixel-exact, intensity endpoints exact, 21 mutations caught |
@@ -309,8 +309,8 @@ leaf by leaf, delete the old path last.
 | ~~7~~ | ~~Move thumbnails (**both** `ImageCollection` sites); dissolve `ImageProcessor` GPU duties~~ | ✅ **done** — 208 tests; 18 mutations caught, 2 shown equivalent by measurement; `RenderStackTests` asserts the context count |
 | ~~8~~ | ~~Flip strict concurrency on~~ | ✅ **done** — full **Swift 6 language mode** (errors, not warnings) on all three targets; 214 tests; 9 mutations caught, 1 untestable and named |
 | ~~9~~ | ~~Wire derive into the new state: register the derived LUT by ID, keep the scratch-file bookkeeping~~ | ✅ **done** — 230 tests; 19 mutations caught, 1 shown equivalent by inspection; fixed a **shipped** bug where a derived LUT never resolved (see below) |
-| ~~10a~~ | ~~RAW develop inspector + the per-image capability probe~~ | ✅ **done** — `RAWCapabilities` crosses the actor boundary carrying nine gates and twelve per-image seeds; the probe measures **~25 ms warm** against **~183 ms** for a full develop, so it runs once per open and never per render. The historical mutation gate is preserved in git history. RAW-dependent methods run in the separate slow lane when `LUMO_RAW_FIXTURE_DIR` is supplied. |
-| ~~10b~~ | ~~Adjustments inspector — fixed slots, one node of each, canonical pipeline order~~ | ✅ **done** — historical 308-test gate; the current suite has 735 methods. Three RAW-dependent methods skip without `LUMO_RAW_FIXTURE_DIR`; deterministic coverage runs on CI. |
+| ~~10a~~ | ~~RAW develop inspector + the per-image capability probe~~ | ✅ **done** — `RAWCapabilities` crosses the actor boundary carrying nine gates and twelve per-image seeds; the probe measures **~25 ms warm** against **~183 ms** for a full develop, so it runs once per open and never per render. The historical mutation gate is preserved in git history. RAW-dependent methods run in the optional lane when `LUMO_RAW_FIXTURE_DIR` is supplied. |
+| ~~10b~~ | ~~Adjustments inspector — fixed slots, one node of each, canonical pipeline order~~ | ✅ **done** — historical 308-test gate; the current suite has 958 methods. Three RAW-dependent methods skip without `LUMO_RAW_FIXTURE_DIR`; deterministic coverage runs on CI. |
 | 11 | Per-image undo keyed by `Item.id`, plus an `EditDocumentStore` | ⌘Z scoped per image |
 | 12 | *(deferred)* export descriptor, metadata/ICC | — |
 
@@ -505,7 +505,7 @@ the next frame. `ImageProcessor.histogram` is gone; the tally is now a pure
 9. **RAW fixtures.** Derive-invariance and RAW-parity tests need a license-clean local RAW/JPG pair.
    The files are intentionally outside Git and are selected with `LUMO_RAW_FIXTURE_DIR`; without
    them, those tests `XCTSkip`. Everything else in the suite generates its fixtures. CI keeps this
-   slow lane separate from the complete deterministic regression lane.
+   optional RAW lane separate from the complete deterministic/render regression lanes.
 
 ---
 

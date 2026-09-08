@@ -242,12 +242,23 @@ a particular volume class from the entitlement alone, Lumo keeps the volume visi
 to select its root in an Open panel, and scans the resulting security-scoped bookmark. Run the full
 Xcode-built app to verify this path; `swift run` does not apply the entitlement.
 
-The suite currently contains **735 XCTest methods** (`swift test list`), including deterministic
-regression coverage and opt-in benchmarks. Fixtures are generated in temporary directories. The
-slow RAW/hardware lane accepts a separately licensed local fixture directory through
-`LUMO_RAW_FIXTURE_DIR`; it skips cleanly when that directory is not supplied. CI runs the
-deterministic tests in parallel, reports the slow lane separately, and builds/verifies a signed app
-bundle on every push and pull request using the macOS 26 runner.
+The suite currently contains **958 XCTest methods** (`swift test list`), including deterministic
+regression coverage and opt-in benchmarks. Fixtures are generated in temporary directories. CI
+partitions the required set into two disjoint macOS 26 lanes: the deterministic/model/fake-engine
+lane runs with `--parallel`, while Core Image/render and AppKit/UI tests run with `--no-parallel`.
+The lane definitions and coverage audit live in [`scripts/ci-tests.sh`](scripts/ci-tests.sh):
+
+```bash
+scripts/ci-tests.sh fast       # required deterministic lane, parallel
+scripts/ci-tests.sh serial     # required render/UI lane, serial
+```
+
+RAW-fixture and benchmark methods are deliberately outside the required gate. Run
+`scripts/ci-tests.sh optional` with the documented `LUMO_*` settings; RAW/derive coverage requires
+a separately licensed local fixture directory through `LUMO_RAW_FIXTURE_DIR`, and Metal/AppKit
+capture requires a logged-in display. Without those inputs the methods skip with an explanatory
+message. CI builds/verifies a signed app bundle on every push and pull request using the macOS 26
+runner.
 
 Optional local benchmarks:
 

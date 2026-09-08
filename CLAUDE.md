@@ -7,8 +7,10 @@ Lumo is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, Swif
 - Build: `swift build`
 - Run (fast iteration; no sandbox/icon): `swift run`
 - Full app (icon + App Sandbox): open `Package.swift` in Xcode and Run.
-- Tests: `swift test`. CI runs the deterministic lane in parallel with a separately reported slow
-  RAW/hardware lane, then builds and verifies the packaged app.
+- Tests: `swift test`. CI runs `scripts/ci-tests.sh fast` for deterministic/model/fake-engine tests
+  in parallel and `scripts/ci-tests.sh serial` for Core Image/render and AppKit/UI tests serially.
+  RAW-fixture and benchmark methods are opt-in through `scripts/ci-tests.sh optional`, then CI
+  builds and verifies the packaged app.
 
 **SDK and deployment target are different things — don't conflate them.** CI runs on `macos-26`
 (Xcode 26.x, macOS 26 SDK); `Package.swift` deploys to **macOS 14**. Building against a current SDK
@@ -56,7 +58,7 @@ The package is split so the app's code is testable (`@testable` can't import an 
 - `Sources/Lumo/` — the `@main` entry point, `AppDelegate`, and the asset catalog. Nothing else belongs here.
 - `Tests/LumoKitTests/` — XCTest. **Fixtures are generated, never committed** (`Fixtures.swift` builds
   `.cube` files and orientation-tagged JPEGs into a temp dir). Licensed camera files for the opt-in
-  slow lane live outside the checkout and are selected with `LUMO_RAW_FIXTURE_DIR`.
+  RAW lane live outside the checkout and are selected with `LUMO_RAW_FIXTURE_DIR`.
 
 When a test needs something currently `private`, widen it to internal with a comment saying why —
 `RecipeExtractor.buildCube` and `workingSize` are the precedent.
