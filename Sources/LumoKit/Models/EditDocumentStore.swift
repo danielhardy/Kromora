@@ -72,6 +72,8 @@ actor EditDocumentStore {
     /// Durable-write counters are actor-isolated so coalescing tests do not need filesystem tracing.
     private(set) var writeCount = 0
     private(set) var saveAttemptCount = 0
+    /// Test evidence that a relink needed the bookmark fallback scan after the path query missed.
+    private(set) var relinkFallbackScanCount = 0
 
     private var artificialWriteDelay: Duration = .zero
     private var writeStartSignal: AsyncStream<Void>.Continuation? = nil
@@ -256,9 +258,15 @@ actor EditDocumentStore {
                     document: document, found: true, status: status)
             }
 
-            guard let url = source.url,
-                let record = try fetchRecordsForRelinking().first(where: { matches($0, url: url) })
-            else {
+            guard let url = source.url else {
+                return EditDocumentLoadResult(
+                    document: EditDocument(), found: false, status: status)
+            }
+
+            let canonicalPath = sourcePath(for: url)
+            let record = try fetchRecord(sourcePath: canonicalPath)
+                ?? fetchRecordsForRelinking().first(where: { matches($0, url: url) })
+            guard let record else {
                 return EditDocumentLoadResult(
                     document: EditDocument(), found: false, status: status)
             }
@@ -343,11 +351,20 @@ actor EditDocumentStore {
         return try modelContext.fetch(descriptor).first
     }
 
+    /// Resolves the common moved-key case in SQLite before falling back to bookmark resolution.
+    private func fetchRecord(sourcePath: String) throws -> EditRecord? {
+        var descriptor = FetchDescriptor<EditRecord>(
+            predicate: #Predicate { $0.sourcePath == sourcePath })
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first
+    }
+
     /// Fetches only the fields needed to identify a moved source. `documentData` can be a large
     /// encoded edit graph, so leaving it out keeps an unedited-photo open from deserializing every
     /// saved document before the matching record is known. Accessing `record.documentData` below
     /// still faults in the document for the one record that actually matches.
     private func fetchRecordsForRelinking() throws -> [EditRecord] {
+        relinkFallbackScanCount += 1
         var descriptor = FetchDescriptor<EditRecord>()
         descriptor.propertiesToFetch = [
             \EditRecord.assetID,
