@@ -36,7 +36,7 @@ final class MaskRefinementTests: XCTestCase {
             nativeExtent: CGSize(width: 8, height: 8)
         )
 
-        let refined = try await service.refine(mask: seed, source: source, tileSize: 2)
+        let refined = try await service.refine(mask: seed, source: source)
         let pixels = await store.pixels(for: refined.reference)
         let expected = try MaskOperations.resized(
             seedPixels, to: PixelDimensions(width: 8, height: 8)
@@ -84,7 +84,7 @@ final class MaskRefinementTests: XCTestCase {
             nativeExtent: CGSize(width: 2048, height: 2048)
         )
         let task = Task {
-            try await service.refine(mask: seed, source: source, tileSize: 1)
+            try await service.refine(mask: seed, source: source)
         }
         task.cancel()
 

@@ -3,7 +3,6 @@ import Foundation
 enum MaskRefinementError: Error, Sendable, Equatable {
     case missingSeedPixels
     case invalidTargetDimensions
-    case invalidTileSize
 }
 
 /// Upgrades a cached semantic mask without rerunning its detector.
@@ -22,10 +21,8 @@ actor MaskRefinementService {
     func refine(
         mask: RegionMask,
         source: ImageSource,
-        targetDimensions: PixelDimensions? = nil,
-        tileSize: Int = 256
+        targetDimensions: PixelDimensions? = nil
     ) async throws -> RegionMask {
-        guard tileSize > 0 else { throw MaskRefinementError.invalidTileSize }
         let dimensions = targetDimensions ?? Self.dimensions(for: source)
         guard dimensions.width > 0, dimensions.height > 0 else {
             throw MaskRefinementError.invalidTargetDimensions
@@ -86,11 +83,10 @@ extension PhotoAnalysisCoordinator {
     func refineMask(
         _ mask: RegionMask,
         source: ImageSource,
-        targetDimensions: PixelDimensions? = nil,
-        tileSize: Int = 256
+        targetDimensions: PixelDimensions? = nil
     ) async throws -> RegionMask {
         try await MaskRefinementService(store: maskStore).refine(
-            mask: mask, source: source, targetDimensions: targetDimensions, tileSize: tileSize
+            mask: mask, source: source, targetDimensions: targetDimensions
         )
     }
 }
