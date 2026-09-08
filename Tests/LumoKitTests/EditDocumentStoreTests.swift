@@ -79,6 +79,41 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(relaunched.document, editedDocument)
     }
 
+    func testRelinkOntoOccupiedAssetIDKeepsNewestRecordAndSubsequentLoadsSucceed() async throws {
+        let container = makeInMemoryEditContainer()
+        let store = EditDocumentStore(modelContainer: container)
+        let oldURL = tempDirectory.appendingPathComponent("relink-old.jpg")
+        let occupiedURL = tempDirectory.appendingPathComponent("relink-occupied.jpg")
+        try Data("old source".utf8).write(to: oldURL)
+
+        let occupiedDocument = EditDocument(adjustments: [.exposure(ev: 0.1)])
+        let relinkedDocument = EditDocument(adjustments: [.exposure(ev: 0.9)])
+        let occupiedSource = EditSourceReference(
+            assetID: .file(occupiedURL), url: occupiedURL)
+        let oldSource = EditSourceReference(assetID: .file(oldURL), url: oldURL)
+
+        try await store.save(occupiedDocument, for: occupiedSource)
+        try await store.save(relinkedDocument, for: oldSource)
+
+        // The direct key is occupied by an older/stale record, while the URL identifies the
+        // record being reopened. The relinked record is the newest observation and wins.
+        let result = await store.load(
+            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
+        XCTAssertEqual(result.document, relinkedDocument)
+        XCTAssertEqual(result.status, .relinked)
+
+        let sameStoreRetry = await store.load(
+            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
+        XCTAssertEqual(sameStoreRetry.document, relinkedDocument)
+        XCTAssertTrue(sameStoreRetry.found)
+
+        let relaunched = EditDocumentStore(modelContainer: container)
+        let persistedRetry = await relaunched.load(
+            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
+        XCTAssertEqual(persistedRetry.document, relinkedDocument)
+        XCTAssertTrue(persistedRetry.found)
+    }
+
     func testPersistenceIORunsOffTheMainActor() async throws {
         let store = makeStore()
         _ = await store.load(for: source())
