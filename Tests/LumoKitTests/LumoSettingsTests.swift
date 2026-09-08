@@ -107,4 +107,17 @@ final class LumoSettingsTests: TempDirectoryTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: canonical.path))
         XCTAssertNil(settings.sourceFolderStatus.url)
     }
+
+    func testEditDatabaseURLIsRevealableOnlyAfterStoreFileExists() throws {
+        let storeURL = tempDirectory.appendingPathComponent("EditStore.store")
+
+        XCTAssertNil(LumoSettingsView.revealableEditDatabaseURL(for: storeURL))
+        XCTAssertNil(LumoSettingsView.revealableEditDatabaseURL(for: nil))
+
+        try Data().write(to: storeURL)
+        XCTAssertEqual(
+            LumoSettingsView.revealableEditDatabaseURL(for: storeURL),
+            storeURL
+        )
+    }
 }
