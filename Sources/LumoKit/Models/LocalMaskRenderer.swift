@@ -232,8 +232,7 @@ final class LocalMaskRenderer {
         // Preserve hard semantic definitions when a binary raster is enlarged. Smooth sampling
         // is correct for Vision's soft person boundaries, but it would introduce a visible
         // one-pixel transition into density-1/no-feather definitions.
-        let sampled = mask.values.allSatisfy { $0 == 0 || $0 == 1 }
-            ? image.samplingNearest() : image.samplingLinear()
+        let sampled = mask.isBinary ? image.samplingNearest() : image.samplingLinear()
         return sampled
             .transformed(by: scale)
             .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
