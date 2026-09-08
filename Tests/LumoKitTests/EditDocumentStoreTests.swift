@@ -119,7 +119,7 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         let container = try ModelContainer(for: schema, configurations: [configuration])
         let photo = source()
         let context = ModelContext(container)
-        let record = EditRecord(assetID: photo.assetID.description, document: editedDocument)
+        let record = try EditRecord(assetID: photo.assetID.description, document: editedDocument)
         record.documentData = Data("partially written".utf8)
         context.insert(record)
         try context.save()
@@ -137,6 +137,33 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertTrue(result.status.message?.contains("neutral edits") == true)
         let storeStatus = await store.status
         XCTAssertEqual(storeStatus, result.status)
+    }
+
+    func testEncodingFailureIsReportedWithoutPersistingAnEmptyRecord() async throws {
+        let store = makeStore()
+        let photo = source()
+        let unencodableDocument = EditDocument(adjustments: [.exposure(ev: .nan)])
+
+        do {
+            try await store.save(unencodableDocument, for: photo)
+            XCTFail("a non-conforming floating-point value must not be saved")
+        } catch {
+            XCTAssertTrue(error is EncodingError)
+        }
+
+        let status = await store.status
+        guard case .writeFailure(let detail) = status else {
+            return XCTFail("expected an encoding failure status, got \(status)")
+        }
+        XCTAssertFalse(detail.isEmpty)
+        let writeCount = await store.writeCount
+        let saveAttemptCount = await store.saveAttemptCount
+        XCTAssertEqual(writeCount, 0)
+        XCTAssertEqual(saveAttemptCount, 0)
+
+        let result = await store.load(for: photo)
+        XCTAssertFalse(result.found)
+        XCTAssertEqual(result.status, status)
     }
 
     func testConcurrentSavesSerializeModelContextAccess() async throws {

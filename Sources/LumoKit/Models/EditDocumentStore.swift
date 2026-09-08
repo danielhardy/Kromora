@@ -278,13 +278,17 @@ public actor EditDocumentStore {
             guard !persistenceUnavailable else {
                 throw StoreError.cannotWrite(status.message ?? "edit database is unavailable")
             }
+            // Encode before fetching or mutating the model context. JSONEncoder rejects values
+            // such as non-conforming floating-point numbers; those failures must not create an
+            // empty row or partially update an existing one.
+            let encodedDocument = try JSONEncoder().encode(document)
             let record =
                 try fetchRecord(assetID: source.assetID.description)
                 ?? EditRecord(
                     assetID: source.assetID.description,
-                    document: document
+                    documentData: encodedDocument
                 )
-            record.document = document
+            record.documentData = encodedDocument
             if record.modelContext == nil {
                 modelContext.insert(record)
             }
@@ -317,8 +321,8 @@ public actor EditDocumentStore {
 
     /// Fetches only the fields needed to identify a moved source. `documentData` can be a large
     /// encoded edit graph, so leaving it out keeps an unedited-photo open from deserializing every
-    /// saved document before the matching record is known. Accessing `record.document` below still
-    /// faults in the document for the one record that actually matches.
+    /// saved document before the matching record is known. Accessing `record.documentData` below
+    /// still faults in the document for the one record that actually matches.
     private func fetchRecordsForRelinking() throws -> [EditRecord] {
         var descriptor = FetchDescriptor<EditRecord>()
         descriptor.propertiesToFetch = [
