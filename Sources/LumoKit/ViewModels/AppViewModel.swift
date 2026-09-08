@@ -646,15 +646,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     /// Narrow presentation-only accessors for the masking canvas. The backing source and renderer
     /// remain owned by the view model; callers receive only the values needed for an overlay task.
-    var maskOverlaySource: ImageSource? { imageSource }
+    var maskOverlaySource: ImageSource? { isShuttingDown ? nil : imageSource }
     var maskOverlayEngine: any RenderEngining { engine }
     /// Shared photo-understanding coordinator. Auto consumes its scalar result; it never reaches
     /// through to Vision, Core Image, or mask pixels.
     let photoAnalysisCoordinator: PhotoAnalysisCoordinator
 
-    var maskingAssetID: PhotoAssetID? { activeAssetID }
+    var maskingAssetID: PhotoAssetID? { isShuttingDown ? nil : activeAssetID }
     var maskingSourceRevision: UInt64 { sourceRevision }
-    var maskingSource: ImageSource? { imageSource }
+    var maskingSource: ImageSource? { isShuttingDown ? nil : imageSource }
     private let preferences: UserDefaults
     private let previewCoordinator: PreviewCoordinator
     private struct SourceLoadRequest: Sendable {
@@ -678,6 +678,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     private var prefetchDelayTask: Task<Void, Never>?
     private var previewDebounceTask: Task<Void, Never>?
     private var previewDebounceGeneration: UInt64 = 0
+    private var sourceFolderOpenTask: Task<Void, Never>?
+    private var storedEditLoadTask: Task<EditDocumentLoadResult, Never>?
+    // Internal so the masking extension can register its retry warm-up with lifecycle shutdown.
+    var personSignalWarmingTask: Task<Void, Never>?
+    private var lutCacheInvalidationTask: Task<Void, Never>?
+    private var semanticCoordinatorInstallTask: Task<Void, Never>?
+    private var isShuttingDown = false
     private var cancellables: [AnyCancellable] = []
     private let mediaVolumeProvider: any MediaVolumeProviding
     private var mediaVolumeDiscoveryTask: Task<Void, Never>?
@@ -759,7 +766,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         self.mediaVolumeProvider = mediaVolumeProvider
 
         if let renderEngine = engine as? RenderEngine {
-            Task { await renderEngine.installSemanticMaskCoordinator(analysisCoordinator) }
+            semanticCoordinatorInstallTask = Task {
+                await renderEngine.installSemanticMaskCoordinator(analysisCoordinator)
+            }
         }
 
         persistence.onStatusChange = { [weak self] status in
@@ -780,13 +789,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // buffer is still able to fail. Keep the previous surface image in that case and surface a
         // useful status instead of leaving the user with a permanent black canvas.
         previewSurface.onPresentationFailure = { [weak self] in
-            guard let self, self.sourceImage != nil else { return }
+            guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
             self.previewState = .failed
             self.autoAdjustmentState = .unavailable("Auto is unavailable because the photo preview failed.")
             self.statusMessage = "Could not display \(self.sourceName). Try Fit or reload the photo."
         }
         originalPreviewSurface.onPresentationFailure = { [weak self] in
-            guard let self, self.sourceImage != nil else { return }
+            guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
             self.statusMessage = "Could not display the comparison preview. Try Fit or reload the photo."
         }
 
@@ -801,7 +810,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         ] {
             cancellables.append(child.sink { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.objectWillChange.send()
+                    guard let self, !self.isShuttingDown else { return }
+                    self.objectWillChange.send()
                 }
             })
         }
@@ -811,7 +821,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // inspector publisher through AppViewModel's broad objectWillChange stream.
         cancellables.append(inspectorState.objectWillChange.sink { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, !self.isShuttingDown else { return }
                 if self.inspectorState.isPresented, self.inspectorState.tab == .info {
                     self.updateHistogram()
                 } else {
@@ -869,18 +879,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // than go on serving the old cube. Wired here, before `restoreFolder()` runs below, so the
         // launch scan is covered too.
         library.onScanned = { [weak self] in
-            guard let self else { return }
+            guard let self, !self.isShuttingDown else { return }
             self.refreshLUTResolutionStatus()
+            self.lutCacheInvalidationTask?.cancel()
+            let engine = self.engine
             guard self.sourceImage != nil else {
-                Task { await self.engine.invalidateLUTCache() }
+                self.lutCacheInvalidationTask = Task { [engine] in
+                    await engine.invalidateLUTCache()
+                }
                 return
             }
             // A render submitted before the asynchronous scan may have been safely ungraded. Flush
             // first, then submit again, so an old cached cube cannot win the race with publication.
-            let engine = self.engine
-            Task { [weak self] in
+            lutCacheInvalidationTask = Task { [weak self] in
                 await engine.invalidateLUTCache()
-                guard let self, self.sourceImage != nil else { return }
+                guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
                 self.schedulePreview()
             }
         }
@@ -968,13 +981,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Open the first image of the source folder once its scan completes.
     private func openFirstImageWhenScanned() {
         let scanToken = collection.scanToken
-        Task {
+        sourceFolderOpenTask = Task { [weak self] in
+            guard let self else { return }
             await collection.scanCompletion()
-            guard collection.scanToken == scanToken else { return }
+            guard !Task.isCancelled, !self.isShuttingDown,
+                  collection.scanToken == scanToken else { return }
             guard let first = collection.items.first, let fileURL = first.url else { return }
             // Folder open starts in Library even though the first image is also loaded so the
             // editor is ready for an immediate Enter/double-click handoff.
-            load(name: first.displayName, url: fileURL, data: nil, assetID: first.id)
+            self.load(name: first.displayName, url: fileURL, data: nil, assetID: first.id)
         }
     }
 
@@ -1179,6 +1194,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         name: String, url: URL?, data: Data?, assetID: PhotoAssetID? = nil,
         traceQuality: String = "open", dataFingerprint: String? = nil
     ) {
+        guard !isShuttingDown else { return }
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
             dataFingerprint: dataFingerprint, traceQuality: traceQuality
@@ -1264,9 +1280,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     private func startSourceLoadWorkerIfNeeded() {
-        guard loadTask == nil else { return }
+        guard !isShuttingDown, loadTask == nil else { return }
         loadTask = Task { [weak self] in
-            while let self, let request = self.pendingSourceLoad {
+            while let self, !self.isShuttingDown, let request = self.pendingSourceLoad {
                 self.pendingSourceLoad = nil
                 await self.prepareAndInstall(request)
             }
@@ -1283,16 +1299,23 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         )
         defer { interval.end() }
 
+        guard !isShuttingDown else { return }
+
         // The edit lookup is independent of source preparation. Starting it first lets its actor
         // work overlap a RAW geometry/session probe without putting it on the source-critical path.
-        let storedTask = Task { await self.editStore.load(for: request.sourceReference) }
+        let editStore = self.editStore
+        let storedTask = Task { await editStore.load(for: request.sourceReference) }
+        storedEditLoadTask = storedTask
         let preparation = await engine.prepareSource(request.source)
 
-        guard request.sourceRevision == sourceRevision,
+        guard !isShuttingDown,
+              request.sourceRevision == sourceRevision,
               request.assetID == activeAssetID else {
             // Do not publish an obsolete source or its error. The worker will consume only the
             // newest pending request after this single in-flight preparation completes.
             storedTask.cancel()
+            _ = await storedTask.value
+            storedEditLoadTask = nil
             return
         }
 
@@ -1301,12 +1324,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             previewState = .failed
             presentError("Error: Cannot load \(request.name)")
             storedTask.cancel()
+            _ = await storedTask.value
+            storedEditLoadTask = nil
             return
         }
 
         install(preparation: preparation, request: request)
 
         let stored = await storedTask.value
+        storedEditLoadTask = nil
         guard request.sourceRevision == sourceRevision,
               request.assetID == activeAssetID else { return }
         adoptStoredEdits(stored, for: request)
@@ -2393,7 +2419,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// `PreviewCoordinator`, which selects the interactive or settled quality and asks
     /// `RenderEngine` to evaluate the graph inside its actor.
     private func schedulePreview() {
-        guard let imageSource else {
+        guard !isShuttingDown, let imageSource else {
             previewSurface.clear()
             return
         }
@@ -2728,7 +2754,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     private func publishPreview(_ publication: PreviewCoordinator.Publication) {
-        guard publication.assetID == activeAssetID,
+        guard !isShuttingDown,
+              publication.assetID == activeAssetID,
               publication.sourceRevision == sourceRevision,
               publication.displayRevision == displayRevision,
               publication.request.source == imageSource else { return }
@@ -2980,12 +3007,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         histogramErrorMessage = nil
         workScheduler.enqueue(id: histogramJobID, lane: .editor, priority: .histogram) {
             [weak self, engine] in
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
             let result = await engine.histogram(
                 source: request.source, document: request.document, lut: request.lut,
                 scale: request.renderScale, space: request.space, maxDimension: 512
             )
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, !self.isShuttingDown,
                   self.isInspectorPresented,
                   self.inspectorTab == .info,
                   assetID == self.activeAssetID,
@@ -3031,7 +3058,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 }
                 return ImageMetadata()
             }.value
-            guard !Task.isCancelled, let self,
+            guard !Task.isCancelled, let self, !self.isShuttingDown,
                   self.activeAssetID == assetID,
                   self.sourceRevision == revision else { return }
             self.metadata = meta
@@ -3056,7 +3083,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let assetID = activeAssetID
         capabilitiesTask = Task { [engine] in
             let capabilities = await engine.rawCapabilities(for: imageSource)
-            guard !Task.isCancelled,
+            guard !Task.isCancelled, !self.isShuttingDown,
                   assetID == self.activeAssetID,
                   revision == self.sourceRevision,
                   self.imageSource == imageSource else { return }
@@ -3317,6 +3344,88 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Explicitly abandon snapshots that could not be written. This is only used after the user
     /// has chosen Quit Without Saving; ordinary edits and failed flushes leave snapshots dirty.
     public func discardPendingWrites() async {
+        await persistence.discard()
+    }
+
+    /// Cancel all work owned by this testable application model and wait until its collaborators
+    /// have released their source/store accesses. This is deliberately explicit rather than a
+    /// `deinit` hook: `deinit` is nonisolated in Swift 6 and cannot safely perform actor cleanup.
+    /// Production launch behavior is unchanged; the app's normal termination path still flushes
+    /// pending edits before quitting.
+    func shutdown() async {
+        guard !isShuttingDown else { return }
+        isShuttingDown = true
+
+        // Invalidate every generation before awaiting anything. A renderer or framework call may
+        // only observe cancellation when it returns, but it can no longer publish into this model.
+        sourceRevision &+= 1
+        documentRevision &+= 1
+        displayRevision &+= 1
+        comparisonRevision &+= 1
+        previewDebounceGeneration &+= 1
+        pendingSourceLoad = nil
+
+        // Disconnect callbacks first so a child that finishes while shutdown is re-entrant cannot
+        // schedule new work or publish into the model.
+        previewCoordinator.onPublication = nil
+        previewCoordinator.onFailure = nil
+        library.onScanned = nil
+        library.onImported = nil
+        library.onImportError = nil
+        export.onStatus = nil
+        export.onError = nil
+        derive.onStatus = nil
+        derive.onError = nil
+        derive.onDerived = nil
+        derive.onSaved = nil
+        lookSave.onStatus = nil
+        lookSave.onError = nil
+        lookSave.onSaved = nil
+        persistence.onStatusChange = nil
+        persistence.onFailure = nil
+        cancellables.removeAll()
+
+        // Collection shutdown ends its discovery stream before awaiting the consumer. This also
+        // prevents a late scan batch from admitting another thumbnail job.
+        await collection.shutdown()
+
+        let storedEditLoad = storedEditLoadTask
+        let tasks: [Task<Void, Never>?] = [
+            capabilitiesTask, autoAdjustmentTask, smartMaskCreationTask, loadTask,
+            metadataTask, prefetchDelayTask, previewDebounceTask, sourceFolderOpenTask,
+            personSignalWarmingTask, lutCacheInvalidationTask, semanticCoordinatorInstallTask,
+            mediaVolumeDiscoveryTask, mediaVolumeScanTask, mediaVolumeImportTask,
+        ]
+        for task in tasks { task?.cancel() }
+        storedEditLoad?.cancel()
+        capabilitiesTask = nil
+        autoAdjustmentTask = nil
+        smartMaskCreationTask = nil
+        loadTask = nil
+        metadataTask = nil
+        prefetchDelayTask = nil
+        previewDebounceTask = nil
+        sourceFolderOpenTask = nil
+        storedEditLoadTask = nil
+        personSignalWarmingTask = nil
+        lutCacheInvalidationTask = nil
+        semanticCoordinatorInstallTask = nil
+        mediaVolumeDiscoveryTask = nil
+        mediaVolumeScanTask = nil
+        mediaVolumeImportTask = nil
+        if let storedEditLoad { _ = await storedEditLoad.value }
+
+        await library.shutdown()
+        await export.shutdown()
+        await derive.shutdown()
+        await lookSave.shutdown()
+        await photoAnalysisCoordinator.shutdown()
+        await previewCoordinator.shutdown()
+        await lookPreviewCoordinator.shutdown()
+        await workScheduler.cancelAllAndWait()
+        for task in tasks {
+            if let task { await task.value }
+        }
         await persistence.discard()
     }
 }

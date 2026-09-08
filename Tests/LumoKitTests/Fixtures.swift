@@ -356,6 +356,9 @@ enum Fixtures {
 class TempDirectoryTestCase: XCTestCase {
     var tempDirectory: URL!
     private var testDefaultSuiteNames: [String] = []
+    /// Every model created by a test is retained until teardown so its explicit async lifecycle
+    /// barrier runs before the fixture directory is removed.
+    private var appViewModels: [AppViewModel] = []
 
     /// Creates an AppViewModel whose persisted state is private to this test and whose managed
     /// library lives beside the test's generated fixtures. Tests that exercise relaunch behavior
@@ -396,7 +399,7 @@ class TempDirectoryTestCase: XCTestCase {
             isolatedPreferences = makeTestUserDefaults()
         }
 
-        return AppViewModel(
+        let viewModel = AppViewModel(
             engine: engine,
             editStore: editStore ?? makeInMemoryEditStore(),
             preferences: isolatedPreferences,
@@ -408,6 +411,8 @@ class TempDirectoryTestCase: XCTestCase {
                 ?? tempDirectory.appendingPathComponent("looks", isDirectory: true),
             photoAnalysisCoordinator: photoAnalysisCoordinator
         )
+        appViewModels.append(viewModel)
+        return viewModel
     }
 
     override func setUpWithError() throws {
@@ -415,7 +420,11 @@ class TempDirectoryTestCase: XCTestCase {
         tempDirectory = try Fixtures.makeTempDirectory(String(describing: type(of: self)))
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
+        for viewModel in appViewModels {
+            await viewModel.shutdown()
+        }
+        appViewModels.removeAll()
         for suiteName in testDefaultSuiteNames {
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
         }
@@ -424,6 +433,6 @@ class TempDirectoryTestCase: XCTestCase {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
         tempDirectory = nil
-        try super.tearDownWithError()
+        try await super.tearDown()
     }
 }

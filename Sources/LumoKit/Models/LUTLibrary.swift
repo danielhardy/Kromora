@@ -99,6 +99,27 @@ final class LUTLibrary: ObservableObject {
         }
     }
 
+    /// Cancel folder and imported-file parsing and wait for their detached readers to finish.
+    /// This is used by the test lifecycle before a temporary Look folder is removed.
+    func shutdown() async {
+        let scan = scanTask
+        let importing = importTask
+        scanTask?.cancel()
+        importTask?.cancel()
+        if let scan { await scan.value }
+        if let importing { await importing.value }
+        scanTask = nil
+        importTask = nil
+        isScanning = false
+        isImporting = false
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = nil
+        for url in importedScopedURLs {
+            url.stopAccessingSecurityScopedResource()
+        }
+        importedScopedURLs.removeAll()
+    }
+
     // MARK: - Folder management
 
     func setFolder(_ url: URL) {

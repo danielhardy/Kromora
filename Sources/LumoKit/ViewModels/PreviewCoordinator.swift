@@ -59,6 +59,7 @@ final class PreviewCoordinator {
     private var latestToken: Token?
     private var nextRevision: UInt64 = 0
     private var isInteracting = false
+    private var isShutdown = false
 
     var onPublication: PublicationHandler?
     var onFailure: FailureHandler?
@@ -101,6 +102,7 @@ final class PreviewCoordinator {
         sourceRevision: UInt64 = 0,
         displayRevision: UInt64 = 0
     ) {
+        guard !isShutdown else { return }
         let hadPendingWork = interactiveTask != nil || settleTask != nil
             || (interactiveJobID.map(scheduler.contains) ?? false)
             || (settledJobID.map(scheduler.contains) ?? false)
@@ -176,6 +178,15 @@ final class PreviewCoordinator {
         settleTask = nil
         pendingInteractive = nil
         isInteracting = false
+    }
+
+    /// Cancel display scheduling and wait for any admitted render operation to leave the shared
+    /// scheduler. This is the teardown barrier used when the source backing a request is temporary.
+    func shutdown() async {
+        guard !isShutdown else { return }
+        isShutdown = true
+        cancel()
+        await scheduler.cancelAllAndWait()
     }
 
     private func settleLatest() {

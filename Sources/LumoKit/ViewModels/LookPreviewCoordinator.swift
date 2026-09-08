@@ -86,6 +86,7 @@ final class LookPreviewCoordinator {
 
     private var inFlight: [WorkKey: InFlight] = [:]
     private var nextToken: UInt64 = 0
+    private var isShutdown = false
 
     init(engine: any RenderEngining, scheduler: ImageWorkScheduler) {
         self.engine = engine
@@ -102,7 +103,7 @@ final class LookPreviewCoordinator {
         look: CubeLUT,
         targetSize: CGSize = LookPreviewLayout.renderSize
     ) async -> CGImage? {
-        guard let source, Self.isValid(targetSize) else { return nil }
+        guard !isShutdown, let source, Self.isValid(targetSize) else { return nil }
 
         var previewDocument = document
         // Compare Look character at full strength, independent of the selected Look's slider.
@@ -212,6 +213,23 @@ final class LookPreviewCoordinator {
     }
 
     var statistics: CacheStatistics { cache.statistics }
+
+    /// Cancel candidate Look renders and wait for their scheduler lane to quiesce before a source
+    /// fixture or Look folder is removed.
+    func shutdown() async {
+        guard !isShutdown else { return }
+        isShutdown = true
+        let active = Array(inFlight.values)
+        for work in active {
+            work.task.cancel()
+            scheduler.cancel(id: work.jobID)
+        }
+        for work in active {
+            _ = await work.task.value
+        }
+        inFlight.removeAll()
+        await scheduler.cancelAllAndWait()
+    }
 
     private static func isValid(_ size: CGSize) -> Bool {
         size.width.isFinite && size.height.isFinite && size.width > 0 && size.height > 0

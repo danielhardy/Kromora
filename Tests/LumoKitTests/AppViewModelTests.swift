@@ -39,6 +39,39 @@ final class AppViewModelTests: TempDirectoryTestCase {
                        "...and also land in the status bar")
     }
 
+    /// A cancelled source preparation may only observe cancellation after the decoder framework
+    /// returns. Shutdown must await that boundary before the fixture is deleted, and its generation
+    /// invalidation must keep the completed preparation from installing a source into the retired
+    /// model that a later test could otherwise still retain.
+    func testShutdownQuiescesCancelledSourceLoadBeforeFixtureCleanup() async throws {
+        let fake = FakeRenderEngine()
+        await fake.gateSourcePreparation()
+        let viewModel = makeAppViewModel(engine: fake)
+        let sourceURL = try Fixtures.writeGradientPNG(
+            width: 24, height: 16, named: "shutdown.png", in: tempDirectory
+        )
+
+        viewModel.openImage(url: sourceURL)
+        let deadline = Date().addingTimeInterval(5)
+        while await fake.sourcePreparationCount == 0 {
+            XCTAssertLessThan(Date(), deadline, "source preparation did not start")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let shutdown = Task { @MainActor in await viewModel.shutdown() }
+        try await Task.sleep(for: .milliseconds(20))
+        await fake.releaseSourcePreparation()
+        await shutdown.value
+
+        // Removing the source now is safe: the cancelled load has crossed its non-cancellable
+        // preparation boundary and shutdown has awaited every dependent task.
+        try FileManager.default.removeItem(at: sourceURL)
+        XCTAssertNil(viewModel.sourceImage)
+
+        // Idempotence is part of the seam used by the base teardown, which also calls shutdown.
+        await viewModel.shutdown()
+    }
+
     func testDeriveStatusAndErrorAreWired() {
         let viewModel = makeAppViewModel()
 

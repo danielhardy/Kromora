@@ -56,6 +56,7 @@ final class ExportCoordinator: ObservableObject {
     /// Optional post-commit Photos delivery. Keeping this injectable leaves core export tests
     /// independent of PhotoKit authorization and the user's library.
     private let photosDelivery: (any PhotosDelivering)?
+    private var singleTask: Task<Void, Never>?
     private var batchTask: Task<BatchOutcome, Never>?
     /// This flag also makes the panel-free API cancellable: its caller may not own a task that the
     /// coordinator can cancel, but the UI still needs a reliable boundary before the next item.
@@ -246,7 +247,8 @@ final class ExportCoordinator: ObservableObject {
         isExporting = true
         onStatus?("Exporting...")
 
-        Task { [weak self, exportEngine, options] in
+        singleTask = Task { [weak self, exportEngine, options] in
+            defer { self?.singleTask = nil }
             let hasDestinationScope = url.startAccessingSecurityScopedResource()
             defer {
                 if hasDestinationScope { url.stopAccessingSecurityScopedResource() }
@@ -354,6 +356,25 @@ final class ExportCoordinator: ObservableObject {
         batchCancellationRequested = true
         batchTask?.cancel()
         onStatus?("Cancelling export…")
+    }
+
+    /// Cancel single and batch export work and wait for any renderer or disk operation to finish.
+    /// This is intentionally separate from the user-facing batch cancellation status flow.
+    func shutdown() async {
+        let single = singleTask
+        let batch = batchTask
+        single?.cancel()
+        batch?.cancel()
+        if let single { await single.value }
+        if let batch { _ = await batch.value }
+        singleTask = nil
+        batchTask = nil
+        isExporting = false
+        batchProgress = 0
+        batchCompleted = 0
+        batchTotal = 0
+        batchCurrentItem = nil
+        batchCancellationRequested = false
     }
 
     /// The batch core. Renders each item through the engine with progress; an

@@ -176,6 +176,9 @@ final class ImageCollection: ObservableObject {
     private var cullingUndoStack: [CullingChange] = []
     private var scanTask: Task<Void, Never>?
     private var scanGeneration: UInt64 = 0
+    /// Finishes the current discovery stream when a scan is cancelled. Cancelling the consumer
+    /// task alone does not wake an `AsyncStream` waiting for its next element.
+    private var discoveryContinuation: AsyncStream<DiscoveryEvent>.Continuation?
     private var metadataTask: Task<Void, Never>?
     private var metadataContinuation: AsyncStream<MetadataRequest>.Continuation?
     private let scheduler: ImageWorkScheduler
@@ -420,6 +423,27 @@ final class ImageCollection: ObservableObject {
         await metadataTask?.value
     }
 
+    /// Stop collection-owned discovery, metadata, and thumbnail work and wait for the detached
+    /// readers to observe cancellation. This is an explicit lifecycle seam for fixture teardown;
+    /// normal source changes continue to use the non-blocking cancellation paths below.
+    func shutdown() async {
+        scanGeneration &+= 1
+        cancelThumbnailWork()
+        discoveryContinuation?.finish()
+        discoveryContinuation = nil
+        let scan = scanTask
+        scanTask?.cancel()
+        scanTask = nil
+
+        let metadata = metadataTask
+        stopMetadataLoading()
+
+        if let scan { await scan.value }
+        if let metadata { await metadata.value }
+        stopScopedURL()
+        isScanning = false
+    }
+
     /// Scan a folder recursively for supported images, recording each file's
     /// relative subfolder so the browser can group them. Items are ordered by
     /// subfolder, then natural filename order.
@@ -431,6 +455,8 @@ final class ImageCollection: ObservableObject {
         scanGeneration &+= 1
         let generation = scanGeneration
         cancelThumbnailWork()
+        discoveryContinuation?.finish()
+        discoveryContinuation = nil
         scanTask?.cancel()
         stopMetadataLoading()
         items = []
@@ -459,7 +485,10 @@ final class ImageCollection: ObservableObject {
 
             var seenItemIDs = Set<PhotoAssetID>()
             for scanURL in self.scanURLs(primary: url) {
-                let stream = Self.discoveryStream(scanURL, managedLibraryURL: self.libraryFolderURL)
+                let (stream, continuation) = Self.discoveryStream(
+                    scanURL, managedLibraryURL: self.libraryFolderURL
+                )
+                self.discoveryContinuation = continuation
                 for await event in stream {
                     guard !Task.isCancelled, self.scanGeneration == generation else { return }
                     switch event {
@@ -486,6 +515,7 @@ final class ImageCollection: ObservableObject {
                         await Task.yield()
                     }
                 }
+                self.discoveryContinuation = nil
             }
 
             guard !Task.isCancelled, self.scanGeneration == generation else { return }
@@ -553,7 +583,7 @@ final class ImageCollection: ObservableObject {
     /// publication task; dimensions and capture metadata remain a separate deferred stage.
     private nonisolated static func discoveryStream(
         _ url: URL, managedLibraryURL: URL
-    ) -> AsyncStream<DiscoveryEvent> {
+    ) -> (stream: AsyncStream<DiscoveryEvent>, continuation: AsyncStream<DiscoveryEvent>.Continuation) {
         let (stream, continuation) = AsyncStream<DiscoveryEvent>.makeStream()
         let producer = Task.detached {
             let fm = FileManager.default
@@ -632,7 +662,7 @@ final class ImageCollection: ObservableObject {
             continuation.finish()
         }
         continuation.onTermination = { _ in producer.cancel() }
-        return stream
+        return (stream, continuation)
     }
 
     private nonisolated static func discoveredItemPrecedes(
