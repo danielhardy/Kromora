@@ -170,17 +170,43 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
             for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
         XCTAssertTrue(retry.found)
         XCTAssertEqual(retry.document, relinkedDocument)
-        // Known limitation (tracked separately): `restoreActionableStatus` treats any prior
-        // actionable status as still-live, so the retry's own successful persist does not clear
-        // the writeFailure this same retry loop left behind. The underlying data is correct and
-        // not poisoned; only the reported `status` is stale until an unrelated `save()` resets it.
-        XCTAssertEqual(retry.status, .writeFailure("injected persistence failure"))
+        // A load reports the outcome of this relink attempt. The prior failed attempt remains a
+        // store-level diagnostic, but it must not overwrite this successful retry's `.relinked`
+        // result.
+        XCTAssertEqual(retry.status, .relinked)
 
         let relaunched = EditDocumentStore(modelContainer: container)
         let persistedRetry = await relaunched.load(
             for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
         XCTAssertEqual(persistedRetry.document, relinkedDocument)
         XCTAssertTrue(persistedRetry.found)
+    }
+
+    func testPlainRelinkRetryReportsItsSuccessfulOutcomeAfterPersistFailure() async throws {
+        let container = makeInMemoryEditContainer()
+        let setupStore = EditDocumentStore(modelContainer: container)
+        let oldURL = tempDirectory.appendingPathComponent("plain-retry-old.jpg")
+        let newURL = tempDirectory.appendingPathComponent("plain-retry-new.jpg")
+        try Data("source".utf8).write(to: oldURL)
+
+        let document = EditDocument(adjustments: [.exposure(ev: 0.6)])
+        let oldSource = EditSourceReference(assetID: .file(oldURL), url: oldURL)
+        try await setupStore.save(document, for: oldSource)
+        try FileManager.default.moveItem(at: oldURL, to: newURL)
+
+        let failingStore = EditDocumentStore(modelContainer: container, failuresBeforeSuccess: 1)
+        let newSource = EditSourceReference(assetID: .file(newURL), url: newURL)
+        let failedLoad = await failingStore.load(for: newSource)
+        guard case .writeFailure = failedLoad.status else {
+            return XCTFail(
+                "expected the injected failure to surface as writeFailure, got \(failedLoad.status)"
+            )
+        }
+
+        let retry = await failingStore.load(for: newSource)
+        XCTAssertTrue(retry.found)
+        XCTAssertEqual(retry.document, document)
+        XCTAssertEqual(retry.status, .relinked)
     }
 
     func testPersistenceIORunsOffTheMainActor() async throws {
@@ -243,6 +269,44 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(storeStatus, result.status)
     }
 
+    func testLoadStatusBelongsToThePhotoBeingLoaded() async throws {
+        let schema = Schema([EditRecord.self])
+        let configuration = ModelConfiguration(
+            "LumoKitTests.PerPhotoLoadStatus",
+            schema: schema,
+            isStoredInMemoryOnly: true,
+            cloudKitDatabase: .none
+        )
+        let container = try ModelContainer(for: schema, configurations: [configuration])
+        let corruptPhoto = source(named: "corrupt.jpg")
+        let healthyPhoto = source(named: "healthy.jpg")
+        let context = ModelContext(container)
+        let corruptRecord = try EditRecord(
+            assetID: corruptPhoto.assetID.description, document: editedDocument
+        )
+        corruptRecord.documentData = Data("partially written".utf8)
+        context.insert(corruptRecord)
+        try context.save()
+
+        let store = EditDocumentStore(modelContainer: container)
+        try await store.save(editedDocument, for: healthyPhoto)
+
+        let corruptResult = await store.load(for: corruptPhoto)
+        let healthyResult = await store.load(for: healthyPhoto)
+        let corruptRetry = await store.load(for: corruptPhoto)
+
+        guard case .corrupt = corruptResult.status else {
+            return XCTFail("the corrupt photo must report its own corrupt status")
+        }
+        XCTAssertEqual(healthyResult.status, .ready)
+        guard case .corrupt = corruptRetry.status else {
+            return XCTFail("loading the corrupt photo again must still report corrupt")
+        }
+        guard case .corrupt = await store.worstActionableStatus else {
+            return XCTFail("the store-level worst actionable status should retain the corrupt warning")
+        }
+    }
+
     func testEncodingFailureIsReportedWithoutPersistingAnEmptyRecord() async throws {
         let store = makeStore()
         let photo = source()
@@ -267,7 +331,7 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
 
         let result = await store.load(for: photo)
         XCTAssertFalse(result.found)
-        XCTAssertEqual(result.status, status)
+        XCTAssertEqual(result.status, .ready)
     }
 
     func testConcurrentSavesSerializeModelContextAccess() async throws {

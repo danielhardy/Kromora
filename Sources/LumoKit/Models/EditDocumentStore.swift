@@ -54,6 +54,15 @@ actor EditDocumentStore {
                 return true
             }
         }
+
+        var severity: Int {
+            switch self {
+            case .ready: return 0
+            case .relinked: return 1
+            case .corrupt: return 2
+            case .writeFailure: return 3
+            }
+        }
     }
 
     enum StoreError: Error, LocalizedError, Equatable {
@@ -80,6 +89,10 @@ actor EditDocumentStore {
     private var failuresRemaining: Int = 0
     private var persistenceUnavailable = false
     private(set) var status: Status = .ready
+    /// The store-wide actionable condition is retained for persistence-health diagnostics. It is
+    /// deliberately separate from a load result: a corrupt record for photo A must not make a
+    /// healthy photo B report `.corrupt`.
+    private(set) var worstActionableStatus: Status?
     private var persistentFileURL: URL? = nil
 
     /// The store file to expose for backup and support workflows, or `nil` when this store is
@@ -201,6 +214,7 @@ actor EditDocumentStore {
         self.persistentFileURL = persistentFileURL
         self.writeStartSignal = writeStartSignal
         self.status = initialStatus
+        self.worstActionableStatus = initialStatus.isActionable ? initialStatus : nil
     }
 
     func load(for source: EditSourceReference) -> EditDocumentLoadResult {
@@ -222,9 +236,10 @@ actor EditDocumentStore {
                     do {
                         document = try relinkedRecord.decodeDocument()
                     } catch {
-                        status = .corrupt(error.localizedDescription)
-                        return EditDocumentLoadResult(
-                            document: EditDocument(), found: true, status: status)
+                        return finishLoad(
+                            document: EditDocument(), found: true,
+                            status: .corrupt(error.localizedDescription)
+                        )
                     }
                     return relink(
                         relinkedRecord,
@@ -239,45 +254,46 @@ actor EditDocumentStore {
                 do {
                     document = try record.decodeDocument()
                 } catch {
-                    status = .corrupt(error.localizedDescription)
-                    return EditDocumentLoadResult(
-                        document: EditDocument(), found: true, status: status)
+                    return finishLoad(
+                        document: EditDocument(), found: true,
+                        status: .corrupt(error.localizedDescription)
+                    )
                 }
                 if let url = source.url, sourcePath(for: url) != record.sourcePath {
-                    let previousStatus = status
-                    updateLocator(on: record, for: url)
-                    status = .relinked
-                    do {
-                        try persist()
-                    } catch {
-                        status = .writeFailure(error.localizedDescription)
-                    }
-                    restoreActionableStatus(after: previousStatus)
+                    return relink(
+                        record,
+                        document: document,
+                        to: key,
+                        for: url,
+                        replacing: nil
+                    )
                 }
-                return EditDocumentLoadResult(
-                    document: document, found: true, status: status)
+                return finishLoad(document: document, found: true, status: .ready)
             }
 
             guard let url = source.url else {
-                return EditDocumentLoadResult(
-                    document: EditDocument(), found: false, status: status)
+                return finishLoad(
+                    document: EditDocument(), found: false, status: loadBaselineStatus
+                )
             }
 
             let canonicalPath = sourcePath(for: url)
             let record = try fetchRecord(sourcePath: canonicalPath)
                 ?? fetchRecordsForRelinking().first(where: { matches($0, url: url) })
             guard let record else {
-                return EditDocumentLoadResult(
-                    document: EditDocument(), found: false, status: status)
+                return finishLoad(
+                    document: EditDocument(), found: false, status: loadBaselineStatus
+                )
             }
 
             let document: EditDocument
             do {
                 document = try record.decodeDocument()
             } catch {
-                status = .corrupt(error.localizedDescription)
-                return EditDocumentLoadResult(
-                    document: EditDocument(), found: true, status: status)
+                return finishLoad(
+                    document: EditDocument(), found: true,
+                    status: .corrupt(error.localizedDescription)
+                )
             }
 
             // No record occupies `key` (the direct-key fetch above already established that), so
@@ -290,8 +306,10 @@ actor EditDocumentStore {
                 replacing: nil
             )
         } catch {
-            status = .writeFailure(error.localizedDescription)
-            return EditDocumentLoadResult(document: EditDocument(), found: false, status: status)
+            return finishLoad(
+                document: EditDocument(), found: false,
+                status: .writeFailure(error.localizedDescription)
+            )
         }
     }
 
@@ -308,7 +326,9 @@ actor EditDocumentStore {
         markIO()
         do {
             guard !persistenceUnavailable else {
-                throw StoreError.cannotWrite(status.message ?? "edit database is unavailable")
+                throw StoreError.cannotWrite(
+                    worstActionableStatus?.message ?? "edit database is unavailable"
+                )
             }
             // Encode before fetching or mutating the model context. JSONEncoder rejects values
             // such as non-conforming floating-point numbers; those failures must not create an
@@ -399,33 +419,54 @@ actor EditDocumentStore {
         for url: URL,
         replacing occupiedRecord: EditRecord?
     ) -> EditDocumentLoadResult {
-        let previousStatus = status
         if let occupiedRecord, occupiedRecord !== record {
             modelContext.delete(occupiedRecord)
         }
         record.assetID = key
         updateLocator(on: record, for: url)
-        status = .relinked
+        var loadStatus: Status = .relinked
         do {
             try persist()
         } catch {
             modelContext.rollback()
-            status = .writeFailure(error.localizedDescription)
+            loadStatus = .writeFailure(error.localizedDescription)
         }
-        restoreActionableStatus(after: previousStatus)
-        return EditDocumentLoadResult(document: document, found: true, status: status)
+        return finishLoad(document: document, found: true, status: loadStatus)
     }
 
     private func markIO() {
         lastIOWasMainThread = Thread.isMainThread
     }
 
-    private func restoreActionableStatus(after previousStatus: Status) {
-        if previousStatus.isActionable, case .writeFailure = status {
+    /// Every load reports only the status produced while resolving that source. Store-level
+    /// persistence health is updated separately so a prior photo cannot taint this result.
+    private func finishLoad(
+        document: EditDocument,
+        found: Bool,
+        status loadStatus: Status
+    ) -> EditDocumentLoadResult {
+        status = loadStatus
+        if loadStatus.isActionable {
+            retainWorstActionableStatus(loadStatus)
+        }
+        return EditDocumentLoadResult(document: document, found: found, status: loadStatus)
+    }
+
+    private var loadBaselineStatus: Status {
+        // A store that fell back to memory cannot provide a normal ready load. A transient
+        // write failure on a previous operation, however, belongs to that operation only and
+        // must not leak into an unrelated read.
+        persistenceUnavailable ? status : .ready
+    }
+
+    private func retainWorstActionableStatus(_ candidate: Status) {
+        guard candidate.isActionable else { return }
+        guard let current = worstActionableStatus else {
+            worstActionableStatus = candidate
             return
         }
-        if previousStatus.isActionable {
-            status = previousStatus
+        if candidate.severity >= current.severity {
+            worstActionableStatus = candidate
         }
     }
 
