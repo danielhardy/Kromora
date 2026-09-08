@@ -3,7 +3,7 @@ import XCTest
 @testable import LumoKit
 
 @MainActor
-final class ResolutionPlannerTests: XCTestCase {
+final class ResolutionPlannerTests: TempDirectoryTestCase {
     private let native = CGSize(width: 6_000, height: 4_000)
 
     func testQuarterCropRequestsNativeDetailWhenItWouldOtherwiseUpscale() {
@@ -56,7 +56,7 @@ final class ResolutionPlannerTests: XCTestCase {
     }
 
     func testAppViewModelDoesNotShareHysteresisBetweenRenderingSurfaces() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let quarterCrop = EditDocument(crop: CropAdjustments(
             normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.25, height: 0.25)
         ))

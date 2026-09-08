@@ -105,7 +105,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
     }
 
     func testActionIsUnavailableBeforeASettledSupportedPhoto() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         XCTAssertFalse(viewModel.canRunAutoAdjustment)
         XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
         XCTAssertTrue(viewModel.autoAdjustmentHelp.contains("supported photo"))
@@ -113,7 +113,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testActionRemainsAvailableWhileOptionalHistogramWorkIsLoading() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
 
         await fake.gateHistogram()
@@ -128,7 +128,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testAutoAvailabilityRefreshesWhenNavigatingBetweenPhotos() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         XCTAssertTrue(viewModel.canRunAutoAdjustment)
 
@@ -152,7 +152,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testAutoAvailableForPhotosLibraryImport() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         let url = try Fixtures.writeJPEG(
             width: 60, height: 40, orientation: 1, named: "photos-import.jpg", in: tempDirectory
         )
@@ -170,7 +170,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testAutoReplacesOnlyGlobalLightAndColorAsOneUndoableOperation() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         viewModel.updateDocument {
             $0.rawDevelop.exposure = 0.4
@@ -205,7 +205,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testFailureLeavesAutoAndHistogramOutOfLoadingState() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         await fake.setShouldFailHistogram(true)
 
@@ -221,7 +221,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testAnalysisShowsProgressWithoutBorrowingHistogramLoadingState() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         await fake.gateHistogram()
 
@@ -249,7 +249,7 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testRepeatingAutoIsDeterministicAndDoesNotAddAnotherHistoryEntry() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
 
         viewModel.runAutoAdjustment()

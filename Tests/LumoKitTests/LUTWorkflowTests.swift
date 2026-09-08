@@ -56,7 +56,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         let (lookFolder, lut) = try makeLUTFolder()
         let container = makeInMemoryEditContainer()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake, editStore: EditDocumentStore(modelContainer: container)
         )
 
@@ -79,7 +79,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.lut.lutID, lut.lutID)
 
         await viewModel.flushPendingWrites()
-        let relaunched = AppViewModel(
+        let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
         )
         relaunched.library.setFolder(lookFolder)
@@ -94,7 +94,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
     }
 
     func testCanonicalLookStateDistinguishesMissingReferenceFromExplicitNone() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let source = try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "missing-look-source.png", in: tempDirectory
         )
@@ -123,7 +123,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
     }
 
     func testCanonicalLookAuditionFollowsTheLibraryOrder() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let folder = tempDirectory.appendingPathComponent("audition-looks")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let firstURL = try Fixtures.writeCube(
@@ -153,8 +153,11 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         )
         let container = makeInMemoryEditContainer()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
-            engine: fake, editStore: EditDocumentStore(modelContainer: container)
+        let preferences = makeTestUserDefaults()
+        let viewModel = makeAppViewModel(
+            engine: fake,
+            editStore: EditDocumentStore(modelContainer: container),
+            preferences: preferences
         )
         viewModel.openImage(url: source)
         try await waitUntil("the source image") { viewModel.sourceName == "import-source.png" }
@@ -180,8 +183,10 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
 
         viewModel.setLookIntensity(0.35)
         await viewModel.flushPendingWrites()
-        let relaunched = AppViewModel(
-            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
+        let relaunched = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: EditDocumentStore(modelContainer: container),
+            preferences: preferences
         )
         while relaunched.library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
         relaunched.openImage(url: source)
@@ -198,7 +203,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         let third = try Fixtures.writeGradientPNG(width: 24, height: 16, named: "three.png", in: first.deletingLastPathComponent())
         let (lookFolder, lut) = try makeLUTFolder()
         let container = makeInMemoryEditContainer()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
         )
@@ -226,7 +231,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         // The destinations have never been opened. Their queued records must still be present in a
         // fresh model, otherwise a quit immediately after multi-paste silently loses the Look.
         await viewModel.flushPendingWrites()
-        let relaunched = AppViewModel(
+        let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
         )

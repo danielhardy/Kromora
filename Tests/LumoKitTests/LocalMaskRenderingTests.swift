@@ -585,7 +585,7 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         let url = try Fixtures.writeGradientPNG(
             width: 64, height: 48, named: "exempt-overlay.png", in: tempDirectory)
         let engine = RenderEngine()
-        let viewModel = AppViewModel(engine: engine, editStore: makeInMemoryEditStore())
+        let viewModel = makeAppViewModel(engine: engine, editStore: makeInMemoryEditStore())
         viewModel.openImage(url: url)
         try await waitForOverlayTest("the image to load") { viewModel.sourceImage != nil }
         let source = try XCTUnwrap(viewModel.maskingSource)

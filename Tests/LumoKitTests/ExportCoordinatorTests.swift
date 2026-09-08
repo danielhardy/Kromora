@@ -425,7 +425,7 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         }
 
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake, editStore: store)
+        let viewModel = makeAppViewModel(engine: fake, editStore: store)
         viewModel.collection.setSourceFolder(libraryFolder)
         try await waitUntil {
             viewModel.collection.items.count == urls.count

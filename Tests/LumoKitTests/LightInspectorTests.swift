@@ -17,7 +17,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testLightBindingRoundTripsAndDoesNotTouchOtherDocumentSections() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument {
             $0.rawDevelop.exposure = 0.25
             $0.adjustments = [.exposure(ev: 0.5)]
@@ -33,7 +33,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testIndividualAndPanelResetsAreScopedAndUndoable() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument {
             $0.light.exposure = 1
             $0.light.whites = 20
@@ -57,7 +57,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testLightSliderGestureIsOneUndoOperation() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.beginPreviewInteraction()
         for value in stride(from: 0.1, through: 0.8, by: 0.1) {
             viewModel.lightBinding(for: .exposure).wrappedValue = value
@@ -88,7 +88,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     func testPhotoHandoffRestoresTheLightDocumentAndHistory() async throws {
         let first = try Fixtures.writeGradientPNG(width: 16, height: 12, named: "first.png", in: tempDirectory)
         let second = try Fixtures.writeGradientPNG(width: 16, height: 12, named: "second.png", in: tempDirectory)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.openImage(url: first)
         try await waitUntil { viewModel.sourceName == "first.png" }
@@ -106,7 +106,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testAccessibilityAdjustableActionAddsTheFirstCurvePoint() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         XCTAssertTrue(viewModel.document.light.toneCurve.points.dropFirst().dropLast().isEmpty)
 
         let synthetic = LightCurvePoint(input: 0.5, output: viewModel.document.light.toneCurve.value(at: 0.5))
@@ -118,7 +118,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testCurveAddAndRemoveEachUseOneUndoStep() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.addToneCurvePoint(input: 0.25)
         XCTAssertEqual(
@@ -135,7 +135,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testCurveDragCoalescesEveryTickIntoOneUndoStep() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.beginPreviewInteraction()
 
         for output in [0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85] {
@@ -153,7 +153,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testCurveDragKeepsMonotonicControlPointsOrderedAndBounded() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument {
             $0.light.toneCurve = LightToneCurve(points: [
                 LightCurvePoint(input: 0.25, output: 0.25),
@@ -188,7 +188,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testEmptyCurveDragCreatesOnePointAndUndoRedoKeepTheWholeGestureTogether() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let curve = viewModel.document.light.toneCurve
         let input = 0.35
 
@@ -218,7 +218,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     func testNearExistingPointMovesThatPointWithoutAddingADuplicate() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument {
             $0.light.toneCurve = LightToneCurve(points: [
                 LightCurvePoint(input: 0.3, output: 0.3),
@@ -240,7 +240,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
         let image = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "curve-drag.png", in: tempDirectory
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.openImage(url: image)
         try await waitUntil { viewModel.previewSurface.image != nil }
         let initialSurfaceRevision = viewModel.previewSurface.revision

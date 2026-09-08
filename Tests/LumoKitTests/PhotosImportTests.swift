@@ -62,7 +62,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "reserved.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.beginPhotosImport(totalCount: 3)
         XCTAssertEqual(viewModel.collection.pendingImportSlots.count, 3)
@@ -193,7 +193,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "partial.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.beginPhotosImport(totalCount: 3)
         viewModel.recordPhotosImportFailure(name: "Unavailable", ordinal: 1)
@@ -224,7 +224,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
     }
 
     func testEmptyImportHasNoReservationsOrActiveDestination() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.beginPhotosImport(totalCount: 0)
         XCTAssertTrue(viewModel.collection.pendingImportSlots.isEmpty)
@@ -245,7 +245,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         )
         let firstData = try Data(contentsOf: firstURL)
         let secondData = try Data(contentsOf: secondURL)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.beginPhotosImport(totalCount: 3)
         viewModel.appendPhotosImport(
@@ -281,7 +281,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "cancel.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.beginPhotosImport(totalCount: 2)
         viewModel.appendPhotosImport(
@@ -302,7 +302,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "inspector-import.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.inspectorTab = .effects
         viewModel.metadata.make = "stale camera"
         viewModel.histogram = HistogramData(
@@ -337,7 +337,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "second-succeeds.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.beginPhotosImport(totalCount: 2)
         viewModel.recordPhotosImportFailure(name: "Unavailable", ordinal: 0)
@@ -352,7 +352,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
     }
 
     func testPhotosImportWithoutAnAcceptedItemLeavesInspectorPresentationUnchanged() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.beginPhotosImport(totalCount: 2)
         viewModel.recordPhotosImportFailure(name: "Unavailable", ordinal: 0)
@@ -374,7 +374,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "repeated-import.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.inspectorTab = .look
 
         viewModel.beginPhotosImport(totalCount: 1)

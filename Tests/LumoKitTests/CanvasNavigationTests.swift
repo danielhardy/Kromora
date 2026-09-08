@@ -280,9 +280,9 @@ final class CanvasNavigationTests: XCTestCase {
 }
 
 @MainActor
-final class CanvasObservationTests: XCTestCase {
+final class CanvasObservationTests: TempDirectoryTestCase {
     func testHighFrequencyCanvasAndCropUpdatesBypassBroadModelPublisher() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray).cropped(
             to: CGRect(x: 0, y: 0, width: 100, height: 80)
         )
@@ -323,7 +323,7 @@ final class CanvasObservationTests: XCTestCase {
     }
 
     func testSourceResetClearsNavigationAndCropTransientState() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray).cropped(
             to: CGRect(x: 0, y: 0, width: 100, height: 80)
         )
@@ -339,7 +339,7 @@ final class CanvasObservationTests: XCTestCase {
     }
 
     func testCanvasDoubleClickToggleIsPresentationOnly() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let document = viewModel.document
 
         viewModel.toggleCanvasZoom()
@@ -353,7 +353,7 @@ final class CanvasObservationTests: XCTestCase {
     }
 
     func testMaskOverlayStateBypassesBroadModelPublisher() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let state = MaskOverlayInteractionState()
         var appChanges = 0
         var overlayChanges = 0

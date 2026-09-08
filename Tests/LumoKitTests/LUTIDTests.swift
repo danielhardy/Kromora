@@ -111,7 +111,7 @@ final class LUTIDTests: TempDirectoryTestCase {
     /// The regression that matters: hold an ID, rescan the library the way `saveDerivedLUT` does,
     /// and the ID must still resolve to the same LUT.
     func testResolutionSurvivesARescan() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 4), named: "Keeper.cube", in: tempDirectory)
 
         library.scan(tempDirectory)
@@ -142,7 +142,7 @@ final class LUTIDTests: TempDirectoryTestCase {
     /// than a paragraph: if the library ever starts minting synthetic IDs, the equivalence quietly
     /// stops holding and a derived LUT could resolve to a file.
     func testAScannedLibraryNeverProducesADerivedID() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         let nested = tempDirectory.appendingPathComponent("Looks")
         try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "Flat.cube", in: tempDirectory)
@@ -161,7 +161,7 @@ final class LUTIDTests: TempDirectoryTestCase {
     /// Resolution has to be exact: a stale ID must miss rather than match a neighbour, or a rescan
     /// would quietly swap one look for another.
     func testResolutionMissesForALUTThatIsGone() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         let doomed = try Fixtures.writeCube(
             Fixtures.identityCubeText(size: 4), named: "Doomed.cube", in: tempDirectory
         )

@@ -23,7 +23,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
     }
 
     func testColorControlsRoundTripThroughBindingsWithoutDrift() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.colorBinding(for: .vibrance).wrappedValue = 37.5
@@ -36,7 +36,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
     }
 
     func testMixerAndGradingBindingsEditOnlyTheirNestedValues() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.mixerBinding(for: .blue, control: .hue).wrappedValue = -18
@@ -53,7 +53,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
     }
 
     func testSectionResetsPreserveOtherColorSections() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.colorBinding(for: .vibrance).wrappedValue = 25
@@ -73,7 +73,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
     }
 
     func testColorResetsPreserveLegacyAdjustmentNodes() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
         let legacyNodes: [AdjustmentNode] = [
             .exposure(ev: 0.8),
@@ -101,7 +101,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
     }
 
     func testRowResetsPreserveSiblingMixerAndGradingValues() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.mixerBinding(for: .red, control: .hue).wrappedValue = 20
@@ -118,7 +118,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
 
     func testVisualWheelBindingMapsGestureValuesAndUsesInteractivePreview() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -139,7 +139,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
 
     func testColorSliderUsesInteractiveRenderAndSettlesLatestValue() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         let atRest = await fake.previewRequests.count
@@ -158,7 +158,7 @@ final class ColorInspectorTests: TempDirectoryTestCase {
     }
 
     func testWhiteBalanceResetRestoresBothRowsAsOneNeutralOperation() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.adjustmentBinding(for: .temperature).wrappedValue = 9000

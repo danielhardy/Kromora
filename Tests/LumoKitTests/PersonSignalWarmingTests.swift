@@ -7,18 +7,7 @@ import XCTest
 /// cold, even while the disk analysis cache is warm (which defeats the analyze preflight that
 /// used to be the only signal-warming path).
 @MainActor
-final class PersonSignalWarmingTests: XCTestCase {
-    private var tempDirectory = URL(fileURLWithPath: "/tmp")
-
-    override func setUp() async throws {
-        try await super.setUp()
-        tempDirectory = try Fixtures.makeTempDirectory("PersonSignalWarming")
-    }
-
-    override func tearDown() async throws {
-        try? FileManager.default.removeItem(at: tempDirectory)
-        try await super.tearDown()
-    }
+final class PersonSignalWarmingTests: TempDirectoryTestCase {
 
     // MARK: - Primitive
 
@@ -70,7 +59,7 @@ final class PersonSignalWarmingTests: XCTestCase {
         let coldStore = MaskStore(directory: tempDirectory.appendingPathComponent("cold-masks"))
         let provider = GatedPersonStubProvider(store: coldStore)
         let coordinator = PhotoAnalysisCoordinator(maskStore: coldStore, maskProvider: provider)
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore(),
             photoAnalysisCoordinator: coordinator
@@ -115,7 +104,7 @@ final class PersonSignalWarmingTests: XCTestCase {
         let coldStore = MaskStore(directory: tempDirectory.appendingPathComponent("retry-masks"))
         let provider = GatedPersonStubProvider(store: coldStore)
         let coordinator = PhotoAnalysisCoordinator(maskStore: coldStore, maskProvider: provider)
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore(),
             photoAnalysisCoordinator: coordinator

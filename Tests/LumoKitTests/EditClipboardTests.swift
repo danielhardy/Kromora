@@ -108,7 +108,7 @@ final class CopyPasteTests: TempDirectoryTestCase {
     }
 
     func testSinglePasteIsUndoableAndDoesNotChangeTheSource() async throws {
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore()
         )
@@ -138,7 +138,7 @@ final class CopyPasteTests: TempDirectoryTestCase {
     }
 
     func testMultiPasteUpdatesOnlySelectedPhotosAndEachDestinationCanUndo() async throws {
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore()
         )

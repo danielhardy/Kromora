@@ -30,7 +30,7 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
 
     /// An untouched panel reads its neutrals and writes nothing. The document must still be empty.
     func testAnUntouchedPanelLeavesTheDocumentEmpty() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         for control in AdjustmentControl.allCases {
@@ -42,7 +42,7 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
 
     /// The value a control reads is in **slider space** — mapped, not the raw stored value.
     func testTemperatureReadsBackInSliderSpace() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.adjustmentBinding(for: .temperature).wrappedValue = 9000
@@ -59,7 +59,7 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
     /// **The ship gate.** A slider write must reach the engine.
     func testAnAdjustmentEditRendersThroughTheEngine() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
 
         viewModel.adjustmentBinding(for: .exposure).wrappedValue = 1.5
@@ -79,7 +79,7 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
     /// Follows `DevelopInspectorTests.testWritingASliderThroughTheBindingStillDebounces`.
     func testWritingAnAdjustmentSliderThroughTheBindingStillDebounces() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         let atRest = await fake.previewRequests.count
@@ -109,7 +109,7 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
     /// can only appear this fast if it truly took the immediate path.
     func testResettingOneControlPreservesTheOthers() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -151,7 +151,7 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
     }
 
     func testResetAllEmptiesTheArray() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.adjustmentBinding(for: .exposure).wrappedValue = 1.5
@@ -166,7 +166,7 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
 
     /// Reset-all must not touch the develop settings or the LUT — it is one panel's button.
     func testResetAllLeavesDevelopAndTheLUTAlone() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.updateDocument { $0.rawDevelop.exposure = 0.7 }
@@ -222,7 +222,7 @@ extension AdjustInspectorTests {
     /// finding `testNoHistogramIsTalliedWhileTheDevelopTabIsShowing` pins for the other tab.
     func testTheAdjustTabDoesNotTallyAHistogram() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -253,7 +253,7 @@ extension AdjustInspectorTests {
     /// scheduling the baseline unconditionally would double every slider tick's cost silently.
     func testAnAdjustmentEditDoesNotReRenderTheComparisonBaseline() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
 
         // Let the opening renders settle so the count below is only this edit's.
@@ -294,7 +294,7 @@ extension AdjustInspectorTests {
     /// renders are actually distinguishable — do not delete it as unrelated setup.
     func testADevelopEditStillReRendersTheComparisonBaseline() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
 
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
@@ -343,7 +343,7 @@ extension AdjustInspectorTests {
     /// full rationale for the enumerated gate it settled on instead — see that property for why the
     /// obvious replacement, comparing the document against its own baseline, is not it.
     func testComparisonBecomesAvailableWithAnAdjustmentAndNoLUT() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         XCTAssertFalse(viewModel.isComparisonAvailable, "an untouched image has nothing to compare")
@@ -356,7 +356,7 @@ extension AdjustInspectorTests {
 
     /// The old behaviour must survive: a LUT alone still offers comparison.
     func testComparisonIsStillAvailableWithALUTAndNoAdjustments() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.selectLUT(TestImages.warmLUT())
@@ -369,7 +369,7 @@ extension AdjustInspectorTests {
     /// (§8.5) — both sides would render identically, and a split view showing two identical
     /// pictures is worse than no split view.
     func testADevelopOnlyEditDoesNotOfferComparison() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.updateDocument { $0.rawDevelop.exposure = 0.7 }
@@ -380,7 +380,7 @@ extension AdjustInspectorTests {
 
     /// Undoing the edit by hand withdraws the offer again — the sparse array is what makes this work.
     func testComparisonWithdrawsWhenTheAdjustmentReturnsToNeutral() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.adjustmentBinding(for: .exposure).wrappedValue = 2.0
@@ -395,7 +395,7 @@ extension AdjustInspectorTests {
     /// correctly calls it contributing nothing, and the render is pixel-identical to no LUT at all.
     /// The old structural gate offered a split view of two identical pictures here; it must not.
     func testComparisonIsNotAvailableWithALUTAtZeroIntensity() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.selectLUT(TestImages.warmLUT())
@@ -406,7 +406,7 @@ extension AdjustInspectorTests {
     }
 
     func testComparisonAvailabilityCoversEveryVisibleLookStage() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         let cases: [(String, EditDocument)] = [
@@ -429,7 +429,7 @@ extension AdjustInspectorTests {
     }
 
     func testSpaceCannotEnterOriginalModeWithoutAVisibleLookEdit() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.showOriginal(true)
