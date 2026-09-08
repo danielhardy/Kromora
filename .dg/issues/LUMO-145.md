@@ -2,7 +2,7 @@
 id: LUMO-145
 title: Add removable-camera-media import flow
 type: feature
-status: review
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -14,13 +14,13 @@ labels:
   - macos
   - photo-workflow
 created: 2026-09-03T01:12:24.531Z
-updated: 2026-09-03T02:31:41.741Z
+updated: 2026-09-08T01:14:08.504Z
 depends_on:
   - LUMO-014
   - LUMO-015
   - LUMO-152
 estimate: 13
-order: t
+order: zzh
 board: product
 ---
 

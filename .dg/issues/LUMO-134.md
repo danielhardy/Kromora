@@ -2,16 +2,16 @@
 id: LUMO-134
 title: Reconcile long-edge export plan with actual encoded pixel dimensions
 type: task
-status: review
+status: done
 priority: low
 labels:
   - verification
 created: 2026-09-02T16:43:09.373Z
-updated: 2026-09-02T19:44:36.881Z
+updated: 2026-09-08T01:14:03.340Z
 depends_on:
   - LUMO-051
   - LUMO-140
-order: n
+order: zz
 board: product
 ---
 

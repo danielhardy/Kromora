@@ -2,7 +2,7 @@
 id: LUMO-238
 title: Expose smart mask tools in the production masking workspace
 type: bug
-status: review
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -14,10 +14,10 @@ labels:
   - editor
   - epic:masking
 created: 2026-09-06T03:14:53.292Z
-updated: 2026-09-07T01:14:11.074Z
+updated: 2026-09-08T01:14:12.995Z
 depends_on:
   - LUMO-251
-order: w
+order: zzq
 board: product
 commits:
   - c0aed13

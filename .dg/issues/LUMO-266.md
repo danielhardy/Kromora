@@ -2,15 +2,38 @@
 id: LUMO-266
 title: Build mask bitmaps at 8-bit instead of RGBAf
 type: task
-status: ready
+status: done
 priority: high
 labels:
   - masking
   - performance
 created: 2026-09-07T01:14:45.729Z
-updated: 2026-09-07T04:03:11.995Z
-order: y
+updated: 2026-09-08T00:09:05.794Z
+order: a0
 board: product
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Peak transient allocation for a 60MP raster conversion ≤ 256MB (no 4-channel Float staging buffer)
+      result: pass
+    - criterion: Pixel-identical (or ≤1 LSB) end-to-end render vs current path on gradient/feathered fixtures, covered by a test
+      result: pass
+    - criterion: swift build, swift test pass with zero Swift 6 diagnostics and zero opt-outs
+      result: pass
+  checks_run:
+    - swift build — clean
+    - swift test — 934 executed, 42 expected skips, 0 failures
+    - swift test --filter LocalMaskRenderingTests — 20/20 passed, including new testRasterPayloadRGBA8MatchesPreviousRGBAfOverlayOnFeatheredFixture parity test
+    - grep for @unchecked Sendable / nonisolated(unsafe) / @preconcurrency across Sources — no opt-outs (one unrelated comment mention)
+    - "manual code review of rasterImage: single fused byte pass into a 60MB Data buffer (60MP case), no Float staging array; overflow guards added on width/values.count before the *4 byte-count computation"
+    - git status --porcelain — clean tree aside from DG bookkeeping files
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-08T00:09:05.787Z
+  session: 01MTRWEDE7NF5J3ABY
 ---
 
 ## Objective
@@ -49,3 +72,34 @@ typically larger than the upscale that produced the mask.
 - [ ] Pixel-identical (or ≤1 LSB) end-to-end render vs the current path on gradient/feathered
       fixtures, covered by a test.
 - [ ] `swift build`, `swift test` pass with zero Swift 6 diagnostics and zero opt-outs.
+
+
+### Comment — codex @ 2026-09-07T23:54:49.740Z
+
+Implemented in cc82d34. LocalMaskRenderer now emits an RGBA8 bitmap with clamped/rounded mask coverage in alpha via one fused byte pass, preserving top-down rows; renderer cache version bumped to 5. Added feathered end-to-end RGBA8-vs-legacy-RGBAf parity coverage. Verification: swift build; swift test (934 passed, 42 expected skips, 0 failures); dg validate.
+
+## Agent log
+
+- 2026-09-08T00:09:05.792Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Peak transient allocation for a 60MP raster conversion ≤ 256MB (no 4-channel Float staging buffer) (pass)
+- [x] Pixel-identical (or ≤1 LSB) end-to-end render vs current path on gradient/feathered fixtures, covered by a test (pass)
+- [x] swift build, swift test pass with zero Swift 6 diagnostics and zero opt-outs (pass)
+Checks run:
+- swift build — clean
+- swift test — 934 executed, 42 expected skips, 0 failures
+- swift test --filter LocalMaskRenderingTests — 20/20 passed, including new testRasterPayloadRGBA8MatchesPreviousRGBAfOverlayOnFeatheredFixture parity test
+- grep for @unchecked Sendable / nonisolated(unsafe) / @preconcurrency across Sources — no opt-outs (one unrelated comment mention)
+- manual code review of rasterImage: single fused byte pass into a 60MB Data buffer (60MP case), no Float staging array; overflow guards added on width/values.count before the *4 byte-count computation
+- git status --porcelain — clean tree aside from DG bookkeeping files
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MTRWEDE7NF5J3ABY
+Summary: Independent verification: build/tests green (934 passed, 42 skips, 0 failures), targeted mask suite (20/20) including new RGBA8-vs-RGBAf parity test, no Swift 6 opt-outs, fused single-pass byte conversion confirmed to meet the ≤256MB transient budget. No fixes needed.
