@@ -161,6 +161,45 @@ final class PhotoAnalysisPerformanceTests: TempDirectoryTestCase {
         assertWithinBaseline("cacheHit", median)
     }
 
+    func testDetailedAnalysisBenchmark() async throws {
+        try requireBenchmark()
+        let fixture = try makeFixture()
+        let assetID = PhotoAssetID.file(
+            sourceURL(for: fixture.source),
+            fingerprint: PhotoSourceFingerprint.file(at: sourceURL(for: fixture.source))
+        )
+        var coldSamples: [Double] = []
+        var stageSamples: [SemanticMaskKind: [Double]] = [:]
+        var analysis: PhotoAnalysis?
+        for index in 0..<iterations {
+            let maskStore = MaskStore(
+                directory: tempDirectory.appendingPathComponent("detailed-cold-masks-\(index)"))
+            let timedProvider = TimedMaskProvider(
+                base: VisionSemanticMaskProvider(store: maskStore))
+            let coordinator = PhotoAnalysisCoordinator(
+                maskStore: maskStore,
+                cache: PhotoAnalysisCache(
+                    directory: tempDirectory.appendingPathComponent("detailed-cold-cache-\(index)")),
+                maskProvider: timedProvider
+            )
+            let start = DispatchTime.now().uptimeNanoseconds
+            analysis = try await coordinator.analyze(
+                assetID: assetID, source: fixture.source, level: .detailed
+            )
+            coldSamples.append(elapsedMilliseconds(since: start))
+            for (kind, samples) in await timedProvider.samples {
+                stageSamples[kind, default: []].append(contentsOf: samples)
+            }
+        }
+
+        let measuredAnalysis = try XCTUnwrap(analysis)
+        report(
+            "detailedAnalysis", median(coldSamples),
+            detail: timingSummary(measuredAnalysis.timings)
+                + " stages=" + detailedStageSummary(stageSamples)
+        )
+    }
+
     func testCanonicalDimensionsBenchmarkAndSubjectSignal() async throws {
         try requireBenchmark()
         let source = try makeFixture().source
@@ -268,6 +307,20 @@ final class PhotoAnalysisPerformanceTests: TempDirectoryTestCase {
             + "regional=\(durationMS(timings.regionalAnalysis)) total=\(durationMS(timings.total))"
     }
 
+    private func detailedStageSummary(_ samples: [SemanticMaskKind: [Double]]) -> String {
+        let stages: [(String, SemanticMaskKind)] = [
+            ("subject", .subject),
+            ("foregroundInstance", .foregroundInstance(0)),
+            ("background", .background),
+            ("face", .face),
+            ("person", .person),
+        ]
+        return stages.map { label, kind in
+            let values = samples[kind] ?? []
+            return "\(label):\(String(format: "%.3f", median(values)))ms"
+        }.joined(separator: ",")
+    }
+
     private func durationMS(_ duration: Duration) -> String {
         let components = duration.components
         return String(
@@ -321,5 +374,33 @@ final class PhotoAnalysisPerformanceTests: TempDirectoryTestCase {
             }
         }
         return result == KERN_SUCCESS ? UInt64(info.resident_size) : 0
+    }
+}
+
+private actor TimedMaskProvider: SemanticMaskProviding {
+    let base: any SemanticMaskProviding
+    private(set) var samples: [SemanticMaskKind: [Double]] = [:]
+
+    init(base: any SemanticMaskProviding) {
+        self.base = base
+    }
+
+    func mask(
+        for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality
+    ) async throws -> RegionMask {
+        let start = DispatchTime.now().uptimeNanoseconds
+        do {
+            let result = try await base.mask(for: kind, image: image, quality: quality)
+            record(kind, start: start)
+            return result
+        } catch {
+            record(kind, start: start)
+            throw error
+        }
+    }
+
+    private func record(_ kind: SemanticMaskKind, start: UInt64) {
+        samples[kind, default: []].append(
+            Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000)
     }
 }
