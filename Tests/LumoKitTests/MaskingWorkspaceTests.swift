@@ -191,6 +191,81 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertEqual(viewModel.maskingState.activeTool, .erase)
     }
 
+    func testAddingEraseBrushToSelectedMaskTargetsThatLayer() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.foreground)
+        let layerID = try XCTUnwrap(viewModel.maskingState.selectedLayerID)
+
+        viewModel.createMask(.erase)
+
+        let layer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        XCTAssertEqual(layer.id, layerID)
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 1)
+        XCTAssertEqual(layer.components.count, 2)
+        XCTAssertEqual(layer.components.last?.mode, .subtract)
+        XCTAssertNotNil(layer.components.last?.source.brushDefinition)
+    }
+
+    func testEraseGesturePreservesEachExistingMaskSourceAndAppendsSubtractBrushIntent() throws {
+        for kind in [MaskCreationKind.linear, .radial, .foreground, .brush] {
+            let viewModel = AppViewModel(engine: FakeRenderEngine())
+            viewModel.createMask(.foreground)
+            let componentID = try XCTUnwrap(viewModel.maskingState.selectedComponentID)
+            let layerID = try XCTUnwrap(viewModel.maskingState.selectedLayerID)
+            let replacement: MaskSource
+            switch kind {
+            case .linear: replacement = .linear(LinearGradientDefinition())
+            case .radial: replacement = .radial(RadialGradientDefinition())
+            case .foreground: replacement = .semantic(SemanticMaskDefinition(target: .foreground))
+            case .brush: replacement = .brush(BrushMaskDefinition())
+            default: fatalError("Unexpected source fixture")
+            }
+            viewModel.updateMaskComponent(componentID, in: layerID) { $0.source = replacement }
+            let sourceBefore = try XCTUnwrap(
+                viewModel.document.localAdjustments.first?.components.first?.source)
+
+            viewModel.setMaskTool(.erase)
+            viewModel.maskingState.brushRadius = 0.025
+            viewModel.maskingState.brushFeather = 0.4
+            viewModel.maskingState.brushFlow = 0.7
+            viewModel.maskingState.brushDensity = 0.8
+            viewModel.beginMaskGesture(
+                at: CGPoint(x: 0.2, y: 0.5),
+                sourceSize: CGSize(width: 1_000, height: 1_000))
+            viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.5))
+            viewModel.endMaskGesture()
+
+            let layer = try XCTUnwrap(viewModel.document.localAdjustments.first)
+            XCTAssertEqual(layer.components.count, 2, "\(kind) must retain its existing component")
+            XCTAssertEqual(layer.components[0].source, sourceBefore)
+            XCTAssertEqual(layer.components[1].mode, .subtract)
+            let stroke = try XCTUnwrap(layer.components[1].source.brushDefinition?.strokes.last)
+            XCTAssertEqual(stroke.radius, 0.025, accuracy: 0.000_001)
+            XCTAssertEqual(stroke.feather, 0.4, accuracy: 0.000_001)
+            XCTAssertEqual(stroke.flow, 0.7, accuracy: 0.000_001)
+            XCTAssertEqual(stroke.density, 0.8, accuracy: 0.000_001)
+            XCTAssertGreaterThan(stroke.samples.count, 2, "sparse endpoints must be filled")
+        }
+    }
+
+    func testActiveBrushSettingsAreCapturedOnceEvenIfControlsChangeMidStroke() throws {
+        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.brush)
+        viewModel.maskingState.brushRadius = 0.03
+        viewModel.maskingState.brushFeather = 0.2
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.5))
+        viewModel.maskingState.brushRadius = 0.12
+        viewModel.maskingState.brushFeather = 0.9
+        viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.5))
+        viewModel.endMaskGesture()
+
+        let stroke = try XCTUnwrap(
+            viewModel.document.localAdjustments.first?.components.first?.source.brushDefinition?
+                .strokes.last)
+        XCTAssertEqual(stroke.radius, 0.03, accuracy: 0.000_001)
+        XCTAssertEqual(stroke.feather, 0.2, accuracy: 0.000_001)
+    }
+
     func testComponentCreationSupportsEverySourceAndOperationWithExplicitFirstReplace() throws {
         let viewModel = AppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.foreground)

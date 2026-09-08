@@ -123,6 +123,28 @@ final class LocalMaskTests: XCTestCase {
         XCTAssertLessThan(compact.count, samples.count)
     }
 
+    func testBrushResamplingFillsSparseNativeEventSegmentsWithoutChangingEndpoints() {
+        let sourceSize = CGSize(width: 1_000, height: 1_000)
+        let samples = [
+            BrushSample(point: CGPoint(x: 0.1, y: 0.5), pressure: 0.2),
+            BrushSample(point: CGPoint(x: 0.9, y: 0.5), pressure: 0.8),
+        ]
+        let radius = 0.02
+        let result = BrushMaskMath.resampledAndSimplified(
+            samples, sourceSize: sourceSize, radius: radius)
+        let spacing = BrushMaskMath.samplingSpacing(sourceSize: sourceSize, radius: radius)
+
+        XCTAssertEqual(result.first?.point, samples.first?.point)
+        XCTAssertEqual(result.last?.point, samples.last?.point)
+        XCTAssertGreaterThan(result.count, 2)
+        for (lhs, rhs) in zip(result, result.dropFirst()) {
+            XCTAssertLessThanOrEqual(
+                BrushMaskMath.physicalDistance(lhs.point, rhs.point, sourceSize: sourceSize),
+                spacing + 0.000_001,
+                "every stamped segment must remain within the gap-free spacing budget")
+        }
+    }
+
     func testLinearGradientMathUsesEndpointsForAngleFalloffAndSmoothAlpha() {
         let definition = LinearGradientDefinition(
             zeroStrengthPoint: CGPoint(x: 0.2, y: 0.5),

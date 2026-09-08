@@ -24,43 +24,23 @@ enum BrushMaskMath {
         let width = max(sourceSize.width.isFinite ? sourceSize.width : 1, 1)
         let height = max(sourceSize.height.isFinite ? sourceSize.height : 1, 1)
         let shorter = max(min(width, height), 1)
+        let sourceSize = CGSize(width: width, height: height)
         let spacing = samplingSpacing(sourceSize: sourceSize, radius: radius)
-
-        var resampled = [samples[0]]
-        resampled.reserveCapacity(min(samples.count, maximumSamples))
-        var last = samples[0].point
-        var carry = 0.0
-        for sample in samples.dropFirst() {
-            let distance = physicalDistance(
-                last, sample.point, sourceSize: CGSize(width: width, height: height))
-            carry += distance
-            if carry >= spacing {
-                resampled.append(sample)
-                last = sample.point
-                carry = 0
-                if resampled.count == maximumSamples { break }
-            }
-        }
-        if resampled.count == 1, let lastSample = samples.last, lastSample != samples[0],
-            maximumSamples > 1
-        {
-            resampled.append(lastSample)
-        } else if let lastSample = samples.last, resampled.last != lastSample,
-            resampled.count < maximumSamples
-        {
-            resampled.append(lastSample)
-        } else if let lastSample = samples.last, resampled.last != lastSample,
-            !resampled.isEmpty
-        {
-            resampled[resampled.count - 1] = lastSample
-        }
+        let resampled = resample(
+            samples, sourceSize: sourceSize, spacing: spacing, maximumSamples: maximumSamples)
 
         let tolerance =
             max(
                 error ?? max(radius * 0.06, 0.0005),
                 0.0001
             ) * shorter
-        return simplify(resampled, tolerance: tolerance, width: width, height: height)
+        // Simplification preserves the path shape, but it can remove every point from a straight
+        // section. Re-expand afterwards: the rasterizer deposits stamps rather than implicit
+        // line segments, so keeping adjacent stamps within the spacing budget is what prevents
+        // sparse pointer events from becoming a row of disconnected blobs.
+        let simplified = simplify(resampled, tolerance: tolerance, width: width, height: height)
+        return resample(
+            simplified, sourceSize: sourceSize, spacing: spacing, maximumSamples: maximumSamples)
     }
 
     /// The minimum physical distance between samples accepted during a live stroke. Keeping this
@@ -78,6 +58,67 @@ enum BrushMaskMath {
         let width = max(sourceSize.width.isFinite ? sourceSize.width : 1, 1)
         let height = max(sourceSize.height.isFinite ? sourceSize.height : 1, 1)
         return hypot((lhs.x - rhs.x) * width, (lhs.y - rhs.y) * height)
+    }
+
+    /// Insert evenly spaced samples along each native-event segment. Event delivery is allowed
+    /// to be sparse (and can be sparse even when coalescing is available), so merely retaining
+    /// event endpoints is not sufficient for a continuous stamped brush.
+    static func interpolatedSamples(
+        from start: BrushSample, to end: BrushSample, sourceSize: CGSize,
+        spacing: Double, carry: inout Double, maximumCount: Int
+    ) -> [BrushSample] {
+        guard maximumCount > 0 else { return [] }
+        let distance = physicalDistance(start.point, end.point, sourceSize: sourceSize)
+        guard distance.isFinite, distance > 0 else { return [] }
+        let safeSpacing = max(spacing.isFinite ? spacing : 0.5, 0.5)
+        var result: [BrushSample] = []
+        var distanceToNext = max(safeSpacing - carry, 0)
+        while distanceToNext <= distance + 0.000_001, result.count < maximumCount {
+            let t = min(max(distanceToNext / distance, 0), 1)
+            result.append(interpolate(start, end, t: t))
+            distanceToNext += safeSpacing
+        }
+        carry = (carry + distance).truncatingRemainder(dividingBy: safeSpacing)
+        return result
+    }
+
+    private static func resample(
+        _ samples: [BrushSample], sourceSize: CGSize, spacing: Double, maximumSamples: Int
+    ) -> [BrushSample] {
+        guard let first = samples.first, maximumSamples > 0 else { return [] }
+        var result = [first]
+        result.reserveCapacity(min(maximumSamples, samples.count))
+        var carry = 0.0
+        var previous = first
+        for sample in samples.dropFirst() {
+            let inserted = interpolatedSamples(
+                from: previous, to: sample, sourceSize: sourceSize, spacing: spacing,
+                carry: &carry, maximumCount: maximumSamples - result.count)
+            result.append(contentsOf: inserted)
+            previous = sample
+            if result.count == maximumSamples { break }
+        }
+        if result.count < maximumSamples, let last = samples.last, result.last != last {
+            result.append(last)
+        } else if let last = samples.last, result.last != last, !result.isEmpty {
+            result[result.count - 1] = last
+        }
+        return result
+    }
+
+    private static func interpolate(_ start: BrushSample, _ end: BrushSample, t: Double) -> BrushSample {
+        let pressure: Double?
+        switch (start.pressure, end.pressure) {
+        case let (lhs?, rhs?): pressure = lhs + (rhs - lhs) * t
+        case (_, let rhs?): pressure = rhs
+        case (let lhs?, _): pressure = lhs
+        case (nil, nil): pressure = nil
+        }
+        return BrushSample(
+            point: CGPoint(
+                x: start.point.x + (end.point.x - start.point.x) * t,
+                y: start.point.y + (end.point.y - start.point.y) * t),
+            pressure: pressure)
     }
 
     /// Mouse samples have no pressure.  Treating absent, invalid, or zero tablet pressure as a
