@@ -41,6 +41,20 @@ final class RegionMaskTests: XCTestCase {
         XCTAssertEqual(mask.values, [0, 0.5, 1, 1])
         XCTAssertEqual(mask.coverage, 0.625, accuracy: 0.0001)
         XCTAssertThrowsError(try NormalizedMask(size: size, values: [0, 1]))
+        XCTAssertThrowsError(try NormalizedMask(size: size, values: [0, .nan, 1, 0]))
+    }
+
+    func testTrustedMaskCarriesGenerationCoverageAndKeepsCodableSchema() throws {
+        let size = PixelDimensions(width: 2, height: 2)
+        let mask = NormalizedMask(
+            trustingSize: size, values: [0, 0.5, 1, 0], coverage: 0.375
+        )
+
+        XCTAssertEqual(mask.coverage, 0.375, accuracy: 0.0001)
+        let decoded = try JSONDecoder().decode(
+            NormalizedMask.self, from: JSONEncoder().encode(mask)
+        )
+        XCTAssertEqual(decoded, mask)
     }
 
     func testMaskStoreKeepsQualityLevelsIndependentAcrossReopen() async throws {
@@ -96,6 +110,11 @@ final class RegionMaskTests: XCTestCase {
         XCTAssertEqual(upscaled.values[15], 0)
         XCTAssertGreaterThanOrEqual(upscaled.values.max() ?? 0, 0)
         XCTAssertLessThanOrEqual(upscaled.values.max() ?? 0, 1)
+        XCTAssertEqual(
+            upscaled.coverage,
+            upscaled.values.reduce(0, +) / Float(upscaled.values.count),
+            accuracy: 0.0001
+        )
 
         // Asymmetric upscale distinguishes the row and column interpolation weights: with the
         // bottom-row lerp mistakenly using fy this interior sample reads 0.4167 instead of 0.5.
