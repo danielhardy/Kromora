@@ -10,6 +10,17 @@ import simd
 @MainActor
 final class AppViewModelTests: TempDirectoryTestCase {
 
+    func testEditDatabaseURLIsExposedWithoutExposingTheStore() async {
+        let storeURL = tempDirectory.appendingPathComponent("EditStore.store")
+        let viewModel = AppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: EditDocumentStore(fileURL: storeURL)
+        )
+
+        let editDatabaseURL = await viewModel.editDatabaseURL
+        XCTAssertEqual(editDatabaseURL, storeURL)
+    }
+
     func testExportStatusReachesTheStatusBar() {
         let viewModel = AppViewModel()
         viewModel.export.onStatus?("Exported: photo.jpg")

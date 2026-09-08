@@ -111,10 +111,23 @@ struct LumoApp: App {
         .commands { LumoCommands(settings: appDelegate.viewModel.settings) }
 
         Settings {
-            LumoSettingsView(
-                settings: appDelegate.viewModel.settings,
-                editStore: appDelegate.viewModel.editStore
-            )
+            LumoSettingsScene(viewModel: appDelegate.viewModel)
+        }
+    }
+}
+
+@MainActor
+private struct LumoSettingsScene: View {
+    let viewModel: AppViewModel
+    @State private var editDatabaseURL: URL?
+
+    var body: some View {
+        LumoSettingsView(
+            settings: viewModel.settings,
+            editDatabaseURL: editDatabaseURL
+        )
+        .task {
+            editDatabaseURL = await viewModel.editDatabaseURL
         }
     }
 }
