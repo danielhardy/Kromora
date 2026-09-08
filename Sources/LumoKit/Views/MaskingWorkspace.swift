@@ -976,6 +976,12 @@ struct MaskCanvasOverlay: View {
             // radial showed just its ellipse tooling).
             let documentLayers = viewModel.document.localAdjustments
             let layers = overlayLayers(document: documentLayers, draft: gradientDraftForOverlay)
+            // Brush drafts are presented as lightweight Canvas guides while the committed layer
+            // remains the resolved wash. In particular an active subtractive brush must keep the
+            // existing semantic/gradient coverage visible; inspecting the new brush component by
+            // itself would make the base mask appear to vanish during an erase gesture.
+            let overlayComponentID = brushDraftKeepsEffectiveOverlay
+                ? nil : maskingState.selectedComponentID
             let style = overlayStyle
             let presentation = MaskOverlayPresentation(
                 coverageOpacity: maskingState.overlayOpacity)
@@ -983,7 +989,7 @@ struct MaskCanvasOverlay: View {
                 layers: layers,
                 selectedLayerID: maskingState.selectedLayerID,
                 soloLayerID: maskingState.soloLayerID,
-                selectedComponentID: maskingState.selectedComponentID,
+                selectedComponentID: overlayComponentID,
                 soloComponentID: maskingState.soloComponentID,
                 assetID: viewModel.maskingAssetID,
                 sourceFingerprint: viewModel.maskingSource?.cacheFingerprint ?? "missing",
@@ -999,19 +1005,6 @@ struct MaskCanvasOverlay: View {
                         presentation: presentation, in: &context
                     )
                 }
-                if maskingState.hasDraft,
-                   (maskingState.activeTool == .brush
-                    || maskingState.activeTool == .erase) {
-                    MaskOverlaySurfaceView(
-                        snapshot: activeBrushMetalSnapshot,
-                        sourceSize: sourceSize,
-                        crop: crop,
-                        navigation: navigation,
-                        backingScale: backingScale,
-                        isInteractive: false,
-                        onPointer: nil
-                    )
-                }
                 MaskPointerSurface(
                     isInteractive: maskingState.activeTool != .selection
                         && !viewModel.isCropToolActive
@@ -1022,11 +1015,10 @@ struct MaskCanvasOverlay: View {
             .accessibilityLabel(canvasAccessibilityLabel)
             .accessibilityValue(canvasAccessibilityValue)
             .task(id: taskID) {
-                maskImage = nil
                 let semanticTarget = selectedSemanticTarget(
                     in: layers,
                     selectedLayerID: maskingState.selectedLayerID,
-                    selectedComponentID: maskingState.selectedComponentID,
+                    selectedComponentID: overlayComponentID,
                     soloComponentID: maskingState.soloComponentID
                 )
                 if semanticTarget != nil {
@@ -1044,7 +1036,7 @@ struct MaskCanvasOverlay: View {
                     soloLayerID: maskingState.soloLayerID,
                     targetSize: targetSize,
                     style: style,
-                    selectedComponentID: maskingState.selectedComponentID,
+                    selectedComponentID: overlayComponentID,
                     soloComponentID: maskingState.soloComponentID
                 )
                 guard !Task.isCancelled else { return }
@@ -1181,17 +1173,9 @@ struct MaskCanvasOverlay: View {
         return definition.target
     }
 
-    private var activeBrushMetalSnapshot: MaskOverlayPrototypeSnapshot {
-        var snapshot = MaskOverlayPrototypeSnapshot()
-        snapshot.tool = .brush
-        snapshot.cursor = maskingState.hoverPoint
-        guard let layer = activeLayer,
-              let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID),
-              case .brush(let definition) = layer.components[index].source,
-              let stroke = definition.strokes.last
-        else { return snapshot }
-        snapshot.brushStroke = stroke.samples.map(\.point)
-        return snapshot
+    private var brushDraftKeepsEffectiveOverlay: Bool {
+        guard maskingState.hasDraft else { return false }
+        return maskingState.activeTool == .brush || maskingState.activeTool == .erase
     }
 
     private var overlayStyle: MaskOverlayStyle {
@@ -1315,15 +1299,29 @@ struct MaskCanvasOverlay: View {
                         path.addLine(to: viewportPoint)
                     }
                 }
+                let sourceRadius = stroke.radius
+                    * Double(min(transform.sourceSize.width, transform.sourceSize.height))
+                    / max(transform.sourceSize.width, 1)
+                let center = stroke.samples.last?.point ?? .zero
+                let viewportRadius: CGFloat
+                if let centerPoint = point(center),
+                   let edgePoint = point(CGPoint(
+                       x: min(max(center.x + sourceRadius, 0), 1), y: center.y)) {
+                    viewportRadius = max(1, abs(edgePoint.x - centerPoint.x))
+                } else {
+                    viewportRadius = 1
+                }
                 context.stroke(
                     path, with: .color(guideColor),
                     style: StrokeStyle(
-                        lineWidth: max(2, stroke.radius * 80), lineCap: .round, lineJoin: .round))
+                        lineWidth: viewportRadius * 2, lineCap: .round, lineJoin: .round))
             }
             if let hover = maskingState.hoverPoint,
                let center = point(hover),
+               let activeStroke = definition.strokes.last,
                let edge = point(CGPoint(
-                   x: hover.x + maskingState.brushRadius
+                   x: hover.x + (maskingState.hasDraft
+                       ? activeStroke.radius : maskingState.brushRadius)
                        * Double(min(transform.sourceSize.width, transform.sourceSize.height))
                        / max(transform.sourceSize.width, 1),
                    y: hover.y)) {

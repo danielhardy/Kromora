@@ -155,6 +155,11 @@ final class MaskOverlayMTKView: MTKView {
         snapshot: MaskOverlayPrototypeSnapshot, sourceSize: CGSize, crop: CropAdjustments,
         navigation: CanvasNavigation, backingScale: CGFloat
     ) {
+        // MTKView's `isOpaque` override alone does not reliably propagate to its backing
+        // CAMetalLayer after SwiftUI reparents the representable. Keep the prototype surface
+        // genuinely transparent whenever it is used by diagnostics, never a black sibling.
+        layer?.isOpaque = false
+        layer?.backgroundColor = NSColor.clear.cgColor
         enableSetNeedsDisplay = true
         isPaused = true
         framebufferOnly = true

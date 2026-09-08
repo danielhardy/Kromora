@@ -269,6 +269,19 @@ extension AppViewModel {
         } else {
             endUndoGrouping()
         }
+        // “Add Erase Brush” augments the selected layer when one exists. A subtract component
+        // only has meaning relative to prior coverage, so placing it in a separate empty layer
+        // would silently erase nothing. Keep the no-selection path below for callers that are
+        // explicitly creating a standalone recipe.
+        if kind == .erase,
+           let layerID = maskInteractionState.selectedLayerID,
+           document.localAdjustments.contains(where: { $0.id == layerID }) {
+            addMaskComponent(
+                to: layerID, source: .brush(BrushMaskDefinition()), mode: .subtract)
+            maskInteractionState.setTool(.erase)
+            statusMessage = "Added Erase Brush to selected mask"
+            return
+        }
         let source: MaskSource
         switch kind {
         case .subject:
@@ -842,6 +855,27 @@ extension AppViewModel {
             return
         }
         var draft = layer
+        // Painting is always an additive component and erasing is always a subtractive brush
+        // component.  Do not mutate a selected analytic or semantic component into a brush: that
+        // would discard its resolved coverage.  Instead append the transient brush intent to the
+        // same layer so subtract composes against the effective mask when the gesture commits.
+        if maskInteractionState.activeTool == .brush || maskInteractionState.activeTool == .erase {
+            let selectedIndex = draft.targetComponentIndex(
+                selected: maskInteractionState.selectedComponentID)
+            let selectedComponent = selectedIndex.map { draft.components[$0] }
+            let wantsSubtract = maskInteractionState.activeTool == .erase
+            let canReuse = selectedComponent.map { component in
+                guard case .brush = component.source else { return false }
+                return wantsSubtract ? component.mode == .subtract : component.mode != .subtract
+            } ?? false
+            if !canReuse {
+                let component = MaskComponent(
+                    mode: wantsSubtract ? .subtract : .add,
+                    source: .brush(BrushMaskDefinition()))
+                draft.components.append(component)
+                maskInteractionState.select(componentID: component.id, in: draft.id)
+            }
+        }
         guard let componentIndex = draft.targetComponentIndex(
             selected: maskInteractionState.selectedComponentID)
         else {
@@ -860,9 +894,6 @@ extension AppViewModel {
                 density: maskInteractionState.brushDensity
             ))
             draft.components[componentIndex].source = .brush(definition)
-            if maskInteractionState.activeTool == .erase {
-                draft.components[componentIndex].mode = .subtract
-            }
         case .linear:
             if case .linear(let current) = draft.components[componentIndex].source {
                 if linearHandle == nil || linearHandle == .creation {
@@ -890,7 +921,7 @@ extension AppViewModel {
         }
         maskInteractionState.beginDraft(draft, at: clamped, sourceSize: sourceSize)
         if maskInteractionState.activeTool == .brush || maskInteractionState.activeTool == .erase {
-            maskInteractionState.beginBrushStroke(at: clamped)
+            maskInteractionState.beginBrushStroke(at: clamped, pressure: pressure)
         }
         if maskInteractionState.activeTool == .linear {
             let handle = maskInteractionState.linearCreationPending
@@ -922,16 +953,13 @@ extension AppViewModel {
             guard case .brush(var definition) = draft.components[componentIndex].source else {
                 return
             }
-            guard let strokeIndex = definition.strokes.indices.last,
-                  maskInteractionState.shouldAcceptBrushSample(
-                      at: clamped, sourceSize: maskInteractionState.gestureSourceSize,
-                      radius: definition.strokes[strokeIndex].radius,
-                      currentCount: definition.strokes[strokeIndex].samples.count)
-            else { return }
-            if !definition.strokes.isEmpty {
-                definition.strokes[definition.strokes.count - 1].samples.append(BrushSample(
-                    point: clamped, pressure: pressure))
-            }
+            guard let strokeIndex = definition.strokes.indices.last else { return }
+            definition.strokes[strokeIndex].samples.append(contentsOf:
+                maskInteractionState.brushSamples(
+                    to: clamped, pressure: pressure,
+                    sourceSize: maskInteractionState.gestureSourceSize,
+                    radius: definition.strokes[strokeIndex].radius,
+                    currentCount: definition.strokes[strokeIndex].samples.count))
             draft.components[componentIndex].source = .brush(definition)
         case .linear:
             guard case .linear(let current) = draft.components[componentIndex].source else {
@@ -1038,7 +1066,21 @@ extension AppViewModel {
             cancelMaskGesture()
             return
         }
-        guard var committed = maskInteractionState.commitDraft() else { return }
+        guard var committed = maskInteractionState.draftLayer else { return }
+        if maskInteractionState.activeTool == .brush || maskInteractionState.activeTool == .erase,
+           let componentIndex = committed.targetComponentIndex(
+               selected: maskInteractionState.selectedComponentID),
+           case .brush(var definition) = committed.components[componentIndex].source,
+           let strokeIndex = definition.strokes.indices.last,
+           let terminal = maskInteractionState.finishBrushStroke(
+               currentCount: definition.strokes[strokeIndex].samples.count),
+           definition.strokes[strokeIndex].samples.last != terminal {
+            definition.strokes[strokeIndex].samples.append(terminal)
+            committed.components[componentIndex].source = .brush(definition)
+            maskInteractionState.updateDraft(committed)
+        }
+        guard let committedDraft = maskInteractionState.commitDraft() else { return }
+        committed = committedDraft
         for componentIndex in committed.components.indices {
             guard case .brush(var definition) = committed.components[componentIndex].source else {
                 continue

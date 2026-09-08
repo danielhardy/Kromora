@@ -124,6 +124,7 @@ final class MaskInteractionState: ObservableObject {
     private(set) var gestureStartRadialDefinition: RadialGradientDefinition?
     private(set) var gestureSourceSize: CGSize = CGSize(width: 1, height: 1)
     private var brushLastRawPoint: CGPoint?
+    private var brushLastRawPressure: Double?
     private var brushDistanceSinceAcceptedSample = 0.0
     private let maximumLiveBrushSamples = 4_096
     private var selectionBeforePendingCreationLayerID: UUID?
@@ -159,29 +160,46 @@ final class MaskInteractionState: ObservableObject {
     func setTool(_ tool: Tool) { activeTool = tool }
     func setSpacePanning(_ isPanning: Bool) { isSpacePanning = isPanning }
 
-    func beginBrushStroke(at point: CGPoint) {
+    func beginBrushStroke(at point: CGPoint, pressure: Double?) {
         brushLastRawPoint = point
+        brushLastRawPressure = pressure
         brushDistanceSinceAcceptedSample = 0
     }
 
-    /// Return whether a pointer sample should be retained by the live draft. The raw pointer stream
-    /// can be much denser than the saved recipe; accepting only distance-separated samples keeps
-    /// main-actor memory bounded throughout a long stroke, rather than only after mouse-up.
-    func shouldAcceptBrushSample(
-        at point: CGPoint, sourceSize: CGSize, radius: Double, currentCount: Int
-    ) -> Bool {
+    /// Interpolate native event endpoints at the same physical spacing used by the durable
+    /// recipe. This makes a low-frequency event stream paint continuously instead of relying on
+    /// the operating system to have delivered enough intermediate mouse events.
+    func brushSamples(
+        to point: CGPoint, pressure: Double?, sourceSize: CGSize, radius: Double,
+        currentCount: Int
+    ) -> [BrushSample] {
         guard let previous = brushLastRawPoint else {
             brushLastRawPoint = point
-            return currentCount < maximumLiveBrushSamples
+            brushLastRawPressure = pressure
+            return []
         }
-        brushDistanceSinceAcceptedSample += BrushMaskMath.physicalDistance(
-            previous, point, sourceSize: sourceSize)
+        let available = maximumLiveBrushSamples - currentCount
+        guard available > 0 else {
+            brushLastRawPoint = point
+            brushLastRawPressure = pressure
+            return []
+        }
+        let samples = BrushMaskMath.interpolatedSamples(
+            from: BrushSample(point: previous, pressure: brushLastRawPressure),
+            to: BrushSample(point: point, pressure: pressure), sourceSize: sourceSize,
+            spacing: BrushMaskMath.samplingSpacing(sourceSize: sourceSize, radius: radius),
+            carry: &brushDistanceSinceAcceptedSample, maximumCount: available)
         brushLastRawPoint = point
-        guard currentCount < maximumLiveBrushSamples else { return false }
-        guard brushDistanceSinceAcceptedSample >= BrushMaskMath.samplingSpacing(
-            sourceSize: sourceSize, radius: radius) else { return false }
-        brushDistanceSinceAcceptedSample = 0
-        return true
+        brushLastRawPressure = pressure
+        return samples
+    }
+
+    /// Preserve the tail shorter than one sampling interval before durable simplification. The
+    /// renderer then never leaves a visible unpainted gap at mouse-up.
+    func finishBrushStroke(currentCount: Int) -> BrushSample? {
+        guard currentCount < maximumLiveBrushSamples,
+              let point = brushLastRawPoint else { return nil }
+        return BrushSample(point: point, pressure: brushLastRawPressure)
     }
 
     func adjustBrushRadius(by delta: Double) {
@@ -266,6 +284,7 @@ final class MaskInteractionState: ObservableObject {
         gestureStartRadialDefinition = nil
         gestureSourceSize = CGSize(width: 1, height: 1)
         brushLastRawPoint = nil
+        brushLastRawPressure = nil
         brushDistanceSinceAcceptedSample = 0
         return committed
     }
@@ -279,6 +298,7 @@ final class MaskInteractionState: ObservableObject {
         gestureStartRadialDefinition = nil
         gestureSourceSize = CGSize(width: 1, height: 1)
         brushLastRawPoint = nil
+        brushLastRawPressure = nil
         brushDistanceSinceAcceptedSample = 0
     }
 
@@ -352,6 +372,7 @@ final class MaskInteractionState: ObservableObject {
         gestureStartRadialDefinition = nil
         gestureSourceSize = CGSize(width: 1, height: 1)
         brushLastRawPoint = nil
+        brushLastRawPressure = nil
         brushDistanceSinceAcceptedSample = 0
         soloLayerID = nil
         soloComponentID = nil
