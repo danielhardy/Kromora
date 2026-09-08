@@ -34,7 +34,8 @@ enum RenderPipeline {
     /// extent contract to Clarity's spatial stage. v19 adds the ordered local-mask boundary.
     /// v20 evaluates the vignette as a destination-coordinate color kernel so tiled GPU evaluation
     /// cannot reinterpret the full-frame geometry through a sampler tile.
-    static let cacheVersion = 20
+    /// v21 evaluates the grain field as a destination-coordinate color kernel for the same reason.
+    static let cacheVersion = 21
 
     /// Build the graph for `document` over `source`.
     ///
@@ -511,7 +512,6 @@ enum RenderPipeline {
         let seedLow = Float(seed & 0xffff)
         return kernel.apply(
             extent: extent,
-            roiCallback: { _, rect in rect },
             arguments: [image, geometry, controls, seedHigh, seedLow]
         )?.cropped(to: extent) ?? image
     }
@@ -801,7 +801,12 @@ enum RenderPipeline {
     }
     """)
 
-    private static let grainKernel = CIKernel(source: """
+    /// Grain is a pointwise transform whose noise field is defined in the complete output frame.
+    /// Keeping the source pixel as a color-kernel input makes `destCoord()` remain in that frame
+    /// when Core Image tiles a large render; `samplerCoord(image)` can instead be reinterpreted in
+    /// a sampler tile/transform coordinate space and create rectangular seams in the completed
+    /// Metal presentation path.
+    private static let grainKernel = CIColorKernel(source: """
     float grainHash(vec2 point, float seedHigh, float seedLow) {
         // Each seed component is a UInt16 supplied as a Float, so both components retain all
         // their bits exactly. Keep them as separate phase offsets: recombining them into a single
@@ -830,16 +835,15 @@ enum RenderPipeline {
     }
 
     kernel vec4 effectsGrain(
-        sampler image,
+        __sample pixel,
         vec4 geometry,
         vec4 controls,
         float seedHigh,
         float seedLow
     ) {
-        vec2 coordinate = samplerCoord(image);
-        vec4 pixel = sample(image, coordinate);
         if (pixel.a <= 0.00001) { return pixel; }
 
+        vec2 coordinate = destCoord();
         vec2 normalized = (coordinate - geometry.xy) / geometry.z;
         float frequency = max(1.0, controls.x);
         float roughness = clamp(controls.y, 0.0, 1.0);

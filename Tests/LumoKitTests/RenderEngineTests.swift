@@ -160,6 +160,110 @@ final class RenderEngineTests: TempDirectoryTestCase {
         }
     }
 
+    /// A nonzero grain field must remain continuous after a large render crosses the completed
+    /// texture and presentation boundaries. The low-frequency settings make an accidental tile
+    /// reset distinguishable from the intended photographic variation.
+    @MainActor
+    func testLargeGrainCompletedTextureHasNoZoomTileSeams() async throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal is unavailable on this host")
+        }
+
+        let largeURL = try Fixtures.writeGradientPNG(
+            width: 2048, height: 1365, named: "large-grain.png", in: tempDirectory
+        )
+        let largeSource = ImageSource(
+            url: largeURL, nativeExtent: CGSize(width: 2048, height: 1365)
+        )
+        let document = EditDocument(effects: EffectsAdjustments(
+            grain: GrainAdjustments(amount: 64, size: 100, roughness: 0)
+        ))
+        let engine = RenderEngine()
+        let maybeImage = await engine.makeCIImage(RenderRequest(
+            source: largeSource,
+            document: document,
+            targetSize: CGSize(width: 2048, height: 1365),
+            quality: .preview,
+            output: .raster
+        ))
+        let image = try XCTUnwrap(maybeImage)
+        let maybeBaseline = await engine.makeCIImage(RenderRequest(
+            source: largeSource,
+            document: EditDocument(),
+            targetSize: CGSize(width: 2048, height: 1365),
+            quality: .preview,
+            output: .raster
+        ))
+        let baseline = try XCTUnwrap(maybeBaseline)
+        let destination = CGRect(x: 0, y: 0, width: 640, height: 426)
+
+        for zoom in [1.0, 3.0, 8.0, 1.25, 4.0, 1.0, 6.0, 1.0] {
+            var navigation = CanvasNavigation()
+            navigation.setZoom(zoom)
+            let presentation = try XCTUnwrap(
+                PreviewSurfaceView.Coordinator.presentationImage(
+                    image, navigation: navigation, destination: destination
+                )
+            )
+            let rendered = try XCTUnwrap(
+                RenderEngine.presentationContext.createCGImage(presentation, from: destination)
+            )
+            let bytes = try Pixels.bytes(of: rendered)
+            let middleY = rendered.height / 2
+            let middleX = rendered.width / 2
+            if zoom == 1.0 {
+                let baselinePresentation = try XCTUnwrap(
+                    PreviewSurfaceView.Coordinator.presentationImage(
+                        baseline, navigation: navigation, destination: destination
+                    )
+                )
+                let baselineRendered = try XCTUnwrap(
+                    RenderEngine.presentationContext.createCGImage(
+                        baselinePresentation, from: destination
+                    )
+                )
+                assertPixelsDiffer(
+                    bytes, try Pixels.bytes(of: baselineRendered),
+                    "the large-frame regression must exercise nonzero grain"
+                )
+            }
+
+            // Grain itself varies, so compare each likely tile boundary with its immediate
+            // neighbours. A sampler-coordinate reset produces an isolated step much larger than
+            // the surrounding low-frequency grain field.
+            for x in [159, 160, 319, 320, 479, 480] where x > 1 && x + 2 < rendered.width {
+                let left = (middleY * rendered.width + x) * 4
+                let right = left + 4
+                let before = left - 4
+                let after = right + 4
+                let boundaryStep = abs(Int(bytes[right]) - Int(bytes[left]))
+                let nearbyStep = max(
+                    abs(Int(bytes[left]) - Int(bytes[before])),
+                    abs(Int(bytes[after]) - Int(bytes[right]))
+                )
+                XCTAssertLessThanOrEqual(
+                    boundaryStep, nearbyStep + 14,
+                    "zoom \(zoom) introduced a horizontal presentation seam at x=\(x)"
+                )
+            }
+            for y in [105, 106, 212, 213, 319, 320] where y > 1 && y + 2 < rendered.height {
+                let upper = (y * rendered.width + middleX) * 4
+                let lower = ((y + 1) * rendered.width + middleX) * 4
+                let before = ((y - 1) * rendered.width + middleX) * 4
+                let after = ((y + 2) * rendered.width + middleX) * 4
+                let boundaryStep = abs(Int(bytes[lower]) - Int(bytes[upper]))
+                let nearbyStep = max(
+                    abs(Int(bytes[upper]) - Int(bytes[before])),
+                    abs(Int(bytes[after]) - Int(bytes[lower]))
+                )
+                XCTAssertLessThanOrEqual(
+                    boundaryStep, nearbyStep + 14,
+                    "zoom \(zoom) introduced a vertical presentation seam at y=\(y)"
+                )
+            }
+        }
+    }
+
     /// RAW develop edits must survive the completed-texture boundary, not only the lazy graph path.
     func testCompletedRAWPreviewReflectsDevelopSettings() async throws {
         guard let rawURL = Fixtures.localRAWURL else {
