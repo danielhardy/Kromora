@@ -7,9 +7,11 @@ import XCTest
 /// Step 2 render seam tests. These exercise the actor boundary and the one shared preview/export
 /// graph rather than testing a second CPU implementation of local adjustments.
 final class LocalMaskRenderingTests: TempDirectoryTestCase {
-    private func source() throws -> ImageSource {
-        let url = try Fixtures.writeGradientPNG(width: 8, height: 4, named: "local-mask.png", in: tempDirectory)
-        return ImageSource(url: url, nativeExtent: CGSize(width: 8, height: 4))
+    private func source(width: Int = 8, height: Int = 4) throws -> ImageSource {
+        let url = try Fixtures.writeGradientPNG(
+            width: width, height: height, named: "local-mask-\(width)x\(height).png", in: tempDirectory
+        )
+        return ImageSource(url: url, nativeExtent: CGSize(width: width, height: height))
     }
 
     private func layer(
@@ -29,6 +31,155 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
     private func image(from result: RenderResult) throws -> CGImage {
         let source = try XCTUnwrap(CGImageSourceCreateWithData(result.data as CFData, nil))
         return try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+    }
+
+    func testPreviewSemanticMaskWorkingResolutionUsesFourMegapixelAndLongEdgeCaps() {
+        let capped = SemanticMaskPreviewResolution.targetSize(
+            for: PixelDimensions(width: 6_000, height: 4_000),
+            cap: PixelDimensions(width: 2_560, height: 2_560)
+        )
+
+        XCTAssertEqual(capped, PixelDimensions(width: 2_449, height: 1_632))
+        XCTAssertLessThanOrEqual(capped.width * capped.height, 4_000_000)
+        XCTAssertLessThanOrEqual(max(capped.width, capped.height), 2_560)
+        XCTAssertEqual(
+            SemanticMaskPreviewResolution.targetSize(
+                for: PixelDimensions(width: 1_600, height: 1_000),
+                cap: PixelDimensions(width: 2_560, height: 2_560)
+            ),
+            PixelDimensions(width: 1_600, height: 1_000),
+            "already-bounded previews must not be resampled"
+        )
+    }
+
+    func testSemanticPreviewCapsWorkingResolutionButExportStaysFullResolution() async throws {
+        let source = try source(width: 64, height: 32)
+        let resolver = RecordingMaskResolver(sourceFingerprint: source.cacheFingerprint)
+        let engine = RenderEngine(
+            maskResolver: resolver,
+            semanticMaskPreviewCap: PixelDimensions(width: 32, height: 32)
+        )
+        let layer = LocalAdjustmentLayer(
+            components: [MaskComponent(
+                source: .semantic(SemanticMaskDefinition(target: .person))
+            )],
+            adjustments: LocalAdjustments(exposure: 1)
+        )
+
+        _ = try await engine.render(RenderRequest(
+            source: source, document: EditDocument(localAdjustments: [layer]),
+            targetSize: CGSize(width: 64, height: 32), quality: .preview, output: .raster
+        ))
+        _ = try await engine.render(RenderRequest(
+            source: source, document: EditDocument(localAdjustments: [layer]),
+            quality: .export, output: .raster
+        ))
+
+        let requests = await resolver.requests
+        XCTAssertEqual(requests.count, 2)
+        XCTAssertEqual(requests[0].quality, .preview)
+        XCTAssertEqual(requests[0].size, PixelDimensions(width: 32, height: 16))
+        XCTAssertEqual(requests[1].quality, .export)
+        XCTAssertEqual(requests[1].size, PixelDimensions(width: 64, height: 32))
+    }
+
+    func testCappedSemanticMaskMatchesFullResolutionForSoftAndHardEdges() async throws {
+        let source = try source(width: 64, height: 32)
+        let softDefinition = SemanticMaskDefinition(target: .person, edgeFeather: 0.5)
+        let hardDefinition = SemanticMaskDefinition(target: .person, density: 1)
+
+        let fixtures: [(String, SemanticMaskDefinition, PreviewMaskFixtureShape, Int)] = [
+            ("soft", softDefinition, PreviewMaskFixtureShape.soft, 5),
+            ("hard", hardDefinition, PreviewMaskFixtureShape.hard, 1),
+        ]
+        for (name, definition, shape, tolerance) in fixtures {
+            let capped = RenderEngine(
+                maskResolver: FixtureMaskResolver(
+                    sourceFingerprint: source.cacheFingerprint, shape: shape
+                ),
+                semanticMaskPreviewCap: PixelDimensions(width: 32, height: 32)
+            )
+            let full = RenderEngine(
+                maskResolver: FixtureMaskResolver(
+                    sourceFingerprint: source.cacheFingerprint, shape: shape
+                ),
+                semanticMaskPreviewCap: nil
+            )
+            var layer = LocalAdjustmentLayer(
+                components: [MaskComponent(source: .semantic(definition))]
+            )
+            if case .hard = shape { layer.isInverted = true }
+            let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+            let request = MaskOverlayRequest(
+                source: source, layers: [layer], selectedLayerID: layer.id, soloLayerID: nil,
+                targetSize: PixelDimensions(width: 64, height: 32), style: style
+            )
+
+            guard let cappedImage = await capped.makeMaskOverlayImage(request) else {
+                return XCTFail("missing capped \(name) mask overlay")
+            }
+            guard let fullImage = await full.makeMaskOverlayImage(request) else {
+                return XCTFail("missing full \(name) mask overlay")
+            }
+            assertPixelsEqual(
+                try Pixels.bytes(of: cappedImage), try Pixels.bytes(of: fullImage),
+                tolerance: tolerance,
+                "\(name) semantic mask preview must remain visually stable when capped"
+            )
+        }
+    }
+
+    func testSemanticPreviewMaskWorkingResolutionBenchmark() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["LUMO_SEMANTIC_MASK_PREVIEW_BENCHMARK"] == "1",
+            "set LUMO_SEMANTIC_MASK_PREVIEW_BENCHMARK=1 to run the 1:1 preview mask benchmark"
+        )
+
+        let source = try source()
+        let seed = try NormalizedMask(
+            size: PixelDimensions(width: 768, height: 512),
+            values: (0..<768 * 512).map { Float($0 % 768) / 767 }
+        )
+        let layer = LocalAdjustmentLayer(
+            components: [MaskComponent(
+                source: .semantic(SemanticMaskDefinition(target: .person))
+            )]
+        )
+        let request = MaskOverlayRequest(
+            source: source, layers: [layer], selectedLayerID: layer.id, soloLayerID: nil,
+            targetSize: PixelDimensions(width: 6_000, height: 4_000), style: MaskOverlayStyle(
+                red: 1, green: 0, blue: 0
+            )
+        )
+        let iterations = max(
+            2, Int(ProcessInfo.processInfo.environment["LUMO_SEMANTIC_MASK_PREVIEW_ITERATIONS"] ?? "3") ?? 3
+        )
+
+        func measure(cap: PixelDimensions?) async -> Double {
+            let start = Date()
+            for _ in 0..<iterations {
+                let engine = RenderEngine(
+                    maskResolver: SeedMaskResolver(
+                        sourceFingerprint: source.cacheFingerprint, seed: seed
+                    ), semanticMaskPreviewCap: cap
+                )
+                _ = await engine.makeMaskOverlayImage(request)
+            }
+            return Date().timeIntervalSince(start) * 1_000 / Double(iterations)
+        }
+
+        let cappedMilliseconds = await measure(
+            cap: PixelDimensions(width: 2_560, height: 2_560)
+        )
+        let fullMilliseconds = await measure(cap: nil)
+        let configuration = ProcessInfo.processInfo.environment[
+            "LUMO_SEMANTIC_MASK_PREVIEW_CONFIGURATION"
+        ] ?? "unspecified"
+        print(String(
+            format: "SEMANTIC_MASK_PREVIEW_BENCHMARK configuration=%@ source=6000x4000 capped_4mp_ms=%.3f full_res_ms=%.3f speedup=%.2fx iterations=%d",
+            configuration as NSString, cappedMilliseconds, fullMilliseconds,
+            fullMilliseconds / cappedMilliseconds, iterations
+        ))
     }
 
     func testSoftMaskBlendsLocalExposureAndPreviewMatchesFullRender() async throws {
@@ -769,6 +920,79 @@ private struct TestMaskResolver: LocalMaskResolving {
         let payloadValues = values.isEmpty ? Array(repeating: Float(0), count: count) :
             (0..<count).map { values[$0 % values.count] }
         let mask = try NormalizedMask(size: request.targetSize, values: payloadValues)
+        return LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            descriptor: .raster(mask)
+        )
+    }
+}
+
+private actor RecordingMaskResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+    private(set) var requests: [(quality: RenderQuality, size: PixelDimensions)] = []
+
+    init(sourceFingerprint: String) {
+        self.sourceFingerprint = sourceFingerprint
+    }
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        requests.append((request.quality, request.targetSize))
+        let count = request.targetSize.width * request.targetSize.height
+        let mask = try NormalizedMask(
+            size: request.targetSize, values: Array(repeating: Float(1), count: count)
+        )
+        return LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            descriptor: .raster(mask)
+        )
+    }
+}
+
+private enum PreviewMaskFixtureShape: Sendable {
+    case soft
+    case hard
+}
+
+private struct FixtureMaskResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+    let shape: PreviewMaskFixtureShape
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        let width = request.targetSize.width
+        let height = request.targetSize.height
+        let values = (0..<height).flatMap { _ in
+            (0..<width).map { x in
+                switch shape {
+                case .soft:
+                    return Float(Double(x) / Double(max(width - 1, 1)))
+                case .hard:
+                    return x < width / 2 ? 1 : 0
+                }
+            }
+        }
+        let mask = try NormalizedMask(size: request.targetSize, values: values)
+        return LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            descriptor: .raster(mask)
+        )
+    }
+}
+
+private struct SeedMaskResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+    let seed: NormalizedMask
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        let mask = try MaskOperations.resized(seed, to: request.targetSize)
         return LocalMaskPayload(
             sourceFingerprint: sourceFingerprint,
             definitionHash: RenderCacheHash.digest(request.component.source),
