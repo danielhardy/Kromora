@@ -5,16 +5,16 @@ metadata, and may include people, locations, or other material whose redistribut
 covered by the source photographer's license. This directory is only the documentation anchor for
 local opt-in fixtures.
 
-To run the slow RAW regression lane, point it at a directory containing a license-cleared RAW and,
+To run the optional RAW regression lane, point it at a directory containing a license-cleared RAW and,
 for derive tests, a same-stem in-camera JPG pair:
 
 ```bash
 LUMO_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
-swift test --filter '(RAW|DeriveInvariance|ImageLoadingTests/testLoadingARAW|RenderPipelineTests/testRAW|PreviewCutoverTests/testRAW)'
+scripts/ci-tests.sh optional
 ```
 
 Do not commit those files or add them to Git LFS without an approved remote storage, retention, and
-access policy. The normal test lane uses generated fixtures and remains fully runnable without them.
+access policy. The normal required lanes use generated fixtures and remain fully runnable without them.
 
 The following terms apply to files Daniel Hardy has separately released for local project use:
 

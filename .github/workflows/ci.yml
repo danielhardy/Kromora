@@ -35,7 +35,7 @@ jobs:
           scripts/check-swift-format.sh
 
   tests-fast:
-    name: Tests (deterministic, parallel)
+    name: Tests (deterministic/model, parallel)
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
@@ -49,29 +49,31 @@ jobs:
       - name: Build (debug)
         run: swift build -v
 
-      - name: Test deterministic lane
-        run: >-
-          swift test --parallel
-          --skip '(MetalPresentationBenchmark|ConcurrentExportEditingBenchmark|PhotosImportPerformanceTests|PreviewCostBenchmark|EditPersistenceBenchmarkTests|TracingOverheadBenchmark)'
+      - name: Test deterministic lane (parallel)
+        run: scripts/ci-tests.sh fast
 
       - name: Build (release)
         run: swift build -c release
 
-  tests-slow:
-    name: Tests (RAW and hardware lane)
+  tests-resource:
+    name: Tests (Core Image/render/AppKit/UI, serial)
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show slow-lane policy
+      - name: Show toolchain
         run: |
-          echo "RAW fixtures are external and privacy/licensing controlled."
-          echo "Set LUMO_RAW_FIXTURE_DIR on a licensed local/self-hosted runner to exercise them."
+          swift --version
+          xcodebuild -version
+          echo "SDK: $(xcrun --sdk macosx --show-sdk-version) at $(xcrun --sdk macosx --show-sdk-path)"
 
-      - name: Run RAW and hardware coverage
-        run: >-
-          swift test --parallel
-          --filter '(RAWCapabilitiesTests|RAWDevelopSettingsTests|DeriveInvarianceTests|ImageLoadingTests|ImageSourceTests|RenderPipelineTests|RenderEngineTests|PreviewCutoverTests|MetalPresentationBenchmark|ConcurrentExportEditingBenchmark|PhotosImportPerformanceTests|PreviewCostBenchmark|EditPersistenceBenchmarkTests|TracingOverheadBenchmark)'
+      - name: Show serialized-lane policy
+        run: |
+          echo "Core Image/render and AppKit/UI tests run with SwiftPM --no-parallel."
+          echo "RAW-fixture and benchmark methods are intentionally excluded; use the documented opt-in command."
+
+      - name: Test render/UI lane (serial)
+        run: scripts/ci-tests.sh serial
 
   package:
     name: Package, sign, and verify app

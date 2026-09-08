@@ -4,8 +4,8 @@ _Historical findings reconciled with the current Lumo package, CI, and `PHASE2_S
 3, 2026._
 
 The original review found no tests and a build-only CI job. That baseline is historical: the current
-package has **735 XCTest methods**, a checked-in Swift-format policy, changed-file linting, separate
-fast/slow test lanes, signed bundle verification, and an application smoke path. The findings below
+package has **958 XCTest methods**, a checked-in Swift-format policy, changed-file linting, separate
+parallel/serial test lanes, signed bundle verification, and an application smoke path. The findings below
 retain their historical evidence while current status and names use Lumo's present architecture.
 
 Findings are marked **[fixed]** where this pass resolved them and **[open]** where they are recorded for
@@ -168,7 +168,7 @@ one remaining site, deliberately deferred out of that pass's scope.
 **[open]** unless noted.
 
 - ~~**No tests, anywhere.**~~ **[fixed]** — the package is split into `LumoKit` plus a thin `@main`
-  executable, with 735 XCTest methods and `swift test` wired into CI. Generated fixtures are never
+  executable, with 958 XCTest methods and `swift test` wired into CI. Generated fixtures are never
   committed; licensed camera files are local-only. Coverage is deliberately concentrated where the
   review found real defects: the `.cube`
   parser, the orientation load path, cube assembly, the async scans, and export naming.
@@ -308,7 +308,7 @@ Worth knowing before leaning on the suite:
 - **The `CIRAWFilter` half of `RAWDevelopSettings` only runs where a RAW exists.** Several tests build
   a real filter from `Fixtures.localRAWURL` — a file under `LUMO_RAW_FIXTURE_DIR` — and `XCTSkip` when
   there is none. The value semantics are covered everywhere; the framework wiring runs in the
-  separately reported slow RAW lane when a licensed fixture is available.
+  separately documented optional RAW lane when a licensed fixture is available.
 
   This entry used to claim the `is*Supported` gates "are not covered at all: that needs a RAW whose
   decoder *lacks* an adjustment, and the Leica file supports every one of them." **Measured in Phase 2
