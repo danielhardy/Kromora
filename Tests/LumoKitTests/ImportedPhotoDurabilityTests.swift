@@ -58,7 +58,7 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
         let source = try Fixtures.writeGradientPNG(
             width: 20, height: 12, named: "edited.png", in: tempDirectory
         )
-        let first = AppViewModel(
+        let first = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults,
@@ -72,7 +72,7 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
         first.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
         _ = await first.flushPendingWrites()
 
-        let relaunched = AppViewModel(
+        let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults,
@@ -94,7 +94,7 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
         let firstURL = try Fixtures.writeGradientPNG(width: 12, height: 8, named: "one.png", in: tempDirectory)
         let secondURL = try Fixtures.writeGradientPNG(width: 12, height: 8, named: "two.png", in: tempDirectory)
         let defaults = UserDefaults(suiteName: "LumoImportedPhotoDurability-\(UUID().uuidString)")!
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(), preferences: defaults, libraryFolderURL: libraryFolder
         )
         viewModel.importPhotosData([

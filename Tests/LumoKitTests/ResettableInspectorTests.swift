@@ -2,9 +2,9 @@ import XCTest
 @testable import LumoKit
 
 @MainActor
-final class ResettableInspectorTests: XCTestCase {
+final class ResettableInspectorTests: TempDirectoryTestCase {
     func testRepresentativeRowsResetToTheirNeutralValues() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument { document in
             document.rawDevelop.exposure = 1.2
             document.light = LightAdjustments(exposure: 1.25, shadows: 30)
@@ -76,7 +76,7 @@ final class ResettableInspectorTests: XCTestCase {
     }
 
     func testResetEndsAnActiveSliderGroupBeforeRecordingItsOwnUndoEntry() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
 
         viewModel.beginPreviewInteraction()
@@ -91,7 +91,7 @@ final class ResettableInspectorTests: XCTestCase {
     }
 
     func testInspectorSectionResetDoesNotCrossStageBoundariesAndIsUndoable() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument {
             $0.light.exposure = 1
             $0.effects.texture = 25
@@ -109,7 +109,7 @@ final class ResettableInspectorTests: XCTestCase {
     }
 
     func testResetPhotoClearsEveryStageAsOneUndoableOperation() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument {
             $0.rawDevelop.exposure = 1
             $0.light.exposure = 1

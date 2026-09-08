@@ -25,7 +25,7 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 24, named: "first.png", in: tempDirectory
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.openImages(urls: [later, first])
 
@@ -44,7 +44,7 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
         let image = try Fixtures.writeGradientPNG(
             width: 20, height: 12, named: "single.png", in: tempDirectory
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.openImages(urls: [image, image])
 
@@ -64,7 +64,7 @@ final class OpenImageDialogTests: TempDirectoryTestCase {
         let image = try Fixtures.writeGradientPNG(
             width: 20, height: 12, named: "existing.png", in: tempDirectory
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.openImages(urls: [image])
         try await waitUntil("the existing image") { viewModel.sourceImage != nil }
 

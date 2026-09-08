@@ -63,7 +63,7 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         let provider = FixtureMediaVolumeProvider(
             volumes: [volume], result: .success(MediaVolumeScanResult(files: [file], warnings: []))
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: provider)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: provider)
 
         viewModel.refreshRemovableMedia()
         try await waitUntil { viewModel.removableMediaVolumes == [volume] }
@@ -77,7 +77,7 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         let failing = FixtureMediaVolumeProvider(
             volumes: [volume], result: .failure(.volumeRemoved("Camera Card"))
         )
-        let failingViewModel = AppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: failing)
+        let failingViewModel = makeAppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: failing)
         failingViewModel.openRemovableMedia(volume)
         try await waitUntil { !failingViewModel.isRemovableMediaScanning }
         XCTAssertTrue(failingViewModel.removableMediaWarnings.contains("Camera Card is no longer available."))
@@ -92,7 +92,7 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
             volumes: [pending, readable],
             result: .success(MediaVolumeScanResult(files: [], warnings: []))
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: provider)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: provider)
 
         viewModel.refreshRemovableMedia()
         try await waitUntil { viewModel.removableMediaVolumes == [pending, readable] }
@@ -109,7 +109,7 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         let provider = FixtureMediaVolumeProvider(
             volumes: [volume], result: .success(MediaVolumeScanResult(files: [], warnings: []))
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: provider)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: provider)
 
         viewModel.openRemovableMedia(volume)
         try await waitUntil { !viewModel.isRemovableMediaScanning }

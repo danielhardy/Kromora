@@ -91,7 +91,7 @@ final class LibraryCullingTests: TempDirectoryTestCase {
 
     func testRapidCullAdvanceInEditLoadsTheNewFocusedPhoto() async throws {
         let defaults = makeDefaults()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore(),
             preferences: defaults,

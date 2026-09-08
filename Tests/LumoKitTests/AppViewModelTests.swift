@@ -12,7 +12,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
     func testEditDatabaseURLIsExposedWithoutExposingTheStore() async {
         let storeURL = tempDirectory.appendingPathComponent("EditStore.store")
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(fileURL: storeURL)
         )
@@ -22,13 +22,13 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testExportStatusReachesTheStatusBar() {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         viewModel.export.onStatus?("Exported: photo.jpg")
         XCTAssertEqual(viewModel.statusMessage, "Exported: photo.jpg")
     }
 
     func testExportErrorReachesBothTheAlertAndTheStatusBar() {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         XCTAssertNil(viewModel.errorMessage)
 
         viewModel.export.onError?("Export failed: disk full")
@@ -40,7 +40,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testDeriveStatusAndErrorAreWired() {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
 
         viewModel.derive.onStatus?("Deriving recipe…")
         XCTAssertEqual(viewModel.statusMessage, "Deriving recipe…")
@@ -50,7 +50,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testPreviewPresentationFailureLeavesAnActionableStatus() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray)
         viewModel.sourceName = "photo.png"
 
@@ -79,7 +79,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// A finished derive should preview itself immediately — but only when
     /// there's an image on screen to preview it against.
     func testDerivedLUTIsSelectedWhenAnImageIsOpen() throws {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         let lut = try makeProductionShapedDerive()
 
         viewModel.derive.onDerived?(lut)
@@ -103,7 +103,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// reference the whole time. It was resolution that failed, so resolution is what to assert.
     func testAFreshlyDerivedLUTResolvesAndGradesThePreview() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         viewModel.sourceImage = CIImage(color: .gray)
             .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
 
@@ -118,7 +118,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testLookResetIsScopedAndUndoable() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let lut = TestImages.warmLUT()
 
         viewModel.updateDocument { document in
@@ -142,7 +142,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testLookSelectionAndIntensityStayWithTheirPhoto() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let first = try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "first.png", in: tempDirectory
         )
@@ -165,7 +165,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testDeriveSavePanelDefaultsToTheLUTFolder() async throws {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         XCTAssertNil(viewModel.derive.libraryFolder?(), "no folder configured yet")
 
         viewModel.library.setFolder(tempDirectory)
@@ -176,7 +176,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// Saving a derived LUT into the library folder has to trigger a re-scan,
     /// or the new file won't appear in the sidebar until relaunch.
     func testSavingADerivedLUTRescansTheLibrary() async throws {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         viewModel.library.setFolder(tempDirectory)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(viewModel.library.allLUTs.isEmpty)
@@ -215,7 +215,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// the honest reference — it is what a fresh launch would resolve, and it is what a rescan puts
     /// in the library.
     func testSavingADerivedLUTRepointsTheDocumentAtTheSavedFile() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.library.setFolder(tempDirectory)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
@@ -237,7 +237,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// scans. The document is re-pointed either way, which means the registry — not the rescan — is
     /// what has to keep it resolving.
     func testSavingOutsideTheLibraryFolderStillResolves() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let libraryFolder = tempDirectory.appendingPathComponent("luts")
         let elsewhere = tempDirectory.appendingPathComponent("elsewhere")
         for folder in [libraryFolder, elsewhere] {
@@ -260,7 +260,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testARescanReplacesARegisteredSavedCubeAtTheSamePath() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.library.setFolder(tempDirectory)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
@@ -296,7 +296,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// after a save (the scan fires too), and a loose match would be satisfied by the pre-save one.
     func testRepointingAfterASaveRendersAgain() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         viewModel.openImage(url: try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "shot.png", in: tempDirectory
         ))
@@ -329,7 +329,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// so the failure path is exactly the one that must not be skipped.
     func testAFailedScanStillInvalidatesTheLUTCache() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         let empty = tempDirectory.appendingPathComponent("empty")
         try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
 
@@ -347,7 +347,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
     func testACompletedScanReResolvesTheOpenDocumentAndReportsMissingLUTsOnce() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         viewModel.openImage(url: try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "source.png", in: tempDirectory
         ))
@@ -384,7 +384,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// can derive, select something else from the sidebar, then save the derive from the still-open
     /// sheet.
     func testSavingDoesNotRepointADocumentShowingADifferentLUT() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "Library.cube", in: tempDirectory)
         viewModel.library.setFolder(tempDirectory)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
@@ -414,7 +414,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// ever asks. Before Step 9 the only caller of `invalidateLUTCache` was a test.
     func testALibraryScanInvalidatesTheEngineLUTCache() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "A.cube", in: tempDirectory)
 
         let before = await fake.invalidateCount
@@ -433,7 +433,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// 65³ cube is ~4.4 MB to hand Core Image, and an intensity drag is many renders.
     func testRenderingDoesNotInvalidateTheLUTCache() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         viewModel.openImage(url: try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "shot.png", in: tempDirectory
         ))
@@ -452,7 +452,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     // MARK: - Passthroughs
 
     func testIsExportingReflectsTheCoordinator() {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         XCTAssertFalse(viewModel.isExporting)
         XCTAssertEqual(viewModel.isExporting, viewModel.export.isExporting)
     }
@@ -476,7 +476,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// The menu bar reaches the app through notifications, so these forwards
     /// are the only thing connecting File ▸ Derive to the sheet.
     func testPresentAndDismissRecipeExtractorForwardToTheCoordinator() {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
 
         viewModel.presentRecipeExtractor()
         XCTAssertTrue(viewModel.derive.isSheetPresented)
@@ -486,7 +486,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testExportDialogWithNoImageTellsTheUserInsteadOfOpeningAPanel() {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         XCTAssertNil(viewModel.sourceImage)
 
         // Must return without ever constructing a panel — if this hangs, the
@@ -496,7 +496,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testBatchExportWithNoImagesTellsTheUserInsteadOfOpeningAPanel() {
-        let viewModel = AppViewModel()
+        let viewModel = makeAppViewModel()
         XCTAssertTrue(viewModel.collection.items.isEmpty)
 
         viewModel.batchExportDialog()

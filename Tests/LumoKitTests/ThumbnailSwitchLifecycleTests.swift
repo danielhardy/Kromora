@@ -34,7 +34,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: engine)
+        let viewModel = makeAppViewModel(engine: engine)
         try await loadCollection(viewModel, first: first, second: second)
 
         viewModel.selectCollectionImage(at: 0)
@@ -70,7 +70,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "sequential-second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: engine)
+        let viewModel = makeAppViewModel(engine: engine)
 
         viewModel.openImage(url: first)
         // One-off opens are copied into the managed library before rendering. Assert the durable
@@ -119,7 +119,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         )
         let engine = FakeRenderEngine()
         await engine.gateSourcePreparation()
-        let viewModel = AppViewModel(engine: engine)
+        let viewModel = makeAppViewModel(engine: engine)
         try await loadCollection(viewModel, first: first, second: second)
 
         viewModel.selectCollectionImage(at: 0)
@@ -161,7 +161,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "auto-second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: engine)
+        let viewModel = makeAppViewModel(engine: engine)
         try await loadCollection(viewModel, first: first, second: second)
 
         viewModel.selectCollectionImage(at: 0)
@@ -202,7 +202,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let second = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "second.png", in: tempDirectory
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await loadCollection(viewModel, first: first, second: second)
 
         XCTAssertTrue(viewModel.navigate(to: .grid))
@@ -222,7 +222,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
     func testFailedSourceAndFailedHistogramLeaveTerminalStates() async throws {
         let missing = tempDirectory.appendingPathComponent("missing.png")
         let sourceEngine = FakeRenderEngine()
-        let sourceViewModel = AppViewModel(engine: sourceEngine)
+        let sourceViewModel = makeAppViewModel(engine: sourceEngine)
         sourceViewModel.openImage(url: missing)
 
         try await waitUntil("the source failure") {
@@ -236,7 +236,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         )
         let histogramEngine = FakeRenderEngine()
         await histogramEngine.setShouldFailHistogram(true)
-        let histogramViewModel = AppViewModel(engine: histogramEngine)
+        let histogramViewModel = makeAppViewModel(engine: histogramEngine)
         histogramViewModel.openImage(url: image)
         try await waitUntil("the image presentation") {
             histogramViewModel.previewState == .ready

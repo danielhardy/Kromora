@@ -289,7 +289,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
 
     /// `NSSavePanel` cannot run headless, so the assertion is on the request `exportDialog` builds.
     func testTheViewModelExportsTheEditedDocument() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         XCTAssertNil(viewModel.exportRequest, "nothing open means nothing to export")
 
         viewModel.openImage(url: try makeImageFile())
@@ -316,7 +316,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// Holding Space swaps the *preview*, not the file. Exporting the comparison baseline would drop
     /// the user's whole look the moment they compared before saving.
     func testHoldingSpaceDoesNotChangeWhatIsExported() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.openImage(url: try makeImageFile())
         try await waitUntil("the image to load") { viewModel.exportRequest != nil }
 
@@ -332,7 +332,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     }
 
     func testBatchExportRequestCarriesTheDocumentAndEveryItem() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let files = try ["one", "two"].map { try makeImageFile(named: "\($0).png") }
         viewModel.collection.setSourceFolder(tempDirectory)
         try await waitUntil("the folder scan") { viewModel.collection.items.count >= files.count }
@@ -360,7 +360,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// see at all, has to move it.
     func testTheHistogramDescribesTheRenderedDocument() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         viewModel.openImage(url: try makeImageFile())
         try await waitUntil("the image to load") { viewModel.exportRequest != nil }
 
@@ -385,7 +385,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// Nothing is tallied while the panel is closed — the reason the inspector gates it at all.
     func testNoHistogramIsRenderedWhileTheInspectorIsClosed() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         viewModel.openImage(url: try makeImageFile())
         try await waitUntil("the first preview") { viewModel.previewSurface.image != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.9)] }
@@ -403,7 +403,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// The real engine, end to end through the view model: the published histogram must actually
     /// change when the look does.
     func testThePublishedHistogramTracksTheDocument() async throws {
-        let viewModel = AppViewModel(engine: RenderEngine())
+        let viewModel = makeAppViewModel(engine: RenderEngine())
         viewModel.openImage(url: try makeImageFile())
         try await waitUntil("the first preview") { viewModel.previewSurface.image != nil }
 

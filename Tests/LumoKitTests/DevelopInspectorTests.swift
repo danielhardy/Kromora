@@ -44,7 +44,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         )
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(distinctiveCapabilities)
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         XCTAssertNil(viewModel.rawCapabilities, "nothing open yet")
 
         try await openStandardImage(viewModel)
@@ -57,7 +57,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// on every frame of a slider drag.
     func testCapabilitiesAreProbedOncePerOpenAndNotPerRender() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities to arrive") { viewModel.rawCapabilities != nil }
 
@@ -78,7 +78,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     func testCapabilitiesAreClearedForAnImageWithNoDevelopStage() async throws {
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(nil)
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
 
         try await openStandardImage(viewModel)
         try await Task.sleep(for: .milliseconds(200))
@@ -180,7 +180,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
     func testOpeningAStandardImageFallsBackFromUnavailableDevelopTab() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         viewModel.inspectorTab = .develop
 
         XCTAssertEqual(viewModel.availableInspectorTabs, [])
@@ -197,7 +197,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     func testAStandardImageEndsOnNoDevelopStage() async throws {
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(nil)
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         XCTAssertEqual(viewModel.developPanelState, .noDevelopStage, "nothing open yet")
 
         try await openStandardImage(viewModel)
@@ -237,7 +237,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(caps)
         await fake.gateProbe()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
 
         viewModel.openImage(url: rawURL)
         try await waitUntil("the RAW to load") { viewModel.sourceImage != nil }
@@ -261,7 +261,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// a develop change also re-rasterizes the side-by-side baseline.
     func testADragIssuesFarFewerRendersThanTicks() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         let atRest = await fake.previewRequests.count
@@ -286,7 +286,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// the *last* event would leave the screen showing a value the slider is not on.
     func testTheFinalValueOfADragIsTheOneRendered() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -317,7 +317,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// never happen since every call — debounced or not — cancels the prior develop task.
     func testAnUndebouncedEditRendersWithoutWaiting() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -356,7 +356,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// leaving the side-by-side panel showing stale, pre-edit pixels indefinitely.
     func testAMixedBurstStillRendersTheComparisonBaseline() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -386,7 +386,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// equivalence.
     func testAPendingDevelopFlagDoesNotSurviveOpeningAnotherImage() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -436,7 +436,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// open inspector parked on Develop is as much a panel nobody's looking at as a closed one.
     func testNoHistogramIsTalliedWhileTheDevelopTabIsShowing() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -463,7 +463,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// a first visit) or stale (on a return) for anyone who touched Develop.
     func testSwitchingBackToInfoRecomputesTheHistogram() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -496,7 +496,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// tally on the way *out*, either.
     func testLeavingInfoStopsTalliesAndReturningResumesThem() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -519,7 +519,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// the final tally in flight so the request count can be checked before any result is published.
     func testRapidEditsCoalesceHistogramWorkAfterTheSettledPreview() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -549,7 +549,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// newer displayed revision has taken its place.
     func testLateHistogramResultCannotReplaceANewerEdit() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -576,7 +576,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// the temporary developed-only before state while Space comparison is active.
     func testHistogramFollowsTheDisplayedComparisonRequest() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         viewModel.isInspectorPresented = true
@@ -599,7 +599,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
     func testADevelopEditRendersTheChangedDocument() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -615,7 +615,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     func testAnUnsetControlReadsBackTheSeedRatherThanZero() async throws {
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -631,7 +631,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// that, and the derive baseline reasons about a neutral document.
     func testReadingEveryControlWritesNothing() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -653,7 +653,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let caps = RAWCapabilities.distinctivelySeeded
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(caps)
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -728,7 +728,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         for seedValue in [true, false] {
             let fake = FakeRenderEngine()
             await fake.setStubbedCapabilities(RAWCapabilities(lensCorrectionEnabled: seedValue))
-            let viewModel = AppViewModel(engine: fake)
+            let viewModel = makeAppViewModel(engine: fake)
             try await openStandardImage(viewModel)
             try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -748,7 +748,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     func testTheTintBindingRoundTripsAndNeverWritesOnRead() async throws {
         let fake = FakeRenderEngine()
         await fake.setStubbedCapabilities(RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -788,7 +788,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// through the debounce, the loop exhausts and the render never shows.
     func testWritingAToggleThroughTheBindingSkipsTheDebounce() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
@@ -829,7 +829,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// test above could be satisfied by making everything immediate.
     func testWritingASliderThroughTheBindingStillDebounces() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         let atRest = await fake.previewRequests.count
@@ -849,7 +849,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
     func testResettingAControlReturnsItToUnset() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -871,7 +871,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// Nothing caught that before — `resetAllDevelop` clears both by replacing the whole struct.
     func testResettingWhiteBalanceClearsBothTemperatureAndTint() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -895,7 +895,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// survive it, or the RAW would still be color-cast after its `CIRAWFilter` seed is restored.
     func testAsShotClearsRAWOverridesAndLegacyPostRenderWhiteBalance() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
@@ -922,7 +922,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         guard let rawURL = Fixtures.localRAWURL else {
             throw XCTSkip("no local RAW; see Fixtures.localRAWURL")
         }
-        let viewModel = AppViewModel(engine: RenderEngine())
+        let viewModel = makeAppViewModel(engine: RenderEngine())
         viewModel.openImage(url: rawURL)
         try await waitUntil("RAW image") { viewModel.sourceImage != nil }
         try await waitUntil("RAW capabilities") { viewModel.rawCapabilities != nil }
@@ -947,7 +947,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let first = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "first.png", in: tempDirectory)
         let second = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "second.png", in: tempDirectory)
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
 
         viewModel.openImage(url: first)
         try await waitUntil("first image") { viewModel.sourceName == "first.png" }
@@ -970,7 +970,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// the wrong field would survive it.
     func testEveryControlResetsToUnsetOnItsOwn() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 

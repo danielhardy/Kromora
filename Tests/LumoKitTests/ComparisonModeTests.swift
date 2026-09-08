@@ -15,7 +15,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     }
 
     private func makeViewModel(defaults: UserDefaults) -> AppViewModel {
-        AppViewModel(
+        makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -82,7 +82,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testUneditedPhotoPopulatesBothSurfacesWithNoEditRecord() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -111,7 +111,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         )
 
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults
@@ -126,7 +126,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testResetPhotoKeepsRetainedSideBySideSurfacesValid() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -159,7 +159,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testEnteringSideBySideAfterSettledPreviewRequestsAndPublishesBaseline() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -203,7 +203,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testEntryDoesNotWaitForDrawableConfirmationBeforeRequestingBaseline() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -245,7 +245,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testStandardTemperatureEditLeavesOriginalRequestAtItsBaseline() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -308,7 +308,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testRAWTemperatureEditLeavesOriginalRequestAtItsBaseline() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -373,7 +373,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testRAWTintEditLeavesOriginalRequestAtItsBaseline() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults
@@ -435,7 +435,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
     func testLateBaselineFromPreviousPhotoCannotPublish() async throws {
         let defaults = makeDefaults()
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: defaults

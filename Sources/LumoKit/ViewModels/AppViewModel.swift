@@ -720,6 +720,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         mediaVolumeProvider: any MediaVolumeProviding = MountedMediaVolumeProvider(),
         includeBundledLooks: Bool = false,
         libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL,
+        userLookFolderURL: URL? = nil,
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil
     ) {
         var interval = LumoSignpostInterval(.launch, context: .unknown)
@@ -730,7 +731,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
         self.editStore = editStore
-        self.settings = LumoSettings(preferences: preferences)
+        self.settings = LumoSettings(
+            preferences: preferences,
+            userLookFolderURL: userLookFolderURL
+        )
         self.workScheduler = ImageWorkScheduler()
         self.persistence = EditPersistenceCoordinator(store: editStore)
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane

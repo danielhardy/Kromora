@@ -49,7 +49,7 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
     }
 
     func testBindingsRoundTripAndIndividualResetsPreserveOtherEffects() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.effectsBinding(for: .texture).wrappedValue = 72.5
@@ -79,7 +79,7 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
     }
 
     func testRetainedSubordinateValuesKeepEffectsResettableAtZeroAmount() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.vignetteBinding(for: .midpoint).wrappedValue = 30
@@ -99,7 +99,7 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
     }
 
     func testResetAllEffectsIsIsolatedFromOtherPanels() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.effectsBinding(for: .dehaze).wrappedValue = 60
@@ -112,7 +112,7 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
 
     func testSliderGestureUsesInteractiveRenderingAndOneUndoEntry() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         let atRest = await fake.previewRequests.count

@@ -26,7 +26,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         )
         let container = makeInMemoryEditContainer()
 
-        let firstLaunch = AppViewModel(
+        let firstLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
         )
@@ -37,7 +37,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         firstLaunch.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
         await firstLaunch.flushPendingWrites()
 
-        let secondLaunch = AppViewModel(
+        let secondLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
         )
@@ -53,7 +53,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             width: 32, height: 24, named: "immediate.png", in: tempDirectory
         )
         let container = makeInMemoryEditContainer()
-        let firstLaunch = AppViewModel(
+        let firstLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
         )
@@ -67,7 +67,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         // the ordering guarantee even when the edit is made immediately before Cmd-Q.
         await firstLaunch.flushPendingWrites()
 
-        let secondLaunch = AppViewModel(
+        let secondLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
         )
@@ -85,7 +85,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         )
         let container = makeInMemoryEditContainer()
         let store = EditDocumentStore(modelContainer: container)
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the coalesced image") { viewModel.sourceImage != nil }
 
@@ -114,7 +114,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let store = makeInMemoryEditStore(
             container: container, artificialWriteDelay: .milliseconds(400)
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the slow-flush image") { viewModel.sourceImage != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.6)] }
@@ -141,7 +141,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             width: 32, height: 24, named: "retry.png", in: tempDirectory
         )
         let store = makeInMemoryEditStore(failuresBeforeSuccess: 1)
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the retry image") { viewModel.sourceImage != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.7)] }
@@ -161,7 +161,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             width: 32, height: 24, named: "failed-termination.png", in: tempDirectory
         )
         let store = makeInMemoryEditStore(failuresBeforeSuccess: 1)
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the failed-termination image") { viewModel.sourceImage != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
@@ -186,7 +186,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             width: 32, height: 24, named: "cancelled-flush.png", in: tempDirectory
         )
         let store = makeInMemoryEditStore(artificialWriteDelay: .milliseconds(250))
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the cancelled-flush image") { viewModel.sourceImage != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.2)] }
@@ -209,7 +209,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             artificialWriteDelay: .milliseconds(100),
             writeStartSignal: writeStartedContinuation
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the raced-flush image") { viewModel.sourceImage != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.4)] }
@@ -253,7 +253,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             width: 32, height: 24, named: "long-gesture.png", in: tempDirectory
         )
         let store = makeInMemoryEditStore()
-        let viewModel = AppViewModel(engine: FakeRenderEngine(), editStore: store)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the long-gesture image") { viewModel.sourceImage != nil }
 
@@ -273,7 +273,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
     }
 
     func testMissingSourceStillReportsAnActionableLoadError() async throws {
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore()
         )
@@ -297,7 +297,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         )
         let engine = FakeRenderEngine()
         await engine.gateSourcePreparation()
-        let viewModel = AppViewModel(engine: engine, editStore: store)
+        let viewModel = makeAppViewModel(engine: engine, editStore: store)
 
         viewModel.openImage(url: imageURL)
         while await engine.sourcePreparationCount < 1 { await Task.yield() }

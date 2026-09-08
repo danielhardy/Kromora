@@ -7,7 +7,7 @@ import SwiftUI
 /// matrix. The hosting tests below render the shipping SwiftUI tree so width and accessibility
 /// regressions are caught without adding a third-party snapshot dependency.
 @MainActor
-final class LookInspectorViewTests: XCTestCase {
+final class LookInspectorViewTests: TempDirectoryTestCase {
     func testEmptyStatePresentationMatrix() {
         XCTAssertEqual(
             LookInspectorEmptyState.resolve(
@@ -96,7 +96,7 @@ final class LookInspectorViewTests: XCTestCase {
         ]
 
         for (expectedState, configure) in cases {
-            let viewModel = AppViewModel(engine: FakeRenderEngine())
+            let viewModel = makeAppViewModel(engine: FakeRenderEngine())
             configure(viewModel)
 
             for width in [CGFloat(240), 280, 360] {
@@ -110,7 +110,7 @@ final class LookInspectorViewTests: XCTestCase {
     }
 
     func testRenderedPopulatedStateAtInspectorWidths() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let look = CubeLUT(
             cube: Array(repeating: SIMD3<Float>(0.5, 0.5, 0.5), count: 8),
             size: 2,

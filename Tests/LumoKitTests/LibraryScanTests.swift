@@ -20,7 +20,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     // MARK: - LUTLibrary
 
     func testScanReturnsBeforeWorkCompletes() throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         for i in 0..<3 {
             try Fixtures.writeCube(
                 Fixtures.identityCubeText(size: 8), named: "lut\(i).cube", in: tempDirectory
@@ -34,7 +34,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testScanGroupsTopLevelAndSubfolders() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "root1.cube", in: tempDirectory)
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "root2.cube", in: tempDirectory)
 
@@ -53,7 +53,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testScanSkipsUnparseableFilesButKeepsTheRest() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "good.cube", in: tempDirectory)
         try Fixtures.writeCube("this is not a cube", named: "bad.cube", in: tempDirectory)
 
@@ -66,7 +66,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testScanIgnoresNonCubeFiles() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "real.cube", in: tempDirectory)
         try "hello".write(to: tempDirectory.appendingPathComponent("notes.txt"),
                           atomically: true, encoding: .utf8)
@@ -82,7 +82,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "plain.cube", in: tempDirectory)
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "vendor.LOOK", in: tempDirectory)
 
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         library.scan(tempDirectory)
         try await waitForScan(library)
 
@@ -96,7 +96,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
             Fixtures.identityCubeText(size: 2), named: "outside.cube", in: tempDirectory
         )
         let bad = try Fixtures.writeCube("not a LUT", named: "broken.look", in: tempDirectory)
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
 
         library.importLUT(from: good)
         while library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
@@ -113,7 +113,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
         let url = try Fixtures.writeCube(
             Fixtures.identityCubeText(size: 2), named: "external-replace.cube", in: tempDirectory
         )
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         library.importLUT(from: url)
         while library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
         let original = try XCTUnwrap(library.allLUTs.first { $0.url == url })
@@ -137,7 +137,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
         let url = try Fixtures.writeCube(
             Fixtures.identityCubeText(size: 2), named: "replace-me.cube", in: tempDirectory
         )
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         library.scan(tempDirectory)
         try await waitForScan(library)
         XCTAssertEqual(try XCTUnwrap(library.allLUTs.first?.tableFloats[4]), Float(1), accuracy: Float(0.0001))
@@ -160,7 +160,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     /// live-but-empty enumerator for one, so a nil check alone reported "no
     /// LUTs" for what was really a missing directory.
     func testMissingFolderIsReportedAsMissingNotEmpty() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         library.scan(tempDirectory.appendingPathComponent("does-not-exist"))
         try await waitForScan(library)
 
@@ -176,7 +176,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testEmptyFolderIsReportedAsEmpty() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         library.scan(tempDirectory)
         try await waitForScan(library)
 
@@ -186,7 +186,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testRescanReplacesPreviousResults() async throws {
-        let library = LUTLibrary()
+        let library = makeLUTLibrary()
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "first.cube", in: tempDirectory)
         library.scan(tempDirectory)
         try await waitForScan(library)

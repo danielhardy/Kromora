@@ -47,7 +47,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         )
         let engine = FakeRenderEngine()
         await engine.gateSourcePreparation()
-        let viewModel = AppViewModel(engine: engine)
+        let viewModel = makeAppViewModel(engine: engine)
 
         viewModel.openImage(url: first)
         while await engine.sourcePreparationCount < 1 { await Task.yield() }

@@ -5,7 +5,7 @@ import XCTest
 @testable import LumoKit
 
 @MainActor
-final class MaskingWorkspaceTests: XCTestCase {
+final class MaskingWorkspaceTests: TempDirectoryTestCase {
     private func waitUntil(
         _ description: String,
         timeout: TimeInterval = 5,
@@ -19,7 +19,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testMaskingIsAnInspectorTabAndReturnsToThePreviousEditControl() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.inspectorState.select(.effects)
         viewModel.inspectorState.select(.masking)
@@ -45,7 +45,7 @@ final class MaskingWorkspaceTests: XCTestCase {
             width: 16, height: 12, named: "first.png", in: directory)
         let secondURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "second.png", in: directory)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.openImage(url: firstURL)
         try await waitUntil("the first photo to load") { viewModel.maskingSource != nil }
@@ -76,7 +76,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testLayerActionsPersistThroughTheDocumentAndUndo() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.createMask(.linear)
         viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.5))
@@ -108,7 +108,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testGestureEditsTheSelectedComponentNotJustTheFirstEnabledOne() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.createMask(.linear)
         viewModel.beginMaskGesture(at: CGPoint(x: 0.1, y: 0.5))
@@ -138,7 +138,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testBrushGestureCommitsOneCompactStrokeWithSettings() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.brush)
         viewModel.maskingState.brushRadius = 0.03
         viewModel.maskingState.brushFeather = 0.25
@@ -165,7 +165,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testSeparateBrushGesturesAppendStrokesWithoutRewritingHistory() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.brush)
         viewModel.setMaskTool(.brush)
 
@@ -184,7 +184,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testEraseBrushIsASeparateSubtractingComponent() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.erase)
         let component = try XCTUnwrap(viewModel.document.localAdjustments.first?.components.first)
         XCTAssertEqual(component.mode, .subtract)
@@ -192,7 +192,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testAddingEraseBrushToSelectedMaskTargetsThatLayer() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.foreground)
         let layerID = try XCTUnwrap(viewModel.maskingState.selectedLayerID)
 
@@ -208,7 +208,7 @@ final class MaskingWorkspaceTests: XCTestCase {
 
     func testEraseGesturePreservesEachExistingMaskSourceAndAppendsSubtractBrushIntent() throws {
         for kind in [MaskCreationKind.linear, .radial, .foreground, .brush] {
-            let viewModel = AppViewModel(engine: FakeRenderEngine())
+            let viewModel = makeAppViewModel(engine: FakeRenderEngine())
             viewModel.createMask(.foreground)
             let componentID = try XCTUnwrap(viewModel.maskingState.selectedComponentID)
             let layerID = try XCTUnwrap(viewModel.maskingState.selectedLayerID)
@@ -249,7 +249,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testActiveBrushSettingsAreCapturedOnceEvenIfControlsChangeMidStroke() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.brush)
         viewModel.maskingState.brushRadius = 0.03
         viewModel.maskingState.brushFeather = 0.2
@@ -267,7 +267,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testComponentCreationSupportsEverySourceAndOperationWithExplicitFirstReplace() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.foreground)
         let layerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
 
@@ -290,7 +290,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testComponentActionsPreserveOrderNamesAndSoloInspection() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.foreground)
         let layerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
         viewModel.addMaskComponent(
@@ -312,7 +312,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testLinearDragCreatesAndSelectsATransientLayerUntilMouseUp() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.setMaskTool(.linear)
         viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.3))
         XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
@@ -331,7 +331,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testLinearHandleEditsKeepOppositeEdgeAndCenterStable() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)
         let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
         let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
@@ -360,7 +360,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testLinearZeroStrengthHandleResizesWithoutReplacingDefinition() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)
         viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.2))
         viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.8))
@@ -387,7 +387,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testLinearFullStrengthHandleResizesWithoutReplacingDefinition() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)
         viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.2))
         viewModel.updateMaskGesture(to: CGPoint(x: 0.8, y: 0.8))
@@ -414,7 +414,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testNewLinearLayerStartsWithCreationDragEvenWhenDefaultGuideIsUnderPointer() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)
         viewModel.beginMaskGesture(at: CGPoint(x: 0.25, y: 0.25))
         viewModel.updateMaskGesture(to: CGPoint(x: 0.75, y: 0.75))
@@ -427,7 +427,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testInspectorChangesFollowTheLiveLinearDraftUntilMouseUp() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)
         let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
         let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
@@ -459,7 +459,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testCancellingLinearCreationDoesNotPersistAnEmptyLayer() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)
         XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
         XCTAssertTrue(viewModel.maskInteractionState.linearCreationPending)
@@ -470,7 +470,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testFreshLinearCreationSelectsLayerAndComponentAndCommitsOneUndoableMask() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.createMask(.linear)
         let pendingLayerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
@@ -496,7 +496,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testLinearCreationAfterExistingSelectionDoesNotEditPreviousLayer() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.foreground)
         let existing = try XCTUnwrap(viewModel.document.localAdjustments.first)
 
@@ -518,7 +518,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testClickWithoutAValidLinearDragLeavesDocumentAndHistoryUnchanged() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.foreground)
         let before = viewModel.document
         let undoBefore = viewModel.undoDepth
@@ -535,7 +535,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testRadialDragCreatesAndSelectsATransientLayerUntilMouseUp() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.setMaskTool(.radial)
         viewModel.beginMaskGesture(
             at: CGPoint(x: 0.3, y: 0.4), sourceSize: CGSize(width: 400, height: 200))
@@ -557,7 +557,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testRadialHandlesResizeTranslateRotateAndOptionShiftModifiers() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.radial)
         let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
         let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
@@ -619,7 +619,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testRadialCenterDragUsesTheViewportDeltaAtZoomAndPreservesDefinition() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.radial)
         let layerID = try XCTUnwrap(viewModel.maskInteractionState.selectedLayerID)
         let componentID = try XCTUnwrap(viewModel.maskInteractionState.selectedComponentID)
@@ -676,7 +676,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testCancellingRadialCreationDoesNotPersistAnEmptyLayer() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.setMaskTool(.radial)
         viewModel.beginMaskGesture(at: CGPoint(x: 0.2, y: 0.3))
         viewModel.cancelMaskGesture()
@@ -685,7 +685,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testSourceSwitchResetClearsTransientMaskPresentationState() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.brush)
         let layerID = viewModel.document.localAdjustments[0].id
         viewModel.maskInteractionState.toggleSolo(layerID: layerID)
@@ -699,7 +699,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testOverlayPresentationControlsDoNotChangeDocumentOrUndoHistory() throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.brush)
         let before = viewModel.document
         let undoBefore = viewModel.undoDepth
@@ -721,7 +721,7 @@ final class MaskingWorkspaceTests: XCTestCase {
             .subject, .person, .face, .foreground, .background,
         ])
 
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         for kind in MaskCreationKind.smartKinds {
             viewModel.createMask(kind)
         }
@@ -740,7 +740,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testSmartCreationFailureWithoutSupportedSourceDoesNotCreateAnInertLayer() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.createSmartMask(.subject)
 
@@ -762,7 +762,7 @@ final class MaskingWorkspaceTests: XCTestCase {
             maskProvider: ProductionSmartMaskProvider(store: store),
             stages: [:]
         )
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json")),
             photoAnalysisCoordinator: coordinator
@@ -791,7 +791,7 @@ final class MaskingWorkspaceTests: XCTestCase {
         let coordinator = PhotoAnalysisCoordinator(
             maskStore: store, maskProvider: provider, stages: [:]
         )
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json")),
             photoAnalysisCoordinator: coordinator
@@ -832,7 +832,7 @@ final class MaskingWorkspaceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "info.png", in: directory)
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json"))
         )
@@ -871,7 +871,7 @@ final class MaskingWorkspaceTests: XCTestCase {
         XCTAssertEqual(viewModel.maskingState.selectedComponentID, firstComponent.id)
 
         await viewModel.flushPendingWrites()
-        let reopened = AppViewModel(
+        let reopened = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json"))
         )
@@ -907,7 +907,7 @@ final class MaskingWorkspaceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "info-stale.png", in: directory)
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.openImage(url: imageURL)
         try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
         let source = try XCTUnwrap(viewModel.maskingSource)
@@ -940,7 +940,7 @@ final class MaskingWorkspaceTests: XCTestCase {
     }
 
     func testInfoAnalysisMaskRejectsALowConfidenceResultWithoutCreatingARecipe() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let directory = try Fixtures.makeTempDirectory("InfoLowConfidenceSemanticMask")
         defer { try? FileManager.default.removeItem(at: directory) }
         let imageURL = try Fixtures.writeGradientPNG(

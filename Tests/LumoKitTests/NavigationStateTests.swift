@@ -28,7 +28,7 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         let second = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "second.png", in: tempDirectory
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
@@ -60,7 +60,7 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "second.png", in: tempDirectory
         )
 
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
         XCTAssertTrue(viewModel.navigate(to: .grid))
@@ -95,7 +95,7 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         )
 
         let engine = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: engine)
+        let viewModel = makeAppViewModel(engine: engine)
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
         XCTAssertTrue(viewModel.navigate(to: .grid))
@@ -128,7 +128,7 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
 
         let engine = FakeRenderEngine()
         await engine.gateSourcePreparation()
-        let viewModel = AppViewModel(engine: engine)
+        let viewModel = makeAppViewModel(engine: engine)
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
         XCTAssertTrue(viewModel.navigate(to: .grid))
@@ -164,7 +164,7 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
     }
 
     func testGridAndEditNavigationRejectsAnUnavailableCollection() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         XCTAssertFalse(viewModel.navigate(to: .grid))
         XCTAssertEqual(viewModel.navigation.mode, .edit)
@@ -175,7 +175,7 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "photo.png", in: tempDirectory
         )
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
         XCTAssertTrue(viewModel.navigate(to: .grid))

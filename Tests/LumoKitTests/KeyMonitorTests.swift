@@ -18,7 +18,7 @@ import AppKit
 /// insofar as the view model is. The lifecycle contract below is the testable half; the wiring was
 /// checked by hand in the running app.
 @MainActor
-final class KeyMonitorTests: XCTestCase {
+final class KeyMonitorTests: TempDirectoryTestCase {
 
     /// Records what was torn down. `isMonitoring` on its own is not enough: it reports whether the
     /// token was cleared, and a `stop()` that cleared the token *without* calling
@@ -31,7 +31,7 @@ final class KeyMonitorTests: XCTestCase {
 
     private func makeMonitor(_ removals: Removals) -> KeyMonitor {
         KeyMonitor(
-            viewModel: AppViewModel(engine: FakeRenderEngine()),
+            viewModel: makeAppViewModel(engine: FakeRenderEngine()),
             removeMonitor: { removals.tokens.append($0) }
         )
     }
@@ -62,7 +62,7 @@ final class KeyMonitorTests: XCTestCase {
     /// Dropping the last reference without stopping must not crash — it simply leaks the monitor
     /// until the process exits, which is the trade the `deinit` removal makes explicit.
     func testDroppingAMonitorWithoutStoppingIsSafe() {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         for _ in 0..<3 {
             let monitor = KeyMonitor(viewModel: viewModel)
             XCTAssertTrue(monitor.isMonitoring)

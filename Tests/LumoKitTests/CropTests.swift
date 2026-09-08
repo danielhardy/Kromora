@@ -374,7 +374,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
     func testDraftIsTransientCancelIsFreeAndCommitIsUndoable() async throws {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "workflow.png", in: tempDirectory)
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore()
         )
@@ -405,7 +405,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
     func testSelectingPresetStaysDraftUntilApplyAndUndoRedoRestoresTheRatio() async throws {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "preset-workflow.png", in: tempDirectory)
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore()
         )
@@ -439,7 +439,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     func testReenteringCropRequestsTheFullUncroppedStageAndRestoresOnExit() async throws {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "reentry.png", in: tempDirectory)
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(
+        let viewModel = makeAppViewModel(
             engine: fake,
             editStore: makeInMemoryEditStore()
         )
@@ -488,7 +488,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     func testCommittedCropSurvivesRelaunch() async throws {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "persisted.png", in: tempDirectory)
         let container = makeInMemoryEditContainer()
-        let first = AppViewModel(
+        let first = makeAppViewModel(
             engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
         )
         first.openImage(url: url)
@@ -498,7 +498,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         first.commitCrop()
         await first.flushPendingWrites()
 
-        let second = AppViewModel(
+        let second = makeAppViewModel(
             engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
         )
         second.openImage(url: url)

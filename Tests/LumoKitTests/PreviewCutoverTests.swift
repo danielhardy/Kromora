@@ -23,7 +23,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     }
 
     private func makeRealViewModel() -> AppViewModel {
-        AppViewModel(
+        makeAppViewModel(
             engine: RenderEngine(),
             editStore: makeInMemoryEditStore()
         )
@@ -85,7 +85,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     /// The whole document reaches the engine — not a LUT and an intensity, the document.
     func testTheDocumentReachesTheEngine() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openImage(viewModel)
 
         let first = try await awaitRequest(fake, "the opening render") { _ in true }
@@ -113,7 +113,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     /// regression can look correct in the coordinator while leaving the visible canvas unchanged.
     func testFitFillAndExplicitZoomPublishNonBlankSurfaceFrames() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openImage(viewModel)
         try await waitUntil("the opening surface") { viewModel.previewSurface.image != nil }
 
@@ -143,7 +143,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
 
     func testZoomJustAboveAndFarAbove100PercentUsesNativePreviewAndKeepsSurfaceFrame() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openImage(viewModel)
         try await waitUntil("the opening surface") { viewModel.previewSurface.image != nil }
 
@@ -171,7 +171,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     /// step's gate, asserted at the request level.
     func testDevelopAdjustmentsAndIntensityAllReachTheEngine() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openImage(viewModel)
 
         let lut = TestImages.warmLUT()
@@ -198,7 +198,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     /// than a differently-decoded image.
     func testShowingOriginalRequestsTheDevelopAppliedBaseline() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = AppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake)
         try await openImage(viewModel)
 
         viewModel.selectLUT(TestImages.warmLUT())
@@ -349,7 +349,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     /// Views read `selectedLUT` and `lutIntensity`; both are now computed off the document. If they
     /// stopped tracking it the toolbar and sidebar would show stale state.
     func testTheShimsTrackTheDocument() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         XCTAssertNil(viewModel.selectedLUT)
         XCTAssertEqual(viewModel.lutIntensity, 1.0)
 
@@ -376,7 +376,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     /// A file-backed LUT resolves out of the library by ID, and keeps resolving after a rescan —
     /// the property `LUTID` exists to guarantee (§4.3), now exercised through the view model.
     func testAFileBackedLUTResolvesAndSurvivesARescan() async throws {
-        let viewModel = AppViewModel(engine: FakeRenderEngine())
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 4), named: "Look.cube", in: tempDirectory)
         viewModel.library.scan(tempDirectory)
         try await waitUntil("the library scan") { !viewModel.library.isScanning }

@@ -356,6 +356,60 @@ enum Fixtures {
 class TempDirectoryTestCase: XCTestCase {
     var tempDirectory: URL!
     private let comparisonModeKey = "Lumo.editor.comparisonMode.sideBySide"
+    private var testDefaultSuiteNames: [String] = []
+
+    /// Creates an AppViewModel whose persisted state is private to this test and whose managed
+    /// library lives beside the test's generated fixtures. Tests that exercise relaunch behavior
+    /// can pass the same `preferences` and `libraryFolderURL` to multiple calls.
+    @MainActor
+    func makeTestUserDefaults() -> UserDefaults {
+        let suiteName = "LumoKitTests.AppViewModel-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        testDefaultSuiteNames.append(suiteName)
+        return defaults
+    }
+
+    @MainActor
+    func makeLUTLibrary(includeBundled: Bool = false) -> LUTLibrary {
+        LUTLibrary(
+            preferences: makeTestUserDefaults(),
+            userLookFolderURL: tempDirectory.appendingPathComponent("looks", isDirectory: true),
+            includeBundled: includeBundled
+        )
+    }
+
+    @MainActor
+    func makeAppViewModel(
+        engine: any RenderEngining = FakeRenderEngine(),
+        editStore: EditDocumentStore? = nil,
+        preferences: UserDefaults? = nil,
+        mediaVolumeProvider: any MediaVolumeProviding = MountedMediaVolumeProvider(),
+        includeBundledLooks: Bool = false,
+        libraryFolderURL: URL? = nil,
+        userLookFolderURL: URL? = nil,
+        photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil
+    ) -> AppViewModel {
+        let isolatedPreferences: UserDefaults
+        if let preferences {
+            isolatedPreferences = preferences
+        } else {
+            isolatedPreferences = makeTestUserDefaults()
+        }
+
+        return AppViewModel(
+            engine: engine,
+            editStore: editStore ?? makeInMemoryEditStore(),
+            preferences: isolatedPreferences,
+            mediaVolumeProvider: mediaVolumeProvider,
+            includeBundledLooks: includeBundledLooks,
+            libraryFolderURL: libraryFolderURL
+                ?? tempDirectory.appendingPathComponent("managed-library", isDirectory: true),
+            userLookFolderURL: userLookFolderURL
+                ?? tempDirectory.appendingPathComponent("looks", isDirectory: true),
+            photoAnalysisCoordinator: photoAnalysisCoordinator
+        )
+    }
 
     override func setUpWithError() throws {
         try super.setUpWithError()
@@ -367,19 +421,10 @@ class TempDirectoryTestCase: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        // Imported-photo durability uses the real default Application Support location when a
-        // test does not inject a library URL. Keep those test copies scoped to the test process so
-        // one test's durable fixtures cannot change another test's expected collection contents.
-        let defaultLibrary = ImageCollection.defaultLibraryFolderURL
-        if let files = try? FileManager.default.contentsOfDirectory(
-            at: defaultLibrary, includingPropertiesForKeys: nil
-        ) {
-            for file in files where file.lastPathComponent.range(
-                of: "^[0-9a-f]{16}-", options: .regularExpression
-            ) != nil {
-                try? FileManager.default.removeItem(at: file)
-            }
+        for suiteName in testDefaultSuiteNames {
+            UserDefaults.standard.removePersistentDomain(forName: suiteName)
         }
+        testDefaultSuiteNames.removeAll()
         if let tempDirectory {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
