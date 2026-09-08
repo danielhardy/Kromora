@@ -25,7 +25,7 @@ struct EditDocumentLoadResult: Sendable, Equatable {
 /// store deliberately has no migration path from the former JSON catalog: the product has not
 /// shipped, so old local edits may be orphaned when this schema is first opened.
 @ModelActor
-public actor EditDocumentStore {
+actor EditDocumentStore {
 
     enum Status: Sendable, Equatable {
         case ready

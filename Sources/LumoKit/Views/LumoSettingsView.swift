@@ -5,14 +5,14 @@ import AppKit
 /// open source/Look folders: changing one changes where a future panel starts, not existing files.
 public struct LumoSettingsView: View {
     @ObservedObject private var settings: LumoSettings
-    private let editStore: EditDocumentStore
+    private let editDatabaseFileURL: URL?
     @State private var sourceTestMessage = ""
     @State private var exportTestMessage = ""
     @State private var editDatabaseURL: URL?
 
-    public init(settings: LumoSettings, editStore: EditDocumentStore) {
+    public init(settings: LumoSettings, editDatabaseURL: URL?) {
         _settings = ObservedObject(wrappedValue: settings)
-        self.editStore = editStore
+        self.editDatabaseFileURL = editDatabaseURL
     }
 
     /// SwiftData may not create the persistent store file until the first successful save.
@@ -97,7 +97,10 @@ public struct LumoSettingsView: View {
         .frame(width: 560)
         .task {
             settings.refreshFolderStatus()
-            editDatabaseURL = Self.revealableEditDatabaseURL(for: await editStore.onDiskFileURL)
+            editDatabaseURL = Self.revealableEditDatabaseURL(for: editDatabaseFileURL)
+        }
+        .onChange(of: editDatabaseFileURL) { _, newURL in
+            editDatabaseURL = Self.revealableEditDatabaseURL(for: newURL)
         }
     }
 

@@ -606,7 +606,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     let workScheduler: ImageWorkScheduler
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
-    public let editStore: EditDocumentStore
+    let editStore: EditDocumentStore
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
     /// file I/O remains inside `EditDocumentStore`.
     let persistence: EditPersistenceCoordinator
@@ -618,6 +618,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// The active-document global Look export flow. It snapshots edits and never mutates them while
     /// the user reviews omissions or chooses a destination.
     let lookSave = LookSaveCoordinator()
+
+    /// The persistent edit database location, when the store has an on-disk backing file.
+    ///
+    /// This keeps the persistence actor internal while allowing the app boundary to expose the
+    /// one value needed by Settings for support and backup workflows.
+    public var editDatabaseURL: URL? {
+        get async { await editStore.onDiskFileURL }
+    }
 
     // Convenience passthroughs so views and the menu don't have to know which
     // collaborator owns a given piece of state.
