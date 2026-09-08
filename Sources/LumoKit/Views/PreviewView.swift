@@ -154,6 +154,7 @@ struct PreviewView: View {
                         normalizedRect: canvasState.cropDraft ?? CropAdjustments.unitRect,
                         imageSize: viewModel.sourceSize,
                         aspectRatio: canvasState.cropAspectRatio,
+                        orientation: canvasState.cropOrientation,
                         onChange: viewModel.updateCropDraft,
                         onAspectRatioChange: viewModel.selectCropAspectRatio,
                         onApply: viewModel.commitCrop,

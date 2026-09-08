@@ -3,9 +3,9 @@ import Foundation
 
 /// The crop ratios exposed by the editor.
 ///
-/// Presets are named in their conventional photographer-facing orientation. On a portrait source
-/// a non-square preset uses its reciprocal pixel ratio, so choosing 3:2 produces a portrait 2:3
-/// frame while keeping the same long-edge convention as a landscape source.
+/// Presets are named in their conventional photographer-facing orientation. Legacy callers can
+/// use `.automatic` orientation to retain the source-aware behavior; the crop UI stores an
+/// explicit portrait or landscape choice when one is selected.
 enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
     case freeform = "Freeform"
     case square = "1:1"
@@ -16,6 +16,28 @@ enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
     var label: String { rawValue }
 
     var isFreeform: Bool { self == .freeform }
+
+    var supportsOrientationSelection: Bool {
+        self != .freeform && self != .square
+    }
+
+    func selectionLabel(for orientation: CropAspectRatioOrientation) -> String {
+        guard supportsOrientationSelection else { return label }
+        switch orientation {
+        case .landscape: return "\(label) Landscape"
+        case .portrait: return "\(portraitLabel) Portrait"
+        case .automatic: return label
+        }
+    }
+
+    private var portraitLabel: String {
+        switch self {
+        case .threeToTwo: return "2:3"
+        case .fourToThree: return "3:4"
+        case .sixteenToNine: return "9:16"
+        case .freeform, .square: return label
+        }
+    }
 
     private var landscapePixelRatio: CGFloat? {
         switch self {
@@ -29,27 +51,46 @@ enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
 
     /// The width-to-height ratio in normalized source coordinates. Normalization is necessary
     /// because a 1:1 rectangle in a 3:2 image has a normalized width-to-height ratio of 2:3.
-    func normalizedRatio(for imageSize: CGSize) -> CGFloat? {
+    func normalizedRatio(
+        for imageSize: CGSize,
+        orientation: CropAspectRatioOrientation = .automatic
+    ) -> CGFloat? {
         guard let landscapePixelRatio = landscapePixelRatio,
               imageSize.width.isFinite, imageSize.height.isFinite,
               imageSize.width > 0, imageSize.height > 0
         else { return nil }
 
-        let pixelRatio = imageSize.width < imageSize.height
-            ? 1 / landscapePixelRatio
-            : landscapePixelRatio
+        let pixelRatio: CGFloat
+        switch orientation {
+        case .landscape:
+            pixelRatio = landscapePixelRatio
+        case .portrait:
+            pixelRatio = 1 / landscapePixelRatio
+        case .automatic:
+            pixelRatio = imageSize.width < imageSize.height
+                ? 1 / landscapePixelRatio
+                : landscapePixelRatio
+        }
         let normalizedRatio = pixelRatio * imageSize.height / imageSize.width
         guard normalizedRatio.isFinite, normalizedRatio > 0 else { return nil }
         return normalizedRatio
     }
 }
 
+/// Orientation selected for a non-square crop preset. `automatic` preserves the behavior of
+/// documents written before explicit portrait/landscape choices were added.
+enum CropAspectRatioOrientation: String, Codable, CaseIterable, Hashable, Sendable {
+    case automatic
+    case landscape
+    case portrait
+}
+
 /// The committed, non-destructive crop framing.
 ///
 /// The rectangle is expressed in the oriented source image's normalized coordinate space. Its
 /// origin is bottom-left, matching Core Image and keeping the value independent of preview scale.
-/// The selected aspect ratio is persisted alongside the rectangle so reopening the crop tool,
-/// undoing, or exporting never loses the user's framing constraint.
+/// The selected aspect ratio and orientation are persisted alongside the rectangle so reopening
+/// the crop tool, undoing, or exporting never loses the user's framing constraint.
 struct CropAdjustments: Codable, Equatable, Sendable {
     static let unitRect = CGRect(x: 0, y: 0, width: 1, height: 1)
     static let neutral = CropAdjustments()
@@ -59,10 +100,16 @@ struct CropAdjustments: Codable, Equatable, Sendable {
     }
 
     var aspectRatio: CropAspectRatio
+    var orientation: CropAspectRatioOrientation
 
-    init(normalizedRect: CGRect? = nil, aspectRatio: CropAspectRatio = .freeform) {
+    init(
+        normalizedRect: CGRect? = nil,
+        aspectRatio: CropAspectRatio = .freeform,
+        orientation: CropAspectRatioOrientation = .automatic
+    ) {
         self.normalizedRect = Self.normalized(normalizedRect)
         self.aspectRatio = aspectRatio
+        self.orientation = orientation
     }
 
     var isIdentity: Bool {
@@ -71,7 +118,7 @@ struct CropAdjustments: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case normalizedRect, aspectRatio
+        case normalizedRect, aspectRatio, orientation
     }
 
     init(from decoder: Decoder) throws {
@@ -80,6 +127,9 @@ struct CropAdjustments: Codable, Equatable, Sendable {
             try container.decodeIfPresent(CGRect.self, forKey: .normalizedRect)
         )
         aspectRatio = try container.decodeIfPresent(CropAspectRatio.self, forKey: .aspectRatio) ?? .freeform
+        orientation = try container.decodeIfPresent(
+            CropAspectRatioOrientation.self, forKey: .orientation
+        ) ?? .automatic
     }
 
     private static func normalized(_ rect: CGRect?) -> CGRect? {
@@ -98,9 +148,12 @@ struct CropAdjustments: Codable, Equatable, Sendable {
 /// Pure crop geometry shared by the SwiftUI overlay and model tests.
 enum CropOverlayInteraction {
     static func applying(
-        _ aspectRatio: CropAspectRatio, to rect: CGRect, imageSize: CGSize
+        _ aspectRatio: CropAspectRatio,
+        orientation: CropAspectRatioOrientation = .automatic,
+        to rect: CGRect,
+        imageSize: CGSize
     ) -> CGRect {
-        guard let targetRatio = aspectRatio.normalizedRatio(for: imageSize),
+        guard let targetRatio = aspectRatio.normalizedRatio(for: imageSize, orientation: orientation),
               let current = CropAdjustments(normalizedRect: rect).normalizedRect
         else { return rect }
 
@@ -133,10 +186,13 @@ enum CropOverlayInteraction {
         delta: CGSize,
         imageRect: CGRect,
         aspectRatio: CropAspectRatio = .freeform,
+        orientation: CropAspectRatioOrientation = .automatic,
         imageSize: CGSize = .zero
     ) -> CGRect {
         guard imageRect.width > 0, imageRect.height > 0 else { return rect }
-        guard let targetRatio = aspectRatio.normalizedRatio(for: imageSize) else {
+        guard let targetRatio = aspectRatio.normalizedRatio(
+            for: imageSize, orientation: orientation
+        ) else {
             return freeformResized(rect, handle: handle, delta: delta, imageRect: imageRect)
         }
 
@@ -172,7 +228,19 @@ enum CropOverlayInteraction {
 
         let requestedWidth = abs(target.x - anchor.x)
         let requestedHeight = abs(target.y - anchor.y)
-        var width = max(requestedWidth, requestedHeight * targetRatio)
+        // A one-axis drag must be allowed to change the corresponding dimension. Using `max`
+        // unconditionally makes an inward horizontal drag compare against the unchanged height
+        // and return the old width, which is especially visible on the top-left handle.
+        let horizontalDrag = abs(dx) > 0.000001
+        let verticalDrag = abs(dy) > 0.000001
+        var width: CGFloat
+        if horizontalDrag && !verticalDrag {
+            width = requestedWidth
+        } else if verticalDrag && !horizontalDrag {
+            width = requestedHeight * targetRatio
+        } else {
+            width = max(requestedWidth, requestedHeight * targetRatio)
+        }
         let maxWidth = horizontalDirection > 0 ? 1 - anchor.x : anchor.x
         let maxHeight = verticalDirection > 0 ? 1 - anchor.y : anchor.y
         let maximumWidth = min(maxWidth, maxHeight * targetRatio)

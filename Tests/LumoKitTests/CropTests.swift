@@ -58,6 +58,65 @@ final class CropModelTests: XCTestCase {
         XCTAssertLessThanOrEqual(resized.maxY, 1)
     }
 
+    func testTopLeftFixedRatioHorizontalInwardDragMovesLeftEdgeRight() {
+        let imageSize = CGSize(width: 1600, height: 900)
+        let start = CropOverlayInteraction.applying(
+            .threeToTwo,
+            orientation: .landscape,
+            to: CGRect(x: 0.1, y: 0.1, width: 0.7, height: 0.7),
+            imageSize: imageSize
+        )
+        let resized = CropOverlayInteraction.resized(
+            start,
+            handle: .topLeading,
+            delta: CGSize(width: 80, height: 0),
+            imageRect: CGRect(x: 0, y: 0, width: 800, height: 450),
+            aspectRatio: .threeToTwo,
+            orientation: .landscape,
+            imageSize: imageSize
+        )
+
+        XCTAssertGreaterThan(resized.minX, start.minX)
+        XCTAssertLessThan(resized.width, start.width)
+        XCTAssertEqual(
+            resized.width * imageSize.width / (resized.height * imageSize.height),
+            1.5,
+            accuracy: 0.000001
+        )
+    }
+
+    func testFixedRatioOneAxisResizesSymmetricallyFromEveryCorner() {
+        let imageSize = CGSize(width: 1600, height: 900)
+        let imageRect = CGRect(x: 0, y: 0, width: 800, height: 450)
+        let start = CGRect(x: 0.2, y: 0.2, width: 0.5, height: 0.5)
+
+        for handle in CropHandle.allCases {
+            let horizontal = CropOverlayInteraction.resized(
+                start,
+                handle: handle,
+                delta: CGSize(width: handle == .topLeading || handle == .bottomLeading ? 40 : -40, height: 0),
+                imageRect: imageRect,
+                aspectRatio: .threeToTwo,
+                orientation: .landscape,
+                imageSize: imageSize
+            )
+            let vertical = CropOverlayInteraction.resized(
+                start,
+                handle: handle,
+                delta: CGSize(width: 0, height: handle == .topLeading || handle == .topTrailing ? 40 : -40),
+                imageRect: imageRect,
+                aspectRatio: .threeToTwo,
+                orientation: .landscape,
+                imageSize: imageSize
+            )
+
+            XCTAssertEqual(horizontal.width * imageSize.width / (horizontal.height * imageSize.height), 1.5, accuracy: 0.000001)
+            XCTAssertEqual(vertical.width * imageSize.width / (vertical.height * imageSize.height), 1.5, accuracy: 0.000001)
+            XCTAssertGreaterThan(horizontal.width, 0)
+            XCTAssertGreaterThan(vertical.height, 0)
+        }
+    }
+
     func testDraggingCropAreaTranslatesInNormalizedBottomLeftSpace() {
         let rect = CGRect(x: 0.2, y: 0.25, width: 0.5, height: 0.4)
         let imageRect = CGRect(x: 10, y: 20, width: 800, height: 400)
@@ -101,6 +160,47 @@ final class CropModelTests: XCTestCase {
         XCTAssertEqual(fitMoved.size.height, rect.size.height, accuracy: 0.000001)
         XCTAssertEqual(zoomedMoved.size.width, rect.size.width, accuracy: 0.000001)
         XCTAssertEqual(zoomedMoved.size.height, rect.size.height, accuracy: 0.000001)
+    }
+
+    func testDraggingCropAreaPreservesFixedFrameSize() {
+        let rect = CGRect(x: 0.2, y: 0.25, width: 0.5, height: 0.4)
+        let moved = CropOverlayInteraction.translated(
+            rect, delta: CGSize(width: -30, height: 55),
+            imageRect: CGRect(x: 0, y: 0, width: 600, height: 400)
+        )
+
+        XCTAssertEqual(moved.size, rect.size)
+        XCTAssertGreaterThanOrEqual(moved.minX, 0)
+        XCTAssertGreaterThanOrEqual(moved.minY, 0)
+        XCTAssertLessThanOrEqual(moved.maxX, 1)
+        XCTAssertLessThanOrEqual(moved.maxY, 1)
+    }
+
+    func testExplicitPortraitAndLandscapeRatiosIgnoreSourceOrientationAndPersist() throws {
+        let imageSize = CGSize(width: 400, height: 800)
+        let sourceRect = CGRect(x: 0.3, y: 0.3, width: 0.4, height: 0.4)
+        let landscape = CropOverlayInteraction.applying(
+            .threeToTwo, orientation: .landscape, to: sourceRect, imageSize: imageSize
+        )
+        let portrait = CropOverlayInteraction.applying(
+            .threeToTwo, orientation: .portrait, to: sourceRect, imageSize: imageSize
+        )
+
+        XCTAssertEqual(landscape.width * imageSize.width / (landscape.height * imageSize.height), 1.5, accuracy: 0.000001)
+        XCTAssertEqual(portrait.width * imageSize.width / (portrait.height * imageSize.height), 2.0 / 3.0, accuracy: 0.000001)
+        XCTAssertEqual(landscape.midX, sourceRect.midX, accuracy: 0.000001)
+        XCTAssertEqual(portrait.midY, sourceRect.midY, accuracy: 0.000001)
+
+        let crop = CropAdjustments(
+            normalizedRect: portrait,
+            aspectRatio: .threeToTwo,
+            orientation: .portrait
+        )
+        let restored = try JSONDecoder().decode(
+            CropAdjustments.self, from: JSONEncoder().encode(crop)
+        )
+        XCTAssertEqual(restored, crop)
+        XCTAssertEqual(restored.orientation, .portrait)
     }
 
     func testCropIsNormalizedBoundedAndCodable() throws {
@@ -314,18 +414,21 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
         viewModel.beginCrop()
         let beforeSelection = viewModel.document
-        viewModel.selectCropAspectRatio(.sixteenToNine)
+        viewModel.selectCropAspectRatio(.sixteenToNine, orientation: .portrait)
         XCTAssertEqual(viewModel.document, beforeSelection, "preset selection must remain a draft")
         XCTAssertEqual(viewModel.cropAspectRatio, .sixteenToNine)
+        XCTAssertEqual(viewModel.cropOrientation, .portrait)
         XCTAssertTrue(viewModel.cropDraft != CropAdjustments.unitRect)
 
         viewModel.commitCrop()
         XCTAssertEqual(viewModel.document.crop.aspectRatio, .sixteenToNine)
+        XCTAssertEqual(viewModel.document.crop.orientation, .portrait)
         XCTAssertEqual(viewModel.undoDepth, 1)
         viewModel.undo()
         XCTAssertEqual(viewModel.document.crop, .neutral)
         viewModel.redo()
         XCTAssertEqual(viewModel.document.crop.aspectRatio, .sixteenToNine)
+        XCTAssertEqual(viewModel.document.crop.orientation, .portrait)
     }
 
     /// Covers the LUMO-115 fix directly: while Crop is open, the pixels under the full-source

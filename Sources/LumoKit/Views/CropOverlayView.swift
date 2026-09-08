@@ -9,8 +9,9 @@ struct CropOverlayView: View {
     let normalizedRect: CGRect
     let imageSize: CGSize
     let aspectRatio: CropAspectRatio
+    let orientation: CropAspectRatioOrientation
     let onChange: (CGRect) -> Void
-    let onAspectRatioChange: (CropAspectRatio) -> Void
+    let onAspectRatioChange: (CropAspectRatio, CropAspectRatioOrientation) -> Void
     let onApply: () -> Void
     let onReset: () -> Void
     let onCancel: () -> Void
@@ -30,8 +31,12 @@ struct CropOverlayView: View {
                     .fill(.clear)
                     .frame(width: cropRect.width, height: cropRect.height)
                     .position(x: cropRect.midX, y: cropRect.midY)
-                    .contentShape(Rectangle())
+                    // Leave the handle hit zones out of the move surface so a corner drag is
+                    // always owned by its handle, even when the frame is small.
+                    .contentShape(Rectangle().inset(by: 14))
                     .gesture(moveGesture(imageRect: imageRect))
+                    .accessibilityLabel("Crop frame")
+                    .accessibilityHint("Drag to move the crop frame without changing its size")
 
                 cropGuides(cropRect: cropRect)
                     .allowsHitTesting(false)
@@ -53,20 +58,28 @@ struct CropOverlayView: View {
                         .font(.headline)
                     Menu {
                         ForEach(CropAspectRatio.allCases, id: \.self) { ratio in
-                            Button {
-                                onAspectRatioChange(ratio)
-                            } label: {
-                                if ratio == aspectRatio {
-                                    Label(ratio.label, systemImage: "checkmark")
-                                } else {
-                                    Text(ratio.label)
+                            if ratio.supportsOrientationSelection {
+                                Menu(ratio.label) {
+                                    ratioButton(ratio, orientation: .landscape)
+                                    ratioButton(ratio, orientation: .portrait)
+                                }
+                            } else {
+                                Button {
+                                    onAspectRatioChange(ratio, .automatic)
+                                } label: {
+                                    if ratio == aspectRatio && orientation == .automatic {
+                                        Label(ratio.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(ratio.label)
+                                    }
                                 }
                             }
                         }
                     } label: {
-                        Label(aspectRatio.label, systemImage: "aspectratio")
+                        Label(aspectRatio.selectionLabel(for: orientation), systemImage: "aspectratio")
                     }
                     .accessibilityLabel("Crop aspect ratio")
+                    .accessibilityHint("Choose a square, freeform, landscape, or portrait crop ratio")
                     Spacer()
                     Button("Reset", action: onReset)
                     Button("Cancel", action: onCancel)
@@ -83,6 +96,21 @@ struct CropOverlayView: View {
             .accessibilityLabel("Crop, \(aspectRatio.label)")
             .accessibilityHint("Choose an aspect ratio, then drag the crop frame or handles within the image bounds")
             .onExitCommand(perform: onCancel)
+        }
+    }
+
+    @ViewBuilder
+    private func ratioButton(
+        _ ratio: CropAspectRatio, orientation: CropAspectRatioOrientation
+    ) -> some View {
+        Button {
+            onAspectRatioChange(ratio, orientation)
+        } label: {
+            if ratio == aspectRatio && self.orientation == orientation {
+                Label(ratio.selectionLabel(for: orientation), systemImage: "checkmark")
+            } else {
+                Text(ratio.selectionLabel(for: orientation))
+            }
         }
     }
 
@@ -166,7 +194,7 @@ struct CropOverlayView: View {
                 handleStarts[handle] = start
                 onChange(CropOverlayInteraction.resized(
                     start, handle: handle, delta: value.translation, imageRect: imageRect,
-                    aspectRatio: aspectRatio, imageSize: imageSize
+                    aspectRatio: aspectRatio, orientation: orientation, imageSize: imageSize
                 ))
             }
             .onEnded { _ in handleStarts[handle] = nil }
