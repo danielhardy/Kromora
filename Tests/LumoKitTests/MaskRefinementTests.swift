@@ -51,6 +51,7 @@ final class MaskRefinementTests: XCTestCase {
         XCTAssertEqual(pixels?.values.first, 1)
         XCTAssertEqual(pixels?.values.last, 0)
         XCTAssertEqual(refined.confidence, seed.confidence)
+        XCTAssertEqual(refined.coverage, actual.coverage, accuracy: 0.0001)
     }
 
     func testCancellationDoesNotPersistAnIncompleteRenderMask() async throws {

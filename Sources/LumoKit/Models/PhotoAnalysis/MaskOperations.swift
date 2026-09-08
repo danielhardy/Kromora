@@ -30,20 +30,26 @@ enum MaskOperations {
         let width = mask.size.width
         let height = mask.size.height
         var blurred = Array(repeating: Float.zero, count: mask.values.count)
+        var outputTotal: Float = 0
         for y in 0..<height {
             for x in 0..<width {
-                var total: Float = 0
+                var sampleTotal: Float = 0
                 var count: Float = 0
                 for sampleY in max(0, y - radius)...min(height - 1, y + radius) {
                     for sampleX in max(0, x - radius)...min(width - 1, x + radius) {
-                        total += mask.values[sampleY * width + sampleX]
+                        sampleTotal += mask.values[sampleY * width + sampleX]
                         count += 1
                     }
                 }
-                blurred[y * width + x] = total / count
+                let value = sampleTotal / count
+                blurred[y * width + x] = value
+                outputTotal += value
             }
         }
-        return try NormalizedMask(size: mask.size, values: blurred)
+        return NormalizedMask(
+            trustingSize: mask.size, values: blurred,
+            coverage: blurred.isEmpty ? 0 : outputTotal / Float(blurred.count)
+        )
     }
 
     static func refine(_ mask: NormalizedMask) throws -> NormalizedMask {
@@ -59,7 +65,8 @@ enum MaskOperations {
         }
         guard mask.size != size else { return mask }
 
-        return NormalizedMask(resampledSize: size, values: try scaleValues(mask, to: size))
+        let result = try scaleValuesAndCoverage(mask, to: size)
+        return NormalizedMask(trustingSize: size, values: result.values, coverage: result.coverage)
     }
 
     /// Shared PlanarF bridge for every semantic-mask upscale. vImage's default resampling kernel
@@ -68,6 +75,12 @@ enum MaskOperations {
     /// by NormalizedMask's existing [0, 1] normalization. `kvImageEdgeExtend` preserves the old
     /// clamp-to-edge behavior, including the one-pixel source/target dimensions guarded above.
     static func scaleValues(_ mask: NormalizedMask, to size: PixelDimensions) throws -> [Float] {
+        try scaleValuesAndCoverage(mask, to: size).values
+    }
+
+    private static func scaleValuesAndCoverage(
+        _ mask: NormalizedMask, to size: PixelDimensions
+    ) throws -> (values: [Float], coverage: Float) {
         guard mask.size.width > 0, mask.size.height > 0,
               size.width > 0, size.height > 0 else {
             throw RegionMaskError.incompatibleSizes
@@ -100,20 +113,18 @@ enum MaskOperations {
             throw MaskResamplingError.vImageScaleFailed(Int32(error))
         }
 
-        // vImage's resampling kernel can ring slightly at a hard mask edge. Clip in Accelerate
-        // before handing the result to NormalizedMask's trusted resampled-value initializer; this
-        // preserves its public [0, 1] invariant without another scalar validation/copy pass.
+        // vImage's resampling kernel can ring slightly at a hard mask edge. Clip and accumulate
+        // in one pass before handing the result to NormalizedMask's trusted initializer; this
+        // preserves its public [0, 1] invariant and avoids a second post-generation walk.
+        var total: Float = 0
         values.withUnsafeMutableBufferPointer { buffer in
-            var lowerBound: Float = 0
-            var upperBound: Float = 1
-            vDSP_vclip(
-                buffer.baseAddress!, 1,
-                &lowerBound, &upperBound,
-                buffer.baseAddress!, 1,
-                vDSP_Length(buffer.count)
-            )
+            for index in buffer.indices {
+                let value = min(max(buffer[index], 0), 1)
+                buffer[index] = value
+                total += value
+            }
         }
-        return values
+        return (values, values.isEmpty ? 0 : total / Float(values.count))
     }
 
     /// Region operations always persist their result through the same store as provider output.

@@ -443,7 +443,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         case kCVPixelFormatType_OneComponent32Float:
             values = (0..<height).flatMap { y in
                 let row = address.assumingMemoryBound(to: Float.self).advanced(by: y * rowStride)
-                return (0..<width).map { x in min(max(row[x], 0), 1) }
+                return (0..<width).map { x in row[x] }
             }
         case kCVPixelFormatType_OneComponent8:
             let byteStride = stride
@@ -488,6 +488,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
 
     private func rectangularMask(bounds: NormalizedRect, size: PixelDimensions) throws -> NormalizedMask {
         var values = Array(repeating: Float.zero, count: size.width * size.height)
+        var total: Float = 0
         for y in 0..<size.height {
             let normalizedY = Double(y) / Double(max(1, size.height - 1))
             for x in 0..<size.width {
@@ -495,10 +496,14 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
                 if normalizedX >= bounds.minX, normalizedX <= bounds.maxX,
                    normalizedY >= bounds.minY, normalizedY <= bounds.maxY {
                     values[y * size.width + x] = 1
+                    total += 1
                 }
             }
         }
-        return try NormalizedMask(size: size, values: values)
+        return NormalizedMask(
+            trustingSize: size, values: values,
+            coverage: values.isEmpty ? 0 : total / Float(values.count)
+        )
     }
 
     private func bounds(of mask: NormalizedMask) -> NormalizedRect {

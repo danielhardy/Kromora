@@ -77,25 +77,55 @@ struct RegionMaskReference: Codable, Sendable, Equatable, Hashable {
 struct NormalizedMask: Codable, Sendable, Equatable {
     let size: PixelDimensions
     let values: [Float]
+    let coverage: Float
 
     init(size: PixelDimensions, values: [Float]) throws {
         guard values.count == size.width * size.height else { throw RegionMaskError.invalidPixelCount }
-        guard values.allSatisfy({ $0.isFinite }) else { throw RegionMaskError.invalidPixelValue }
+        var normalized: [Float] = []
+        normalized.reserveCapacity(values.count)
+        var total: Float = 0
+        for value in values {
+            guard value.isFinite else { throw RegionMaskError.invalidPixelValue }
+            let clipped = min(max(value, 0), 1)
+            normalized.append(clipped)
+            total += clipped
+        }
         self.size = size
-        self.values = values.map { min(max($0, 0), 1) }
+        self.values = normalized
+        self.coverage = normalized.isEmpty ? 0 : total / Float(normalized.count)
     }
 
-    /// Used only by Accelerate-backed producers after they have validated the dimensions and
-    /// clipped the finite vImage output. Keeping this fast path beside the checked initializer
-    /// avoids a second scalar validation/copy over multi-megapixel render masks.
-    init(resampledSize size: PixelDimensions, values: [Float]) {
+    /// Used only by internal producers after they have validated the dimensions and established
+    /// the [0, 1] invariant. The optional coverage is for small/test call sites; hot producers
+    /// pass the sum they already accumulated while generating the values.
+    init(trustingSize size: PixelDimensions, values: [Float], coverage: Float? = nil) {
+        precondition(values.count == size.width * size.height, "mask values must match mask size")
         self.size = size
         self.values = values
+        self.coverage = coverage ?? (values.isEmpty ? 0 : values.reduce(0, +) / Float(values.count))
     }
 
-    var coverage: Float {
-        guard !values.isEmpty else { return 0 }
-        return values.reduce(0, +) / Float(values.count)
+    private enum CodingKeys: String, CodingKey {
+        case size
+        case values
+    }
+
+    /// Coverage is derived on decode so legacy payloads that contain only size and values remain
+    /// readable. This is also the validating I/O boundary for inline and decoded mask payloads.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            size: container.decode(PixelDimensions.self, forKey: .size),
+            values: container.decode([Float].self, forKey: .values)
+        )
+    }
+
+    /// Keep coverage out of serialized payloads; it is a derived value and older sidecars do not
+    /// carry it. Persisted mask metadata has its own custom schema in MaskStore.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(size, forKey: .size)
+        try container.encode(values, forKey: .values)
     }
 }
 
