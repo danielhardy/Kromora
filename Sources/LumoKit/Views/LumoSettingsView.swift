@@ -15,6 +15,13 @@ public struct LumoSettingsView: View {
         self.editStore = editStore
     }
 
+    /// SwiftData may not create the persistent store file until the first successful save.
+    /// A requested on-disk URL is therefore only revealable once the file exists.
+    static func revealableEditDatabaseURL(for url: URL?) -> URL? {
+        guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
     public var body: some View {
         Form {
             Section {
@@ -90,7 +97,7 @@ public struct LumoSettingsView: View {
         .frame(width: 560)
         .task {
             settings.refreshFolderStatus()
-            editDatabaseURL = await editStore.onDiskFileURL
+            editDatabaseURL = Self.revealableEditDatabaseURL(for: await editStore.onDiskFileURL)
         }
     }
 
