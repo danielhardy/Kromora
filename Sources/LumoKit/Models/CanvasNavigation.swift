@@ -14,12 +14,14 @@ final class CanvasInteractionState: ObservableObject {
     @Published private(set) var isCropToolActive = false
     @Published private(set) var cropDraft: CGRect?
     @Published private(set) var cropAspectRatio: CropAspectRatio = .freeform
+    @Published private(set) var cropOrientation: CropAspectRatioOrientation = .automatic
 
     func resetForSource() {
         navigation.resetForSource()
         isCropToolActive = false
         cropDraft = nil
         cropAspectRatio = .freeform
+        cropOrientation = .automatic
     }
 
     func fit() { navigation.fit() }
@@ -42,6 +44,7 @@ final class CanvasInteractionState: ObservableObject {
         isCropToolActive = true
         cropDraft = committedCrop.normalizedRect ?? CropAdjustments.unitRect
         cropAspectRatio = committedCrop.aspectRatio
+        cropOrientation = committedCrop.orientation
         return true
     }
 
@@ -50,12 +53,17 @@ final class CanvasInteractionState: ObservableObject {
         cropDraft = CropAdjustments(normalizedRect: normalizedRect).normalizedRect
     }
 
-    func selectCropAspectRatio(_ aspectRatio: CropAspectRatio, imageSize: CGSize) {
+    func selectCropAspectRatio(
+        _ aspectRatio: CropAspectRatio,
+        orientation: CropAspectRatioOrientation = .automatic,
+        imageSize: CGSize
+    ) {
         guard isCropToolActive else { return }
         let current = cropDraft ?? CropAdjustments.unitRect
         cropAspectRatio = aspectRatio
+        cropOrientation = orientation
         cropDraft = CropOverlayInteraction.applying(
-            aspectRatio, to: current, imageSize: imageSize
+            aspectRatio, orientation: orientation, to: current, imageSize: imageSize
         )
     }
 
@@ -63,12 +71,14 @@ final class CanvasInteractionState: ObservableObject {
         isCropToolActive = false
         cropDraft = nil
         cropAspectRatio = .freeform
+        cropOrientation = .automatic
     }
 
     func resetCropDraft() {
         guard isCropToolActive else { return }
         cropDraft = CropAdjustments.unitRect
         cropAspectRatio = .freeform
+        cropOrientation = .automatic
     }
 }
 

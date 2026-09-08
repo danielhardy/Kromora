@@ -31,22 +31,33 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
     struct CropCategory: Codable, Sendable, Equatable {
         var normalizedRect: CGRect?
         var aspectRatio: CropAspectRatio
+        var orientation: CropAspectRatioOrientation
 
-        static let neutral = CropCategory(normalizedRect: nil, aspectRatio: .freeform)
+        static let neutral = CropCategory(
+            normalizedRect: nil, aspectRatio: .freeform, orientation: .automatic
+        )
 
-        init(normalizedRect: CGRect? = nil, aspectRatio: CropAspectRatio = .freeform) {
+        init(
+            normalizedRect: CGRect? = nil,
+            aspectRatio: CropAspectRatio = .freeform,
+            orientation: CropAspectRatioOrientation = .automatic
+        ) {
             self.normalizedRect = normalizedRect
             self.aspectRatio = aspectRatio
+            self.orientation = orientation
         }
 
         private enum CodingKeys: String, CodingKey {
-            case normalizedRect, aspectRatio
+            case normalizedRect, aspectRatio, orientation
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             normalizedRect = try container.decodeIfPresent(CGRect.self, forKey: .normalizedRect)
             aspectRatio = try container.decodeIfPresent(CropAspectRatio.self, forKey: .aspectRatio) ?? .freeform
+            orientation = try container.decodeIfPresent(
+                CropAspectRatioOrientation.self, forKey: .orientation
+            ) ?? .automatic
         }
     }
 
@@ -144,7 +155,8 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.effectAdjustments = document.effects
         self.crop = CropCategory(
             normalizedRect: document.crop.normalizedRect,
-            aspectRatio: document.crop.aspectRatio
+            aspectRatio: document.crop.aspectRatio,
+            orientation: document.crop.orientation
         )
     }
 
@@ -178,7 +190,9 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         }
         if categories.contains(.crop) {
             result.crop = CropAdjustments(
-                normalizedRect: crop.normalizedRect, aspectRatio: crop.aspectRatio
+                normalizedRect: crop.normalizedRect,
+                aspectRatio: crop.aspectRatio,
+                orientation: crop.orientation
             )
         }
         if categories.contains(.lut) {

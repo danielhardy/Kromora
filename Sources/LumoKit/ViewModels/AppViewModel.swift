@@ -420,6 +420,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     var isCropToolActive: Bool { canvasState.isCropToolActive }
     var cropDraft: CGRect? { canvasState.cropDraft }
     var cropAspectRatio: CropAspectRatio { canvasState.cropAspectRatio }
+    var cropOrientation: CropAspectRatioOrientation { canvasState.cropOrientation }
 
     var isInspectorPresented: Bool {
         get { inspectorState.isPresented }
@@ -2490,9 +2491,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     /// Select a crop ratio in the transient tool state. The current crop center and approximate
     /// area are preserved, while the resulting frame is clamped to the source image bounds.
-    func selectCropAspectRatio(_ aspectRatio: CropAspectRatio) {
+    func selectCropAspectRatio(
+        _ aspectRatio: CropAspectRatio,
+        orientation: CropAspectRatioOrientation = .automatic
+    ) {
         guard sourceSize != .zero else { return }
-        canvasState.selectCropAspectRatio(aspectRatio, imageSize: sourceSize)
+        canvasState.selectCropAspectRatio(
+            aspectRatio, orientation: orientation, imageSize: sourceSize
+        )
     }
 
     /// Commit the current draft as one ordinary document mutation, giving it persistence, undo,
@@ -2501,9 +2507,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard canvasState.isCropToolActive else { return }
         let committed = canvasState.cropDraft ?? CropAdjustments.unitRect
         let aspectRatio = canvasState.cropAspectRatio
+        let orientation = canvasState.cropOrientation
         canvasState.finishCrop()
         let previousDocument = document
-        updateDocument { $0.crop = CropAdjustments(normalizedRect: committed, aspectRatio: aspectRatio) }
+        updateDocument {
+            $0.crop = CropAdjustments(
+                normalizedRect: committed, aspectRatio: aspectRatio, orientation: orientation
+            )
+        }
         // Applying an unchanged draft is still a composition transition: updateDocument quite
         // correctly records no history entry, but the temporary uncropped preview must be replaced
         // by the committed framing.
