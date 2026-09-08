@@ -15,6 +15,7 @@ struct PreviewView: View {
     @State private var isDraggingCanvas = false
     @State private var isMagnifyingCanvas = false
     @ObservedObject private var maskingState: MaskInteractionState
+    @ObservedObject private var inspectorState: AppViewModel.InspectorState
 
     init(viewModel: AppViewModel) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
@@ -22,6 +23,7 @@ struct PreviewView: View {
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
         _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
         _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)
+        _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
     }
 
     private var maskOverlayBackingScale: CGFloat {
@@ -222,7 +224,9 @@ struct PreviewView: View {
                         .simultaneousGesture(magnificationGesture(viewportSize: geometry.size))
                 }
 
-                if maskingState.showOverlay, viewModel.sourceSize != .zero,
+                if inspectorState.isPresented, inspectorState.tab == .masking,
+                   viewModel.isMaskingWorkspaceActive,
+                   maskingState.showOverlay, viewModel.sourceSize != .zero,
                    (maskingState.selectedLayerID != nil || maskingState.hasDraft
                     || maskingState.activeTool == .linear || maskingState.activeTool == .radial) {
                     MaskCanvasOverlay(

@@ -432,6 +432,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         set { selectInspectorTab(newValue) }
     }
 
+    /// Whether the masking presentation belongs on the editor canvas right now. Mask selection,
+    /// drafts, and the overlay preference are persistent/transient masking state; this is only the
+    /// workspace gate that decides whether the presentation subtree should exist at all.
+    var isMaskingWorkspaceActive: Bool {
+        inspectorState.isPresented
+            && inspectorState.tab == .masking
+            && navigation.isEdit
+            && sourceImage != nil
+            && maskingAssetID != nil
+    }
+
     /// Route every inspector-tab selection through the shared workspace transition. Masking keeps
     /// its persistent editor and selection semantics; the other tabs remain ordinary inspector
     /// navigation and implicitly return from Masking when selected.

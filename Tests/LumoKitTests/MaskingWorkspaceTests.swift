@@ -75,6 +75,39 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.inspectorTab, .effects)
     }
 
+    func testMaskOverlayIsScopedToMaskingTabAndEditorWorkspace() async throws {
+        let directory = try Fixtures.makeTempDirectory("MaskOverlayWorkspaceVisibility")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "overlay.png", in: directory)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
+        viewModel.selectInspectorTab(.masking)
+        viewModel.createMask(.brush)
+
+        XCTAssertTrue(viewModel.isMaskingWorkspaceActive)
+        XCTAssertTrue(viewModel.maskingState.showOverlay)
+        let layerID = try XCTUnwrap(viewModel.maskingState.selectedLayerID)
+
+        viewModel.selectInspectorTab(.effects)
+        XCTAssertFalse(viewModel.isMaskingWorkspaceActive)
+        XCTAssertEqual(viewModel.maskingState.selectedLayerID, layerID)
+        XCTAssertTrue(viewModel.maskingState.showOverlay)
+
+        viewModel.navigate(to: .grid)
+        XCTAssertFalse(viewModel.isMaskingWorkspaceActive)
+
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        XCTAssertFalse(viewModel.isMaskingWorkspaceActive)
+        XCTAssertEqual(viewModel.inspectorTab, .effects)
+
+        viewModel.selectInspectorTab(.masking)
+        XCTAssertTrue(viewModel.isMaskingWorkspaceActive)
+        XCTAssertEqual(viewModel.maskingState.selectedLayerID, layerID)
+    }
+
     func testLayerActionsPersistThroughTheDocumentAndUndo() throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
