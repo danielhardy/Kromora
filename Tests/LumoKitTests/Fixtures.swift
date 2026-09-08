@@ -355,7 +355,6 @@ enum Fixtures {
 /// Base class that hands each test a scratch directory and cleans it up.
 class TempDirectoryTestCase: XCTestCase {
     var tempDirectory: URL!
-    private let comparisonModeKey = "Lumo.editor.comparisonMode.sideBySide"
     private var testDefaultSuiteNames: [String] = []
 
     /// Creates an AppViewModel whose persisted state is private to this test and whose managed
@@ -413,10 +412,6 @@ class TempDirectoryTestCase: XCTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        // AppViewModel's production default is UserDefaults.standard. Reset the one UI preference
-        // that affects render scheduling so a comparison-mode test cannot leave a side-by-side
-        // baseline in flight for the next test's unrelated source/edit assertions.
-        UserDefaults.standard.removeObject(forKey: comparisonModeKey)
         tempDirectory = try Fixtures.makeTempDirectory(String(describing: type(of: self)))
     }
 
@@ -429,7 +424,6 @@ class TempDirectoryTestCase: XCTestCase {
             try? FileManager.default.removeItem(at: tempDirectory)
         }
         tempDirectory = nil
-        UserDefaults.standard.removeObject(forKey: comparisonModeKey)
         try super.tearDownWithError()
     }
 }
