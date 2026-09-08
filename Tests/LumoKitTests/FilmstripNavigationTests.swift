@@ -46,11 +46,17 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "third.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
         await engine.gateSourcePreparation()
         let viewModel = makeAppViewModel(engine: engine)
 
         viewModel.openImage(url: first)
-        while await engine.sourcePreparationCount < 1 { await Task.yield() }
+        _ = try await TestSynchronization.nextEvent(from: reader, "first source preparation start") {
+            if case .sourcePreparationStarted = $0 { return true }
+            return false
+        } diagnostics: {
+            "source preparations=\(await engine.sourcePreparationCount)"
+        }
         viewModel.openImage(url: second)
         viewModel.openImage(url: third)
         let managedThirdURL = try XCTUnwrap(
@@ -58,10 +64,21 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         )
 
         await engine.releaseSourcePreparation()
-        let deadline = Date().addingTimeInterval(2)
-        while viewModel.sourceURL != managedThirdURL {
-            if Date() > deadline { return XCTFail("the newest source did not finish loading") }
-            await Task.yield()
+        _ = try await TestSynchronization.nextEvent(from: reader, "the newest source preparation") {
+            if case .sourcePreparationCompleted(let source, _) = $0 {
+                return source.backing == .url(managedThirdURL)
+            }
+            return false
+        } diagnostics: {
+            "source preparations=\(await engine.sourcePreparationCount)"
+        }
+        _ = try await TestSynchronization.nextEvent(from: reader, "the newest source preview") {
+            if case .previewRequested(let request) = $0 {
+                return request.source?.backing == .url(managedThirdURL)
+            }
+            return false
+        } diagnostics: {
+            "source preparations=\(await engine.sourcePreparationCount), previews=\(await engine.previewRequests.count)"
         }
 
         let preparationCount = await engine.sourcePreparationCount

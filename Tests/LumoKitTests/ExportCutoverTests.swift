@@ -59,7 +59,9 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
-            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            if Date() > deadline {
+                throw TestSynchronizationError.timedOut(description, "published state did not settle")
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -68,39 +70,101 @@ final class ExportCutoverTests: TempDirectoryTestCase {
         try Pixels.bytes(of: try Pixels.decode(try Data(contentsOf: url)))
     }
 
-    /// Wait for a recorded request matching `predicate`.
-    ///
-    /// Several renders are in flight at once — the preview, the side-by-side baseline, the histogram
-    /// — so "read the last request" silently reads whichever finished first. Match on the specific
-    /// value you mean instead.
-    private func awaitRequest(
+    private func awaitEncodeRequest(
+        _ reader: FakeRenderEventReader,
+        _ fake: FakeRenderEngine,
         _ description: String,
-        timeout: TimeInterval = 5,
-        _ fetch: @escaping () async -> [FakeRenderEngine.Request],
-        matching predicate: (FakeRenderEngine.Request) -> Bool
+        matching predicate: @Sendable @escaping (FakeRenderEngine.Request) -> Bool
     ) async throws -> FakeRenderEngine.Request {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            if let match = await fetch().first(where: predicate) { return match }
-            try await Task.sleep(for: .milliseconds(10))
+        let event = try await TestSynchronization.nextEvent(
+            from: reader, description, matching: { event in
+                if case .encodeRequested(let request) = event { return predicate(request) }
+                return false
+            }, diagnostics: {
+                let requests = await fake.encodeRequests
+                return "encode requests=\(requests.count), revisions=\(await fake.renderRequests.map(\.requestRevision)), seen=\(requests)"
+            }
+        )
+        guard case .encodeRequested(let request) = event else {
+            throw TestSynchronizationError.streamEnded(description)
         }
-        let seen = await fetch()
-        XCTFail("timed out waiting for \(description); saw \(seen.count) request(s): \(seen)")
-        throw XCTSkip("no matching request")
+        return request
+    }
+
+    private func awaitEncodeCompletion(
+        _ reader: FakeRenderEventReader,
+        _ fake: FakeRenderEngine,
+        _ description: String,
+        matching predicate: @Sendable @escaping (FakeRenderEngine.Request) -> Bool
+    ) async throws -> FakeRenderEngine.Request {
+        let event = try await TestSynchronization.nextEvent(
+            from: reader, description, matching: { event in
+                if case .encodeCompleted(let request) = event { return predicate(request) }
+                return false
+            }, diagnostics: {
+                "encode requests=\(await fake.encodeRequests.count), active=\(await fake.activeEncodes)"
+            }
+        )
+        guard case .encodeCompleted(let request) = event else {
+            throw TestSynchronizationError.streamEnded(description)
+        }
+        return request
     }
 
     private func awaitHistogramRequest(
-        _ fake: FakeRenderEngine, _ description: String,
-        matching predicate: (FakeRenderEngine.Request) -> Bool
+        _ reader: FakeRenderEventReader, _ fake: FakeRenderEngine, _ description: String,
+        matching predicate: @Sendable @escaping (FakeRenderEngine.Request) -> Bool
     ) async throws -> FakeRenderEngine.Request {
-        try await awaitRequest(description, { await fake.histogramRequests }, matching: predicate)
+        let event = try await TestSynchronization.nextEvent(
+            from: reader, description, matching: { event in
+                if case .histogramRequested(let request) = event { return predicate(request) }
+                return false
+            }, diagnostics: {
+                let requests = await fake.histogramRequests
+                return "histogram requests=\(requests.count), revisions=\(await fake.renderRequests.map(\.requestRevision)), seen=\(requests)"
+            }
+        )
+        guard case .histogramRequested(let request) = event else {
+            throw TestSynchronizationError.streamEnded(description)
+        }
+        return request
     }
 
     private func awaitPreviewRequest(
-        _ fake: FakeRenderEngine, _ description: String,
-        matching predicate: (FakeRenderEngine.Request) -> Bool
+        _ reader: FakeRenderEventReader, _ fake: FakeRenderEngine, _ description: String,
+        matching predicate: @Sendable @escaping (FakeRenderEngine.Request) -> Bool
     ) async throws -> FakeRenderEngine.Request {
-        try await awaitRequest(description, { await fake.previewRequests }, matching: predicate)
+        let event = try await TestSynchronization.nextEvent(
+            from: reader, description, matching: { event in
+                if case .previewRequested(let request) = event { return predicate(request) }
+                return false
+            }, diagnostics: {
+                let requests = await fake.previewRequests
+                return "preview requests=\(requests.count), revisions=\(await fake.renderRequests.map(\.requestRevision)), seen=\(requests)"
+            }
+        )
+        guard case .previewRequested(let request) = event else {
+            throw TestSynchronizationError.streamEnded(description)
+        }
+        return request
+    }
+
+    private func awaitPreviewCompletion(
+        _ reader: FakeRenderEventReader, _ fake: FakeRenderEngine, _ description: String,
+        matching predicate: @Sendable @escaping (FakeRenderEngine.Request) -> Bool
+    ) async throws -> FakeRenderEngine.Request {
+        let event = try await TestSynchronization.nextEvent(
+            from: reader, description, matching: { event in
+                if case .previewCompleted(let request) = event { return predicate(request) }
+                return false
+            }, diagnostics: {
+                "preview requests=\(await fake.previewRequests.count), active encodes=\(await fake.activeEncodes)"
+            }
+        )
+        guard case .previewCompleted(let request) = event else {
+            throw TestSynchronizationError.streamEnded(description)
+        }
+        return request
     }
 
     // MARK: - What the engine is asked to encode
@@ -108,6 +172,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// The whole document reaches the encoder, at full resolution, in the chosen format.
     func testTheDocumentReachesTheEncoderAtFullResolution() async throws {
         let fake = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await fake.eventStream())
         let coordinator = ExportCoordinator(engine: fake)
         coordinator.onError = { XCTFail("unexpected error: \($0)") }
 
@@ -119,7 +184,8 @@ final class ExportCutoverTests: TempDirectoryTestCase {
             format: .tiff,
             to: tempDirectory.appendingPathComponent("out.tif")
         )
-        try await waitUntil("the export to finish") { !coordinator.isExporting }
+        let signalRequest = try await awaitEncodeRequest(reader, fake, "the encode request") { $0.source == source }
+        _ = try await awaitEncodeCompletion(reader, fake, "the encode completion") { $0 == signalRequest }
 
         let requests = await fake.encodeRequests
         XCTAssertEqual(requests.count, 1)
@@ -141,6 +207,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// from the same document at `.full`, and each request must name *its own* file.
     func testBatchExportEncodesEveryItemFromTheSameDocument() async throws {
         let fake = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await fake.eventStream())
         let coordinator = ExportCoordinator(engine: fake)
         coordinator.onError = { XCTFail("unexpected error: \($0)") }
 
@@ -155,6 +222,10 @@ final class ExportCutoverTests: TempDirectoryTestCase {
             items, document: document, lut: lut, format: .png, to: try destinationFolder()
         )
         XCTAssertEqual(outcome, .init(exported: 3, failed: 0, total: 3))
+
+        for _ in 0..<3 {
+            _ = try await awaitEncodeCompletion(reader, fake, "a batch encode completion") { _ in true }
+        }
 
         let requests = await fake.encodeRequests
         XCTAssertEqual(requests.count, 3, "one encode per image")
@@ -360,6 +431,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// see at all, has to move it.
     func testTheHistogramDescribesTheRenderedDocument() async throws {
         let fake = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await fake.eventStream())
         let viewModel = makeAppViewModel(engine: fake)
         viewModel.openImage(url: try makeImageFile())
         try await waitUntil("the image to load") { viewModel.exportRequest != nil }
@@ -369,7 +441,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
 
         // Match on the edited document rather than on "the last request": the opening render and the
         // adjusted one are both in flight, and a looser condition reads whichever landed first.
-        let request = try await awaitHistogramRequest(fake, "the adjusted document") {
+        let request = try await awaitHistogramRequest(reader, fake, "the adjusted document") {
             $0.document.adjustments == [.exposure(ev: 0.9)]
         }
         guard case .preview(let box) = request.scale else {
@@ -385,15 +457,18 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     /// Nothing is tallied while the panel is closed — the reason the inspector gates it at all.
     func testNoHistogramIsRenderedWhileTheInspectorIsClosed() async throws {
         let fake = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await fake.eventStream())
         let viewModel = makeAppViewModel(engine: fake)
         viewModel.openImage(url: try makeImageFile())
         try await waitUntil("the first preview") { viewModel.previewSurface.image != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.9)] }
         // Wait for the render the edit triggered, then give the histogram every chance to fire.
-        _ = try await awaitPreviewRequest(fake, "the adjusted render") {
+        let adjustedRequest = try await awaitPreviewRequest(reader, fake, "the adjusted render") {
             $0.document.adjustments == [.exposure(ev: 0.9)]
         }
-        try await Task.sleep(for: .milliseconds(150))
+        _ = try await awaitPreviewCompletion(reader, fake, "the adjusted render completion") {
+            $0 == adjustedRequest
+        }
 
         let requests = await fake.histogramRequests
         XCTAssertTrue(requests.isEmpty, "the closed inspector should not be tallying pixels")
