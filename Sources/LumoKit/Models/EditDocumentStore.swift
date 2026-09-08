@@ -207,6 +207,32 @@ public actor EditDocumentStore {
 
         do {
             if let record = try fetchRecord(assetID: key) {
+                // A stale direct-key record can coexist with a record whose locator proves that
+                // it is the source being opened. Treat that observed relink as the newest write;
+                // `relink` below applies the same keep-newest policy as the normal relink path.
+                if let url = source.url,
+                    sourcePath(for: url) != record.sourcePath,
+                    let relinkedRecord = try fetchRecordsForRelinking().first(where: {
+                        $0 !== record && matches($0, url: url)
+                    })
+                {
+                    let document: EditDocument
+                    do {
+                        document = try relinkedRecord.decodeDocument()
+                    } catch {
+                        status = .corrupt(error.localizedDescription)
+                        return EditDocumentLoadResult(
+                            document: EditDocument(), found: true, status: status)
+                    }
+                    return relink(
+                        relinkedRecord,
+                        document: document,
+                        to: key,
+                        for: url,
+                        replacing: record
+                    )
+                }
+
                 let document: EditDocument
                 do {
                     document = try record.decodeDocument()
@@ -246,17 +272,17 @@ public actor EditDocumentStore {
                     document: EditDocument(), found: true, status: status)
             }
 
-            record.assetID = key
-            updateLocator(on: record, for: url)
-            let previousStatus = status
-            status = .relinked
-            do {
-                try persist()
-            } catch {
-                status = .writeFailure(error.localizedDescription)
-            }
-            restoreActionableStatus(after: previousStatus)
-            return EditDocumentLoadResult(document: document, found: true, status: status)
+            // The record being relinked is the newest observation, so it wins a collision with
+            // an existing target record. `relink` deletes the loser before changing the unique
+            // key and rolls back both changes if the durable write fails.
+            let occupiedRecord = try fetchRecord(assetID: key)
+            return relink(
+                record,
+                document: document,
+                to: key,
+                for: url,
+                replacing: occupiedRecord
+            )
         } catch {
             status = .writeFailure(error.localizedDescription)
             return EditDocumentLoadResult(document: EditDocument(), found: false, status: status)
@@ -345,6 +371,34 @@ public actor EditDocumentStore {
         } catch {
             throw StoreError.cannotWrite(error.localizedDescription)
         }
+    }
+
+    /// Relinks a record using a keep-newest policy. The record discovered through the current
+    /// source URL is the newest observation, so an occupied target record is the loser. Deleting
+    /// that loser before assigning the unique key avoids a uniqueness violation. If persistence
+    /// fails, roll back the deletion, rekey, and locator update so a later load starts cleanly.
+    private func relink(
+        _ record: EditRecord,
+        document: EditDocument,
+        to key: String,
+        for url: URL,
+        replacing occupiedRecord: EditRecord?
+    ) -> EditDocumentLoadResult {
+        let previousStatus = status
+        if let occupiedRecord, occupiedRecord !== record {
+            modelContext.delete(occupiedRecord)
+        }
+        record.assetID = key
+        updateLocator(on: record, for: url)
+        status = .relinked
+        do {
+            try persist()
+        } catch {
+            modelContext.rollback()
+            status = .writeFailure(error.localizedDescription)
+        }
+        restoreActionableStatus(after: previousStatus)
+        return EditDocumentLoadResult(document: document, found: true, status: status)
     }
 
     private func markIO() {
