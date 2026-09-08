@@ -78,21 +78,27 @@ struct NormalizedMask: Codable, Sendable, Equatable {
     let size: PixelDimensions
     let values: [Float]
     let coverage: Float
+    /// Whether every value is exactly 0 or 1. Computed once here rather than rescanned by
+    /// renderers on every frame, since a mask's values never change after construction.
+    let isBinary: Bool
 
     init(size: PixelDimensions, values: [Float]) throws {
         guard values.count == size.width * size.height else { throw RegionMaskError.invalidPixelCount }
         var normalized: [Float] = []
         normalized.reserveCapacity(values.count)
         var total: Float = 0
+        var binary = true
         for value in values {
             guard value.isFinite else { throw RegionMaskError.invalidPixelValue }
             let clipped = min(max(value, 0), 1)
             normalized.append(clipped)
             total += clipped
+            if clipped != 0, clipped != 1 { binary = false }
         }
         self.size = size
         self.values = normalized
         self.coverage = normalized.isEmpty ? 0 : total / Float(normalized.count)
+        self.isBinary = binary
     }
 
     /// Used only by internal producers after they have validated the dimensions and established
@@ -103,6 +109,7 @@ struct NormalizedMask: Codable, Sendable, Equatable {
         self.size = size
         self.values = values
         self.coverage = coverage ?? (values.isEmpty ? 0 : values.reduce(0, +) / Float(values.count))
+        self.isBinary = values.allSatisfy { $0 == 0 || $0 == 1 }
     }
 
     private enum CodingKeys: String, CodingKey {
