@@ -470,8 +470,10 @@ extension AppViewModel {
             // force the overlay task to re-resolve through the epoch below.
             maskInteractionState.beginMaskResolution()
             if selectedSemanticTarget == .person {
-                Task { [weak self] in
+                personSignalWarmingTask?.cancel()
+                personSignalWarmingTask = Task { [weak self] in
                     await self?.warmPersonSignals()
+                    guard !Task.isCancelled else { return }
                     await MainActor.run { self?.maskInteractionState.requestMaskReResolve() }
                 }
             }

@@ -62,6 +62,17 @@ final class LookSaveCoordinator: ObservableObject {
         isConverting = false
     }
 
+    /// Cancel conversion and wait for the detached LUT conversion before its source fixture is
+    /// removed. Dismissing the sheet remains the non-awaiting UI action.
+    func shutdown() async {
+        let current = conversionTask
+        current?.cancel()
+        if let current { await current.value }
+        conversionTask = nil
+        isConverting = false
+        isSheetPresented = false
+    }
+
     /// Present the destination panel after the user has reviewed the support matrix.
     func saveDialog() {
         guard conversion != nil else { return }

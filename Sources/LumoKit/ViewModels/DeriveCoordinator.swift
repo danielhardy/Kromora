@@ -64,6 +64,19 @@ final class DeriveCoordinator: ObservableObject {
         onStatus?("Derive cancelled")
     }
 
+    /// Cancel extraction and wait for the detached extractor before its source pair or scratch
+    /// directory is removed by a test fixture.
+    func shutdown() async {
+        let current = task
+        current?.cancel()
+        if let current { await current.value }
+        task = nil
+        isDeriving = false
+        progress = 0
+        stage = ""
+        isSheetPresented = false
+    }
+
     // MARK: - Deriving
 
     /// Name given to the derived cube, and to its scratch file. Pure and

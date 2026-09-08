@@ -58,6 +58,7 @@ actor PhotoAnalysisCoordinator {
 
     private var inFlightAnalyses: [AnalysisRequestKey: InFlightEntry<PhotoAnalysis>] = [:]
     private var inFlightMasks: [MaskRequestKey: InFlightEntry<RegionMask>] = [:]
+    private var isShutdown = false
 
     init(
         engine: any RenderEngining = RenderEngine.shared,
@@ -76,12 +77,37 @@ actor PhotoAnalysisCoordinator {
         self.stages = stages ?? Self.defaultStages
     }
 
+    /// Cancel shared analysis and mask work and wait for providers to quiesce. A caller that is
+    /// deleting a test fixture must not rely on waiter cancellation alone: another consumer may
+    /// still be attached to the same shared task.
+    func shutdown() async {
+        guard !isShutdown else { return }
+        isShutdown = true
+        let analysisTasks: [Task<PhotoAnalysis, Error>] = inFlightAnalyses.values.map { $0.task }
+        let maskTasks: [Task<RegionMask, Error>] = inFlightMasks.values.map { $0.task }
+        for task in analysisTasks {
+            task.cancel()
+        }
+        for task in maskTasks {
+            task.cancel()
+        }
+        for task in analysisTasks {
+            _ = try? await task.value
+        }
+        for task in maskTasks {
+            _ = try? await task.value
+        }
+        inFlightAnalyses.removeAll()
+        inFlightMasks.removeAll()
+    }
+
     /// Analyze one source at the requested level. Concurrent identical requests await one task.
     func analyze(
         assetID: PhotoAssetID,
         source: ImageSource,
         level: PhotoAnalysisLevel
     ) async throws -> PhotoAnalysis {
+        guard !isShutdown else { throw CancellationError() }
         try Task.checkCancellation()
         let key = AnalysisRequestKey(
             assetID: assetID,
@@ -147,6 +173,7 @@ actor PhotoAnalysisCoordinator {
         kind: SemanticMaskKind,
         quality: MaskQuality
     ) async throws -> RegionMask {
+        guard !isShutdown else { throw CancellationError() }
         try Task.checkCancellation()
         let key = MaskRequestKey(
             assetID: assetID,

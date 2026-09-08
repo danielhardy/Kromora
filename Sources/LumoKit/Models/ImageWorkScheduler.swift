@@ -197,6 +197,22 @@ final class ImageWorkScheduler {
         cancel(ids: ids)
     }
 
+    /// Cancel every admitted operation and wait for work that had already entered its operation.
+    ///
+    /// `cancelAll()` alone is not a teardown barrier: an operation may be inside a renderer or
+    /// another framework call that only observes cancellation when it returns. Callers that are
+    /// about to remove a fixture must await this method so that the operation cannot touch the old
+    /// source after cleanup.
+    func cancelAllAndWait() async {
+        while !queued.isEmpty || !running.isEmpty {
+            let activeTasks = running.values.map(\.task)
+            cancelAll()
+            for task in activeTasks {
+                await task.value
+            }
+        }
+    }
+
     private func cancel(id: JobID, countAsCancellation: Bool) {
         if let job = queued.removeValue(forKey: id) {
             if countAsCancellation { cancelledCount += 1 }
