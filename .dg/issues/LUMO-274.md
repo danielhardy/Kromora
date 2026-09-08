@@ -2,7 +2,7 @@
 id: LUMO-274
 title: Crop overlay top-left handle, frame dragging, and portrait/landscape ratios are broken
 type: bug
-status: claimed
+status: done
 priority: high
 creation_provenance:
   runner: codex
@@ -13,15 +13,15 @@ labels:
   - editing
   - ux
 created: 2026-09-07T03:46:06.834Z
-updated: 2026-09-07T04:02:21.805Z
-order: n
+updated: 2026-09-08T00:50:39.131Z
+order: zx
 board: product
 claim:
-  actor: codex
-  session: 01MTQPSKJ04OF3BIXM
-  claimed_at: 2026-09-07T04:02:21.804Z
-  expires_at: 2026-09-07T05:02:21.804Z
-  model: gpt-5.6-luna
+  actor: claude
+  session: 01MTRY9DSJFTQ9GXW4
+  claimed_at: 2026-09-08T00:47:09.331Z
+  expires_at: 2026-09-08T01:47:09.331Z
+  model: sonnet
 ---
 
 ## Objective
@@ -75,6 +75,34 @@ top-left horizontal inward drag even though the requested width is smaller.
 ### Comment — codex @ 2026-09-07T03:46:40.960Z
 
 Reproduced from code inspection: fixed-ratio resizing uses the unchanged dimension as a max constraint, so a top-left horizontal inward drag can return the original width. The ticket also captures the required fixed-size interior move gesture and explicit portrait/landscape quick-ratio choices.
+
+### Comment — codex @ 2026-09-08T00:47:01.164Z
+
+Implemented in commit 0ec4c48: fixed one-axis corner resizing across all handles, bounded fixed-size interior frame movement, explicit portrait/landscape quick-ratio choices with persisted orientation, clipboard propagation, and model/workflow regressions. Verification: swift test — 940 passed, 43 expected skips; focused crop workflow tests pass.
+
+### Comment — claude @ 2026-09-08T00:50:36.384Z
+
+## Counterpoint verification report — LUMO-274
+
+**Verdict: PASS**
+
+**Scope reviewed:** commit 0ec4c48 (Sources/LumoKit/Models/{CropAdjustments,CanvasNavigation,EditClipboard}.swift, ViewModels/AppViewModel.swift, Views/{CropOverlayView,PreviewView}.swift, Tests/LumoKitTests/CropTests.swift).
+
+**Correctness**
+- `CropOverlayInteraction.resized` now branches on which axis actually moved (`horizontalDrag`/`verticalDrag`) instead of unconditionally taking `max(requestedWidth, requestedHeight*targetRatio)`. Traced through all four handles by hand: each one-axis drag drives the corresponding raw dimension and the other dimension is derived from `targetRatio`, so all four corners are symmetric in both fixed-ratio and freeform modes. Confirmed against the new `testTopLeftFixedRatioHorizontalInwardDragMovesLeftEdgeRight` and `testFixedRatioOneAxisResizesSymmetricallyFromEveryCorner`.
+- `CropAspectRatioOrientation` (`automatic`/`landscape`/`portrait`) is threaded end-to-end: `CropAspectRatio.normalizedRatio(orientation:)` → `CropAdjustments` (Codable, defaults `.automatic` on decode, so old documents/clipboard payloads stay neutral) → `EditClipboardPayload.CropCategory` → `CanvasInteractionState` → `AppViewModel` → `CropOverlayView` menu. No orientation dependency exists outside these files (checked `RecipeExtractor`/export path — it only reads `normalizedRect`, not `aspectRatio`/`orientation`), so no export-side gap.
+- Interior move gesture (`translated`) unchanged in substance; frame-size preservation and bounds clamping verified by existing + new `testDraggingCropAreaPreservesFixedFrameSize`.
+- `Rectangle().inset(by: 14)` used to keep the move-gesture hit area from stealing corner-handle drags on small frames is a reasonable, localized UI fix; handles are drawn after the move rectangle in the ZStack so they already win hit-testing, this is defense in depth, not load-bearing.
+
+**Maintainability/API**: additive `orientation` parameters all default to `.automatic`, preserving old call sites; Codable back-compat verified by `testMissingCropFieldKeepsLegacyDocumentsNeutral`/clipboard legacy test.
+
+**Security**: no new I/O, network, or privilege-sensitive code paths; N/A.
+
+**Performance**: pure value-type geometry, no new allocations in hot paths; unaffected.
+
+**Tests run**: `swift test` — 940 passed, 43 expected skips, 0 failures (full deterministic lane, ~121s). Targeted `swift test --filter Crop` — 30/30 passed, including the 4 new regression tests.
+
+**Findings**: none blocking. No broader non-blocking findings warranting a child ticket — the inset-based hit-testing tweak is small enough to not need follow-up.
 
 ## Agent log
 

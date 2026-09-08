@@ -2,13 +2,13 @@
 id: LUMO-273
 title: Linear gradient with zero falloff renders an empty wash
 type: bug
-status: review
+status: done
 priority: low
 labels:
   - masking
 created: 2026-09-07T02:08:20.787Z
-updated: 2026-09-07T02:18:49.323Z
-order: y
+updated: 2026-09-08T01:20:09.313Z
+order: zzv
 board: product
 branch: fix/linear-zero-falloff
 ---

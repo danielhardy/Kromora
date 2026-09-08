@@ -2,7 +2,7 @@
 id: LUMO-253
 title: Unattributed reconciliation commit (a42c5cf) exposes the known-broken addSmartMaskComponent retry path in production and leaves LUMO-237 untraced
 type: bug
-status: ready
+status: done
 priority: urgent
 creation_provenance:
   runner: claude
@@ -12,12 +12,34 @@ labels:
   - masking
   - verification
 created: 2026-09-06T14:28:13.713Z
-updated: 2026-09-07T04:13:59.893Z
+updated: 2026-09-07T14:46:41.129Z
 parent: LUMO-243
 depends_on:
   - LUMO-251
-order: z
+order: a0
 board: product
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: The per-layer combine-mode submenu does not expose addSmartMaskComponent-backed smart mask kinds in production until LUMO-251's retry-context fix lands
+      result: pass
+    - criterion: LUMO-237.md's verification_report.verification_commits is updated to reference the commit that actually carries its implementation
+      result: pass
+    - criterion: a42c5cf's bundled changes are retroactively attributed to the tickets they implement rather than left as an anonymous chore commit
+      result: pass
+  checks_run:
+    - swift test --filter MaskingWorkspaceTests (30 passed, 0 failures, includes testRetryingFailedSmartComponentReattemptsTheOriginalLayerAdd)
+    - swift test --filter LocalMaskRenderingTests (19 passed, 0 failures)
+    - dg validate (OK; pre-existing unrelated pickup-runner model warning)
+    - git diff --check (clean)
+    - git status --porcelain (clean aside from DispatchGraph bookkeeping)
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-07T14:46:41.126Z
+  session: 01MTRCRNTV5B7IICZY
 ---
 
 ## Objective
@@ -74,6 +96,33 @@ forward: update `LUMO-237.md`'s `verification_commits`, and address the prematur
 `addSmartMaskComponent` UI exposure by coordinating with LUMO-251 (add the gating/hide here, or
 land it as part of LUMO-251's own fix).
 
+### Comment — codex @ 2026-09-07T14:45:21.576Z
+
+Implemented and verified LUMO-253. LUMO-251 is already fixed on this branch (commit 9fe440a), and MaskingWorkspaceTests passed 30/30 including the component retry regression, so the per-layer smart-mask submenu remains enabled. Linked a42c5cf to LUMO-237's verification_commits/commits and LUMO-238's commits. Added the attribution metadata in commit 0ba6afe. Checks: swift test --filter MaskingWorkspaceTests; swift test --filter LocalMaskRenderingTests (19/19); dg validate; git diff --check.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-07T14:46:41.127Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] The per-layer combine-mode submenu does not expose addSmartMaskComponent-backed smart mask kinds in production until LUMO-251's retry-context fix lands (pass)
+- [x] LUMO-237.md's verification_report.verification_commits is updated to reference the commit that actually carries its implementation (pass)
+- [x] a42c5cf's bundled changes are retroactively attributed to the tickets they implement rather than left as an anonymous chore commit (pass)
+Checks run:
+- swift test --filter MaskingWorkspaceTests (30 passed, 0 failures, includes testRetryingFailedSmartComponentReattemptsTheOriginalLayerAdd)
+- swift test --filter LocalMaskRenderingTests (19 passed, 0 failures)
+- dg validate (OK; pre-existing unrelated pickup-runner model warning)
+- git diff --check (clean)
+- git status --porcelain (clean aside from DispatchGraph bookkeeping)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MTRCRNTV5B7IICZY
+Summary: Verified: LUMO-251 fix (9fe440a) landed before completion so the production combine-mode submenu's addSmartMaskComponent path is safe; LUMO-237/LUMO-238 commits fields and LUMO-237 verification_commits now reference a42c5cf, resolving the attribution gap. All declared checks reproduced clean.

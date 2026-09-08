@@ -2,8 +2,10 @@
 id: LUMO-243
 title: Uncommitted LUMO-235/LUMO-236 masking fixes at risk of loss in shared working tree
 type: bug
-status: review
+status: done
 priority: high
+verification_agent: pi
+verification_model: openrouter/z-ai/glm-5.3-flash
 creation_provenance:
   runner: claude
   model: sonnet
@@ -13,9 +15,9 @@ labels:
   - editor
   - verification
 created: 2026-09-06T04:05:19.885Z
-updated: 2026-09-06T14:28:50.285Z
+updated: 2026-09-08T01:13:57.082Z
 parent: LUMO-234
-order: a0
+order: zy
 board: product
 ---
 
