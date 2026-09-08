@@ -9,9 +9,9 @@ enum MaskRefinementError: Error, Sendable, Equatable {
 /// Upgrades a cached semantic mask without rerunning its detector.
 ///
 /// The source image is represented by its existing ImageSource descriptor at this boundary. The
-/// seed mask's semantic boundary is sampled into render-resolution tiles; the full result is only
-/// assembled after each tile has passed cancellation. The tile buffer is bounded by
-/// `tileSize * targetWidth`, while the final NormalizedMask is the unavoidable persisted output.
+/// seed mask's semantic boundary is scaled into render resolution by the shared Accelerate path.
+/// Cancellation is checked before and after the non-cancellable vImage call and again before the
+/// durable store write.
 actor MaskRefinementService {
     private let store: MaskStore
 
@@ -53,36 +53,12 @@ actor MaskRefinementService {
             throw MaskRefinementError.missingSeedPixels
         }
 
-        var values: [Float] = []
-        values.reserveCapacity(dimensions.width * dimensions.height)
-        let width = dimensions.width
-        let height = dimensions.height
-        let rowsPerTile = min(tileSize, height)
-        var y = 0
-        while y < height {
-            try Task.checkCancellation()
-            let endY = min(height, y + rowsPerTile)
-            var tile: [Float] = []
-            tile.reserveCapacity((endY - y) * width)
-            for outputY in y..<endY {
-                try Task.checkCancellation()
-                let sourceY = Float(outputY) / Float(max(1, height - 1))
-                    * Float(max(1, seed.size.height - 1))
-                for outputX in 0..<width {
-                    let sourceX = Float(outputX) / Float(max(1, width - 1))
-                        * Float(max(1, seed.size.width - 1))
-                    tile.append(Self.bilinear(seed, x: sourceX, y: sourceY))
-                }
-            }
-            values.append(contentsOf: tile)
-            y = endY
-            // Give cancellation a scheduling point between large tiles without creating a second
-            // task or moving storage ownership outside this actor.
-            await Task.yield()
-        }
-
         try Task.checkCancellation()
-        let refined = try NormalizedMask(size: dimensions, values: values)
+        let refined = try MaskOperations.resized(seed, to: dimensions)
+        // vImage is not cancellable while running. This yield gives a superseded render a
+        // scheduling point immediately after the scale and before any store work begins.
+        await Task.yield()
+        try Task.checkCancellation()
         let key = mask.reference.cacheKey.with(kind: mask.kind, quality: .render)
         let reference = try await store.store(refined, for: key, quality: .render)
         return RegionMask(
@@ -103,25 +79,6 @@ actor MaskRefinementService {
         )
     }
 
-    private static func bilinear(_ mask: NormalizedMask, x: Float, y: Float) -> Float {
-        let maxX = mask.size.width - 1
-        let maxY = mask.size.height - 1
-        let clampedX = min(max(0, x), Float(maxX))
-        let clampedY = min(max(0, y), Float(maxY))
-        let x0 = Int(clampedX.rounded(.down))
-        let y0 = Int(clampedY.rounded(.down))
-        let x1 = min(maxX, x0 + 1)
-        let y1 = min(maxY, y0 + 1)
-        let fx = clampedX - Float(x0)
-        let fy = clampedY - Float(y0)
-
-        func value(_ px: Int, _ py: Int) -> Float {
-            mask.values[py * mask.size.width + px]
-        }
-        let top = value(x0, y0) * (1 - fx) + value(x1, y0) * fx
-        let bottom = value(x0, y1) * (1 - fx) + value(x1, y1) * fx
-        return top * (1 - fy) + bottom * fy
-    }
 }
 
 extension PhotoAnalysisCoordinator {
