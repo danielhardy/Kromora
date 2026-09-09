@@ -126,6 +126,26 @@ final class HistogramTests: TempDirectoryTestCase {
         XCTAssertLessThan(total, 900 * 600, "a 900×600 source must not be tallied at full size")
     }
 
+    /// A completed preview image is sufficient input for the Info tally. In particular, the source
+    /// is intentionally invalid here: the presented-image overload must not fall back to building
+    /// a graph from a source/document pair.
+    func testTheEngineTalliesThePresentedImageWithoutRebuildingTheSource() async throws {
+        let engine = RenderEngine()
+        let image = CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 1)).cropped(
+            to: CGRect(x: 0, y: 0, width: 900, height: 600)
+        )
+
+        let result = await engine.histogram(presentedImage: image, space: .sRGB, maxDimension: 64)
+        let histogram = try XCTUnwrap(result)
+
+        let total = histogram.red.reduce(0, +)
+        XCTAssertGreaterThan(total, 0)
+        XCTAssertGreaterThan(histogram.red[255], 0,
+                             "the completed frame should be the tally input")
+        XCTAssertGreaterThan(histogram.green[0], 0)
+        XCTAssertLessThanOrEqual(total, 64 * 64)
+    }
+
     /// The document reaches the tally. An adjustment that visibly moves the tone must move the
     /// histogram — this is the whole reason the histogram was cut over rather than left reading a
     /// LUT-only image.

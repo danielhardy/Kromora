@@ -330,6 +330,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// The last settled request confirmed by the presentation surface. Supporting work is never
     /// admitted before this lifecycle boundary.
     private var lastPresentedVisibleRequest: RenderRequest?
+    /// The completed image belonging to `lastPresentedVisibleRequest`. Keeping the value alongside
+    /// the request lets a later Info-tab open use the frame that was actually presented without
+    /// asking the renderer to reconstruct it.
+    private var lastPresentedVisibleImage: CIImage?
     /// The newest settled request accepted by the preview surface. Mode entry may use this current
     /// candidate before drawable confirmation, but it must never fall back to an older document.
     private var lastPublishedVisibleRequest: RenderRequest?
@@ -1286,6 +1290,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // inspector while its pixels are being decoded.
         imageSource = nil
         lastPresentedVisibleRequest = nil
+        lastPresentedVisibleImage = nil
         lastPublishedVisibleRequest = nil
         sourceURL = nil
         sourceSize = .zero
@@ -1458,7 +1463,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             // If the speculative frame already reached the drawable, it was intentionally not
             // allowed to start histogram work. Re-admit that final request now that persistence
             // has confirmed it is the document on screen.
-            updateHistogram(for: lastPresentedVisibleRequest)
+            updateHistogram(for: lastPresentedVisibleRequest, presentedImage: lastPresentedVisibleImage)
         }
         scheduleEditedThumbnailAfterSettle(for: request.assetID, priority: .activeEditor)
         if stored.status.isActionable {
@@ -3151,12 +3156,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             space: request.space
         )
         let detailFactor = request.renderScale.factor(for: request.source.nativeExtent)
+        let presentedImage = publication.gpuImage ?? publication.image.map(CIImage.init)
         let presentationConfirmation: (() -> Void)? = publication.phase == .settled
             ? { [weak self] in
                 self?.didPresentVisibleFrame(
                     request, assetID: publication.assetID,
                     sourceRevision: publication.sourceRevision,
-                    displayRevision: publication.displayRevision
+                    displayRevision: publication.displayRevision,
+                    presentedImage: presentedImage
                 )
             }
             : nil
@@ -3203,7 +3210,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// from being mistaken for pixels the user has actually received.
     private func didPresentVisibleFrame(
         _ request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
-        displayRevision: UInt64
+        displayRevision: UInt64, presentedImage: CIImage?
     ) {
         guard assetID == activeAssetID,
               sourceRevision == self.sourceRevision,
@@ -3213,6 +3220,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         previewState = .ready
         if !isAutoAdjustmentInProgress { autoAdjustmentState = .ready }
         lastPresentedVisibleRequest = request
+        lastPresentedVisibleImage = presentedImage
         let needsComparisonRefresh = pendingDevelopChange
         pendingDevelopChange = false
         if isSideBySideVisible || needsComparisonRefresh {
@@ -3221,7 +3229,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             cancelComparisonPreview()
         }
         if storedEditsResolvedSourceRevision == sourceRevision {
-            updateHistogram(for: request)
+            updateHistogram(for: request, presentedImage: presentedImage)
         }
     }
 
@@ -3339,16 +3347,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Recompute the histogram for the currently displayed image. No-op unless the Info tab of an
     /// open inspector is on screen. Cancellable, so dragging the intensity slider stays smooth.
     ///
-    /// **Step 6 cut this over with export.** It used to tally `processedImage` — a full-resolution
-    /// neutral decode with only the LUT on it — while the screen showed develop and adjustments as
-    /// well. Deleting `processedImage` forced the choice, and describing the wrong image is not a
-    /// state worth carrying to Step 7: the histogram now renders the *same document at the same
-    /// scale* the preview does, which is what `document(forDisplay:)` exists to guarantee.
-    ///
-    /// Passing the preview box rather than a histogram-sized scale is deliberate — see
-    /// `RenderEngine.histogram`, which shares the developed-source memo with the on-screen render
-    /// instead of evicting it every tally.
-    private func updateHistogram(for displayedRequest: RenderRequest? = nil) {
+    /// The histogram consumes the completed image from the settled presentation. This keeps it
+    /// aligned with the pixels the user received and avoids evaluating the preview graph again.
+    /// The source/document overload remains available for standalone engine analysis, but it is
+    /// intentionally not used for the visible Info inspector path.
+    private func updateHistogram(
+        for displayedRequest: RenderRequest? = nil,
+        presentedImage: CIImage? = nil
+    ) {
         // Both halves of the gate: an inspector parked on Develop shows no histogram, so tallying
         // one on every settled render of a slider drag is pure waste.
         guard isInspectorPresented, inspectorTab == .info else {
@@ -3359,22 +3365,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             cancelHistogram(clear: true)
             return
         }
-        guard lastPresentedVisibleRequest != nil else { return }
+        guard let lastPresentedVisibleRequest else { return }
         let request: RenderRequest
         if let displayedRequest {
             request = displayedRequest
         } else {
-            let (requested, lut) = displayRequest
-            request = RenderRequest(
-                source: imageSource, document: requested, lut: lut,
-                targetSize: previewRenderTargetSize(for: requested, surface: .histogram), quality: .preview,
-                output: .raster, space: .current
-            )
+            // Opening Info between a document edit and its settled presentation must describe the
+            // last frame the user actually received, not a newly assembled request for the edit
+            // that is still rendering.
+            request = lastPresentedVisibleRequest
         }
         guard request.source == imageSource else {
             cancelHistogram(clear: true)
             return
         }
+        let image = presentedImage ?? lastPresentedVisibleImage
+        guard let image else { return }
 
         let sourceRevision = self.sourceRevision
         let displayRevision = self.displayRevision
@@ -3397,9 +3403,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         workScheduler.enqueue(id: histogramJobID, lane: .editor, priority: .histogram) {
             [weak self, engine] in
             guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+            // The settled publication already contains the completed preview texture. Tally that
+            // value after drawable confirmation so Info describes pixels the user received and does
+            // not trigger a second evaluation of the render graph.
             let result = await engine.histogram(
-                source: request.source, document: request.document, lut: request.lut,
-                scale: request.renderScale, space: request.space, maxDimension: 512
+                presentedImage: image, space: request.space, maxDimension: 512
             )
             guard !Task.isCancelled, !self.isShuttingDown,
                   self.isInspectorPresented,
