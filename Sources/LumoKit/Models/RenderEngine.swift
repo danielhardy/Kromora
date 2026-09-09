@@ -42,6 +42,10 @@ protocol RenderEngining: Sendable {
     /// preview frames do not pay for an encoded PNG that is immediately decoded again.
     func makeCGImage(_ request: RenderRequest) async -> sending CGImage?
 
+    /// Produce a thumbnail CGImage. The default preserves older conformers' thumbnail recording
+    /// seam; `RenderEngine` overrides it to rasterize directly without encoded bytes.
+    func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage?
+
     /// Produce the presentation-only resolved alpha overlay for the masking workspace. This is a
     /// separate seam from `RenderRequest` so inspection state can never affect preview or export.
     func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage?
@@ -134,6 +138,15 @@ extension RenderEngining {
               let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
         else { return nil }
         return image
+    }
+
+    /// Thumbnail callers can use a CGImage without changing the established fake-render seam.
+    /// The default is intentionally compatibility-only; `RenderEngine` overrides it below so the
+    /// production badge path never encodes PNG bytes just to decode them again.
+    func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage? {
+        guard let result = try? await renderThumbnail(request),
+              let source = CGImageSourceCreateWithData(result.data as CFData, nil) else { return nil }
+        return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
     func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage? { nil }
@@ -267,7 +280,8 @@ actor RenderEngine: RenderEngining {
             image = try await buildImage(request.source, request.document, request.lut,
                                          request.renderScale, request.space, quality: request.quality,
                                          maskTransform: request.maskTransform,
-                                         assetID: request.assetID, requestRevision: request.requestRevision)
+                                         assetID: request.assetID, requestRevision: request.requestRevision,
+                                         resolveSemanticMasks: request.maskResolution == .resolved)
         } catch {
             return nil
         }
@@ -351,11 +365,17 @@ actor RenderEngine: RenderEngining {
     private var processingPrefixMaterializationCount = 0
     private var materializationBudgetSkipCount = 0
     private var memoryPressureSource: DispatchSourceMemoryPressure?
-    /// Latest in-flight mask request per source. Resolver calls are actor-reentrant, so a newer
-    /// request can arrive while an older semantic request is suspended. This guard is distinct
-    /// from the payload's provenance checks and makes supersession observable at the await boundary.
+    /// Render-domain supersession is keyed by source and full document identity. This lets a
+    /// global-only edit keep an older local-mask resolution alive while still rejecting a lagging
+    /// render of the same document revision. Local-mask recipe changes invalidate every older
+    /// document entry for that source.
     private var latestMaskRequestRevisions: [String: UInt64] = [:]
+    private var latestMaskRecipeIdentities: [String: String] = [:]
+    /// Overlay requests intentionally remain source-wide: the overlay has no document identity and
+    /// must still reject a stale nonzero revision after a preview render has started.
+    private var latestOverlayMaskRequestRevisions: [String: UInt64] = [:]
     private let maximumTrackedMaskSources = 16
+    private let maximumTrackedMaskRequests = 64
 
     init(
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
@@ -409,7 +429,8 @@ actor RenderEngine: RenderEngining {
             image = try await buildImage(
                 request.source, request.document, request.lut, request.renderScale, request.space,
                 quality: request.quality, maskTransform: request.maskTransform,
-                assetID: request.assetID, requestRevision: request.requestRevision
+                assetID: request.assetID, requestRevision: request.requestRevision,
+                resolveSemanticMasks: request.maskResolution == .resolved
             )
         } catch {
             return nil
@@ -423,6 +444,13 @@ actor RenderEngine: RenderEngining {
         return context.createCGImage(
             image, from: rect, format: .RGBA8, colorSpace: request.space.cgColorSpace
         )
+    }
+
+    /// The edited-thumbnail path uses the actor-local rasterizer directly. Keeping this separate
+    /// from the encoded `renderThumbnail` API avoids a PNG encode/decode round trip for every
+    /// 256px browsing badge.
+    func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage? {
+        await makeCGImage(request)
     }
 
     func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage? {
@@ -546,12 +574,14 @@ actor RenderEngine: RenderEngining {
             )
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
                                          quality: request.quality, maskTransform: request.maskTransform,
-                                         assetID: request.assetID, requestRevision: request.requestRevision)
+                                         assetID: request.assetID, requestRevision: request.requestRevision,
+                                         resolveSemanticMasks: request.maskResolution == .resolved)
             decodeInterval.end()
         } else {
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
                                          quality: request.quality, maskTransform: request.maskTransform,
-                                         assetID: request.assetID, requestRevision: request.requestRevision)
+                                         assetID: request.assetID, requestRevision: request.requestRevision,
+                                         resolveSemanticMasks: request.maskResolution == .resolved)
         }
         guard let image else {
             throw ImageError.processingFailed
@@ -929,6 +959,8 @@ actor RenderEngine: RenderEngining {
         resources.evictAll()
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
+        latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
+        latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
         Thumbnails.evictForMemoryPressure()
     }
 
@@ -937,6 +969,8 @@ actor RenderEngine: RenderEngining {
         resources.invalidateAll()
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
+        latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
+        latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
         Thumbnails.invalidateCache()
     }
 
@@ -986,9 +1020,15 @@ actor RenderEngine: RenderEngining {
         quality: RenderQuality,
         maskTransform: LocalMaskRenderTransform = .identity,
         assetID: PhotoAssetID? = nil,
-        requestRevision: UInt64 = 0
+        requestRevision: UInt64 = 0,
+        resolveSemanticMasks: Bool = true
     ) async throws -> CIImage? {
-        noteMaskRequest(source: source, revision: requestRevision)
+        let maskIdentity = RenderCacheHash.digest(document.localAdjustments)
+        let documentIdentity = RenderCacheHash.digest(document)
+        noteMaskRequest(
+            source: source, revision: requestRevision,
+            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+        )
         // These are explicit Core Image resource boundaries even though the transfer function is
         // mathematically source/space independent. A replaced source or working-space switch must
         // not retain a resource from the prior render session.
@@ -1024,7 +1064,9 @@ actor RenderEngine: RenderEngining {
         let masks = try await resolvedLocalMasks(
             for: document.localAdjustments, source: source, extent: upstream.extent,
             quality: quality, transform: maskTransform, assetID: assetID,
-            requestRevision: requestRevision
+            requestRevision: requestRevision,
+            maskIdentity: maskIdentity, documentIdentity: documentIdentity,
+            resolveSemanticMasks: resolveSemanticMasks
         )
         let localAdjusted = RenderPipeline.applyLocalAdjustments(
             document.localAdjustments, masks: masks, to: upstream
@@ -1047,6 +1089,9 @@ actor RenderEngine: RenderEngining {
         transform: LocalMaskRenderTransform,
         assetID: PhotoAssetID?,
         requestRevision: UInt64,
+        maskIdentity: String? = nil,
+        documentIdentity: String? = nil,
+        resolveSemanticMasks: Bool = true,
         includeIdentity: Bool = false,
         onlyComponentID: UUID? = nil
     ) async throws -> [UUID: CIImage] {
@@ -1059,12 +1104,16 @@ actor RenderEngine: RenderEngining {
         var result: [UUID: CIImage] = [:]
         for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
             try Task.checkCancellation()
-            guard isCurrentMaskRequest(source: source, revision: requestRevision) else {
+            guard isCurrentMaskRequest(
+                source: source, revision: requestRevision,
+                maskIdentity: maskIdentity, documentIdentity: documentIdentity
+            ) else {
                 throw LocalMaskResolutionError.cancelled
             }
             var effective: CIImage?
             for component in layer.components where component.isUsable
                 && (onlyComponentID == nil || component.id == onlyComponentID) {
+                if !resolveSemanticMasks, component.source.semanticDefinition != nil { continue }
                 let definitionHash = RenderCacheHash.digest(component.source)
                 let componentTargetSize = maskTargetSize(
                     for: component, extent: extent, quality: quality
@@ -1090,7 +1139,10 @@ actor RenderEngine: RenderEngining {
                     } catch is CancellationError {
                         throw CancellationError()
                     }
-                    guard isCurrentMaskRequest(source: source, revision: requestRevision) else {
+                    guard isCurrentMaskRequest(
+                        source: source, revision: requestRevision,
+                        maskIdentity: maskIdentity, documentIdentity: documentIdentity
+                    ) else {
                         throw LocalMaskResolutionError.cancelled
                     }
                     localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
@@ -1098,7 +1150,10 @@ actor RenderEngine: RenderEngining {
 
                 // The resolver is allowed to suspend. A newer request for this source may have
                 // superseded it while it was waiting; never turn that late value into a CI graph.
-                guard isCurrentMaskRequest(source: source, revision: requestRevision) else {
+                guard isCurrentMaskRequest(
+                    source: source, revision: requestRevision,
+                    maskIdentity: maskIdentity, documentIdentity: documentIdentity
+                ) else {
                     throw LocalMaskResolutionError.cancelled
                 }
 
@@ -1154,16 +1209,56 @@ actor RenderEngine: RenderEngining {
     private func noteMaskRequest(source: ImageSource, revision: UInt64) {
         guard revision > 0 else { return }
         let key = source.cacheFingerprint
-        if let current = latestMaskRequestRevisions[key], current >= revision { return }
-        latestMaskRequestRevisions[key] = revision
-        if latestMaskRequestRevisions.count > maximumTrackedMaskSources,
-           let oldest = latestMaskRequestRevisions.min(by: { $0.value < $1.value })?.key {
-            latestMaskRequestRevisions.removeValue(forKey: oldest)
+        if latestOverlayMaskRequestRevisions[key, default: 0] < revision {
+            latestOverlayMaskRequestRevisions[key] = revision
         }
     }
 
-    private func isCurrentMaskRequest(source: ImageSource, revision: UInt64) -> Bool {
-        revision == 0 || latestMaskRequestRevisions[source.cacheFingerprint] == revision
+    private func noteMaskRequest(
+        source: ImageSource, revision: UInt64, maskIdentity: String, documentIdentity: String
+    ) {
+        guard revision > 0 else { return }
+        let sourceKey = source.cacheFingerprint
+        if latestMaskRecipeIdentities[sourceKey] != maskIdentity {
+            latestMaskRecipeIdentities[sourceKey] = maskIdentity
+            latestMaskRequestRevisions.keys
+                .filter { $0.hasPrefix(sourceKey + "|") }
+                .forEach { latestMaskRequestRevisions.removeValue(forKey: $0) }
+        }
+        let documentKey = sourceKey + "|" + documentIdentity
+        if latestMaskRequestRevisions[documentKey, default: 0] < revision {
+            latestMaskRequestRevisions[documentKey] = revision
+        }
+        noteMaskRequest(source: source, revision: revision)
+        trimMaskRequestState()
+    }
+
+    private func trimMaskRequestState() {
+        if latestMaskRecipeIdentities.count > maximumTrackedMaskSources,
+           let oldestSource = latestMaskRecipeIdentities.first?.key {
+            latestMaskRecipeIdentities.removeValue(forKey: oldestSource)
+            latestOverlayMaskRequestRevisions.removeValue(forKey: oldestSource)
+            latestMaskRequestRevisions.keys
+                .filter { $0.hasPrefix(oldestSource + "|") }
+                .forEach { latestMaskRequestRevisions.removeValue(forKey: $0) }
+        }
+        while latestMaskRequestRevisions.count > maximumTrackedMaskRequests,
+              let oldestRequest = latestMaskRequestRevisions.min(by: { $0.value < $1.value })?.key {
+            latestMaskRequestRevisions.removeValue(forKey: oldestRequest)
+        }
+    }
+
+    private func isCurrentMaskRequest(
+        source: ImageSource, revision: UInt64,
+        maskIdentity: String? = nil, documentIdentity: String? = nil
+    ) -> Bool {
+        guard revision > 0 else { return true }
+        let sourceKey = source.cacheFingerprint
+        guard let maskIdentity, let documentIdentity else {
+            return latestOverlayMaskRequestRevisions[sourceKey] == revision
+        }
+        return latestMaskRecipeIdentities[sourceKey] == maskIdentity
+            && latestMaskRequestRevisions[sourceKey + "|" + documentIdentity] == revision
     }
 
     private struct MaterializedImage {
@@ -1433,6 +1528,8 @@ actor RenderEngine: RenderEngining {
         localMaskCache.removeAll()
         localMaskRenderer.removeAllCachedBrushStrokes()
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
+        latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
+        latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
         interactiveRAWSession = nil
         toneCurveCache.removeAll()
         toneCurveSource = nil

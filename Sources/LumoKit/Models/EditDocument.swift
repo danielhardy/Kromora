@@ -84,6 +84,17 @@ struct EditDocument: Codable, Sendable, Equatable {
             !adjustments.allSatisfy(\.isIdentity) || !lut.isIdentity || localAdjustments.contains(where: \.hasVisibleLook)
     }
 
+    /// True when a visible local adjustment depends on a semantic mask provider. This is the
+    /// admission check for the progressive preview path; vector and brush masks can still be
+    /// evaluated in the first frame without waiting for Vision.
+    var hasSemanticMasks: Bool {
+        localAdjustments.contains { layer in
+            layer.isEnabled && layer.amount > 0 && layer.components.contains { component in
+                component.isUsable && component.source.semanticDefinition != nil
+            }
+        }
+    }
+
     /// Stable SHA-256 identity for caches, undo diagnostics, and persistence comparisons.
     /// `RenderCacheHash` uses sorted JSON keys, so this does not depend on dictionary iteration order.
     var editHash: String { RenderCacheHash.digest(self) }
