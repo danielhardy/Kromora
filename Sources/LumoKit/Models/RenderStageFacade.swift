@@ -1,4 +1,5 @@
 import CoreImage
+import CoreGraphics
 
 /// The stage-composition seam between the request façade and the pure Core Image pipeline.
 ///
@@ -14,7 +15,9 @@ enum RenderStageFacade {
         lut: CubeLUT?,
         space: WorkingSpace,
         lutCache: LUTFilterCache,
-        grainSeed: UInt32
+        grainSeed: UInt32,
+        applyCommittedCrop: Bool = true,
+        finalFrameExtent: CGRect? = nil
     ) -> CIImage {
         RenderPipeline.buildImage(
             preLUT: image,
@@ -22,7 +25,9 @@ enum RenderStageFacade {
             lut: lut,
             space: space,
             lutCache: lutCache,
-            grainSeed: grainSeed
+            grainSeed: grainSeed,
+            applyCommittedCrop: applyCommittedCrop,
+            finalFrameExtent: finalFrameExtent
         )
     }
 }

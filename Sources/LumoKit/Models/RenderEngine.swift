@@ -279,6 +279,7 @@ actor RenderEngine: RenderEngining {
         do {
             image = try await buildImage(request.source, request.document, request.lut,
                                          request.renderScale, request.space, quality: request.quality,
+                                         sourceROI: request.sourceROI,
                                          maskTransform: request.maskTransform,
                                          assetID: request.assetID, requestRevision: request.requestRevision,
                                          resolveSemanticMasks: request.maskResolution == .resolved)
@@ -315,7 +316,17 @@ actor RenderEngine: RenderEngining {
         guard await commitAndWaitForCompletion(commandBuffer), !Task.isCancelled else { return nil }
         // CIImage retains the texture. Since this image is only returned after the command buffer
         // completes, a presentation transform can sample it without racing an in-flight write.
-        return CIImage(mtlTexture: texture, options: [.colorSpace: request.space.cgColorSpace])
+        guard let textureImage = CIImage(
+            mtlTexture: texture, options: [.colorSpace: request.space.cgColorSpace]
+        ) else { return nil }
+        // Metal textures start at (0, 0), while an ROI retains its source-space origin in the
+        // Core Image graph. Restore that origin so the presentation surface can place the ROI
+        // inside the virtual committed-crop extent without shifting it to the frame corner.
+        return rect.origin == .zero
+            ? textureImage
+            : textureImage.transformed(by: CGAffineTransform(
+                translationX: rect.minX, y: rect.minY
+            ))
     }
 
     /// The app's engine. One instance, therefore one actor-owned processing context and queue.
@@ -477,7 +488,8 @@ actor RenderEngine: RenderEngining {
         do {
             image = try await buildImage(
                 request.source, request.document, request.lut, request.renderScale, request.space,
-                quality: request.quality, maskTransform: request.maskTransform,
+                quality: request.quality, sourceROI: request.sourceROI,
+                maskTransform: request.maskTransform,
                 assetID: request.assetID, requestRevision: request.requestRevision,
                 resolveSemanticMasks: request.maskResolution == .resolved
             )
@@ -622,13 +634,15 @@ actor RenderEngine: RenderEngining {
                 .decode, source: request.source, quality: request.quality
             )
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
-                                         quality: request.quality, maskTransform: request.maskTransform,
+                                         quality: request.quality, sourceROI: request.sourceROI,
+                                         maskTransform: request.maskTransform,
                                          assetID: request.assetID, requestRevision: request.requestRevision,
                                          resolveSemanticMasks: request.maskResolution == .resolved)
             decodeInterval.end()
         } else {
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
-                                         quality: request.quality, maskTransform: request.maskTransform,
+                                         quality: request.quality, sourceROI: request.sourceROI,
+                                         maskTransform: request.maskTransform,
                                          assetID: request.assetID, requestRevision: request.requestRevision,
                                          resolveSemanticMasks: request.maskResolution == .resolved)
         }
@@ -1071,6 +1085,7 @@ actor RenderEngine: RenderEngining {
         _ scale: RenderScale,
         _ space: WorkingSpace,
         quality: RenderQuality,
+        sourceROI: CGRect? = nil,
         maskTransform: LocalMaskRenderTransform = .identity,
         assetID: PhotoAssetID? = nil,
         requestRevision: UInt64 = 0,
@@ -1091,27 +1106,75 @@ actor RenderEngine: RenderEngining {
             toneCurveSource = sourceFingerprint
             toneCurveSpace = space
         }
-        guard let developed = developedSource(
+        guard let developedFull = developedSource(
             source, document.rawDevelop, scale, space: space,
             interactive: quality == .interactive
         ) else { return nil }
+        let cropNativeRect = document.crop.normalizedRect.map { rect in
+            CGRect(
+                x: rect.minX * source.nativeExtent.width,
+                y: rect.minY * source.nativeExtent.height,
+                width: rect.width * source.nativeExtent.width,
+                height: rect.height * source.nativeExtent.height
+            )
+        } ?? CGRect(origin: .zero, size: source.nativeExtent)
+        let effectiveROI = sourceROI.flatMap { roi -> CGRect? in
+            let intersection = roi.intersection(cropNativeRect)
+            return intersection.isNull || intersection.width <= 0 || intersection.height <= 0
+                ? nil : intersection
+        }
+        let processingROI = effectiveROI.map {
+            RenderPipeline.expandedSourceROI(
+                $0, nativeExtent: source.nativeExtent,
+                needsSpatialSupport: document.effects.hasSpatialWork
+            )
+        }
+        let working: CIImage
+        let fullFrameExtent = RenderPipeline.scaledSourceExtent(
+            nativeExtent: source.nativeExtent,
+            imageExtent: developedFull.extent,
+            scale: scale.factor(for: source.nativeExtent)
+        )
+        if !scale.isFull, let processingROI {
+            working = RenderPipeline.cropSourceROI(
+                processingROI, nativeExtent: source.nativeExtent, in: developedFull
+            )
+        } else {
+            working = developedFull
+        }
+        let hasEarlyCrop = !scale.isFull && effectiveROI != nil
+        let finalFrameExtent: CGRect? = {
+            guard hasEarlyCrop, let crop = document.crop.normalizedRect else {
+                return hasEarlyCrop ? fullFrameExtent : nil
+            }
+            return CGRect(
+                x: fullFrameExtent.minX + crop.minX * fullFrameExtent.width,
+                y: fullFrameExtent.minY + crop.minY * fullFrameExtent.height,
+                width: crop.width * fullFrameExtent.width,
+                height: crop.height * fullFrameExtent.height
+            )
+        }()
         let includePostRenderWhiteBalance = source.kind == .standard
         let upstream: CIImage
         if !scale.isFull, RenderPipeline.hasPreLUTWork(
             document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
         ) {
             upstream = processingPrefix(
-                source: source, document: document, developed: developed, scale: scale,
+                source: source, document: document, developed: working, scale: scale,
+                sourceROI: processingROI,
+                spatialReferenceExtent: fullFrameExtent,
                 space: space, includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 quality: quality
             ) ?? RenderPipeline.buildPreLUTImage(
-                developed: developed, document: document, toneCurveCache: toneCurveCache,
-                includePostRenderWhiteBalance: includePostRenderWhiteBalance
+                developed: working, document: document, toneCurveCache: toneCurveCache,
+                includePostRenderWhiteBalance: includePostRenderWhiteBalance,
+                spatialReferenceExtent: fullFrameExtent
             )
         } else {
             upstream = RenderPipeline.buildPreLUTImage(
-                developed: developed, document: document, toneCurveCache: toneCurveCache,
-                includePostRenderWhiteBalance: includePostRenderWhiteBalance
+                developed: working, document: document, toneCurveCache: toneCurveCache,
+                includePostRenderWhiteBalance: includePostRenderWhiteBalance,
+                spatialReferenceExtent: hasEarlyCrop ? fullFrameExtent : nil
             )
         }
         let masks = try await resolvedLocalMasks(
@@ -1124,10 +1187,16 @@ actor RenderEngine: RenderEngining {
         let localAdjusted = RenderPipeline.applyLocalAdjustments(
             document.localAdjustments, masks: masks, to: upstream
         )
-        return RenderStageFacade.buildFinalStages(
+        let output = RenderStageFacade.buildFinalStages(
             preLUT: localAdjusted, document: document, lut: lut, space: space, lutCache: lutCache,
-            grainSeed: RenderPipeline.grainSeed(for: source)
+            grainSeed: RenderPipeline.grainSeed(for: source),
+            applyCommittedCrop: !hasEarlyCrop,
+            finalFrameExtent: finalFrameExtent
         )
+        guard hasEarlyCrop, let effectiveROI else { return output }
+        return output.cropped(to: RenderPipeline.scaledSourceRect(
+            effectiveROI, nativeExtent: source.nativeExtent, imageExtent: fullFrameExtent
+        ))
     }
 
     /// Resolve and compose only the layers that can affect pixels. The component cache is keyed by
@@ -1469,6 +1538,8 @@ actor RenderEngine: RenderEngining {
         document: EditDocument,
         developed: CIImage,
         scale: RenderScale,
+        sourceROI: CGRect?,
+        spatialReferenceExtent: CGRect,
         space: WorkingSpace,
         includePostRenderWhiteBalance: Bool,
         quality: RenderQuality
@@ -1480,6 +1551,7 @@ actor RenderEngine: RenderEngining {
                 document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
             ),
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
+            sourceROI: sourceROI,
             space: space,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             pipelineVersion: RenderPipeline.cacheVersion
@@ -1494,7 +1566,8 @@ actor RenderEngine: RenderEngining {
 
         let prefix = RenderPipeline.buildPreLUTImage(
             developed: developed, document: document, toneCurveCache: toneCurveCache,
-            includePostRenderWhiteBalance: includePostRenderWhiteBalance
+            includePostRenderWhiteBalance: includePostRenderWhiteBalance,
+            spatialReferenceExtent: spatialReferenceExtent
         )
         guard let completed = materializedImage(
             prefix, space: space,
@@ -1923,6 +1996,7 @@ actor RenderEngine: RenderEngining {
             documentHash: RenderCacheHash.digest(request.document),
             lutFingerprint: request.lut?.cacheFingerprint ?? "none",
             targetScale: RenderScaleKey(scale, nativeExtent: request.source.nativeExtent),
+            sourceROI: request.sourceROI,
             quality: request.quality,
             space: request.space,
             pipelineVersion: RenderPipeline.cacheVersion

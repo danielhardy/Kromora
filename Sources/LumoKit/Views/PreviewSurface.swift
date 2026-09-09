@@ -14,11 +14,13 @@ struct PreviewFrameIdentity: Equatable, Sendable {
 final class PreviewSurface: ObservableObject {
     @Published private(set) var revision: UInt64 = 0
     private(set) var image: CIImage?
+    private(set) var presentationImageExtent: CGRect?
     private(set) var space: WorkingSpace = .current
     /// The last image known to have made it through the presentation command buffer. Production
     /// frames are already completed texture-backed images; the confirmation still matters because
     /// drawable acquisition/presentation can fail independently of processing.
     private var lastValidImage: CIImage?
+    private var lastValidPresentationImageExtent: CGRect?
     private var lastValidSpace: WorkingSpace = .current
     private var lastValidDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
     private var currentDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
@@ -77,6 +79,7 @@ final class PreviewSurface: ObservableObject {
                  quality: RenderQuality = .interactive,
                  detailIdentity: PreviewFrameIdentity? = nil,
                  detailFactor: CGFloat? = nil,
+                 presentationImageExtent: CGRect? = nil,
                  onPresented: (() -> Void)? = nil) -> Bool {
         guard let image,
               image.extent.width > 0, image.extent.height > 0,
@@ -96,6 +99,7 @@ final class PreviewSurface: ObservableObject {
             return false
         }
         self.image = image
+        self.presentationImageExtent = presentationImageExtent
         self.space = space
         if let detailIdentity, let detailFactor, detailFactor.isFinite {
             currentDetail = (detailIdentity, detailFactor)
@@ -134,6 +138,7 @@ final class PreviewSurface: ObservableObject {
     func markPresentationSucceeded(displayRevision: UInt64) {
         guard pendingDisplayID == displayRevision else { return }
         lastValidImage = image
+        lastValidPresentationImageExtent = presentationImageExtent
         lastValidSpace = space
         lastValidDetail = currentDetail
         pendingDisplayID = nil
@@ -143,6 +148,7 @@ final class PreviewSurface: ObservableObject {
         guard pendingDisplayID == displayRevision else { return }
         pendingDisplayID = nil
         image = lastValidImage
+        presentationImageExtent = lastValidPresentationImageExtent
         space = lastValidSpace
         currentDetail = lastValidDetail
         revision &+= 1
@@ -238,8 +244,10 @@ final class PreviewSurface: ObservableObject {
     }
     func clear() {
         image = nil
+        presentationImageExtent = nil
         space = .current
         lastValidImage = nil
+        lastValidPresentationImageExtent = nil
         lastValidSpace = .current
         lastValidDetail = nil
         currentDetail = nil
@@ -365,7 +373,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             // here, after the requested render has been produced, so fit/fill/zoom/pan never alter
             // the source or export pipeline.
             guard let output = Self.presentationImage(
-                image, navigation: navigation, destination: destination
+                image, navigation: navigation, destination: destination,
+                virtualExtent: surface.presentationImageExtent
             ) else { return }
             let presentationRevision = surface.pendingPresentationRevision()
             if let presentationRevision {
@@ -447,7 +456,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// clip the final result as a second explicit destination contract. The source image is
         /// never downscaled here; only pixels outside the current viewport are discarded.
         static func presentationImage(
-            _ image: CIImage, navigation: CanvasNavigation, destination: CGRect
+            _ image: CIImage, navigation: CanvasNavigation, destination: CGRect,
+            virtualExtent: CGRect? = nil
         ) -> CIImage? {
             guard destination.width > 0, destination.height > 0,
                   destination.width.isFinite, destination.height.isFinite,
@@ -455,13 +465,14 @@ struct PreviewSurfaceView: NSViewRepresentable {
                   image.extent.width.isFinite, image.extent.height.isFinite else { return nil }
 
             let extent = image.extent
-            let transform = navigation.transform(imageExtent: extent, viewportSize: destination.size)
+            let transformExtent = virtualExtent ?? extent
+            let transform = navigation.transform(imageExtent: transformExtent, viewportSize: destination.size)
             guard transform.scale.isFinite, transform.scale > 0,
                   transform.imageSize.width.isFinite, transform.imageSize.height.isFinite else {
                 return nil
             }
             let displayed = image
-                .transformed(by: transform.affineTransform(for: extent))
+                .transformed(by: transform.affineTransform(for: transformExtent))
                 .cropped(to: destination)
             // Deliberately dark image-presentation letterbox. This is scoped to the Metal
             // drawable so an image's surrounding SwiftUI shell can follow light/dark mode;

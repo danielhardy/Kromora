@@ -14,11 +14,9 @@ enum ResolutionPlannerSurface: String, Sendable {
 
 /// The discrete source detail selected for one canvas request.
 ///
-/// `sourceSize` is the size of the *uncropped* source that should be developed. Crop remains a
-/// later composition stage, so a small crop can legitimately select native source detail even when
-/// the visible crop itself is only a fraction of the source. The visible region is retained as
-/// metadata for profiling and a future ROI/tile implementation; it does not move crop ahead of
-/// spatial effects.
+/// `sourceSize` is the planner-sized full source decode. `visibleSourceRect` is the native-space
+/// ROI that preview graph stages may consume after the cacheable decode. Full-resolution/export
+/// callers continue to use the original uncropped graph.
 struct ResolutionPlan: Equatable, Sendable {
     let level: Int
     let scale: CGFloat
@@ -33,6 +31,31 @@ struct ResolutionPlan: Equatable, Sendable {
         let height = max(0, Int(sourceSize.height.rounded(.down)))
         return width.multipliedReportingOverflow(by: height).overflow
             ? Int.max : width * height
+    }
+
+    /// The committed crop frame in the same scaled coordinate system as `sourceSize`. The preview
+    /// surface uses this as a virtual extent when the renderer publishes only a smaller ROI.
+    var presentationImageExtent: CGRect {
+        CGRect(
+            x: cropRect.minX * sourceSize.width,
+            y: cropRect.minY * sourceSize.height,
+            width: cropRect.width * sourceSize.width,
+            height: cropRect.height * sourceSize.height
+        )
+    }
+
+    /// Avoid creating an ROI graph when the viewport already covers the complete source. This is
+    /// the common fit case and keeps the full-image preview path a true no-op.
+    func previewSourceROI(nativeExtent: CGSize) -> CGRect? {
+        let full = CGRect(origin: .zero, size: nativeExtent)
+        let epsilon: CGFloat = 0.0001
+        guard abs(visibleSourceRect.minX - full.minX) > epsilon
+                || abs(visibleSourceRect.minY - full.minY) > epsilon
+                || abs(visibleSourceRect.width - full.width) > epsilon
+                || abs(visibleSourceRect.height - full.height) > epsilon else {
+            return nil
+        }
+        return visibleSourceRect
     }
 }
 

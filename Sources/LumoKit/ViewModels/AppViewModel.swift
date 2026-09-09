@@ -2693,10 +2693,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         cancelHistogram(clear: false, pump: false)
 
         let (requested, look) = displayRequest
+        let plan = resolutionPlan(
+            for: requested,
+            nativeExtent: imageSource.nativeExtent,
+            viewportSize: previewBackingSize,
+            surface: .mainPreview
+        )
         previewScheduledSourceRevision = sourceRevision
         previewCoordinator.submit(RenderRequest(
             source: imageSource, assetID: activeAssetID, document: requested, lut: look,
-            targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .preview,
+            targetSize: plan.sourceSize,
+            sourceROI: canvasState.isCropToolActive
+                ? nil : plan.previewSourceROI(nativeExtent: imageSource.nativeExtent),
+            presentationImageExtent: plan.presentationImageExtent,
+            quality: .preview,
             output: .raster, space: .current, requestRevision: displayRevision
         ), phase: .settled, assetID: activeAssetID, sourceRevision: sourceRevision,
             displayRevision: displayRevision)
@@ -2709,9 +2719,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         let (requested, lut) = displayRequest
+        let plan = resolutionPlan(
+            for: requested,
+            nativeExtent: imageSource.nativeExtent,
+            viewportSize: previewBackingSize,
+            surface: .mainPreview
+        )
         previewCoordinator.submit(RenderRequest(
             source: imageSource, assetID: activeAssetID, document: requested, lut: lut,
-            targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .interactive,
+            targetSize: plan.sourceSize,
+            sourceROI: canvasState.isCropToolActive
+                ? nil : plan.previewSourceROI(nativeExtent: imageSource.nativeExtent),
+            presentationImageExtent: plan.presentationImageExtent,
+            quality: .interactive,
             output: .raster, space: .current, requestRevision: displayRevision
         ), phase: .interactive, assetID: activeAssetID, sourceRevision: sourceRevision,
         displayRevision: displayRevision)
@@ -3069,6 +3089,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                                    quality: request.quality,
                                    detailIdentity: detailIdentity,
                                    detailFactor: detailFactor,
+                                   presentationImageExtent: request.presentationImageExtent,
                                    onPresented: presentationConfirmation)
         } else if let cgImage = publication.image {
             // Non-GPU conformers retain a raster compatibility seam, but it terminates at the
@@ -3081,6 +3102,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                                    quality: request.quality,
                                    detailIdentity: detailIdentity,
                                    detailFactor: detailFactor,
+                                   presentationImageExtent: request.presentationImageExtent,
                                    onPresented: presentationConfirmation)
         }
         guard publication.gpuImage != nil || publication.image != nil else {

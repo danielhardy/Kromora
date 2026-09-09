@@ -37,6 +37,13 @@ struct RenderRequest: Sendable, Equatable {
     let lut: CubeLUT?
     /// Maximum output dimensions for preview tiers. Export sizing is carried by exportOptions.
     let targetSize: CGSize?
+    /// Native-space rectangle requested for a preview. The decoder still owns the full planned
+    /// scaled source (so adjacent pans hit the developed-source cache), but expensive graph stages
+    /// may operate only on this rectangle. `nil` preserves the uncropped/full-source path.
+    let sourceROI: CGRect?
+    /// Scaled crop-frame geometry for the presentation surface when `sourceROI` is smaller than
+    /// the committed crop. This never changes export pixels.
+    let presentationImageExtent: CGRect?
     let quality: RenderQuality
     let frameBudgetMilliseconds: Double
     let output: Output
@@ -58,6 +65,8 @@ struct RenderRequest: Sendable, Equatable {
         document: EditDocument,
         lut: CubeLUT? = nil,
         targetSize: CGSize? = nil,
+        sourceROI: CGRect? = nil,
+        presentationImageExtent: CGRect? = nil,
         quality: RenderQuality,
         frameBudgetMilliseconds: Double = 16.7,
         output: Output = .raster,
@@ -72,6 +81,8 @@ struct RenderRequest: Sendable, Equatable {
         self.document = document
         self.lut = lut
         self.targetSize = targetSize
+        self.sourceROI = sourceROI
+        self.presentationImageExtent = presentationImageExtent
         self.quality = quality
         self.frameBudgetMilliseconds = frameBudgetMilliseconds
         self.output = output
