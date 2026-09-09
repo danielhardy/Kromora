@@ -20,6 +20,12 @@ final class PreviewSurface: ObservableObject {
     /// frames are already completed texture-backed images; the confirmation still matters because
     /// drawable acquisition/presentation can fail independently of processing.
     private var lastValidImage: CIImage?
+    /// The display-ready copy of `image`. It is materialized once when a new render revision is
+    /// published and sampled directly by the Metal presenter for every drawable thereafter.
+    fileprivate private(set) var presentationTexture: MTLTexture?
+    fileprivate private(set) var presentationTextureExtent: CGRect?
+    private var lastValidPresentationTexture: MTLTexture?
+    private var lastValidPresentationTextureExtent: CGRect?
     private var lastValidPresentationImageExtent: CGRect?
     private var lastValidSpace: WorkingSpace = .current
     private var lastValidDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
@@ -101,6 +107,9 @@ final class PreviewSurface: ObservableObject {
         self.image = image
         self.presentationImageExtent = presentationImageExtent
         self.space = space
+        let materialized = Self.makePresentationTexture(image: image, space: space)
+        presentationTexture = materialized?.texture
+        presentationTextureExtent = materialized?.extent
         if let detailIdentity, let detailFactor, detailFactor.isFinite {
             currentDetail = (detailIdentity, detailFactor)
         } else {
@@ -138,6 +147,8 @@ final class PreviewSurface: ObservableObject {
     func markPresentationSucceeded(displayRevision: UInt64) {
         guard pendingDisplayID == displayRevision else { return }
         lastValidImage = image
+        lastValidPresentationTexture = presentationTexture
+        lastValidPresentationTextureExtent = presentationTextureExtent
         lastValidPresentationImageExtent = presentationImageExtent
         lastValidSpace = space
         lastValidDetail = currentDetail
@@ -148,6 +159,8 @@ final class PreviewSurface: ObservableObject {
         guard pendingDisplayID == displayRevision else { return }
         pendingDisplayID = nil
         image = lastValidImage
+        presentationTexture = lastValidPresentationTexture
+        presentationTextureExtent = lastValidPresentationTextureExtent
         presentationImageExtent = lastValidPresentationImageExtent
         space = lastValidSpace
         currentDetail = lastValidDetail
@@ -247,6 +260,10 @@ final class PreviewSurface: ObservableObject {
         presentationImageExtent = nil
         space = .current
         lastValidImage = nil
+        presentationTexture = nil
+        presentationTextureExtent = nil
+        lastValidPresentationTexture = nil
+        lastValidPresentationTextureExtent = nil
         lastValidPresentationImageExtent = nil
         lastValidSpace = .current
         lastValidDetail = nil
@@ -260,9 +277,54 @@ final class PreviewSurface: ObservableObject {
         submittedTelemetryRevisions.removeAll()
         presentationConfirmations.removeAll()
     }
+
+    private struct MaterializedTexture {
+        let texture: MTLTexture
+        let extent: CGRect
+    }
+
+    /// Convert a completed preview image to the drawable's display format once per publication.
+    /// The returned texture is deliberately separate from the source CIImage: the latter may
+    /// retain a private render texture, while this copy owns the exact color-space conversion
+    /// needed at the presentation boundary and can be sampled without Core Image evaluation.
+    private static func makePresentationTexture(
+        image: CIImage, space: WorkingSpace
+    ) -> MaterializedTexture? {
+        let extent = image.extent.integral
+        guard extent.width > 0, extent.height > 0,
+              extent.width.isFinite, extent.height.isFinite,
+              extent.width <= CGFloat(Int32.max), extent.height <= CGFloat(Int32.max),
+              let width = Int(exactly: extent.width), let height = Int(exactly: extent.height),
+              width > 0, height > 0 else { return nil }
+
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
+        )
+        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        descriptor.storageMode = .private
+        guard let texture = RenderEngine.presentationDevice.makeTexture(descriptor: descriptor) else {
+            return nil
+        }
+
+        let translated = image.transformed(by: CGAffineTransform(
+            translationX: -extent.minX, y: -extent.minY
+        ))
+        guard let commandBuffer = RenderEngine.presentationQueue.makeCommandBuffer() else {
+            return nil
+        }
+        RenderEngine.presentationContext.render(
+            translated, to: texture, commandBuffer: commandBuffer,
+            bounds: CGRect(origin: .zero, size: extent.size),
+            colorSpace: space.cgColorSpace
+        )
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+        guard commandBuffer.status == .completed else { return nil }
+        return MaterializedTexture(texture: texture, extent: extent)
+    }
 }
 
-/// Persistent CAMetalLayer/MTKView destination for Core Image output.
+/// Persistent CAMetalLayer/MTKView destination for the completed preview texture.
 struct PreviewSurfaceView: NSViewRepresentable {
     @ObservedObject var surface: PreviewSurface
     var navigation: CanvasNavigation = CanvasNavigation()
@@ -287,6 +349,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         view.framebufferOnly = false
         view.colorPixelFormat = .bgra8Unorm
         view.autoResizeDrawable = true
+        context.coordinator.startDisplayObservation()
         return view
     }
 
@@ -309,6 +372,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ view: MTKView, coordinator: Coordinator) {
+        coordinator.stopDisplayObservation()
         coordinator.surface?.detachDisplayView(view)
     }
 
@@ -333,6 +397,87 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// completes. Processing has already completed on RenderEngine's queue; this pacer bounds
         /// only the small transform/compositing pass and drawable submissions.
         private var isDrawing = false
+        private var needsDisplayAfterInFlightDraw = false
+        private var displayNotificationTokens: [NSObjectProtocol] = []
+        private let pipeline: MTLRenderPipelineState?
+        private let samplerState: MTLSamplerState?
+
+        private struct Vertex {
+            var position: SIMD2<Float>
+            var texcoord: SIMD2<Float>
+        }
+
+        private struct Uniforms {
+            var transformOrigin: SIMD2<Float>
+            var imageOrigin: SIMD2<Float>
+            var imageSize: SIMD2<Float>
+            var scale: Float
+            var viewportSize: SIMD2<Float>
+        }
+
+        override init() {
+            let library: MTLLibrary?
+            if let url = Bundle.module.url(forResource: "PreviewSurface", withExtension: "metal"),
+               let source = try? String(contentsOf: url, encoding: .utf8) {
+                library = try? RenderEngine.presentationDevice.makeLibrary(source: source, options: nil)
+            } else {
+                library = RenderEngine.presentationDevice.makeDefaultLibrary()
+            }
+
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library?.makeFunction(name: "preview_quad_vertex")
+            descriptor.fragmentFunction = library?.makeFunction(name: "preview_quad_fragment")
+            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            descriptor.colorAttachments[0].isBlendingEnabled = true
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            pipeline = try? RenderEngine.presentationDevice.makeRenderPipelineState(descriptor: descriptor)
+
+            let samplerDescriptor = MTLSamplerDescriptor()
+            samplerDescriptor.minFilter = .linear
+            samplerDescriptor.magFilter = .linear
+            samplerDescriptor.sAddressMode = .clampToEdge
+            samplerDescriptor.tAddressMode = .clampToEdge
+            samplerState = RenderEngine.presentationDevice.makeSamplerState(descriptor: samplerDescriptor)
+            super.init()
+        }
+
+        /// A screen move can change the drawable's backing/color space without changing the
+        /// published image. Repaint the retained texture into the new drawable, while keeping the
+        /// settled-frame confirmation attached to the publication rather than to each repaint.
+        func startDisplayObservation() {
+            guard displayNotificationTokens.isEmpty else { return }
+            let center = NotificationCenter.default
+            let names: [Notification.Name] = [
+                NSWindow.didChangeScreenNotification,
+                NSWindow.didChangeBackingPropertiesNotification,
+                NSApplication.didChangeScreenParametersNotification
+            ]
+            displayNotificationTokens = names.map { name in
+                center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                    Task { @MainActor in self?.displayConfigurationChanged() }
+                }
+            }
+        }
+
+        func stopDisplayObservation() {
+            let center = NotificationCenter.default
+            displayNotificationTokens.forEach(center.removeObserver)
+            displayNotificationTokens.removeAll()
+        }
+
+        private func displayConfigurationChanged() {
+            lastDrawableSize = nil
+            if isDrawing {
+                needsDisplayAfterInFlightDraw = true
+            } else {
+                lastDrawnRevision = nil
+                lastDrawnNavigation = nil
+            }
+            view?.setNeedsDisplay(view?.bounds ?? .zero)
+        }
 
         func draw(in view: MTKView) {
             self.view = view
@@ -369,13 +514,6 @@ struct PreviewSurfaceView: NSViewRepresentable {
                   image.extent.width > 0, image.extent.height > 0,
                   image.extent.width.isFinite, image.extent.height.isFinite else { return }
 
-            // Render into the drawable's actual pixel dimensions. The display transform is applied
-            // here, after the requested render has been produced, so fit/fill/zoom/pan never alter
-            // the source or export pipeline.
-            guard let output = Self.presentationImage(
-                image, navigation: navigation, destination: destination,
-                virtualExtent: surface.presentationImageExtent
-            ) else { return }
             let presentationRevision = surface.pendingPresentationRevision()
             if let presentationRevision {
                 surface.setEffectiveDimensions(revision: presentationRevision,
@@ -386,12 +524,49 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let drawNavigation = navigation
             isDrawing = true
             let presentationEncodingStart = LiveEditTelemetryClock.now
-            context.render(output, to: drawable.texture, commandBuffer: commandBuffer,
-                           bounds: destination, colorSpace: surface.space.cgColorSpace)
+            let renderPass = view.currentRenderPassDescriptor
+            renderPass?.colorAttachments[0].clearColor = Self.windowBackgroundClearColor
+            renderPass?.colorAttachments[0].loadAction = .clear
+            renderPass?.colorAttachments[0].storeAction = .store
 
-            // CIContext.render(_:to:commandBuffer:...) only encodes into this buffer; presenting the
-            // drawable is on us. The drawable is submitted only after the complete fitted frame is
-            // encoded, so a new frame cannot expose Core Image's intermediate tiles.
+            if let texture = surface.presentationTexture,
+               let textureExtent = surface.presentationTextureExtent,
+               let pipeline, let samplerState,
+               var geometry = Self.quadGeometry(
+                   imageExtent: textureExtent, navigation: navigation,
+                   destination: destination, virtualExtent: surface.presentationImageExtent
+               ),
+               let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
+                   device.makeBuffer(bytes: rawBuffer.baseAddress!,
+                                     length: rawBuffer.count, options: .storageModeShared)
+               }),
+               let uniformBuffer = device.makeBuffer(bytes: &geometry.uniforms,
+                                                      length: MemoryLayout<Uniforms>.stride,
+                                                      options: .storageModeShared),
+               let encoder = renderPass.flatMap({ commandBuffer.makeRenderCommandEncoder(descriptor: $0) }) {
+                encoder.setRenderPipelineState(pipeline)
+                encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+                encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+                encoder.setFragmentTexture(texture, index: 0)
+                encoder.setFragmentSamplerState(samplerState, index: 0)
+                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0,
+                                       vertexCount: geometry.vertices.count)
+                encoder.endEncoding()
+            } else if let output = Self.presentationImage(
+                image, navigation: navigation, destination: destination,
+                virtualExtent: surface.presentationImageExtent
+            ) {
+                // Compatibility seam for a host without a usable Metal texture/pipeline. The
+                // production path above never evaluates this graph on presentation-only redraws.
+                context.render(output, to: drawable.texture, commandBuffer: commandBuffer,
+                               bounds: destination, colorSpace: surface.space.cgColorSpace)
+            } else {
+                isDrawing = false
+                return
+            }
+
+            // Presenting the drawable is on us. The drawable is submitted only after the complete
+            // fitted frame is encoded, so a new frame cannot expose intermediate tiles.
             commandBuffer.present(drawable)
             let presentationEncodingMS = max(
                 0, (LiveEditTelemetryClock.now - presentationEncodingStart) * 1_000
@@ -474,13 +649,65 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let displayed = image
                 .transformed(by: transform.affineTransform(for: transformExtent))
                 .cropped(to: destination)
-            // Deliberately dark image-presentation letterbox. This is scoped to the Metal
-            // drawable so an image's surrounding SwiftUI shell can follow light/dark mode;
-            // changing it would alter rendered presentation pixels rather than window chrome.
+            // The image-presentation letterbox follows the SwiftUI shell's resolved window
+            // background. It is scoped to the drawable, so it still updates with appearance
+            // changes without adding a Core Image evaluation to a repaint.
+            let clear = windowBackgroundClearColor
             let background = CIImage(
-                color: CIColor(red: 0.07, green: 0.07, blue: 0.08, alpha: 1)
+                color: CIColor(red: CGFloat(clear.red), green: CGFloat(clear.green),
+                               blue: CGFloat(clear.blue), alpha: 1)
             ).cropped(to: destination)
             return displayed.composited(over: background).cropped(to: destination)
+        }
+
+        private static var windowBackgroundClearColor: MTLClearColor {
+            let color = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
+                ?? NSColor.windowBackgroundColor
+            return MTLClearColor(red: Double(color.redComponent),
+                                 green: Double(color.greenComponent),
+                                 blue: Double(color.blueComponent), alpha: 1)
+        }
+
+        private static func quadGeometry(
+            imageExtent: CGRect, navigation: CanvasNavigation, destination: CGRect,
+            virtualExtent: CGRect?
+        ) -> (vertices: [Vertex], uniforms: Uniforms)? {
+            let transformExtent = virtualExtent ?? imageExtent
+            let transform = navigation.transform(
+                imageExtent: transformExtent, viewportSize: destination.size
+            )
+            guard transform.scale.isFinite, transform.scale > 0,
+                  transform.origin.x.isFinite, transform.origin.y.isFinite,
+                  imageExtent.width > 0, imageExtent.height > 0,
+                  imageExtent.width.isFinite, imageExtent.height.isFinite,
+                  destination.width > 0, destination.height > 0,
+                  destination.width.isFinite, destination.height.isFinite else { return nil }
+
+            let origin = CGPoint(
+                x: transform.origin.x + (imageExtent.minX - transformExtent.minX) * transform.scale,
+                y: transform.origin.y + (imageExtent.minY - transformExtent.minY) * transform.scale
+            )
+            let size = CGSize(width: imageExtent.width * transform.scale,
+                              height: imageExtent.height * transform.scale)
+            let values = [origin.x, origin.y, size.width, size.height,
+                          transform.scale, destination.width, destination.height]
+            guard values.allSatisfy({ $0.isFinite }) else { return nil }
+            return (
+                vertices: [
+                    Vertex(position: SIMD2(0, 0), texcoord: SIMD2(0, 0)),
+                    Vertex(position: SIMD2(1, 0), texcoord: SIMD2(1, 0)),
+                    Vertex(position: SIMD2(0, 1), texcoord: SIMD2(0, 1)),
+                    Vertex(position: SIMD2(1, 1), texcoord: SIMD2(1, 1))
+                ],
+                uniforms: Uniforms(
+                    transformOrigin: SIMD2(Float(transform.origin.x), Float(transform.origin.y)),
+                    imageOrigin: SIMD2(Float(imageExtent.minX - transformExtent.minX),
+                                       Float(imageExtent.minY - transformExtent.minY)),
+                    imageSize: SIMD2(Float(imageExtent.width), Float(imageExtent.height)),
+                    scale: Float(transform.scale),
+                    viewportSize: SIMD2(Float(destination.width), Float(destination.height))
+                )
+            )
         }
 
         private func drawingFinished(
@@ -490,10 +717,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let retry = skippedDrawNeedsRetry
             skippedDrawNeedsRetry = false
             isDrawing = false
+            let displayChanged = needsDisplayAfterInFlightDraw
+            needsDisplayAfterInFlightDraw = false
             // Do not record a draw as complete until its command buffer completed successfully.
             // The surface may also have advanced while the buffer evaluated; in that case this
             // completion only frees the pacer and the newest revision is redrawn below.
-            if retry {
+            if retry || displayChanged {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
                 lastDrawableSize = nil
