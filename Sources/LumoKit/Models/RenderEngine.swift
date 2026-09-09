@@ -109,6 +109,111 @@ struct RenderWorkStatistics: Sendable, Equatable {
     let materializationBudgetSkips: Int
 }
 
+/// The value-only part of a render request.
+///
+/// Keeping the scale/ROI/crop decisions in a Sendable value is the important half of the render
+/// split: callers can prepare several requests without touching Core Image or the actor-owned
+/// decoder/context. The plan deliberately contains no CIImage, CIFilter, Metal, or cache object;
+/// those are materialized only after the request has passed its cancellation and supersession
+/// fences on `RenderEngine`.
+struct RenderBuildPlan: Sendable, Equatable {
+    let scale: RenderScale
+    let sourceROI: CGRect?
+    let processingROI: CGRect?
+    let fullFrameExtent: CGRect
+    let hasEarlyCrop: Bool
+    let finalFrameExtent: CGRect?
+    let includePostRenderWhiteBalance: Bool
+    let maskIdentity: String
+    let documentIdentity: String
+
+    static func make(
+        source: ImageSource,
+        document: EditDocument,
+        scale: RenderScale,
+        sourceROI: CGRect?
+    ) -> Self {
+        let maskIdentity = RenderCacheHash.digest(RenderEngine.MaskRecipeIdentity(document.localAdjustments))
+        let documentIdentity = RenderCacheHash.digest(document)
+        let cropNativeRect = document.crop.normalizedRect.map { rect in
+            CGRect(
+                x: rect.minX * source.nativeExtent.width,
+                y: rect.minY * source.nativeExtent.height,
+                width: rect.width * source.nativeExtent.width,
+                height: rect.height * source.nativeExtent.height
+            )
+        } ?? CGRect(origin: .zero, size: source.nativeExtent)
+        let effectiveROI = sourceROI.flatMap { roi -> CGRect? in
+            let intersection = roi.intersection(cropNativeRect)
+            return intersection.isNull || intersection.width <= 0 || intersection.height <= 0
+                ? nil : intersection
+        }
+        let processingROI = effectiveROI.map {
+            RenderPipeline.expandedSourceROI(
+                $0, nativeExtent: source.nativeExtent,
+                needsSpatialSupport: document.effects.hasSpatialWork
+            )
+        }
+        // This is the geometry of the complete scaled source, even when the graph below is
+        // evaluated from a smaller ROI. Spatial effects use it as their photographic reference.
+        let fullFrameExtent = CGRect(
+            origin: .zero,
+            size: CGSize(
+                width: source.nativeExtent.width * scale.factor(for: source.nativeExtent),
+                height: source.nativeExtent.height * scale.factor(for: source.nativeExtent)
+            )
+        )
+        let hasEarlyCrop = !scale.isFull && effectiveROI != nil
+        let finalFrameExtent: CGRect? = {
+            guard hasEarlyCrop, let crop = document.crop.normalizedRect else {
+                return hasEarlyCrop ? fullFrameExtent : nil
+            }
+            return CGRect(
+                x: fullFrameExtent.minX + crop.minX * fullFrameExtent.width,
+                y: fullFrameExtent.minY + crop.minY * fullFrameExtent.height,
+                width: crop.width * fullFrameExtent.width,
+                height: crop.height * fullFrameExtent.height
+            )
+        }()
+        return Self(
+            scale: scale, sourceROI: effectiveROI, processingROI: processingROI,
+            fullFrameExtent: fullFrameExtent, hasEarlyCrop: hasEarlyCrop,
+            finalFrameExtent: finalFrameExtent,
+            includePostRenderWhiteBalance: source.kind == .standard,
+            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+        )
+    }
+
+    /// Rebase the plan's frame geometry on the decoder's authoritative extent. Standard image
+    /// orientation and RAW metadata normally agree with `ImageSource.nativeExtent`, but the
+    /// decoder remains the source of truth for the graph's actual extent.
+    func rebased(to decodedExtent: CGRect, crop: CropAdjustments) -> Self {
+        let fullFrameExtent = RenderPipeline.scaledSourceExtent(
+            nativeExtent: decodedExtent.size,
+            imageExtent: decodedExtent,
+            scale: scale.factor(for: decodedExtent.size)
+        )
+        let finalFrameExtent: CGRect? = {
+            guard hasEarlyCrop, let crop = crop.normalizedRect else {
+                return hasEarlyCrop ? fullFrameExtent : nil
+            }
+            return CGRect(
+                x: fullFrameExtent.minX + crop.minX * fullFrameExtent.width,
+                y: fullFrameExtent.minY + crop.minY * fullFrameExtent.height,
+                width: crop.width * fullFrameExtent.width,
+                height: crop.height * fullFrameExtent.height
+            )
+        }()
+        return Self(
+            scale: scale, sourceROI: sourceROI, processingROI: processingROI,
+            fullFrameExtent: fullFrameExtent, hasEarlyCrop: hasEarlyCrop,
+            finalFrameExtent: finalFrameExtent,
+            includePostRenderWhiteBalance: includePostRenderWhiteBalance,
+            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+        )
+    }
+}
+
 extension RenderEngining {
     func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult {
         try await render(request)
@@ -275,6 +380,7 @@ actor RenderEngine: RenderEngining {
 
     func makeCIImage(_ request: RenderRequest) async -> sending CIImage? {
         guard request.output == .raster, !Task.isCancelled else { return nil }
+        noteRenderRequest(request)
         let image: CIImage?
         do {
             image = try await buildImage(request.source, request.document, request.lut,
@@ -286,7 +392,9 @@ actor RenderEngine: RenderEngining {
         } catch {
             return nil
         }
-        guard let image,
+        // A newer request may have arrived while this build awaited value-level mask work.
+        // Superseded graphs must be discarded before they can enqueue GPU work.
+        guard !Task.isCancelled, isCurrentRenderRequest(request), let image,
               image.extent.isRasterizable
         else {
             return nil
@@ -370,6 +478,9 @@ actor RenderEngine: RenderEngining {
     /// rebuilding its immutable source/decode setup on every pointer tick. It is discarded at the
     /// source boundary, so a replaced URL or a different photo can never reuse decoder state.
     private var interactiveRAWSession: InteractiveRAWFilterSession?
+    /// Latest request revision admitted for each source. This is independent of mask revisions:
+    /// an unmasked interactive render still needs a pre-submit supersession fence.
+    private var latestRenderRequestRevisions: [String: UInt64] = [:]
     private var rawFilterConstructionCount = 0
     private var rawPropertyWriteCount = 0
     private var rawOutputRequestCount = 0
@@ -380,7 +491,7 @@ actor RenderEngine: RenderEngining {
     /// adjustment values applied through the resolved mask. A layer dropping out of the visible
     /// graph still changes the identity, while an exposure/contrast tick on an active layer does
     /// not restart an unchanged semantic detector.
-    private struct MaskRecipeIdentity: Encodable {
+    struct MaskRecipeIdentity: Encodable {
         struct Layer: Encodable {
             let id: UUID
             let isInverted: Bool
@@ -478,6 +589,7 @@ actor RenderEngine: RenderEngining {
     /// Sendable value for exports and other renderer clients.
     func makeCGImage(_ request: RenderRequest) async -> sending CGImage? {
         guard request.output == .raster, !Task.isCancelled else { return nil }
+        noteRenderRequest(request)
 
         var interval = LumoObservability.begin(
             .render, source: request.source, quality: request.quality
@@ -496,7 +608,7 @@ actor RenderEngine: RenderEngining {
         } catch {
             return nil
         }
-        guard let image,
+        guard !Task.isCancelled, isCurrentRenderRequest(request), let image,
               image.extent.isRasterizable,
               !Task.isCancelled
         else { return nil }
@@ -603,6 +715,7 @@ actor RenderEngine: RenderEngining {
         // before doing any work so cancellation drops queued superseded values instead of making
         // the coordinator wait for an obsolete graph to rasterize.
         try Task.checkCancellation()
+        noteRenderRequest(request)
         if let options = request.exportOptions {
             try options.validate()
             guard case .encoded(let format, _) = request.output else {
@@ -656,6 +769,7 @@ actor RenderEngine: RenderEngining {
             outputImage = image
         }
         try Task.checkCancellation()
+        guard isCurrentRenderRequest(request) else { throw CancellationError() }
         let rect = outputImage.extent.integral
         guard rect.isRasterizable else { throw ImageError.processingFailed }
         let colorSpace = outputSpace.cgColorSpace
@@ -1091,8 +1205,14 @@ actor RenderEngine: RenderEngining {
         requestRevision: UInt64 = 0,
         resolveSemanticMasks: Bool = true
     ) async throws -> CIImage? {
-        let maskIdentity = RenderCacheHash.digest(MaskRecipeIdentity(document.localAdjustments))
-        let documentIdentity = RenderCacheHash.digest(document)
+        // Everything in this plan is value state. It is intentionally prepared before entering
+        // the decoder/graph section so a future concurrent build worker can do this work without
+        // borrowing the actor-owned Core Image resources.
+        let plan = RenderBuildPlan.make(
+            source: source, document: document, scale: scale, sourceROI: sourceROI
+        )
+        let maskIdentity = plan.maskIdentity
+        let documentIdentity = plan.documentIdentity
         noteMaskRequest(
             source: source, revision: requestRevision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity
@@ -1106,35 +1226,15 @@ actor RenderEngine: RenderEngining {
             toneCurveSource = sourceFingerprint
             toneCurveSpace = space
         }
-        guard let developedFull = developedSource(
+        guard let developedFull = await developedSourceForBuild(
             source, document.rawDevelop, scale, space: space,
             interactive: quality == .interactive
         ) else { return nil }
-        let cropNativeRect = document.crop.normalizedRect.map { rect in
-            CGRect(
-                x: rect.minX * source.nativeExtent.width,
-                y: rect.minY * source.nativeExtent.height,
-                width: rect.width * source.nativeExtent.width,
-                height: rect.height * source.nativeExtent.height
-            )
-        } ?? CGRect(origin: .zero, size: source.nativeExtent)
-        let effectiveROI = sourceROI.flatMap { roi -> CGRect? in
-            let intersection = roi.intersection(cropNativeRect)
-            return intersection.isNull || intersection.width <= 0 || intersection.height <= 0
-                ? nil : intersection
-        }
-        let processingROI = effectiveROI.map {
-            RenderPipeline.expandedSourceROI(
-                $0, nativeExtent: source.nativeExtent,
-                needsSpatialSupport: document.effects.hasSpatialWork
-            )
-        }
+        try Task.checkCancellation()
+        let effectivePlan = plan.rebased(to: developedFull.extent, crop: document.crop)
+        let effectiveROI = effectivePlan.sourceROI
+        let processingROI = effectivePlan.processingROI
         let working: CIImage
-        let fullFrameExtent = RenderPipeline.scaledSourceExtent(
-            nativeExtent: source.nativeExtent,
-            imageExtent: developedFull.extent,
-            scale: scale.factor(for: source.nativeExtent)
-        )
         if !scale.isFull, let processingROI {
             working = RenderPipeline.cropSourceROI(
                 processingROI, nativeExtent: source.nativeExtent, in: developedFull
@@ -1142,19 +1242,10 @@ actor RenderEngine: RenderEngining {
         } else {
             working = developedFull
         }
-        let hasEarlyCrop = !scale.isFull && effectiveROI != nil
-        let finalFrameExtent: CGRect? = {
-            guard hasEarlyCrop, let crop = document.crop.normalizedRect else {
-                return hasEarlyCrop ? fullFrameExtent : nil
-            }
-            return CGRect(
-                x: fullFrameExtent.minX + crop.minX * fullFrameExtent.width,
-                y: fullFrameExtent.minY + crop.minY * fullFrameExtent.height,
-                width: crop.width * fullFrameExtent.width,
-                height: crop.height * fullFrameExtent.height
-            )
-        }()
-        let includePostRenderWhiteBalance = source.kind == .standard
+        let hasEarlyCrop = effectivePlan.hasEarlyCrop
+        let finalFrameExtent = effectivePlan.finalFrameExtent
+        let fullFrameExtent = effectivePlan.fullFrameExtent
+        let includePostRenderWhiteBalance = effectivePlan.includePostRenderWhiteBalance
         let upstream: CIImage
         if !scale.isFull, RenderPipeline.hasPreLUTWork(
             document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
@@ -1184,6 +1275,14 @@ actor RenderEngine: RenderEngining {
             maskIdentity: maskIdentity, documentIdentity: documentIdentity,
             resolveSemanticMasks: resolveSemanticMasks
         )
+        // Give a newer request a chance to run between value resolution and final graph material-
+        // ization. This is the handoff point used by the GPU-submit fence below.
+        await Task.yield()
+        try Task.checkCancellation()
+        if requestRevision > 0,
+           latestRenderRequestRevisions[source.cacheFingerprint, default: 0] > requestRevision {
+            throw CancellationError()
+        }
         let localAdjusted = RenderPipeline.applyLocalAdjustments(
             document.localAdjustments, masks: masks, to: upstream
         )
@@ -1199,10 +1298,151 @@ actor RenderEngine: RenderEngining {
         ))
     }
 
+    /// Standard-image decode is immutable value work. It does not touch the interactive RAW
+    /// session or any actor-owned cache, so it can run while the engine actor services another
+    /// request. RAW remains on the actor because `CIRAWFilter` is mutable and its session is the
+    /// single-writer boundary. The returned graph is handed back only as the next Core Image value
+    /// phase; GPU submission still happens in the actor methods above.
+    private func developedSourceForBuild(
+        _ source: ImageSource,
+        _ rawDevelop: RAWDevelopSettings,
+        _ scale: RenderScale,
+        space: WorkingSpace,
+        interactive: Bool
+    ) async -> CIImage? {
+        guard source.kind == .standard else {
+            return developedSource(source, rawDevelop, scale, space: space, interactive: interactive)
+        }
+        let key: DevelopedSourceCacheKey? = scale.isFull ? nil : DevelopedSourceCacheKey(
+            source: RenderSourceFingerprint(source),
+            developHash: RenderCacheHash.digest(rawDevelop),
+            scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
+            pipelineVersion: RenderPipeline.cacheVersion
+        )
+        if let key, let cached = developedSourceCache.value(for: key) {
+            LumoObservability.event(.cacheHit, source: source, quality: .preview,
+                                    detail: "layer=developedSource")
+            return cached
+        }
+        if key != nil {
+            LumoObservability.event(.cacheMiss, source: source, quality: .preview,
+                                    detail: "layer=developedSource")
+        }
+        let image: CIImage? = await Task.detached(priority: .userInitiated) { () -> CIImage? in
+            guard !Task.isCancelled else { return nil }
+            return RenderPipeline.developedSource(
+                source, rawDevelop: rawDevelop, scale: scale
+            )
+        }.value
+        guard let image else { return nil }
+        if let key {
+            developedSourceCache.insert(
+                image, for: key,
+                cost: estimatedByteCost(extent: image.extent.integral, bytesPerPixel: 4)
+            )
+        }
+        return image
+    }
+
+    private struct MaskPayloadWork: Sendable {
+        let key: LocalMaskCacheKey
+        let component: MaskComponent
+        let targetSize: PixelDimensions
+        let definitionHash: String
+        let request: LocalMaskResolveRequest
+        let isSemantic: Bool
+    }
+
     /// Resolve and compose only the layers that can affect pixels. The component cache is keyed by
     /// source and mask definition, never by the document's global look, so slider edits reuse the
     /// same bounded payloads. Core Image objects are created only after the value-only resolver
     /// returns and remain inside this actor.
+    private func resolveMaskPayloads(
+        for layers: [LocalAdjustmentLayer],
+        source: ImageSource,
+        extent: CGRect,
+        quality: RenderQuality,
+        transform: LocalMaskRenderTransform,
+        assetID: PhotoAssetID?,
+        requestRevision: UInt64,
+        maskIdentity: String?,
+        documentIdentity: String?,
+        resolveSemanticMasks: Bool,
+        includeIdentity: Bool,
+        onlyComponentID: UUID?
+    ) async throws -> ([LocalMaskCacheKey: LocalMaskPayload], Set<LocalMaskCacheKey>) {
+        var payloads: [LocalMaskCacheKey: LocalMaskPayload] = [:]
+        var pending: [MaskPayloadWork] = []
+        var pendingKeys: Set<LocalMaskCacheKey> = []
+        var duplicateKeys: Set<LocalMaskCacheKey> = []
+
+        for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
+            guard resolveSemanticMasks || layer.allowsDeferredSemanticPreview else { continue }
+            for component in layer.components where component.isUsable
+                && (onlyComponentID == nil || component.id == onlyComponentID) {
+                if !resolveSemanticMasks, component.source.semanticDefinition != nil { continue }
+                let definitionHash = RenderCacheHash.digest(component.source)
+                let targetSize = maskTargetSize(for: component, extent: extent, quality: quality)
+                let key = LocalMaskCacheKey(
+                    source: RenderSourceFingerprint(source), definitionHash: definitionHash,
+                    targetSize: targetSize, quality: quality, transform: transform,
+                    rendererVersion: LocalMaskRenderer.version
+                )
+                guard pendingKeys.insert(key).inserted else {
+                    duplicateKeys.insert(key)
+                    continue
+                }
+                if let cached = localMaskCache.value(for: key) {
+                    payloads[key] = cached
+                    continue
+                }
+                pending.append(MaskPayloadWork(
+                    key: key, component: component, targetSize: targetSize,
+                    definitionHash: definitionHash,
+                    request: LocalMaskResolveRequest(
+                        source: source, assetID: assetID, component: component,
+                        targetSize: targetSize, quality: quality, transform: transform
+                    ),
+                    isSemantic: component.source.semanticDefinition != nil
+                ))
+            }
+        }
+
+        guard !pending.isEmpty else { return (payloads, duplicateKeys) }
+        let resolver = localMaskResolver
+        try await withThrowingTaskGroup(of: (LocalMaskCacheKey, LocalMaskPayload).self) { group in
+            for work in pending {
+                group.addTask { [weak self] in
+                    guard let self else { throw CancellationError() }
+                    do {
+                        let payload: LocalMaskPayload
+                        if work.isSemantic, requestRevision > 0, let maskIdentity {
+                            payload = try await self.resolveSemanticMask(
+                                work.request, sourceKey: source.cacheFingerprint,
+                                maskIdentity: maskIdentity
+                            )
+                        } else {
+                            payload = try await resolver.resolve(work.request)
+                        }
+                        return (work.key, payload)
+                    } catch is CancellationError {
+                        throw CancellationError()
+                    }
+                }
+            }
+            for try await (key, payload) in group {
+                try Task.checkCancellation()
+                guard isCurrentMaskRequest(
+                    source: source, revision: requestRevision,
+                    maskIdentity: maskIdentity, documentIdentity: documentIdentity
+                ) else { throw LocalMaskResolutionError.cancelled }
+                localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
+                payloads[key] = payload
+            }
+        }
+        return (payloads, duplicateKeys)
+    }
+
     private func resolvedLocalMasks(
         for layers: [LocalAdjustmentLayer],
         source: ImageSource,
@@ -1223,7 +1463,15 @@ actor RenderEngine: RenderEngining {
               extent.width <= CGFloat(Int.max), extent.height <= CGFloat(Int.max)
         else { return [:] }
 
+        let (payloads, duplicateKeys) = try await resolveMaskPayloads(
+            for: layers, source: source, extent: extent, quality: quality,
+            transform: transform, assetID: assetID, requestRevision: requestRevision,
+            maskIdentity: maskIdentity, documentIdentity: documentIdentity,
+            resolveSemanticMasks: resolveSemanticMasks, includeIdentity: includeIdentity,
+            onlyComponentID: onlyComponentID
+        )
         var result: [UUID: CIImage] = [:]
+        var composedKeys: Set<LocalMaskCacheKey> = []
         for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
             try Task.checkCancellation()
             // The deferred first frame omits semantic components, which only stays a *refinement*
@@ -1250,39 +1498,14 @@ actor RenderEngine: RenderEngining {
                     targetSize: componentTargetSize, quality: quality, transform: transform,
                     rendererVersion: LocalMaskRenderer.version
                 )
-                let payload: LocalMaskPayload
-                if let cached = localMaskCache.value(for: key) {
-                    // Request revision guards supersession, not derived-resource identity. A
-                    // cached payload is safe to reuse directly; AppViewModel's publication gate
-                    // owns the UI-level source/display staleness decision.
-                    payload = cached
-                } else {
-                    do {
-                        let resolveRequest = LocalMaskResolveRequest(
-                            source: source, assetID: assetID, component: component,
-                            targetSize: componentTargetSize,
-                            quality: quality, transform: transform
-                        )
-                        if component.source.semanticDefinition != nil,
-                           requestRevision > 0,
-                           let maskIdentity {
-                            payload = try await resolveSemanticMask(
-                                resolveRequest, sourceKey: source.cacheFingerprint,
-                                maskIdentity: maskIdentity
-                            )
-                        } else {
-                            payload = try await localMaskResolver.resolve(resolveRequest)
-                        }
-                    } catch is CancellationError {
-                        throw CancellationError()
-                    }
-                    guard isCurrentMaskRequest(
-                        source: source, revision: requestRevision,
-                        maskIdentity: maskIdentity, documentIdentity: documentIdentity
-                    ) else {
-                        throw LocalMaskResolutionError.cancelled
-                    }
-                    localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
+                guard let payload = payloads[key] else {
+                    throw LocalMaskResolutionError.invalidPayload
+                }
+                if duplicateKeys.contains(key), !composedKeys.insert(key).inserted {
+                    // Preserve the cache accounting/behavior of the old in-order resolver: a
+                    // second identical component is a cache hit even when its first resolution
+                    // was coalesced into the concurrent value phase above.
+                    _ = localMaskCache.value(for: key)
                 }
 
                 // The resolver is allowed to suspend. A newer request for this source may have
@@ -1349,6 +1572,20 @@ actor RenderEngine: RenderEngining {
         if latestOverlayMaskRequestRevisions[key, default: 0] < revision {
             latestOverlayMaskRequestRevisions[key] = revision
         }
+    }
+
+    private func noteRenderRequest(_ request: RenderRequest) {
+        guard request.requestRevision > 0 else { return }
+        let key = request.source.cacheFingerprint
+        if latestRenderRequestRevisions[key, default: 0] < request.requestRevision {
+            latestRenderRequestRevisions[key] = request.requestRevision
+        }
+    }
+
+    private func isCurrentRenderRequest(_ request: RenderRequest) -> Bool {
+        guard request.requestRevision > 0 else { return true }
+        return latestRenderRequestRevisions[request.source.cacheFingerprint, default: 0]
+            <= request.requestRevision
     }
 
     private func noteMaskRequest(
@@ -1718,6 +1955,7 @@ actor RenderEngine: RenderEngining {
     /// it lets a caller release the intermediates when no image is on screen.
     func invalidateSourceCache() {
         cancelAllSemanticMaskResolutions()
+        latestRenderRequestRevisions.removeAll(keepingCapacity: true)
         developedSourceCache.removeAll()
         processingPrefixCache.removeAll()
         localMaskCache.removeAll()
