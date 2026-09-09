@@ -170,6 +170,90 @@ final class HistogramTests: TempDirectoryTestCase {
                           "…and the two must not be collapsing to the same render")
     }
 
+    /// The Info histogram consumes the completed preview texture, while the engine's standalone
+    /// histogram API rebuilds the graph from the source/document pair. Keep those paths in lockstep
+    /// on the edits most likely to expose a precision or working-space mismatch.
+    func testPresentedFrameHistogramMatchesRebuildOnExposureAndWhiteBalanceFixtures() async throws {
+        let engine = RenderEngine()
+        let source = try makeSource(width: 192, height: 128, named: "parity.png")
+        let targetSize = CGSize(width: 96, height: 64)
+        let maxDimension = 64
+
+        struct Fixture {
+            let name: String
+            let document: EditDocument
+        }
+
+        let fixtures = [
+            Fixture(
+                name: "high-exposure",
+                document: EditDocument(light: LightAdjustments(exposure: 2.5))
+            ),
+            Fixture(
+                name: "warm-white-balance",
+                document: EditDocument(
+                    adjustments: [.temperatureTint(temp: 3200, tint: -100)]
+                )
+            ),
+            Fixture(
+                name: "high-exposure-and-cool-white-balance",
+                document: EditDocument(
+                    light: LightAdjustments(exposure: 2.5),
+                    adjustments: [.temperatureTint(temp: 9000, tint: 100)]
+                )
+            ),
+        ]
+
+        // Recorded against the RGBA16F completed preview texture being re-tallied as RGBA8. The
+        // comparison is intentionally per bin rather than a whole-histogram aggregate so a single
+        // quantization shift cannot be hidden by cancellation elsewhere in the distribution.
+        let recordedMaximumPerBinDistance = 4
+
+        for fixture in fixtures {
+            let request = RenderRequest(
+                source: source,
+                document: fixture.document,
+                targetSize: targetSize,
+                quality: .preview,
+                output: .raster,
+                space: .sRGB
+            )
+            let renderedImage = await engine.makeCIImage(request)
+            let presentedImage = try XCTUnwrap(renderedImage)
+            let presentedResult = await engine.histogram(
+                presentedImage: presentedImage, space: .sRGB, maxDimension: maxDimension
+            )
+            let presented = try XCTUnwrap(presentedResult)
+            let rebuiltResult = await engine.histogram(
+                source: source,
+                document: fixture.document,
+                lut: nil,
+                scale: request.renderScale,
+                space: .sRGB,
+                maxDimension: maxDimension
+            )
+            let rebuilt = try XCTUnwrap(rebuiltResult)
+
+            let channels: [(name: String, presented: [Int], rebuilt: [Int])] = [
+                ("red", presented.red, rebuilt.red),
+                ("green", presented.green, rebuilt.green),
+                ("blue", presented.blue, rebuilt.blue),
+                ("luma", presented.luma, rebuilt.luma),
+            ]
+            for channel in channels {
+                XCTAssertEqual(channel.presented.count, channel.rebuilt.count, fixture.name)
+                for (bin, values) in zip(channel.presented, channel.rebuilt).enumerated() {
+                    let distance = abs(values.0 - values.1)
+                    XCTAssertLessThanOrEqual(
+                        distance,
+                        recordedMaximumPerBinDistance,
+                        "\(fixture.name) \(channel.name) bin \(bin): presented=\(values.0), rebuilt=\(values.1)"
+                    )
+                }
+            }
+        }
+    }
+
     /// The histogram is rendered in the working space, like the preview raster it describes. A fixed
     /// sRGB tally would be identical in both.
     func testTheHistogramFollowsTheWorkingSpace() async throws {
