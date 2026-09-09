@@ -241,6 +241,58 @@ final class LookPreviewTests: XCTestCase {
         XCTAssertEqual(renderRequestCount, 1)
     }
 
+    func testStaleCandidateDropTest() async throws {
+        let fake = FakeRenderEngine()
+        let scheduler = ImageWorkScheduler()
+        let coordinator = LookPreviewCoordinator(engine: fake, scheduler: scheduler)
+        let departedSource = ImageSource(
+            data: Data([31, 32, 33]), nativeExtent: CGSize(width: 1200, height: 800))
+        let visibleSource = ImageSource(
+            data: Data([41, 42, 43]), nativeExtent: CGSize(width: 1200, height: 800))
+        let look = TestImages.warmLUT(name: "stale-drop")
+
+        let departed = Task {
+            await coordinator.image(
+                source: departedSource, document: EditDocument(), look: look)
+        }
+        try await Task.sleep(for: .milliseconds(10))
+        let visible = Task {
+            await coordinator.image(
+                source: visibleSource, document: EditDocument(), look: look)
+        }
+
+        let departedImage = await departed.value
+        let visibleImage = await visible.value
+        XCTAssertNil(departedImage)
+        XCTAssertNotNil(visibleImage)
+        let requests = await fake.renderRequests
+        XCTAssertEqual(
+            Set(requests.map { $0.source.cacheFingerprint }),
+            [visibleSource.cacheFingerprint],
+            "a departed source must not publish a candidate"
+        )
+    }
+
+    func testThumbnailLaneOnlyTest() async throws {
+        let fake = FakeRenderEngine()
+        let scheduler = ImageWorkScheduler()
+        let coordinator = LookPreviewCoordinator(engine: fake, scheduler: scheduler)
+        let source = ImageSource(
+            data: Data([51, 52, 53]), nativeExtent: CGSize(width: 1200, height: 800))
+
+        _ = await coordinator.image(
+            source: source, document: EditDocument(), look: TestImages.identityLUT(name: "lane-a"))
+        _ = await coordinator.image(
+            source: source, document: EditDocument(), look: TestImages.warmLUT(name: "lane-b"))
+
+        XCTAssertFalse(scheduler.admissionLog.isEmpty)
+        XCTAssertTrue(
+            scheduler.admissionLog.allSatisfy { $0.lane == .thumbnail },
+            "Look browsing must never enter the editor lane"
+        )
+        XCTAssertEqual(scheduler.pendingEditorCount, 0)
+    }
+
     func testLookPreviewLayoutFitsTheSupportedInspectorWidths() {
         XCTAssertEqual(LookPreviewLayout.displaySize.height, 56)
         XCTAssertEqual(LookPreviewLayout.renderSize, CGSize(width: 168, height: 112))

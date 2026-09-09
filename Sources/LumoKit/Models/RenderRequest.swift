@@ -130,6 +130,72 @@ struct RenderRequest: Sendable, Equatable {
     }
 }
 
+/// A bounded Look-browser request.
+///
+/// The browser normally changes only `candidateDocument.lut`. Keeping the base document beside
+/// the candidate makes that contract explicit to the renderer: a LUT-only candidate may reuse the
+/// developed/pre-LUT prefix, while a bundled preset that changes any other document field must
+/// take the ordinary full-build path for that candidate.
+struct LookPreviewRequest: Sendable, Equatable {
+    let source: ImageSource
+    let baseDocument: EditDocument
+    let candidateDocument: EditDocument
+    let look: CubeLUT
+    let targetSize: CGSize
+    let space: WorkingSpace
+
+    init(
+        source: ImageSource,
+        document: EditDocument,
+        look: CubeLUT,
+        targetSize: CGSize,
+        space: WorkingSpace = .current
+    ) {
+        var candidate = document
+        candidate.lut = LUTSettings(lutID: look.lutID, intensity: 1)
+        self.init(
+            source: source, baseDocument: document, candidateDocument: candidate,
+            look: look, targetSize: targetSize, space: space
+        )
+    }
+
+    init(
+        source: ImageSource,
+        baseDocument: EditDocument,
+        candidateDocument: EditDocument,
+        look: CubeLUT,
+        targetSize: CGSize,
+        space: WorkingSpace = .current
+    ) {
+        self.source = source
+        self.baseDocument = baseDocument
+        self.candidateDocument = candidateDocument
+        self.look = look
+        self.targetSize = targetSize
+        self.space = space
+    }
+
+    /// Conservative by design. The shared prefix boundary is below every document field except
+    /// the LUT: `version`, `rawDevelop`, `light`, `color`, every `effects` field, `crop`, ordered
+    /// `adjustments`, and `localAdjustments` all force the candidate's full build. This keeps
+    /// bundled tone/preset changes pixel-correct even if a future preset adds a field whose stage
+    /// ordering is not yet known to the browser.
+    var isLUTOnlyChange: Bool {
+        var base = baseDocument
+        var candidate = candidateDocument
+        base.lut = .none
+        candidate.lut = .none
+        return base == candidate
+    }
+
+    var renderRequest: RenderRequest {
+        RenderRequest(
+            source: source, document: candidateDocument, lut: look,
+            targetSize: targetSize, quality: .thumbnail, output: .raster, space: space
+        )
+    }
+}
+
 /// The five work classes used by orchestration and caching.
 ///
 /// Quality is intentionally independent from `RenderRequest.Output`: an interactive raster and an

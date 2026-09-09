@@ -16,6 +16,10 @@ struct RenderCacheConfiguration: Sendable, Equatable {
     /// Developed-source materialized image costs include the CPU-backed RGBA-half bytes and the
     /// estimated GPU texture bytes. An entry must fit before its backing buffer is allocated.
     var developedSourceMaxCostBytes = 256 * 1024 * 1024
+    /// Edited filmstrip thumbnails use a separate, deliberately small working set. They must not
+    /// consume an entry or a byte of the editor's developed-source budget.
+    var thumbnailDevelopedSourceMaxEntries = 1
+    var thumbnailDevelopedSourceMaxCostBytes = 16 * 1024 * 1024
     /// Completed pre-LUT prefixes are larger than encoded previews, so they have their own budget.
     /// Keeping this separate prevents a LUT/grain drag from evicting the final preview working set.
     /// Materialized-prefix entries retain only a GPU texture and are charged at width*height*8;
@@ -31,6 +35,7 @@ struct RenderCacheConfiguration: Sendable, Equatable {
 struct RenderCacheStatistics: Sendable, Equatable {
     let preview: CacheStatistics
     let developedSource: CacheStatistics
+    let thumbnailDevelopedSource: CacheStatistics
     let processingPrefix: CacheStatistics
     let localMask: CacheStatistics
     let lutFilter: CacheStatistics

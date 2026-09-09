@@ -19,6 +19,7 @@ final class RenderEngineResources {
     var toneCurveSpace: WorkingSpace?
     let previewCache: BoundedLRUCache<PreviewCacheKey, RenderResult>
     let developedSourceCache: BoundedLRUCache<DevelopedSourceCacheKey, CIImage>
+    let thumbnailDevelopedSourceCache: BoundedLRUCache<DevelopedSourceCacheKey, CIImage>
     let processingPrefixCache: BoundedLRUCache<ProcessingPrefixCacheKey, CIImage>
     let localMaskCache: BoundedLRUCache<LocalMaskCacheKey, LocalMaskPayload>
     let localMaskRenderer: LocalMaskRenderer
@@ -41,6 +42,10 @@ final class RenderEngineResources {
         self.developedSourceCache = BoundedLRUCache(
             maxEntries: configuration.developedSourceMaxEntries,
             maxCostBytes: configuration.developedSourceMaxCostBytes
+        )
+        self.thumbnailDevelopedSourceCache = BoundedLRUCache(
+            maxEntries: configuration.thumbnailDevelopedSourceMaxEntries,
+            maxCostBytes: configuration.thumbnailDevelopedSourceMaxCostBytes
         )
         self.processingPrefixCache = BoundedLRUCache(
             maxEntries: configuration.processingPrefixMaxEntries,
@@ -69,6 +74,10 @@ final class RenderEngineResources {
             maxEntries: configuration.developedSourceMaxEntries,
             maxCostBytes: configuration.developedSourceMaxCostBytes
         )
+        self.thumbnailDevelopedSourceCache = BoundedLRUCache(
+            maxEntries: configuration.thumbnailDevelopedSourceMaxEntries,
+            maxCostBytes: configuration.thumbnailDevelopedSourceMaxCostBytes
+        )
         self.processingPrefixCache = BoundedLRUCache(
             maxEntries: configuration.processingPrefixMaxEntries,
             maxCostBytes: configuration.processingPrefixMaxCostBytes
@@ -89,6 +98,7 @@ final class RenderEngineResources {
     func evictAll() {
         previewCache.removeAll(countAsEvictions: true)
         developedSourceCache.removeAll(countAsEvictions: true)
+        thumbnailDevelopedSourceCache.removeAll(countAsEvictions: true)
         processingPrefixCache.removeAll(countAsEvictions: true)
         localMaskCache.removeAll(countAsEvictions: true)
         localMaskRenderer.removeAllCachedBrushStrokes()
@@ -101,6 +111,7 @@ final class RenderEngineResources {
     func invalidateAll() {
         previewCache.removeAll()
         developedSourceCache.removeAll()
+        thumbnailDevelopedSourceCache.removeAll()
         processingPrefixCache.removeAll()
         localMaskCache.removeAll()
         localMaskRenderer.removeAllCachedBrushStrokes()
