@@ -75,6 +75,9 @@ actor FakeRenderEngine: RenderEngining {
 
     /// Every `makeCGImage` call, in order.
     private(set) var previewRequests: [Request] = []
+    /// Preview requests that ask the renderer to resolve semantic masks. This is an admission
+    /// counter, not a Vision invocation counter; cache/provider reuse is covered by resolver tests.
+    private(set) var semanticMaskRequests: [Request] = []
     /// Every `encode` call, in order.
     private(set) var encodeRequests: [Request] = []
     /// Every `histogram` call, in order.
@@ -92,6 +95,7 @@ actor FakeRenderEngine: RenderEngining {
         let document: EditDocument
         let lutID: LUTID?
         let scale: RenderScale
+        let maskResolution: MaskResolutionPolicy
         let space: WorkingSpace
         let format: ExportFormat?
         /// The `ImageSource` the call named. Recorded so a test can tell *which* image was asked
@@ -104,11 +108,13 @@ actor FakeRenderEngine: RenderEngining {
             scale: RenderScale,
             space: WorkingSpace,
             format: ExportFormat?,
-            source: ImageSource?
+            source: ImageSource?,
+            maskResolution: MaskResolutionPolicy
         ) {
             self.document = document
             self.lutID = lutID
             self.scale = scale
+            self.maskResolution = maskResolution
             self.space = space
             self.format = format
             self.source = source
@@ -118,6 +124,7 @@ actor FakeRenderEngine: RenderEngining {
             document = request.document
             lutID = request.lut?.lutID
             scale = request.renderScale
+            maskResolution = request.maskResolution
             space = request.space
             switch request.output {
             case .raster:
@@ -163,6 +170,11 @@ actor FakeRenderEngine: RenderEngining {
         switch request.output {
         case .raster:
             previewRequests.append(record)
+            if request.quality == .preview,
+               request.maskResolution == .resolved,
+               request.document.hasSemanticMasks {
+                semanticMaskRequests.append(record)
+            }
             emit(.previewRequested(record))
             if previewIsGated {
                 await withCheckedContinuation { parkedPreviews.append($0) }
@@ -219,7 +231,7 @@ actor FakeRenderEngine: RenderEngining {
     ) async -> HistogramData? {
         let record = Request(
             document: document, lutID: lut?.lutID, scale: scale, space: space, format: nil,
-            source: source
+            source: source, maskResolution: .resolved
         )
         histogramRequests.append(record)
         emit(.histogramRequested(record))
