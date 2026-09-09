@@ -292,10 +292,11 @@ final class PreviewSurfaceTests: XCTestCase {
 
     /// The required LUMO-312 acceptance test: presentation-only navigation must sample the
     /// retained texture and never fall back to a new Core Image evaluation.
-    func testNoCIEvalOnRepaintTest() throws {
+    func testNoCIEvalOnRepaintTest() async throws {
         let surface = PreviewSurface()
         let image = try makeOrientationAsymmetricFixture()
         XCTAssertTrue(surface.present(image))
+        _ = try await waitForPresentationTexture(surface)
         let coordinator = PreviewSurfaceView.Coordinator()
 
         PreviewSurface.resetPresentationCoreImageEvaluationCount()
@@ -314,10 +315,11 @@ final class PreviewSurfaceTests: XCTestCase {
     /// The required LUMO-312 acceptance test: compare ultrawide, square, and portrait quad output
     /// against the CPU-composited reference, including an orientation-asymmetric fixture and the
     /// letterbox color. The top/bottom assertions make a vertical flip fail loudly.
-    func testGeometryGoldenTest() throws {
+    func testGeometryGoldenTest() async throws {
         let surface = PreviewSurface()
         let image = try makeOrientationAsymmetricFixture()
         XCTAssertTrue(surface.present(image))
+        _ = try await waitForPresentationTexture(surface)
         let coordinator = PreviewSurfaceView.Coordinator()
         let navigation = CanvasNavigation()
 
@@ -409,7 +411,7 @@ final class PreviewSurfaceTests: XCTestCase {
 
     /// The required LUMO-312 acceptance test: a simulated display change redraws the latest
     /// retained revision once, without a second publication or visible-frame confirmation.
-    func testDisplayChangeTest() throws {
+    func testDisplayChangeTest() async throws {
         let surface = PreviewSurface()
         surface.attachPresentationLifecycle()
         let image = try makeOrientationAsymmetricFixture()
@@ -419,7 +421,7 @@ final class PreviewSurfaceTests: XCTestCase {
         presentCount += 1
         XCTAssertTrue(surface.present(image, revision: 1, telemetry: telemetry,
                                       onPresented: { confirmationCount += 1 }))
-        let retainedTexture = try XCTUnwrap(surface.presentationTexture)
+        let retainedTexture = try await waitForPresentationTexture(surface)
         let coordinator = PreviewSurfaceView.Coordinator()
         var quadRenderCount = 0
         XCTAssertNotNil(coordinator.renderRetainedTextureForTesting(
@@ -463,6 +465,17 @@ final class PreviewSurfaceTests: XCTestCase {
             intent: .defaultIntent
         ))
         return CIImage(cgImage: cgImage)
+    }
+
+    private func waitForPresentationTexture(_ surface: PreviewSurface) async throws -> MTLTexture {
+        for _ in 0..<200 {
+            if let texture = surface.presentationTexture {
+                return texture
+            }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        return try XCTUnwrap(surface.presentationTexture,
+                             "async presentation texture did not complete")
     }
 
     private func pixel(in bytes: [UInt8], width: Int, at point: (Int, Int)) -> (UInt8, UInt8, UInt8) {
