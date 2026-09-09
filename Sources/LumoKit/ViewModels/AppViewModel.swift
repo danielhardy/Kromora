@@ -1448,8 +1448,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // A cold open already rendered the identity document speculatively. Only an adopted disk
         // document that differs from that first request needs a corrective render. In-memory
         // sessions and edits made while loading remain authoritative and must not be replaced.
+        // The corrective queues behind the speculation instead of cancelling it, so the first
+        // request still reaches the engine (LUMO-317).
         if shouldAdopt, documentChanged {
-            schedulePreview()
+            scheduleCorrectivePreview()
         } else if let lastPresentedVisibleRequest,
                   lastPresentedVisibleRequest.source == imageSource,
                   lastPresentedVisibleRequest.document == displayRequest.document {
@@ -2740,6 +2742,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// `PreviewCoordinator`, which selects the interactive or settled quality and asks
     /// `RenderEngine` to evaluate the graph inside its actor.
     private func schedulePreview() {
+        submitSettledPreview(preemptsPredecessor: true)
+    }
+
+    /// The stored-edit corrective render for a speculative open (see `adoptStoredEdits`). Unlike
+    /// every other settled submission, this queues behind the speculative request instead of
+    /// cancelling it, so both renders reach the engine in order.
+    private func scheduleCorrectivePreview() {
+        submitSettledPreview(preemptsPredecessor: false)
+    }
+
+    private func submitSettledPreview(preemptsPredecessor: Bool) {
         guard !isShuttingDown, let imageSource else {
             previewSurface.clear()
             return
@@ -2756,7 +2769,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             surface: .mainPreview
         )
         previewScheduledSourceRevision = sourceRevision
-        previewCoordinator.submit(RenderRequest(
+        let request = RenderRequest(
             source: imageSource, assetID: activeAssetID, document: requested, lut: look,
             targetSize: plan.sourceSize,
             sourceROI: canvasState.isCropToolActive
@@ -2764,8 +2777,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             presentationImageExtent: plan.presentationImageExtent,
             quality: .preview,
             output: .raster, space: .current, requestRevision: displayRevision
-        ), phase: .settled, assetID: activeAssetID, sourceRevision: sourceRevision,
-            displayRevision: displayRevision)
+        )
+        if preemptsPredecessor {
+            previewCoordinator.submit(
+                request, phase: .settled, assetID: activeAssetID,
+                sourceRevision: sourceRevision, displayRevision: displayRevision
+            )
+        } else {
+            previewCoordinator.submitCorrective(
+                request, assetID: activeAssetID,
+                sourceRevision: sourceRevision, displayRevision: displayRevision
+            )
+        }
     }
 
     /// A viewport-sized interactive render. `PreviewCoordinator` drops superseded values and

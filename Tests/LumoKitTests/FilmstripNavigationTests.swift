@@ -87,7 +87,11 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.sourceSize, CGSize(width: 16, height: 12))
     }
 
-    func testEachFilmstripOpenSubmitsOneSettledPreview() async throws {
+    /// A pristine open admits one settled preview; an open with stored edits speculates with the
+    /// identity document and then corrects with the stored one (LUMO-308, LUMO-317), so the
+    /// second navigation here admits two. The corrective must still carry the stored document
+    /// and reach the engine after the speculation.
+    func testEachFilmstripOpenAdmitsItsSettledPreview() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "single-first.png", in: tempDirectory
         )
@@ -125,6 +129,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         let secondPreview = try await TestSynchronization.nextEvent(from: reader, "the edited settled preview") {
             if case .previewCompleted(let request) = $0 {
                 return request.source?.backing == .url(second)
+                    && request.document == storedDocument
             }
             return false
         } diagnostics: {
@@ -135,7 +140,10 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         }
         XCTAssertEqual(request.document, storedDocument)
         let previewCount = await engine.previewRequests.count
-        XCTAssertEqual(previewCount, 2, "each navigation open must admit one settled preview")
+        XCTAssertEqual(
+            previewCount, 3,
+            "the stored-edit open corrects its speculative preview instead of replacing it silently"
+        )
     }
 
     func testAdjacentPrefetchUsesStoredEditsForNeverOpenedNeighbor() async throws {

@@ -113,12 +113,52 @@ final class PreviewCoordinator {
 
     /// Submit a complete display request. The request is value state, so a caller can safely create
     /// it on the main actor and the renderer can evaluate it elsewhere.
+    ///
+    /// A new submission preempts any admitted predecessor so a stuck render can never hold the
+    /// visible lane hostage; see `submitCorrective` for the one path that intentionally opts out.
     func submit(
         _ request: RenderRequest,
         phase: Phase = .settled,
         assetID: PhotoAssetID? = nil,
         sourceRevision: UInt64 = 0,
         displayRevision: UInt64 = 0
+    ) {
+        admit(
+            request, phase: phase, assetID: assetID, sourceRevision: sourceRevision,
+            displayRevision: displayRevision, cancelSettledPredecessor: true
+        )
+    }
+
+    /// Submit the stored-edit corrective render for a speculative open.
+    ///
+    /// Unlike `submit`, this never cancels an admitted settled predecessor: the predecessor is
+    /// the speculative identity render submitted moments earlier for the same source, and
+    /// cancelling it before its scheduler task first runs coalesces both submissions into the
+    /// corrective request — first pixels then wait on persistence after all (LUMO-317). The
+    /// predecessor is left to reach the engine and the revision fence retires it as stale, while
+    /// the corrective queues behind it on the single-editor lane, so both renders are observed
+    /// in order. The predecessor's job handle is intentionally abandoned (see `admit`); it can no
+    /// longer publish once the corrective advances the revision, and `cancel()` still invalidates
+    /// it along with everything else.
+    func submitCorrective(
+        _ request: RenderRequest,
+        assetID: PhotoAssetID? = nil,
+        sourceRevision: UInt64 = 0,
+        displayRevision: UInt64 = 0
+    ) {
+        admit(
+            request, phase: .settled, assetID: assetID, sourceRevision: sourceRevision,
+            displayRevision: displayRevision, cancelSettledPredecessor: false
+        )
+    }
+
+    private func admit(
+        _ request: RenderRequest,
+        phase: Phase,
+        assetID: PhotoAssetID?,
+        sourceRevision: UInt64,
+        displayRevision: UInt64,
+        cancelSettledPredecessor: Bool
     ) {
         guard !isShutdown else { return }
         let hadPendingWork = interactiveTask != nil || settleTask != nil
@@ -150,7 +190,9 @@ final class PreviewCoordinator {
         cancelInteractiveJob(pump: false)
         interactiveTask?.cancel()
         interactiveTask = nil
-        cancelSettledJob(pump: false)
+        if cancelSettledPredecessor {
+            cancelSettledJob(pump: false)
+        }
         settleTask?.cancel()
         settleTask = nil
         pendingInteractive = nil
@@ -284,6 +326,9 @@ final class PreviewCoordinator {
         interactiveTask = nil
         cancelInteractiveJob(pump: false)
         let jobID = ImageWorkScheduler.JobID("visible-preview-settled-\(token.revision)")
+        // Overwriting here abandons a still-running predecessor's handle when the submission
+        // opted out of preemption (see `submitCorrective`). That job keeps its scheduler slot
+        // until it finishes, but the revision it carries is already stale so it cannot publish.
         settledJobID = jobID
         scheduler.enqueue(id: jobID, lane: .editor, priority: .activeEditor) {
             [weak self, engine] in
