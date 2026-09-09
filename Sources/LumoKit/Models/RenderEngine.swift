@@ -365,6 +365,41 @@ actor RenderEngine: RenderEngining {
     private var processingPrefixMaterializationCount = 0
     private var materializationBudgetSkipCount = 0
     private var memoryPressureSource: DispatchSourceMemoryPressure?
+    /// Pixel-affecting mask topology, deliberately excluding both the global look and the local
+    /// adjustment values applied through the resolved mask. A layer dropping out of the visible
+    /// graph still changes the identity, while an exposure/contrast tick on an active layer does
+    /// not restart an unchanged semantic detector.
+    private struct MaskRecipeIdentity: Encodable {
+        struct Layer: Encodable {
+            let id: UUID
+            let isInverted: Bool
+            let components: [Component]
+        }
+
+        struct Component: Encodable {
+            let id: UUID
+            let mode: MaskCombineMode
+            let isInverted: Bool
+            let source: MaskSource
+        }
+
+        let layers: [Layer]
+
+        init(_ layers: [LocalAdjustmentLayer]) {
+            self.layers = layers.filter(\.hasVisibleLook).map { layer in
+                Layer(
+                    id: layer.id,
+                    isInverted: layer.isInverted,
+                    components: layer.components.filter(\.isUsable).map { component in
+                        Component(
+                            id: component.id, mode: component.mode,
+                            isInverted: component.isInverted, source: component.source
+                        )
+                    }
+                )
+            }
+        }
+    }
     /// Render-domain supersession is keyed by source and full document identity. This lets a
     /// global-only edit keep an older local-mask resolution alive while still rejecting a lagging
     /// render of the same document revision. Local-mask recipe changes invalidate every older
@@ -374,6 +409,17 @@ actor RenderEngine: RenderEngining {
     /// Overlay requests intentionally remain source-wide: the overlay has no document identity and
     /// must still reject a stale nonzero revision after a preview render has started.
     private var latestOverlayMaskRequestRevisions: [String: UInt64] = [:]
+    /// A revisioned preview owns one waiter on the coordinator for every semantic component it is
+    /// currently resolving. Keeping the waiter task here lets a later source or mask recipe cancel
+    /// it immediately; cancelling that task runs `PhotoAnalysisCoordinator.maskWaiterCancelled`
+    /// and stops the shared provider once no still-useful consumer remains.
+    private struct InFlightSemanticMaskResolution {
+        let sourceKey: String
+        let maskIdentity: String
+        let task: Task<LocalMaskPayload, Error>
+    }
+    private var inFlightSemanticMaskResolutions: [UUID: InFlightSemanticMaskResolution] = [:]
+    private var activeRevisionedMaskSource: String?
     private let maximumTrackedMaskSources = 16
     private let maximumTrackedMaskRequests = 64
 
@@ -956,6 +1002,7 @@ actor RenderEngine: RenderEngining {
 
     /// Release all reusable intermediates. This is also the memory-pressure handler.
     func evictForMemoryPressure() {
+        cancelAllSemanticMaskResolutions()
         resources.evictAll()
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
@@ -966,6 +1013,7 @@ actor RenderEngine: RenderEngining {
 
     /// Explicit invalidation for a source-folder refresh or a caller that knows a source changed.
     func invalidateRenderCaches() {
+        cancelAllSemanticMaskResolutions()
         resources.invalidateAll()
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
@@ -1023,7 +1071,7 @@ actor RenderEngine: RenderEngining {
         requestRevision: UInt64 = 0,
         resolveSemanticMasks: Bool = true
     ) async throws -> CIImage? {
-        let maskIdentity = RenderCacheHash.digest(document.localAdjustments)
+        let maskIdentity = RenderCacheHash.digest(MaskRecipeIdentity(document.localAdjustments))
         let documentIdentity = RenderCacheHash.digest(document)
         noteMaskRequest(
             source: source, revision: requestRevision,
@@ -1136,11 +1184,21 @@ actor RenderEngine: RenderEngining {
                     payload = cached
                 } else {
                     do {
-                    payload = try await localMaskResolver.resolve(LocalMaskResolveRequest(
+                        let resolveRequest = LocalMaskResolveRequest(
                             source: source, assetID: assetID, component: component,
                             targetSize: componentTargetSize,
                             quality: quality, transform: transform
-                        ))
+                        )
+                        if component.source.semanticDefinition != nil,
+                           requestRevision > 0,
+                           let maskIdentity {
+                            payload = try await resolveSemanticMask(
+                                resolveRequest, sourceKey: source.cacheFingerprint,
+                                maskIdentity: maskIdentity
+                            )
+                        } else {
+                            payload = try await localMaskResolver.resolve(resolveRequest)
+                        }
                     } catch is CancellationError {
                         throw CancellationError()
                     }
@@ -1224,7 +1282,14 @@ actor RenderEngine: RenderEngining {
     ) {
         guard revision > 0 else { return }
         let sourceKey = source.cacheFingerprint
+        if activeRevisionedMaskSource != sourceKey {
+            cancelSemanticMaskResolutions { $0.sourceKey != sourceKey }
+            activeRevisionedMaskSource = sourceKey
+        }
         if latestMaskRecipeIdentities[sourceKey] != maskIdentity {
+            cancelSemanticMaskResolutions {
+                $0.sourceKey == sourceKey && $0.maskIdentity != maskIdentity
+            }
             latestMaskRecipeIdentities[sourceKey] = maskIdentity
             latestMaskRequestRevisions.keys
                 .filter { $0.hasPrefix(sourceKey + "|") }
@@ -1236,6 +1301,43 @@ actor RenderEngine: RenderEngining {
         }
         noteMaskRequest(source: source, revision: revision)
         trimMaskRequestState()
+    }
+
+    /// Run a revisioned semantic resolve in an explicitly cancellable waiter task. A global-look
+    /// edit has the same `maskIdentity`, so it attaches another waiter to the coordinator's shared
+    /// provider task instead of cancelling or restarting Vision. Source and recipe changes cancel
+    /// the old waiter from `noteMaskRequest` above.
+    private func resolveSemanticMask(
+        _ request: LocalMaskResolveRequest, sourceKey: String, maskIdentity: String
+    ) async throws -> LocalMaskPayload {
+        let id = UUID()
+        let resolver = localMaskResolver
+        let task = Task { try await resolver.resolve(request) }
+        inFlightSemanticMaskResolutions[id] = InFlightSemanticMaskResolution(
+            sourceKey: sourceKey, maskIdentity: maskIdentity, task: task
+        )
+        defer { inFlightSemanticMaskResolutions.removeValue(forKey: id) }
+        return try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            task.cancel()
+        }
+    }
+
+    private func cancelSemanticMaskResolutions(
+        where shouldCancel: (InFlightSemanticMaskResolution) -> Bool
+    ) {
+        for resolution in inFlightSemanticMaskResolutions.values where shouldCancel(resolution) {
+            resolution.task.cancel()
+        }
+    }
+
+    private func cancelAllSemanticMaskResolutions() {
+        for resolution in inFlightSemanticMaskResolutions.values {
+            resolution.task.cancel()
+        }
+        inFlightSemanticMaskResolutions.removeAll(keepingCapacity: true)
+        activeRevisionedMaskSource = nil
     }
 
     private func trimMaskRequestState() {
@@ -1528,6 +1630,7 @@ actor RenderEngine: RenderEngining {
     /// Drop the developed-source memo. Not needed for correctness — the key covers every input — but
     /// it lets a caller release the intermediates when no image is on screen.
     func invalidateSourceCache() {
+        cancelAllSemanticMaskResolutions()
         developedSourceCache.removeAll()
         processingPrefixCache.removeAll()
         localMaskCache.removeAll()

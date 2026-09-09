@@ -281,6 +281,158 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertEqual(firstError, .cancelled)
     }
 
+    func testNavigatingToAnotherMaskedSourceCancelsTheSupersededCoordinatorWaiter() async throws {
+        let firstSource = try source(width: 8, height: 4)
+        let secondSource = try source(width: 10, height: 4)
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("navigation-masks"))
+        let provider = ControllableStoredMaskProvider(store: store)
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store, maskProvider: provider, stages: [:]
+        )
+        let engine = RenderEngine(
+            maskResolver: CoordinatorLocalMaskResolver(coordinator: coordinator)
+        )
+        let document = semanticDocument(target: .subject)
+
+        let first = Task {
+            try await engine.render(RenderRequest(
+                source: firstSource, assetID: PhotoAnalysisCoordinator.assetID(for: firstSource),
+                document: document, targetSize: firstSource.nativeExtent,
+                quality: .preview, output: .raster, requestRevision: 1
+            ))
+        }
+        let firstStarted = await provider.waitForStartedCount(1)
+        XCTAssertTrue(firstStarted)
+
+        let second = Task {
+            try await engine.render(RenderRequest(
+                source: secondSource, assetID: PhotoAnalysisCoordinator.assetID(for: secondSource),
+                document: document, targetSize: secondSource.nativeExtent,
+                quality: .preview, output: .raster, requestRevision: 2
+            ))
+        }
+        let secondStarted = await provider.waitForStartedCount(2)
+        XCTAssertTrue(secondStarted)
+        let cancelledPromptly = await provider.waitForCancellationCount(1)
+        await provider.release()
+
+        XCTAssertTrue(cancelledPromptly, "navigation must cancel the old provider task")
+        do {
+            _ = try await first.value
+            XCTFail("the superseded source render must be cancelled")
+        } catch is CancellationError {
+            // Expected.
+        }
+        _ = try await second.value
+        let navigationCompletedCount = await provider.completedCount
+        XCTAssertEqual(navigationCompletedCount, 1,
+                       "only the currently visible source may finish mask work")
+        await coordinator.shutdown()
+    }
+
+    func testMaskRecipeEditCancelsTheSupersededCoordinatorWaiter() async throws {
+        let source = try source()
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("recipe-edit-masks"))
+        let provider = ControllableStoredMaskProvider(store: store)
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store, maskProvider: provider, stages: [:]
+        )
+        let engine = RenderEngine(
+            maskResolver: CoordinatorLocalMaskResolver(coordinator: coordinator)
+        )
+        let firstDocument = semanticDocument(target: .subject)
+        let secondDocument = semanticDocument(target: .foreground)
+
+        let first = Task {
+            try await engine.render(RenderRequest(
+                source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
+                document: firstDocument, targetSize: source.nativeExtent,
+                quality: .preview, output: .raster, requestRevision: 1
+            ))
+        }
+        let firstStarted = await provider.waitForStartedCount(1)
+        XCTAssertTrue(firstStarted)
+
+        let second = Task {
+            try await engine.render(RenderRequest(
+                source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
+                document: secondDocument, targetSize: source.nativeExtent,
+                quality: .preview, output: .raster, requestRevision: 2
+            ))
+        }
+        let secondStarted = await provider.waitForStartedCount(2)
+        XCTAssertTrue(secondStarted)
+        let cancelledPromptly = await provider.waitForCancellationCount(1)
+        await provider.release()
+
+        XCTAssertTrue(cancelledPromptly, "a changed semantic recipe must cancel its old waiter")
+        do {
+            _ = try await first.value
+            XCTFail("the superseded mask recipe must be cancelled")
+        } catch is CancellationError {
+            // Expected.
+        }
+        _ = try await second.value
+        let recipeCompletedCount = await provider.completedCount
+        XCTAssertEqual(recipeCompletedCount, 1)
+        await coordinator.shutdown()
+    }
+
+    func testGlobalOnlyEditHitsTheResolvedSemanticMaskCacheWithoutCallingProviderAgain() async throws {
+        let source = try source()
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("global-edit-masks"))
+        let provider = ControllableStoredMaskProvider(store: store)
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store, maskProvider: provider, stages: [:]
+        )
+        let engine = RenderEngine(
+            maskResolver: CoordinatorLocalMaskResolver(coordinator: coordinator)
+        )
+        let localAdjustments = semanticDocument(target: .subject).localAdjustments
+        let firstDocument = EditDocument(localAdjustments: localAdjustments)
+        let secondDocument = EditDocument(
+            light: LightAdjustments(contrast: 30), localAdjustments: localAdjustments
+        )
+
+        let first = Task {
+            try await engine.render(RenderRequest(
+                source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
+                document: firstDocument, targetSize: source.nativeExtent,
+                quality: .preview, output: .raster, requestRevision: 1
+            ))
+        }
+        let firstStarted = await provider.waitForStartedCount(1)
+        XCTAssertTrue(firstStarted)
+        await provider.release()
+        _ = try await first.value
+        let before = await engine.cacheStatistics()
+
+        _ = try await engine.render(RenderRequest(
+            source: source, assetID: PhotoAnalysisCoordinator.assetID(for: source),
+            document: secondDocument, targetSize: source.nativeExtent,
+            quality: .preview, output: .raster, requestRevision: 2
+        ))
+        let after = await engine.cacheStatistics()
+
+        let globalEditCallCount = await provider.callCount
+        XCTAssertEqual(globalEditCallCount, 1,
+                       "a global-only edit must not re-enter the Vision provider")
+        XCTAssertGreaterThan(after.localMask.hits, before.localMask.hits,
+                             "the unchanged semantic definition must hit the mask payload cache")
+        await coordinator.shutdown()
+    }
+
+    private func semanticDocument(target: SemanticTarget) -> EditDocument {
+        EditDocument(localAdjustments: [
+            LocalAdjustmentLayer(
+                components: [MaskComponent(
+                    source: .semantic(SemanticMaskDefinition(target: target))
+                )],
+                adjustments: LocalAdjustments(exposure: 1)
+            )
+        ])
+    }
+
     func testSemanticExportRejectsAnUnresolvedMaskWithAnActionableError() async throws {
         let source = try source()
         let semantic = LocalAdjustmentLayer(
@@ -1204,6 +1356,73 @@ private struct SeedMaskResolver: LocalMaskResolving {
             quality: request.quality,
             descriptor: .raster(mask)
         )
+    }
+}
+
+/// A deterministic stand-in for Vision that remains suspended until released and records whether
+/// cancellation reached the provider task. Yield-based gates make the assertions about task
+/// outcomes and counts rather than elapsed wall-clock time.
+private actor ControllableStoredMaskProvider: SemanticMaskProviding {
+    private let store: MaskStore
+    private var isReleased = false
+    private(set) var callCount = 0
+    private(set) var cancellationCount = 0
+    private(set) var completedCount = 0
+
+    init(store: MaskStore) {
+        self.store = store
+    }
+
+    func mask(
+        for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality
+    ) async throws -> RegionMask {
+        callCount += 1
+        do {
+            while !isReleased {
+                try Task.checkCancellation()
+                await Task.yield()
+            }
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            cancellationCount += 1
+            throw CancellationError()
+        }
+
+        let pixels = try NormalizedMask(
+            size: image.dimensions,
+            values: Array(repeating: Float(1), count: image.dimensions.width * image.dimensions.height)
+        )
+        let key = MaskCacheKey(
+            assetID: image.assetID ?? PhotoAnalysisCoordinator.assetID(for: image.source),
+            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: image.source),
+            kind: kind, quality: quality, providerVersion: "controlled-test"
+        )
+        let reference = try await store.store(pixels, for: key, quality: quality)
+        completedCount += 1
+        return RegionMask(
+            kind: kind, bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            quality: quality, reference: reference, confidence: 1, coverage: 1
+        )
+    }
+
+    func release() {
+        isReleased = true
+    }
+
+    func waitForStartedCount(_ expected: Int) async -> Bool {
+        for _ in 0..<100_000 {
+            if callCount >= expected { return true }
+            await Task.yield()
+        }
+        return callCount >= expected
+    }
+
+    func waitForCancellationCount(_ expected: Int) async -> Bool {
+        for _ in 0..<100_000 {
+            if cancellationCount >= expected { return true }
+            await Task.yield()
+        }
+        return cancellationCount >= expected
     }
 }
 

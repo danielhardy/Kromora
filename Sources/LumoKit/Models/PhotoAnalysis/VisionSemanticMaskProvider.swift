@@ -2,6 +2,7 @@ import CoreImage
 import CoreVideo
 import Foundation
 import Vision
+import os
 
 /// The revisions that participate in mask cache identity. Revision 2 of attention saliency is
 /// available on macOS 14. Changing one invalidates only the affected cached masks.
@@ -173,7 +174,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             return cached
         }
 
-        let observations = try detectFaces(image: image)
+        let observations = try await detectFaces(image: image)
         guard !observations.isEmpty else { throw VisionSemanticMaskError.noFaceDetected }
 
         var masks: [RegionMask] = []
@@ -224,7 +225,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         }
         let handler = try makeRequestHandler(for: image)
         do {
-            try handler.perform([request])
+            try await perform(request, using: handler)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -272,7 +273,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         let request = VNGenerateAttentionBasedSaliencyImageRequest()
         let handler = try makeRequestHandler(for: image)
         do {
-            try handler.perform([request])
+            try await perform(request, using: handler)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -351,7 +352,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         request.outputPixelFormat = kCVPixelFormatType_OneComponent32Float
         let handler = try makeRequestHandler(for: image)
         do {
-            try handler.perform([request])
+            try await perform(request, using: handler)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
@@ -375,7 +376,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
                           reference: reference, confidence: 1, coverage: pixels.coverage)
     }
 
-    private func detectFaces(image: AnalysisImage) throws -> [VNFaceObservation] {
+    private func detectFaces(image: AnalysisImage) async throws -> [VNFaceObservation] {
         let request = VNDetectFaceRectanglesRequest()
         guard VNDetectFaceRectanglesRequest.supportedRevisions.contains(configuration.faceRevision) else {
             throw VisionSemanticMaskError.requestFailed(
@@ -385,13 +386,43 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         request.revision = configuration.faceRevision
         let handler = try makeRequestHandler(for: image)
         do {
-            try handler.perform([request])
+            try await perform(request, using: handler)
         } catch is CancellationError {
             throw CancellationError()
         } catch {
             throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
         }
         return request.results ?? []
+    }
+
+    /// Bridge structured-concurrency cancellation into Vision's synchronous request API. Vision
+    /// may report cancellation as its own error rather than `CancellationError`, so consult the
+    /// task state before translating a handler failure.
+    private func perform(_ request: VNRequest, using handler: VNImageRequestHandler) async throws {
+        // VNRequest is not annotated Sendable, but its cancellation API is expressly designed to
+        // abort an executing request. Share only a lock-protected, unretained address with the
+        // cancellation callback. The operation closure owns `request` for at least as long as the
+        // address is present; clearing it under the same lock closes the only lifetime race.
+        let requestAddress = UInt(bitPattern: Unmanaged.passUnretained(request).toOpaque())
+        let cancellationAddress = OSAllocatedUnfairLock<UInt?>(initialState: requestAddress)
+        do {
+            try await withTaskCancellationHandler {
+                try Task.checkCancellation()
+                defer { cancellationAddress.withLock { $0 = nil } }
+                try handler.perform([request])
+            } onCancel: {
+                cancellationAddress.withLock { address in
+                    guard let address, let pointer = UnsafeRawPointer(bitPattern: address) else {
+                        return
+                    }
+                    Unmanaged<VNRequest>.fromOpaque(pointer).takeUnretainedValue().cancel()
+                }
+            }
+        } catch {
+            if Task.isCancelled { throw CancellationError() }
+            throw error
+        }
+        try Task.checkCancellation()
     }
 
     private func makeFaceMask(
