@@ -399,11 +399,13 @@ final class ImageCollection: ObservableObject {
     /// Set (and persist) a folder as the image source: saves a security-scoped
     /// bookmark, records the URL, and scans it. Mirrors `LUTLibrary`'s folder
     /// persistence so the source survives relaunches and the App Sandbox.
-    func setSourceFolder(_ url: URL) {
+    @discardableResult
+    func setSourceFolder(_ url: URL) -> Bool {
         stopScopedURL()
-        saveBookmark(for: url)
+        let didPersistBookmark = saveBookmark(for: url)
         sourceFolderURL = url
         loadFromFolder(url)
+        return didPersistBookmark
     }
 
     /// Restore a previously-chosen source folder on launch. Returns true if a
