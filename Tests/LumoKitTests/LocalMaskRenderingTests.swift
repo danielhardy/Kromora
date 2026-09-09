@@ -378,6 +378,30 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         await coordinator.shutdown()
     }
 
+    func testMaskRequestStateEvictsOldestSourceFirst() async throws {
+        let engine = RenderEngine()
+        var sources: [ImageSource] = []
+        for index in 0..<17 {
+            sources.append(try source(width: 8 + index, height: 4))
+        }
+
+        for (index, source) in sources.enumerated() {
+            _ = try await engine.render(RenderRequest(
+                source: source,
+                document: EditDocument(),
+                targetSize: CGSize(width: 8, height: 4),
+                quality: .preview,
+                output: .raster,
+                requestRevision: UInt64(index + 1)
+            ))
+        }
+
+        let trackedSources = await engine.trackedMaskSourceKeysForTesting
+        XCTAssertEqual(trackedSources.count, 16)
+        XCTAssertEqual(trackedSources, sources.dropFirst().map(\.cacheFingerprint))
+        XCTAssertFalse(trackedSources.contains(sources[0].cacheFingerprint))
+    }
+
     func testGlobalOnlyEditHitsTheResolvedSemanticMaskCacheWithoutCallingProviderAgain() async throws {
         let source = try source()
         let store = MaskStore(directory: tempDirectory.appendingPathComponent("global-edit-masks"))

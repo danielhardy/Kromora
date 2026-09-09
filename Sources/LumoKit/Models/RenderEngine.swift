@@ -406,6 +406,9 @@ actor RenderEngine: RenderEngining {
     /// document entry for that source.
     private var latestMaskRequestRevisions: [String: UInt64] = [:]
     private var latestMaskRecipeIdentities: [String: String] = [:]
+    /// Dictionary iteration order is undefined, so keep the source insertion order separately for
+    /// the bounded supersession table. A recipe replacement makes that source the newest entry.
+    private var maskSourceOrder: [String] = []
     /// Overlay requests intentionally remain source-wide: the overlay has no document identity and
     /// must still reject a stale nonzero revision after a preview render has started.
     private var latestOverlayMaskRequestRevisions: [String: UInt64] = [:]
@@ -1007,6 +1010,7 @@ actor RenderEngine: RenderEngining {
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
         latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
+        maskSourceOrder.removeAll(keepingCapacity: true)
         latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
         Thumbnails.evictForMemoryPressure()
     }
@@ -1018,6 +1022,7 @@ actor RenderEngine: RenderEngining {
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
         latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
+        maskSourceOrder.removeAll(keepingCapacity: true)
         latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
         Thumbnails.invalidateCache()
     }
@@ -1291,6 +1296,8 @@ actor RenderEngine: RenderEngining {
                 $0.sourceKey == sourceKey && $0.maskIdentity != maskIdentity
             }
             latestMaskRecipeIdentities[sourceKey] = maskIdentity
+            maskSourceOrder.removeAll { $0 == sourceKey }
+            maskSourceOrder.append(sourceKey)
             latestMaskRequestRevisions.keys
                 .filter { $0.hasPrefix(sourceKey + "|") }
                 .forEach { latestMaskRequestRevisions.removeValue(forKey: $0) }
@@ -1341,9 +1348,12 @@ actor RenderEngine: RenderEngining {
     }
 
     private func trimMaskRequestState() {
-        if latestMaskRecipeIdentities.count > maximumTrackedMaskSources,
-           let oldestSource = latestMaskRecipeIdentities.first?.key {
-            latestMaskRecipeIdentities.removeValue(forKey: oldestSource)
+        while latestMaskRecipeIdentities.count > maximumTrackedMaskSources {
+            guard let oldestSource = maskSourceOrder.first else { return }
+            maskSourceOrder.removeFirst()
+            guard latestMaskRecipeIdentities.removeValue(forKey: oldestSource) != nil else {
+                continue
+            }
             latestOverlayMaskRequestRevisions.removeValue(forKey: oldestSource)
             latestMaskRequestRevisions.keys
                 .filter { $0.hasPrefix(oldestSource + "|") }
@@ -1354,6 +1364,10 @@ actor RenderEngine: RenderEngining {
             latestMaskRequestRevisions.removeValue(forKey: oldestRequest)
         }
     }
+
+    /// Internal inspection seam for the source-supersession eviction test. The production
+    /// renderer never needs to expose its bounded state.
+    var trackedMaskSourceKeysForTesting: [String] { maskSourceOrder }
 
     private func isCurrentMaskRequest(
         source: ImageSource, revision: UInt64,
