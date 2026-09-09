@@ -117,12 +117,14 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         XCTAssertNil(first.lutID)
         XCTAssertEqual(first.space, .current)
 
-        // Opening an image issues two renders — the preview and the side-by-side baseline — and at
-        // open they are indistinguishable. So assert the property of *every* request rather than
-        // picking one: a mutation that rendered the preview at `.full` slipped past a version of this
-        // test that only inspected `requests.first`, because it happened to read the other request.
+        try await waitUntil("the opening preview to settle") {
+            viewModel.previewState == .ready
+        }
+
+        // The initial source marker is published before the stored-edit lookup completes, but it
+        // must not admit a pristine render that is immediately superseded by the stored document.
         let all = await fake.previewRequests
-        XCTAssertFalse(all.isEmpty)
+        XCTAssertEqual(all.count, 1, "an open admits exactly one settled preview")
         for request in all {
             guard case .preview(let box) = request.scale else {
                 return XCTFail("every on-screen render must use a preview scale, got \(request.scale)")
@@ -130,6 +132,36 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
             XCTAssertEqual(box, CGSize(width: 64, height: 48),
                            "preview planning must respect the native source bounds")
         }
+    }
+
+    func testOpeningStoredEditsSubmitsOnePreviewWithTheStoredDocument() async throws {
+        let image = try makeImageFile()
+        let storedDocument = EditDocument(
+            rawDevelop: RAWDevelopSettings(exposure: 0.75),
+            adjustments: [.vibrance(amount: 0.4)]
+        )
+        let store = makeInMemoryEditStore()
+        try await store.save(
+            storedDocument,
+            for: EditSourceReference(assetID: .file(image), url: image)
+        )
+
+        let fake = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await fake.eventStream())
+        let viewModel = makeAppViewModel(engine: fake, editStore: store)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == image })
+
+        viewModel.selectCollectionImage(at: index)
+        let request = try await awaitRequest(reader, fake, "the stored-edit opening render") { _ in true }
+        XCTAssertEqual(request.document, storedDocument)
+
+        try await waitUntil("the stored-edit preview to settle") {
+            viewModel.previewState == .ready
+        }
+        let previewCount = await fake.previewRequests.count
+        XCTAssertEqual(previewCount, 1, "stored edits must not cause a discarded pristine preview")
     }
 
     /// Navigation changes must remain a display concern while still driving a fresh render when
