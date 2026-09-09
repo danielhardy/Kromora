@@ -46,6 +46,10 @@ protocol RenderEngining: Sendable {
     /// seam; `RenderEngine` overrides it to rasterize directly without encoded bytes.
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage?
 
+    /// Produce one Look-browser candidate. Production engines can reuse the candidate's shared
+    /// developed/pre-LUT prefix when the candidate differs from the base document only by LUT.
+    func makeLookPreviewCGImage(_ request: LookPreviewRequest) async -> sending CGImage?
+
     /// Produce the presentation-only resolved alpha overlay for the masking workspace. This is a
     /// separate seam from `RenderRequest` so inspection state can never affect preview or export.
     func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage?
@@ -264,6 +268,12 @@ extension RenderEngining {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
+    func makeLookPreviewCGImage(_ request: LookPreviewRequest) async -> sending CGImage? {
+        // Compatibility seam for lightweight conformers. Production RenderEngine overrides this
+        // method to reuse the LUT-independent prefix before rasterizing the candidate.
+        await makeCGImage(request.renderRequest)
+    }
+
     func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage? { nil }
 
     func maskedHistogram(
@@ -471,6 +481,9 @@ actor RenderEngine: RenderEngining {
     private var developedSourceCache: BoundedLRUCache<DevelopedSourceCacheKey, CIImage> {
         resources.developedSourceCache
     }
+    private var thumbnailDevelopedSourceCache: BoundedLRUCache<DevelopedSourceCacheKey, CIImage> {
+        resources.thumbnailDevelopedSourceCache
+    }
     private var processingPrefixCache: BoundedLRUCache<ProcessingPrefixCacheKey, CIImage> {
         resources.processingPrefixCache
     }
@@ -497,6 +510,9 @@ actor RenderEngine: RenderEngining {
     private var materializationBudgetSkipCount = 0
     private var nextPrefixFlightToken: UInt64 = 0
     private var processingPrefixFlights: [ProcessingPrefixCacheKey: PrefixMaterializationFlight] = [:]
+    private var nextDevelopedSourceFlightToken: UInt64 = 0
+    private var developedSourceFlights: [DevelopedSourceCacheKey: DevelopedSourceFlight] = [:]
+    private var thumbnailDevelopedSourceFlights: [DevelopedSourceCacheKey: DevelopedSourceFlight] = [:]
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     /// Pixel-affecting mask topology, deliberately excluding both the global look and the local
     /// adjustment values applied through the resolved mask. A layer dropping out of the visible
@@ -635,6 +651,32 @@ actor RenderEngine: RenderEngining {
     /// 256px browsing badge.
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage? {
         await makeCGImage(request)
+    }
+
+    func makeLookPreviewCGImage(_ request: LookPreviewRequest) async -> sending CGImage? {
+        guard request.targetSize.width.isFinite, request.targetSize.height.isFinite,
+              request.targetSize.width > 0, request.targetSize.height > 0,
+              !Task.isCancelled else { return nil }
+
+        let renderRequest = request.renderRequest
+        noteRenderRequest(renderRequest)
+        let image: CIImage?
+        do {
+            image = try await buildImage(
+                request.source, request.candidateDocument, request.look,
+                renderRequest.renderScale, request.space,
+                quality: .thumbnail,
+                prefixDocument: request.isLUTOnlyChange ? request.baseDocument : nil
+            )
+        } catch {
+            return nil
+        }
+        guard !Task.isCancelled, isCurrentRenderRequest(renderRequest),
+              let image, image.extent.isRasterizable else { return nil }
+        return context.createCGImage(
+            image, from: image.extent.integral, format: .RGBA8,
+            colorSpace: request.space.cgColorSpace
+        )
     }
 
     func makeMaskOverlayImage(_ request: MaskOverlayRequest) async -> sending CGImage? {
@@ -1126,6 +1168,7 @@ actor RenderEngine: RenderEngining {
         RenderCacheStatistics(
             preview: previewCache.statistics,
             developedSource: developedSourceCache.statistics,
+            thumbnailDevelopedSource: thumbnailDevelopedSourceCache.statistics,
             processingPrefix: processingPrefixCache.statistics,
             localMask: localMaskCache.statistics,
             lutFilter: lutCache.statistics
@@ -1200,7 +1243,8 @@ actor RenderEngine: RenderEngining {
         maskTransform: LocalMaskRenderTransform = .identity,
         assetID: PhotoAssetID? = nil,
         requestRevision: UInt64 = 0,
-        resolveSemanticMasks: Bool = true
+        resolveSemanticMasks: Bool = true,
+        prefixDocument: EditDocument? = nil
     ) async throws -> CIImage? {
         // Everything in this plan is value state. It is intentionally prepared before entering
         // the decoder/graph section so a future concurrent build worker can do this work without
@@ -1210,6 +1254,7 @@ actor RenderEngine: RenderEngining {
         )
         let maskIdentity = plan.maskIdentity
         let documentIdentity = plan.documentIdentity
+        let sharedPrefixDocument = prefixDocument ?? document
         noteMaskRequest(
             source: source, revision: requestRevision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity
@@ -1225,7 +1270,8 @@ actor RenderEngine: RenderEngining {
         }
         guard let developedFull = await developedSourceForBuild(
             source, document.rawDevelop, scale, space: space,
-            interactive: quality == .interactive
+            interactive: quality == .interactive,
+            thumbnail: quality == .thumbnail
         ) else { return nil }
         try Task.checkCancellation()
         let effectivePlan = plan.rebased(to: developedFull.extent, crop: document.crop)
@@ -1245,22 +1291,22 @@ actor RenderEngine: RenderEngining {
         let includePostRenderWhiteBalance = effectivePlan.includePostRenderWhiteBalance
         let upstream: CIImage
         if !scale.isFull, RenderPipeline.hasPreLUTWork(
-            document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
+            sharedPrefixDocument, includePostRenderWhiteBalance: includePostRenderWhiteBalance
         ) {
             upstream = await processingPrefix(
-                source: source, document: document, developed: working, scale: scale,
+                source: source, document: sharedPrefixDocument, developed: working, scale: scale,
                 sourceROI: processingROI,
                 spatialReferenceExtent: fullFrameExtent,
                 space: space, includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 quality: quality
             ) ?? RenderPipeline.buildPreLUTImage(
-                developed: working, document: document, toneCurveCache: toneCurveCache,
+                developed: working, document: sharedPrefixDocument, toneCurveCache: toneCurveCache,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 spatialReferenceExtent: fullFrameExtent
             )
         } else {
             upstream = RenderPipeline.buildPreLUTImage(
-                developed: working, document: document, toneCurveCache: toneCurveCache,
+                developed: working, document: sharedPrefixDocument, toneCurveCache: toneCurveCache,
                 includePostRenderWhiteBalance: includePostRenderWhiteBalance,
                 spatialReferenceExtent: hasEarlyCrop ? fullFrameExtent : nil
             )
@@ -1317,10 +1363,14 @@ actor RenderEngine: RenderEngining {
         _ rawDevelop: RAWDevelopSettings,
         _ scale: RenderScale,
         space: WorkingSpace,
-        interactive: Bool
+        interactive: Bool,
+        thumbnail: Bool
     ) async -> CIImage? {
         guard source.kind == .standard else {
-            return developedSource(source, rawDevelop, scale, space: space, interactive: interactive)
+            return developedSource(
+                source, rawDevelop, scale, space: space, interactive: interactive,
+                thumbnail: thumbnail
+            )
         }
         let key: DevelopedSourceCacheKey? = scale.isFull ? nil : DevelopedSourceCacheKey(
             source: RenderSourceFingerprint(source),
@@ -1328,29 +1378,64 @@ actor RenderEngine: RenderEngining {
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
             pipelineVersion: RenderPipeline.cacheVersion
         )
-        if let key, let cached = developedSourceCache.value(for: key) {
-            LumoObservability.event(.cacheHit, source: source, quality: .preview,
-                                    detail: "layer=developedSource")
-            return cached
-        }
-        if key != nil {
+        if let key {
+            let flights = thumbnail ? thumbnailDevelopedSourceFlights : developedSourceFlights
+            let cache = thumbnail ? thumbnailDevelopedSourceCache : developedSourceCache
+            if let flight = flights[key] {
+                return await flight.task.value
+            }
+            if let cached = cache.value(for: key) {
+                LumoObservability.event(.cacheHit, source: source, quality: .preview,
+                                        detail: "layer=developedSource")
+                return cached
+            }
             LumoObservability.event(.cacheMiss, source: source, quality: .preview,
                                     detail: "layer=developedSource")
+            nextDevelopedSourceFlightToken &+= 1
+            let token = nextDevelopedSourceFlightToken
+            let task = Task.detached(priority: .userInitiated) { () -> CIImage? in
+                guard !Task.isCancelled else { return nil }
+                return RenderPipeline.developedSource(
+                    source, rawDevelop: rawDevelop, scale: scale
+                )
+            }
+            if thumbnail {
+                thumbnailDevelopedSourceFlights[key] = DevelopedSourceFlight(task: task, token: token)
+            } else {
+                developedSourceFlights[key] = DevelopedSourceFlight(task: task, token: token)
+            }
+            let image = await task.value
+            guard let image else {
+                if thumbnail {
+                    if thumbnailDevelopedSourceFlights[key]?.token == token {
+                        thumbnailDevelopedSourceFlights.removeValue(forKey: key)
+                    }
+                } else if developedSourceFlights[key]?.token == token {
+                    developedSourceFlights.removeValue(forKey: key)
+                }
+                return nil
+            }
+            let isCurrentFlight: Bool
+            if thumbnail {
+                isCurrentFlight = thumbnailDevelopedSourceFlights[key]?.token == token
+                if isCurrentFlight { thumbnailDevelopedSourceFlights.removeValue(forKey: key) }
+            } else {
+                isCurrentFlight = developedSourceFlights[key]?.token == token
+                if isCurrentFlight { developedSourceFlights.removeValue(forKey: key) }
+            }
+            if isCurrentFlight {
+                cache.insert(
+                    image, for: key,
+                    cost: estimatedByteCost(extent: image.extent.integral, bytesPerPixel: 4)
+                )
+            }
+            return image
         }
-        let image: CIImage? = await Task.detached(priority: .userInitiated) { () -> CIImage? in
+
+        return await Task.detached(priority: .userInitiated) { () -> CIImage? in
             guard !Task.isCancelled else { return nil }
-            return RenderPipeline.developedSource(
-                source, rawDevelop: rawDevelop, scale: scale
-            )
+            return RenderPipeline.developedSource(source, rawDevelop: rawDevelop, scale: scale)
         }.value
-        guard let image else { return nil }
-        if let key {
-            developedSourceCache.insert(
-                image, for: key,
-                cost: estimatedByteCost(extent: image.extent.integral, bytesPerPixel: 4)
-            )
-        }
-        return image
     }
 
     private struct MaskPayloadWork: Sendable {
@@ -2027,7 +2112,8 @@ actor RenderEngine: RenderEngining {
         _ rawDevelop: RAWDevelopSettings,
         _ scale: RenderScale,
         space: WorkingSpace,
-        interactive: Bool = false
+        interactive: Bool = false,
+        thumbnail: Bool = false
     ) -> CIImage? {
         let canUsePreparedSession = source.kind == .raw && !scale.isFull &&
             (interactive || interactiveRAWSession?.fingerprint == source.decoderFingerprint)
@@ -2061,8 +2147,9 @@ actor RenderEngine: RenderEngining {
             scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
             pipelineVersion: RenderPipeline.cacheVersion
         )
+        let cache = thumbnail ? thumbnailDevelopedSourceCache : developedSourceCache
         var cacheInterval = LumoObservability.begin(.cache, source: source, quality: .preview)
-        let cachedImage = developedSourceCache.value(for: key)
+        let cachedImage = cache.value(for: key)
         cacheInterval.end()
         if let image = cachedImage {
             LumoObservability.event(.cacheHit, source: source, quality: .preview,
@@ -2087,7 +2174,7 @@ actor RenderEngine: RenderEngining {
                 image, space: space,
                 maxWorkingSetBytes: resources.configuration.developedSourceMaxCostBytes
             ) {
-                developedSourceCache.insert(completed.image, for: key, cost: completed.costBytes)
+                cache.insert(completed.image, for: key, cost: completed.costBytes)
                 return completed.image
             }
             // A lazy RAW output is backed by a decoder graph whose full working set is unknown to
@@ -2099,7 +2186,7 @@ actor RenderEngine: RenderEngining {
 
         let extent = image.extent.integral
         let byteCount = estimatedByteCost(extent: extent, bytesPerPixel: 4)
-        developedSourceCache.insert(image, for: key, cost: byteCount)
+        cache.insert(image, for: key, cost: byteCount)
         return image
     }
 
@@ -2122,6 +2209,7 @@ actor RenderEngine: RenderEngining {
         cancelAllSemanticMaskResolutions()
         latestRenderRequestRevisions.removeAll(keepingCapacity: true)
         developedSourceCache.removeAll()
+        thumbnailDevelopedSourceCache.removeAll()
         processingPrefixCache.removeAll()
         localMaskCache.removeAll()
         localMaskRenderer.removeAllCachedBrushStrokes()

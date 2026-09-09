@@ -86,6 +86,7 @@ final class LookPreviewCoordinator {
 
     private var inFlight: [WorkKey: InFlight] = [:]
     private var nextToken: UInt64 = 0
+    private var activeSource: RenderSourceFingerprint?
     private var isShutdown = false
 
     init(engine: any RenderEngining, scheduler: ImageWorkScheduler) {
@@ -103,11 +104,23 @@ final class LookPreviewCoordinator {
         look: CubeLUT,
         targetSize: CGSize = LookPreviewLayout.renderSize
     ) async -> CGImage? {
-        guard !isShutdown, let source, Self.isValid(targetSize) else { return nil }
+        guard !isShutdown, Self.isValid(targetSize) else { return nil }
+        guard let source else {
+            cancelInFlight(for: nil)
+            activeSource = nil
+            return nil
+        }
 
-        var previewDocument = document
-        // Compare Look character at full strength, independent of the selected Look's slider.
-        previewDocument.lut = LUTSettings(lutID: look.lutID, intensity: 1)
+        let sourceFingerprint = RenderSourceFingerprint(source)
+        if activeSource != sourceFingerprint {
+            cancelInFlight(for: sourceFingerprint)
+            activeSource = sourceFingerprint
+        }
+
+        let preview = LookPreviewRequest(
+            source: source, document: document, look: look, targetSize: targetSize
+        )
+        let previewDocument = preview.candidateDocument
         let key = CacheKey(
             source: source, document: previewDocument, look: look, targetSize: targetSize
         )
@@ -140,17 +153,7 @@ final class LookPreviewCoordinator {
         nextToken &+= 1
         let token = nextToken
         let jobID = workKey.schedulerID
-        let request = RenderRequest(
-            source: source,
-            document: previewDocument,
-            lut: look,
-            targetSize: targetSize,
-            quality: .thumbnail,
-            output: .raster,
-            space: .current
-        )
-
-        let task = Task<CGImage?, Never> { @MainActor [engine, scheduler] in
+        let task = Task<CGImage?, Never> { @MainActor [engine, scheduler, preview] in
             // The row task identity can change on every pointer tick. Hold admission for the same
             // quiet period used by the editor so those transient generations are cancelled before
             // they reach the thumbnail lane.
@@ -173,7 +176,7 @@ final class LookPreviewCoordinator {
                         ) {
                             // RenderEngine creates the CGImage beside its CIContext. This avoids the
                             // PNG encode/decode round trip that the Sendable `render` boundary needs.
-                            rendered.image = await engine.makeCGImage(request)
+                            rendered.image = await engine.makeLookPreviewCGImage(preview)
                         }
                         // Cancellation can race the task's first hop onto the main actor. Check here
                         // as well as in the handler so a job admitted after that hop cannot be left
@@ -202,10 +205,13 @@ final class LookPreviewCoordinator {
                     scheduler.cancel(id: jobID)
                 }
             })
-        if inFlight[workKey]?.token == token {
+        let isCurrentGeneration = inFlight[workKey]?.token == token
+        let isCurrentSource = activeSource == sourceFingerprint
+        if isCurrentGeneration {
             inFlight.removeValue(forKey: workKey)
         }
 
+        guard isCurrentGeneration, isCurrentSource else { return nil }
         if let image {
             cache.insert(image, for: key, cost: Self.cost(of: image))
         }
@@ -220,15 +226,27 @@ final class LookPreviewCoordinator {
         guard !isShutdown else { return }
         isShutdown = true
         let active = Array(inFlight.values)
-        for work in active {
-            work.task.cancel()
-            scheduler.cancel(id: work.jobID)
-        }
+        cancelInFlight(for: nil)
         for work in active {
             _ = await work.task.value
         }
         inFlight.removeAll()
+        activeSource = nil
         await scheduler.cancelAllAndWait()
+    }
+
+    /// A Look list belongs to one source at a time. Replacing the source cancels every old
+    /// candidate and leaves a source-generation fence in `image` so a render that was already at
+    /// the GPU handoff cannot publish into the new list.
+    private func cancelInFlight(for retainedSource: RenderSourceFingerprint?) {
+        let stale = inFlight.filter { key, _ in
+            retainedSource == nil || key.source != retainedSource
+        }
+        for (key, work) in stale {
+            scheduler.cancel(id: work.jobID, pump: false)
+            work.task.cancel()
+            inFlight.removeValue(forKey: key)
+        }
     }
 
     private static func isValid(_ size: CGSize) -> Bool {

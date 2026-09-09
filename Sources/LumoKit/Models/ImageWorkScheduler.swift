@@ -18,7 +18,7 @@ final class ImageWorkScheduler {
         case background = 5
     }
 
-    enum Lane: Sendable {
+    enum Lane: Sendable, Equatable {
         case editor
         case thumbnail
     }
@@ -53,6 +53,12 @@ final class ImageWorkScheduler {
         static let `default` = Configuration()
     }
 
+    struct Admission: Sendable, Equatable {
+        let id: JobID
+        let lane: Lane
+        let priority: Priority
+    }
+
     typealias Operation = @MainActor @Sendable () async -> Void
     typealias TerminalHandler = @MainActor @Sendable (TerminalOutcome) -> Void
 
@@ -81,6 +87,7 @@ final class ImageWorkScheduler {
     private(set) var droppedThumbnailCount = 0
     private(set) var cancelledCount = 0
     private(set) var peakQueuedThumbnailCount = 0
+    private(set) var admissionLog: [Admission] = []
 
     init(configuration: Configuration = .default) {
         self.configuration = Configuration(
@@ -155,6 +162,9 @@ final class ImageWorkScheduler {
             }
         }
         let admitted = queued[job.id] != nil
+        if admitted || running[job.id] != nil {
+            admissionLog.append(Admission(id: job.id, lane: lane, priority: priority))
+        }
         updatePeakQueue()
         pump()
         return admitted || running[job.id] != nil

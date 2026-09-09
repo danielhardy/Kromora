@@ -289,6 +289,78 @@ final class RenderCacheTests: TempDirectoryTestCase {
         XCTAssertEqual(stats.processingPrefix.hits, 1)
     }
 
+    func testSharedPrefixTest() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        let base = EditDocument(light: LightAdjustments(exposure: 0.35))
+        let looks = [
+            TestImages.identityLUT(name: "shared-identity"),
+            TestImages.warmLUT(name: "shared-warm"),
+            CubeLUT(
+                cube: TestImages.toBlackCube(), size: 4, name: "shared-black"
+            ),
+        ]
+
+        let images = await withTaskGroup(of: CGImage?.self, returning: [CGImage].self) { group in
+            for look in looks {
+                group.addTask {
+                    await engine.makeLookPreviewCGImage(LookPreviewRequest(
+                        source: source, document: base, look: look,
+                        targetSize: CGSize(width: 48, height: 32)
+                    ))
+                }
+            }
+            var result: [CGImage] = []
+            for await image in group {
+                if let image { result.append(image) }
+            }
+            return result
+        }
+
+        XCTAssertEqual(images.count, looks.count)
+        for lhs in 0..<images.count {
+            for rhs in (lhs + 1)..<images.count {
+                XCTAssertNotEqual(
+                    try Pixels.bytes(of: images[lhs]), try Pixels.bytes(of: images[rhs]),
+                    "each candidate LUT must produce a distinct thumbnail"
+                )
+            }
+        }
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.thumbnailDevelopedSource.misses, 1)
+        XCTAssertEqual(stats.thumbnailDevelopedSource.count, 1)
+        XCTAssertEqual(stats.processingPrefix.misses, 1)
+        XCTAssertEqual(stats.processingPrefix.count, 1)
+        let work = await engine.workStatistics()
+        XCTAssertEqual(work.processingPrefixMaterializations, 1)
+    }
+
+    func testNonLUTFallbackTest() async throws {
+        let source = try makeSource()
+        let look = TestImages.warmLUT(name: "fallback")
+        let base = EditDocument()
+        let candidate = EditDocument(
+            light: LightAdjustments(exposure: 0.6),
+            lut: LUTSettings(lutID: look.lutID, intensity: 1)
+        )
+        let request = LookPreviewRequest(
+            source: source, baseDocument: base, candidateDocument: candidate,
+            look: look, targetSize: CGSize(width: 48, height: 32)
+        )
+        XCTAssertFalse(request.isLUTOnlyChange)
+
+        let optimizedEngine = RenderEngine()
+        let fullEngine = RenderEngine()
+        let optimizedImage = await optimizedEngine.makeLookPreviewCGImage(request)
+        let fullImage = await fullEngine.makeCGImage(request.renderRequest)
+        let optimizedEntry = try XCTUnwrap(optimizedImage)
+        let fullEntry = try XCTUnwrap(fullImage)
+        assertPixelsEqual(
+            try Pixels.bytes(of: optimizedEntry), try Pixels.bytes(of: fullEntry), tolerance: 1,
+            "a non-LUT candidate must match the full-build reference"
+        )
+    }
+
     func testUpstreamEditsInvalidateOnlyTheProcessingPrefix() async throws {
         let source = try makeSource()
         let engine = RenderEngine()
