@@ -30,6 +30,19 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.errorMessage, message)
     }
 
+    func testOpeningSourceFolderSurfacesBookmarkPersistenceFailure() {
+        let viewModel = makeAppViewModel()
+
+        // Security-scoped bookmarks are only valid for file URLs, so this deterministically
+        // exercises the bookmark-creation failure path while still allowing the current-session
+        // source-folder selection to proceed.
+        viewModel.openSourceFolder(url: URL(string: "https://example.com")!)
+
+        let message = "Lumo could not save the source folder. It will not be restored on next launch."
+        XCTAssertEqual(viewModel.statusMessage, message)
+        XCTAssertEqual(viewModel.errorMessage, message)
+    }
+
     func testEditDatabaseURLIsExposedWithoutExposingTheStore() async {
         let storeURL = tempDirectory.appendingPathComponent("EditStore.store")
         let viewModel = makeAppViewModel(

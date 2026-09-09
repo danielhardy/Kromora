@@ -2027,7 +2027,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Adopt `url` as the source folder (persisted), reveal the browser, and
     /// open its first image. Shared by the menu/toolbar action and folder drops.
     func openSourceFolder(url: URL) {
-        collection.setSourceFolder(url)
+        let didPersistBookmark = collection.setSourceFolder(url)
+        if !didPersistBookmark {
+            presentError(
+                "Lumo could not save the source folder. "
+                    + "It will not be restored on next launch."
+            )
+        }
         isSourceBrowserPresented = true
         navigation.move(to: .grid)
         collection.beginThumbnailDemand()
