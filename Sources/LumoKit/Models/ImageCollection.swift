@@ -254,9 +254,18 @@ final class ImageCollection: ObservableObject {
         defaults: UserDefaults = .standard,
         libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL
     ) {
+        let standardizedLibraryFolderURL = libraryFolderURL.standardizedFileURL
+        let standardizedDefaultLibraryFolderURL = Self.defaultLibraryFolderURL.standardizedFileURL
+        if Self.shouldRejectProductionLibraryInTests,
+           standardizedLibraryFolderURL == standardizedDefaultLibraryFolderURL {
+            preconditionFailure(
+                "Tests must use TempDirectoryTestCase.makeTestCollection() with an isolated "
+                    + "libraryFolderURL and UserDefaults."
+            )
+        }
         self.scheduler = scheduler
         self.defaults = defaults
-        self.libraryFolderURL = libraryFolderURL.standardizedFileURL
+        self.libraryFolderURL = standardizedLibraryFolderURL
         if let data = defaults.data(forKey: Self.cullingStateKey),
            let states = try? JSONDecoder().decode([String: PersistedCullingState].self, from: data) {
             self.persistedCullingStates = states
@@ -271,6 +280,11 @@ final class ImageCollection: ObservableObject {
         return base
             .appendingPathComponent("Lumo", isDirectory: true)
             .appendingPathComponent("Library", isDirectory: true)
+    }
+
+    private nonisolated static var shouldRejectProductionLibraryInTests: Bool {
+        ProcessInfo.processInfo.environment["LUMO_TEST_ISOLATION"] == "1"
+            || NSClassFromString("XCTestCase") != nil
     }
 
     deinit {

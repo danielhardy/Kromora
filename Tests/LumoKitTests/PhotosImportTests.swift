@@ -9,7 +9,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 80, height: 60, orientation: 6, named: "portrait.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
 
         collection.beginDataImport()
         let item = ImageCollection.PhotoImportItem(
@@ -31,7 +31,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         )
         let data = try Data(contentsOf: url)
         let item = ImageCollection.PhotoImportItem(name: "Digest", data: data)
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
 
         collection.beginDataImport()
         let id = collection.appendDataImport(item, ordinal: 0)
@@ -46,7 +46,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "source.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
 
         collection.beginDataImport()
         _ = collection.appendDataImport(
@@ -98,7 +98,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "filtered.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
 
         collection.setFilter(LibraryFilter(flag: .picks, rating: .any))
         collection.beginDataImport(reservedCount: 3)
@@ -137,7 +137,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "overflow.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
 
         collection.beginDataImport(reservedCount: 2)
         let overflowID = collection.appendDataImport(
@@ -171,7 +171,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "stable-entry.jpg", in: tempDirectory
         )
         let data = try Data(contentsOf: url)
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
 
         collection.beginDataImport(reservedCount: 2)
         let firstID = collection.appendDataImport(

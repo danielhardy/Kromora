@@ -96,7 +96,7 @@ final class LibraryGridTests: TempDirectoryTestCase {
             )
         }
 
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()
 
@@ -127,7 +127,7 @@ final class LibraryGridTests: TempDirectoryTestCase {
             maxConcurrentThumbnails: 1,
             maxQueuedThumbnails: 4
         ))
-        let collection = ImageCollection(scheduler: scheduler)
+        let collection = makeTestCollection(scheduler: scheduler)
         collection.beginThumbnailDemand()
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()

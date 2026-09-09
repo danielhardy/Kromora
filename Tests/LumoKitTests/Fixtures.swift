@@ -440,6 +440,23 @@ class TempDirectoryTestCase: XCTestCase {
         return defaults
     }
 
+    /// Creates a collection whose durable library and persisted state are private to this test.
+    /// Collection tests must use this helper rather than the production defaults so generated
+    /// imports can never land in the user's managed Library.
+    @MainActor
+    func makeTestCollection(
+        scheduler: ImageWorkScheduler? = nil,
+        defaults: UserDefaults? = nil,
+        libraryFolderURL: URL? = nil
+    ) -> ImageCollection {
+        ImageCollection(
+            scheduler: scheduler ?? ImageWorkScheduler(),
+            defaults: defaults ?? makeTestUserDefaults(),
+            libraryFolderURL: libraryFolderURL
+                ?? tempDirectory.appendingPathComponent("managed-library", isDirectory: true)
+        )
+    }
+
     @MainActor
     func makeLUTLibrary(includeBundled: Bool = false) -> LUTLibrary {
         LUTLibrary(
