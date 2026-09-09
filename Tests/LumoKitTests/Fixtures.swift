@@ -144,6 +144,74 @@ enum Fixtures {
         return url
     }
 
+    /// Write the asymmetric gradient used by orientation tests as a JPEG. A flat fixture can prove
+    /// that the axes were swapped, but not that a mirror or 180° transform was applied in the right
+    /// direction.
+    @discardableResult
+    static func writeGradientJPEG(
+        width: Int,
+        height: Int,
+        orientation: Int,
+        named name: String,
+        in directory: URL
+    ) throws -> URL {
+        try writeOrientedImage(
+            makeGradientCGImage(width: width, height: height),
+            typeIdentifier: UTType.jpeg.identifier,
+            orientation: orientation,
+            named: name,
+            in: directory
+        )
+    }
+
+    /// HEIC is optional on the runner (the encoder is provided by the installed ImageIO codecs), so
+    /// callers can skip the format-specific assertion when this environment cannot write one.
+    static func writeGradientHEIC(
+        width: Int,
+        height: Int,
+        orientation: Int,
+        named name: String,
+        in directory: URL
+    ) throws -> URL? {
+        let url = directory.appendingPathComponent(name)
+        guard let dest = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.heic.identifier as CFString, 1, nil
+        ) else { return nil }
+        let properties: [CFString: Any] = [
+            kCGImagePropertyOrientation: orientation,
+            kCGImagePropertyTIFFDictionary: [
+                kCGImagePropertyTIFFOrientation: orientation
+            ] as [CFString: Any],
+        ]
+        CGImageDestinationAddImage(
+            dest, try makeGradientCGImage(width: width, height: height), properties as CFDictionary
+        )
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return url
+    }
+
+    private static func writeOrientedImage(
+        _ image: CGImage,
+        typeIdentifier: String,
+        orientation: Int,
+        named name: String,
+        in directory: URL
+    ) throws -> URL {
+        let url = directory.appendingPathComponent(name)
+        guard let dest = CGImageDestinationCreateWithURL(
+            url as CFURL, typeIdentifier as CFString, 1, nil
+        ) else { throw FixtureError.cannotCreateDestination }
+        let properties: [CFString: Any] = [
+            kCGImagePropertyOrientation: orientation,
+            kCGImagePropertyTIFFDictionary: [
+                kCGImagePropertyTIFFOrientation: orientation
+            ] as [CFString: Any],
+        ]
+        CGImageDestinationAddImage(dest, image, properties as CFDictionary)
+        guard CGImageDestinationFinalize(dest) else { throw FixtureError.cannotWriteImage }
+        return url
+    }
+
     /// Write a JPEG carrying a set of EXIF/TIFF/GPS values, for metadata tests.
     @discardableResult
     static func writeJPEG(

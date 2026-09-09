@@ -1,4 +1,5 @@
 import XCTest
+import AppKit
 import CoreImage
 import CoreGraphics
 @testable import LumoKit
@@ -73,6 +74,14 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             )
         }
         return stride(from: 0, to: pixels.count, by: 4).map { pixels[$0] }
+    }
+
+    private func ciImage(from thumbnail: NSImage) throws -> CIImage {
+        var proposedRect = NSRect(origin: .zero, size: thumbnail.size)
+        let cgImage = try XCTUnwrap(thumbnail.cgImage(
+            forProposedRect: &proposedRect, context: nil, hints: nil
+        ))
+        return CIImage(cgImage: cgImage)
     }
 
     // MARK: - Identity
@@ -672,24 +681,81 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         let full = try XCTUnwrap(RenderPipeline.developedSource(
             source, rawDevelop: RAWDevelopSettings(), scale: .full
         ))
-        XCTAssertEqual(full.extent.size, nativeExtent,
+        let preChangeReference = try XCTUnwrap(CIImage(contentsOf: url))
+        XCTAssertEqual(full.extent.size, preChangeReference.extent.size,
                        "full resolution must stay on the native decode path")
+        assertPixelsEqual(
+            try Pixels.bytes(of: full), try Pixels.bytes(of: preChangeReference), tolerance: 0,
+            "full resolution must remain pixel-identical to the pre-change CIImage decode"
+        )
     }
 
     func testPreviewDecodeBakesOrientationLikeTheFilmstrip() throws {
-        let url = try Fixtures.writeJPEG(
-            width: 80, height: 60, orientation: 6, named: "preview-portrait.jpg", in: tempDirectory
-        )
-        let source = ImageSource(url: url, nativeExtent: CGSize(width: 60, height: 80))
-        let preview = try XCTUnwrap(RenderPipeline.developedSource(
-            source, rawDevelop: RAWDevelopSettings(),
-            scale: .preview(maxSize: CGSize(width: 40, height: 40))
-        ))
-        let thumbnail = try XCTUnwrap(Thumbnails.generate(from: url, maxPixelSize: 40))
+        // Orientations 2 and 3 preserve the aspect ratio, so an extent-only assertion would let a
+        // disagreement about mirror/rotation direction pass. The gradient is intentionally
+        // asymmetric so the pixel comparison catches those transforms.
+        let jpegCases: [(url: URL, orientation: Int)] = try [2, 3, 6].map { orientation in
+            (
+                try Fixtures.writeGradientJPEG(
+                    width: 80, height: 60, orientation: orientation,
+                    named: "preview-orientation-\(orientation).jpg", in: tempDirectory
+                ),
+                orientation
+            )
+        }
+        var cases = jpegCases
+        if let heicURL = try Fixtures.writeGradientHEIC(
+            width: 80, height: 60, orientation: 6,
+            named: "preview-orientation-heic.heic", in: tempDirectory
+        ) {
+            cases.append((heicURL, 6))
+        }
 
-        XCTAssertEqual(preview.extent.width, thumbnail.size.width, accuracy: 2)
-        XCTAssertEqual(preview.extent.height, thumbnail.size.height, accuracy: 2)
-        XCTAssertGreaterThan(preview.extent.height, preview.extent.width)
+        for (url, orientation) in cases {
+            let displayedSize = [5, 6, 7, 8].contains(orientation)
+                ? CGSize(width: 60, height: 80)
+                : CGSize(width: 80, height: 60)
+            let source = ImageSource(url: url, nativeExtent: displayedSize)
+            let preview = try XCTUnwrap(RenderPipeline.developedSource(
+                source, rawDevelop: RAWDevelopSettings(),
+                scale: .preview(maxSize: CGSize(width: 40, height: 40))
+            ))
+            let thumbnail = try XCTUnwrap(Thumbnails.generate(from: url, maxPixelSize: 40))
+            let thumbnailImage = try ciImage(from: thumbnail)
+            let commonSize = preview.extent.integral.size
+
+            XCTAssertEqual(thumbnailImage.extent.size, commonSize,
+                           "orientation \(orientation) thumbnail geometry should match preview")
+            assertPixelsEqual(
+                try Pixels.bytes(of: RenderPipeline.resized(preview, to: commonSize)),
+                try Pixels.bytes(of: RenderPipeline.resized(thumbnailImage, to: commonSize)),
+                tolerance: 4,
+                "orientation \(orientation) preview pixels should match the filmstrip thumbnail"
+            )
+        }
+    }
+
+    func testPreviewDecodeWithZeroDimensionNativeExtentUsesFallbackAndRejectsCorruptInput() throws {
+        let validURL = try Fixtures.writeGradientPNG(
+            width: 80, height: 60, named: "zero-native-extent.png", in: tempDirectory
+        )
+        let validSource = ImageSource(url: validURL, nativeExtent: .zero)
+        let previewScale = RenderScale.preview(maxSize: CGSize(width: 40, height: 40))
+
+        // A zero native extent disables the thumbnail fast path, but a valid source must still use
+        // the established CIImage fallback and downscale successfully.
+        XCTAssertNotNil(RenderPipeline.developedSource(
+            validSource, rawDevelop: RAWDevelopSettings(), scale: previewScale
+        ))
+
+        // The same fallback must retain the old corrupt-input behavior instead of turning the
+        // thumbnail guard into a successful-looking empty render.
+        let corruptSource = ImageSource(
+            backing: .data(Data("not an image".utf8)), kind: .standard, nativeExtent: .zero
+        )
+        XCTAssertNil(RenderPipeline.developedSource(
+            corruptSource, rawDevelop: RAWDevelopSettings(), scale: previewScale
+        ))
     }
 
     // MARK: - Colour space
