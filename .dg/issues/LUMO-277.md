@@ -2,7 +2,7 @@
 id: LUMO-277
 title: Grain kernel likely shares vignette's samplerCoord tiled-Metal seam defect
 type: bug
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: claude
@@ -10,12 +10,12 @@ creation_provenance:
   actor: claude
 labels:
   - verification
+created: 2026-09-07T15:01:14.861Z
+updated: 2026-09-09T14:10:41.734Z
 parent: LUMO-271
 depends_on:
   - LUMO-271
-created: 2026-09-07T15:01:14.861Z
-updated: 2026-09-07T15:01:14.861Z
-order: m
+order: z8
 board: product
 ---
 

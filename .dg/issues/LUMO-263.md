@@ -7,10 +7,10 @@ priority: low
 labels:
   - persistence
 created: 2026-09-07T01:10:27.518Z
-updated: 2026-09-07T04:14:23.439Z
+updated: 2026-09-09T14:10:19.784Z
 depends_on:
   - LUMO-244
-order: x3
+order: x6
 board: product
 ---
 
