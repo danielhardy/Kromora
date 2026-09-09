@@ -77,6 +77,94 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
     }
 
+    func testDebouncedEditBurstCoalescesToOneTrailingThumbnail() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "burst.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "burst-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: first, second: second)
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the burst photo") {
+            viewModel.sourceURL == first && viewModel.previewState == .ready
+        }
+        let assetID = viewModel.collection.items[0].id
+        let initialThumbnailCount = await engine.thumbnailRequests.filter {
+            $0.assetID == assetID
+        }.count
+
+        for step in 1...10 {
+            viewModel.updateDocument(debounced: true) {
+                $0.adjustments = [.exposure(ev: Double(step) / 10.0)]
+            }
+        }
+
+        try await waitUntil("the trailing burst thumbnail") {
+            await engine.thumbnailRequests.contains {
+                $0.assetID == assetID && $0.document.adjustments == [.exposure(ev: 1.0)]
+            }
+        }
+
+        let thumbnails = await engine.thumbnailRequests.filter { $0.assetID == assetID }
+        XCTAssertEqual(
+            thumbnails.count - initialThumbnailCount, 1,
+            "a ten-tick edit burst should submit one trailing thumbnail render"
+        )
+        XCTAssertEqual(thumbnails.last?.document.adjustments, [.exposure(ev: 1.0)])
+    }
+
+    func testEditedThumbnailSkipsPreviewInteractionAndRunsOnceAfterItEnds() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "interaction.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "interaction-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: first, second: second)
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the interaction photo") {
+            viewModel.sourceURL == first && viewModel.previewState == .ready
+        }
+        let assetID = viewModel.collection.items[0].id
+        let initialThumbnailCount = await engine.thumbnailRequests.filter {
+            $0.assetID == assetID
+        }.count
+
+        viewModel.beginPreviewInteraction()
+        for step in 1...10 {
+            viewModel.updateDocument(debounced: true) {
+                $0.adjustments = [.exposure(ev: Double(step) / 10.0)]
+            }
+        }
+        await Task.yield()
+        let thumbnailCountDuringInteraction = await engine.thumbnailRequests.filter {
+            $0.assetID == assetID
+        }.count
+        XCTAssertEqual(
+            thumbnailCountDuringInteraction,
+            initialThumbnailCount,
+            "thumbnail work stays out of the interactive preview lane"
+        )
+
+        viewModel.endPreviewInteraction()
+        try await waitUntil("the post-interaction thumbnail") {
+            await engine.thumbnailRequests.contains {
+                $0.assetID == assetID && $0.document.adjustments == [.exposure(ev: 1.0)]
+            }
+        }
+
+        let thumbnails = await engine.thumbnailRequests.filter { $0.assetID == assetID }
+        XCTAssertEqual(thumbnails.count - initialThumbnailCount, 1)
+        XCTAssertEqual(thumbnails.last?.document.adjustments, [.exposure(ev: 1.0)])
+    }
+
     func testFilmstripSelectionPresentsRepeatedSelectionAndSettlesHistogram() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "first.png", in: tempDirectory

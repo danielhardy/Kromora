@@ -1977,6 +1977,23 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard !isShuttingDown,
               let item = collection.items.first(where: { $0.id == assetID }) else { return }
 
+        // A demand callback can arrive while the preview debounce is already pending (or after a
+        // cell reappears during a gesture). Keep the active photo's request as value state and let
+        // the settle path admit it; no thumbnail should enter the shared render actor in either
+        // interval.
+        if isPreviewInteractionActive || previewDebounceTask != nil {
+            if assetID == activeAssetID {
+                pendingEditedThumbnailAssetID = assetID
+                editedThumbnailDebounceTasks[assetID]?.cancel()
+                editedThumbnailDebounceTasks[assetID] = nil
+                workScheduler.cancel(
+                    id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw),
+                    pump: false
+                )
+            }
+            return
+        }
+
         let jobID = ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw)
         if workScheduler.contains(jobID) {
             if force {
@@ -2702,6 +2719,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             guard !Task.isCancelled, let self,
                   self.previewDebounceGeneration == generation,
                   self.sourceRevision == revision else { return }
+            // The handle represents pending work, not the completed task. Clear it before
+            // scheduling the trailing thumbnail so scheduleEditedThumbnailAfterSettle can admit
+            // exactly one render for the settled document.
+            self.previewDebounceTask = nil
             self.schedulePreview()
             if let assetID = self.pendingEditedThumbnailAssetID {
                 self.scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
