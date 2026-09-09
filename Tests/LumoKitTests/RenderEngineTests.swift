@@ -345,6 +345,32 @@ final class RenderEngineTests: TempDirectoryTestCase {
                           "preview and export must rasterize to the same pixels")
     }
 
+    /// The badge path rasterizes directly to a CGImage, while the encoded thumbnail API remains
+    /// available to callers that need bytes. Keep both outputs pixel-equivalent at the bounded
+    /// thumbnail scale so the fast path cannot subtly change the library badge.
+    func testDirectThumbnailRasterMatchesEncodedThumbnail() async throws {
+        let engine = RenderEngine()
+        let request = RenderRequest(
+            source: source,
+            document: EditDocument(adjustments: [.exposure(ev: 0.35)]),
+            targetSize: CGSize(width: Thumbnails.defaultMaxPixelSize,
+                               height: Thumbnails.defaultMaxPixelSize),
+            quality: .thumbnail,
+            output: .raster,
+            space: .current
+        )
+
+        let maybeDirect = await engine.makeThumbnailCGImage(request)
+        let direct = try XCTUnwrap(maybeDirect)
+        let encoded = try await engine.renderThumbnail(request)
+        let decoded = try Pixels.decode(encoded.data)
+
+        XCTAssertEqual(direct.width, decoded.width)
+        XCTAssertEqual(direct.height, decoded.height)
+        assertPixelsEqual(try Pixels.bytes(of: direct), try Pixels.bytes(of: decoded),
+                          "direct thumbnail raster must preserve encoded thumbnail pixels")
+    }
+
     func testExportMetadataPolicyRoundTripsSourceMetadataForEveryFormat() async throws {
         let url = try Fixtures.writeJPEG(
             named: "metadata-source.jpg",
