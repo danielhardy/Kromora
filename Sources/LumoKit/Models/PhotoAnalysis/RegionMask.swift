@@ -104,12 +104,17 @@ struct NormalizedMask: Codable, Sendable, Equatable {
     /// Used only by internal producers after they have validated the dimensions and established
     /// the [0, 1] invariant. The optional coverage is for small/test call sites; hot producers
     /// pass the sum they already accumulated while generating the values.
-    init(trustingSize size: PixelDimensions, values: [Float], coverage: Float? = nil) {
+    init(
+        trustingSize size: PixelDimensions,
+        values: [Float],
+        coverage: Float? = nil,
+        isBinary: Bool? = nil
+    ) {
         precondition(values.count == size.width * size.height, "mask values must match mask size")
         self.size = size
         self.values = values
         self.coverage = coverage ?? (values.isEmpty ? 0 : values.reduce(0, +) / Float(values.count))
-        self.isBinary = values.allSatisfy { $0 == 0 || $0 == 1 }
+        self.isBinary = isBinary ?? values.allSatisfy { $0 == 0 || $0 == 1 }
     }
 
     private enum CodingKeys: String, CodingKey {

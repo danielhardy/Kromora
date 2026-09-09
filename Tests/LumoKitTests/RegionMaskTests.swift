@@ -51,11 +51,40 @@ final class RegionMaskTests: XCTestCase {
         )
 
         XCTAssertEqual(mask.coverage, 0.375, accuracy: 0.0001)
+        XCTAssertFalse(mask.isBinary)
         let decoded = try JSONDecoder().decode(
             NormalizedMask.self, from: JSONEncoder().encode(mask)
         )
         XCTAssertEqual(decoded, mask)
     }
+
+    #if DEBUG
+    func testTrustedMaskPreconditionRejectsCountMismatch() throws {
+        let environmentKey = "LUMO_EXPECT_TRUSTED_MASK_PRECONDITION"
+        if ProcessInfo.processInfo.environment[environmentKey] == "1" {
+            _ = NormalizedMask(
+                trustingSize: PixelDimensions(width: 2, height: 2), values: [0]
+            )
+            XCTFail("the trusted initializer should have trapped")
+            return
+        }
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = [
+            "xctest",
+            "-XCTest",
+            "LumoKitTests.RegionMaskTests/testTrustedMaskPreconditionRejectsCountMismatch",
+            Bundle(for: type(of: self)).bundleURL.path,
+        ]
+        var environment = ProcessInfo.processInfo.environment
+        environment[environmentKey] = "1"
+        process.environment = environment
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertNotEqual(process.terminationStatus, 0)
+    }
+    #endif
 
     func testMaskStoreKeepsQualityLevelsIndependentAcrossReopen() async throws {
         let directory = try Fixtures.makeTempDirectory("MaskStoreTests")

@@ -533,7 +533,8 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         }
         return NormalizedMask(
             trustingSize: size, values: values,
-            coverage: values.isEmpty ? 0 : total / Float(values.count)
+            coverage: values.isEmpty ? 0 : total / Float(values.count),
+            isBinary: true
         )
     }
 
