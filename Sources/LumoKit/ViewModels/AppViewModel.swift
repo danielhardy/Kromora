@@ -684,6 +684,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let hadInMemorySession: Bool
         let traceQuality: String
     }
+    private struct AdjacentPreviewCandidate: Sendable {
+        let source: ImageSource
+        let inMemoryDocument: EditDocument?
+        let reference: EditSourceReference
+    }
     /// One non-cancellable source preparation is allowed to run. New navigation replaces this one
     /// pending value, so a burst cannot build a queue of obsolete RAW decoder operations.
     private var pendingSourceLoad: SourceLoadRequest?
@@ -1455,7 +1460,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             .filter { $0 != selected && abs($0 - selected) <= 2 }
             .sorted { abs($0 - selected) < abs($1 - selected) }
             .prefix(2)
-            .compactMap { index -> (source: ImageSource, document: EditDocument?, lut: CubeLUT?, reference: EditSourceReference)? in
+            .compactMap { index -> AdjacentPreviewCandidate? in
                 let item = collection.items[index]
                 guard let dimensions = item.asset.dimensions,
                       dimensions.width > 0, dimensions.height > 0 else { return nil }
@@ -1470,11 +1475,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 } else {
                     return nil
                 }
-                let document = editSessions[item.id]?.document
-                return (
+                return AdjacentPreviewCandidate(
                     source: source,
-                    document: document,
-                    lut: document.flatMap { resolvedLUT($0.lut.lutID) },
+                    inMemoryDocument: editSessions[item.id]?.document,
                     reference: EditSourceReference(assetID: item.id, url: item.url)
                 )
             }
@@ -1489,33 +1492,56 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             guard !Task.isCancelled, let self,
                   self.activeAssetID == assetID,
                   self.sourceRevision == revision else { return }
+
+            // Resolve all cold neighbors before admitting the scheduler job. The editor lane is
+            // reserved for renderer work, and a corrupt/unavailable record must not be converted
+            // into a guessed identity document that is immediately discarded on open.
+            let coldCandidates = candidates.filter { $0.inMemoryDocument == nil }
+            let storedResults = await editStore.load(for: coldCandidates.map(\.reference))
+            guard !Task.isCancelled,
+                  self.activeAssetID == assetID,
+                  self.sourceRevision == revision else { return }
+
+            var storedResultIndex = 0
+            var requests: [RenderRequest] = []
+            requests.reserveCapacity(candidates.count)
+            for candidate in candidates {
+                let document: EditDocument
+                if let inMemory = candidate.inMemoryDocument {
+                    document = inMemory
+                } else {
+                    let stored = storedResults[storedResultIndex]
+                    storedResultIndex += 1
+                    guard stored.isUsableForPrefetch else { continue }
+                    document = stored.document
+                }
+                requests.append(
+                    RenderRequest(
+                        source: candidate.source,
+                        document: document,
+                        lut: self.resolvedLUT(document.lut.lutID),
+                        targetSize: self.previewBackingSize,
+                        quality: .preview,
+                        output: .raster,
+                        space: .current
+                    )
+                )
+            }
+            guard !requests.isEmpty,
+                  !Task.isCancelled,
+                  self.activeAssetID == assetID,
+                  self.sourceRevision == revision else { return }
+
             self.workScheduler.enqueue(
                 id: self.adjacentPreviewPrefetchJobID, lane: .editor, priority: .background
             ) { [weak self, engine] in
                 guard !Task.isCancelled, let self,
                       self.activeAssetID == assetID,
                       self.sourceRevision == revision else { return }
-                for candidate in candidates {
+                for request in requests {
                     guard !Task.isCancelled,
                           self.activeAssetID == assetID,
                           self.sourceRevision == revision else { return }
-                    let document: EditDocument
-                    if let inMemory = candidate.document {
-                        document = inMemory
-                    } else {
-                        // A neighbor may never have been opened, so its in-memory session is not
-                        // authoritative. Resolve disk state immediately before admission rather
-                        // than rendering a known-wrong identity document.
-                        let stored = await editStore.load(for: candidate.reference)
-                        guard stored.found || !stored.status.isActionable else { continue }
-                        document = stored.document
-                    }
-                    let lut = self.resolvedLUT(document.lut.lutID)
-                    let request = RenderRequest(
-                        source: candidate.source, document: document, lut: lut,
-                        targetSize: self.previewBackingSize,
-                        quality: .preview, output: .raster, space: .current
-                    )
                     _ = try? await engine.render(request)
                 }
             }

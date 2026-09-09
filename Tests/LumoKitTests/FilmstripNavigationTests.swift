@@ -137,4 +137,51 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         let previewCount = await engine.previewRequests.count
         XCTAssertEqual(previewCount, 2, "each navigation open must admit one settled preview")
     }
+
+    func testAdjacentPrefetchUsesStoredEditsForNeverOpenedNeighbor() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "prefetch-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "prefetch-second.png", in: tempDirectory
+        )
+        let storedDocument = EditDocument(adjustments: [.exposure(ev: 0.8)])
+        let store = makeInMemoryEditStore()
+        try await store.save(
+            storedDocument,
+            for: EditSourceReference(assetID: .file(second), url: second)
+        )
+
+        let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
+        let viewModel = makeAppViewModel(engine: engine, editStore: store)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == first })
+
+        viewModel.selectCollectionImage(at: firstIndex)
+        _ = try await TestSynchronization.nextEvent(from: reader, "the first settled preview") {
+            if case .previewCompleted(let request) = $0 {
+                return request.source?.backing == .url(first)
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await engine.previewRequests.count)"
+        }
+
+        let prefetched = try await TestSynchronization.nextEvent(
+            from: reader, "the stored-edit neighbor prefetch"
+        ) {
+            if case .previewRequested(let request) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await engine.previewRequests.count)"
+        }
+        guard case .previewRequested(let request) = prefetched else {
+            return XCTFail("expected the adjacent neighbor prefetch")
+        }
+        XCTAssertEqual(request.document, storedDocument)
+    }
 }
