@@ -171,15 +171,33 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         // whose tag changes but never reaches AppViewModel.
         viewModel.setCanvasZoom(2)
         XCTAssertEqual(viewModel.canvasState.navigation.zoom, 2, "exercise the over-100% canvas path")
+        // Import completion publishes the Look before the automatically auditioned preview has
+        // necessarily reached the renderer. Establish that request first; otherwise the ID-click
+        // waiter can mistake the delayed audition for the click's request after LUMO-308 added the
+        // speculative opening preview.
+        try await waitForLUTRequest(fake, id: imported.lutID, intensity: 1)
+        let auditionedCount = await fake.previewRequests.count
         viewModel.selectLook(nil)
+        // The clear's preview is submitted asynchronously through the coordinator/scheduler,
+        // so the click baseline must be settled after that render lands. Reading the count
+        // immediately races it, and the click's submit supersedes the clear's while Look-browser
+        // candidates (thumbnail lane, hardcoded intensity 1) share the same recording seam —
+        // under parallel load that churn can leave the click's waiter timing out against an
+        // unsettled baseline (LUMO-321). A nil-LUT record is unambiguous here: candidates always
+        // carry a concrete Look, and every earlier cleared-state render predates the audition.
+        try await waitForNewLUTRequest(fake, after: auditionedCount, id: nil, intensity: 1)
         let requestsBeforeClick = await fake.previewRequests.count
         viewModel.selectLook(id: imported.lutID)
 
         XCTAssertEqual(viewModel.selectedLookID, imported.lutID)
         XCTAssertEqual(viewModel.selectedLook, imported)
-        try await waitForLUTRequest(fake, id: imported.lutID, intensity: 1)
-        let requestsAfterClick = await fake.previewRequests.count
-        XCTAssertGreaterThan(requestsAfterClick, requestsBeforeClick)
+        // The waiter's success is the assertion: it returns only after a new request carrying
+        // the clicked Look reaches the engine. (A separate count comparison here proved nothing
+        // beyond that — the log is append-only — and failed as a knock-on whenever this waiter
+        // timed out.)
+        try await waitForNewLUTRequest(
+            fake, after: requestsBeforeClick, id: imported.lutID, intensity: 1
+        )
 
         viewModel.setLookIntensity(0.35)
         await viewModel.flushPendingWrites()
@@ -264,7 +282,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
     }
 
     private func waitForLUTRequest(
-        _ fake: FakeRenderEngine, id: LUTID, intensity: Double
+        _ fake: FakeRenderEngine, id: LUTID?, intensity: Double
     ) async throws {
         let deadline = Date().addingTimeInterval(5)
         while Date() < deadline {
@@ -275,5 +293,20 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("timed out waiting for a preview request carrying the LUT")
+    }
+
+    private func waitForNewLUTRequest(
+        _ fake: FakeRenderEngine, after count: Int, id: LUTID?, intensity: Double
+    ) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            let requests = await fake.previewRequests
+            if requests.count > count,
+               requests.dropFirst(count).contains(where: {
+                   $0.document.lut.lutID == id && $0.document.lut.intensity == intensity
+               }) { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("timed out waiting for a new preview request carrying the LUT")
     }
 }
