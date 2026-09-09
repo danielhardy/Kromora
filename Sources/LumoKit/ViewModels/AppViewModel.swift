@@ -899,6 +899,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             navigation.move(to: .grid)
             collection.beginThumbnailDemand()
             openFirstImageWhenScanned()
+        } else if collection.hasPersistedSourceFolderBookmark {
+            presentError(
+                "Lumo could not restore the source folder. "
+                    + "Choose Open Source Folder… to select it again."
+            )
         } else if collection.restoreLibrary() {
             navigation.move(to: .grid)
             collection.beginThumbnailDemand()

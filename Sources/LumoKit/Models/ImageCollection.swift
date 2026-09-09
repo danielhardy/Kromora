@@ -431,6 +431,13 @@ final class ImageCollection: ObservableObject {
         return true
     }
 
+    /// Whether launch found a persisted source-folder choice. This is deliberately separate from
+    /// `restoreSourceFolder()`: an unreadable bookmark must not be mistaken for a first launch,
+    /// because doing so would silently switch the user to the managed-library fallback.
+    var hasPersistedSourceFolderBookmark: Bool {
+        defaults.data(forKey: Self.bookmarkKey) != nil
+    }
+
     /// Restore Lumo-managed imports when no user source folder is configured. The folder is not
     /// created on launch, so a clean profile remains an empty library without a warning.
     @discardableResult
@@ -443,16 +450,34 @@ final class ImageCollection: ObservableObject {
         return true
     }
 
-    private func saveBookmark(for url: URL) {
+    @discardableResult
+    private func saveBookmark(for url: URL) -> Bool {
         do {
             let bookmark = try url.bookmarkData(
                 options: [.withSecurityScope],
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
+            // Do not leave a bookmark behind that this process cannot resolve using the same
+            // security-scope contract used at relaunch. The source remains usable for the current
+            // session, but the failed persistence is reported rather than silently becoming a
+            // future restore failure.
+            var isStale = false
+            guard let resolved = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ), resolved.startAccessingSecurityScopedResource() else {
+                print("Failed to validate source bookmark for \(url.path)")
+                return false
+            }
+            resolved.stopAccessingSecurityScopedResource()
             defaults.set(bookmark, forKey: Self.bookmarkKey)
+            return true
         } catch {
             print("Failed to save source bookmark: \(error)")
+            return false
         }
     }
 
