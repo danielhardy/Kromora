@@ -17,6 +17,14 @@ enum RenderOutput: Sendable, Equatable {
     static var image: Self { .raster }
 }
 
+/// Controls whether semantic local masks are part of this render yet. Procedural and brush
+/// masks remain available in both modes; the deferred mode is only used for the fast first frame
+/// of a masked preview while Vision resolves the semantic components.
+enum MaskResolutionPolicy: Sendable, Equatable {
+    case resolved
+    case deferSemantic
+}
+
 struct RenderRequest: Sendable, Equatable {
     /// Kept nested as a discoverable spelling alongside the top-level type.
     typealias Output = RenderOutput
@@ -36,6 +44,7 @@ struct RenderRequest: Sendable, Equatable {
     /// Projection of normalized mask geometry into this render. It is identity for ordinary image
     /// renders, but remains on the request so preview/export and derived-mask caches share one seam.
     let maskTransform: LocalMaskRenderTransform
+    let maskResolution: MaskResolutionPolicy
     /// RenderEngine-local supersession token. UI publication staleness is checked independently by
     /// PreviewCoordinator/AppViewModel and is never encoded into a reusable mask payload.
     let requestRevision: UInt64
@@ -55,6 +64,7 @@ struct RenderRequest: Sendable, Equatable {
         space: WorkingSpace = .current,
         exportOptions: ExportOptions? = nil,
         maskTransform: LocalMaskRenderTransform = .identity,
+        maskResolution: MaskResolutionPolicy = .resolved,
         requestRevision: UInt64 = 0
     ) {
         self.source = source
@@ -68,6 +78,7 @@ struct RenderRequest: Sendable, Equatable {
         self.space = space
         self.exportOptions = exportOptions
         self.maskTransform = maskTransform
+        self.maskResolution = maskResolution
         self.requestRevision = requestRevision
     }
 

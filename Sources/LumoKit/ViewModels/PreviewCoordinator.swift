@@ -289,6 +289,26 @@ final class PreviewCoordinator {
         phase: Phase,
         engine: any RenderEngining
     ) async {
+        // Semantic masks are the only display stage that can suspend on Vision. Publish the
+        // already-available source/global/procedural graph first, then refine the same visible
+        // revision once the mask resolver returns. A newer request cancels this scheduler job and
+        // the renderer's request revision fence prevents a late refinement from being published.
+        if request.maskResolution == .resolved && request.document.hasSemanticMasks {
+            let baseRequest = Self.request(
+                request, quality: request.quality, maskResolution: .deferSemantic
+            )
+            await renderSingle(baseRequest, token: token, phase: phase, engine: engine)
+            guard !Task.isCancelled, isCurrent(token) else { return }
+        }
+        await renderSingle(request, token: token, phase: phase, engine: engine)
+    }
+
+    private func renderSingle(
+        _ request: RenderRequest,
+        token: Token,
+        phase: Phase,
+        engine: any RenderEngining
+    ) async {
         telemetry.mark(token.revision, renderStart: LiveEditTelemetryClock.now)
         LumoObservability.liveEdit(.renderStart, source: request.source, quality: request.quality,
                                    revision: token.revision)
@@ -326,6 +346,14 @@ final class PreviewCoordinator {
     }
 
     private static func request(_ request: RenderRequest, quality: RenderQuality) -> RenderRequest {
+        Self.request(request, quality: quality, maskResolution: request.maskResolution)
+    }
+
+    private static func request(
+        _ request: RenderRequest,
+        quality: RenderQuality,
+        maskResolution: MaskResolutionPolicy
+    ) -> RenderRequest {
         RenderRequest(
             source: request.source,
             assetID: request.assetID,
@@ -336,6 +364,7 @@ final class PreviewCoordinator {
             frameBudgetMilliseconds: request.frameBudgetMilliseconds,
             output: .raster,
             space: request.space,
+            maskResolution: maskResolution,
             requestRevision: request.requestRevision
         )
     }

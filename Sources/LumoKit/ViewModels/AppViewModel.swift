@@ -618,6 +618,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Edited thumbnails share the collection's bounded thumbnail lane. A stable job per asset
     /// lets filmstrip and grid demand one render rather than producing duplicate work.
     private var editedThumbnailGenerations: [PhotoAssetID: UInt64] = [:]
+    private var editedThumbnailDebounceTasks: [PhotoAssetID: Task<Void, Never>] = [:]
+    private var pendingEditedThumbnailAssetID: PhotoAssetID?
     private let editedThumbnailJobPrefix = "edited-thumbnail-"
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
@@ -686,6 +688,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// pending value, so a burst cannot build a queue of obsolete RAW decoder operations.
     private var pendingSourceLoad: SourceLoadRequest?
     private var loadTask: Task<Void, Never>?
+    /// Tracks whether a preview was already admitted after source chrome appeared. A user edit
+    /// can arrive while stored edits are still loading; adopting the store result must not submit
+    /// a duplicate preview in that case.
+    private var previewScheduledSourceRevision: UInt64?
     private let adjacentPreviewPrefetchJobID = ImageWorkScheduler.JobID("adjacent-preview-prefetch")
     private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
     private let histogramJobID = ImageWorkScheduler.JobID("histogram")
@@ -1230,6 +1236,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // Discrete edits are queued normally; switching sources is a durability boundary for them.
         // Do not rewrite an unchanged document merely because navigation occurred.
         requestPersistenceFlush()
+        let previousActiveAssetID = activeAssetID
         activeAssetID = assetID
         let sourceReference = importPlan.sourceReference
         activeSourceReference = sourceReference
@@ -1247,6 +1254,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         cancelHistogram(clear: true, pump: false)
         let sourceRevision = self.sourceRevision
         previewCoordinator.cancel()
+        cancelEditedThumbnailDebounce(for: previousActiveAssetID)
+        if let previousActiveAssetID {
+            workScheduler.cancel(
+                id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + previousActiveAssetID.raw),
+                pump: false
+            )
+        }
+        pendingEditedThumbnailAssetID = nil
         previewSurface.clear()
         originalPreviewSurface.clear()
         canvasState.resetForSource()
@@ -1364,6 +1379,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         preparation: ImageSourcePreparation, request: SourceLoadRequest
     ) {
         imageSource = preparation.source
+        previewScheduledSourceRevision = nil
         if case .url(let url) = request.source.backing {
             sourceURL = url
         } else {
@@ -1380,7 +1396,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         statusMessage = "\(request.name)  \(Int(preparation.nativeExtent.width))\u{00D7}\(Int(preparation.nativeExtent.height))"
         isLoading = false
         keepInspectorTabValid()
-        schedulePreview()
         switch request.source.backing {
         case .url(let url): refreshMetadata(url: url, data: nil)
         case .data(let data): refreshMetadata(url: nil, data: data)
@@ -1407,11 +1422,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             if documentChanged {
                 documentRevision &+= 1
                 comparisonRevision &+= 1
-                schedulePreview()
                 scheduleAdjacentPreviewPrefetch()
-                requestEditedThumbnail(for: request.assetID, priority: .activeEditor, force: true)
             }
         }
+        // Install publishes source chrome before the store read, but the first pixel request is
+        // deliberately admitted only once the disk document has been resolved. This prevents an
+        // edited source from rendering the pristine document and then immediately rendering it
+        // again with its stored edits.
+        if previewScheduledSourceRevision != sourceRevision {
+            schedulePreview()
+        }
+        scheduleEditedThumbnailAfterSettle(for: request.assetID, priority: .activeEditor)
         if stored.status.isActionable {
             editStoreStatus = stored.status.message
         } else {
@@ -1434,7 +1455,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             .filter { $0 != selected && abs($0 - selected) <= 2 }
             .sorted { abs($0 - selected) < abs($1 - selected) }
             .prefix(2)
-            .compactMap { index -> (ImageSource, EditDocument, CubeLUT?)? in
+            .compactMap { index -> (source: ImageSource, document: EditDocument?, lut: CubeLUT?, reference: EditSourceReference)? in
                 let item = collection.items[index]
                 guard let dimensions = item.asset.dimensions,
                       dimensions.width > 0, dimensions.height > 0 else { return nil }
@@ -1449,14 +1470,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 } else {
                     return nil
                 }
-                let document = editSessions[item.id]?.document ?? EditDocument()
-                return (source, document, resolvedLUT(document.lut.lutID))
+                let document = editSessions[item.id]?.document
+                return (
+                    source: source,
+                    document: document,
+                    lut: document.flatMap { resolvedLUT($0.lut.lutID) },
+                    reference: EditSourceReference(assetID: item.id, url: item.url)
+                )
             }
         guard !candidates.isEmpty else { return }
 
         let revision = sourceRevision
         let assetID = activeAssetID
         let engine = self.engine
+        let editStore = self.editStore
         prefetchDelayTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled, let self,
@@ -1468,12 +1495,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 guard !Task.isCancelled, let self,
                       self.activeAssetID == assetID,
                       self.sourceRevision == revision else { return }
-                for (source, document, lut) in candidates {
+                for candidate in candidates {
                     guard !Task.isCancelled,
                           self.activeAssetID == assetID,
                           self.sourceRevision == revision else { return }
+                    let document: EditDocument
+                    if let inMemory = candidate.document {
+                        document = inMemory
+                    } else {
+                        // A neighbor may never have been opened, so its in-memory session is not
+                        // authoritative. Resolve disk state immediately before admission rather
+                        // than rendering a known-wrong identity document.
+                        let stored = await editStore.load(for: candidate.reference)
+                        guard stored.found || !stored.status.isActionable else { continue }
+                        document = stored.document
+                    }
+                    let lut = self.resolvedLUT(document.lut.lutID)
                     let request = RenderRequest(
-                        source: source, document: document, lut: lut,
+                        source: candidate.source, document: document, lut: lut,
                         targetSize: self.previewBackingSize,
                         quality: .preview, output: .raster, space: .current
                     )
@@ -1970,6 +2009,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard let source else { return }
 
         let inMemoryDocument = editSessions[assetID]?.document
+        if let inMemoryDocument, inMemoryDocument.isIdentity {
+            let revision = editedThumbnailRevision(document: inMemoryDocument, lut: nil)
+            collection.applyEditedThumbnail(nil, for: assetID, revision: revision)
+            return
+        }
         let sourceReference = EditSourceReference(assetID: assetID, url: item.url)
         let engine = self.engine
         let editStore = self.editStore
@@ -2011,11 +2055,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 space: .current
             )
             let image: NSImage?
-            if let result = try? await engine.renderThumbnail(request) {
-                image = NSImage(data: result.data)
-            } else {
-                image = nil
-            }
+            if let cgImage = await engine.makeThumbnailCGImage(request) {
+                image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+            } else { image = nil }
             guard !Task.isCancelled, !self.isShuttingDown,
                   self.editedThumbnailGenerations[assetID] == generation else { return }
             self.collection.applyEditedThumbnail(image, for: assetID, revision: revision)
@@ -2024,6 +2066,39 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     private func editedThumbnailRevision(document: EditDocument, lut: CubeLUT?) -> String {
         document.editHash + ":" + (lut?.cacheFingerprint ?? "unresolved")
+    }
+
+    /// Keep the active photo's badge out of the shared renderer while a preview burst is active.
+    /// One task survives the quiet period, so a slider drag can invalidate and replace a queued
+    /// thumbnail without submitting one thumbnail per document tick.
+    private func scheduleEditedThumbnailAfterSettle(
+        for assetID: PhotoAssetID, priority: ImageWorkScheduler.Priority
+    ) {
+        guard !isShuttingDown, assetID == activeAssetID else { return }
+        pendingEditedThumbnailAssetID = assetID
+        editedThumbnailDebounceTasks[assetID]?.cancel()
+        editedThumbnailDebounceTasks[assetID] = nil
+        guard !isPreviewInteractionActive, previewDebounceTask == nil else { return }
+
+        let sourceRevision = self.sourceRevision
+        editedThumbnailDebounceTasks[assetID] = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled, let self,
+                  !self.isShuttingDown,
+                  self.sourceRevision == sourceRevision,
+                  self.activeAssetID == assetID,
+                  !self.isPreviewInteractionActive,
+                  self.previewDebounceTask == nil else { return }
+            self.editedThumbnailDebounceTasks[assetID] = nil
+            self.pendingEditedThumbnailAssetID = nil
+            self.requestEditedThumbnail(for: assetID, priority: priority, force: true)
+        }
+    }
+
+    private func cancelEditedThumbnailDebounce(for assetID: PhotoAssetID?) {
+        guard let assetID else { return }
+        editedThumbnailDebounceTasks[assetID]?.cancel()
+        editedThumbnailDebounceTasks[assetID] = nil
     }
 
     /// A LUT scan can resolve or replace a file-backed Look without changing the edit document.
@@ -2324,9 +2399,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         refreshLUTResolutionStatus()
         saveActiveDocument()
         documentRevision &+= 1
-        if let activeAssetID {
-            requestEditedThumbnail(for: activeAssetID, priority: .activeEditor, force: true)
-        }
         // Look edits and RAW Temperature/Tint leave the baseline unchanged, so an in-flight
         // baseline remains useful. Other RAW develop edits change the explicit before-image and
         // must invalidate that work; it will be queued again after the new visible result publishes.
@@ -2346,6 +2418,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             previewDebounceTask?.cancel()
             previewDebounceTask = nil
             schedulePreview()
+            if let activeAssetID {
+                scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
+            }
             return
         }
 
@@ -2353,6 +2428,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             scheduleInteractivePreview()
         } else {
             scheduleSettledPreviewAfterDebounce()
+        }
+        if let activeAssetID {
+            scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
         }
     }
 
@@ -2447,13 +2525,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         activeHistory.recordChange(from: oldDocument, to: document)
         saveActiveDocument()
         documentRevision &+= 1
-        if let activeAssetID {
-            requestEditedThumbnail(for: activeAssetID, priority: .activeEditor, force: true)
-        }
         if isPreviewInteractionActive {
             scheduleInteractivePreview()
         } else {
             scheduleSettledPreviewAfterDebounce()
+        }
+        if let activeAssetID {
+            scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
         }
     }
 
@@ -2572,6 +2650,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         cancelHistogram(clear: false, pump: false)
 
         let (requested, look) = displayRequest
+        previewScheduledSourceRevision = sourceRevision
         previewCoordinator.submit(RenderRequest(
             source: imageSource, assetID: activeAssetID, document: requested, lut: look,
             targetSize: previewRenderTargetSize(for: requested, surface: .mainPreview), quality: .preview,
@@ -2624,11 +2703,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                   self.previewDebounceGeneration == generation,
                   self.sourceRevision == revision else { return }
             self.schedulePreview()
+            if let assetID = self.pendingEditedThumbnailAssetID {
+                self.scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
+            }
         }
     }
 
     func beginPreviewInteraction() {
         beginUndoGrouping()
+        cancelEditedThumbnailDebounce(for: activeAssetID)
+        if let activeAssetID {
+            workScheduler.cancel(
+                id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + activeAssetID.raw),
+                pump: false
+            )
+        }
         isPreviewInteractionActive = true
         previewCoordinator.beginInteraction()
     }
@@ -2639,6 +2728,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         previewDebounceTask = nil
         previewCoordinator.endInteraction()
         endUndoGrouping()
+        if let assetID = pendingEditedThumbnailAssetID {
+            scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
+        }
     }
 
     // MARK: - Crop
@@ -2887,7 +2979,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         saveActiveDocument(force: true)
         documentRevision &+= 1
         if let activeAssetID {
-            requestEditedThumbnail(for: activeAssetID, priority: .activeEditor, force: true)
+            scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
         }
         if comparisonChanged {
             comparisonRevision &+= 1
@@ -3537,12 +3629,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         await collection.shutdown()
 
         let storedEditLoad = storedEditLoadTask
+        let thumbnailDebounceTasks = editedThumbnailDebounceTasks.values.map(Optional.init)
         let tasks: [Task<Void, Never>?] = [
             capabilitiesTask, autoAdjustmentTask, smartMaskCreationTask, loadTask,
             metadataTask, prefetchDelayTask, previewDebounceTask, sourceFolderOpenTask,
             personSignalWarmingTask, lutCacheInvalidationTask, semanticCoordinatorInstallTask,
             mediaVolumeDiscoveryTask, mediaVolumeScanTask, mediaVolumeImportTask,
-        ]
+        ] + thumbnailDebounceTasks
         for task in tasks { task?.cancel() }
         storedEditLoad?.cancel()
         capabilitiesTask = nil
@@ -3552,6 +3645,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         metadataTask = nil
         prefetchDelayTask = nil
         previewDebounceTask = nil
+        editedThumbnailDebounceTasks.removeAll()
+        pendingEditedThumbnailAssetID = nil
         sourceFolderOpenTask = nil
         storedEditLoadTask = nil
         personSignalWarmingTask = nil
