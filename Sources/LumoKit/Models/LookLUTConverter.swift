@@ -134,6 +134,16 @@ struct LookLUTConversion: Sendable {
     /// can never be mistaken for one that was flattened into the cube.
     let sampledDocument: EditDocument
 
+    var isApproximate: Bool { !verification.passed }
+
+    var qualitySummary: String {
+        let result = verification.passed ? "within quality bar" : "approximate"
+        return String(
+            format: "%@ at %d³: maximum channel error %.3f (limit %.3f)",
+            result, size, verification.maxAbsoluteChannelError, verification.tolerance
+        )
+    }
+
     func cubeText(title: String) -> String {
         let included = supportMatrix.included.map(\.name).joined(separator: ", ")
         let omitted = supportMatrix.omitted.map(\.name).joined(separator: ", ")
@@ -144,8 +154,10 @@ struct LookLUTConversion: Sendable {
             "Working color space: \(workingSpace.rawValue)",
             "DOMAIN_MIN: 0.0 0.0 0.0",
             "DOMAIN_MAX: 1.0 1.0 1.0",
+            "Quality policy: maximum absolute channel error across a 5^3 off-lattice probe grid; accepted when error is at or below the tolerance.",
             "Conversion tolerance (maximum absolute channel error): \(String(format: "%.3f", verification.tolerance))",
             "Verification maximum absolute channel error: \(String(format: "%.6f", verification.maxAbsoluteChannelError))",
+            "Verification result: \(verification.passed ? "within quality bar" : "approximate; explicit confirmation required")",
             "Included stages: \(included.isEmpty ? "none" : included)",
             "Omitted stages: \(omitted.isEmpty ? "none" : omitted)",
             "Limits: this LUT preserves global RGB color/tone changes only; it does not reproduce RAW development, crop/rotation, masking, vignette, grain, or other spatial/source-dependent edits."
@@ -174,10 +186,11 @@ enum LookLUTConversionError: LocalizedError, Sendable {
     }
 }
 
-/// Converts the global, verified portion of a document by evaluating the same Core Image graph used
+/// Converts the global, supported portion of a document by evaluating the same Core Image graph used
 /// for preview/export at the lattice points of a standard `.cube`.
 enum LookLUTConverter {
     static let defaultSize = 33
+    static let highestQualitySize = CubeLUT.maximumSupportedSize
     static let verificationResolution = 5
     /// Keep sampled LUT/probe images below the maximum 1D texture width supported by Metal.
     private static let samplesPerRow = 8192
@@ -196,6 +209,30 @@ enum LookLUTConverter {
         guard document.lut.isIdentity || lut != nil else {
             throw LookLUTConversionError.unresolvedLook
         }
+
+        let initial = try convertOnce(
+            document: document, lut: lut, matrix: matrix, size: size, space: space, tolerance: tolerance
+        )
+        guard !initial.verification.passed, size < highestQualitySize else { return initial }
+
+        // A 33³ cube is a useful fast path, but a single off-lattice worst-case sample can reject
+        // a perfectly supported edit. Retry at the largest Core Image resolution before exposing
+        // an approximation to the user. If that still misses the quality bar, return it so the UI
+        // can make the best-effort choice explicit instead of turning conversion into a dead end.
+        return try convertOnce(
+            document: document, lut: lut, matrix: matrix, size: highestQualitySize,
+            space: space, tolerance: tolerance
+        )
+    }
+
+    private static func convertOnce(
+        document: EditDocument,
+        lut: CubeLUT?,
+        matrix: LUTSupportMatrix,
+        size: Int,
+        space: WorkingSpace,
+        tolerance: Double
+    ) throws -> LookLUTConversion {
 
         // RAW decoding, framing, and every spatial effect are intentionally neutralized. The
         // remaining graph is made only of verified per-pixel stages and keeps their original order.
@@ -230,11 +267,6 @@ enum LookLUTConverter {
             space: space,
             tolerance: tolerance
         )
-        guard verification.passed else {
-            throw LookLUTConversionError.verificationFailed(
-                maxError: verification.maxAbsoluteChannelError, tolerance: tolerance
-            )
-        }
 
         return LookLUTConversion(
             cube: cube, size: size, workingSpace: space,

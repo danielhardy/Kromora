@@ -13,6 +13,7 @@ final class LookSaveCoordinator: ObservableObject {
     @Published private(set) var isConverting = false
     @Published private(set) var conversion: LookLUTConversion?
     @Published var name = ""
+    @Published var allowsApproximateSave = false
     @Published private(set) var saveError: String?
 
     var onStatus: ((String) -> Void)?
@@ -31,6 +32,7 @@ final class LookSaveCoordinator: ObservableObject {
         self.document = document
         self.lut = lut
         self.conversion = nil
+        self.allowsApproximateSave = false
         self.saveError = nil
         self.name = LookNameValidator.validate(suggestedName) ?? "Look"
         self.isSheetPresented = true
@@ -75,7 +77,13 @@ final class LookSaveCoordinator: ObservableObject {
 
     /// Present the destination panel after the user has reviewed the support matrix.
     func saveDialog() {
-        guard conversion != nil else { return }
+        guard let conversion else { return }
+        guard conversion.verification.passed || allowsApproximateSave else {
+            saveError = "This Look is approximate even at \(conversion.size)³ (maximum channel error "
+                + String(format: "%.3f", conversion.verification.maxAbsoluteChannelError)
+                + "). Confirm the approximation before saving."
+            return
+        }
         guard let validName = LookNameValidator.validate(name) else {
             saveError = "Enter a Look name without path separators or control characters."
             return
@@ -104,6 +112,9 @@ final class LookSaveCoordinator: ObservableObject {
     /// Panel-free save seam used by automated coverage and by alternate UI surfaces.
     func performSave(name rawName: String, to destination: URL) throws {
         guard let conversion else { throw LookSaveError.notReady }
+        guard conversion.verification.passed || allowsApproximateSave else {
+            throw LookSaveError.approximationNotConfirmed
+        }
         guard let name = LookNameValidator.validate(rawName) else {
             throw LookSaveError.invalidName
         }
@@ -134,6 +145,7 @@ final class LookSaveCoordinator: ObservableObject {
         case invalidName
         case invalidDestination
         case nameCollision
+        case approximationNotConfirmed
         case writeFailed(String)
 
         var errorDescription: String? {
@@ -142,6 +154,8 @@ final class LookSaveCoordinator: ObservableObject {
             case .invalidName: return "Enter a valid Look name."
             case .invalidDestination: return "Choose a writable folder and save the Look as a .cube file."
             case .nameCollision: return "A Look with that filename already exists. Choose a different name or destination."
+            case .approximationNotConfirmed:
+                return "This Look is approximate. Confirm the measured conversion quality before saving."
             case .writeFailed(let detail): return "The Look could not be written: \(detail)"
             }
         }
@@ -151,6 +165,7 @@ final class LookSaveCoordinator: ObservableObject {
     func setConversion(_ conversion: LookLUTConversion, name: String = "Look") {
         self.conversion = conversion
         self.name = name
+        self.allowsApproximateSave = false
         self.isConverting = false
         self.saveError = nil
     }

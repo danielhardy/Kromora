@@ -64,6 +64,27 @@ final class LookLUTExportTests: TempDirectoryTestCase {
         )
     }
 
+    func testStrongSaturationRetriesAtHighestQualityResolution() throws {
+        let document = EditDocument(color: ColorAdjustments(saturation: 30))
+
+        let conversion = try LookLUTConverter.convert(document: document, lut: nil)
+
+        XCTAssertEqual(conversion.size, LookLUTConverter.highestQualitySize)
+        XCTAssertTrue(conversion.verification.passed, conversion.qualitySummary)
+        XCTAssertTrue(conversion.cubeText(title: "Strong saturation").contains("LUT size: 65^3"))
+    }
+
+    func testPersistentApproximationIsReturnedWithMeasuredQuality() throws {
+        let document = EditDocument(color: ColorAdjustments(saturation: 100))
+
+        let conversion = try LookLUTConverter.convert(document: document, lut: nil)
+
+        XCTAssertEqual(conversion.size, LookLUTConverter.highestQualitySize)
+        XCTAssertTrue(conversion.isApproximate)
+        XCTAssertGreaterThan(conversion.verification.maxAbsoluteChannelError, conversion.verification.tolerance)
+        XCTAssertTrue(conversion.cubeText(title: "Approximate saturation").contains("explicit confirmation required"))
+    }
+
     @MainActor
     func testSaveRejectsCollisionAndDoesNotOverwriteExistingFile() throws {
         let coordinator = LookSaveCoordinator()
@@ -101,6 +122,27 @@ final class LookLUTExportTests: TempDirectoryTestCase {
         viewModel.lookSave.onSaved?(destination)
         while viewModel.library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(viewModel.library.allLUTs.contains { $0.url == destination })
+    }
+
+    @MainActor
+    func testApproximateConversionRequiresExplicitConfirmationBeforeWriting() throws {
+        let conversion = try LookLUTConverter.convert(
+            document: EditDocument(color: ColorAdjustments(saturation: 100)), lut: nil
+        )
+        let coordinator = LookSaveCoordinator()
+        coordinator.setConversion(conversion, name: "Approximate Look")
+        let destination = tempDirectory.appendingPathComponent("Approximate Look.cube")
+
+        XCTAssertThrowsError(try coordinator.performSave(name: "Approximate Look", to: destination)) { error in
+            XCTAssertEqual((error as? LookSaveCoordinator.LookSaveError)?.errorDescription,
+                           "This Look is approximate. Confirm the measured conversion quality before saving.")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
+
+        coordinator.allowsApproximateSave = true
+        try coordinator.performSave(name: "Approximate Look", to: destination)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertTrue(try String(contentsOf: destination).contains("Verification result: approximate"))
     }
 }
 

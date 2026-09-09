@@ -10,7 +10,7 @@ struct LookSaveSheet: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text("Save as Look/LUT")
                     .font(.title2.bold())
-                Text("Save the active photo's verified global RGB edits as a standard .cube Look.")
+                Text("Save the active photo's supported global RGB edits as a standard .cube Look.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -50,7 +50,9 @@ struct LookSaveSheet: View {
                 Button("Save .cube…") { coordinator.saveDialog() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(coordinator.isConverting || coordinator.conversion == nil)
+                    .disabled(coordinator.isConverting || coordinator.conversion == nil
+                              || (coordinator.conversion?.isApproximate == true
+                                  && !coordinator.allowsApproximateSave))
             }
         }
         .padding(20)
@@ -76,6 +78,26 @@ struct LookSaveSheet: View {
                 .font(.callout)
                 .foregroundStyle(conversion.supportMatrix.hasOmissions ? .orange : .secondary)
 
+            if conversion.isApproximate {
+                VStack(alignment: .leading, spacing: 7) {
+                    Label("Approximate conversion", systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.medium))
+                        .foregroundStyle(.orange)
+                    Text("The highest-quality \(conversion.size)³ cube still differs from the supported edit at one or more probe points. It can be saved as a best-effort Look, but the result may not match the photo exactly.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Toggle("I understand and want to save this approximation", isOn: $coordinator.allowsApproximateSave)
+                        .font(.callout)
+                }
+                .padding(10)
+                .background(.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
+            } else {
+                Text("Verification: \(conversion.qualitySummary)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             ScrollView {
                 VStack(alignment: .leading, spacing: 7) {
                     ForEach(conversion.supportMatrix.entries) { entry in
@@ -100,7 +122,7 @@ struct LookSaveSheet: View {
             }
             .frame(maxHeight: 170)
 
-            Text("Domain/range: 0.0–1.0. The .cube preserves global color/tone only; it does not reproduce RAW development, crop/rotation, masking, vignette, grain, or other spatial/source-dependent edits. Tolerance: ±\(String(format: "%.3f", conversion.verification.tolerance)) per channel.")
+            Text("Domain/range: 0.0–1.0. The .cube preserves global color/tone only; it does not reproduce RAW development, crop/rotation, masking, vignette, grain, or other spatial/source-dependent edits. Quality policy: maximum absolute channel error over a 5³ off-lattice probe grid, with a tolerance of ±\(String(format: "%.3f", conversion.verification.tolerance)) per channel.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
