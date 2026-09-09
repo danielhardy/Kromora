@@ -1651,6 +1651,7 @@ actor RenderEngine: RenderEngining {
         localMaskRenderer.removeAllCachedBrushStrokes()
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
         latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
+        maskSourceOrder.removeAll(keepingCapacity: true)
         latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
         interactiveRAWSession = nil
         toneCurveCache.removeAll()
