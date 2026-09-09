@@ -176,6 +176,10 @@ struct EffectsAdjustments: Codable, Equatable, Sendable {
         texture == 0 && clarity == 0 && dehaze == 0 && vignette.isIdentity && grain.isIdentity
     }
 
+    var hasSpatialWork: Bool {
+        texture != 0 || clarity != 0 || dehaze != 0
+    }
+
     private enum CodingKeys: String, CodingKey { case texture, clarity, dehaze, vignette, grain }
 
     init(from decoder: Decoder) throws {

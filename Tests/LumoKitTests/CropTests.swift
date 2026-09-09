@@ -403,6 +403,44 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop, committed)
     }
 
+    func testCropToolOpenUnchangedTestRequestsTheFullUncroppedSource() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(
+            engine: fake,
+            editStore: makeInMemoryEditStore()
+        )
+        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "roi-tool.png", in: tempDirectory)
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+        while (await fake.previewRequests).isEmpty {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        viewModel.beginCrop()
+        viewModel.updateCropDraft(CGRect(x: 0.2, y: 0.2, width: 0.6, height: 0.6))
+        viewModel.commitCrop()
+        while !(await fake.previewRequests).contains(where: { !$0.document.crop.isIdentity }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let before = await fake.previewRequests.count
+        viewModel.beginCrop()
+        while !(await fake.previewRequests).dropFirst(before).contains(where: {
+            $0.document.crop.isIdentity && $0.sourceROI == nil
+        }) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let requests = await fake.previewRequests
+        let request = try XCTUnwrap(requests.dropFirst(before).first {
+            $0.document.crop.isIdentity && $0.sourceROI == nil
+        })
+        if case .preview(let size) = request.scale {
+            XCTAssertEqual(size, CGSize(width: 32, height: 24))
+        } else {
+            XCTFail("crop-tool-open must remain a preview request")
+        }
+    }
+
     func testSelectingPresetStaysDraftUntilApplyAndUndoRedoRestoresTheRatio() async throws {
         let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "preset-workflow.png", in: tempDirectory)
         let viewModel = makeAppViewModel(

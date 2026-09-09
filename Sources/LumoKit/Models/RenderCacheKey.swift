@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 import CryptoKit
 
 /// Stable identity for a source as it exists now.
@@ -73,6 +74,7 @@ struct ProcessingPrefixCacheKey: Hashable, Sendable {
     let developHash: String
     let upstreamHash: String
     let scale: RenderScaleKey
+    let sourceROI: CGRect?
     let space: WorkingSpace
     let includePostRenderWhiteBalance: Bool
     let pipelineVersion: Int
@@ -95,6 +97,7 @@ struct PreviewCacheKey: Hashable, Sendable {
     let documentHash: String
     let lutFingerprint: String
     let targetScale: RenderScaleKey
+    let sourceROI: CGRect?
     let quality: RenderQuality
     let space: WorkingSpace
     let pipelineVersion: Int

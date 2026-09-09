@@ -425,6 +425,8 @@ final class PreviewCoordinator {
             document: request.document,
             lut: request.lut,
             targetSize: request.targetSize,
+            sourceROI: request.sourceROI,
+            presentationImageExtent: request.presentationImageExtent,
             quality: quality,
             frameBudgetMilliseconds: request.frameBudgetMilliseconds,
             output: .raster,

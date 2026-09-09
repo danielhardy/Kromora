@@ -36,7 +36,7 @@ enum RenderPipeline {
     /// v20 evaluates the vignette as a destination-coordinate color kernel so tiled GPU evaluation
     /// cannot reinterpret the full-frame geometry through a sampler tile.
     /// v21 evaluates the grain field as a destination-coordinate color kernel for the same reason.
-    static let cacheVersion = 21
+    static let cacheVersion = 22
 
     /// Build the graph for `document` over `source`.
     ///
@@ -64,16 +64,48 @@ enum RenderPipeline {
         lut: CubeLUT?,
         scale: RenderScale,
         space: WorkingSpace = .current,
-        lutCache: LUTFilterCache? = nil
+        lutCache: LUTFilterCache? = nil,
+        sourceROI: CGRect? = nil
     ) -> CIImage? {
         guard let developed = developedSource(source, rawDevelop: document.rawDevelop, scale: scale) else {
             return nil
         }
-        return buildImage(
-            developed: developed, document: document, lut: lut, space: space, lutCache: lutCache,
-            includePostRenderWhiteBalance: source.kind == .standard,
-            grainSeed: grainSeed(for: source)
+        let fullFrame = scaledSourceExtent(
+            nativeExtent: source.nativeExtent,
+            imageExtent: developed.extent,
+            scale: scale.factor(for: source.nativeExtent)
         )
+        let visibleROI = (!scale.isFull ? sourceROI : nil)
+        let processingROI = visibleROI.map {
+            expandedSourceROI($0, nativeExtent: source.nativeExtent,
+                               needsSpatialSupport: document.effects.hasSpatialWork)
+        }
+        let working = processingROI.map {
+            cropSourceROI($0, nativeExtent: source.nativeExtent, in: developed)
+        } ?? developed
+        let earlyCrop = visibleROI != nil
+        let finalFrame: CGRect? = {
+            guard earlyCrop, let crop = document.crop.normalizedRect else {
+                return earlyCrop ? fullFrame : nil
+            }
+            return CGRect(
+                x: fullFrame.minX + crop.minX * fullFrame.width,
+                y: fullFrame.minY + crop.minY * fullFrame.height,
+                width: crop.width * fullFrame.width,
+                height: crop.height * fullFrame.height
+            )
+        }()
+        let result = buildImage(
+            developed: working, document: document, lut: lut, space: space, lutCache: lutCache,
+            includePostRenderWhiteBalance: source.kind == .standard,
+            grainSeed: grainSeed(for: source), applyCommittedCrop: !earlyCrop,
+            spatialReferenceExtent: earlyCrop ? fullFrame : nil,
+            finalFrameExtent: finalFrame
+        )
+        guard let visibleROI, earlyCrop else { return result }
+        return result.cropped(to: scaledSourceRect(
+            visibleROI, nativeExtent: source.nativeExtent, imageExtent: fullFrame
+        ))
     }
 
     /// The graph from an **already-developed** source onwards — adjustments, LUT, then post-crop
@@ -94,15 +126,20 @@ enum RenderPipeline {
         lutCache: LUTFilterCache? = nil,
         toneCurveCache: ToneCurveFilterCache? = nil,
         includePostRenderWhiteBalance: Bool = true,
-        grainSeed: UInt32 = 0
+        grainSeed: UInt32 = 0,
+        applyCommittedCrop: Bool = true,
+        spatialReferenceExtent: CGRect? = nil,
+        finalFrameExtent: CGRect? = nil
     ) -> CIImage {
         let adjusted = buildPreLUTImage(
             developed: developed, document: document, toneCurveCache: toneCurveCache,
-            includePostRenderWhiteBalance: includePostRenderWhiteBalance
+            includePostRenderWhiteBalance: includePostRenderWhiteBalance,
+            spatialReferenceExtent: spatialReferenceExtent
         )
         return buildImage(
             preLUT: adjusted, document: document, lut: lut, space: space, lutCache: lutCache,
-            grainSeed: grainSeed
+            grainSeed: grainSeed, applyCommittedCrop: applyCommittedCrop,
+            finalFrameExtent: finalFrameExtent
         )
     }
 
@@ -113,16 +150,20 @@ enum RenderPipeline {
         lut: CubeLUT?,
         space: WorkingSpace = .current,
         lutCache: LUTFilterCache? = nil,
-        grainSeed: UInt32 = 0
+        grainSeed: UInt32 = 0,
+        applyCommittedCrop: Bool = true,
+        finalFrameExtent: CGRect? = nil
     ) -> CIImage {
         let adjusted = preLUT
         let lutAdjusted = applyLUT(document.lut, lut: lut, to: adjusted, space: space, cache: lutCache)
         // Crop is a composition stage: all look work above is evaluated over the source, while
         // vignette and grain below describe the final cropped frame. This also keeps preview,
         // comparison, and full-resolution export on one extent-changing path.
-        let cropped = applyCrop(document.crop, to: lutAdjusted)
-        let vignetted = applyVignette(document.effects.vignette, to: cropped)
-        return applyGrain(document.effects.grain, to: vignetted, seed: grainSeed)
+        let cropped = applyCommittedCrop ? applyCrop(document.crop, to: lutAdjusted) : lutAdjusted
+        let frame = finalFrameExtent ?? cropped.extent
+        let vignetted = applyVignette(document.effects.vignette, to: cropped, frameExtent: frame)
+        return applyGrain(document.effects.grain, to: vignetted, seed: grainSeed,
+                          frameExtent: frame)
     }
 
     /// Build the one intentionally materializable expensive prefix. Keeping it as one graph
@@ -132,13 +173,16 @@ enum RenderPipeline {
         developed: CIImage,
         document: EditDocument,
         toneCurveCache: ToneCurveFilterCache? = nil,
-        includePostRenderWhiteBalance: Bool = true
+        includePostRenderWhiteBalance: Bool = true,
+        spatialReferenceExtent: CGRect? = nil
     ) -> CIImage {
         let lightAdjusted = applyLight(document.light, to: developed, cache: toneCurveCache)
         let colorAdjusted = applyColor(document.color, to: lightAdjusted)
         // Detail/atmosphere effects are pre-LUT. Vignette is deliberately held until after the LUT
         // because it is a final composition effect and its mask must describe the post-crop frame.
-        let effectsAdjusted = applyPreLUTEffects(document.effects, to: colorAdjusted)
+        let effectsAdjusted = applyPreLUTEffects(
+            document.effects, to: colorAdjusted, spatialReferenceExtent: spatialReferenceExtent
+        )
         let adjustmentNodes = includePostRenderWhiteBalance
             ? document.adjustments
             : document.adjustments.filter { $0.slot != .temperatureTint }
@@ -220,6 +264,59 @@ enum RenderPipeline {
             height: normalizedRect.height * extent.height
         )
         return image.cropped(to: cropRect)
+    }
+
+    /// Map a native-source ROI into a decoded image's coordinates without rasterizing it. The
+    /// decoded image remains the cacheable planner-sized source; only the stages after this seam
+    /// see the smaller extent.
+    static func cropSourceROI(_ roi: CGRect, nativeExtent: CGSize, in image: CIImage) -> CIImage {
+        guard nativeExtent.width.isFinite, nativeExtent.height.isFinite,
+              nativeExtent.width > 0, nativeExtent.height > 0,
+              image.extent.width.isFinite, image.extent.height.isFinite,
+              image.extent.width > 0, image.extent.height > 0,
+              roi.width.isFinite, roi.height.isFinite, roi.width > 0, roi.height > 0
+        else { return image }
+
+        let clamped = roi.intersection(CGRect(origin: .zero, size: nativeExtent))
+        guard !clamped.isNull, clamped.width > 0, clamped.height > 0 else { return image }
+        let extent = image.extent
+        let mapped = scaledSourceRect(clamped, nativeExtent: nativeExtent, imageExtent: extent)
+        return image.cropped(to: mapped)
+    }
+
+    static func scaledSourceRect(
+        _ sourceRect: CGRect, nativeExtent: CGSize, imageExtent: CGRect
+    ) -> CGRect {
+        CGRect(
+            x: imageExtent.minX + sourceRect.minX / nativeExtent.width * imageExtent.width,
+            y: imageExtent.minY + sourceRect.minY / nativeExtent.height * imageExtent.height,
+            width: sourceRect.width / nativeExtent.width * imageExtent.width,
+            height: sourceRect.height / nativeExtent.height * imageExtent.height
+        )
+    }
+
+    static func expandedSourceROI(
+        _ roi: CGRect, nativeExtent: CGSize, needsSpatialSupport: Bool
+    ) -> CGRect {
+        guard needsSpatialSupport, nativeExtent.width > 0, nativeExtent.height > 0 else { return roi }
+        // Clarity/Dehaze use the largest pre-LUT radius (2.8% of the full decoded shortest side).
+        // Include that support in the decode ROI so edge pixels match the uncropped graph; the
+        // final visible crop is restored after all shared pre-LUT/LUT stages.
+        let margin = min(nativeExtent.width, nativeExtent.height) * 0.028
+        return roi.insetBy(dx: -margin, dy: -margin)
+            .intersection(CGRect(origin: .zero, size: nativeExtent))
+    }
+
+    /// The full source frame at a decoded scale. It is used as the reference for spatial radii;
+    /// recomputing those fractions from a small ROI would make a zoomed preview visibly diverge
+    /// from the same pixels in a full-resolution export.
+    static func scaledSourceExtent(nativeExtent: CGSize, imageExtent: CGRect, scale: CGFloat) -> CGRect {
+        guard scale.isFinite, scale > 0, nativeExtent.width > 0, nativeExtent.height > 0 else {
+            return imageExtent
+        }
+        return CGRect(origin: imageExtent.origin,
+                      size: CGSize(width: nativeExtent.width * scale,
+                                   height: nativeExtent.height * scale))
     }
 
     // MARK: - Source
@@ -567,7 +664,8 @@ enum RenderPipeline {
     static func applyGrain(
         _ grain: GrainAdjustments,
         to image: CIImage,
-        seed: UInt32 = 0
+        seed: UInt32 = 0,
+        frameExtent: CGRect? = nil
     ) -> CIImage {
         guard !grain.isIdentity,
               let kernel = grainKernel,
@@ -578,7 +676,8 @@ enum RenderPipeline {
         else { return image }
 
         let extent = image.extent
-        let shortestSide = min(abs(extent.width), abs(extent.height))
+        let frame = frameExtent ?? extent
+        let shortestSide = min(abs(frame.width), abs(frame.height))
         guard shortestSide.isFinite, shortestSide > 0 else { return image }
 
         let controls = CIVector(
@@ -587,7 +686,7 @@ enum RenderPipeline {
             z: grain.amount / 100,
             w: 0
         )
-        let geometry = CIVector(x: extent.midX, y: extent.midY, z: shortestSide, w: 0)
+        let geometry = CIVector(x: frame.midX, y: frame.midY, z: shortestSide, w: 0)
         // UInt16 values are exactly representable by Float. Passing the halves independently keeps
         // the low 16 bits from being rounded away when the original UInt32 is near 2^32.
         let seedHigh = Float(seed >> 16)
@@ -601,19 +700,31 @@ enum RenderPipeline {
     /// Apply the detail/atmosphere controls that belong before the LUT. Kept separate from the
     /// convenience above so the full pipeline can place vignette after LUT exactly once.
     static func applyPreLUTEffects(_ effects: EffectsAdjustments, to image: CIImage) -> CIImage {
+        applyPreLUTEffects(effects, to: image, spatialReferenceExtent: nil)
+    }
+
+    /// Apply spatial effects to an ROI while retaining the full decoded frame as their scale
+    /// reference. Recomputing these fractions from a small ROI would make a zoomed preview
+    /// visibly diverge from the same pixels in a full-resolution export.
+    static func applyPreLUTEffects(
+        _ effects: EffectsAdjustments,
+        to image: CIImage,
+        spatialReferenceExtent: CGRect?
+    ) -> CIImage {
         let clarity = sanitizedClarity(effects.clarity)
         let dehaze = sanitizedDehaze(effects.dehaze)
         guard effects.texture != 0 || clarity != 0 || dehaze != 0 else { return image }
         var result = image
+        let reference = spatialReferenceExtent ?? image.extent
 
         if effects.texture != 0 {
-            result = applyTexture(effects.texture, to: result)
+            result = applyTexture(effects.texture, to: result, referenceExtent: reference)
         }
         if clarity != 0 {
-            result = applyClarity(clarity, to: result)
+            result = applyClarity(clarity, to: result, referenceExtent: reference)
         }
         if dehaze != 0 {
-            result = applyDehaze(dehaze, to: result)
+            result = applyDehaze(dehaze, to: result, referenceExtent: reference)
         }
         return result
     }
@@ -622,7 +733,9 @@ enum RenderPipeline {
     /// coordinates in both axes, so a 4:3 image gets an ellipse that reaches its left/right and
     /// top/bottom edges at the same normalized distance rather than a circle stretched by pixels.
     /// Every operation is clipped back to that extent; vignette never changes output dimensions.
-    static func applyVignette(_ vignette: VignetteAdjustments, to image: CIImage) -> CIImage {
+    static func applyVignette(
+        _ vignette: VignetteAdjustments, to image: CIImage, frameExtent: CGRect? = nil
+    ) -> CIImage {
         guard !vignette.isIdentity,
               let kernel = vignetteKernel,
               image.extent.width.isFinite,
@@ -632,11 +745,12 @@ enum RenderPipeline {
         else { return image }
 
         let extent = image.extent
+        let frame = frameExtent ?? extent
         let geometry = CIVector(
-            x: extent.midX,
-            y: extent.midY,
-            z: extent.width / 2,
-            w: extent.height / 2
+            x: frame.midX,
+            y: frame.midY,
+            z: frame.width / 2,
+            w: frame.height / 2
         )
         let shape = CIVector(
             x: vignette.midpoint / 100,
@@ -653,9 +767,11 @@ enum RenderPipeline {
 
     /// Texture is a small-radius luminance detail operation. Negative Texture uses the same
     /// narrow neighbourhood as a softening operation, so its inverse does not become a global blur.
-    private static func applyTexture(_ value: Double, to image: CIImage) -> CIImage {
+    private static func applyTexture(
+        _ value: Double, to image: CIImage, referenceExtent: CGRect
+    ) -> CIImage {
         let amount = CGFloat(abs(value) / EffectsAdjustments.textureRange.upperBound)
-        let radius = normalizedRadius(0.004, for: image)
+        let radius = normalizedRadius(0.004, for: referenceExtent)
         let effect: CIImage
         if value > 0 {
             effect = image.applyingFilter("CISharpenLuminance", parameters: [
@@ -673,7 +789,9 @@ enum RenderPipeline {
     /// stage is deliberately bounded before blending: Core Image's spatial filters are lazy and
     /// may advertise an implementation-defined extent, but Clarity is an in-frame adjustment and
     /// must never hand a transformed or unbounded image to the next stage.
-    private static func applyClarity(_ value: Double, to image: CIImage) -> CIImage {
+    private static func applyClarity(
+        _ value: Double, to image: CIImage, referenceExtent: CGRect
+    ) -> CIImage {
         let value = sanitizedClarity(value)
         guard value != 0,
               image.extent.width.isFinite,
@@ -684,7 +802,7 @@ enum RenderPipeline {
 
         let inputExtent = image.extent
         let amount = CGFloat(abs(value) / EffectsAdjustments.clarityRange.upperBound)
-        let radius = normalizedRadius(0.028, for: image)
+        let radius = normalizedRadius(0.028, for: referenceExtent)
         let candidate = value > 0
             ? image.applyingFilter("CISharpenLuminance", parameters: [
                 "inputRadius": radius,
@@ -701,7 +819,9 @@ enum RenderPipeline {
     /// Dehaze combines broad local contrast with global tone and colour separation. The global
     /// terms are intentionally restrained: at moderate settings the operation remains reversible
     /// and avoids making clipped highlights or artificial halos the primary visual effect.
-    private static func applyDehaze(_ value: Double, to image: CIImage) -> CIImage {
+    private static func applyDehaze(
+        _ value: Double, to image: CIImage, referenceExtent: CGRect
+    ) -> CIImage {
         let value = sanitizedDehaze(value)
         guard value != 0,
               image.extent.width.isFinite,
@@ -712,7 +832,7 @@ enum RenderPipeline {
 
         let inputExtent = image.extent
         let amount = CGFloat(abs(value) / EffectsAdjustments.dehazeRange.upperBound)
-        let radius = normalizedRadius(0.026, for: image)
+        let radius = normalizedRadius(0.026, for: referenceExtent)
         let local: CIImage
         if value > 0 {
             local = image.applyingFilter("CIUnsharpMask", parameters: [
@@ -785,8 +905,7 @@ enum RenderPipeline {
         return candidate.cropped(to: extent)
     }
 
-    private static func normalizedRadius(_ fraction: CGFloat, for image: CIImage) -> CGFloat {
-        let extent = image.extent
+    private static func normalizedRadius(_ fraction: CGFloat, for extent: CGRect) -> CGFloat {
         let shortestSide = min(abs(extent.width), abs(extent.height))
         guard shortestSide.isFinite, shortestSide > 0 else { return 1 }
         return max(0.5, shortestSide * fraction)

@@ -98,6 +98,8 @@ actor FakeRenderEngine: RenderEngining {
         let maskResolution: MaskResolutionPolicy
         let space: WorkingSpace
         let format: ExportFormat?
+        let sourceROI: CGRect?
+        let presentationImageExtent: CGRect?
         /// The `ImageSource` the call named. Recorded so a test can tell *which* image was asked
         /// for — a batch export issues one request per file and they differ only here.
         var source: ImageSource?
@@ -109,7 +111,9 @@ actor FakeRenderEngine: RenderEngining {
             space: WorkingSpace,
             format: ExportFormat?,
             source: ImageSource?,
-            maskResolution: MaskResolutionPolicy
+            maskResolution: MaskResolutionPolicy,
+            sourceROI: CGRect? = nil,
+            presentationImageExtent: CGRect? = nil
         ) {
             self.document = document
             self.lutID = lutID
@@ -117,6 +121,8 @@ actor FakeRenderEngine: RenderEngining {
             self.maskResolution = maskResolution
             self.space = space
             self.format = format
+            self.sourceROI = sourceROI
+            self.presentationImageExtent = presentationImageExtent
             self.source = source
         }
 
@@ -133,6 +139,8 @@ actor FakeRenderEngine: RenderEngining {
                 self.format = format
             }
             source = request.source
+            sourceROI = request.sourceROI
+            presentationImageExtent = request.presentationImageExtent
         }
     }
 
