@@ -214,6 +214,16 @@ struct RenderBuildPlan: Sendable, Equatable {
     }
 }
 
+private struct ResolvedLocalMaskSet {
+    let images: [UUID: CIImage]
+    let cacheIdentity: MaskRasterCacheIdentity?
+}
+
+private struct MaskRasterCacheIdentity: Sendable, Hashable {
+    let resolutionState: String
+    let payloadVersion: String
+}
+
 extension RenderEngining {
     func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult {
         try await render(request)
@@ -485,6 +495,8 @@ actor RenderEngine: RenderEngining {
     private var rawOutputRequestCount = 0
     private var processingPrefixMaterializationCount = 0
     private var materializationBudgetSkipCount = 0
+    private var nextPrefixFlightToken: UInt64 = 0
+    private var processingPrefixFlights: [ProcessingPrefixCacheKey: PrefixMaterializationFlight] = [:]
     private var memoryPressureSource: DispatchSourceMemoryPressure?
     /// Pixel-affecting mask topology, deliberately excluding both the global look and the local
     /// adjustment values applied through the resolved mask. A layer dropping out of the visible
@@ -665,7 +677,7 @@ actor RenderEngine: RenderEngining {
                 requestRevision: request.requestRevision, includeIdentity: true,
                 onlyComponentID: onlyComponentID
             )
-            guard let mask = masks[layer.id], !Task.isCancelled else { return nil }
+            guard let mask = masks.images[layer.id], !Task.isCancelled else { return nil }
             let output: CIImage
             switch request.style.inspection {
             case .colorWash:
@@ -1253,7 +1265,7 @@ actor RenderEngine: RenderEngining {
                 spatialReferenceExtent: hasEarlyCrop ? fullFrameExtent : nil
             )
         }
-        let masks = try await resolvedLocalMasks(
+        let resolvedMasks = try await resolvedLocalMasks(
             for: document.localAdjustments, source: source, extent: upstream.extent,
             quality: quality, transform: maskTransform, assetID: assetID,
             requestRevision: requestRevision,
@@ -1268,9 +1280,21 @@ actor RenderEngine: RenderEngining {
            latestRenderRequestRevisions[source.cacheFingerprint, default: 0] > requestRevision {
             throw CancellationError()
         }
-        let localAdjusted = RenderPipeline.applyLocalAdjustments(
-            document.localAdjustments, masks: masks, to: upstream
+        let localAdjustedGraph = RenderPipeline.applyLocalAdjustments(
+            document.localAdjustments, masks: resolvedMasks.images, to: upstream
         )
+        let localAdjusted: CIImage
+        if !scale.isFull, resolveSemanticMasks,
+           let cacheIdentity = resolvedMasks.cacheIdentity {
+            localAdjusted = await postLocalProcessingPrefix(
+                source: source, document: document, localAdjusted: localAdjustedGraph,
+                scale: scale, sourceROI: processingROI, space: space,
+                includePostRenderWhiteBalance: includePostRenderWhiteBalance,
+                quality: quality, cacheIdentity: cacheIdentity
+            )
+        } else {
+            localAdjusted = localAdjustedGraph
+        }
         let output = RenderStageFacade.buildFinalStages(
             preLUT: localAdjusted, document: document, lut: lut, space: space, lutCache: lutCache,
             grainSeed: RenderPipeline.grainSeed(for: source),
@@ -1441,12 +1465,12 @@ actor RenderEngine: RenderEngining {
         resolveSemanticMasks: Bool = true,
         includeIdentity: Bool = false,
         onlyComponentID: UUID? = nil
-    ) async throws -> [UUID: CIImage] {
+    ) async throws -> ResolvedLocalMaskSet {
         guard !layers.isEmpty,
               extent.width.isFinite, extent.height.isFinite,
               extent.width > 0, extent.height > 0,
               extent.width <= CGFloat(Int.max), extent.height <= CGFloat(Int.max)
-        else { return [:] }
+        else { return ResolvedLocalMaskSet(images: [:], cacheIdentity: nil) }
 
         let (payloads, duplicateKeys) = try await resolveMaskPayloads(
             for: layers, source: source, extent: extent, quality: quality,
@@ -1457,6 +1481,12 @@ actor RenderEngine: RenderEngining {
         )
         var result: [UUID: CIImage] = [:]
         var composedKeys: Set<LocalMaskCacheKey> = []
+        var payloadVersions: [String] = []
+        let hasSemanticMask = layers.contains { layer in
+            layer.hasVisibleLook && layer.components.contains {
+                $0.isUsable && $0.source.semanticDefinition != nil
+            }
+        }
         for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
             try Task.checkCancellation()
             // The deferred first frame omits semantic components, which only stays a *refinement*
@@ -1485,6 +1515,9 @@ actor RenderEngine: RenderEngining {
                 )
                 guard let payload = payloads[key] else {
                     throw LocalMaskResolutionError.invalidPayload
+                }
+                if component.source.semanticDefinition != nil {
+                    payloadVersions.append(component.id.uuidString + ":" + payload.cacheFingerprint)
                 }
                 if duplicateKeys.contains(key), !composedKeys.insert(key).inserted {
                     // Preserve the cache accounting/behavior of the old in-order resolver: a
@@ -1537,7 +1570,13 @@ actor RenderEngine: RenderEngining {
             if layer.isInverted { mask = localMaskRenderer.inverted(mask, extent: extent) }
             result[layer.id] = mask
         }
-        return result
+        let cacheIdentity: MaskRasterCacheIdentity? = hasSemanticMask ? MaskRasterCacheIdentity(
+            resolutionState: resolveSemanticMasks
+                ? "resolved"
+                : "deferred:\(requestRevision)",
+            payloadVersion: RenderCacheHash.digest(payloadVersions.sorted())
+        ) : nil
+        return ResolvedLocalMaskSet(images: result, cacheIdentity: cacheIdentity)
     }
 
     private func maskTargetSize(
@@ -1676,6 +1715,16 @@ actor RenderEngine: RenderEngining {
     private struct MaterializedImage {
         let image: CIImage
         let costBytes: Int
+    }
+
+    private struct PrefixMaterializationFlight {
+        let task: Task<MaterializedImage?, Never>
+        let token: UInt64
+    }
+
+    private struct DevelopedSourceFlight {
+        let task: Task<CIImage?, Never>
+        let token: UInt64
     }
 
     private struct MaterializationEstimate {
@@ -1833,6 +1882,9 @@ actor RenderEngine: RenderEngining {
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             pipelineVersion: RenderPipeline.cacheVersion
         )
+        if let flight = processingPrefixFlights[key] {
+            return await flight.task.value?.image
+        }
         if let cached = processingPrefixCache.value(for: key) {
             LumoObservability.event(.cacheHit, source: source, quality: quality,
                                     detail: "layer=processingPrefix")
@@ -1846,13 +1898,86 @@ actor RenderEngine: RenderEngining {
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             spatialReferenceExtent: spatialReferenceExtent
         )
-        guard let completed = await materializedPrefixImage(
-            prefix, space: space,
-            maxWorkingSetBytes: resources.configuration.processingPrefixMaxCostBytes
-        ) else { return nil }
-        processingPrefixMaterializationCount += 1
-        processingPrefixCache.insert(completed.image, for: key, cost: completed.costBytes)
-        return completed.image
+        nextPrefixFlightToken &+= 1
+        let token = nextPrefixFlightToken
+        let task = Task { [self] in
+            await materializedPrefixImage(
+                prefix, space: space,
+                maxWorkingSetBytes: resources.configuration.processingPrefixMaxCostBytes
+            )
+        }
+        processingPrefixFlights[key] = PrefixMaterializationFlight(task: task, token: token)
+        let completed = await task.value
+        if processingPrefixFlights[key]?.token == token {
+            processingPrefixFlights.removeValue(forKey: key)
+            if let completed {
+                processingPrefixMaterializationCount += 1
+                processingPrefixCache.insert(completed.image, for: key, cost: completed.costBytes)
+            }
+        }
+        return completed?.image
+    }
+
+    /// Materialize the graph after local adjustments when semantic masks participate in a
+    /// preview. The payload identity is collected only after resolution, so a deferred frame can
+    /// never occupy the settled-mask slot. Global edits remain in `upstreamHash`; the developed
+    /// source and every resolved component can still be reused independently on the next tick.
+    private func postLocalProcessingPrefix(
+        source: ImageSource,
+        document: EditDocument,
+        localAdjusted: CIImage,
+        scale: RenderScale,
+        sourceROI: CGRect?,
+        space: WorkingSpace,
+        includePostRenderWhiteBalance: Bool,
+        quality: RenderQuality,
+        cacheIdentity: MaskRasterCacheIdentity
+    ) async -> CIImage {
+        let key = ProcessingPrefixCacheKey(
+            source: RenderSourceFingerprint(source),
+            developHash: RenderCacheHash.digest(document.rawDevelop),
+            upstreamHash: prefixDocumentHash(
+                document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
+            ),
+            stage: .postLocal,
+            localAdjustmentsHash: RenderCacheHash.digest(document.localAdjustments),
+            maskResolutionState: cacheIdentity.resolutionState,
+            maskPayloadVersion: cacheIdentity.payloadVersion,
+            scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
+            sourceROI: sourceROI,
+            space: space,
+            includePostRenderWhiteBalance: includePostRenderWhiteBalance,
+            pipelineVersion: RenderPipeline.cacheVersion
+        )
+        if let flight = processingPrefixFlights[key] {
+            return await flight.task.value?.image ?? localAdjusted
+        }
+        if let cached = processingPrefixCache.value(for: key) {
+            LumoObservability.event(.cacheHit, source: source, quality: quality,
+                                    detail: "layer=postLocalProcessingPrefix state=\(cacheIdentity.resolutionState)")
+            return cached
+        }
+        LumoObservability.event(.cacheMiss, source: source, quality: quality,
+                                detail: "layer=postLocalProcessingPrefix state=\(cacheIdentity.resolutionState)")
+
+        nextPrefixFlightToken &+= 1
+        let token = nextPrefixFlightToken
+        let task = Task { [self] in
+            await materializedPrefixImage(
+                localAdjusted, space: space,
+                maxWorkingSetBytes: resources.configuration.processingPrefixMaxCostBytes
+            )
+        }
+        processingPrefixFlights[key] = PrefixMaterializationFlight(task: task, token: token)
+        let completed = await task.value
+        if processingPrefixFlights[key]?.token == token {
+            processingPrefixFlights.removeValue(forKey: key)
+            if let completed {
+                processingPrefixMaterializationCount += 1
+                processingPrefixCache.insert(completed.image, for: key, cost: completed.costBytes)
+            }
+        }
+        return completed?.image ?? localAdjusted
     }
 
     private func prefixDocumentHash(

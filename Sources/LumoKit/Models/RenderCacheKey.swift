@@ -67,17 +67,56 @@ struct DevelopedSourceCacheKey: Hashable, Sendable {
     let pipelineVersion: Int
 }
 
-/// Identity for the one intentionally materialized expensive prefix. It stops at the LUT because
-/// LUT intensity/content and the composition effects below it are common interactive edit targets.
+/// The materialized prefix can stop either before local adjustments or immediately after them.
+/// LUT intensity/content and the composition effects below it remain common interactive edit
+/// targets in both cases.
+enum ProcessingPrefixStage: String, Hashable, Sendable {
+    case preLUT
+    case postLocal
+}
+
+/// Identity for the one intentionally materialized expensive prefix.
 struct ProcessingPrefixCacheKey: Hashable, Sendable {
     let source: RenderSourceFingerprint
     let developHash: String
     let upstreamHash: String
+    let stage: ProcessingPrefixStage
+    let localAdjustmentsHash: String?
+    let maskResolutionState: String?
+    let maskPayloadVersion: String?
     let scale: RenderScaleKey
     let sourceROI: CGRect?
     let space: WorkingSpace
     let includePostRenderWhiteBalance: Bool
     let pipelineVersion: Int
+
+    init(
+        source: RenderSourceFingerprint,
+        developHash: String,
+        upstreamHash: String,
+        stage: ProcessingPrefixStage = .preLUT,
+        localAdjustmentsHash: String? = nil,
+        maskResolutionState: String? = nil,
+        maskPayloadVersion: String? = nil,
+        scale: RenderScaleKey,
+        sourceROI: CGRect?,
+        space: WorkingSpace,
+        includePostRenderWhiteBalance: Bool,
+        pipelineVersion: Int
+    ) {
+        self.source = source
+        self.developHash = developHash
+        self.upstreamHash = upstreamHash
+        self.stage = stage
+        self.localAdjustmentsHash = localAdjustmentsHash
+        self.maskResolutionState = maskResolutionState
+        self.maskPayloadVersion = maskPayloadVersion
+        self.scale = scale
+        self.sourceROI = sourceROI
+        self.space = space
+        self.includePostRenderWhiteBalance = includePostRenderWhiteBalance
+        self.pipelineVersion = pipelineVersion
+    }
 }
 
 /// Identity for one resolved local-mask component. It deliberately contains no document/global
