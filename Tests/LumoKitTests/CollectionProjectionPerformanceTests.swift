@@ -8,11 +8,11 @@ import XCTest
 /// rebuilt only when their inputs change, and a thumbnail is published by its own item rather than
 /// by the collection containing thousands of items.
 @MainActor
-final class CollectionProjectionPerformanceTests: XCTestCase {
+final class CollectionProjectionPerformanceTests: TempDirectoryTestCase {
 
     func testProjectionCacheIsStableFor1KAnd10KLibraries() {
         for count in [1_000, 10_000] {
-            let collection = ImageCollection()
+            let collection = makeTestCollection()
             collection.items = makeItems(count: count)
 
             let start = DispatchTime.now().uptimeNanoseconds
@@ -40,7 +40,7 @@ final class CollectionProjectionPerformanceTests: XCTestCase {
     }
 
     func testThumbnailPublishesOnlyFromTheChangedItemAndKeepsProjectionCache() {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         let items = makeItems(count: 3)
         collection.items = items
         _ = collection.thumbnailEntries
@@ -69,7 +69,7 @@ final class CollectionProjectionPerformanceTests: XCTestCase {
     }
 
     func testFilterRevisionRebuildsTheProjectionWithoutChangingItemIdentityOrder() {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         let items = makeItems(count: 4)
         items[1].asset.rating = 4
         items[3].asset.rating = 2

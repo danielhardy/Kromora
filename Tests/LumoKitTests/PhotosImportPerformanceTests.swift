@@ -5,7 +5,7 @@ import XCTest
 /// multi-dozen-megapixel sample, so this test never turns the absence of a licensed local RAW into
 /// a CI failure. Its output is the before/after report used with Instruments on a reference Mac.
 @MainActor
-final class PhotosImportPerformanceTests: XCTestCase {
+final class PhotosImportPerformanceTests: TempDirectoryTestCase {
 
     func testProfileOneLargeRAWImportBeforeAndAfter() throws {
         try XCTSkipUnless(
@@ -39,14 +39,14 @@ final class PhotosImportPerformanceTests: XCTestCase {
             _ = Thumbnails.generate(from: sourceData)
         }
 
-        let oldCollection = ImageCollection()
+        let oldCollection = makeTestCollection()
         let oldInsertion = elapsed {
             oldCollection.addFromData((0..<3).map {
                 (name: "Photo \($0 + 1)", data: sourceData)
             })
         }
 
-        let newCollection = ImageCollection()
+        let newCollection = makeTestCollection()
         let newInsertion = elapsed {
             newCollection.beginDataImport()
             for ordinal in 0..<3 {

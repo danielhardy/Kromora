@@ -7,7 +7,9 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
 
     func testURLImportsAppendCopyAndDeduplicate() throws {
         let sourceFolder = try Fixtures.makeTempDirectory("LumoImportSource")
-        let libraryFolder = try Fixtures.makeTempDirectory("LumoImportLibrary")
+        let libraryFolder = tempDirectory.appendingPathComponent(
+            "managed-library", isDirectory: true
+        )
         let first = try Fixtures.writeGradientPNG(
             width: 20, height: 12, named: "first.png", in: sourceFolder
         )
@@ -15,8 +17,10 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
             width: 12, height: 20, named: "second.png", in: sourceFolder
         )
         let originalFirst = try Data(contentsOf: first)
-        let defaults = UserDefaults(suiteName: "LumoImportedPhotoDurability-\(UUID().uuidString)")!
-        let collection = ImageCollection(defaults: defaults, libraryFolderURL: libraryFolder)
+        let defaults = makeTestUserDefaults()
+        let collection = makeTestCollection(
+            defaults: defaults, libraryFolderURL: libraryFolder
+        )
 
         XCTAssertEqual(collection.addFromURLs([first]).count, 1)
         XCTAssertEqual(collection.addFromURLs([second]).count, 1)
@@ -31,15 +35,21 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
     }
 
     func testImportedCopyIsFoundAfterCollectionRebuild() async throws {
-        let libraryFolder = try Fixtures.makeTempDirectory("LumoImportLibrary")
+        let libraryFolder = tempDirectory.appendingPathComponent(
+            "managed-library", isDirectory: true
+        )
         let source = try Fixtures.writeGradientPNG(
             width: 20, height: 12, named: "relaunch.png", in: tempDirectory
         )
-        let defaults = UserDefaults(suiteName: "LumoImportedPhotoDurability-\(UUID().uuidString)")!
-        let first = ImageCollection(defaults: defaults, libraryFolderURL: libraryFolder)
+        let defaults = makeTestUserDefaults()
+        let first = makeTestCollection(
+            defaults: defaults, libraryFolderURL: libraryFolder
+        )
         _ = first.addFromURLs([source])
 
-        let relaunched = ImageCollection(defaults: defaults, libraryFolderURL: libraryFolder)
+        let relaunched = makeTestCollection(
+            defaults: defaults, libraryFolderURL: libraryFolder
+        )
         XCTAssertTrue(relaunched.restoreLibrary())
         await relaunched.scanCompletion()
 

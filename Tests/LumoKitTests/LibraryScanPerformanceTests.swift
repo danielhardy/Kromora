@@ -31,7 +31,7 @@ final class LibraryScanPerformanceTests: TempDirectoryTestCase {
                 ))
             }
 
-            let collection = ImageCollection()
+            let collection = makeTestCollection()
             let start = DispatchTime.now().uptimeNanoseconds
             collection.loadFromFolder(folder)
             let firstRowStart = DispatchTime.now().uptimeNanoseconds

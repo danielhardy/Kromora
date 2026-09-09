@@ -207,7 +207,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     // MARK: - ImageCollection
 
     func testCollectionScansFolderAndRecordsSubfolders() async throws {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "b.jpg", in: tempDirectory)
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "a.jpg", in: tempDirectory)
 
@@ -234,7 +234,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
             )
         }
 
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
 
         var sawPartialScan = false
@@ -268,7 +268,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
         }
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "current.jpg", in: second)
 
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(first)
         collection.loadFromFolder(second)
         await collection.scanCompletion()
@@ -289,7 +289,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
             tiff: [kCGImagePropertyTIFFMake: "Lumo", kCGImagePropertyTIFFModel: "Test Body"]
         )
 
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
 
         // Discovery publishes the item before the deferred ImageIO metadata read completes.
@@ -315,7 +315,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "good.jpg", in: tempDirectory)
         try Data("not an image".utf8).write(to: tempDirectory.appendingPathComponent("bad.jpg"))
 
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()
         await collection.metadataCompletion()
@@ -331,7 +331,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
         try Data("not an image".utf8).write(to: tempDirectory.appendingPathComponent("aaa-bad.jpg"))
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "zzz-good.jpg", in: tempDirectory)
 
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()
         await collection.metadataCompletion()
@@ -345,7 +345,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     /// `isActive` false, which killed ←/→ and `selectedItem` while the browser
     /// still listed the row.
     func testSingleImageFolderIsActive() async throws {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "only.jpg", in: tempDirectory)
 
         collection.loadFromFolder(tempDirectory)
@@ -357,7 +357,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testEmptyFolderIsNotActive() async throws {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()
 
@@ -367,7 +367,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testCollectionIgnoresUnsupportedFiles() async throws {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "keep.jpg", in: tempDirectory)
         try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "skip.cube", in: tempDirectory)
         try "x".write(to: tempDirectory.appendingPathComponent("skip.txt"), atomically: true, encoding: .utf8)
@@ -379,7 +379,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testNavigationStaysInBounds() async throws {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         for name in ["a", "b", "c"] {
             try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "\(name).jpg", in: tempDirectory)
         }
@@ -398,7 +398,7 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testClearDropsBrowsingStateButKeepsNothingStale() async throws {
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "a.jpg", in: tempDirectory)
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()

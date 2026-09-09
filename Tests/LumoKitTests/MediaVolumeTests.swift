@@ -126,8 +126,10 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         let original = try Data(contentsOf: url)
         let file = MediaVolumeFile(url: url, filename: "DSC0001.JPG", orientation: 6)
         let volume = MediaVolume(name: "Card", url: tempDirectory)
-        let libraryFolder = try Fixtures.makeTempDirectory("LumoMediaImportLibrary")
-        let collection = ImageCollection(libraryFolderURL: libraryFolder)
+        let libraryFolder = tempDirectory.appendingPathComponent(
+            "managed-library", isDirectory: true
+        )
+        let collection = makeTestCollection(libraryFolderURL: libraryFolder)
 
         let ids = collection.addFromMediaVolume(volume, files: [file])
         XCTAssertEqual(ids.count, 1)

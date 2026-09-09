@@ -161,7 +161,7 @@ final class ThumbnailTests: TempDirectoryTestCase {
         try writeSolidPNG(named: "b.png", red: 0.9, green: 0.1, blue: 0.1)
         try writeSolidPNG(named: "c.png", red: 0.1, green: 0.9, blue: 0.1)
 
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
         try await waitUntil("the first scan") { collection.items.count == 2 }
 
@@ -208,7 +208,7 @@ final class ThumbnailTests: TempDirectoryTestCase {
                 width: 64, height: 48, orientation: 1, named: "\(name).jpg", in: tempDirectory
             )
         }
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
 
         try await waitUntil("thumbnails for every scanned file") {
@@ -230,7 +230,7 @@ final class ThumbnailTests: TempDirectoryTestCase {
         let data = try Data(contentsOf: url)
 
         let libraryFolder = try Fixtures.makeTempDirectory("LumoImportLibrary")
-        let collection = ImageCollection(libraryFolderURL: libraryFolder)
+        let collection = makeTestCollection(libraryFolderURL: libraryFolder)
         collection.addFromData([(name: "photo", data: data)])
 
         XCTAssertEqual(collection.items.count, 1)

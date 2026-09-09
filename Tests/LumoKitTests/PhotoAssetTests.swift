@@ -128,7 +128,7 @@ final class PhotoAssetTests: TempDirectoryTestCase {
         let url = try Fixtures.writeJPEG(
             width: 20, height: 10, orientation: 1, named: "photo.jpg", in: tempDirectory
         )
-        let collection = ImageCollection()
+        let collection = makeTestCollection()
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()
         let firstID = try XCTUnwrap(collection.items.first?.id)

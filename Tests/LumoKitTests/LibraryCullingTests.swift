@@ -4,10 +4,7 @@ import XCTest
 @MainActor
 final class LibraryCullingTests: TempDirectoryTestCase {
     private func makeDefaults() -> UserDefaults {
-        let suite = "LumoCullingTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        return defaults
+        makeTestUserDefaults()
     }
 
     private func makeCollection(defaults: UserDefaults) async throws -> ImageCollection {
@@ -16,7 +13,7 @@ final class LibraryCullingTests: TempDirectoryTestCase {
                 width: 16, height: 12, orientation: 1, named: name, in: tempDirectory
             )
         }
-        let collection = ImageCollection(defaults: defaults)
+        let collection = makeTestCollection(defaults: defaults)
         collection.loadFromFolder(tempDirectory)
         await collection.scanCompletion()
         return collection
@@ -122,7 +119,7 @@ final class LibraryCullingTests: TempDirectoryTestCase {
         XCTAssertTrue(collection.setRating(4, for: firstID))
         XCTAssertTrue(collection.setFlag(.pick, for: firstID))
 
-        let restored = ImageCollection(defaults: defaults)
+        let restored = makeTestCollection(defaults: defaults)
         restored.loadFromFolder(tempDirectory)
         await restored.scanCompletion()
         let item = try XCTUnwrap(restored.items.first { $0.id == firstID })
