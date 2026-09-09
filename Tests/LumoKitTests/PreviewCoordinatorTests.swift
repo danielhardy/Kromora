@@ -253,6 +253,154 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertLessThanOrEqual(p95, 50, "interactive preview must stay within the 50 ms budget")
     }
 
+    // MARK: - Two-phase masked preview
+
+    /// A masked photo must not wait on Vision to show anything. The coordinator publishes the
+    /// semantics-free frame first, then republishes the same visible revision once the masks
+    /// resolve.
+    func testMaskedPreviewPublishesABaseFrameBeforeTheResolvedOne() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(engine: fake, settleDelay: .zero)
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+        let source = makeSource()
+
+        coordinator.submit(maskedRequest(source: source, exposure: 0.1), displayRevision: 7)
+        try await waitUntil("the base render") { await fake.requests.count == 1 }
+        var requests = await fake.allRequests()
+        XCTAssertEqual(requests[0].maskResolution, .deferSemantic,
+                       "the first frame of a masked preview must skip semantic resolution")
+
+        await fake.releaseNext()
+        try await waitUntil("the base publication") { publications.count == 1 }
+        XCTAssertEqual(publications[0].request.maskResolution, .deferSemantic)
+        XCTAssertEqual(publications[0].displayRevision, 7)
+        let firstPixels = try XCTUnwrap(coordinator.telemetry.measurements.last?.renderEnd)
+
+        try await waitUntil("the refining render") { await fake.requests.count == 2 }
+        requests = await fake.allRequests()
+        XCTAssertEqual(requests[1].maskResolution, .resolved)
+        XCTAssertEqual(requests[1].document, requests[0].document,
+                       "the refinement must refine the frame that was published, not a newer one")
+
+        await fake.releaseNext()
+        try await waitUntil("the refined publication") { publications.count == 2 }
+        XCTAssertEqual(publications[1].request.maskResolution, .resolved)
+        XCTAssertEqual(publications[1].displayRevision, 7,
+                       "the refinement carries the display revision it refines")
+        XCTAssertEqual(coordinator.telemetry.measurements.last?.renderEnd, firstPixels,
+                       "pointer-to-pixel latency must describe the frame the user saw first")
+    }
+
+    /// The two-phase publish exists to hide Vision latency. Once a resolved frame for the same
+    /// photo and mask recipe has landed, the renderer's masks are warm, so a further edit must cost
+    /// one render — not two.
+    func testWarmSemanticMasksRenderInASinglePhase() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(engine: fake, settleDelay: .zero)
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+        let source = makeSource()
+
+        coordinator.submit(maskedRequest(source: source, exposure: 0.1))
+        try await waitUntil("the base render") { await fake.requests.count == 1 }
+        await fake.releaseNext()
+        try await waitUntil("the refining render") { await fake.requests.count == 2 }
+        await fake.releaseNext()
+        try await waitUntil("the refined publication") { publications.count == 2 }
+
+        coordinator.submit(maskedRequest(source: source, exposure: 0.4))
+        try await waitUntil("the edited render") { await fake.requests.count == 3 }
+        await fake.releaseNext()
+        try await waitUntil("the edited publication") { publications.count == 3 }
+        let requests = await fake.allRequests()
+        XCTAssertEqual(requests.count, 3, "a warm mask recipe must not pay for a second base frame")
+        XCTAssertEqual(requests[2].maskResolution, .resolved)
+
+        // Editing the mask recipe itself makes the resolver cold again, so the base frame returns.
+        var recipeChange = maskedRequest(source: source, exposure: 0.4)
+        recipeChange = RenderRequest(
+            source: recipeChange.source, document: EditDocument(
+                rawDevelop: RAWDevelopSettings(exposure: 0.4),
+                localAdjustments: [Self.maskLayer(target: .person)]
+            ),
+            targetSize: recipeChange.targetSize, quality: .preview, output: .raster
+        )
+        coordinator.submit(recipeChange)
+        try await waitUntil("the cold base render") { await fake.requests.count == 4 }
+        let afterRecipeChange = await fake.allRequests()
+        XCTAssertEqual(afterRecipeChange[3].maskResolution, .deferSemantic,
+                       "a new smart mask must publish a base frame while Vision resolves it")
+    }
+
+    /// The refinement is fenced by the same token as the base frame: a superseded base frame must
+    /// neither publish nor drag its own refinement onto the screen behind a newer edit.
+    func testASupersededBaseFrameNeitherPublishesNorRefines() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(engine: fake, settleDelay: .zero)
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+        let source = makeSource()
+
+        coordinator.submit(maskedRequest(source: source, exposure: 0.1))
+        try await waitUntil("the first base render") { await fake.requests.count == 1 }
+        coordinator.submit(maskedRequest(source: source, exposure: 0.9))
+        try await waitUntil("the replacement base render") { await fake.requests.count == 2 }
+
+        await fake.releaseNext()
+        try await Task.sleep(for: .milliseconds(20))
+        XCTAssertTrue(publications.isEmpty, "the superseded base frame must not reach the screen")
+        let afterStale = await fake.allRequests()
+        XCTAssertEqual(afterStale.count, 2, "a superseded base frame must not start a refinement")
+
+        await fake.releaseNext()
+        try await waitUntil("the current base publication") { publications.count == 1 }
+        XCTAssertEqual(publications[0].request.document.rawDevelop.exposure, 0.9)
+        try await waitUntil("the current refinement") { await fake.requests.count == 3 }
+        await fake.releaseNext()
+        try await waitUntil("the current refined publication") { publications.count == 2 }
+        XCTAssertEqual(publications[1].request.maskResolution, .resolved)
+        XCTAssertEqual(publications[1].request.document.rawDevelop.exposure, 0.9)
+    }
+
+    /// A photo with no semantic masks has nothing to wait for, so it must keep the single exact
+    /// render it has always had.
+    func testUnmaskedPreviewStaysSinglePhase() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(engine: fake, settleDelay: .zero)
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+
+        coordinator.submit(request(source: makeSource(), exposure: 0.2))
+        try await waitUntil("the only render") { await fake.requests.count == 1 }
+        await fake.releaseNext()
+        try await waitUntil("the publication") { publications.count == 1 }
+        try await Task.sleep(for: .milliseconds(20))
+        let requests = await fake.allRequests()
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].maskResolution, .resolved)
+    }
+
+    private static func maskLayer(target: SemanticTarget) -> LocalAdjustmentLayer {
+        LocalAdjustmentLayer(
+            components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: target)))],
+            adjustments: LocalAdjustments(exposure: 0.5)
+        )
+    }
+
+    private func maskedRequest(source: ImageSource, exposure: Double) -> RenderRequest {
+        RenderRequest(
+            source: source,
+            document: EditDocument(
+                rawDevelop: RAWDevelopSettings(exposure: exposure),
+                localAdjustments: [Self.maskLayer(target: .subject)]
+            ),
+            targetSize: CGSize(width: 320, height: 240),
+            quality: .preview,
+            output: .raster
+        )
+    }
+
     private func request(source: ImageSource, exposure: Double) -> RenderRequest {
         RenderRequest(
             source: source,
