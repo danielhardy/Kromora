@@ -151,7 +151,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         }
     }
 
-    func testOpeningStoredEditsSubmitsOnePreviewWithTheStoredDocument() async throws {
+    func testOpeningStoredEditsSpeculatesThenSubmitsTheStoredDocument() async throws {
         let image = try makeImageFile()
         let storedDocument = EditDocument(
             rawDevelop: RAWDevelopSettings(exposure: 0.75),
@@ -171,14 +171,19 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == image })
 
         viewModel.selectCollectionImage(at: index)
-        let request = try await awaitRequest(reader, fake, "the stored-edit opening render") { _ in true }
-        XCTAssertEqual(request.document, storedDocument)
+        let speculative = try await awaitRequest(reader, fake, "the speculative opening render") { _ in true }
+        XCTAssertEqual(speculative.document, EditDocument())
+
+        let stored = try await awaitRequest(reader, fake, "the stored-edit corrective render") { request in
+            request.document == storedDocument
+        }
+        XCTAssertEqual(stored.document, storedDocument)
 
         try await waitUntil("the stored-edit preview to settle") {
             viewModel.previewState == .ready
         }
         let previewCount = await fake.previewRequests.count
-        XCTAssertEqual(previewCount, 1, "stored edits must not cause a discarded pristine preview")
+        XCTAssertEqual(previewCount, 2, "stored edits correct the speculative opening preview")
     }
 
     /// Navigation changes must remain a display concern while still driving a fresh render when

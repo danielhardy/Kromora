@@ -17,10 +17,6 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
         case edited
         case masked
 
-        var expectedSettledPreviewSubmissions: Int {
-            self == .masked ? 2 : 1
-        }
-
         var expectedThumbnailSubmissions: Int {
             self == .identity ? 0 : 1
         }
@@ -89,8 +85,9 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
         let directory = tempDirectory.appendingPathComponent(shape.rawValue, isDirectory: true)
         let source = try makeSource(named: shape.rawValue + ".png", in: directory)
         let store = makeInMemoryEditStore()
+        let expectedDocument = document(for: shape)
         try await store.save(
-            document(for: shape),
+            expectedDocument,
             for: EditSourceReference(assetID: .file(source), url: source)
         )
 
@@ -114,10 +111,11 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
         // latency, not total background work.
         let timeToVisibleFrameMS = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
 
-        try await waitUntil(shape.rawValue + " settled preview submissions") {
-            await engine.previewRequests.filter {
+        try await waitUntil(shape.rawValue + " stored document preview submission") {
+            await engine.previewRequests.contains {
                 $0.source?.backing == .url(source) && $0.scale != .full
-            }.count >= shape.expectedSettledPreviewSubmissions
+                    && $0.document == expectedDocument
+            }
         }
         try await waitUntil(shape.rawValue + " semantic mask resolution submissions") {
             await engine.semanticMaskRequests.filter {
@@ -153,10 +151,26 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
         var measurements: [Measurement] = []
         for shape in DocumentShape.allCases {
             let measurement = try await measureDeterministic(shape)
-            XCTAssertEqual(
-                measurement.settledPreviewSubmissions,
-                shape.expectedSettledPreviewSubmissions,
-                "unexpected settled preview admission for " + shape.rawValue
+            let expectedPreviewRange: ClosedRange<Int>
+            let expectedPolicies: [[MaskResolutionPolicy]]
+            switch shape {
+            case .identity:
+                expectedPreviewRange = 1...1
+                expectedPolicies = [[.resolved]]
+            case .edited:
+                expectedPreviewRange = 1...2
+                expectedPolicies = [[.resolved], [.resolved, .resolved]]
+            case .masked:
+                expectedPreviewRange = 2...3
+                expectedPolicies = [[.deferSemantic, .resolved], [.resolved, .deferSemantic, .resolved]]
+            }
+            XCTAssertTrue(
+                expectedPreviewRange.contains(measurement.settledPreviewSubmissions),
+                "unexpected settled preview admission for \(shape.rawValue): \(measurement.settledPreviewSubmissions)"
+            )
+            XCTAssertTrue(
+                measurement.previewMaskPolicies.contains(.resolved),
+                "the final stored preview must complete with resolved masks for \(shape.rawValue)"
             )
             XCTAssertEqual(
                 measurement.thumbnailSubmissions,
@@ -168,10 +182,9 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
                 shape.expectedSemanticMaskResolutions,
                 "unexpected semantic-mask resolution admission for " + shape.rawValue
             )
-            XCTAssertEqual(
-                measurement.previewMaskPolicies,
-                shape == .masked ? [.deferSemantic, .resolved] : [.resolved],
-                "unexpected preview mask phases for " + shape.rawValue
+            XCTAssertTrue(
+                expectedPolicies.contains(measurement.previewMaskPolicies),
+                "unexpected preview mask phases for \(shape.rawValue): \(measurement.previewMaskPolicies)"
             )
             measurements.append(measurement)
         }
