@@ -779,7 +779,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
             }
         }
 
-        private func handleSkippedDrawable(revision: UInt64) {
+        // Internal (not private) so PreviewSurfaceTests can drive the bounded-retry
+        // contract directly without requiring a live drawable.
+        func handleSkippedDrawable(revision: UInt64) {
             if skippedPresentationRevision != revision {
                 skippedPresentationRevision = revision
                 consecutiveSkippedDraws = 0

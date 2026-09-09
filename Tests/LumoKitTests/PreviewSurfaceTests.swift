@@ -109,6 +109,71 @@ final class PreviewSurfaceTests: XCTestCase {
                      "a skipped-then-retried frame must not enter presentation statistics")
     }
 
+    func testSkippedDrawRetriesAreBoundedAndQuietAfterConsecutiveSkips() async throws {
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let view = TrackingMTKView(frame: CGRect(x: 0, y: 0, width: 32, height: 24), device: nil)
+        coordinator.view = view
+        let baseline = view.redrawRequestCount
+
+        // Coalescing: two skips landing in the same turn schedule a single invalidation.
+        coordinator.handleSkippedDrawable(revision: 7)
+        coordinator.handleSkippedDrawable(revision: 7)
+        try await waitForRedrawCount(view, toBecome: baseline + 1)
+
+        // Bound: the third consecutive skip suppresses retries; later skips stay quiet.
+        coordinator.handleSkippedDrawable(revision: 7)
+        try await assertRedrawCountSettles(view, at: baseline + 1)
+        coordinator.handleSkippedDrawable(revision: 7)
+        coordinator.handleSkippedDrawable(revision: 7)
+        try await assertRedrawCountSettles(view, at: baseline + 1)
+    }
+
+    func testVisibilityRestoreRearmsSkippedDrawRetries() async throws {
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let view = TrackingMTKView(frame: CGRect(x: 0, y: 0, width: 32, height: 24), device: nil)
+        coordinator.view = view
+        let baseline = view.redrawRequestCount
+
+        coordinator.handleSkippedDrawable(revision: 9)
+        try await waitForRedrawCount(view, toBecome: baseline + 1)
+        coordinator.handleSkippedDrawable(revision: 9)
+        try await waitForRedrawCount(view, toBecome: baseline + 2)
+        coordinator.handleSkippedDrawable(revision: 9)
+        try await assertRedrawCountSettles(view, at: baseline + 2)
+
+        // A visibility restore repaints the latest revision and lifts the suppression so the
+        // still-pending revision can retry once it has a drawable again.
+        coordinator.visibilityDidChange()
+        try await waitForRedrawCount(view, toBecome: baseline + 3)
+        coordinator.handleSkippedDrawable(revision: 9)
+        try await waitForRedrawCount(view, toBecome: baseline + 4)
+    }
+
+    /// The retry scheduler paces invalidations through a yielded main-actor task, so poll
+    /// briefly rather than assuming a fixed number of yields drains it.
+    private func waitForRedrawCount(
+        _ view: TrackingMTKView, toBecome expected: Int,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async throws {
+        for _ in 0..<200 {
+            if view.redrawRequestCount == expected { return }
+            try await Task.sleep(nanoseconds: 2_000_000)
+        }
+        XCTFail("redraw count settled at \(view.redrawRequestCount), expected \(expected)",
+                file: file, line: line)
+    }
+
+    /// Asserting quiet requires waiting out any in-flight paced task, then confirming silence.
+    private func assertRedrawCountSettles(
+        _ view: TrackingMTKView, at expected: Int,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async throws {
+        try await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(view.redrawRequestCount, expected,
+                       "suppressed skipped draws must not schedule further redraws",
+                       file: file, line: line)
+    }
+
     func testLatestPublicationRemainsAvailableAcrossSkippedReplacement() {
         let surface = PreviewSurface()
         surface.attachPresentationLifecycle()
