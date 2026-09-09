@@ -402,6 +402,41 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertFalse(trackedSources.contains(sources[0].cacheFingerprint))
     }
 
+    func testInvalidateSourceCacheClearsMaskSourceOrder() async throws {
+        let engine = RenderEngine()
+        let firstSource = try source(width: 8, height: 4)
+
+        _ = try await engine.render(RenderRequest(
+            source: firstSource,
+            document: EditDocument(),
+            targetSize: CGSize(width: 8, height: 4),
+            quality: .preview,
+            output: .raster,
+            requestRevision: 1
+        ))
+        let trackedAfterFirst = await engine.trackedMaskSourceKeysForTesting
+        XCTAssertEqual(trackedAfterFirst, [firstSource.cacheFingerprint])
+
+        await engine.invalidateSourceCache()
+        let trackedAfterInvalidate = await engine.trackedMaskSourceKeysForTesting
+        XCTAssertEqual(
+            trackedAfterInvalidate, [],
+            "invalidateSourceCache must clear mask source order along with the recipe table"
+        )
+
+        let secondSource = try source(width: 9, height: 4)
+        _ = try await engine.render(RenderRequest(
+            source: secondSource,
+            document: EditDocument(),
+            targetSize: CGSize(width: 9, height: 4),
+            quality: .preview,
+            output: .raster,
+            requestRevision: 1
+        ))
+        let trackedAfterSecond = await engine.trackedMaskSourceKeysForTesting
+        XCTAssertEqual(trackedAfterSecond, [secondSource.cacheFingerprint])
+    }
+
     func testGlobalOnlyEditHitsTheResolvedSemanticMaskCacheWithoutCallingProviderAgain() async throws {
         let source = try source()
         let store = MaskStore(directory: tempDirectory.appendingPathComponent("global-edit-masks"))
