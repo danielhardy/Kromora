@@ -10,6 +10,26 @@ import simd
 @MainActor
 final class AppViewModelTests: TempDirectoryTestCase {
 
+    func testUnreadableSourceBookmarkDoesNotFallBackToManagedLibrary() throws {
+        let libraryFolder = tempDirectory.appendingPathComponent("managed-library", isDirectory: true)
+        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+        _ = try Fixtures.writeGradientPNG(
+            width: 12, height: 8, named: "managed.png", in: libraryFolder
+        )
+        let defaults = makeTestUserDefaults()
+        defaults.set(Data("sandboxed-bookmark-from-another-process".utf8), forKey: "imageSourceFolderBookmark")
+
+        let viewModel = makeAppViewModel(
+            preferences: defaults,
+            libraryFolderURL: libraryFolder
+        )
+
+        let message = "Lumo could not restore the source folder. Choose Open Source Folder… to select it again."
+        XCTAssertTrue(viewModel.collection.items.isEmpty)
+        XCTAssertEqual(viewModel.statusMessage, message)
+        XCTAssertEqual(viewModel.errorMessage, message)
+    }
+
     func testEditDatabaseURLIsExposedWithoutExposingTheStore() async {
         let storeURL = tempDirectory.appendingPathComponent("EditStore.store")
         let viewModel = makeAppViewModel(
