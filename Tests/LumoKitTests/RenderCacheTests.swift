@@ -133,6 +133,90 @@ final class RenderCacheTests: TempDirectoryTestCase {
         XCTAssertEqual(stats.developedSource.hits, 1)
     }
 
+    func testPartitionSurvivalTest() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        let previewRequests = (0..<4).map { offset in
+            request(
+                source: source,
+                targetSize: CGSize(width: 28 + offset * 4, height: 28 + offset * 4)
+            )
+        }
+
+        for previewRequest in previewRequests {
+            _ = await engine.makeCIImage(previewRequest)
+        }
+        let beforeThumbnails = await engine.cacheStatistics()
+
+        for size in 8...57 {
+            _ = await engine.makeCIImage(RenderRequest(
+                source: source,
+                document: EditDocument(),
+                targetSize: CGSize(width: size, height: size),
+                quality: .thumbnail,
+                output: .raster
+            ))
+        }
+
+        let afterThumbnails = await engine.cacheStatistics()
+        XCTAssertEqual(afterThumbnails.developedSource.count, 4)
+        XCTAssertEqual(afterThumbnails.developedSource.evictions,
+                       beforeThumbnails.developedSource.evictions,
+                       "thumbnail churn must not evict editor developed sources")
+
+        for previewRequest in previewRequests {
+            _ = await engine.makeCIImage(previewRequest)
+        }
+        let afterHits = await engine.cacheStatistics()
+        XCTAssertEqual(afterHits.developedSource.hits - afterThumbnails.developedSource.hits, 4)
+    }
+
+    func testEvictionAccountingTest() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        _ = await engine.makeCIImage(request(source: source, targetSize: CGSize(width: 32, height: 32)))
+        let before = await engine.cacheStatistics()
+
+        for size in 8...57 {
+            _ = await engine.makeCIImage(RenderRequest(
+                source: source,
+                document: EditDocument(),
+                targetSize: CGSize(width: size, height: size),
+                quality: .thumbnail,
+                output: .raster
+            ))
+        }
+
+        let after = await engine.cacheStatistics()
+        XCTAssertEqual(after.developedSource.evictions, before.developedSource.evictions)
+        XCTAssertGreaterThanOrEqual(after.thumbnailDevelopedSource.evictions, 49)
+    }
+
+    func testByteCapTest() async throws {
+        let sourceURL = try Fixtures.writeGradientPNG(
+            width: 512, height: 512, named: "thumbnail-byte-cap.png", in: tempDirectory
+        )
+        let source = ImageSource(url: sourceURL, nativeExtent: CGSize(width: 512, height: 512))
+        let cap = 100_000
+        let engine = RenderEngine(configuration: RenderCacheConfiguration(
+            thumbnailDevelopedSourceMaxEntries: 256,
+            thumbnailDevelopedSourceMaxCostBytes: cap
+        ))
+
+        for size in 100...149 {
+            _ = await engine.makeCIImage(RenderRequest(
+                source: source,
+                document: EditDocument(),
+                targetSize: CGSize(width: size, height: size),
+                quality: .thumbnail,
+                output: .raster
+            ))
+        }
+
+        let stats = await engine.cacheStatistics()
+        XCTAssertLessThanOrEqual(stats.thumbnailDevelopedSource.costBytes, cap)
+    }
+
     func testMaskedPrefixHitTest() async throws {
         let source = try makeSource()
         let document = semanticDocument()
@@ -218,6 +302,20 @@ final class RenderCacheTests: TempDirectoryTestCase {
         let stats = await engine.cacheStatistics()
         XCTAssertEqual(stats.preview.hits, 1,
                        "unmasked preview key behavior must remain unchanged")
+    }
+
+    func testTextureWarmupPrimesDevelopedSourceForTheNextPreview() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        let request = request(source: source)
+
+        _ = await engine.makeCIImage(request)
+        let warmStats = await engine.cacheStatistics()
+        _ = await engine.makeCIImage(request)
+        let nextPreviewStats = await engine.cacheStatistics()
+
+        XCTAssertEqual(warmStats.developedSource.misses, 1)
+        XCTAssertEqual(nextPreviewStats.developedSource.hits, 1)
     }
 
     func testDownstreamOnlyEditsReuseTheCompletedProcessingPrefix() async throws {

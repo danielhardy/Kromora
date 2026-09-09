@@ -697,6 +697,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// can arrive while stored edits are still loading; adopting the store result must not submit
     /// a duplicate preview in that case.
     private var previewScheduledSourceRevision: UInt64?
+    /// The first preview may be speculative while persistence is still loading. Supporting work
+    /// such as histogram and edited-thumbnail generation is admitted only after this source's
+    /// stored document has been reconciled.
+    private var storedEditsResolvedSourceRevision: UInt64?
     private let adjacentPreviewPrefetchJobID = ImageWorkScheduler.JobID("adjacent-preview-prefetch")
     private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
     private let histogramJobID = ImageWorkScheduler.JobID("histogram")
@@ -1256,6 +1260,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         sourceRevision &+= 1
         comparisonRevision &+= 1
         displayRevision &+= 1
+        storedEditsResolvedSourceRevision = nil
         cancelHistogram(clear: true, pump: false)
         let sourceRevision = self.sourceRevision
         previewCoordinator.cancel()
@@ -1373,6 +1378,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         install(preparation: preparation, request: request)
 
+        // The source is drawable now, so admit the best document we have without waiting for
+        // persistence. A cold open speculates with the identity document; an in-memory session
+        // already contains the document the user expects to see. The store result below may
+        // replace that speculation, but it must not hold back the first pixels.
+        if previewScheduledSourceRevision != sourceRevision {
+            schedulePreview()
+        }
+
         let stored = await storedTask.value
         storedEditLoadTask = nil
         guard request.sourceRevision == sourceRevision,
@@ -1416,9 +1429,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         // current document. Only a still-pristine, never-seen session may adopt disk state.
         let changedInMemory = (editSessionRevisions[request.assetID] ?? 0) != request.editSessionRevision
         let shouldAdopt = !request.hadInMemorySession && !changedInMemory
+        var documentChanged = false
         if shouldAdopt {
             activeHistory = EditHistory()
-            let documentChanged = document != stored.document
+            documentChanged = document != stored.document
             document = stored.document
             comparisonBaselineDocument = document.comparisonBaseline
             editSessions[request.assetID] = PhotoEditSession(document: document, history: activeHistory)
@@ -1430,12 +1444,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 scheduleAdjacentPreviewPrefetch()
             }
         }
-        // Install publishes source chrome before the store read, but the first pixel request is
-        // deliberately admitted only once the disk document has been resolved. This prevents an
-        // edited source from rendering the pristine document and then immediately rendering it
-        // again with its stored edits.
-        if previewScheduledSourceRevision != sourceRevision {
+        storedEditsResolvedSourceRevision = sourceRevision
+        // A cold open already rendered the identity document speculatively. Only an adopted disk
+        // document that differs from that first request needs a corrective render. In-memory
+        // sessions and edits made while loading remain authoritative and must not be replaced.
+        if shouldAdopt, documentChanged {
             schedulePreview()
+        } else if let lastPresentedVisibleRequest,
+                  lastPresentedVisibleRequest.source == imageSource,
+                  lastPresentedVisibleRequest.document == displayRequest.document {
+            // If the speculative frame already reached the drawable, it was intentionally not
+            // allowed to start histogram work. Re-admit that final request now that persistence
+            // has confirmed it is the document on screen.
+            updateHistogram(for: lastPresentedVisibleRequest)
         }
         scheduleEditedThumbnailAfterSettle(for: request.assetID, priority: .activeEditor)
         if stored.status.isActionable {
@@ -1520,7 +1541,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                         source: candidate.source,
                         document: document,
                         lut: self.resolvedLUT(document.lut.lutID),
-                        targetSize: self.previewBackingSize,
+                        // Navigation resets the main planner before the selected preview is
+                        // submitted. Use the same initial planner state here so hysteresis from
+                        // the currently visible photo cannot make this neighbor warm a different
+                        // pyramid level than the preview it will use after selection.
+                        targetSize: self.adjacentPreviewRenderTargetSize(
+                            for: document, nativeExtent: candidate.source.nativeExtent
+                        ),
                         quality: .preview,
                         output: .raster,
                         space: .current
@@ -1542,7 +1569,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                     guard !Task.isCancelled,
                           self.activeAssetID == assetID,
                           self.sourceRevision == revision else { return }
-                    _ = try? await engine.render(request)
+                    _ = await engine.makeCIImage(request)
                 }
             }
         }
@@ -2601,12 +2628,41 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         for document: EditDocument,
         surface: ResolutionPlannerSurface = .mainPreview
     ) -> CGSize {
-        guard let imageSource else { return previewBackingSize }
+        guard let plan = previewRenderPlan(for: document, surface: surface) else {
+            return previewBackingSize
+        }
+        return plan.sourceSize
+    }
+
+    private func previewRenderPlan(
+        for document: EditDocument,
+        surface: ResolutionPlannerSurface = .mainPreview
+    ) -> ResolutionPlan? {
+        guard let imageSource else { return nil }
         return resolutionPlan(
             for: document,
             nativeExtent: imageSource.nativeExtent,
             viewportSize: previewBackingSize,
             surface: surface
+        )
+    }
+
+    /// Plan an adjacent photo as if it were the next navigation target. The selected photo's
+    /// planner is intentionally not used: it carries hysteresis from the current source, while
+    /// `openImage` resets the planner before the subsequent selected-preview request.
+    private func adjacentPreviewRenderTargetSize(
+        for document: EditDocument,
+        nativeExtent: CGSize
+    ) -> CGSize {
+        var planner = ResolutionPlanner()
+        return planner.plan(
+            nativeExtent: nativeExtent,
+            crop: document.crop,
+            viewportSize: previewBackingSize,
+            // `openImage` resets presentation navigation for the next source before it plans
+            // that source's preview. Match that fit-state input instead of borrowing the current
+            // photo's zoom/pan.
+            navigation: CanvasNavigation()
         ).sourceSize
     }
 
@@ -3141,7 +3197,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         } else {
             cancelComparisonPreview()
         }
-        updateHistogram(for: request)
+        if storedEditsResolvedSourceRevision == sourceRevision {
+            updateHistogram(for: request)
+        }
     }
 
     /// Rasterize the comparison baseline for the side-by-side left panel. Only needs to re-run when

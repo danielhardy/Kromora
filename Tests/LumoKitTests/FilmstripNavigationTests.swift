@@ -172,16 +172,75 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         let prefetched = try await TestSynchronization.nextEvent(
             from: reader, "the stored-edit neighbor prefetch"
         ) {
-            if case .previewRequested(let request) = $0 {
+            if case .textureRequested(let request) = $0 {
                 return request.source?.backing == .url(second)
             }
             return false
         } diagnostics: {
-            "previews=\(await engine.previewRequests.count)"
+            "textures=\(await engine.textureRequests.count)"
         }
-        guard case .previewRequested(let request) = prefetched else {
+        guard case .textureRequested(let request) = prefetched else {
             return XCTFail("expected the adjacent neighbor prefetch")
         }
         XCTAssertEqual(request.document, storedDocument)
+        let encodeCount = await engine.encodeRequests.count
+        let renderedNeighbor = await engine.renderRequests.contains { $0.source.backing == .url(second) }
+        XCTAssertEqual(encodeCount, 0)
+        XCTAssertFalse(
+            renderedNeighbor,
+            "adjacent warming must not use the PNG-producing render path"
+        )
+    }
+
+    func testAdjacentPrefetchScaleKeyMatchesSubsequentSelectionPreview() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 3_000, height: 2_000, named: "scale-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 3_000, height: 2_000, named: "scale-second.png", in: tempDirectory
+        )
+
+        let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
+        let viewModel = makeAppViewModel(engine: engine)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == first })
+        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == second })
+
+        viewModel.selectCollectionImage(at: firstIndex)
+        _ = try await TestSynchronization.nextEvent(from: reader, "the first settled preview") {
+            if case .previewCompleted(let request) = $0 {
+                return request.source?.backing == .url(first)
+            }
+            return false
+        } diagnostics: { "previews=\(await engine.previewRequests.count)" }
+
+        let prefetch = try await TestSynchronization.nextEvent(from: reader, "the scale-matched prefetch") {
+            if case .textureRequested(let request) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: { "textures=\(await engine.textureRequests.count)" }
+        guard case .textureRequested(let prefetchRequest) = prefetch,
+              let prefetchSource = prefetchRequest.source else {
+            return XCTFail("expected a texture prefetch request")
+        }
+
+        viewModel.selectCollectionImage(at: secondIndex)
+        let selected = try await TestSynchronization.nextEvent(from: reader, "the selected neighbor preview") {
+            if case .previewCompleted(let request) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: { "previews=\(await engine.previewRequests.count)" }
+        guard case .previewCompleted(let selectedRequest) = selected else {
+            return XCTFail("expected the selected neighbor preview")
+        }
+
+        XCTAssertEqual(
+            RenderScaleKey(prefetchRequest.scale, nativeExtent: prefetchSource.nativeExtent),
+            RenderScaleKey(selectedRequest.scale, nativeExtent: prefetchSource.nativeExtent)
+        )
     }
 }

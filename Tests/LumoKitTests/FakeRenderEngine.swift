@@ -59,6 +59,7 @@ actor FakeRenderEngine: RenderEngining {
     enum Event: Sendable, Equatable {
         case sourcePreparationStarted(ImageSource)
         case sourcePreparationCompleted(ImageSource, ImageSourcePreparation?)
+        case textureRequested(Request)
         case previewRequested(Request)
         case previewCompleted(Request)
         case histogramRequested(Request)
@@ -75,6 +76,9 @@ actor FakeRenderEngine: RenderEngining {
 
     /// Every `makeCGImage` call, in order.
     private(set) var previewRequests: [Request] = []
+    /// Every `makeCIImage` call, in order. Prefetch uses this seam to warm the renderer without
+    /// entering the PNG-producing `render(.raster)` path.
+    private(set) var textureRequests: [Request] = []
     /// Preview requests that ask the renderer to resolve semantic masks. This is an admission
     /// counter, not a Vision invocation counter; cache/provider reuse is covered by resolver tests.
     private(set) var semanticMaskRequests: [Request] = []
@@ -214,6 +218,17 @@ actor FakeRenderEngine: RenderEngining {
                 colorSpace: request.space, quality: request.quality, output: request.output
             )
         }
+    }
+
+    func makeCIImage(_ request: RenderRequest) async -> sending CIImage? {
+        guard !Task.isCancelled else { return nil }
+        let record = Request(request: request)
+        textureRequests.append(record)
+        emit(.textureRequested(record))
+        // Keep visible-preview tests on the established CGImage seam. RenderEngine returns a
+        // completed texture here; nil makes the protocol's compatibility fallback exercise the
+        // existing fake raster result without conflating the two call types.
+        return nil
     }
 
     func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult {
