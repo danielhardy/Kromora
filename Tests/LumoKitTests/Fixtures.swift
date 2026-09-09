@@ -475,7 +475,10 @@ class TempDirectoryTestCase: XCTestCase {
         includeBundledLooks: Bool = false,
         libraryFolderURL: URL? = nil,
         userLookFolderURL: URL? = nil,
-        photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil
+        photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
+        embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
+            Thumbnails.generate(from: url, maxPixelSize: 1600)
+        }
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults
         if let preferences {
@@ -494,7 +497,8 @@ class TempDirectoryTestCase: XCTestCase {
                 ?? tempDirectory.appendingPathComponent("managed-library", isDirectory: true),
             userLookFolderURL: userLookFolderURL
                 ?? tempDirectory.appendingPathComponent("looks", isDirectory: true),
-            photoAnalysisCoordinator: photoAnalysisCoordinator
+            photoAnalysisCoordinator: photoAnalysisCoordinator,
+            embeddedFirstFrameProvider: embeddedFirstFrameProvider
         )
         appViewModels.append(viewModel)
         return viewModel

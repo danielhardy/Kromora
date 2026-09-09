@@ -712,6 +712,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// The embedded camera JPEG is a presentation-only first frame. It never enters the render
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
+    private let embeddedFirstFrameProvider: @Sendable (URL) async -> NSImage?
     private var embeddedFirstFrameTask: Task<NSImage?, Never>?
     private var prefetchDelayTask: Task<Void, Never>?
     private var previewDebounceTask: Task<Void, Never>?
@@ -766,7 +767,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         includeBundledLooks: Bool = false,
         libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL,
         userLookFolderURL: URL? = nil,
-        photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil
+        photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
+        embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
+            Thumbnails.generate(from: url, maxPixelSize: 1600)
+        }
     ) {
         var interval = LumoSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -801,6 +805,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             editStore: editStore
         )
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
+        self.embeddedFirstFrameProvider = embeddedFirstFrameProvider
         self.mediaVolumeProvider = mediaVolumeProvider
 
         collection.onThumbnailDemand = { [weak self] assetID, priority in
@@ -1455,8 +1460,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         let sourceRevision = self.sourceRevision
         let assetID = self.activeAssetID
+        let provider = embeddedFirstFrameProvider
         let extractionTask = Task.detached(priority: .userInitiated) {
-            Thumbnails.generate(from: url, maxPixelSize: 1600)
+            await provider(url)
         }
         embeddedFirstFrameTask = extractionTask
 
