@@ -2,7 +2,6 @@ import Foundation
 import AppKit
 import ImageIO
 import CoreGraphics
-import UniformTypeIdentifiers
 import os.lock
 import Darwin
 
@@ -29,9 +28,9 @@ enum Thumbnails {
     static let defaultMaxPixelSize = 240
 
     /// Thumbnails are small, but a long folder navigation session can otherwise retain one image per
-    /// file forever. The cache stores PNG bytes, not `NSImage`, so its cost is measurable and the
-    /// value never crosses the lock as a mutable AppKit object.
-    private static let cache = ThumbnailByteCache(maxEntries: 256, maxCostBytes: 32 * 1024 * 1024)
+    /// file forever. The cache stores the decoded `CGImage` behind its lock, so a cache hit only has
+    /// to wrap the retained bitmap for AppKit instead of encoding and decoding a PNG.
+    private static let cache = ThumbnailImageCache(maxEntries: 256, maxCostBytes: 32 * 1024 * 1024)
 
     static func cacheStatistics() -> CacheStatistics { cache.statistics }
 
@@ -53,9 +52,9 @@ enum Thumbnails {
             source: "url:\(url.standardizedFileURL.path):\(fingerprint)",
             maxPixelSize: maxPixelSize
         )
-        if let data = cache.value(for: key), let image = image(fromPNG: data) {
+        if let image = cache.value(for: key) {
             LumoObservability.event(.cacheHit, quality: .thumbnail, detail: "layer=thumbnail")
-            return image
+            return nsImage(from: image)
         }
         LumoObservability.event(.cacheMiss, quality: .thumbnail, detail: "layer=thumbnail")
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
@@ -86,9 +85,9 @@ enum Thumbnails {
         )
         let sourceKey = RenderSourceFingerprint(sourceIdentity).value
         let key = cacheKey(source: sourceKey, maxPixelSize: maxPixelSize)
-        if let data = cache.value(for: key), let image = image(fromPNG: data) {
+        if let image = cache.value(for: key) {
             LumoObservability.event(.cacheHit, quality: .thumbnail, detail: "layer=thumbnail")
-            return image
+            return nsImage(from: image)
         }
         LumoObservability.event(.cacheMiss, quality: .thumbnail, detail: "layer=thumbnail")
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
@@ -109,10 +108,10 @@ enum Thumbnails {
         guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else {
             return nil
         }
-        if let cacheKey, let png = pngData(for: cgImage) {
-            cache.insert(png, for: cacheKey)
+        if let cacheKey {
+            cache.insert(cgImage, for: cacheKey)
         }
-        return NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
+        return nsImage(from: cgImage)
     }
 
     /// A cheap identity for a URL-backed file: device/inode/size/mtime/ctime, mirroring
@@ -135,29 +134,17 @@ enum Thumbnails {
         "thumbnail-v\(RenderPipeline.cacheVersion):\(source):\(maxPixelSize)"
     }
 
-    private static func pngData(for image: CGImage) -> Data? {
-        let data = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(
-            data, UTType.png.identifier as CFString, 1, nil
-        ) else { return nil }
-        CGImageDestinationAddImage(destination, image, nil)
-        return CGImageDestinationFinalize(destination) ? data as Data : nil
-    }
-
-    private static func image(fromPNG data: Data) -> NSImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
-        else { return nil }
+    private static func nsImage(from image: CGImage) -> NSImage {
         return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 }
 
-/// A small synchronous, lock-protected byte cache for the thumbnail API. `OSAllocatedUnfairLock`
-/// makes the synchronization explicit and keeps the cache safe when folder thumbnails are generated
-/// by detached tasks, without weakening Swift 6's Sendable checking.
-private final class ThumbnailByteCache: Sendable {
-    private struct State: Sendable {
-        var entries: [String: Data] = [:]
+/// A small synchronous, lock-protected image cache for the thumbnail API. `CGImage` is intentionally
+/// kept inside the lock-protected state: it is not `Sendable`, but the cache is shared by detached
+/// thumbnail workers and must not rely on unsynchronized dictionary access.
+private final class ThumbnailImageCache: Sendable {
+    private struct State {
+        var entries: [String: CGImage] = [:]
         var costs: [String: Int] = [:]
         var recency: [String] = []
         var totalCost = 0
@@ -173,11 +160,11 @@ private final class ThumbnailByteCache: Sendable {
     init(maxEntries: Int, maxCostBytes: Int) {
         self.maxEntries = max(0, maxEntries)
         self.maxCostBytes = max(0, maxCostBytes)
-        self.state = OSAllocatedUnfairLock(initialState: State())
+        self.state = OSAllocatedUnfairLock(uncheckedState: State())
     }
 
-    func value(for key: String) -> Data? {
-        state.withLock { state in
+    func value(for key: String) -> CGImage? {
+        state.withLockUnchecked { state in
             guard let value = state.entries[key] else {
                 state.misses += 1
                 return nil
@@ -189,19 +176,19 @@ private final class ThumbnailByteCache: Sendable {
         }
     }
 
-    func insert(_ data: Data, for key: String) {
-        state.withLock { state in
+    func insert(_ image: CGImage, for key: String) {
+        state.withLockUnchecked { state in
             if let oldCost = state.costs.removeValue(forKey: key) {
                 state.totalCost -= oldCost
                 state.entries.removeValue(forKey: key)
                 state.recency.removeAll { $0 == key }
             }
-            let cost = data.count
+            let cost = imageCost(of: image)
             guard maxEntries > 0, maxCostBytes > 0, cost <= maxCostBytes else {
                 if cost > maxCostBytes { state.evictions += 1 }
                 return
             }
-            state.entries[key] = data
+            state.entries[key] = image
             state.costs[key] = cost
             state.recency.append(key)
             state.totalCost += cost
@@ -216,7 +203,7 @@ private final class ThumbnailByteCache: Sendable {
     }
 
     func removeAll(countAsEviction: Bool) {
-        state.withLock { state in
+        state.withLockUnchecked { state in
             if countAsEviction { state.evictions += state.entries.count }
             state.entries.removeAll(keepingCapacity: true)
             state.costs.removeAll(keepingCapacity: true)
@@ -226,11 +213,16 @@ private final class ThumbnailByteCache: Sendable {
     }
 
     var statistics: CacheStatistics {
-        state.withLock { state in
+        state.withLockUnchecked { state in
             CacheStatistics(
                 hits: state.hits, misses: state.misses, evictions: state.evictions,
                 count: state.entries.count, costBytes: state.totalCost
             )
         }
+    }
+
+    private func imageCost(of image: CGImage) -> Int {
+        let (cost, overflow) = image.bytesPerRow.multipliedReportingOverflow(by: image.height)
+        return overflow ? Int.max : cost
     }
 }
