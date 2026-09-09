@@ -40,10 +40,6 @@ private actor EmbeddedFirstFrameGate {
         parkedExtraction = nil
     }
 
-    func hasRequested(named name: String) -> Bool {
-        requestedURLs.contains { $0.lastPathComponent == name }
-    }
-
     func hasCompleted(named name: String) -> Bool {
         completedURLs.contains { $0.lastPathComponent == name }
     }
