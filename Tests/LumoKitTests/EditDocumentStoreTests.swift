@@ -271,7 +271,7 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(storeStatus, result.status)
     }
 
-    func testLoadStatusBelongsToThePhotoBeingLoaded() async throws {
+    func testCorruptLoadBannerIsPhotoScopedWhileWorstDiagnosticStaysSticky() async throws {
         let schema = Schema([EditRecord.self])
         let configuration = ModelConfiguration(
             "LumoKitTests.PerPhotoLoadStatus",
@@ -305,7 +305,9 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
             return XCTFail("loading the corrupt photo again must still report corrupt")
         }
         guard case .corrupt = await store.worstActionableStatus else {
-            return XCTFail("the store-level worst actionable status should retain the corrupt warning")
+            return XCTFail(
+                "the deliberately sticky store diagnostic should retain the corrupt warning"
+            )
         }
     }
 

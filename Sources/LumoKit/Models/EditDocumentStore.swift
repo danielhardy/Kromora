@@ -96,10 +96,12 @@ actor EditDocumentStore {
     private var writeStartSignal: AsyncStream<Void>.Continuation? = nil
     private var failuresRemaining: Int = 0
     private var persistenceUnavailable = false
+    /// The outcome of the most recent store operation. Load callers must use their
+    /// `EditDocumentLoadResult.status` instead of treating this as a load-wide diagnostic.
     private(set) var status: Status = .ready
-    /// The store-wide actionable condition is retained for persistence-health diagnostics. It is
-    /// deliberately separate from a load result: a corrupt record for photo A must not make a
-    /// healthy photo B report `.corrupt`.
+    /// The store-wide actionable condition is retained for persistence-health diagnostics. This
+    /// is the only deliberately sticky load diagnostic: it is separate from a load result, so a
+    /// corrupt record for photo A must not make a healthy photo B report `.corrupt`.
     private(set) var worstActionableStatus: Status?
     private var persistentFileURL: URL? = nil
 

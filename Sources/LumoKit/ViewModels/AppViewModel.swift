@@ -1466,11 +1466,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             updateHistogram(for: lastPresentedVisibleRequest, presentedImage: lastPresentedVisibleImage)
         }
         scheduleEditedThumbnailAfterSettle(for: request.assetID, priority: .activeEditor)
-        if stored.status.isActionable {
-            editStoreStatus = stored.status.message
-        } else {
-            editStoreStatus = nil
-        }
+        applyStoredLoadStatus(stored.status)
+    }
+
+    private func applyStoredLoadStatus(_ status: EditDocumentStore.Status) {
+        // Load banners are scoped to the active photo. A relink notice is useful for the photo
+        // just opened, a corrupt-record warning belongs only to that record, and a load-time
+        // write failure belongs only to that attempt. None should leak from photo A to photo B;
+        // the store's separate worstActionableStatus owns any deliberately sticky diagnostic.
+        editStoreStatus = status.isActionable ? status.message : nil
     }
 
     /// Warm at most the two nearest filtered neighbours after the active render has had an idle
