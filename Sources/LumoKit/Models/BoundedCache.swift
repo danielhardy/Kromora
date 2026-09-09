@@ -13,13 +13,13 @@ struct RenderCacheConfiguration: Sendable, Equatable {
     var previewMaxEntries = 12
     var previewMaxCostBytes = 64 * 1024 * 1024
     var developedSourceMaxEntries = 4
-    /// Materialized image costs include the CPU-backed RGBA-half bytes and the estimated GPU
-    /// texture bytes. An entry must fit before its backing buffer is allocated.
+    /// Developed-source materialized image costs include the CPU-backed RGBA-half bytes and the
+    /// estimated GPU texture bytes. An entry must fit before its backing buffer is allocated.
     var developedSourceMaxCostBytes = 256 * 1024 * 1024
     /// Completed pre-LUT prefixes are larger than encoded previews, so they have their own budget.
     /// Keeping this separate prevents a LUT/grain drag from evicting the final preview working set.
-    /// Materialized-prefix costs use the same CPU + GPU working-set accounting as the developed
-    /// source budget.
+    /// Materialized-prefix entries retain only a GPU texture and are charged at width*height*8;
+    /// admission still reserves the conservative CPU+GPU peak needed while completing the graph.
     var processingPrefixMaxEntries = 4
     var processingPrefixMaxCostBytes = 256 * 1024 * 1024
     var localMaskMaxEntries = 32

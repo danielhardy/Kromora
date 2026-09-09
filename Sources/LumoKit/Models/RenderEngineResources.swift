@@ -108,4 +108,19 @@ final class RenderEngineResources {
         toneCurveSource = nil
         toneCurveSpace = nil
     }
+
+    /// Allocate an actor-confined texture for a completed intermediate. The texture is private so
+    /// Core Image can consume the prefix through Metal without exposing a CPU staging buffer.
+    func makeProcessingTexture(width: Int, height: Int) -> MTLTexture? {
+        guard let device, width > 0, height > 0 else { return nil }
+        let descriptor = MTLTextureDescriptor()
+        descriptor.textureType = .type2D
+        descriptor.pixelFormat = .rgba16Float
+        descriptor.width = width
+        descriptor.height = height
+        descriptor.mipmapLevelCount = 1
+        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        descriptor.storageMode = .private
+        return device.makeTexture(descriptor: descriptor)
+    }
 }
