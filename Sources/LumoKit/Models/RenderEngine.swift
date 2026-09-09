@@ -439,14 +439,18 @@ actor RenderEngine: RenderEngining {
         let width = Int(rect.width)
         let height = Int(rect.height)
         guard width > 0, height > 0,
-              let texture = resources.makeProcessingTexture(width: width, height: height)
+              let texture = resources.makeProcessingTexture(
+                  width: width, height: height,
+                  pixelFormat: RenderEngineResources.previewTexturePixelFormat(for: request.quality)
+              )
         else { return nil }
 
-        // RGBAh/RGBA16Float is intentional. The processing result is never quantized to RGBA8
-        // merely to cross the actor boundary; color matching and premultiplied-alpha behavior stay
-        // in Core Image at the requested working-space precision. Core Image encodes into this
-        // engine-owned command buffer, and the renderer does not hand the texture to presentation
-        // until its completion handler reports success.
+        // Interactive frames are intentionally quantized at this completed-texture boundary: the
+        // next request is always the settled `.preview` frame, which restores half-float precision.
+        // The working-space tag is applied both while Core Image renders and when the texture is
+        // wrapped as a CIImage, so presentation does not perform an implicit second conversion.
+        // All other qualities retain the existing RGBA16Float path; in particular this does not
+        // change processing-prefix, full-resolution, thumbnail, or export precision.
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
         context.render(image, to: texture, commandBuffer: commandBuffer, bounds: rect,
                        colorSpace: request.space.cgColorSpace)
