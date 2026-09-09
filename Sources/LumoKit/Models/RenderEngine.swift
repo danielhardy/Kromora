@@ -1981,14 +1981,21 @@ actor RenderEngine: RenderEngining {
             return nil
         }
 
-        var data = Data(repeating: 0, count: estimate.cpuBytes)
-        data.withUnsafeMutableBytes { bytes in
-            guard let baseAddress = bytes.baseAddress else { return }
-            context.render(
-                image, toBitmap: baseAddress, rowBytes: estimate.rowBytes, bounds: rect,
-                format: .RGBAh, colorSpace: space.cgColorSpace
-            )
-        }
+        // `bounds` is the complete integral extent and `rowBytes` is exactly width * 8 for
+        // RGBA16Float, so Core Image writes every byte in this allocation before the bitmap is
+        // wrapped in a CIImage. Keep the pointer scoped to this actor-local render call; Data takes
+        // ownership only after rendering has completed and releases it with `deallocate()`.
+        let buffer = UnsafeMutableRawPointer.allocate(
+            byteCount: estimate.cpuBytes, alignment: MemoryLayout<UInt16>.alignment
+        )
+        context.render(
+            image, toBitmap: buffer, rowBytes: estimate.rowBytes, bounds: rect,
+            format: .RGBAh, colorSpace: space.cgColorSpace
+        )
+        let data = Data(
+            bytesNoCopy: buffer, count: estimate.cpuBytes,
+            deallocator: .custom { pointer, _ in pointer.deallocate() }
+        )
         let image = CIImage(
             bitmapData: data, bytesPerRow: estimate.rowBytes, size: rect.size,
             format: .RGBAh, colorSpace: space.cgColorSpace
