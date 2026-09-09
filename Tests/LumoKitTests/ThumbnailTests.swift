@@ -53,6 +53,79 @@ final class ThumbnailTests: TempDirectoryTestCase {
                              "orientation 6 is portrait; the thumbnail must agree with the canvas")
     }
 
+    func testOrientationTest() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 800, height: 600, orientation: 6, named: "portrait-reference.jpg", in: tempDirectory
+        )
+        let cached = try XCTUnwrap(Thumbnails.generate(from: url, maxPixelSize: 240))
+        let cachedAgain = try XCTUnwrap(Thumbnails.generate(from: url, maxPixelSize: 240))
+
+        let source = try XCTUnwrap(CGImageSourceCreateWithURL(url as CFURL, nil))
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: 240,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        let reference = try XCTUnwrap(
+            CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+        )
+
+        XCTAssertEqual(try pixels(of: cachedAgain), try Pixels.bytes(of: reference))
+        XCTAssertEqual(try pixels(of: cached), try Pixels.bytes(of: reference))
+    }
+
+    func testNoCodecOnHitTest() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/LumoKit/Models/Thumbnails.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        XCTAssertFalse(source.contains("pngData"), "thumbnail cache misses must not encode PNG data")
+        XCTAssertFalse(source.contains("image(fromPNG"), "thumbnail cache hits must not decode PNG data")
+
+        let url = try Fixtures.writeGradientPNG(
+            width: 240, height: 160, named: "codec-free-hit.png", in: tempDirectory
+        )
+        Thumbnails.invalidateCache()
+        let before = Thumbnails.cacheStatistics()
+        XCTAssertNotNil(Thumbnails.generate(from: url))
+        XCTAssertNotNil(Thumbnails.generate(from: url))
+        let after = Thumbnails.cacheStatistics()
+
+        XCTAssertEqual(after.hits - before.hits, 1)
+        XCTAssertEqual(after.misses - before.misses, 1)
+    }
+
+    func testBudgetEnforcementTest() throws {
+        Thumbnails.invalidateCache()
+        var urls: [URL] = []
+        for index in 0..<150 {
+            urls.append(try writeSolidPNG(
+                named: "budget-\(index).png", width: 240, height: 240,
+                red: CGFloat(index % 10) / 10.0,
+                green: CGFloat((index / 10) % 10) / 10.0,
+                blue: CGFloat(index % 7) / 7.0
+            ))
+        }
+        for url in urls {
+            XCTAssertNotNil(Thumbnails.generate(from: url, maxPixelSize: 240))
+        }
+
+        let filled = Thumbnails.cacheStatistics()
+        XCTAssertGreaterThan(filled.evictions, 0, "the 32 MiB byte budget must bind before 256 entries")
+        XCTAssertLessThanOrEqual(filled.count, 256)
+        XCTAssertLessThanOrEqual(filled.costBytes, 32 * 1024 * 1024)
+
+        let missesBeforeOldestProbe = filled.misses
+        XCTAssertNotNil(Thumbnails.generate(from: urls[0], maxPixelSize: 240))
+        XCTAssertEqual(
+            Thumbnails.cacheStatistics().misses,
+            missesBeforeOldestProbe + 1,
+            "the oldest entry should be evicted first"
+        )
+    }
+
     /// The URL and Data entry points are separate `CGImageSource` constructors, and the app reaches
     /// each from a different `ImageCollection` site. They must not disagree.
     ///
@@ -179,15 +252,31 @@ final class ThumbnailTests: TempDirectoryTestCase {
     // MARK: - Helpers
 
     @discardableResult
-    private func writeSolidPNG(named name: String, red: CGFloat, green: CGFloat, blue: CGFloat) throws -> URL {
+    private func writeSolidPNG(
+        named name: String,
+        width: Int = 64,
+        height: Int = 64,
+        red: CGFloat,
+        green: CGFloat,
+        blue: CGFloat
+    ) throws -> URL {
         let url = tempDirectory.appendingPathComponent(name)
-        let image = try Fixtures.makeCGImage(width: 64, height: 64, red: red, green: green, blue: blue)
+        let image = try Fixtures.makeCGImage(
+            width: width, height: height, red: red, green: green, blue: blue
+        )
         let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
             url as CFURL, UTType.png.identifier as CFString, 1, nil
         ))
         CGImageDestinationAddImage(destination, image, nil)
         XCTAssertTrue(CGImageDestinationFinalize(destination))
         return url
+    }
+
+    private func pixels(of image: NSImage) throws -> [UInt8] {
+        var rect = CGRect(origin: .zero, size: image.size)
+        return try Pixels.bytes(of: XCTUnwrap(
+            image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        ))
     }
 
     /// The mean RGB of a thumbnail, so a mislabelled one is visible.
