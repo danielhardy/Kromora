@@ -25,6 +25,29 @@ final class RenderCacheTests: TempDirectoryTestCase {
         )
     }
 
+    private func semanticDocument(generationVersion: Int = 1) -> EditDocument {
+        EditDocument(localAdjustments: [
+            LocalAdjustmentLayer(
+                components: [MaskComponent(source: .semantic(SemanticMaskDefinition(
+                    target: .person, generationVersion: generationVersion
+                )))],
+                adjustments: LocalAdjustments(exposure: 1)
+            )
+        ])
+    }
+
+    private func semanticRequest(
+        source: ImageSource,
+        document: EditDocument,
+        maskResolution: MaskResolutionPolicy = .resolved,
+        requestRevision: UInt64 = 0
+    ) -> RenderRequest {
+        RenderRequest(
+            source: source, document: document, targetSize: CGSize(width: 48, height: 32),
+            quality: .preview, maskResolution: maskResolution, requestRevision: requestRevision
+        )
+    }
+
     func testIdenticalPreviewRequestsHitAndExposeCounters() async throws {
         let source = try makeSource()
         let engine = RenderEngine()
@@ -108,6 +131,93 @@ final class RenderCacheTests: TempDirectoryTestCase {
         let stats = await engine.cacheStatistics()
         XCTAssertEqual(stats.developedSource.misses, 1)
         XCTAssertEqual(stats.developedSource.hits, 1)
+    }
+
+    func testMaskedPrefixHitTest() async throws {
+        let source = try makeSource()
+        let document = semanticDocument()
+        let engine = RenderEngine(maskResolver: VersionedSemanticMaskResolver(
+            sourceFingerprint: source.cacheFingerprint, providerVersion: "mask-v1",
+            coverage: 1
+        ))
+        let renderRequest = semanticRequest(source: source, document: document)
+
+        let first = await engine.makeCGImage(renderRequest)
+        let second = await engine.makeCGImage(renderRequest)
+        XCTAssertNotNil(first)
+        XCTAssertNotNil(second)
+
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.developedSource.misses, 1)
+        XCTAssertEqual(stats.developedSource.hits, 1,
+                       "a settled semantic mask must not force source re-development")
+        XCTAssertGreaterThanOrEqual(stats.processingPrefix.hits, 1,
+                                    "the post-local prefix should be reusable")
+    }
+
+    func testMaskVersionMissTest() async throws {
+        let source = try makeSource()
+        let firstDocument = semanticDocument(generationVersion: 1)
+        let secondDocument = semanticDocument(generationVersion: 2)
+        let engine = RenderEngine(maskResolver: VersionedSemanticMaskResolver(
+            sourceFingerprint: source.cacheFingerprint, providerVersion: "mask-v1",
+            coverage: 1
+        ))
+
+        let firstImage = await engine.makeCGImage(
+            semanticRequest(source: source, document: firstDocument)
+        )
+        let secondImage = await engine.makeCGImage(
+            semanticRequest(source: source, document: secondDocument)
+        )
+        let first = try XCTUnwrap(firstImage)
+        let second = try XCTUnwrap(secondImage)
+
+        XCTAssertNotEqual(try Pixels.bytes(of: first), try Pixels.bytes(of: second),
+                          "a changed semantic definition must not reuse the old local prefix")
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.developedSource.misses, 1)
+        XCTAssertEqual(stats.processingPrefix.misses, 2,
+                       "each semantic version gets its own post-local entry")
+    }
+
+    func testMidResolutionPoisonTest() async throws {
+        let source = try makeSource()
+        let document = semanticDocument()
+        let engine = RenderEngine(maskResolver: VersionedSemanticMaskResolver(
+            sourceFingerprint: source.cacheFingerprint, providerVersion: "mask-v1",
+            coverage: 1
+        ))
+
+        let deferredImage = await engine.makeCGImage(semanticRequest(
+            source: source, document: document, maskResolution: .deferSemantic,
+            requestRevision: 1
+        ))
+        let resolvedImage = await engine.makeCGImage(semanticRequest(
+            source: source, document: document, requestRevision: 2
+        ))
+        let deferred = try XCTUnwrap(deferredImage)
+        let resolved = try XCTUnwrap(resolvedImage)
+
+        XCTAssertNotEqual(try Pixels.bytes(of: deferred), try Pixels.bytes(of: resolved),
+                          "the resolved frame must not hit the deferred mask-less prefix")
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.processingPrefix.count, 1,
+                       "the deferred fast path must not materialize a settled-mask entry")
+    }
+
+    func testUnmaskedNoOpTest() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        let first = request(source: source)
+        let second = request(source: source)
+
+        _ = try await engine.render(first)
+        _ = try await engine.render(second)
+
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.preview.hits, 1,
+                       "unmasked preview key behavior must remain unchanged")
     }
 
     func testDownstreamOnlyEditsReuseTheCompletedProcessingPrefix() async throws {
@@ -463,5 +573,31 @@ final class RenderCacheTests: TempDirectoryTestCase {
     private func sourceURL(for source: ImageSource) -> URL {
         guard case .url(let url) = source.backing else { fatalError("test source must be URL-backed") }
         return url
+    }
+}
+
+private struct VersionedSemanticMaskResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+    let providerVersion: String
+    let coverage: Float
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        let count = request.targetSize.width * request.targetSize.height
+        let resolvedCoverage: Float = {
+            guard case .semantic(let definition) = request.component.source else { return coverage }
+            return definition.generationVersion == 1 ? coverage : coverage * 0.25
+        }()
+        let mask = try NormalizedMask(
+            size: request.targetSize,
+            values: Array(repeating: resolvedCoverage, count: count)
+        )
+        return LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            providerVersion: providerVersion,
+            descriptor: .raster(mask)
+        )
     }
 }

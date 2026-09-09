@@ -187,8 +187,8 @@ struct MaskOverlayRequest: Sendable, Equatable {
 /// renderer at the requested extent, so they do not need a semantic cache or a pixel buffer.
 /// Staleness is checked by `RenderEngine` before this value is cached or rendered, and by
 /// `AppViewModel`/`PreviewCoordinator` before a completed frame is published.
-struct LocalMaskPayload: Sendable, Equatable {
-    enum Descriptor: Sendable, Equatable {
+struct LocalMaskPayload: Sendable, Equatable, Codable {
+    enum Descriptor: Sendable, Equatable, Codable {
         case raster(NormalizedMask)
         case linear(LinearGradientDefinition)
         case radial(RadialGradientDefinition)
@@ -221,6 +221,13 @@ struct LocalMaskPayload: Sendable, Equatable {
         self.quality = quality
         self.providerVersion = providerVersion
         self.descriptor = descriptor
+    }
+
+    /// Stable identity for the pixels supplied by a semantic provider. The descriptor is included
+    /// deliberately: a provider may retain its version while replacing a mask after a re-resolve.
+    /// This value is used only after resolution, never as mutable shared cache state.
+    var cacheFingerprint: String {
+        RenderCacheHash.digest(self)
     }
 
     var estimatedCostBytes: Int {
