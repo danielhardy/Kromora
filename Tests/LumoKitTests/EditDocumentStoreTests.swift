@@ -265,6 +265,8 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertFalse(detail.isEmpty)
         XCTAssertTrue(result.status.isActionable)
         XCTAssertTrue(result.status.message?.contains("neutral edits") == true)
+        XCTAssertFalse(result.isUsableForPrefetch,
+                       "a corrupt record must not be prefetched with its neutral fallback")
         let storeStatus = await store.status
         XCTAssertEqual(storeStatus, result.status)
     }

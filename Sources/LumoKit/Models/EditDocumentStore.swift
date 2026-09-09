@@ -17,6 +17,14 @@ struct EditDocumentLoadResult: Sendable, Equatable {
     let document: EditDocument
     let found: Bool
     let status: EditDocumentStore.Status
+
+    /// A speculative preview may use a healthy missing record as identity, but must not use the
+    /// neutral fallback returned when persistence could not establish what the stored state was.
+    var isUsableForPrefetch: Bool {
+        if !found { return !status.isActionable }
+        if case .corrupt = status { return false }
+        return true
+    }
 }
 
 /// Actor-isolated SwiftData persistence for per-photo edit documents.
@@ -315,6 +323,12 @@ actor EditDocumentStore {
 
     func load(for assetID: PhotoAssetID) -> EditDocumentLoadResult {
         load(for: EditSourceReference(assetID: assetID))
+    }
+
+    /// Load several source records in one actor hop. Callers use this for speculative work so
+    /// the store lookup does not occupy the editor scheduler lane one neighbor at a time.
+    func load(for sources: [EditSourceReference]) -> [EditDocumentLoadResult] {
+        sources.map { load(for: $0) }
     }
 
     func document(for source: EditSourceReference) -> EditDocument? {
