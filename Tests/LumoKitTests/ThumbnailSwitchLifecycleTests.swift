@@ -59,8 +59,14 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             $0.quality == .thumbnail && $0.assetID == viewModel.collection.items[0].id
         }
         XCTAssertEqual(thumbnailRequests.last?.document.adjustments, [.exposure(ev: 0.8)])
-        XCTAssertNotNil(viewModel.collection.items[0].thumbnail)
-        XCTAssertNotNil(viewModel.collection.items[0].editedThumbnailRevision)
+        // The waiter above observes request admission, not publication: under parallel load the
+        // completed bitmap can still be in flight when the request is already recorded (LUMO-321).
+        // Wait for the published state this test actually means — the shared edited bitmap —
+        // rather than asserting it exactly once.
+        try await waitUntil("the published edited thumbnail") {
+            viewModel.collection.items[0].thumbnail != nil
+                && viewModel.collection.items[0].editedThumbnailRevision != nil
+        }
 
         // Navigation demands a second photo through the same collection path. Its request is
         // independent, while the first photo's completed edited bitmap remains shared by every

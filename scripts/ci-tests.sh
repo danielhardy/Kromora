@@ -61,10 +61,10 @@ run_lane() {
     print "CI_TEST_LANE=$lane"
     print "Focused rerun: $command_display"
     "$@" || {
-        local status=$?
+        local lane_status=$?
         print -u2 "FAILED CI_TEST_LANE=$lane"
         print -u2 "Focused rerun: $command_display"
-        return "$status"
+        return "$lane_status"
     }
 }
 
