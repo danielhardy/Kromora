@@ -709,6 +709,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
     private let histogramJobID = ImageWorkScheduler.JobID("histogram")
     private var metadataTask: Task<Void, Never>?
+    /// The embedded camera JPEG is a presentation-only first frame. It never enters the render
+    /// coordinator or any supporting-work path, and is cancelled when navigation selects another
+    /// source.
+    private var embeddedFirstFrameTask: Task<NSImage?, Never>?
     private var prefetchDelayTask: Task<Void, Never>?
     private var previewDebounceTask: Task<Void, Never>?
     private var previewDebounceGeneration: UInt64 = 0
@@ -1236,6 +1240,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         traceQuality: String = "open", dataFingerprint: String? = nil
     ) {
         guard !isShuttingDown else { return }
+        embeddedFirstFrameTask?.cancel()
+        embeddedFirstFrameTask = nil
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
             dataFingerprint: dataFingerprint, traceQuality: traceQuality
@@ -1416,7 +1422,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             to: CGRect(origin: .zero, size: preparation.nativeExtent)
         )
         previewState = .loading
-        statusMessage = "\(request.name)  \(Int(preparation.nativeExtent.width))\u{00D7}\(Int(preparation.nativeExtent.height))"
+        if request.source.kind != .raw {
+            statusMessage = "\(request.name)  \(Int(preparation.nativeExtent.width))\u{00D7}\(Int(preparation.nativeExtent.height))"
+        }
+        presentEmbeddedFirstFrameIfRAW(preparation: preparation, request: request)
         isLoading = false
         keepInspectorTabValid()
         switch request.source.backing {
@@ -1425,6 +1434,51 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         }
         refreshCapabilities()
         scheduleAdjacentPreviewPrefetch()
+    }
+
+    /// Put the camera's embedded JPEG on the presentation surface while the neutral RAW develop
+    /// is still rendering. This is deliberately outside `PreviewCoordinator`: the provisional
+    /// image is not a render publication and must not participate in settled revision ownership
+    /// or its presentation-confirmation lifecycle.
+    private func presentEmbeddedFirstFrameIfRAW(
+        preparation: ImageSourcePreparation, request: SourceLoadRequest
+    ) {
+        guard request.source.kind == .raw,
+              case .url(let url) = preparation.source.backing else {
+            return
+        }
+
+        let sourceRevision = self.sourceRevision
+        let assetID = self.activeAssetID
+        let extractionTask = Task.detached(priority: .userInitiated) {
+            Thumbnails.generate(from: url, maxPixelSize: 1600)
+        }
+        embeddedFirstFrameTask = extractionTask
+
+        Task { @MainActor [weak self, extractionTask, sourceRevision, assetID, preparation] in
+            let image = await extractionTask.value
+            guard let self, !extractionTask.isCancelled, !self.isShuttingDown,
+                  self.sourceRevision == sourceRevision,
+                  self.activeAssetID == assetID,
+                  self.previewState == .loading,
+                  self.lastPublishedVisibleRequest == nil,
+                  let image,
+                  let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+            else { return }
+
+            // The settled preview is submitted through the coordinator and always publishes at a
+            // newer surface revision. The guards above keep a late provisional JPEG from ever
+            // replacing that settled frame, so no explicit clear is needed here.
+            self.previewSurface.present(
+                CIImage(cgImage: cgImage), space: .current,
+                revision: self.displayRevision,
+                source: preparation.source,
+                quality: .preview,
+                presentationImageExtent: CGRect(origin: .zero, size: preparation.nativeExtent),
+                onPresented: nil
+            )
+            self.embeddedFirstFrameTask = nil
+        }
     }
 
     private func adoptStoredEdits(
@@ -3222,6 +3276,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
               request.source == imageSource,
               request.document == displayRequest.document else { return }
         previewState = .ready
+        if request.source.kind == .raw,
+           statusMessage == "Loading \(sourceName)..." {
+            statusMessage = "\(sourceName)  \(Int(request.source.nativeExtent.width))\u{00D7}\(Int(request.source.nativeExtent.height))"
+        }
         if !isAutoAdjustmentInProgress { autoAdjustmentState = .ready }
         lastPresentedVisibleRequest = request
         lastPresentedVisibleImage = presentedImage
@@ -3792,6 +3850,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         let storedEditLoad = storedEditLoadTask
         let thumbnailDebounceTasks = editedThumbnailDebounceTasks.values.map(Optional.init)
+        embeddedFirstFrameTask?.cancel()
         let tasks: [Task<Void, Never>?] = [
             capabilitiesTask, autoAdjustmentTask, smartMaskCreationTask, loadTask,
             metadataTask, prefetchDelayTask, previewDebounceTask, sourceFolderOpenTask,
@@ -3805,6 +3864,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         smartMaskCreationTask = nil
         loadTask = nil
         metadataTask = nil
+        embeddedFirstFrameTask = nil
         prefetchDelayTask = nil
         previewDebounceTask = nil
         editedThumbnailDebounceTasks.removeAll()
