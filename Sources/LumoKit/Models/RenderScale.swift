@@ -7,8 +7,8 @@ import CoreGraphics
 /// both call the same `buildImage`, and this value is the only argument that changes. See
 /// `docs/PHASE2_SPEC.md` §1.
 ///
-/// The scale is applied **early** — `CIRAWFilter.scaleFactor` before `outputImage` for RAW, a Lanczos
-/// step right after load for standard images — so adjustment and LUT nodes operate on a preview-sized
+/// The scale is applied **early** — `CIRAWFilter.scaleFactor` before `outputImage` for RAW, an ImageIO
+/// thumbnail decode for standard images — so adjustment and LUT nodes operate on a preview-sized
 /// image rather than the full extent. That is what makes every `AdjustmentNode`'s
 /// resolution-independence a hard requirement rather than a nicety (§5).
 enum RenderScale: Sendable, Equatable {
