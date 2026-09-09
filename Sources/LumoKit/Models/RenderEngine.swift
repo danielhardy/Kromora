@@ -74,6 +74,18 @@ protocol RenderEngining: Sendable {
         maxDimension: Int
     ) async -> HistogramData?
 
+    /// Tally the already-rendered frame that reached the presentation surface.
+    ///
+    /// This is deliberately separate from the source/document overload above: a settled preview
+    /// must not rebuild its graph just to feed the Info inspector. The image is completed before it
+    /// crosses the renderer boundary, so this operation only performs the bounded RGBA8 raster
+    /// and byte tally. Lightweight compatibility conformers may leave this at its default `nil`.
+    func histogram(
+        presentedImage: sending CIImage,
+        space: WorkingSpace,
+        maxDimension: Int
+    ) async -> HistogramData?
+
     /// Tally the rendered canonical image through a soft mask. The default implementation uses
     /// the same raster request seam as `histogram`; production engines may override it with an
     /// actor-local GPU tally without changing the analysis API.
@@ -258,6 +270,12 @@ extension RenderEngining {
     }
 
     func makeCIImage(_ request: RenderRequest) async -> sending CIImage? { nil }
+
+    func histogram(
+        presentedImage: sending CIImage,
+        space: WorkingSpace,
+        maxDimension: Int
+    ) async -> HistogramData? { nil }
 
     func makeCGImage(_ request: RenderRequest) async -> sending CGImage? {
         guard request.output == .raster,
@@ -1049,6 +1067,26 @@ actor RenderEngine: RenderEngining {
             return nil
         }
         guard let image else { return nil }
+        return tallyHistogram(from: image, space: space, maxDimension: maxDimension)
+    }
+
+    /// Tally the completed preview texture without rebuilding the render graph.
+    func histogram(
+        presentedImage: sending CIImage,
+        space: WorkingSpace = .current,
+        maxDimension: Int = 512
+    ) async -> HistogramData? {
+        var interval = LumoObservability.begin(.histogram, source: nil, quality: .preview)
+        defer { interval.end() }
+        return tallyHistogram(from: presentedImage, space: space, maxDimension: maxDimension)
+    }
+
+    private func tallyHistogram(
+        from image: CIImage,
+        space: WorkingSpace,
+        maxDimension: Int
+    ) -> HistogramData? {
+        guard !Task.isCancelled, maxDimension > 0 else { return nil }
         guard !Task.isCancelled else { return nil }
         let extent = image.extent
         guard extent.isRasterizable else { return nil }

@@ -86,6 +86,10 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var encodeRequests: [Request] = []
     /// Every `histogram` call, in order.
     private(set) var histogramRequests: [Request] = []
+    /// The latest completed preview request, used by the presented-image tally seam. The fake does
+    /// not inspect CIImage pixels; it preserves the existing request/event assertions while
+    /// modeling the production lifecycle where the image itself is already complete.
+    private var lastPreviewRecord: Request?
     /// Whether histogram calls should pause before returning. This makes cancellation and
     /// revision guards observable instead of letting a synchronous fake hide a late-result race.
     private var histogramIsGated = false
@@ -182,6 +186,7 @@ actor FakeRenderEngine: RenderEngining {
         switch request.output {
         case .raster:
             previewRequests.append(record)
+            lastPreviewRecord = record
             if request.quality == .preview,
                request.maskResolution == .resolved,
                request.document.hasSemanticMasks {
@@ -256,6 +261,19 @@ actor FakeRenderEngine: RenderEngining {
             document: document, lutID: lut?.lutID, scale: scale, space: space, format: nil,
             source: source, maskResolution: .resolved
         )
+        return await histogram(for: record)
+    }
+
+    func histogram(
+        presentedImage: sending CIImage,
+        space: WorkingSpace,
+        maxDimension: Int
+    ) async -> HistogramData? {
+        guard let record = lastPreviewRecord else { return nil }
+        return await histogram(for: record)
+    }
+
+    private func histogram(for record: Request) async -> HistogramData? {
         histogramRequests.append(record)
         emit(.histogramRequested(record))
         if histogramIsGated {
@@ -268,12 +286,12 @@ actor FakeRenderEngine: RenderEngining {
         // A recognisable tally rather than `nil`: a caller that drops the result would otherwise be
         // indistinguishable from one that publishes it.
         var bins = [Int](repeating: 0, count: 256)
-        let adjustmentExposure = document.adjustments.reduce(0.0) { partial, node in
+        let adjustmentExposure = record.document.adjustments.reduce(0.0) { partial, node in
             guard case .exposure(let ev) = node else { return partial }
             return partial + ev
         }
         let marker = max(
-            0, min(255, Int(((document.rawDevelop.exposure ?? 0) + adjustmentExposure + 10) * 10))
+            0, min(255, Int(((record.document.rawDevelop.exposure ?? 0) + adjustmentExposure + 10) * 10))
         )
         bins[marker] = 1
         let result = HistogramData(red: bins, green: bins, blue: bins, luma: bins)
