@@ -648,6 +648,50 @@ final class RenderPipelineTests: TempDirectoryTestCase {
                            "scaling after grading would mean the downscale is not early")
     }
 
+    func testPreviewDecodeExtentMatchesPlannerAndFullRemainsNative() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 600, height: 400, orientation: 1, named: "preview-decode.jpg", in: tempDirectory
+        )
+        let nativeExtent = CGSize(width: 600, height: 400)
+        let source = ImageSource(url: url, nativeExtent: nativeExtent)
+        let scale = RenderScale.preview(maxSize: CGSize(width: 120, height: 120))
+
+        let preview = try XCTUnwrap(RenderPipeline.developedSource(
+            source, rawDevelop: RAWDevelopSettings(), scale: scale
+        ))
+        XCTAssertEqual(preview.extent.width, 120, accuracy: 2)
+        XCTAssertEqual(preview.extent.height, 80, accuracy: 2)
+
+        let fromData = ImageSource(data: try Data(contentsOf: url), nativeExtent: nativeExtent)
+        let dataPreview = try XCTUnwrap(RenderPipeline.developedSource(
+            fromData, rawDevelop: RAWDevelopSettings(), scale: scale
+        ))
+        XCTAssertEqual(dataPreview.extent.width, preview.extent.width, accuracy: 2)
+        XCTAssertEqual(dataPreview.extent.height, preview.extent.height, accuracy: 2)
+
+        let full = try XCTUnwrap(RenderPipeline.developedSource(
+            source, rawDevelop: RAWDevelopSettings(), scale: .full
+        ))
+        XCTAssertEqual(full.extent.size, nativeExtent,
+                       "full resolution must stay on the native decode path")
+    }
+
+    func testPreviewDecodeBakesOrientationLikeTheFilmstrip() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 80, height: 60, orientation: 6, named: "preview-portrait.jpg", in: tempDirectory
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 60, height: 80))
+        let preview = try XCTUnwrap(RenderPipeline.developedSource(
+            source, rawDevelop: RAWDevelopSettings(),
+            scale: .preview(maxSize: CGSize(width: 40, height: 40))
+        ))
+        let thumbnail = try XCTUnwrap(Thumbnails.generate(from: url, maxPixelSize: 40))
+
+        XCTAssertEqual(preview.extent.width, thumbnail.size.width, accuracy: 2)
+        XCTAssertEqual(preview.extent.height, thumbnail.size.height, accuracy: 2)
+        XCTAssertGreaterThan(preview.extent.height, preview.extent.width)
+    }
+
     // MARK: - Colour space
 
     /// The interpolation space has to reach the cube. If `buildImage` dropped its `space` argument,

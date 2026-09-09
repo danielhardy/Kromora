@@ -71,6 +71,18 @@ final class ImageLoadingTests: TempDirectoryTestCase {
         XCTAssertThrowsError(try ImageDecoder.load(from: garbage, name: "bad.txt"))
     }
 
+    func testLoadFromDataThrowsOnTruncatedImage() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 80, height: 60, orientation: 1, named: "truncated-source.jpg", in: tempDirectory
+        )
+        let complete = try Data(contentsOf: url)
+        let truncated = complete.prefix(max(1, complete.count / 2))
+
+        XCTAssertThrowsError(try ImageDecoder.load(
+            from: Data(truncated), name: "truncated-source.jpg"
+        ))
+    }
+
     func testLoadFromURLThrowsOnMissingFile() {
         let missing = tempDirectory.appendingPathComponent("nope.jpg")
         XCTAssertThrowsError(try ImageDecoder.load(from: missing))

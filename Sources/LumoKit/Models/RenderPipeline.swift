@@ -2,6 +2,7 @@ import Foundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import CoreGraphics
+import ImageIO
 
 /// Turns an `EditDocument` into one lazy `CIImage`. A pure function — no `CIContext`, no rasterizing,
 /// no state.
@@ -227,8 +228,8 @@ enum RenderPipeline {
     ///
     /// **Downscaling happens here, before anything else touches the pixels.** For RAW that means
     /// `CIRAWFilter.scaleFactor`, set before `outputImage`, so the decoder itself demosaics small; for
-    /// a standard image it is a Lanczos step immediately after load. Either way the adjustment and LUT
-    /// stages then operate on a preview-sized image rather than a 60-megapixel one.
+    /// a standard image it is an ImageIO thumbnail decode. Either way the adjustment and LUT stages
+    /// then operate on a preview-sized image rather than a 60-megapixel one.
     ///
     /// That is the whole reason every `AdjustmentNode` must use normalized units (§5): the graph a
     /// preview runs is the graph an export runs, at a different number of pixels.
@@ -254,6 +255,17 @@ enum RenderPipeline {
             return filter.outputImage
 
         case .standard:
+            // ImageIO can ask the codec for a reduced-resolution decode, which avoids allocating
+            // the native pixel buffer just to throw it away in the Lanczos filter below. Keep the
+            // old CIImage path as a compatibility fallback for formats/codecs that cannot produce
+            // a thumbnail (and for malformed inputs, where it remains the normal nil failure).
+            if !scale.isFull,
+               let preview = previewStandardImage(
+                   for: source.backing, nativeExtent: source.nativeExtent, scale: scale
+               ) {
+                return preview
+            }
+
             guard let image = standardImage(for: source.backing) else { return nil }
             let factor = scale.factor(for: image.extent.size)
             guard factor < 1 else { return image }
@@ -285,6 +297,76 @@ enum RenderPipeline {
         case .data(let data):
             return CIImage(data: data, options: ImageDecoder.orientedLoadOptions)
         }
+    }
+
+    /// Decode a standard image directly at the preview's planned long edge.
+    ///
+    /// `CGImageSourceCreateThumbnailAtIndex` performs the reduction inside ImageIO/the image
+    /// codec, before a full-resolution `CGImage` or `CIImage` exists. The transform flag is the
+    /// ImageIO equivalent of `ImageDecoder.orientedLoadOptions`: both paths bake EXIF orientation
+    /// into the image's geometry. The resulting `CGImage` retains the decoder-provided color space
+    /// when it is wrapped in Core Image.
+    ///
+    /// A nil result is deliberately not an error here. The caller falls back to the established
+    /// `CIImage` loader so a codec that does not support thumbnail creation still renders normally.
+    private static func previewStandardImage(
+        for backing: ImageSource.Backing,
+        nativeExtent: CGSize,
+        scale: RenderScale
+    ) -> CIImage? {
+        guard let sourceSize = validSourceSize(nativeExtent),
+              let targetSize = scale.targetSize,
+              targetSize.width > 0, targetSize.height > 0,
+              targetSize.width.isFinite, targetSize.height.isFinite else {
+            return nil
+        }
+
+        let factor = scale.factor(for: sourceSize)
+        // The normal loader is already the best path when no reduction is needed. This also
+        // guarantees that a tiny source is never sent to ImageIO with an upscaling request.
+        guard factor < 1 else { return nil }
+
+        let requestedLongEdge = max(sourceSize.width, sourceSize.height) * factor
+        guard requestedLongEdge.isFinite,
+              requestedLongEdge >= 1,
+              requestedLongEdge <= CGFloat(Int.max) else {
+            return nil
+        }
+        let maxPixelSize = max(1, Int(ceil(requestedLongEdge)))
+
+        guard let imageSource = imageSource(for: backing),
+              CGImageSourceGetCount(imageSource) > 0 else {
+            return nil
+        }
+
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+        ]
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(
+            imageSource, 0, options as CFDictionary
+        ) else {
+            return nil
+        }
+        return CIImage(cgImage: cgImage)
+    }
+
+    private static func imageSource(for backing: ImageSource.Backing) -> CGImageSource? {
+        switch backing {
+        case .url(let url):
+            return CGImageSourceCreateWithURL(url as CFURL, nil)
+        case .data(let data):
+            return CGImageSourceCreateWithData(data as CFData, nil)
+        }
+    }
+
+    private static func validSourceSize(_ size: CGSize) -> CGSize? {
+        guard size.width >= 1, size.height >= 1,
+              size.width.isFinite, size.height.isFinite else {
+            return nil
+        }
+        return size
     }
 
     private static func lanczosScaled(_ image: CIImage, by factor: CGFloat) -> CIImage {
