@@ -399,7 +399,7 @@ actor RenderEngine: RenderEngining {
         else {
             return nil
         }
-        guard let device, let commandQueue else {
+        guard let commandQueue else {
             // This is the CPU/no-device compatibility seam. The shipping macOS path has a Metal
             // device and therefore takes the completed-texture path below; keeping the lazy image
             // available here preserves RenderEngine's graph-only test initializer and CPU CI hosts.
@@ -410,7 +410,7 @@ actor RenderEngine: RenderEngining {
         let width = Int(rect.width)
         let height = Int(rect.height)
         guard width > 0, height > 0,
-              let texture = makePreviewTexture(device: device, width: width, height: height)
+              let texture = resources.makeProcessingTexture(width: width, height: height)
         else { return nil }
 
         // RGBAh/RGBA16Float is intentional. The processing result is never quantized to RGBA8
@@ -446,7 +446,6 @@ actor RenderEngine: RenderEngining {
     // These narrow aliases keep the render algorithm readable while making ownership explicit in
     // `RenderEngineResources`. They are actor-isolated through their enclosing engine.
     private var context: CIContext { resources.context }
-    private var device: MTLDevice? { resources.device }
     private var commandQueue: MTLCommandQueue? { resources.commandQueue }
     private var lutCache: LUTFilterCache { resources.lutCache }
     private var toneCurveCache: ToneCurveFilterCache { resources.toneCurveCache }
@@ -1162,20 +1161,6 @@ actor RenderEngine: RenderEngining {
 
     // MARK: - Private
 
-    /// Allocate the completed-frame surface. The image stays texture-backed all the way to the
-    /// main-actor presentation pass; there is intentionally no PNG/CGImage/CPU readback seam here.
-    private func makePreviewTexture(device: MTLDevice, width: Int, height: Int) -> MTLTexture? {
-        let descriptor = MTLTextureDescriptor()
-        descriptor.textureType = .type2D
-        descriptor.pixelFormat = .rgba16Float
-        descriptor.width = width
-        descriptor.height = height
-        descriptor.mipmapLevelCount = 1
-        descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
-        descriptor.storageMode = .private
-        return device.makeTexture(descriptor: descriptor)
-    }
-
     /// Turn the processing command buffer into the renderer's pacing boundary without blocking
     /// the actor thread. The handler is installed before commit; otherwise Metal rejects a late
     /// handler on a command buffer that has already been submitted. Cancellation is checked by the
@@ -1250,7 +1235,7 @@ actor RenderEngine: RenderEngining {
         if !scale.isFull, RenderPipeline.hasPreLUTWork(
             document, includePostRenderWhiteBalance: includePostRenderWhiteBalance
         ) {
-            upstream = processingPrefix(
+            upstream = await processingPrefix(
                 source: source, document: document, developed: working, scale: scale,
                 sourceROI: processingROI,
                 spatialReferenceExtent: fullFrameExtent,
@@ -1703,6 +1688,61 @@ actor RenderEngine: RenderEngining {
         }
     }
 
+    /// Complete a prefix directly into a private Metal texture. This is deliberately separate from
+    /// `materializedImage`: the latter is the CPU fallback seam used by software/injected contexts,
+    /// while this path never allocates a bitmap or calls `CIContext.render(toBitmap:)`.
+    private func materializedPrefixImage(
+        _ image: CIImage,
+        space: WorkingSpace,
+        maxWorkingSetBytes: Int
+    ) async -> MaterializedImage? {
+        let rect = image.extent.integral
+        guard rect.isRasterizable,
+              rect.width <= CGFloat(Int.max), rect.height <= CGFloat(Int.max),
+              rect.width > 0, rect.height > 0 else { return nil }
+        let width = Int(rect.width)
+        let height = Int(rect.height)
+        guard let estimate = materializationEstimate(width: width, height: height) else {
+            return nil
+        }
+        guard maxWorkingSetBytes > 0, estimate.workingSetBytes <= maxWorkingSetBytes else {
+            // Keep the conservative working-set admission used by the existing cache. It avoids
+            // admitting a prefix whose GPU allocation would leave no room for Core Image's
+            // transient source-side work, while the retained cache cost below is texture-only.
+            materializationBudgetSkipCount += 1
+            return nil
+        }
+
+        guard let commandQueue, let texture = resources.makeProcessingTexture(
+            width: width, height: height
+        ) else {
+            // The injected/software context has no renderer-owned Metal queue. Preserve the
+            // established CPU fallback, including its working-space tag and origin.
+            return materializedImage(
+                image, space: space, maxWorkingSetBytes: maxWorkingSetBytes
+            )
+        }
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+        context.render(
+            image, to: texture, commandBuffer: commandBuffer, bounds: rect,
+            colorSpace: space.cgColorSpace
+        )
+        guard await commitAndWaitForCompletion(commandBuffer), !Task.isCancelled,
+              let textureImage = CIImage(
+                  mtlTexture: texture, options: [.colorSpace: space.cgColorSpace]
+              ) else {
+            return nil
+        }
+        let positioned = rect.origin == .zero
+            ? textureImage
+            : textureImage.transformed(by: CGAffineTransform(
+                translationX: rect.minX, y: rect.minY
+            ))
+        // The cached value retains the private texture. Count only the retained GPU allocation;
+        // the CPU bitmap path remains available only as a fallback.
+        return MaterializedImage(image: positioned, costBytes: estimate.gpuBytes)
+    }
+
     /// Complete a prefix at half-float precision so later graph construction cannot pull the RAW
     /// decoder or expensive spatial nodes back into the next LUT/grain evaluation. This is a
     /// bounded, preview-only boundary; full-resolution/export requests stay on the original fused
@@ -1780,7 +1820,7 @@ actor RenderEngine: RenderEngining {
         space: WorkingSpace,
         includePostRenderWhiteBalance: Bool,
         quality: RenderQuality
-    ) -> CIImage? {
+    ) async -> CIImage? {
         let key = ProcessingPrefixCacheKey(
             source: RenderSourceFingerprint(source),
             developHash: RenderCacheHash.digest(document.rawDevelop),
@@ -1806,7 +1846,7 @@ actor RenderEngine: RenderEngining {
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
             spatialReferenceExtent: spatialReferenceExtent
         )
-        guard let completed = materializedImage(
+        guard let completed = await materializedPrefixImage(
             prefix, space: space,
             maxWorkingSetBytes: resources.configuration.processingPrefixMaxCostBytes
         ) else { return nil }
