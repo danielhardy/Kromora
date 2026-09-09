@@ -26,6 +26,11 @@ struct LiveEditMeasurement: Sendable, Equatable {
     /// renderEnd: the latter covers completed source/adjustment processing on RenderEngine.
     var drawableAcquisitionMS: Double?
     var presentationEncodingMS: Double?
+    /// The publish-path copy from the completed CI image into the retained BGRA texture. The
+    /// submit value covers main-actor command encoding/commit; the GPU value is the command
+    /// buffer's hardware duration and is intentionally separate from drawable quad encoding.
+    var presentationMaterializationSubmitMS: Double?
+    var presentationMaterializationGPUMS: Double?
     /// A zero presentedTime means the drawable was skipped (for example while occluded). Keep the
     /// measurement for diagnostics, but do not let a later retry turn this into a slow-frame
     /// sample in the presentation statistics.
@@ -94,6 +99,7 @@ final class LiveEditTelemetry {
             effectiveWidth: width, effectiveHeight: height,
             inputTime: time, renderStart: nil, renderEnd: nil, gpuCompletion: nil,
             drawablePresentation: nil, drawableAcquisitionMS: nil, presentationEncodingMS: nil,
+            presentationMaterializationSubmitMS: nil, presentationMaterializationGPUMS: nil,
             cpuTimeMS: nil, gpuTimeMS: nil,
             allocationBytes: nil, memoryGrowthBytes: nil))
         trimIfNeeded()
@@ -130,6 +136,16 @@ final class LiveEditTelemetry {
         guard let i = index[revision] else { return }
         measurements[i].drawableAcquisitionMS = drawableAcquisitionMS
         measurements[i].presentationEncodingMS = presentationEncodingMS
+    }
+
+    func markPresentationMaterializationSubmitted(_ revision: UInt64, submitMS: Double) {
+        guard let i = index[revision] else { return }
+        measurements[i].presentationMaterializationSubmitMS = submitMS
+    }
+
+    func markPresentationMaterializationCompleted(_ revision: UInt64, gpuMS: Double?) {
+        guard let i = index[revision] else { return }
+        measurements[i].presentationMaterializationGPUMS = gpuMS
     }
 
     func markSkippedDrawable(_ revision: UInt64) {

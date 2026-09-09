@@ -36,12 +36,15 @@ final class PreviewSurface: ObservableObject {
     /// published and sampled directly by the Metal presenter for every drawable thereafter.
     private(set) var presentationTexture: MTLTexture?
     private(set) var presentationTextureExtent: CGRect?
+    private(set) var presentationTextureGeneration: UInt64 = 0
     private var lastValidPresentationTexture: MTLTexture?
     private var lastValidPresentationTextureExtent: CGRect?
     private var lastValidPresentationImageExtent: CGRect?
     private var lastValidSpace: WorkingSpace = .current
     private var lastValidDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
     private var currentDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
+    private var pendingPresentationMaterializationRevision: UInt64?
+    private var pendingPresentationMaterialization: (texture: MTLTexture, extent: CGRect)?
     private var pendingDisplayID: UInt64?
     private var pendingGPURevision: UInt64?
     /// The paused MTKView does not continuously redraw. Keep the active destination weakly so a
@@ -120,9 +123,12 @@ final class PreviewSurface: ObservableObject {
         self.image = image
         self.presentationImageExtent = presentationImageExtent
         self.space = space
-        let materialized = Self.makePresentationTexture(image: image, space: space)
-        presentationTexture = materialized?.texture
-        presentationTextureExtent = materialized?.extent
+        // The new publication must not sample the previous frame's texture. Until the async
+        // materialization completes, draw() intentionally takes the CI fallback path for this
+        // image, which keeps the first drawable responsive and preserves the non-GPU seam.
+        presentationTexture = nil
+        presentationTextureExtent = nil
+        pendingPresentationMaterialization = nil
         if let detailIdentity, let detailFactor, detailFactor.isFinite {
             currentDetail = (detailIdentity, detailFactor)
         } else {
@@ -156,6 +162,12 @@ final class PreviewSurface: ObservableObject {
         } else {
             pendingGPURevision = nil
         }
+        let surfaceRevision = self.revision
+        pendingPresentationMaterializationRevision = surfaceRevision
+        beginPresentationTextureMaterialization(
+            image: image, space: space, surfaceRevision: surfaceRevision,
+            telemetryRevision: revision
+        )
         if let revision, let onPresented, !hasManagedPresentationLifecycle {
             presentationConfirmations.removeValue(forKey: revision)
             onPresented()
@@ -186,6 +198,8 @@ final class PreviewSurface: ObservableObject {
         presentationImageExtent = lastValidPresentationImageExtent
         space = lastValidSpace
         currentDetail = lastValidDetail
+        pendingPresentationMaterializationRevision = nil
+        pendingPresentationMaterialization = nil
         revision &+= 1
         requestDisplay()
         onPresentationFailure?()
@@ -212,6 +226,73 @@ final class PreviewSurface: ObservableObject {
                 .presentationEncoded, source: source, quality: pending.quality,
                 detail: "drawable_ms=\(drawableAcquisitionMS) encode_ms=\(presentationEncodingMS)"
             )
+        }
+    }
+
+    private func beginPresentationTextureMaterialization(
+        image: CIImage, space: WorkingSpace, surfaceRevision: UInt64,
+        telemetryRevision: UInt64?
+    ) {
+        let started = LiveEditTelemetryClock.now
+        guard let submission = Self.makePresentationTexture(image: image, space: space) else {
+            pendingPresentationMaterializationRevision = nil
+            return
+        }
+        pendingPresentationMaterialization = (submission.texture, submission.extent)
+
+        submission.commandBuffer.addCompletedHandler { [weak self] commandBuffer in
+            let gpuMS: Double?
+            if commandBuffer.gpuStartTime > 0, commandBuffer.gpuEndTime > 0 {
+                gpuMS = max(0, (commandBuffer.gpuEndTime - commandBuffer.gpuStartTime) * 1_000)
+            } else {
+                gpuMS = nil
+            }
+            let succeeded = commandBuffer.status == .completed
+            Task { @MainActor in
+                self?.presentationTextureMaterializationCompleted(
+                    surfaceRevision: surfaceRevision, telemetryRevision: telemetryRevision,
+                    succeeded: succeeded, gpuMS: gpuMS
+                )
+            }
+        }
+        submission.commandBuffer.commit()
+        let submitMS = max(0, (LiveEditTelemetryClock.now - started) * 1_000)
+        if let telemetryRevision {
+            telemetryByRevision[telemetryRevision]?.telemetry
+                .markPresentationMaterializationSubmitted(telemetryRevision, submitMS: submitMS)
+        }
+    }
+
+    private func presentationTextureMaterializationCompleted(
+        surfaceRevision: UInt64,
+        telemetryRevision: UInt64?, succeeded: Bool, gpuMS: Double?
+    ) {
+        if let telemetryRevision {
+            telemetryByRevision[telemetryRevision]?.telemetry
+                .markPresentationMaterializationCompleted(telemetryRevision, gpuMS: gpuMS)
+            if let pending = telemetryByRevision[telemetryRevision], let source = pending.source {
+                LumoObservability.event(
+                    .presentationMaterialized, source: source, quality: pending.quality,
+                    detail: "gpu_ms=\(gpuMS ?? 0)"
+                )
+            }
+        }
+        guard pendingPresentationMaterializationRevision == surfaceRevision,
+              revision == surfaceRevision else { return }
+        pendingPresentationMaterializationRevision = nil
+        let materialization = pendingPresentationMaterialization
+        pendingPresentationMaterialization = nil
+        if succeeded, let materialization {
+            presentationTexture = materialization.texture
+            presentationTextureExtent = materialization.extent
+            presentationTextureGeneration &+= 1
+            // The fallback drawable can complete before this callback's main-actor hop. Keep the
+            // retained texture in rollback state if the publication was already confirmed.
+            if pendingDisplayID == nil {
+                lastValidPresentationTexture = materialization.texture
+                lastValidPresentationTextureExtent = materialization.extent
+            }
+            requestDisplay()
         }
     }
 
@@ -284,6 +365,7 @@ final class PreviewSurface: ObservableObject {
         lastValidImage = nil
         presentationTexture = nil
         presentationTextureExtent = nil
+        presentationTextureGeneration &+= 1
         lastValidPresentationTexture = nil
         lastValidPresentationTextureExtent = nil
         lastValidPresentationImageExtent = nil
@@ -299,11 +381,14 @@ final class PreviewSurface: ObservableObject {
         submittedTelemetryRevisions.removeAll()
         skippedTelemetryRevisions.removeAll()
         presentationConfirmations.removeAll()
+        pendingPresentationMaterializationRevision = nil
+        pendingPresentationMaterialization = nil
     }
 
-    private struct MaterializedTexture {
+    private struct MaterializationSubmission {
         let texture: MTLTexture
         let extent: CGRect
+        let commandBuffer: MTLCommandBuffer
     }
 
     /// Convert a completed preview image to the drawable's display format once per publication.
@@ -312,7 +397,7 @@ final class PreviewSurface: ObservableObject {
     /// needed at the presentation boundary and can be sampled without Core Image evaluation.
     private static func makePresentationTexture(
         image: CIImage, space: WorkingSpace
-    ) -> MaterializedTexture? {
+    ) -> MaterializationSubmission? {
         let extent = image.extent.integral
         guard extent.width > 0, extent.height > 0,
               extent.width.isFinite, extent.height.isFinite,
@@ -341,10 +426,8 @@ final class PreviewSurface: ObservableObject {
             colorSpace: space.cgColorSpace
         )
         Self.notePresentationCoreImageEvaluation()
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-        guard commandBuffer.status == .completed else { return nil }
-        return MaterializedTexture(texture: texture, extent: extent)
+        return MaterializationSubmission(texture: texture, extent: extent,
+                                         commandBuffer: commandBuffer)
     }
 }
 
@@ -412,6 +495,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         var onDrawableSizeChange: ((CGSize) -> Void)?
         private var lastDrawnRevision: UInt64?
         private var lastDrawnNavigation: CanvasNavigation?
+        private var lastDrawnTextureGeneration: UInt64?
         private var lastDrawableSize: (width: Int, height: Int)?
         /// A drawable can be skipped after its command buffer has been submitted. Remember which
         /// draw needs replaying so the completion handler cannot mark the skipped revision as the
@@ -514,6 +598,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             } else {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
+                lastDrawnTextureGeneration = nil
             }
             view?.setNeedsDisplay(view?.bounds ?? .zero)
         }
@@ -541,12 +626,13 @@ struct PreviewSurfaceView: NSViewRepresentable {
             onDrawableSizeChange?(CGSize(width: drawableSize.0, height: drawableSize.1))
             let sameDrawableSize = lastDrawableSize?.width == drawableSize.0 &&
                 lastDrawableSize?.height == drawableSize.1
+            let sameTextureGeneration = lastDrawnTextureGeneration == surface.presentationTextureGeneration
             // A pan/zoom/fit change does not bump `surface.revision` — it is presentation-only
             // and deliberately does not wait for a new render — so it must independently trigger
             // a redraw here, or dragging the image would have no visible effect until some other
             // change (an edit, a settled render) happened to bump the revision.
             guard surface.revision != lastDrawnRevision || !sameDrawableSize
-                    || navigation != lastDrawnNavigation else {
+                    || navigation != lastDrawnNavigation || !sameTextureGeneration else {
                 return
             }
 
@@ -567,6 +653,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let displayRevision = surface.pendingDisplayRevision()
             let drawRevision = surface.revision
             let drawNavigation = navigation
+            let drawTextureGeneration = surface.presentationTextureGeneration
             isDrawing = true
             let presentationEncodingStart = LiveEditTelemetryClock.now
             let renderPass = view.currentRenderPassDescriptor
@@ -645,7 +732,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     }
                     self?.drawingFinished(
                         drawRevision: drawRevision, navigation: drawNavigation,
-                        drawableSize: drawableSize, succeeded: succeeded
+                        drawableSize: drawableSize, textureGeneration: drawTextureGeneration,
+                        succeeded: succeeded
                     )
                 }
             }
@@ -758,7 +846,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         private func drawingFinished(
             drawRevision: UInt64, navigation: CanvasNavigation,
-            drawableSize: (width: Int, height: Int), succeeded: Bool
+            drawableSize: (width: Int, height: Int), textureGeneration: UInt64,
+            succeeded: Bool
         ) {
             let retry = skippedDrawNeedsRetry
             skippedDrawNeedsRetry = false
@@ -772,14 +861,17 @@ struct PreviewSurfaceView: NSViewRepresentable {
             if retry || displayChanged || surfaceAdvanced || !succeeded {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
+                lastDrawnTextureGeneration = nil
                 lastDrawableSize = nil
             } else if succeeded, let surface, surface.revision == drawRevision, surface.image != nil {
                 lastDrawnRevision = drawRevision
                 lastDrawnNavigation = navigation
+                lastDrawnTextureGeneration = textureGeneration
                 lastDrawableSize = drawableSize
             } else {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
+                lastDrawnTextureGeneration = nil
                 lastDrawableSize = nil
             }
             // The surface may have advanced while this buffer evaluated. One redraw now consumes
