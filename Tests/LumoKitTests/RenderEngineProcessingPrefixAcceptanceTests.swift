@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreImage
+import Foundation
 import Metal
 import XCTest
 @testable import LumoKit
@@ -11,6 +12,29 @@ import XCTest
 /// non-GPU seam for the CPU fallback.
 @MainActor
 final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
+
+    func testNoZeroFillStaticTest() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources/LumoKit/Models/RenderEngine.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let hotPath = try XCTUnwrap(
+            source.range(of: "    private func materializedImage(")
+                .flatMap { start in
+                    source[start.upperBound...].range(of: "    private func materializationEstimate(")
+                        .map { end in String(source[start.lowerBound..<end.lowerBound]) }
+                },
+            "could not isolate the materializedImage hot path"
+        )
+
+        XCTAssertFalse(hotPath.contains("Data(repeating: 0"))
+        XCTAssertFalse(hotPath.contains("Data(count:"))
+        XCTAssertTrue(hotPath.contains("UnsafeMutableRawPointer.allocate"))
+        XCTAssertTrue(hotPath.contains("Data("))
+        XCTAssertTrue(hotPath.contains("bytesNoCopy:"))
+    }
 
     func testNoCPUUploadOnLUTTickTest() async throws {
         try XCTSkipUnless(
@@ -118,6 +142,35 @@ final class RenderEngineProcessingPrefixAcceptanceTests: TempDirectoryTestCase {
         let cache = await fallbackEngine.cacheStatistics()
         XCTAssertEqual(cache.processingPrefix.count, 1)
         XCTAssertGreaterThan(cache.processingPrefix.costBytes, 0)
+    }
+
+    func testOutputIdenticalTest() async throws {
+        let source = try makeSource()
+        let documents = [
+            EditDocument(
+                light: LightAdjustments(exposure: 0.2, contrast: 8),
+                effects: EffectsAdjustments(texture: 16, clarity: 8)
+            ),
+            EditDocument(
+                light: LightAdjustments(exposure: -0.35, highlights: -12, shadows: 18),
+                color: ColorAdjustments(saturation: 0.14),
+                effects: EffectsAdjustments(texture: 12, grain: GrainAdjustments(amount: 20))
+            ),
+        ]
+
+        for document in documents {
+            let firstResult = await RenderEngine(context: CIContext()).makeCGImage(
+                request(source: source, document: document)
+            )
+            let secondResult = await RenderEngine(context: CIContext()).makeCGImage(
+                request(source: source, document: document)
+            )
+            let first = try XCTUnwrap(firstResult)
+            let second = try XCTUnwrap(secondResult)
+            let firstHash = RenderCacheHash.digest(Data(try Pixels.bytes(of: first)))
+            let secondHash = RenderCacheHash.digest(Data(try Pixels.bytes(of: second)))
+            XCTAssertEqual(firstHash, secondHash, "fresh CPU prefix materializations must match")
+        }
     }
 
     func testPressureEvictsTexturePrefixTest() async throws {
