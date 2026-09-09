@@ -74,7 +74,7 @@ final class PreviewSurfaceTests: XCTestCase {
                              "a newly-created view must draw an already-published frame")
     }
 
-    func testSkippedDrawableConfirmsAndRequestsAnotherDraw() {
+    func testSkippedDrawableStaysPendingUntilARealPresentation() {
         let surface = PreviewSurface()
         surface.attachPresentationLifecycle()
         let telemetry = LiveEditTelemetry()
@@ -82,6 +82,10 @@ final class PreviewSurfaceTests: XCTestCase {
             url: URL(fileURLWithPath: "/tmp/skipped-presentation-test.png"),
             nativeExtent: CGSize(width: 2, height: 2)
         )
+        let request = RenderRequest(
+            source: source, document: EditDocument(), quality: .interactive, output: .raster
+        )
+        telemetry.input(source: source, request: request, revision: 1, time: 10)
         var confirmed = false
 
         surface.present(
@@ -93,7 +97,46 @@ final class PreviewSurfaceTests: XCTestCase {
             surface.markDrawablePresented(revision: 1, time: 0),
             "a skipped drawable must be replayed into a fresh drawable"
         )
-        XCTAssertTrue(confirmed, "a valid completed render must not leave the preview loading")
+        XCTAssertFalse(confirmed, "an occluded drawable must not count as visible presentation")
+
+        XCTAssertFalse(
+            surface.markDrawablePresented(revision: 1, time: 1),
+            "a retry with a presented timestamp is a real presentation, not another retry"
+        )
+        XCTAssertTrue(confirmed, "the confirmation should fire after the retry reaches a drawable")
+        XCTAssertTrue(telemetry.measurements[0].skippedDrawable)
+        XCTAssertNil(telemetry.report().p50InputToPresentMS,
+                     "a skipped-then-retried frame must not enter presentation statistics")
+    }
+
+    func testLatestPublicationRemainsAvailableAcrossSkippedReplacement() {
+        let surface = PreviewSurface()
+        surface.attachPresentationLifecycle()
+        let telemetry = LiveEditTelemetry()
+        let source = ImageSource(
+            url: URL(fileURLWithPath: "/tmp/skipped-replacement-test.png"),
+            nativeExtent: CGSize(width: 2, height: 2)
+        )
+        var presentedRevision: UInt64?
+        let first = CIImage(color: .red)
+        let latest = CIImage(color: .blue)
+
+        surface.present(
+            first, revision: 1, telemetry: telemetry, source: source,
+            onPresented: { presentedRevision = 1 }
+        )
+        XCTAssertTrue(surface.markDrawablePresented(revision: 1, time: 0))
+        XCTAssertTrue(surface.image === first)
+
+        surface.present(
+            latest, revision: 2, telemetry: telemetry, source: source,
+            onPresented: { presentedRevision = 2 }
+        )
+
+        XCTAssertTrue(surface.image === latest)
+        XCTAssertFalse(surface.markDrawablePresented(revision: 2, time: 1))
+        XCTAssertEqual(presentedRevision, 2)
+        XCTAssertTrue(surface.image === latest)
     }
 
     func testAFailedReplacementKeepsTheLastValidFrame() throws {
