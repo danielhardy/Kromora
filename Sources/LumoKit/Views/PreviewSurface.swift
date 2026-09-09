@@ -12,6 +12,18 @@ struct PreviewFrameIdentity: Equatable, Sendable {
 
 @MainActor
 final class PreviewSurface: ObservableObject {
+    /// Diagnostic count used by the presentation acceptance tests. A publication is expected to
+    /// perform one Core Image materialization; retained-texture redraws must not increment it.
+    @MainActor static private(set) var presentationCoreImageEvaluationCount = 0
+
+    @MainActor static func resetPresentationCoreImageEvaluationCount() {
+        presentationCoreImageEvaluationCount = 0
+    }
+
+    @MainActor static func notePresentationCoreImageEvaluation() {
+        presentationCoreImageEvaluationCount += 1
+    }
+
     @Published private(set) var revision: UInt64 = 0
     private(set) var image: CIImage?
     private(set) var presentationImageExtent: CGRect?
@@ -22,8 +34,8 @@ final class PreviewSurface: ObservableObject {
     private var lastValidImage: CIImage?
     /// The display-ready copy of `image`. It is materialized once when a new render revision is
     /// published and sampled directly by the Metal presenter for every drawable thereafter.
-    fileprivate private(set) var presentationTexture: MTLTexture?
-    fileprivate private(set) var presentationTextureExtent: CGRect?
+    private(set) var presentationTexture: MTLTexture?
+    private(set) var presentationTextureExtent: CGRect?
     private var lastValidPresentationTexture: MTLTexture?
     private var lastValidPresentationTextureExtent: CGRect?
     private var lastValidPresentationImageExtent: CGRect?
@@ -328,6 +340,7 @@ final class PreviewSurface: ObservableObject {
             bounds: CGRect(origin: .zero, size: extent.size),
             colorSpace: space.cgColorSpace
         )
+        Self.notePresentationCoreImageEvaluation()
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
         guard commandBuffer.status == .completed else { return nil }
@@ -592,6 +605,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 // production path above never evaluates this graph on presentation-only redraws.
                 context.render(output, to: drawable.texture, commandBuffer: commandBuffer,
                                bounds: destination, colorSpace: surface.space.cgColorSpace)
+                PreviewSurface.notePresentationCoreImageEvaluation()
             } else {
                 isDrawing = false
                 return
@@ -840,6 +854,65 @@ struct PreviewSurfaceView: NSViewRepresentable {
             lastDrawableSize = nil
             onDrawableSizeChange?(CGSize(width: size.width.rounded(.down), height: size.height.rounded(.down)))
             view.setNeedsDisplay(view.bounds)
+        }
+
+        /// Render one retained presentation texture into an offscreen target using the same
+        /// pipeline as the drawable path. This is an acceptance-test seam for geometry and
+        /// repaint behavior on hosts without a logged-in display; it never evaluates Core Image.
+        func renderRetainedTextureForTesting(
+            surface: PreviewSurface, navigation: CanvasNavigation, destinationSize: CGSize
+        ) -> MTLTexture? {
+            guard destinationSize.width > 0, destinationSize.height > 0,
+                  destinationSize.width.isFinite, destinationSize.height.isFinite,
+                  let texture = surface.presentationTexture,
+                  let textureExtent = surface.presentationTextureExtent,
+                  let pipeline, let samplerState else { return nil }
+
+            let width = Int(destinationSize.width.rounded())
+            let height = Int(destinationSize.height.rounded())
+            guard width > 0, height > 0 else { return nil }
+            let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+                pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
+            )
+            descriptor.usage = [.shaderRead, .renderTarget]
+            descriptor.storageMode = .shared
+            guard let target = device.makeTexture(descriptor: descriptor),
+                  var geometry = Self.quadGeometry(
+                      imageExtent: textureExtent,
+                      navigation: navigation,
+                      destination: CGRect(x: 0, y: 0, width: width, height: height),
+                      virtualExtent: surface.presentationImageExtent
+                  ),
+                  let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = target
+            pass.colorAttachments[0].clearColor = Self.windowBackgroundClearColor
+            pass.colorAttachments[0].loadAction = .clear
+            pass.colorAttachments[0].storeAction = .store
+            guard let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
+                      device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count,
+                                        options: .storageModeShared)
+                  }),
+                  let uniformBuffer = device.makeBuffer(
+                      bytes: &geometry.uniforms,
+                      length: MemoryLayout<Uniforms>.stride,
+                      options: .storageModeShared
+                  ),
+                  let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+                return nil
+            }
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+            encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+            encoder.setFragmentTexture(texture, index: 0)
+            encoder.setFragmentSamplerState(samplerState, index: 0)
+            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0,
+                                   vertexCount: geometry.vertices.count)
+            encoder.endEncoding()
+            commandBuffer.commit()
+            commandBuffer.waitUntilCompleted()
+            return commandBuffer.status == .completed ? target : nil
         }
     }
 }

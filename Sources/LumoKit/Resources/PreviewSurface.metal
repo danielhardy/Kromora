@@ -32,7 +32,11 @@ vertex PreviewQuadOutput preview_quad_vertex(
         pixelPosition.y / uniforms.viewportSize.y * 2.0 - 1.0
     );
     output.position = float4(ndc, 0.0, 1.0);
-    output.texcoord = vertices[vertexID].texcoord;
+    // Core Image's completed texture is authored in a y-up image space, while the Metal
+    // drawable's row zero is the top of the presented frame. Keep the geometry origin shared
+    // with CanvasNavigation and invert only the texture sampling axis at the presentation edge.
+    output.texcoord = float2(vertices[vertexID].texcoord.x,
+                             1.0 - vertices[vertexID].texcoord.y);
     return output;
 }
 
