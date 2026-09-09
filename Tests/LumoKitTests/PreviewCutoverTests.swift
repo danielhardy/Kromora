@@ -47,6 +47,23 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         }
     }
 
+    /// The renderer is an actor, so conditions about *what it was asked for* are async. Kept
+    /// separate from the synchronous published-state wait above rather than making every caller
+    /// await its own state.
+    private func waitUntil(
+        _ description: String,
+        timeout: TimeInterval = 5,
+        _ condition: @escaping @MainActor () async -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !(await condition()) {
+            if Date() > deadline {
+                throw TestSynchronizationError.timedOut(description, "the renderer was never asked")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     private func openImage(_ viewModel: AppViewModel) async throws {
         viewModel.openImage(url: try makeImageFile())
         try await waitUntil("the image to load") { viewModel.sourceImage != nil }
@@ -448,6 +465,79 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
 
         XCTAssertEqual(viewModel.library.allLUTs.count, 2)
         XCTAssertEqual(viewModel.selectedLUT, lut, "the selection must survive a library rescan")
+    }
+
+    /// End to end: adding a smart-mask layer must not hold the canvas hostage while Vision runs.
+    /// The editor's first request for the masked document skips semantic resolution and the second
+    /// refines it, and both describe the same document.
+    func testAddingASmartMaskPublishesABaseFrameThenRefinesIt() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        _ = try await openImage(viewModel, using: fake)
+        try await waitUntil("the opening preview to settle") { viewModel.previewState == .ready }
+        let opening = await fake.renderRequests.count
+
+        viewModel.updateDocument {
+            $0.localAdjustments = [LocalAdjustmentLayer(
+                components: [MaskComponent(
+                    source: .semantic(SemanticMaskDefinition(target: .subject))
+                )],
+                adjustments: LocalAdjustments(exposure: 0.8)
+            )]
+        }
+        try await waitUntil("both masked frames") {
+            await fake.renderRequests.count >= opening + 2
+        }
+
+        let masked = await fake.renderRequests.dropFirst(opening)
+        XCTAssertEqual(masked.count, 2, "a masked edit publishes a base frame and one refinement")
+        let base = try XCTUnwrap(masked.first)
+        let refined = try XCTUnwrap(masked.last)
+        XCTAssertEqual(base.maskResolution, .deferSemantic)
+        XCTAssertEqual(refined.maskResolution, .resolved)
+        XCTAssertEqual(base.document, refined.document,
+                       "the refinement refines the document the base frame showed")
+        XCTAssertTrue(base.document.hasSemanticMasks)
+
+        // The opening render of an unmasked document, and every render before it, stays exact.
+        let openingRequests = await fake.renderRequests.prefix(opening)
+        XCTAssertTrue(openingRequests.allSatisfy { $0.maskResolution == .resolved },
+                      "a document without semantic masks has nothing to defer")
+
+        try await waitUntil("the refined preview to settle") { viewModel.previewState == .ready }
+        XCTAssertEqual(viewModel.document.localAdjustments.count, 1)
+    }
+
+    /// Everything that is not the on-screen preview keeps the single exact path: an edited
+    /// thumbnail, an export and a histogram must never be built from a partially resolved mask.
+    func testOnlyTheVisiblePreviewTakesTheProgressivePath() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        _ = try await openImage(viewModel, using: fake)
+        try await waitUntil("the opening preview to settle") { viewModel.previewState == .ready }
+
+        viewModel.updateDocument {
+            $0.localAdjustments = [LocalAdjustmentLayer(
+                components: [MaskComponent(
+                    source: .semantic(SemanticMaskDefinition(target: .subject))
+                )],
+                adjustments: LocalAdjustments(exposure: 0.8)
+            )]
+        }
+        try await waitUntil("the refined frame") {
+            await fake.renderRequests.contains {
+                $0.document.hasSemanticMasks && $0.maskResolution == .resolved
+            }
+        }
+
+        let deferred = await fake.renderRequests.filter { $0.maskResolution == .deferSemantic }
+        XCTAssertTrue(deferred.allSatisfy { $0.quality == .preview || $0.quality == .interactive },
+                      "only visible preview tiers may defer semantic masks, got \(deferred.map(\.quality))")
+        XCTAssertTrue(deferred.allSatisfy { $0.output == .raster && $0.exportOptions == nil },
+                      "an encoded or export request must never defer semantic masks")
+        let thumbnails = await fake.thumbnailRequests
+        XCTAssertTrue(thumbnails.allSatisfy { $0.maskResolution == .resolved },
+                      "browsing thumbnails stay on the exact path")
     }
 
 }

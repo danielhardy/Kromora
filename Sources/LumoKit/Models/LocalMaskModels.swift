@@ -536,6 +536,27 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
     var isIdentity: Bool { !isEnabled || amount == 0 || !components.contains(where: \.isUsable) || adjustments.isIdentity }
     var hasVisibleLook: Bool { isEnabled && amount > 0 && components.contains(where: \.isUsable) && !adjustments.isIdentity }
 
+    /// Whether this layer may still be drawn in the two-phase preview's first frame, where semantic
+    /// components are not resolved yet.
+    ///
+    /// The refinement must only ever *add* coverage. If the semantics-free mask can cover a pixel
+    /// the resolved mask will not, the layer's look flashes onto pixels it never owns and then
+    /// retracts — a flicker, not a refinement. Dropping a component keeps the base mask a subset of
+    /// the resolved one only when that component adds coverage: `.add` anywhere, or `.replace` as
+    /// the first usable component, since the remaining components then compose against the empty
+    /// mask exactly as they do in the resolved pass. `.subtract` and `.intersect` remove coverage,
+    /// a later `.replace` discards everything before it, and a layer inversion turns any subset
+    /// back into a superset — each of those defers the whole layer to the refined frame instead.
+    var allowsDeferredSemanticPreview: Bool {
+        let usable = components.filter(\.isUsable)
+        guard usable.contains(where: { $0.source.semanticDefinition != nil }) else { return true }
+        guard !isInverted else { return false }
+        return usable.enumerated().allSatisfy { index, component in
+            guard component.source.semanticDefinition != nil else { return true }
+            return component.mode == .add || (index == 0 && component.mode == .replace)
+        }
+    }
+
     private enum CodingKeys: String, CodingKey { case id, name, isEnabled, isInverted, amount, components, adjustments }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)

@@ -909,6 +909,210 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         let invertedPixel = try Pixels.bytes(of: invertedImage)
         XCTAssertLessThanOrEqual(abs(Int(invertedPixel[3]) - 102), 2)
     }
+
+    // MARK: - Two-phase preview (deferred semantic masks)
+
+    /// The base frame of a masked preview must be exactly "everything that does not need Vision":
+    /// procedural and brush layers drawn, semantic layers left for the refinement.
+    func testDeferredSemanticPassResolvesOnlyNonSemanticComponents() async throws {
+        let source = try source(width: 16, height: 8)
+        let resolver = ComponentRecordingMaskResolver(sourceFingerprint: source.cacheFingerprint)
+        let engine = RenderEngine(maskResolver: resolver)
+        let linear = MaskSource.linear(LinearGradientDefinition())
+        let semantic = MaskSource.semantic(SemanticMaskDefinition(target: .person))
+        let document = EditDocument(localAdjustments: [
+            LocalAdjustmentLayer(
+                components: [MaskComponent(source: linear)],
+                adjustments: LocalAdjustments(exposure: 1)
+            ),
+            LocalAdjustmentLayer(
+                components: [MaskComponent(source: semantic)],
+                adjustments: LocalAdjustments(exposure: -1)
+            ),
+        ])
+        let base = try await engine.render(request(
+            source: source, document: document, maskResolution: .deferSemantic
+        ))
+        var seen = await resolver.resolved
+        XCTAssertEqual(seen, [linear],
+                       "the base frame must not ask the semantic resolver for anything")
+
+        let refined = try await engine.render(request(source: source, document: document))
+        seen = await resolver.resolved
+        XCTAssertEqual(seen, [linear, semantic],
+                       "the refinement resolves the semantic component that the base frame skipped")
+        assertPixelsDiffer(
+            try Pixels.bytes(of: image(from: base)), try Pixels.bytes(of: image(from: refined)),
+            "the refinement must actually add the semantic layer's look"
+        )
+    }
+
+    /// A layer whose semantic component *removes* coverage cannot be drawn from its remaining
+    /// components: doing so would apply the look to pixels the resolved mask subtracts, which reads
+    /// as a flash rather than a refinement. Such a layer is absent from the base frame entirely.
+    func testDeferredSemanticPassOmitsLayersThatWouldOverApply() async throws {
+        let source = try source(width: 16, height: 8)
+        let resolver = ComponentRecordingMaskResolver(sourceFingerprint: source.cacheFingerprint)
+        let engine = RenderEngine(maskResolver: resolver)
+        let document = EditDocument(localAdjustments: [
+            LocalAdjustmentLayer(
+                components: [
+                    MaskComponent(mode: .replace, source: .linear(LinearGradientDefinition())),
+                    MaskComponent(
+                        mode: .subtract, source: .semantic(SemanticMaskDefinition(target: .person))
+                    ),
+                ],
+                adjustments: LocalAdjustments(exposure: 1)
+            )
+        ])
+        let base = try await engine.render(request(
+            source: source, document: document, maskResolution: .deferSemantic
+        ))
+        let seen = await resolver.resolved
+        XCTAssertTrue(seen.isEmpty, "a layer deferred whole resolves none of its components")
+
+        let unedited = try await engine.render(request(source: source, document: EditDocument()))
+        assertPixelsEqual(
+            try Pixels.bytes(of: image(from: base)), try Pixels.bytes(of: image(from: unedited)),
+            "the base frame must show the photo without the deferred layer"
+        )
+        let refined = try await engine.render(request(source: source, document: document))
+        assertPixelsDiffer(
+            try Pixels.bytes(of: image(from: base)), try Pixels.bytes(of: image(from: refined)),
+            "the refinement must land the deferred layer"
+        )
+    }
+
+    /// Export and full-resolution renders never take the progressive path, so their pixels do not
+    /// depend on which components happened to be resolved when the frame was built.
+    func testExportIgnoresTheDeferredSemanticPolicy() async throws {
+        let source = try source(width: 16, height: 8)
+        let document = EditDocument(localAdjustments: [
+            LocalAdjustmentLayer(
+                components: [MaskComponent(
+                    source: .semantic(SemanticMaskDefinition(target: .person))
+                )],
+                adjustments: LocalAdjustments(exposure: 1)
+            )
+        ])
+        let engine = RenderEngine(
+            maskResolver: ComponentRecordingMaskResolver(sourceFingerprint: source.cacheFingerprint)
+        )
+        XCTAssertEqual(
+            RenderRequest(source: source, document: document, quality: .export).maskResolution,
+            .resolved, "an export request defaults to the exact path"
+        )
+        let exported = try await engine.render(RenderRequest(
+            source: source, document: document, quality: .export, output: .raster
+        ))
+        let full = try await engine.render(RenderRequest(
+            source: source, document: document, quality: .fullResolution, output: .raster
+        ))
+        assertPixelsEqual(
+            try Pixels.bytes(of: image(from: exported)), try Pixels.bytes(of: image(from: full)),
+            "export and full-resolution renders must agree with the resolved graph"
+        )
+    }
+
+    /// The subset rule is the whole safety argument for the base frame, so it is pinned directly
+    /// rather than only through rendered pixels.
+    func testDeferredPreviewAdmissionFollowsTheSubsetRule() {
+        let semantic = MaskSource.semantic(SemanticMaskDefinition(target: .subject))
+        let linear = MaskSource.linear(LinearGradientDefinition())
+        func layer(
+            _ components: [MaskComponent], inverted: Bool = false
+        ) -> LocalAdjustmentLayer {
+            LocalAdjustmentLayer(isInverted: inverted, components: components)
+        }
+
+        XCTAssertTrue(layer([MaskComponent(source: linear)]).allowsDeferredSemanticPreview,
+                      "a layer without semantic components resolves fully in the base frame")
+        XCTAssertTrue(
+            layer([MaskComponent(mode: .replace, source: semantic)]).allowsDeferredSemanticPreview,
+            "a semantic-only layer contributes nothing to the base frame, which is a subset"
+        )
+        XCTAssertTrue(
+            layer([
+                MaskComponent(mode: .replace, source: semantic),
+                MaskComponent(mode: .add, source: linear),
+            ]).allowsDeferredSemanticPreview,
+            "dropping a leading replace leaves the rest composing against the empty mask"
+        )
+        XCTAssertFalse(
+            layer([
+                MaskComponent(mode: .replace, source: linear),
+                MaskComponent(mode: .subtract, source: semantic),
+            ]).allowsDeferredSemanticPreview,
+            "a subtracting semantic component would over-apply while it is unresolved"
+        )
+        XCTAssertFalse(
+            layer([
+                MaskComponent(mode: .replace, source: linear),
+                MaskComponent(mode: .intersect, source: semantic),
+            ]).allowsDeferredSemanticPreview,
+            "an intersecting semantic component would over-apply while it is unresolved"
+        )
+        XCTAssertFalse(
+            layer([
+                MaskComponent(mode: .replace, source: linear),
+                MaskComponent(mode: .replace, source: semantic),
+            ]).allowsDeferredSemanticPreview,
+            "a later replace discards the components the base frame would have drawn"
+        )
+        XCTAssertFalse(
+            layer([
+                MaskComponent(mode: .replace, source: semantic),
+                MaskComponent(mode: .add, source: linear),
+            ], inverted: true).allowsDeferredSemanticPreview,
+            "layer inversion turns the base frame's subset back into a superset"
+        )
+        var disabledSemantic = MaskComponent(mode: .subtract, source: semantic)
+        disabledSemantic.isEnabled = false
+        XCTAssertTrue(
+            layer([MaskComponent(source: linear), disabledSemantic]).allowsDeferredSemanticPreview,
+            "an unusable component takes part in neither pass"
+        )
+    }
+
+    private func request(
+        source: ImageSource,
+        document: EditDocument,
+        maskResolution: MaskResolutionPolicy = .resolved
+    ) -> RenderRequest {
+        RenderRequest(
+            source: source, document: document,
+            targetSize: source.nativeExtent, quality: .preview, output: .raster,
+            maskResolution: maskResolution
+        )
+    }
+}
+
+/// Records which component definitions each pass asked for. Its masks are flat, so the rendered
+/// pixels reflect exactly which components took part; semantic masks return partial coverage so a
+/// composition that subtracts one does not collapse to an empty mask.
+private actor ComponentRecordingMaskResolver: LocalMaskResolving {
+    let sourceFingerprint: String
+    private(set) var resolved: [MaskSource] = []
+
+    init(sourceFingerprint: String) {
+        self.sourceFingerprint = sourceFingerprint
+    }
+
+    func resolve(_ request: LocalMaskResolveRequest) async throws -> LocalMaskPayload {
+        resolved.append(request.component.source)
+        let count = max(0, request.targetSize.width * request.targetSize.height)
+        let coverage: Float = request.component.source.semanticDefinition == nil ? 1 : 0.5
+        let mask = try NormalizedMask(
+            size: request.targetSize, values: Array(repeating: coverage, count: count)
+        )
+        return LocalMaskPayload(
+            sourceFingerprint: sourceFingerprint,
+            definitionHash: RenderCacheHash.digest(request.component.source),
+            targetSize: request.targetSize,
+            quality: request.quality,
+            descriptor: .raster(mask)
+        )
+    }
 }
 
 private struct TestMaskResolver: LocalMaskResolving {

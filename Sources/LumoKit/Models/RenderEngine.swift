@@ -1104,6 +1104,11 @@ actor RenderEngine: RenderEngining {
         var result: [UUID: CIImage] = [:]
         for layer in layers where includeIdentity ? layer.isEnabled : layer.hasVisibleLook {
             try Task.checkCancellation()
+            // The deferred first frame omits semantic components, which only stays a *refinement*
+            // while the semantics-free mask is a subset of the resolved one. A layer that would
+            // over-apply without its semantic components is left out of the base frame entirely,
+            // so the refinement adds its look rather than retracting it.
+            if !resolveSemanticMasks, !layer.allowsDeferredSemanticPreview { continue }
             guard isCurrentMaskRequest(
                 source: source, revision: requestRevision,
                 maskIdentity: maskIdentity, documentIdentity: documentIdentity

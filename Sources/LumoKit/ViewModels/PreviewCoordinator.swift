@@ -34,6 +34,23 @@ final class PreviewCoordinator {
     typealias PublicationHandler = @MainActor (Publication) -> Void
     typealias FailureHandler = @MainActor (RenderRequest) -> Void
 
+    /// The semantic mask work a published refined frame has already warmed.
+    ///
+    /// The two-phase publish only pays for itself while the refined render can still suspend on
+    /// Vision. Once a resolved frame for this photo and mask recipe has reached the screen, the
+    /// renderer's component cache answers the next render without suspending, and a base frame
+    /// would just be a second full-graph render for every pointer tick. Mask resolution is keyed
+    /// by the component definitions, the mask quality tier and the requested box — not by the
+    /// document's global look — so a slider drag keeps the warm identity while adding or editing a
+    /// smart mask correctly loses it.
+    private struct SemanticWarmth: Equatable {
+        let source: ImageSource
+        let assetID: PhotoAssetID?
+        let components: [MaskSource]
+        let maskQuality: MaskQuality
+        let targetSize: CGSize?
+    }
+
     private struct Token: Equatable {
         let source: ImageSource
         let assetID: PhotoAssetID?
@@ -60,6 +77,7 @@ final class PreviewCoordinator {
     private var nextRevision: UInt64 = 0
     private var isInteracting = false
     private var isShutdown = false
+    private var warmSemanticMasks: SemanticWarmth?
 
     var onPublication: PublicationHandler?
     var onFailure: FailureHandler?
@@ -178,6 +196,9 @@ final class PreviewCoordinator {
         settleTask = nil
         pendingInteractive = nil
         isInteracting = false
+        // Navigation is also the renderer's source boundary: nothing about the next photo's mask
+        // work may be assumed warm from this one.
+        warmSemanticMasks = nil
     }
 
     /// Cancel display scheduling and wait for any admitted render operation to leave the shared
@@ -293,45 +314,88 @@ final class PreviewCoordinator {
         // already-available source/global/procedural graph first, then refine the same visible
         // revision once the mask resolver returns. A newer request cancels this scheduler job and
         // the renderer's request revision fence prevents a late refinement from being published.
-        if request.maskResolution == .resolved && request.document.hasSemanticMasks {
+        guard request.maskResolution == .resolved, request.document.hasSemanticMasks else {
+            await renderSingle(request, token: token, phase: phase, engine: engine)
+            return
+        }
+        let warmth = Self.semanticWarmth(for: request, assetID: token.assetID)
+        if warmth != warmSemanticMasks {
             let baseRequest = Self.request(
                 request, quality: request.quality, maskResolution: .deferSemantic
             )
-            await renderSingle(baseRequest, token: token, phase: phase, engine: engine)
+            let publishedBase = await renderSingle(
+                baseRequest, token: token, phase: phase, engine: engine
+            )
             guard !Task.isCancelled, isCurrent(token) else { return }
+            // Pointer-to-pixel latency is a property of the frame the user actually saw, and both
+            // phases share this revision. Once the base frame has been published, the refinement
+            // must not overwrite its timings with its own, later ones.
+            if await renderSingle(
+                request, token: token, phase: phase, engine: engine,
+                tracksLatency: !publishedBase
+            ) {
+                warmSemanticMasks = warmth
+            }
+            return
         }
-        await renderSingle(request, token: token, phase: phase, engine: engine)
+        // Only a frame that actually reached the screen proves the renderer resolved and cached
+        // this recipe's masks. A cancelled or failed refinement leaves the next submit two-phase.
+        if await renderSingle(request, token: token, phase: phase, engine: engine) {
+            warmSemanticMasks = warmth
+        }
     }
 
+    private static func semanticWarmth(
+        for request: RenderRequest, assetID: PhotoAssetID?
+    ) -> SemanticWarmth {
+        SemanticWarmth(
+            source: request.source,
+            assetID: request.assetID ?? assetID,
+            components: request.document.localAdjustments.flatMap { layer in
+                layer.isEnabled
+                    ? layer.components.filter {
+                        $0.isUsable && $0.source.semanticDefinition != nil
+                    }.map(\.source)
+                    : []
+            },
+            maskQuality: request.quality.maskQuality,
+            targetSize: request.targetSize
+        )
+    }
+
+    /// Renders one request and publishes it if it is still current. Returns whether it published.
+    @discardableResult
     private func renderSingle(
         _ request: RenderRequest,
         token: Token,
         phase: Phase,
-        engine: any RenderEngining
-    ) async {
-        telemetry.mark(token.revision, renderStart: LiveEditTelemetryClock.now)
+        engine: any RenderEngining,
+        tracksLatency: Bool = true
+    ) async -> Bool {
+        let maskDetail = request.maskResolution == .deferSemantic ? "masks=deferred" : ""
+        if tracksLatency { telemetry.mark(token.revision, renderStart: LiveEditTelemetryClock.now) }
         LumoObservability.liveEdit(.renderStart, source: request.source, quality: request.quality,
-                                   revision: token.revision)
+                                   revision: token.revision, detail: maskDetail)
         let gpuImage = await engine.makeCIImage(request)
         // Test doubles and non-GPU conformers retain the old raster seam. Once a GPU image exists,
         // the persistent presentation surface owns display for both phases, so rasterizing the
         // same request would rebuild the graph and perform a redundant second render pass.
         let image = gpuImage == nil ? await engine.makeCGImage(request) : nil
-        telemetry.mark(token.revision, renderEnd: LiveEditTelemetryClock.now)
+        if tracksLatency { telemetry.mark(token.revision, renderEnd: LiveEditTelemetryClock.now) }
         LumoObservability.liveEdit(.renderEnd, source: request.source, quality: request.quality,
-                                   revision: token.revision)
-        guard !Task.isCancelled else { return }
+                                   revision: token.revision, detail: maskDetail)
+        guard !Task.isCancelled else { return false }
         guard isCurrent(token) else {
             let age = nextRevision >= token.revision ? nextRevision - token.revision : 0
             telemetry.stale(token.revision, age: age)
             LumoObservability.liveEdit(.staleRevision, source: request.source, quality: request.quality,
                                        revision: token.revision, detail: "age=\(age)")
-            return
+            return false
         }
         guard image != nil || gpuImage != nil else {
             telemetry.discard(token.revision)
             onFailure?(request)
-            return
+            return false
         }
         onPublication?(Publication(
             request: request, image: image, gpuImage: gpuImage,
@@ -339,6 +403,7 @@ final class PreviewCoordinator {
             sourceRevision: token.sourceRevision,
             displayRevision: token.displayRevision, phase: phase
         ))
+        return true
     }
 
     private func isCurrent(_ token: Token) -> Bool {
