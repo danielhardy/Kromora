@@ -8,5 +8,10 @@
 .project/runs-retry.json
 .project/runs-drain.json
 .project/locks/
+.project/mutations/
 PROJ-*-finish.sh
 # END DispatchGraph
+
+# Local archive exports duplicate the canonical issue records under issues/.
+# Keep issue Markdown and .project/events.jsonl as the durable history instead.
+archive/
