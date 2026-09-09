@@ -31,6 +31,7 @@ enum MaskOperations {
         let height = mask.size.height
         var blurred = Array(repeating: Float.zero, count: mask.values.count)
         var outputTotal: Float = 0
+        var outputIsBinary = true
         for y in 0..<height {
             for x in 0..<width {
                 var sampleTotal: Float = 0
@@ -44,11 +45,13 @@ enum MaskOperations {
                 let value = sampleTotal / count
                 blurred[y * width + x] = value
                 outputTotal += value
+                if value != 0, value != 1 { outputIsBinary = false }
             }
         }
         return NormalizedMask(
             trustingSize: mask.size, values: blurred,
-            coverage: blurred.isEmpty ? 0 : outputTotal / Float(blurred.count)
+            coverage: blurred.isEmpty ? 0 : outputTotal / Float(blurred.count),
+            isBinary: outputIsBinary
         )
     }
 
@@ -66,7 +69,12 @@ enum MaskOperations {
         guard mask.size != size else { return mask }
 
         let result = try scaleValuesAndCoverage(mask, to: size)
-        return NormalizedMask(trustingSize: size, values: result.values, coverage: result.coverage)
+        return NormalizedMask(
+            trustingSize: size,
+            values: result.values,
+            coverage: result.coverage,
+            isBinary: result.isBinary
+        )
     }
 
     /// Shared PlanarF bridge for every semantic-mask upscale. vImage's default resampling kernel
@@ -80,7 +88,7 @@ enum MaskOperations {
 
     private static func scaleValuesAndCoverage(
         _ mask: NormalizedMask, to size: PixelDimensions
-    ) throws -> (values: [Float], coverage: Float) {
+    ) throws -> (values: [Float], coverage: Float, isBinary: Bool) {
         guard mask.size.width > 0, mask.size.height > 0,
               size.width > 0, size.height > 0 else {
             throw RegionMaskError.incompatibleSizes
@@ -117,14 +125,16 @@ enum MaskOperations {
         // in one pass before handing the result to NormalizedMask's trusted initializer; this
         // preserves its public [0, 1] invariant and avoids a second post-generation walk.
         var total: Float = 0
+        var isBinary = true
         values.withUnsafeMutableBufferPointer { buffer in
             for index in buffer.indices {
                 let value = min(max(buffer[index], 0), 1)
                 buffer[index] = value
                 total += value
+                if value != 0, value != 1 { isBinary = false }
             }
         }
-        return (values, values.isEmpty ? 0 : total / Float(values.count))
+        return (values, values.isEmpty ? 0 : total / Float(values.count), isBinary)
     }
 
     /// Region operations always persist their result through the same store as provider output.
