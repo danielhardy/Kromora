@@ -26,6 +26,10 @@ struct LiveEditMeasurement: Sendable, Equatable {
     /// renderEnd: the latter covers completed source/adjustment processing on RenderEngine.
     var drawableAcquisitionMS: Double?
     var presentationEncodingMS: Double?
+    /// A zero presentedTime means the drawable was skipped (for example while occluded). Keep the
+    /// measurement for diagnostics, but do not let a later retry turn this into a slow-frame
+    /// sample in the presentation statistics.
+    var skippedDrawable = false
     /// Filled from Instruments/Metal System Trace when a capture is imported into a report.
     var cpuTimeMS: Double?
     var gpuTimeMS: Double?
@@ -51,7 +55,7 @@ struct LiveEditReport: Sendable, Equatable {
     let maximumStaleRevisionAge: UInt64
 
     static func make(from samples: [LiveEditMeasurement]) -> Self {
-        let presented = samples.filter { $0.drawablePresentation != nil }
+        let presented = samples.filter { $0.drawablePresentation != nil && !$0.skippedDrawable }
         let latencies = presented.compactMap(\.inputToPresent).sorted()
         func percentile(_ p: Double) -> Double? {
             guard !latencies.isEmpty else { return nil }
@@ -126,6 +130,11 @@ final class LiveEditTelemetry {
         guard let i = index[revision] else { return }
         measurements[i].drawableAcquisitionMS = drawableAcquisitionMS
         measurements[i].presentationEncodingMS = presentationEncodingMS
+    }
+
+    func markSkippedDrawable(_ revision: UInt64) {
+        guard let i = index[revision] else { return }
+        measurements[i].skippedDrawable = true
     }
 
     func coalesced(_ revision: UInt64) {

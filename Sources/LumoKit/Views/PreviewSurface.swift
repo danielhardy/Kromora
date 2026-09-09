@@ -43,6 +43,7 @@ final class PreviewSurface: ObservableObject {
     }
     private var telemetryByRevision: [UInt64: PendingTelemetry] = [:]
     private var submittedTelemetryRevisions: Set<UInt64> = []
+    private var skippedTelemetryRevisions: Set<UInt64> = []
     private var presentationConfirmations: [UInt64: () -> Void] = [:]
     private var hasManagedPresentationLifecycle = false
     var onPresentationFailure: (() -> Void)?
@@ -118,6 +119,15 @@ final class PreviewSurface: ObservableObject {
         self.revision &+= 1
         pendingDisplayID = self.revision
         if let revision, let telemetry {
+            // A skipped publication has been submitted but never reached a visible drawable.
+            // A newer publication supersedes it, so release its callback and diagnostic state.
+            if let previous = pendingGPURevision,
+               skippedTelemetryRevisions.contains(previous) {
+                telemetryByRevision.removeValue(forKey: previous)
+                submittedTelemetryRevisions.remove(previous)
+                skippedTelemetryRevisions.remove(previous)
+                presentationConfirmations.removeValue(forKey: previous)
+            }
             // A pending value that has not reached a drawable is obsolete once a newer value is
             // presented. Submitted values remain until Metal reports their completion/display.
             if let previous = pendingGPURevision,
@@ -199,6 +209,7 @@ final class PreviewSurface: ObservableObject {
         for revision in revisions.prefix(telemetryByRevision.count - LiveEditTelemetry.maximumRetainedSamples) {
             telemetryByRevision.removeValue(forKey: revision)
             submittedTelemetryRevisions.remove(revision)
+            skippedTelemetryRevisions.remove(revision)
         }
     }
 
@@ -215,13 +226,13 @@ final class PreviewSurface: ObservableObject {
         presentationConfirmations.removeValue(forKey: revision)
         telemetryByRevision.removeValue(forKey: revision)
         submittedTelemetryRevisions.remove(revision)
+        skippedTelemetryRevisions.remove(revision)
         if pendingGPURevision == revision { pendingGPURevision = nil }
     }
 
     /// Returns `true` when Metal skipped this drawable and the caller should request another draw.
-    /// A skipped drawable is still a completed render candidate, so settle the UI state here as
-    /// well; otherwise a fast source replacement can leave AppViewModel waiting forever for a
-    /// presentation callback that will never arrive.
+    /// A skipped drawable remains pending: it is a valid render candidate, but it has not reached
+    /// visible pixels, so the producer's visible-frame confirmation must wait for a real retry.
     @discardableResult
     func markDrawablePresented(revision: UInt64, time: TimeInterval) -> Bool {
         guard let pending = telemetryByRevision[revision] else { return false }
@@ -235,14 +246,12 @@ final class PreviewSurface: ObservableObject {
             pending.telemetry.mark(revision, drawablePresentation: fallback())
         } else {
             // Metal reports zero when a drawable was skipped. Do not turn a skipped frame into a
-            // false presentation sample. The render itself is valid, though, so complete the
-            // settled-preview handshake and ask the paused MTKView to put the image in a fresh
-            // drawable. This is common while SwiftUI is replacing the canvas during rapid
-            // thumbnail navigation.
-            let confirmation = presentationConfirmations.removeValue(forKey: revision)
-            telemetryByRevision.removeValue(forKey: revision)
-            submittedTelemetryRevisions.remove(revision)
-            confirmation?()
+            // false presentation sample. Keep the candidate and its confirmation pending so the
+            // producer does not mistake an occluded frame for pixels the user received. Re-arm
+            // the revision for the next drawable; the coordinator bounds how often that happens.
+            pending.telemetry.markSkippedDrawable(revision)
+            skippedTelemetryRevisions.insert(revision)
+            pendingGPURevision = revision
             return true
         }
         if let source = pending.source {
@@ -251,6 +260,7 @@ final class PreviewSurface: ObservableObject {
         }
         telemetryByRevision.removeValue(forKey: revision)
         submittedTelemetryRevisions.remove(revision)
+        skippedTelemetryRevisions.remove(revision)
         let confirmation = presentationConfirmations.removeValue(forKey: revision)
         confirmation?()
         return false
@@ -275,6 +285,7 @@ final class PreviewSurface: ObservableObject {
         pendingGPURevision = nil
         telemetryByRevision.removeAll()
         submittedTelemetryRevisions.removeAll()
+        skippedTelemetryRevisions.removeAll()
         presentationConfirmations.removeAll()
     }
 
@@ -393,6 +404,15 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// draw needs replaying so the completion handler cannot mark the skipped revision as the
         /// settled frame and suppress the retry.
         private var skippedDrawNeedsRetry = false
+        /// A paused MTKView is explicitly invalidated for each retry. Keep that invalidation
+        /// coalesced and paced to the next main-runloop turn; otherwise an occluded view can
+        /// manufacture an unbounded stream of drawable submissions.
+        private var retryTask: Task<Void, Never>?
+        private var retryScheduled = false
+        private var skippedPresentationRevision: UInt64?
+        private var consecutiveSkippedDraws = 0
+        private var skippedDrawRetriesSuppressed = false
+        fileprivate static let maximumConsecutiveSkippedDraws = 3
         /// Keep one drawable submission in flight and redraw only the newest surface state when it
         /// completes. Processing has already completed on RenderEngine's queue; this pacer bounds
         /// only the small transform/compositing pass and drawable submissions.
@@ -453,7 +473,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let names: [Notification.Name] = [
                 NSWindow.didChangeScreenNotification,
                 NSWindow.didChangeBackingPropertiesNotification,
-                NSApplication.didChangeScreenParametersNotification
+                NSApplication.didChangeScreenParametersNotification,
+                NSWindow.didChangeOcclusionStateNotification,
+                NSWindow.didBecomeKeyNotification
             ]
             displayNotificationTokens = names.map { name in
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -463,12 +485,16 @@ struct PreviewSurfaceView: NSViewRepresentable {
         }
 
         func stopDisplayObservation() {
+            retryTask?.cancel()
+            retryTask = nil
+            retryScheduled = false
             let center = NotificationCenter.default
             displayNotificationTokens.forEach(center.removeObserver)
             displayNotificationTokens.removeAll()
         }
 
         private func displayConfigurationChanged() {
+            resetSkippedDrawBackoff()
             lastDrawableSize = nil
             if isDrawing {
                 needsDisplayAfterInFlightDraw = true
@@ -477,6 +503,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 lastDrawnNavigation = nil
             }
             view?.setNeedsDisplay(view?.bounds ?? .zero)
+        }
+
+        /// Explicit seam for a visibility/occlusion observer. Notification-driven display
+        /// changes use the same path, and tests can model a restore without requiring a window.
+        func visibilityDidChange() {
+            displayConfigurationChanged()
         }
 
         func draw(in view: MTKView) {
@@ -611,7 +643,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                             revision: revision, time: presentationTime
                         ) == true
                         if skipped {
-                            self?.retrySkippedDraw()
+                            self?.handleSkippedDrawable(revision: revision)
                         }
                     }
                 }
@@ -722,7 +754,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             // Do not record a draw as complete until its command buffer completed successfully.
             // The surface may also have advanced while the buffer evaluated; in that case this
             // completion only frees the pacer and the newest revision is redrawn below.
-            if retry || displayChanged {
+            let surfaceAdvanced = surface?.revision != drawRevision
+            if retry || displayChanged || surfaceAdvanced || !succeeded {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
                 lastDrawableSize = nil
@@ -736,12 +769,33 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 lastDrawableSize = nil
             }
             // The surface may have advanced while this buffer evaluated. One redraw now consumes
-            // that latest revision rather than replaying every superseded pointer update.
-            if let view { view.setNeedsDisplay(view.bounds) }
+            // that latest revision rather than replaying every superseded pointer update. A
+            // skipped drawable uses the paced scheduler; ordinary presentation completion can
+            // request the newest publication immediately.
+            if retry {
+                scheduleSkippedDrawRetry()
+            } else if displayChanged || surfaceAdvanced || !succeeded {
+                view?.setNeedsDisplay(view?.bounds ?? .zero)
+            }
         }
 
-        private func retrySkippedDraw() {
-            guard let view else { return }
+        private func handleSkippedDrawable(revision: UInt64) {
+            if skippedPresentationRevision != revision {
+                skippedPresentationRevision = revision
+                consecutiveSkippedDraws = 0
+                skippedDrawRetriesSuppressed = false
+            }
+            consecutiveSkippedDraws += 1
+            guard consecutiveSkippedDraws < Self.maximumConsecutiveSkippedDraws,
+                  !skippedDrawRetriesSuppressed else {
+                skippedDrawRetriesSuppressed = true
+                skippedDrawNeedsRetry = false
+                retryTask?.cancel()
+                retryTask = nil
+                retryScheduled = false
+                return
+            }
+
             if isDrawing {
                 // The presented handler and command-buffer completion can arrive in either order.
                 // Let drawingFinished preserve the retry when completion is still pending.
@@ -752,8 +806,32 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
                 lastDrawableSize = nil
+                scheduleSkippedDrawRetry()
             }
-            view.setNeedsDisplay(view.bounds)
+        }
+
+        private func scheduleSkippedDrawRetry() {
+            guard !retryScheduled, !skippedDrawRetriesSuppressed else { return }
+            retryScheduled = true
+            retryTask = Task { @MainActor [weak self] in
+                // Yield once so multiple presented handlers/completion callbacks in the same
+                // turn coalesce into this single invalidation.
+                await Task.yield()
+                guard !Task.isCancelled, let self else { return }
+                self.retryScheduled = false
+                self.retryTask = nil
+                self.view?.setNeedsDisplay(self.view?.bounds ?? .zero)
+            }
+        }
+
+        private func resetSkippedDrawBackoff() {
+            retryTask?.cancel()
+            retryTask = nil
+            retryScheduled = false
+            skippedDrawNeedsRetry = false
+            skippedPresentationRevision = nil
+            consecutiveSkippedDraws = 0
+            skippedDrawRetriesSuppressed = false
         }
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
