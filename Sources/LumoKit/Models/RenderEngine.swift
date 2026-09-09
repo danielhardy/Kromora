@@ -110,6 +110,15 @@ struct RenderWorkStatistics: Sendable, Equatable {
     let rawPropertyWrites: Int
     let rawOutputRequests: Int
     let processingPrefixMaterializations: Int
+    /// Number of processing-prefix completions that used the CPU bitmap fallback.
+    ///
+    /// This is diagnostic state for the acceptance/performance tests. A GPU-backed prefix should
+    /// leave this at zero; the injected-context path deliberately increments it to prove the
+    /// compatibility branch remains alive.
+    let processingPrefixCPUReadbacks: Int
+    /// Number of processing-prefix command-buffer submissions. A downstream LUT/grain tick should
+    /// reuse the retained texture and therefore add no submissions.
+    let processingPrefixTextureSubmissions: Int
     let materializationBudgetSkips: Int
 }
 
@@ -507,7 +516,11 @@ actor RenderEngine: RenderEngining {
     private var rawPropertyWriteCount = 0
     private var rawOutputRequestCount = 0
     private var processingPrefixMaterializationCount = 0
+    private var processingPrefixCPUReadbackCount = 0
+    private var processingPrefixTextureSubmissionCount = 0
     private var materializationBudgetSkipCount = 0
+    /// One-shot test seam for exercising actor re-entry between Metal completion and cache insert.
+    private var processingPrefixCompletionHook: (@Sendable () async -> Void)?
     private var nextPrefixFlightToken: UInt64 = 0
     private var processingPrefixFlights: [ProcessingPrefixCacheKey: PrefixMaterializationFlight] = [:]
     private var nextDevelopedSourceFlightToken: UInt64 = 0
@@ -1181,13 +1194,24 @@ actor RenderEngine: RenderEngining {
             rawPropertyWrites: rawPropertyWriteCount,
             rawOutputRequests: rawOutputRequestCount,
             processingPrefixMaterializations: processingPrefixMaterializationCount,
+            processingPrefixCPUReadbacks: processingPrefixCPUReadbackCount,
+            processingPrefixTextureSubmissions: processingPrefixTextureSubmissionCount,
             materializationBudgetSkips: materializationBudgetSkipCount
         )
+    }
+
+    /// Install a one-shot acceptance-test hook at the processing-prefix re-entry window.
+    ///
+    /// The hook is intentionally internal: it lets the test suite deterministically interleave
+    /// invalidation with a completed command buffer without exposing non-Sendable GPU state.
+    func setProcessingPrefixCompletionHook(_ hook: (@Sendable () async -> Void)?) {
+        processingPrefixCompletionHook = hook
     }
 
     /// Release all reusable intermediates. This is also the memory-pressure handler.
     func evictForMemoryPressure() {
         cancelAllSemanticMaskResolutions()
+        cancelProcessingPrefixFlights()
         resources.evictAll()
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
@@ -1200,6 +1224,7 @@ actor RenderEngine: RenderEngining {
     /// Explicit invalidation for a source-folder refresh or a caller that knows a source changed.
     func invalidateRenderCaches() {
         cancelAllSemanticMaskResolutions()
+        cancelProcessingPrefixFlights()
         resources.invalidateAll()
         interactiveRAWSession = nil
         latestMaskRequestRevisions.removeAll(keepingCapacity: true)
@@ -1228,6 +1253,16 @@ actor RenderEngine: RenderEngining {
             }
             commandBuffer.commit()
         }
+    }
+
+    /// Invalidation can re-enter the actor while a prefix command buffer is waiting for Metal.
+    /// Cancel and detach those flights before clearing their caches so a completed old texture
+    /// cannot be inserted after the invalidation boundary.
+    private func cancelProcessingPrefixFlights() {
+        for flight in processingPrefixFlights.values {
+            flight.task.cancel()
+        }
+        processingPrefixFlights.removeAll(keepingCapacity: true)
     }
 
     /// One funnel, so preview and export cannot diverge in how they build the graph — only in the
@@ -1852,11 +1887,13 @@ actor RenderEngine: RenderEngining {
         ) else {
             // The injected/software context has no renderer-owned Metal queue. Preserve the
             // established CPU fallback, including its working-space tag and origin.
+            processingPrefixCPUReadbackCount += 1
             return materializedImage(
                 image, space: space, maxWorkingSetBytes: maxWorkingSetBytes
             )
         }
         guard let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+        processingPrefixTextureSubmissionCount += 1
         context.render(
             image, to: texture, commandBuffer: commandBuffer, bounds: rect,
             colorSpace: space.cgColorSpace
@@ -1993,6 +2030,9 @@ actor RenderEngine: RenderEngining {
         }
         processingPrefixFlights[key] = PrefixMaterializationFlight(task: task, token: token)
         let completed = await task.value
+        let completionHook = processingPrefixCompletionHook
+        processingPrefixCompletionHook = nil
+        await completionHook?()
         if processingPrefixFlights[key]?.token == token {
             processingPrefixFlights.removeValue(forKey: key)
             if let completed {
@@ -2055,6 +2095,9 @@ actor RenderEngine: RenderEngining {
         }
         processingPrefixFlights[key] = PrefixMaterializationFlight(task: task, token: token)
         let completed = await task.value
+        let completionHook = processingPrefixCompletionHook
+        processingPrefixCompletionHook = nil
+        await completionHook?()
         if processingPrefixFlights[key]?.token == token {
             processingPrefixFlights.removeValue(forKey: key)
             if let completed {
@@ -2207,6 +2250,7 @@ actor RenderEngine: RenderEngining {
     /// it lets a caller release the intermediates when no image is on screen.
     func invalidateSourceCache() {
         cancelAllSemanticMaskResolutions()
+        cancelProcessingPrefixFlights()
         latestRenderRequestRevisions.removeAll(keepingCapacity: true)
         developedSourceCache.removeAll()
         thumbnailDevelopedSourceCache.removeAll()
