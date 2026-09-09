@@ -120,13 +120,25 @@ final class RenderEngineResources {
         toneCurveSpace = nil
     }
 
+    /// The completed presentation texture is quantized only for interactive frames. Settled
+    /// previews and every processing-prefix boundary retain half-float precision.
+    static func previewTexturePixelFormat(for quality: RenderQuality) -> MTLPixelFormat {
+        quality == .interactive ? .rgba8Unorm : .rgba16Float
+    }
+
     /// Allocate an actor-confined texture for a completed intermediate. The texture is private so
-    /// Core Image can consume the prefix through Metal without exposing a CPU staging buffer.
-    func makeProcessingTexture(width: Int, height: Int) -> MTLTexture? {
+    /// Core Image can consume the prefix through Metal without exposing a CPU staging buffer. The
+    /// default keeps processing-prefix materialization at its existing half-float precision;
+    /// callers may opt into 8-bit only for the interactive presentation boundary.
+    func makeProcessingTexture(
+        width: Int,
+        height: Int,
+        pixelFormat: MTLPixelFormat = .rgba16Float
+    ) -> MTLTexture? {
         guard let device, width > 0, height > 0 else { return nil }
         let descriptor = MTLTextureDescriptor()
         descriptor.textureType = .type2D
-        descriptor.pixelFormat = .rgba16Float
+        descriptor.pixelFormat = pixelFormat
         descriptor.width = width
         descriptor.height = height
         descriptor.mipmapLevelCount = 1
