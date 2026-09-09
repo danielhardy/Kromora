@@ -72,6 +72,12 @@ final class PreviewCoordinator {
     private var pendingInteractive: (request: RenderRequest, token: Token)?
     private var interactiveJobID: ImageWorkScheduler.JobID?
     private var settledJobID: ImageWorkScheduler.JobID?
+    /// Settled predecessors left running by `submitCorrective` instead of being cancelled (see
+    /// `admit`). They are not tracked by `settledJobID` once superseded, so without this set the
+    /// next `cancelSettledJob` would leak them: still occupying the scheduler's single editor-lane
+    /// slot, they would block every later editor job — including the next photo's preview — until
+    /// they happened to finish on their own.
+    private var abandonedSettledJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var latestRequest: RenderRequest?
     private var latestToken: Token?
     private var nextRevision: UInt64 = 0
@@ -137,9 +143,10 @@ final class PreviewCoordinator {
     /// corrective request — first pixels then wait on persistence after all (LUMO-317). The
     /// predecessor is left to reach the engine and the revision fence retires it as stale, while
     /// the corrective queues behind it on the single-editor lane, so both renders are observed
-    /// in order. The predecessor's job handle is intentionally abandoned (see `admit`); it can no
-    /// longer publish once the corrective advances the revision, and `cancel()` still invalidates
-    /// it along with everything else.
+    /// in order. The predecessor's job handle is intentionally not cancelled here (see `admit`);
+    /// it can no longer publish once the corrective advances the revision, and it is tracked in
+    /// `abandonedSettledJobIDs` so a later cancellation still reclaims the editor lane from it
+    /// instead of leaking it as a permanently running job.
     func submitCorrective(
         _ request: RenderRequest,
         assetID: PhotoAssetID? = nil,
@@ -192,6 +199,10 @@ final class PreviewCoordinator {
         interactiveTask = nil
         if cancelSettledPredecessor {
             cancelSettledJob(pump: false)
+        } else if let settledJobID {
+            // Left running so it can still win the revision race and publish first (LUMO-317);
+            // tracked so a later cancellation can still reclaim the lane instead of leaking it.
+            abandonedSettledJobIDs.insert(settledJobID)
         }
         settleTask?.cancel()
         settleTask = nil
@@ -326,9 +337,10 @@ final class PreviewCoordinator {
         interactiveTask = nil
         cancelInteractiveJob(pump: false)
         let jobID = ImageWorkScheduler.JobID("visible-preview-settled-\(token.revision)")
-        // Overwriting here abandons a still-running predecessor's handle when the submission
-        // opted out of preemption (see `submitCorrective`). That job keeps its scheduler slot
-        // until it finishes, but the revision it carries is already stale so it cannot publish.
+        // Overwriting here leaves a still-running predecessor's handle out of `settledJobID` when
+        // the submission opted out of preemption (see `submitCorrective`); `admit` records that
+        // predecessor in `abandonedSettledJobIDs` before this runs; so it is still reclaimed by a
+        // later cancellation.
         settledJobID = jobID
         scheduler.enqueue(id: jobID, lane: .editor, priority: .activeEditor) {
             [weak self, engine] in
@@ -344,9 +356,18 @@ final class PreviewCoordinator {
     }
 
     private func cancelSettledJob(pump: Bool = true) {
-        guard let settledJobID else { return }
-        scheduler.cancel(id: settledJobID, pump: pump)
-        self.settledJobID = nil
+        var ids = abandonedSettledJobIDs
+        abandonedSettledJobIDs.removeAll()
+        if let settledJobID {
+            ids.insert(settledJobID)
+            self.settledJobID = nil
+        }
+        guard !ids.isEmpty else { return }
+        if pump {
+            scheduler.cancel(ids: ids)
+        } else {
+            for id in ids { scheduler.cancel(id: id, pump: false) }
+        }
     }
 
     private func render(

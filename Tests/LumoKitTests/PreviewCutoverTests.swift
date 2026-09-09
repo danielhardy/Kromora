@@ -186,6 +186,65 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         XCTAssertEqual(previewCount, 2, "stored edits correct the speculative opening preview")
     }
 
+    /// LUMO-317's `submitCorrective` intentionally leaves the speculative predecessor running
+    /// instead of cancelling it, so both renders can be observed in order. That predecessor must
+    /// not become a permanent lease on the single editor lane once the caller moves on: navigating
+    /// away before it finishes must still free the lane for the next photo immediately, not once
+    /// the abandoned render happens to finish on its own.
+    func testOrphanedSpeculativePredecessorDoesNotBlockTheNextPhoto() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "orphan-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "orphan-second.png", in: tempDirectory
+        )
+        let storedDocument = EditDocument(
+            rawDevelop: RAWDevelopSettings(exposure: 0.75),
+            adjustments: [.vibrance(amount: 0.4)]
+        )
+        let store = makeInMemoryEditStore()
+        try await store.save(
+            storedDocument,
+            for: EditSourceReference(assetID: .file(first), url: first)
+        )
+
+        let fake = FakeRenderEngine()
+        await fake.gatePreviews()
+        let reader = FakeRenderEventReader(await fake.eventStream())
+        let viewModel = makeAppViewModel(engine: fake, editStore: store)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == first })
+        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == second })
+
+        viewModel.selectCollectionImage(at: firstIndex)
+        // The speculative identity render enters the fake and parks there, modeling a real render
+        // that is still running when the corrective is submitted behind it.
+        _ = try await TestSynchronization.nextEvent(from: reader, "speculative parked") {
+            if case .previewRequested(let request) = $0 { return request.document == EditDocument() }
+            return false
+        } diagnostics: { "" }
+
+        // Give the in-memory store lookup time to resolve and submit the corrective behind it,
+        // before the parked speculative render is ever released.
+        try await Task.sleep(for: .milliseconds(50))
+
+        // Navigate away before the parked speculative predecessor ever finishes.
+        viewModel.selectCollectionImage(at: secondIndex)
+
+        // The second photo's own preview must reach the engine without waiting for the abandoned
+        // first-photo render to be released.
+        _ = try await TestSynchronization.nextEvent(from: reader, "second photo's opening render") {
+            if case .previewRequested(let request) = $0 { return request.source?.backing == .url(second) }
+            return false
+        } diagnostics: {
+            let seen = await fake.previewRequests
+            return "preview requests=\(seen.count), seen=\(seen)"
+        }
+
+        await fake.releasePreviews()
+    }
+
     /// Navigation changes must remain a display concern while still driving a fresh render when
     /// more source detail is useful. The surface is intentionally asserted too: a request-only
     /// regression can look correct in the coordinator while leaving the visible canvas unchanged.
