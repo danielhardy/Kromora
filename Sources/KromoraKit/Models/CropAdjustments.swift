@@ -143,6 +143,31 @@ struct CropAdjustments: Codable, Equatable, Sendable {
         guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else { return nil }
         return clipped
     }
+
+    /// Remap the crop for a change in the image's quarter-turn rotation so it keeps framing the
+    /// same visual content once the underlying image is reoriented.
+    ///
+    /// `normalizedRect` is defined in the *oriented* source's coordinate space (see the type
+    /// comment), so a committed crop must be carried through the same rotation applied to the
+    /// image — otherwise the stored rectangle silently gets reinterpreted against the new,
+    /// axis-swapped extent and frames the wrong region.
+    func rotated(byClockwiseQuarterTurns turns: Int) -> CropAdjustments {
+        let steps = ((turns % 4) + 4) % 4
+        guard steps != 0, let rect = normalizedRect else { return self }
+
+        var current = rect
+        for _ in 0..<steps {
+            current = CGRect(
+                x: current.minY,
+                y: 1 - current.minX - current.width,
+                width: current.height,
+                height: current.width
+            )
+        }
+        var result = self
+        result.normalizedRect = current
+        return result
+    }
 }
 
 /// Pure crop geometry shared by the SwiftUI overlay and model tests.
