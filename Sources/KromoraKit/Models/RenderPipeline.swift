@@ -11,7 +11,7 @@ import ImageIO
 /// graph, and `actor RenderEngine` (Step 4) evaluates that graph at one of two scales. **Preview and
 /// export call this same function and differ only in `scale`**, which is what makes their agreement
 /// structural rather than a coincidence that two code paths currently maintain. See
-/// `docs/PHASE2_SPEC.md` §1 and §3.
+/// `docs/ENGINEERING_GUIDE.md`.
 ///
 /// Nothing here is rasterized. Every stage hands the next a lazy `CIImage`, so the whole chain costs
 /// one GPU pass when the engine finally renders it.

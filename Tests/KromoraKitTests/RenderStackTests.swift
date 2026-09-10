@@ -5,7 +5,7 @@ import CoreImage
 /// Phase 2 Step 7's ship gate: one live render context, plus explicitly isolated one-shot samplers.
 ///
 /// The count to assert is 2, not 1, and the difference is the whole point. `RecipeExtractor` keeps
-/// its own context by design (`docs/PHASE2_SPEC.md` §3): it sits outside the stack, never imports
+/// its own context by design (`docs/ENGINEERING_GUIDE.md`): it sits outside the stack, never imports
 /// `EditDocument`, never calls `RenderEngine`, and samples in a space pinned to sRGB regardless of
 /// `WorkingSpace.current` — because a derived cube has to be *fit* in the space it will later be
 /// *applied* in (§4.4). Folding it into the engine would quietly couple those two spaces together.

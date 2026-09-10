@@ -400,7 +400,7 @@ extension RenderEngining {
 /// actor boundary. This prevents drawable acquisition/presentation from becoming part of source
 /// evaluation while making the device/queue relationship explicit.
 ///
-/// **The GPU is the isolation boundary** (`docs/PHASE2_SPEC.md` §4.5). Source graphs, filters and
+/// **The GPU is the isolation boundary** (`docs/ENGINEERING_GUIDE.md`). Source graphs, filters and
 /// processing contexts are born and die inside this actor; only value requests and completed,
 /// texture-backed preview images cross out. That is what lets Step 8 turn strict concurrency on
 /// without a single `@unchecked`.

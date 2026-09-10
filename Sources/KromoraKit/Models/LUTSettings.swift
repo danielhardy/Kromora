@@ -10,7 +10,7 @@ import Foundation
 /// `derived://…` for an in-memory LUT), which makes it deterministic: the same file scanned twice
 /// yields the same ID. A `UUID`-backed ID would mint a fresh value on every `LUTLibrary.scan` — and
 /// `saveDerivedLUT` triggers a rescan — so every persisted and undo document would silently stop
-/// resolving the moment the library was rescanned. See `docs/PHASE2_SPEC.md` §4.3.
+/// resolving the moment the library was rescanned. See `docs/ENGINEERING_GUIDE.md`
 struct LUTID: Codable, Sendable, Hashable {
     let raw: String
 

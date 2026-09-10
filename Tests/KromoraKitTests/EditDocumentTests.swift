@@ -171,7 +171,7 @@ final class EditDocumentTests: XCTestCase {
 
     /// The adjustments array is a pipeline, not a set. `[exposure, saturation]` is a different render
     /// from the reverse, so both the value and its serialized form have to preserve the sequence
-    /// exactly — including duplicates, which stack (`docs/PHASE2_SPEC.md` §8.6).
+    /// exactly — including duplicates, which stack (`docs/ENGINEERING_GUIDE.md`).
     func testAdjustmentOrderIsSignificantAndSurvivesEncoding() throws {
         let ordered: [AdjustmentNode] = [
             .exposure(ev: 1),

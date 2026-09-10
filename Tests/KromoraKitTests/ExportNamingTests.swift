@@ -70,7 +70,7 @@ final class ExportNamingTests: TempDirectoryTestCase {
 
     /// The export-flow contract, pinned in Step 7 when `ExportFormat` moved out of `ImageProcessor`.
     ///
-    /// `docs/PHASE2_SPEC.md` §7 flagged this move as a risk because everything it depends on fails
+    /// `docs/ENGINEERING_GUIDE.md` flagged this move as a risk because everything it depends on fails
     /// *quietly*: a `Picker` whose rows share an `id` still compiles and still draws, it just stops
     /// tracking the selection, and a changed raw value only shows up as a wrong label. Nothing else
     /// in the suite would notice either.

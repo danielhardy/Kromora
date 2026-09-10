@@ -14,7 +14,7 @@ import AppKit
 /// the wrong place for it.
 ///
 /// **What this cannot cover:** that `KeyboardShortcuts.onDisappear` actually calls `stop()`. That is
-/// a SwiftUI view body, and `docs/CODE_REVIEW.md` §5 already records that views are exercised only
+/// a SwiftUI view body, and `docs/ENGINEERING_GUIDE.md` already records that views are exercised only
 /// insofar as the view model is. The lifecycle contract below is the testable half; the wiring was
 /// checked by hand in the running app.
 @MainActor

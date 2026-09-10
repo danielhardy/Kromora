@@ -281,7 +281,7 @@ private enum AutoLightBounds {
 /// Corpus-tuned response constants. These remain grouped by policy rather than being exposed as
 /// configuration: changing them changes the meaning of an Auto result and therefore requires an
 /// algorithm-version bump. The before/after corpus measurements are recorded in
-/// `docs/PHOTO_INTELLIGENCE_TUNING_2026-09-04.md`.
+/// `docs/ENGINEERING_GUIDE.md`.
 private enum AutoLightTuning {
     static let exposureIntentExponent = 4.0
     static let backlightExposureLift = 0.20

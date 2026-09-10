@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 /// The file formats Kromora writes.
 ///
-/// Promoted out of `ImageProcessor` in Step 7, when that type dissolved. `docs/PHASE2_SPEC.md` §7
+/// Promoted out of `ImageProcessor` in Step 7, when that type dissolved. `docs/ENGINEERING_GUIDE.md`
 /// flagged the promotion as a risk worth carrying deliberately: the export flow presents
 /// `allCases` and keys format choices by `id`, while `NSSavePanel` seeds its filename from
 /// `fileExtension`. Dropping `Identifiable` or changing the raw values would break both — quietly,

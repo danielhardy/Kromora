@@ -161,7 +161,7 @@ final class ImageLoadingTests: TempDirectoryTestCase {
     /// So the branch is not load-bearing for DNG at neutral. It is load-bearing for RAW formats
     /// ImageIO will not open bare (`CIImage(contentsOf:)` returns nil and `load` would throw
     /// `cannotLoad`), and no fixture in this repo can exercise that — the same limitation
-    /// `docs/CODE_REVIEW.md` §5 records for the `is*Supported` gates. What this test *does* pin is
+    /// `docs/ENGINEERING_GUIDE.md` records for the `is*Supported` gates. What this test *does* pin is
     /// that `load` and `developRAWNeutral` stay in agreement, which is what would break if someone
     /// taught the eager decode to apply develop settings.
     ///

@@ -16,7 +16,7 @@ import Darwin
 ///
 /// What Step 7 *did* change is what they hang off. Both `ImageCollection` call sites captured
 /// `ImageProcessor.shared` — a non-`Sendable` class — into a `Task.detached`, which is the hazard
-/// `docs/PHASE2_SPEC.md` §2 flags and the thing that kept strict concurrency red. These are
+/// `docs/ENGINEERING_GUIDE.md` flags and the thing that kept strict concurrency red. These are
 /// stateless statics on a caseless `enum`, so nothing crosses the boundary but a `URL` or a `Data`.
 ///
 /// `NSImage` is the return type because the filmstrip is AppKit and that is where these land. It is

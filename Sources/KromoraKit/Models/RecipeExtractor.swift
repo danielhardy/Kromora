@@ -109,7 +109,7 @@ struct RecipeExtractor {
         // If WorkingSpace.current ever moves to P3, do NOT simply thread it through here: the
         // neutral RAW baseline this fits against is itself an sRGB-default render. Either re-fit
         // derive in P3, or stamp the build space onto the CubeLUT so apply can match.
-        // See WorkingSpace and docs/PHASE2_SPEC.md §4.4.
+        // See WorkingSpace and `docs/ENGINEERING_GUIDE.md`.
         let sRGB = WorkingSpace.sRGB.cgColorSpace
 
         func checkCancelled() throws {

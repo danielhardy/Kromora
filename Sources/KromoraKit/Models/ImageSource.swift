@@ -23,7 +23,7 @@ struct ImageSourcePreparation: Sendable, Equatable {
 ///
 /// It is also the reason this type carries a URL or `Data` and never a live `CIImage`: `CIImage` is
 /// not `Sendable`, and the whole point of the value-state spine is that nothing non-`Sendable` enters
-/// app state. See `docs/PHASE2_SPEC.md` §4.2 and §4.5.
+/// app state. See `docs/ENGINEERING_GUIDE.md`.
 struct ImageSource: Sendable, Equatable {
 
     /// Where the bytes are.

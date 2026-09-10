@@ -100,7 +100,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
 
     /// The identity of a LUT that exists only in memory: `derived://<name>/<hash of the table>`.
     ///
-    /// **Content-derived, not random.** `docs/PHASE2_SPEC.md` §4.3 rules out a `UUID` because it
+    /// **Content-derived, not random.** `docs/ENGINEERING_GUIDE.md` rules out a `UUID` because it
     /// mints fresh identity on construction, and that argument does not stop at the library scan it
     /// is written about — a `UUID()` here did the same thing one level down. Hashing the table means
     /// the same cube is always the same LUT, which is also the honest answer: two cubes with the same
@@ -428,7 +428,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
     ///
     /// Note the crossfade happens in the `CIContext`'s working space (≈ linear light), **not** in
     /// `space` — that argument governs cube interpolation only. Measured: a to-black LUT over white
-    /// reads 188 at intensity 0.5, where a perceptual mix would read ~128. See `docs/PHASE2_SPEC.md`
+    /// reads 188 at intensity 0.5, where a perceptual mix would read ~128. See `docs/ENGINEERING_GUIDE.md`
     /// §8.1; changing it later is a visible look change for every sub-100% render.
     func apply(to image: CIImage, intensity: Double, space: WorkingSpace = .current) -> CIImage? {
         let t = max(0, min(1, intensity))

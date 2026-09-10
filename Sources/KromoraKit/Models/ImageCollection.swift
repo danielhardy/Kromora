@@ -880,7 +880,7 @@ final class ImageCollection: ObservableObject {
     ///
     /// **The second thumbnail site.** `generateThumbnails` below is the obvious one; this one builds
     /// its thumbnails inline and is easy to miss when the thumbnail path moves — which is why
-    /// `docs/PHASE2_SPEC.md` §6 names both explicitly. Step 7 pointed both at `Thumbnails`.
+    /// `docs/ENGINEERING_GUIDE.md` names both explicitly. Step 7 pointed both at `Thumbnails`.
     @discardableResult
     func addFromData(_ dataItems: [(name: String, data: Data)]) -> [PhotoAssetID] {
         beginDataImport(reservedCount: dataItems.count)

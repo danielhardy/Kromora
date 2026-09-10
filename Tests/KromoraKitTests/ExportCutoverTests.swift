@@ -252,7 +252,7 @@ final class ExportCutoverTests: TempDirectoryTestCase {
     ///
     /// Compared against a graph built independently through `RenderPipeline`, **not** against the
     /// preview. Preview/export parity is asserted in `RenderEngineTests`, and on its own it cannot
-    /// catch both halves being wrong together — the failure mode `docs/CODE_REVIEW.md` §5 names.
+    /// catch both halves being wrong together — the failure mode `docs/ENGINEERING_GUIDE.md` names.
     func testExportedFileIsTheDocumentAtFullResolution() async throws {
         let coordinator = ExportCoordinator(engine: RenderEngine())
         coordinator.onError = { XCTFail("unexpected error: \($0)") }
