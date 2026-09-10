@@ -1,4 +1,5 @@
 import CoreGraphics
+import CryptoKit
 import Foundation
 
 /// Document-aware measurement for content-aware Auto (KRMA-343).
@@ -1157,9 +1158,8 @@ actor CurrentEditMeasurementCache {
     }
 
     private static func filename(for key: CurrentEditMeasurementKey) -> String {
-        var hasher = Hasher()
-        hasher.combine(key.cacheKey)
-        let digest = String(format: "%016llx", UInt64(bitPattern: Int64(hasher.finalize())))
+        let digest = SHA256.hash(data: Data(key.cacheKey.utf8))
+            .map { String(format: "%02x", $0) }.joined()
         return "current-edit-\(digest).json"
     }
 
