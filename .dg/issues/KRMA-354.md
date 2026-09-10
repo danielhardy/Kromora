@@ -2,7 +2,7 @@
 id: KRMA-354
 title: Reconcile and commit the accumulated dirty worktree
 type: task
-status: claimed
+status: done
 priority: urgent
 creation_provenance:
   runner: codex
@@ -13,15 +13,11 @@ labels:
   - git
   - hygiene
 created: 2026-09-10T16:03:43.049Z
-updated: 2026-09-10T16:32:21.909Z
+updated: 2026-09-10T16:39:25.576Z
 order: t
 board: product
-claim:
-  actor: codex
-  session: 01MTVQWMTWEX45XJAC
-  claimed_at: 2026-09-10T16:32:21.908Z
-  expires_at: 2026-09-10T17:32:21.908Z
-  model: gpt-5.6-luna
+commits:
+  - 1544d61
 ---
 
 ## Objective
@@ -67,6 +63,12 @@ At minimum, explicitly account for these change clusters:
 
 The ticket is a recovery and commit-hygiene task, not authorization to discard work or rewrite unrelated history. If attribution is uncertain, preserve the files and record the ambiguity in a follow-up issue rather than guessing. Do not amend or rewrite existing commits unless explicitly required to correct a demonstrably incorrect issue reference.
 
+### Comment — codex @ 2026-09-10T16:39:25.573Z
+
+Completion details:\n- Baseline: main at 066b0eb, 194 dirty status entries (192 paths plus status accounting); no destructive recovery commands were used.\n- b61e093 (KRMA-334): retired mutate-step9.sh, mutate-step10a.sh, run-kromora-118-capture.sh, and run-kromora-123-capture.sh; added scripts/README.md and run-kromora-capture.sh; updated live capture references and test-audit comments.\n- 7e42db7 (KRMA-340): deleted the obsolete docs tree, retained five current guides plus DOCUMENTATION_AUDIT.md, and updated README.md, CLAUDE.md, source comments, and test comments.\n- 1544d61 (KRMA-354): reconciled DG board/config policy, issue statuses/reports/order/events, commit attribution, new KRMA-334–354 records, and KRMA-336/337/339 screenshot assets. Existing product commits were preserved and not rewritten; completed records for KRMA-335 and KRMA-339 were given their existing commit IDs.\n- Checks: dg validate (OK; only pre-existing model/context warnings), git diff --check, zsh -n scripts/*.sh, capture-wrapper help smoke, repository stale-reference scan, swift build, and swift test (1,080 executed, 47 skipped, 0 failures).\n- Deferred: a background pickup claimed KRMA-312 after this issue completed; its issue file and the corresponding append-only event-log tail remain untouched for that agent. No product/source work is deferred.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-10T16:38:27.340Z: Reconciled the shared worktree into KRMA-334 script, KRMA-340 documentation, and KRMA-354 DispatchGraph commits; preserved all DG records/assets and verified the final tree.
