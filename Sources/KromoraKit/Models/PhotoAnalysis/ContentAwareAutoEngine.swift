@@ -8,16 +8,6 @@ struct ContentAwareAutoEngine: Sendable {
     let analysisCoordinator: PhotoAnalysisCoordinator
     let maskStore: MaskStore
 
-    init(
-        engine: any RenderEngining & CurrentEditSampling,
-        analysisCoordinator: PhotoAnalysisCoordinator,
-        maskStore: MaskStore
-    ) {
-        self.engine = engine
-        self.analysisCoordinator = analysisCoordinator
-        self.maskStore = maskStore
-    }
-
     func run(
         source: ImageSource,
         assetID: PhotoAssetID,
@@ -25,7 +15,8 @@ struct ContentAwareAutoEngine: Sendable {
         lut: CubeLUT? = nil
     ) async -> AutoEnhancementResult {
         if let fingerprint = current.lastAutoRunFingerprint,
-           fingerprint.matches(source: source, document: current) {
+            fingerprint.matches(source: source, document: current)
+        {
             return AutoEnhancementResult(
                 status: .unchanged, proposedDocument: current,
                 algorithmVersion: AutoEnhancementPolicy.algorithmVersion,
@@ -48,14 +39,15 @@ struct ContentAwareAutoEngine: Sendable {
 
         // Rehydrate only the already-known semantic references. This reuses MaskStore rather than
         // creating a second mask subsystem, and a missing individual mask merely lowers evidence.
-        let masks = sourceAnalysis?.regions.map { region in
-            RegionMask(
-                id: region.id, kind: region.kind,
-                bounds: region.bounds ?? NormalizedRect(x: 0, y: 0, width: 0, height: 0),
-                quality: region.mask.quality, reference: region.mask,
-                confidence: region.confidence, coverage: region.coverage
-            )
-        } ?? []
+        let masks =
+            sourceAnalysis?.regions.map { region in
+                RegionMask(
+                    id: region.id, kind: region.kind,
+                    bounds: region.bounds ?? NormalizedRect(x: 0, y: 0, width: 0, height: 0),
+                    quality: region.mask.quality, reference: region.mask,
+                    confidence: region.confidence, coverage: region.coverage
+                )
+            } ?? []
 
         let measurer = CurrentEditMeasurer(engine: engine, store: maskStore)
         let measurement: CurrentEditMeasurement
@@ -117,10 +109,201 @@ struct ContentAwareAutoEngine: Sendable {
             facts: facts, regions: measurement.regions, native: native, apple: apple,
             sourceKind: sourceKind, lut: lut
         )
-        return .from(
-            selected, current: current,
-            confidence: max(native.confidence, signalConfidence.overall),
-            source: source
+
+        // Regional corrections are planned from the selected global candidate, not from the
+        // source/current measurement above. This keeps a region that the global proposal already
+        // fixed from earning a redundant local layer, while retaining the same renderer and
+        // MaskStore seams for the post-global evidence.
+        let regionalPlan: AutoRegionalPlan
+        switch selected.status {
+        case .improved, .unchanged, .noCandidate:
+            regionalPlan = await regionalCorrections(
+                source: source,
+                assetID: assetID,
+                document: selected.document,
+                masks: masks,
+                lut: lut
+            )
+        case .cancelled, .staleRevision, .renderUnavailable:
+            regionalPlan = AutoRegionalCorrections.plan(
+                AutoRegionalPlanInput(
+                    existingLayerNames: selected.document.localAdjustments.map(\.name)
+                )
+            )
+        }
+        guard !Task.isCancelled else {
+            return AutoEnhancementResult(
+                status: .cancelled,
+                proposedDocument: current,
+                reasons: ["Auto was cancelled while planning regional corrections."]
+            )
+        }
+
+        var selectedWithRegionalCorrections = selected
+        let regionalDocument = AutoRegionalCorrections.applying(
+            regionalPlan, to: selected.document
         )
+        if regionalDocument != selected.document {
+            // A regional-only improvement is still an accepted Auto result. The global
+            // coordinator may have found no worthwhile global slider change, but the measured
+            // conflict is independently actionable and must remain atomic/undoable.
+            selectedWithRegionalCorrections = AutoEnhancementCoordinatorResult(
+                status: .improved,
+                document: regionalDocument,
+                provenance: selected.provenance,
+                message: selected.status == .improved
+                    ? selected.message
+                    : "Regional corrections added after the global Auto evaluation.",
+                budget: selected.budget,
+                candidateNotes: selected.candidateNotes,
+                selectedScore: selected.selectedScore,
+                evaluatedDocumentHash: selected.evaluatedDocumentHash,
+                sourceFingerprint: selected.sourceFingerprint
+            )
+        }
+        return .from(
+            selectedWithRegionalCorrections, current: current,
+            confidence: max(native.confidence, signalConfidence.overall),
+            source: source,
+            regionalNotes: regionalPlan.notes
+        )
+    }
+
+    /// Measure the accepted global document through the existing regional mask seam and turn the
+    /// resulting facts into the pure KRMA-348 planner input. Missing pixels or post-global render
+    /// failures deliberately become planner notes rather than guessed corrections.
+    private func regionalCorrections(
+        source: ImageSource,
+        assetID: PhotoAssetID,
+        document: EditDocument,
+        masks: [RegionMask],
+        lut: CubeLUT?
+    ) async -> AutoRegionalPlan {
+        let existingLayerNames = document.localAdjustments.map(\.name)
+        guard !masks.isEmpty else {
+            return AutoRegionalCorrections.plan(
+                AutoRegionalPlanInput(existingLayerNames: existingLayerNames)
+            )
+        }
+
+        let measurer = CurrentEditMeasurer(engine: engine, store: maskStore)
+        let postGlobal: CurrentEditMeasurement
+        do {
+            postGlobal = try await measurer.measure(
+                source: source,
+                assetID: assetID,
+                document: document,
+                expectedDocumentHash: document.editHash,
+                lut: lut,
+                configuration: .default,
+                masks: masks
+            )
+        } catch is CancellationError {
+            return AutoRegionalCorrections.plan(
+                AutoRegionalPlanInput(existingLayerNames: existingLayerNames)
+            )
+        } catch {
+            var plan = AutoRegionalCorrections.plan(
+                AutoRegionalPlanInput(existingLayerNames: existingLayerNames)
+            )
+            plan.notes.insert(
+                "Regional corrections skipped: post-global regional measurement was unavailable.",
+                at: 0
+            )
+            return plan
+        }
+
+        let regionsByID = Dictionary(uniqueKeysWithValues: masks.map { ($0.id, $0) })
+        let postRegions = postGlobal.regions
+        let primary = PrimarySubjectSelector.select(from: postRegions)
+        let subjectRegion = primary.primaryRegionID.flatMap { id in
+            postRegions.first { $0.id == id }
+        }
+        let backgroundRegion = postRegions.first { $0.kind == .background }
+
+        let subjectEvidence = await regionalEvidence(
+            for: subjectRegion, masksByID: regionsByID
+        )
+        let backgroundEvidence = await regionalEvidence(
+            for: backgroundRegion, masksByID: regionsByID
+        )
+
+        let overlap: Float?
+        if let subjectPixels = subjectEvidence?.pixels,
+            let backgroundPixels = backgroundEvidence?.pixels
+        {
+            overlap = AutoRegionalCorrections.intersectionOverUnion(
+                subjectPixels, backgroundPixels
+            )
+        } else if subjectEvidence != nil, backgroundEvidence != nil {
+            // Both regional facts were measured, but their pixel support could not be compared.
+            // Passing nil is intentional: the planner refuses opposing corrections without
+            // verified separation.
+            overlap = nil
+        } else {
+            overlap = nil
+        }
+
+        let colorCast = subjectRegion.map(Self.regionalColorCast) ?? 0
+        let input = AutoRegionalPlanInput(
+            subjectTone: subjectRegion.map(Self.regionalToneEvidence),
+            subjectMask: subjectEvidence?.facts,
+            prefersPersonTarget: subjectRegion.map(Self.prefersPersonTarget) ?? false,
+            backgroundTone: backgroundRegion.map(Self.regionalToneEvidence),
+            backgroundMask: backgroundEvidence?.facts,
+            subjectBackgroundOverlap: overlap,
+            colorCast: colorCast,
+            crop: document.crop.normalizedRect.map(NormalizedRect.init),
+            existingLayerNames: existingLayerNames
+        )
+        return AutoRegionalCorrections.plan(input)
+    }
+
+    private struct RegionalEvidence: Sendable {
+        let facts: AutoRegionalMaskFacts
+        let pixels: NormalizedMask
+    }
+
+    private func regionalEvidence(
+        for region: AnalyzedRegion?, masksByID: [UUID: RegionMask]
+    ) async -> RegionalEvidence? {
+        guard let region,
+            let mask = masksByID[region.id],
+            let pixels = await maskStore.pixels(for: mask.reference)
+        else { return nil }
+        return RegionalEvidence(
+            facts: AutoRegionalCorrections.facts(
+                pixels: pixels, confidence: region.confidence,
+                bounds: region.bounds ?? mask.bounds
+            ),
+            pixels: pixels
+        )
+    }
+
+    private static func regionalToneEvidence(
+        _ region: AnalyzedRegion
+    ) -> AutoRegionalToneEvidence {
+        AutoRegionalToneEvidence(
+            median: region.tone.p50,
+            highlightClipping: region.tone.highlightClippingFraction,
+            shadowClipping: region.tone.shadowClippingFraction,
+            cast: regionalColorCast(region)
+        )
+    }
+
+    private static func regionalColorCast(_ region: AnalyzedRegion) -> Float {
+        regionalColorCast(region.color)
+    }
+
+    /// Positive means the measured region is cooler (blue exceeds red), matching the planner's
+    /// signed-cast contract and its counter-steering temperature correction.
+    private static func regionalColorCast(_ color: ColorStatistics) -> Float {
+        let cast = color.meanRGB.z - color.meanRGB.x
+        return cast.isFinite ? min(max(cast, -1), 1) : 0
+    }
+
+    private static func prefersPersonTarget(_ region: AnalyzedRegion) -> Bool {
+        if case .person = region.kind { return true }
+        return false
     }
 }

@@ -68,10 +68,11 @@ struct AutoRunFingerprint: Codable, Sendable, Equatable, Hashable {
         algorithmVersion: Int = AutoEnhancementPolicy.algorithmVersion,
         renderIdentity: String = RenderIdentity.current
     ) -> Bool {
-        self == Self.make(
-            source: source, document: document,
-            algorithmVersion: algorithmVersion, renderIdentity: renderIdentity
-        )
+        self
+            == Self.make(
+                source: source, document: document,
+                algorithmVersion: algorithmVersion, renderIdentity: renderIdentity
+            )
     }
 
     /// A compact value useful for diagnostics and persisted reports without leaking a path.
@@ -182,7 +183,9 @@ struct AutoEnhancementResult: Codable, Sendable, Equatable {
     /// Compatibility spelling for callers that treat the result as the selected document.
     var document: EditDocument { proposedDocument }
     var candidate: AutoCandidateProvenance? { candidateProvenance }
-    var isNoOp: Bool { status != .improved || changedControls.isEmpty }
+    var isNoOp: Bool {
+        status != .improved || (changedControls.isEmpty && generatedLayerIDs.isEmpty)
+    }
 
     func applying(to current: EditDocument) -> EditDocument {
         EditDocument.applyingAutoResult(self, to: current)
@@ -196,7 +199,8 @@ extension AutoEnhancementResult {
         confidence: Float,
         algorithmVersion: Int = AutoEnhancementPolicy.algorithmVersion,
         renderIdentity: String = RenderIdentity.current,
-        source: ImageSource
+        source: ImageSource,
+        regionalNotes: [String] = []
     ) -> Self {
         let changed: [AutoPolicyControl]
         if coordinator.status == .improved {
@@ -221,7 +225,9 @@ extension AutoEnhancementResult {
             algorithmVersion: algorithmVersion,
             changedControls: changed,
             confidence: confidence,
-            reasons: [coordinator.message] + coordinator.candidateNotes.values.sorted(),
+            reasons: [coordinator.message]
+                + regionalNotes
+                + coordinator.candidateNotes.values.sorted(),
             validationMeasurements: .init(score: coordinator.selectedScore ?? .acceptable),
             candidateProvenance: coordinator.provenance,
             fingerprint: fingerprint,
@@ -230,7 +236,9 @@ extension AutoEnhancementResult {
     }
 }
 
-private func autoChangedControls(from old: EditDocument, to new: EditDocument) -> [AutoPolicyControl] {
+private func autoChangedControls(from old: EditDocument, to new: EditDocument)
+    -> [AutoPolicyControl]
+{
     AutoPolicyControl.allCases.filter { control in
         switch control {
         case .exposure: return old.light.exposure != new.light.exposure
@@ -243,12 +251,18 @@ private func autoChangedControls(from old: EditDocument, to new: EditDocument) -
         case .saturation: return old.color.saturation != new.color.saturation
         case .dehaze: return old.effects.dehaze != new.effects.dehaze
         case .temperature:
-            let oldValue = old.rawDevelop.neutralTemperature ?? AdjustmentControl.temperature.value(in: old.adjustments)
-            let newValue = new.rawDevelop.neutralTemperature ?? AdjustmentControl.temperature.value(in: new.adjustments)
+            let oldValue =
+                old.rawDevelop.neutralTemperature
+                ?? AdjustmentControl.temperature.value(in: old.adjustments)
+            let newValue =
+                new.rawDevelop.neutralTemperature
+                ?? AdjustmentControl.temperature.value(in: new.adjustments)
             return oldValue != newValue
         case .tint:
-            let oldValue = old.rawDevelop.neutralTint ?? AdjustmentControl.tint.value(in: old.adjustments)
-            let newValue = new.rawDevelop.neutralTint ?? AdjustmentControl.tint.value(in: new.adjustments)
+            let oldValue =
+                old.rawDevelop.neutralTint ?? AdjustmentControl.tint.value(in: old.adjustments)
+            let newValue =
+                new.rawDevelop.neutralTint ?? AdjustmentControl.tint.value(in: new.adjustments)
             return oldValue != newValue
         }
     }
