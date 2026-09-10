@@ -144,21 +144,31 @@ struct EditDocument: Codable, Sendable, Equatable {
         let generated = applied.localAdjustments.filter(\.isAutoOwned)
         var reconciled = current.localAdjustments
         for generatedLayer in generated {
-            guard let purpose = generatedLayer.autoProvenance?.purpose else { continue }
+            guard let provenance = generatedLayer.autoProvenance else { continue }
             if let index = reconciled.firstIndex(where: {
-                $0.isAutoOwned && $0.autoProvenance?.purpose == purpose
+                $0.isAutoOwned && $0.autoProvenance?.stableIdentity == provenance.stableIdentity
             }) {
                 var replacement = generatedLayer
                 replacement.id = reconciled[index].id
                 reconciled[index] = replacement
             } else if !reconciled.contains(where: {
-                $0.autoProvenance?.purpose == purpose
+                $0.autoProvenance?.stableIdentity == provenance.stableIdentity
             }) {
                 reconciled.append(generatedLayer)
             }
         }
         applied.localAdjustments = reconciled
-        if let fingerprint = result.fingerprint { applied.lastAutoRunFingerprint = fingerprint }
+        if let fingerprint = result.fingerprint {
+            // Reconciliation may reuse an existing layer ID. Recompute the document component
+            // after that merge so the persisted fingerprint describes the document that will
+            // actually be saved and rendered, not the transient candidate value.
+            applied.lastAutoRunFingerprint = AutoRunFingerprint(
+                sourceFingerprint: fingerprint.sourceFingerprint,
+                documentHash: applied.renderingHash,
+                algorithmVersion: fingerprint.algorithmVersion,
+                renderIdentity: fingerprint.renderIdentity
+            )
+        }
         return applied
     }
 

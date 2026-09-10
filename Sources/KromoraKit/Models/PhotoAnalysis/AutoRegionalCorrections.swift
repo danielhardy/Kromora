@@ -286,14 +286,16 @@ enum AutoRegionalCorrections {
         var updated = document
         var layers = document.localAdjustments
         for generated in plan.layers {
-            guard let purpose = generated.autoProvenance?.purpose else { continue }
+            guard let provenance = generated.autoProvenance else { continue }
             if let index = layers.firstIndex(where: {
-                $0.isAutoOwned && $0.autoProvenance?.purpose == purpose
+                $0.isAutoOwned && $0.autoProvenance?.stableIdentity == provenance.stableIdentity
             }) {
                 var replacement = generated
                 replacement.id = layers[index].id
                 layers[index] = replacement
-            } else if !layers.contains(where: { $0.autoProvenance?.purpose == purpose }) {
+            } else if !layers.contains(where: {
+                $0.autoProvenance?.stableIdentity == provenance.stableIdentity
+            }) {
                 layers.append(generated)
             }
         }

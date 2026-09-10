@@ -535,7 +535,10 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
         self.id = id; self.name = name; self.isEnabled = isEnabled; self.isInverted = isInverted
         self.amount = Self.clamp(amount, 0...1, default: 1); self.components = components; self.adjustments = adjustments
         self.ownership = ownership
-        self.autoProvenance = ownership == .auto ? autoProvenance : nil
+        // Keep provenance after a manual edit. Ownership is the replacement guard; provenance is
+        // the stable purpose identity that lets a later Auto run recognize the protected layer
+        // and avoid appending a duplicate beside it.
+        self.autoProvenance = autoProvenance
     }
 
     var isIdentity: Bool { !isEnabled || amount == 0 || !components.contains(where: \.isUsable) || adjustments.isIdentity }
@@ -544,7 +547,6 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
 
     mutating func markUserOwned() {
         ownership = .user
-        autoProvenance = nil
     }
 
     /// Whether this layer may still be drawn in the two-phase preview's first frame, where semantic
