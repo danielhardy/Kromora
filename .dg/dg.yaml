@@ -1,6 +1,6 @@
-name: Lumo
+name: Kromora
 format_version: 2
-id_prefix: LUMO
+id_prefix: KRMA
 description: Native macOS RAW photo editor
 default_board: product
 statuses:
@@ -25,6 +25,7 @@ agents:
     - opencode
     - codex
     - pi
+  ai_ticket_creation: backlog
   options:
     cursor:
       skip_permissions: true
@@ -45,6 +46,9 @@ agents:
     max_concurrency: 1
     labels: []
     context_budget: 12000
+    retry:
+      on_limit: true
+      fallback_delay_minutes: 60
     worktrees:
       enabled: false
   verification:
