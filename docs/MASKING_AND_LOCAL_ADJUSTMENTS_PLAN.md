@@ -1,4 +1,4 @@
-# Lumo Masking and Local Adjustments — Implementation Plan
+# Kromora Masking and Local Adjustments — Implementation Plan
 
 **Status:** planning only; no implementation has started  
 **Target:** native macOS 14+, Swift 6, SwiftUI + Core Image/Metal, Apple frameworks only  

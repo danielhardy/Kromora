@@ -1,6 +1,6 @@
 # Auto adjustment
 
-Lumo's v1 Auto action is a deterministic baseline for global Light and Color controls. It is not
+Kromora's v1 Auto action is a deterministic baseline for global Light and Color controls. It is not
 an image-quality oracle and makes no semantic or camera-profile claims.
 
 ## Heuristic

@@ -43,4 +43,4 @@ The algorithm version is now 2 because the output meaning changed.
 
 Known limitation: this is a deliberately small generated corpus (seven base scenarios and two
 variants each). It does not validate real faces, camera rendering, or photographic preference.
-Broader real-photo validation remains opt-in through the existing `LUMO_RAW_FIXTURE_DIR` lane.
+Broader real-photo validation remains opt-in through the existing `KROMORA_RAW_FIXTURE_DIR` lane.

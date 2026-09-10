@@ -4,7 +4,7 @@ set -euo pipefail
 project_root="${0:A:h}/.."
 cd "$project_root"
 
-app_bundle="${1:-.build/Lumo.app}"
+app_bundle="${1:-.build/Kromora.app}"
 if [[ ! -d "$app_bundle" ]]; then
   print -u2 "missing $app_bundle; run scripts/build-macos-app.sh first"
   exit 1
@@ -18,39 +18,39 @@ if ! /usr/bin/osascript -e 'tell application "System Events" to get name of firs
   exit 2
 fi
 
-smoke_dir="$(mktemp -d -t lumo-app-smoke)"
+smoke_dir="$(mktemp -d -t kromora-app-smoke)"
 input_png="$smoke_dir/input.png"
 output_png="$smoke_dir/export.png"
 app_pid=""
 cleanup() {
   if [[ -n "$app_pid" ]]; then
-    /usr/bin/osascript -e 'tell application "Lumo" to quit' >/dev/null 2>&1 || true
+    /usr/bin/osascript -e 'tell application "Kromora" to quit' >/dev/null 2>&1 || true
     kill "$app_pid" >/dev/null 2>&1 || true
   fi
   rm -rf "$smoke_dir"
 }
 trap cleanup EXIT
 
-/usr/bin/sips -s format png -z 256 256 Sources/Lumo/Branding/LumoIcon.svg --out "$input_png" >/dev/null
+/usr/bin/sips -s format png -z 256 256 Sources/Kromora/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
 open -n "$app_bundle"
 
 for _ in {1..30}; do
-  app_pid="$(pgrep -x Lumo | head -1 || true)"
+  app_pid="$(pgrep -x Kromora | head -1 || true)"
   [[ -n "$app_pid" ]] && break
   sleep 1
 done
-[[ -n "$app_pid" ]] || { print -u2 "Lumo did not launch"; exit 1; }
+[[ -n "$app_pid" ]] || { print -u2 "Kromora did not launch"; exit 1; }
 
-if ! /usr/bin/osascript -e 'tell application "Lumo" to activate' >/dev/null 2>&1; then
-  print "SKIP: macOS refused to activate Lumo through the UI automation service"
+if ! /usr/bin/osascript -e 'tell application "Kromora" to activate' >/dev/null 2>&1; then
+  print "SKIP: macOS refused to activate Kromora through the UI automation service"
   exit 2
 fi
 
-export LUMO_SMOKE_INPUT="$input_png"
-export LUMO_SMOKE_OUTPUT="$output_png"
+export KROMORA_SMOKE_INPUT="$input_png"
+export KROMORA_SMOKE_OUTPUT="$output_png"
 /usr/bin/osascript <<'APPLESCRIPT'
-set inputPath to do shell script "printf '%s' \"$LUMO_SMOKE_INPUT\""
-set outputPath to do shell script "printf '%s' \"$LUMO_SMOKE_OUTPUT\""
+set inputPath to do shell script "printf '%s' \"$KROMORA_SMOKE_INPUT\""
+set outputPath to do shell script "printf '%s' \"$KROMORA_SMOKE_OUTPUT\""
 
 using terms from application "System Events"
 on waitForWindow(p)
@@ -58,7 +58,7 @@ on waitForWindow(p)
         if (count of windows of p) > 0 then return
         delay 1
     end repeat
-    error "Lumo did not create a window"
+    error "Kromora did not create a window"
 end waitForWindow
 
 on clickFileMenuItem(p, itemName)
@@ -70,8 +70,8 @@ end clickFileMenuItem
 end using terms from
 
 tell application "System Events"
-    tell application "Lumo" to activate
-    tell process "Lumo"
+    tell application "Kromora" to activate
+    tell process "Kromora"
         my waitForWindow(it)
 
         -- Open through the shipping File menu and native Open panel.
@@ -90,9 +90,9 @@ tell application "System Events"
         end repeat
 
         -- Exercise the application-level Settings scene, then return to the main window.
-        click menu bar item "Lumo" of menu bar 1
-        set lumoMenu to menu 1 of menu bar item "Lumo" of menu bar 1
-        set settingsItem to (first menu item of lumoMenu whose title contains "Settings")
+        click menu bar item "Kromora" of menu bar 1
+        set kromoraMenu to menu 1 of menu bar item "Kromora" of menu bar 1
+        set settingsItem to (first menu item of kromoraMenu whose title contains "Settings")
         click settingsItem
         delay 2
         if (count of windows) < 2 then error "Settings did not open"

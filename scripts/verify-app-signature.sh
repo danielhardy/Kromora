@@ -4,11 +4,11 @@ set -euo pipefail
 project_root="${0:A:h}/.."
 cd "$project_root"
 
-app_bundle="${1:-.build/Lumo.app}"
+app_bundle="${1:-.build/Kromora.app}"
 [[ -d "$app_bundle" ]] || { print -u2 "missing $app_bundle; run scripts/build-macos-app.sh first"; exit 1; }
 
 /usr/bin/codesign --verify --deep --strict "$app_bundle"
-dump="$(mktemp -t lumo-entitlements).plist"
+dump="$(mktemp -t kromora-entitlements).plist"
 trap 'rm -f "$dump"' EXIT
 /usr/bin/codesign -d --entitlements :- "$app_bundle" > "$dump" 2>/dev/null
 

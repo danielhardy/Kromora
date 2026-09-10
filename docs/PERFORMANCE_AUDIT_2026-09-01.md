@@ -18,7 +18,7 @@ Local hardware: Apple M1 Pro, 10 CPU cores, 16 GB RAM; macOS 26.6. Existing benc
 
 The approximately 40× source-reuse difference demonstrates why avoiding new source graphs matters. It does not predict a 40× improvement for the whole app. The PNG round-trip benchmark is not the shipping Metal display path and should not become a new optimization ticket: that display detour has already been removed.
 
-A standalone probe in `/tmp`, linked against the current debug LumoKit objects, reproduced a cache bug through the production `makeCIImage` entry point. Source: 3000×2000 PNG; requested box: 2400×1600.
+A standalone probe in `/tmp`, linked against the current debug KromoraKit objects, reproduced a cache bug through the production `makeCIImage` entry point. Source: 3000×2000 PNG; requested box: 2400×1600.
 
 | Request order | Actual results | Required results |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 1. P1 — Correct developed-source cache identity for effective resolution
 
-**Evidence:** [RenderCacheKey.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderCacheKey.swift:25) maps `.preview(size)` and `.interactive(size, budget)` to the same width/height bits. It ignores the interactive budget. [RenderScale.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderScale.swift:30) caps interactive output at 1.5 MP, while [RenderEngine.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:543) uses that shared key for standard-image development.
+**Evidence:** [RenderCacheKey.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderCacheKey.swift:25) maps `.preview(size)` and `.interactive(size, budget)` to the same width/height bits. It ignores the interactive budget. [RenderScale.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderScale.swift:30) caps interactive output at 1.5 MP, while [RenderEngine.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderEngine.swift:543) uses that shared key for standard-image development.
 
 **Impact:** A settled standard preview can remain permanently undersized, or an interactive preview can process 2.56× its intended pixels in the reproduced case. This affects accuracy and responsiveness, not just cache efficiency.
 
@@ -58,7 +58,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 2. P1 — Separate completed image rendering from canvas presentation
 
-**Evidence:** [RenderEngine.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:140) returns a graph from `makeCIImage`. [PreviewSurface.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Views/PreviewSurface.swift:210) calls `context.render` inside the `@MainActor` MTKView coordinator. Navigation transforms that graph and submits it again. The actor method finishing therefore does not mean image processing finished. GPU execution is asynchronous, but graph evaluation/encoding and drawable acquisition still occur on the UI path.
+**Evidence:** [RenderEngine.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderEngine.swift:140) returns a graph from `makeCIImage`. [PreviewSurface.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Views/PreviewSurface.swift:210) calls `context.render` inside the `@MainActor` MTKView coordinator. Navigation transforms that graph and submits it again. The actor method finishing therefore does not mean image processing finished. GPU execution is asynchronous, but graph evaluation/encoding and drawable acquisition still occur on the UI path.
 
 **Impact:** Expensive adjustments, first-use kernels, or source evaluation can delay input handling. Pan/zoom has no explicit guarantee of sampling already-completed image pixels; Core Image may reuse intermediates, but the application does not own that guarantee.
 
@@ -70,7 +70,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 3. P1 — Add crop-aware resolution planning and a reusable resolution pyramid
 
-**Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1276) derives target resolution from the whole uncropped source and continuously varying zoom. Cache dimensions are exact floating-point values. [RenderPipeline.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderPipeline.swift:105) crops after source downscaling. Pinch updates request interactive rendering even when a sharper settled image is already available.
+**Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/ViewModels/AppViewModel.swift:1276) derives target resolution from the whole uncropped source and continuously varying zoom. Cache dimensions are exact floating-point values. [RenderPipeline.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderPipeline.swift:105) crops after source downscaling. Pinch updates request interactive rendering even when a sharper settled image is already available.
 
 **Impact:** Zoom/resize creates many distinct source-cache entries and evicts useful ones. Deep zoom requests high source resolution without an explicit visible-region strategy. Cropping to one quarter of the source width/height can leave only one quarter of the required linear detail before the surface enlarges it. At equal aspect ratio, a 1600×1200 source preview becomes a 400×300 crop displayed at 1600×1200.
 
@@ -82,7 +82,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 4. P1 — Replace open-time image development with source preparation and bounded loading
 
-**Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:695) starts an unstructured detached `ImageDecoder.load`, waits for it, then loads the edit record. [ImageDecoder.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/ImageDecoder.swift:113) accesses a neutral RAW filter's `outputImage`; the engine subsequently creates its own source graph. `sourceImage` is used as an availability flag rather than as the renderer's source. RAW capabilities instantiate another filter. Canceling the parent load does not cancel the detached operation.
+**Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/ViewModels/AppViewModel.swift:695) starts an unstructured detached `ImageDecoder.load`, waits for it, then loads the edit record. [ImageDecoder.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/ImageDecoder.swift:113) accesses a neutral RAW filter's `outputImage`; the engine subsequently creates its own source graph. `sourceImage` is used as an availability flag rather than as the renderer's source. RAW capabilities instantiate another filter. Canceling the parent load does not cancel the detached operation.
 
 **Impact:** First useful pixels wait on unnecessary source preparation; rapid navigation can leave obsolete loads running. The code accesses a full-resolution RAW output graph, although this audit does not claim every pixel is eagerly rasterized at that point.
 
@@ -94,7 +94,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 5. P1 — Coalesce edit persistence and avoid rewriting the catalog per pointer tick
 
-**Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1150) calls `saveActiveDocument` for each changed slider value. [queuePersistence](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1950) chains every task behind its predecessor without coalescing. [EditDocumentStore.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/EditDocumentStore.swift:318) encodes all records, reads/validates the previous catalog, and atomically writes backup and primary on every save. Locator/bookmark creation also repeats.
+**Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/ViewModels/AppViewModel.swift:1150) calls `saveActiveDocument` for each changed slider value. [queuePersistence](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/ViewModels/AppViewModel.swift:1950) chains every task behind its predecessor without coalescing. [EditDocumentStore.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/EditDocumentStore.swift:318) encodes all records, reads/validates the previous catalog, and atomically writes backup and primary on every save. Locator/bookmark creation also repeats.
 
 **Impact:** Persistence work scales with pointer events × catalog size, even though rendering drops superseded events. The backlog consumes CPU/I/O and can delay a subsequent edit-store load or shutdown.
 
@@ -104,7 +104,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 6. P1 — Reuse unchanged RAW outputs and processing prefixes
 
-**Evidence:** [RenderEngine.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:549) sends every interactive RAW request through `InteractiveRAWFilterSession.output`, even for downstream light/color/LUT changes. That method restores all baseline values, reapplies settings, writes scale, and requests `outputImage` every time. [RenderPipeline.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderPipeline.swift:92) reconstructs the full downstream graph. The final preview cache belongs to the encoded `render` path, not `makeCIImage`.
+**Evidence:** [RenderEngine.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderEngine.swift:549) sends every interactive RAW request through `InteractiveRAWFilterSession.output`, even for downstream light/color/LUT changes. That method restores all baseline values, reapplies settings, writes scale, and requests `outputImage` every time. [RenderPipeline.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderPipeline.swift:92) reconstructs the full downstream graph. The final preview cache belongs to the encoded `render` path, not `makeCIImage`.
 
 **Impact:** Keeping the CIRAWFilter alive avoids construction but does not explicitly reuse unchanged output or completed upstream processing. RAW property writes may invalidate expensive decoder work; the exact cost must be measured with actual RAW files.
 
@@ -114,7 +114,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 7. P2 — Isolate canvas interaction state from the application observation graph
 
-**Evidence:** [PreviewView.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Views/PreviewView.swift:6) and the surrounding editor observe the broad AppViewModel. Navigation and crop draft mutations are published there. `PreviewSurface` already isolates image publication, but not pointer-frequency navigation/document/draft updates.
+**Evidence:** [PreviewView.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Views/PreviewView.swift:6) and the surrounding editor observe the broad AppViewModel. Navigation and crop draft mutations are published there. `PreviewSurface` already isolates image publication, but not pointer-frequency navigation/document/draft updates.
 
 **Approach:** Introduce narrowly observed canvas/crop state and inspector state. Let transform and handle movement update their own view subtree. Keep document history and persistence at clear commit/checkpoint boundaries. Use SwiftUI profiling to identify expensive invalidations rather than migrating frameworks solely on assumption.
 
@@ -122,7 +122,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 8. P2 — Schedule supporting render work after actual presentation
 
-**Evidence:** Histogram processing and exports use the same RenderEngine actor as display graph construction. [RenderEngine.histogram](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:341) lacks an entry cancellation check and performs synchronous bitmap rendering. [AppViewModel.publishPreview](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1599) starts supporting work after graph publication, before actual presentation. Comparison baseline work is scheduled at open even when hidden.
+**Evidence:** Histogram processing and exports use the same RenderEngine actor as display graph construction. [RenderEngine.histogram](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/RenderEngine.swift:341) lacks an entry cancellation check and performs synchronous bitmap rendering. [AppViewModel.publishPreview](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/ViewModels/AppViewModel.swift:1599) starts supporting work after graph publication, before actual presentation. Comparison baseline work is scheduled at open even when hidden.
 
 **Approach:** Give visible edits priority over histograms, hidden comparison preparation, prefetch, and batch export. Check cancellation before expensive work and prevent obsolete supporting jobs from entering the actor. Define independent execution capacity for long non-preemptible export work, with GPU resource limits. Compute histograms from reusable rendered stages where the histogram contract permits it.
 
@@ -130,7 +130,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 9. P2 — Make performance telemetry cheap, bounded, and representative
 
-**Evidence:** [Observability.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/Observability.swift:85) repeatedly derives a trace token from `source.cacheFingerprint`. [ImageSource.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/ImageSource.swift:119) performs URL resource queries and `lstat`; pointer/render/GPU/display events repeat this work, including on the main actor. [LiveEditTelemetry.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/LiveEditTelemetry.swift:90) retains all samples indefinitely and reports requested rather than effective dimensions. Settled promotion allocates a new revision without registering an input sample, so final-frame completion is not fully represented. The existing “60 MP-class” coordinator benchmark uses a fake renderer and measures publication, not GPU presentation.
+**Evidence:** [Observability.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/Observability.swift:85) repeatedly derives a trace token from `source.cacheFingerprint`. [ImageSource.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/ImageSource.swift:119) performs URL resource queries and `lstat`; pointer/render/GPU/display events repeat this work, including on the main actor. [LiveEditTelemetry.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Models/LiveEditTelemetry.swift:90) retains all samples indefinitely and reports requested rather than effective dimensions. Settled promotion allocates a new revision without registering an input sample, so final-frame completion is not fully represented. The existing “60 MP-class” coordinator benchmark uses a fake renderer and measures publication, not GPU presentation.
 
 **Approach:** Capture a stable trace token for each source session and refresh file identity at explicit validated boundaries. Keep source-replacement correctness independent of logging. Use bounded sample retention. Record effective render/tile dimensions and connect final promotion to the originating user input. Add an actual Metal presentation benchmark plus a saved RAW capture matrix. Precompile legacy source-string kernels to Metal as a separately measured cold-start follow-up.
 
@@ -138,7 +138,7 @@ All ten tickets are in backlog. Dependencies encode implementation prerequisites
 
 ### 10. P1 correctness companion — Restore the full canvas when re-entering Crop
 
-**Evidence:** [AppViewModel.beginCrop](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1381) resets navigation and exposes the draft but does not request an uncropped image. [PreviewView.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Views/PreviewView.swift:103) continues using the committed cropped surface while its overlay uses full `sourceSize` coordinates.
+**Evidence:** [AppViewModel.beginCrop](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/ViewModels/AppViewModel.swift:1381) resets navigation and exposes the draft but does not request an uncropped image. [PreviewView.swift](/Users/dhardy/Dev/Kromora/Sources/KromoraKit/Views/PreviewView.swift:103) continues using the committed cropped surface while its overlay uses full `sourceSize` coordinates.
 
 **Impact:** After committing a crop, re-entering Crop draws a full-source-coordinate overlay over already-cropped pixels. Performance work must not make this incorrect geometry merely faster.
 
@@ -159,7 +159,7 @@ Apple's [CIImage documentation](https://developer.apple.com/documentation/coreim
 ## Validation performed
 
 - Focused navigation/coordinator/surface/cache tests: 27 executed, 1 opt-in benchmark skipped, 0 failures.
-- Existing Release benchmarks: 3 executed, 0 failures. Raw logs: `/tmp/lumo-performance-bench.log`.
-- Standalone cache reproduction: `/tmp/lumo-cache-probe.swift`, linked against current LumoKit objects, generated image data only; no application source edits.
-- Additional crop/comparison/persistence tests: 15 executed, 0 failures. Raw log: `/tmp/lumo-performance-crop-tests.log`.
+- Existing Release benchmarks: 3 executed, 0 failures. Raw logs: `/tmp/kromora-performance-bench.log`.
+- Standalone cache reproduction: `/tmp/kromora-cache-probe.swift`, linked against current KromoraKit objects, generated image data only; no application source edits.
+- Additional crop/comparison/persistence tests: 15 executed, 0 failures. Raw log: `/tmp/kromora-performance-crop-tests.log`.
 - No GUI Instruments capture or Lightroom/Photomator comparison was performed. RAW optimization effects and full input-to-display latency remain measurement tasks.

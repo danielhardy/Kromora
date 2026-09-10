@@ -18,7 +18,7 @@ private enum StarterLookPackageValidationError: Error, CustomStringConvertible {
 private func validateStarterLookPackage() throws {
     let packageDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
     let resourceDirectory = packageDirectory
-        .appendingPathComponent("Sources/LumoKit/Resources/StarterLooks", isDirectory: true)
+        .appendingPathComponent("Sources/KromoraKit/Resources/StarterLooks", isDirectory: true)
     let manifestURL = resourceDirectory.appendingPathComponent("manifest.json")
     let object = try JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
     guard let manifest = object as? [String: Any],
@@ -49,7 +49,7 @@ private func validateStarterLookPackage() throws {
         _ = try requiredString("sourceAuthor")
         _ = try requiredString("source")
         let license = try requiredString("license")
-        guard license == "MIT License (Lumo project license)" else {
+        guard license == "MIT License (Kromora project license)" else {
             throw StarterLookPackageValidationError.invalid("Starter Look \(id) has no approved redistributable license")
         }
         _ = try requiredString("attribution")
@@ -109,20 +109,20 @@ do {
     fatalError("Starter Look package validation failed: \(error)")
 }
 
-// Lumo is split into a library plus a thin `@main` executable so the app's own
+// Kromora is split into a library plus a thin `@main` executable so the app's own
 // code can be unit-tested: `@testable` cannot import an executable target.
-// Everything of substance lives in LumoKit; the Lumo target is just the entry
+// Everything of substance lives in KromoraKit; the Kromora target is just the entry
 // point, the app delegate, and the asset catalog.
 let package = Package(
-    name: "Lumo",
+    name: "Kromora",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Lumo", targets: ["Lumo"]),
-        .library(name: "LumoKit", targets: ["LumoKit"]),
+        .executable(name: "Kromora", targets: ["Kromora"]),
+        .library(name: "KromoraKit", targets: ["KromoraKit"]),
     ],
     targets: [
         .target(
-            name: "LumoKit",
+            name: "KromoraKit",
             resources: [.copy("Resources")],
             swiftSettings: [.swiftLanguageMode(.v6)],
             linkerSettings: [
@@ -133,18 +133,18 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "Lumo",
-            dependencies: ["LumoKit"],
+            name: "Kromora",
+            dependencies: ["KromoraKit"],
             // The asset catalog and entitlements belong to the bundled app
             // packaging phase. Branding is likewise an input to that phase,
             // not Swift source; scripts/build-macos-app.sh consumes the
             // entitlements explicitly when signing the completed bundle.
-            exclude: ["Assets.xcassets", "Branding", "Info.plist", "Lumo.entitlements"],
+            exclude: ["Assets.xcassets", "Branding", "Info.plist", "Kromora.entitlements"],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
-            name: "LumoKitTests",
-            dependencies: ["LumoKit"],
+            name: "KromoraKitTests",
+            dependencies: ["KromoraKit"],
             resources: [.copy("PerformanceBaselines")],
             swiftSettings: [.swiftLanguageMode(.v6)]
         ),

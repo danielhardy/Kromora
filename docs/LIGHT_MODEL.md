@@ -54,7 +54,7 @@ pre-LUMO-071 `CIColorCube` path from `c459816^`, drives 30 changing curve values
 1024×768 Core Image rasterization for each tick. Run it with:
 
 ```text
-LUMO_BENCH=1 swift test --filter PreviewCostBenchmark.testMeasureToneCurveDragCost
+KROMORA_BENCH=1 swift test --filter PreviewCostBenchmark.testMeasureToneCurveDragCost
 ```
 
 Captured on 2026-08-31 (macOS arm64e, this checkout):
@@ -67,4 +67,4 @@ Captured on 2026-08-31 (macOS arm64e, this checkout):
 That run measured a 1,024× payload reduction and 25.8× lower per-tick time. The byte figures are
 the actual `Data` payloads handed to Core Image, not estimates from the comments; the timing includes
 curve-table construction, Core Image graph construction, and forced GPU rasterization. The benchmark
-is gated by `LUMO_BENCH` because the baseline intentionally allocates a 4 MiB cube per sample.
+is gated by `KROMORA_BENCH` because the baseline intentionally allocates a 4 MiB cube per sample.

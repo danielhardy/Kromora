@@ -9,7 +9,7 @@ To run the optional RAW regression lane, point it at a directory containing a li
 for derive tests, a same-stem in-camera JPG pair:
 
 ```bash
-LUMO_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
+KROMORA_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
 scripts/ci-tests.sh optional
 ```
 

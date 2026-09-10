@@ -56,7 +56,7 @@ are useful baselines but do not close the real-pointer or 16.7 ms overlay gate.
 The Release benchmark was attempted with:
 
 ```sh
-LUMO_MASK_OVERLAY_BENCHMARK=1 LUMO_MASK_OVERLAY_ITERATIONS=30 \
+KROMORA_MASK_OVERLAY_BENCHMARK=1 KROMORA_MASK_OVERLAY_ITERATIONS=30 \
 swift test -c release --disable-sandbox \
   --filter MaskOverlayPerformanceBenchmark/testRealMaskOverlayPresentationBenchmark
 ```
@@ -68,7 +68,7 @@ retired in LUMO-230, so the real-pointer capture workflow is no longer available
 
 ## Remaining handoff gate
 
-Use Instruments on the in-app Lumo mask-overlay path on the reference Mac with a human moving and
+Use Instruments on the in-app Kromora mask-overlay path on the reference Mac with a human moving and
 dragging over the visible editor, then attach the resulting trace/summary and record p95/p99 for
 brush, gradient handles, smart refinement, source switching, zoom/pan, ten layers, 45 MP input, and
 full-resolution export.

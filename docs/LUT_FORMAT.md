@@ -1,6 +1,6 @@
 # LUT file support
 
-Lumo's Look stage accepts text-based `.cube` files and text-based `.look` files whose contents use
+Kromora's Look stage accepts text-based `.cube` files and text-based `.look` files whose contents use
 the same 3D cube grammar. A `.look` extension is accepted for interoperability with tools that use
 that suffix for a plain cube export; proprietary binary or XML Adobe `.look` packages are rejected
 with an import error rather than guessed at.
@@ -17,7 +17,7 @@ Supported input:
   interchange format.
 
 The parser deliberately rejects 1D cubes, mixed 1D/3D tables, reversed domains, non-finite
-numbers, malformed rows, missing/truncated tables, and dimensions outside 2…65. Lumo's renderer
+numbers, malformed rows, missing/truncated tables, and dimensions outside 2…65. Kromora's renderer
 uses Core Image's GPU-backed `CIColorCubeWithColorSpace`, so 1D files need to be converted to a 3D
 cube by the authoring tool before import.
 
@@ -44,7 +44,7 @@ leave the old cube applied after refresh.
 
 ## User Look storage
 
-Lumo's canonical user Look/LUT folder is `~/Library/Application Support/Lumo/Looks` (the path is
+Kromora's canonical user Look/LUT folder is `~/Library/Application Support/Kromora/Looks` (the path is
 resolved with the user's Application Support directory at runtime). User-created and imported Looks
 are kept distinct from any future bundled assets. The Settings window can reveal this folder, and
 the derive and Save as Look flows use it when no external Look folder has been selected.

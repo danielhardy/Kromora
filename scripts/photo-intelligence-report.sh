@@ -3,10 +3,10 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_dir=$(CDPATH= cd -- "$script_dir/.." && pwd)
-report_path=${LUMO_PHOTO_INTELLIGENCE_REPORT_PATH:-artifacts/photo-intelligence/report.html}
+report_path=${KROMORA_PHOTO_INTELLIGENCE_REPORT_PATH:-artifacts/photo-intelligence/report.html}
 
 cd "$repo_dir"
-LUMO_PHOTO_INTELLIGENCE_REPORT_PATH="$report_path" \
+KROMORA_PHOTO_INTELLIGENCE_REPORT_PATH="$report_path" \
   swift test --filter PhotoIntelligenceCorpusTests.testGenerateVisualRegressionReport
 
 case "$report_path" in

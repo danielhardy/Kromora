@@ -1,0 +1,222 @@
+import XCTest
+import CoreGraphics
+import ImageIO
+@testable import KromoraKit
+
+/// Contract tests for the UI-independent render funnel introduced in LUMO-012.
+final class RenderRequestTests: TempDirectoryTestCase {
+
+    private func makeSource() throws -> ImageSource {
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "request.png", in: tempDirectory
+        )
+        return ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
+    }
+
+    private func makeLargeSource() throws -> ImageSource {
+        let url = try Fixtures.writeClarityPNG(
+            width: 2048, height: 1536, named: "large-clarity.png", in: tempDirectory
+        )
+        return ImageSource(url: url, nativeExtent: CGSize(width: 2048, height: 1536))
+    }
+
+    private func decodedSize(_ data: Data) throws -> CGSize {
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        let image = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        return CGSize(width: image.width, height: image.height)
+    }
+
+    func testAllFiveQualityTiersAreRepresented() {
+        XCTAssertEqual(
+            RenderQuality.allCases,
+            [.thumbnail, .interactive, .preview, .fullResolution, .export]
+        )
+    }
+
+    func testQualityControlsExtentWithoutChangingTheEditModel() async throws {
+        let source = try makeSource()
+        let document = EditDocument(adjustments: [.exposure(ev: 0.35)])
+        let engine = RenderEngine()
+        let downsampled: [RenderQuality] = [.thumbnail, .interactive, .preview]
+
+        for quality in downsampled {
+            let result = try await engine.render(RenderRequest(
+                source: source, document: document, targetSize: CGSize(width: 24, height: 24),
+                quality: quality, output: .raster
+            ))
+            XCTAssertEqual(result.quality, quality)
+            XCTAssertEqual(result.extent, CGSize(width: 24, height: 16))
+            XCTAssertEqual(try decodedSize(result.data), result.extent)
+        }
+
+        for quality in [RenderQuality.fullResolution, .export] {
+            let result = try await engine.render(RenderRequest(
+                source: source, document: document, targetSize: CGSize(width: 24, height: 24),
+                quality: quality, output: .raster
+            ))
+            XCTAssertEqual(result.extent, CGSize(width: 96, height: 64))
+            XCTAssertEqual(try decodedSize(result.data), result.extent)
+        }
+    }
+
+    func testNeutralRenderBakesOrientationAndReportsTheEncodedExtent() async throws {
+        let url = try Fixtures.writeJPEG(
+            width: 80, height: 60, orientation: 6, named: "oriented.jpg", in: tempDirectory
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 60, height: 80))
+        let result = try await RenderEngine().render(RenderRequest(
+            source: source, document: EditDocument(), quality: .fullResolution, output: .raster
+        ))
+
+        XCTAssertEqual(result.extent, CGSize(width: 60, height: 80))
+        XCTAssertEqual(try decodedSize(result.data), CGSize(width: 60, height: 80))
+        XCTAssertEqual(result.colorSpace, .current)
+    }
+
+    func testPreviewAndExportParityUsesExplicitQualityAndOutputPolicies() async throws {
+        let source = try makeSource()
+        // Construct the grade through the same mapping a visual wheel uses. The request funnel must
+        // preserve that state identically for an on-screen preview and a lossless export.
+        let document = EditDocument(
+            color: ColorAdjustments(grading: ColorGradingAdjustments(
+                midtones: ColorGradingWheelMapping.wheel(at: .init(x: -0.4, y: 0.7))
+            )),
+            adjustments: [.vibrance(amount: 0.4)]
+        )
+        let engine = RenderEngine()
+
+        let preview = try await engine.render(RenderRequest(
+            source: source, document: document, targetSize: source.nativeExtent,
+            quality: .preview, output: .raster, space: .displayP3
+        ))
+        let export = try await engine.render(RenderRequest(
+            source: source, document: document,
+            quality: .export,
+            output: .encoded(format: .png, quality: 1), space: .displayP3
+        ))
+
+        XCTAssertEqual(preview.output, .raster)
+        XCTAssertEqual(export.output, .encoded(format: .png, quality: 1))
+        XCTAssertEqual(preview.colorSpace, export.colorSpace)
+        XCTAssertEqual(preview.extent, export.extent)
+        assertPixelsEqual(
+            try Pixels.bytes(of: try Pixels.decode(preview.data)),
+            try Pixels.bytes(of: try Pixels.decode(export.data)),
+            "preview and export request policies must preserve the same pipeline pixels"
+        )
+    }
+
+    func testDehazeFullRangeKeepsPreviewAndExportGeometryAndPixelsAligned() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+
+        for value in [-100.0, -1.0, 0.0, 1.0, 100.0] {
+            let document = EditDocument(effects: EffectsAdjustments(dehaze: value))
+            let preview = try await engine.render(RenderRequest(
+                source: source,
+                document: document,
+                targetSize: source.nativeExtent,
+                quality: .preview,
+                output: .raster
+            ))
+            let interactive = try await engine.render(RenderRequest(
+                source: source,
+                document: document,
+                targetSize: source.nativeExtent,
+                quality: .interactive,
+                output: .raster
+            ))
+            let exported = try await engine.render(RenderRequest(
+                source: source,
+                document: document,
+                quality: .export,
+                output: .encoded(format: .png, quality: 1)
+            ))
+
+            XCTAssertEqual(preview.extent, source.nativeExtent, "preview extent for Dehaze \(value)")
+            XCTAssertEqual(interactive.extent, source.nativeExtent,
+                           "interactive extent for Dehaze \(value)")
+            XCTAssertEqual(exported.extent, source.nativeExtent, "export extent for Dehaze \(value)")
+            assertPixelsEqual(
+                try Pixels.bytes(of: try Pixels.decode(interactive.data)),
+                try Pixels.bytes(of: try Pixels.decode(preview.data)),
+                "interactive/settled Dehaze \(value) must keep the same geometry"
+            )
+            assertPixelsEqual(
+                try Pixels.bytes(of: try Pixels.decode(preview.data)),
+                try Pixels.bytes(of: try Pixels.decode(exported.data)),
+                "preview/export Dehaze \(value) must use the same bounded geometry"
+            )
+        }
+    }
+
+    func testClarityFullRangeKeepsInteractiveSettledAndExportFramesAligned() async throws {
+        let source = try makeLargeSource()
+        let engine = RenderEngine()
+        var settledByValue: [Double: [UInt8]] = [:]
+
+        for value in [-100.0, -1.0, 0.0, 1.0, 100.0] {
+            let document = EditDocument(effects: EffectsAdjustments(clarity: value))
+            let preview = try await engine.render(RenderRequest(
+                source: source,
+                document: document,
+                targetSize: source.nativeExtent,
+                quality: .preview,
+                output: .raster
+            ))
+            let interactive = try await engine.render(RenderRequest(
+                source: source,
+                document: document,
+                targetSize: source.nativeExtent,
+                quality: .interactive,
+                output: .raster
+            ))
+            let exported = try await engine.render(RenderRequest(
+                source: source,
+                document: document,
+                quality: .export,
+                output: .encoded(format: .png, quality: 1)
+            ))
+
+            XCTAssertEqual(preview.extent, source.nativeExtent,
+                           "settled Clarity \(value) changed the source frame")
+            XCTAssertEqual(exported.extent, source.nativeExtent,
+                           "export Clarity \(value) changed the source frame")
+            XCTAssertGreaterThan(interactive.extent.width, 0)
+            XCTAssertGreaterThan(interactive.extent.height, 0)
+            XCTAssertEqual(
+                interactive.extent.width / interactive.extent.height,
+                source.nativeExtent.width / source.nativeExtent.height,
+                accuracy: 0.01,
+                "interactive Clarity \(value) changed the aspect ratio"
+            )
+
+            let previewImage = try Pixels.decode(preview.data)
+            let interactiveImage = try Pixels.decode(interactive.data)
+            let exportImage = try Pixels.decode(exported.data)
+            let previewBytes = try Pixels.bytes(of: previewImage)
+            let interactiveBytes = try Pixels.bytes(of: interactiveImage)
+            let exportBytes = try Pixels.bytes(of: exportImage)
+            XCTAssertTrue(previewBytes.contains(where: { $0 != 0 }),
+                          "settled Clarity \(value) produced a blank frame")
+            XCTAssertTrue(interactiveBytes.contains(where: { $0 != 0 }),
+                          "interactive Clarity \(value) produced a blank frame")
+            XCTAssertTrue(exportBytes.contains(where: { $0 != 0 }),
+                          "export Clarity \(value) produced a blank frame")
+            assertPixelsEqual(
+                previewBytes, exportBytes,
+                "preview/export Clarity \(value) must use the same bounded pipeline"
+            )
+            settledByValue[value] = previewBytes
+        }
+
+        assertPixelsDiffer(
+            settledByValue[100] ?? [], settledByValue[0] ?? [],
+            "maximum Clarity must remain visually distinct from its neutral render"
+        )
+        assertPixelsDiffer(
+            settledByValue[-100] ?? [], settledByValue[0] ?? [],
+            "minimum Clarity must remain visually distinct from its neutral render"
+        )
+    }
+}

@@ -1,0 +1,617 @@
+{
+  "components" : [
+
+  ],
+  "meta" : {
+    "createdAt" : "2026-09-10T02:49:56.6697659492492676Z",
+    "id" : {
+      "rawValue" : "30A8EC03-B363-470E-B010-97447AFD225C"
+    },
+    "modifiedAt" : "2026-09-10T03:01:43.07803797721862793Z",
+    "schemaVersion" : 6
+  },
+  "nodes" : {
+    "storage" : [
+      {
+        "rawValue" : "19EE498E-DD21-4AF6-AEE2-342D98CD633E"
+      },
+      {
+        "children" : [
+
+        ],
+        "compositing" : {
+
+        },
+        "frame" : {
+          "height" : 543.275,
+          "width" : 436.32500000000005,
+          "x" : 62.775,
+          "y" : 270.725
+        },
+        "id" : {
+          "rawValue" : "19EE498E-DD21-4AF6-AEE2-342D98CD633E"
+        },
+        "layout" : {
+          "constraints" : {
+
+          }
+        },
+        "locked" : false,
+        "name" : "Text Glyph 1",
+        "payload" : {
+          "path" : {
+            "_0" : {
+              "isClosed" : true,
+              "segments" : [
+                {
+                  "line" : {
+                    "to" : {
+                      "x" : 62.775,
+                      "y" : 270.725
+                    }
+                  }
+                },
+                {
+                  "line" : {
+                    "to" : {
+                      "x" : 62.775,
+                      "y" : 814
+                    }
+                  }
+                },
+                {
+                  "line" : {
+                    "to" : {
+                      "x" : 181.35,
+                      "y" : 814
+                    }
+                  }
+                }
+              ],
+              "startPoint" : {
+                "x" : 181.35,
+                "y" : 270.725
+              },
+              "subpaths" : [
+                {
+                  "isClosed" : true,
+                  "segments" : [
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 184.45000000000002,
+                          "y" : 540.425
+                        }
+                      }
+                    },
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 351.075,
+                          "y" : 814
+                        }
+                      }
+                    },
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 499.1,
+                          "y" : 814
+                        }
+                      }
+                    },
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 313.1,
+                          "y" : 535
+                        }
+                      }
+                    },
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 482.05,
+                          "y" : 270.725
+                        }
+                      }
+                    },
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 345.65000000000003,
+                          "y" : 270.725
+                        }
+                      }
+                    }
+                  ],
+                  "startPoint" : {
+                    "x" : 184.45000000000002,
+                    "y" : 537.325
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "style" : {
+          "blendMode" : "normal",
+          "effects" : [
+
+          ],
+          "fills" : [
+            {
+              "blendMode" : "normal",
+              "opacity" : 1,
+              "paint" : {
+                "literal" : {
+                  "_0" : {
+                    "alpha" : 1,
+                    "blue" : 0.18,
+                    "green" : 0.16,
+                    "red" : 0.15
+                  }
+                }
+              },
+              "visible" : true
+            }
+          ],
+          "opacity" : {
+            "literal" : {
+              "_0" : 1
+            }
+          },
+          "textAlignment" : "leading",
+          "textOverflow" : "wrap",
+          "typeStyle" : {
+            "literal" : {
+              "_0" : {
+                "fontFamily" : "Kohinoor Devanagari",
+                "fontSize" : 775,
+                "fontWeight" : "bold",
+                "letterSpacing" : 0,
+                "lineSpacing" : 0,
+                "variableAxes" : {
+
+                }
+              }
+            }
+          }
+        },
+        "transform" : {
+          "rotation" : 0,
+          "scale" : {
+            "x" : 1,
+            "y" : 1
+          },
+          "translation" : {
+            "x" : 231.2249999999999,
+            "y" : -30.725000000000023
+          }
+        },
+        "visible" : true
+      },
+      {
+        "rawValue" : "438FD0C1-3C5D-4276-8046-DE84E3E7792C"
+      },
+      {
+        "children" : [
+
+        ],
+        "compositing" : {
+
+        },
+        "frame" : {
+          "height" : 566.5250000000001,
+          "width" : 351.85,
+          "x" : 44.175000000000004,
+          "y" : 99.69999999999993
+        },
+        "id" : {
+          "rawValue" : "438FD0C1-3C5D-4276-8046-DE84E3E7792C"
+        },
+        "layout" : {
+          "constraints" : {
+
+          }
+        },
+        "locked" : false,
+        "name" : "Text Glyph 1",
+        "payload" : {
+          "path" : {
+            "_0" : {
+              "isClosed" : true,
+              "segments" : [
+                {
+                  "line" : {
+                    "to" : {
+                      "x" : 146.475,
+                      "y" : 666.225
+                    }
+                  }
+                },
+                {
+                  "line" : {
+                    "to" : {
+                      "x" : 146.475,
+                      "y" : 99.69999999999993
+                    }
+                  }
+                },
+                {
+                  "line" : {
+                    "to" : {
+                      "x" : 44.175000000000004,
+                      "y" : 99.69999999999993
+                    }
+                  }
+                }
+              ],
+              "startPoint" : {
+                "x" : 44.175000000000004,
+                "y" : 666.225
+              },
+              "subpaths" : [
+                {
+                  "isClosed" : true,
+                  "segments" : [
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 396.02500000000003,
+                          "y" : 666.225
+                        }
+                      }
+                    },
+                    {
+                      "cubic" : {
+                        "control1" : {
+                          "x" : 338.675,
+                          "y" : 580.2
+                        },
+                        "control2" : {
+                          "x" : 310,
+                          "y" : 537.575
+                        },
+                        "to" : {
+                          "x" : 253.425,
+                          "y" : 451.54999999999995
+                        }
+                      }
+                    },
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 386.725,
+                          "y" : 265.54999999999995
+                        }
+                      }
+                    },
+                    {
+                      "line" : {
+                        "to" : {
+                          "x" : 282.875,
+                          "y" : 265.54999999999995
+                        }
+                      }
+                    },
+                    {
+                      "cubic" : {
+                        "control1" : {
+                          "x" : 228.625,
+                          "y" : 342.275
+                        },
+                        "control2" : {
+                          "x" : 200.725,
+                          "y" : 380.25
+                        },
+                        "to" : {
+                          "x" : 148.025,
+                          "y" : 458.525
+                        }
+                      }
+                    },
+                    {
+                      "cubic" : {
+                        "control1" : {
+                          "x" : 201.5,
+                          "y" : 542.225
+                        },
+                        "control2" : {
+                          "x" : 229.4,
+                          "y" : 582.525
+                        },
+                        "to" : {
+                          "x" : 285.975,
+                          "y" : 666.225
+                        }
+                      }
+                    }
+                  ],
+                  "startPoint" : {
+                    "x" : 285.975,
+                    "y" : 666.225
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "style" : {
+          "blendMode" : "normal",
+          "effects" : [
+
+          ],
+          "fills" : [
+            {
+              "blendMode" : "normal",
+              "opacity" : 1,
+              "paint" : {
+                "literal" : {
+                  "_0" : {
+                    "alpha" : 1,
+                    "blue" : 0.18,
+                    "green" : 0.16,
+                    "red" : 0.15
+                  }
+                }
+              },
+              "visible" : true
+            }
+          ],
+          "opacity" : {
+            "literal" : {
+              "_0" : 1
+            }
+          },
+          "textAlignment" : "leading",
+          "textOverflow" : "wrap",
+          "typeStyle" : {
+            "literal" : {
+              "_0" : {
+                "fontFamily" : "Apple SD Gothic Neo",
+                "fontSize" : 775,
+                "fontWeight" : "black",
+                "letterSpacing" : 0,
+                "lineSpacing" : 0,
+                "variableAxes" : {
+
+                }
+              }
+            }
+          }
+        },
+        "transform" : {
+          "rotation" : 0,
+          "scale" : {
+            "x" : 1,
+            "y" : 1
+          },
+          "translation" : {
+            "x" : 291.825,
+            "y" : 100.30000000000007
+          }
+        },
+        "visible" : true
+      },
+      {
+        "rawValue" : "577BD489-3AC6-4CDB-827F-1D14C2BD2209"
+      },
+      {
+        "children" : [
+
+        ],
+        "compositing" : {
+
+        },
+        "frame" : {
+          "height" : 930,
+          "width" : 509,
+          "x" : 431,
+          "y" : 508
+        },
+        "id" : {
+          "rawValue" : "577BD489-3AC6-4CDB-827F-1D14C2BD2209"
+        },
+        "layout" : {
+          "constraints" : {
+
+          }
+        },
+        "locked" : false,
+        "name" : "Text",
+        "payload" : {
+          "text" : {
+            "_0" : {
+              "runs" : [
+
+              ],
+              "string" : "K"
+            }
+          }
+        },
+        "style" : {
+          "blendMode" : "normal",
+          "effects" : [
+
+          ],
+          "fills" : [
+            {
+              "blendMode" : "normal",
+              "opacity" : 1,
+              "paint" : {
+                "literal" : {
+                  "_0" : {
+                    "alpha" : 1,
+                    "blue" : 0.18,
+                    "green" : 0.16,
+                    "red" : 0.15
+                  }
+                }
+              },
+              "visible" : true
+            }
+          ],
+          "opacity" : {
+            "literal" : {
+              "_0" : 1
+            }
+          },
+          "textAlignment" : "leading",
+          "textOverflow" : "wrap",
+          "typeStyle" : {
+            "literal" : {
+              "_0" : {
+                "fontFamily" : "Array",
+                "fontSize" : 775,
+                "fontWeight" : "medium",
+                "letterSpacing" : 0,
+                "lineSpacing" : 0,
+                "variableAxes" : {
+
+                }
+              }
+            }
+          }
+        },
+        "transform" : {
+          "rotation" : 0,
+          "scale" : {
+            "x" : 1,
+            "y" : 1
+          },
+          "translation" : {
+            "x" : -173,
+            "y" : -461
+          }
+        },
+        "visible" : true
+      }
+    ]
+  },
+  "pages" : [
+    {
+      "artboards" : [
+        {
+          "background" : {
+            "alpha" : 1,
+            "blue" : 1,
+            "green" : 1,
+            "red" : 1
+          },
+          "children" : [
+            {
+              "rawValue" : "438FD0C1-3C5D-4276-8046-DE84E3E7792C"
+            }
+          ],
+          "frame" : {
+            "height" : 1024,
+            "width" : 1024,
+            "x" : 0,
+            "y" : 0
+          },
+          "id" : {
+            "rawValue" : "09B03AA7-E4EF-456A-A366-9D7DCFDA8E32"
+          },
+          "name" : "Artboard 1"
+        },
+        {
+          "background" : {
+            "alpha" : 1,
+            "blue" : 1,
+            "green" : 1,
+            "red" : 1
+          },
+          "children" : [
+            {
+              "rawValue" : "577BD489-3AC6-4CDB-827F-1D14C2BD2209"
+            }
+          ],
+          "frame" : {
+            "height" : 1024,
+            "width" : 1024,
+            "x" : 1097,
+            "y" : 0
+          },
+          "id" : {
+            "rawValue" : "D5B75AF1-6B00-4233-8520-5B78E9B3AF5C"
+          },
+          "name" : "Artboard 1"
+        },
+        {
+          "background" : {
+            "alpha" : 0,
+            "blue" : 1,
+            "green" : 1,
+            "red" : 1
+          },
+          "children" : [
+            {
+              "rawValue" : "19EE498E-DD21-4AF6-AEE2-342D98CD633E"
+            }
+          ],
+          "frame" : {
+            "height" : 1024,
+            "width" : 1024,
+            "x" : 2233,
+            "y" : 0
+          },
+          "id" : {
+            "rawValue" : "2BFF857D-B87E-4235-A6BE-FE6724BF1185"
+          },
+          "name" : "Artboard 1"
+        }
+      ],
+      "children" : [
+
+      ],
+      "guides" : [
+
+      ],
+      "id" : {
+        "rawValue" : "3FE955CD-441B-4BAC-9F7D-743AEB22A25D"
+      },
+      "name" : "Page 1",
+      "zOrder" : [
+        {
+          "artboard" : {
+            "_0" : {
+              "rawValue" : "09B03AA7-E4EF-456A-A366-9D7DCFDA8E32"
+            }
+          }
+        },
+        {
+          "artboard" : {
+            "_0" : {
+              "rawValue" : "D5B75AF1-6B00-4233-8520-5B78E9B3AF5C"
+            }
+          }
+        },
+        {
+          "artboard" : {
+            "_0" : {
+              "rawValue" : "2BFF857D-B87E-4235-A6BE-FE6724BF1185"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "tokens" : {
+    "colors" : [
+
+    ],
+    "effects" : [
+
+    ],
+    "radii" : [
+
+    ],
+    "spacings" : [
+
+    ],
+    "typeStyles" : [
+
+    ]
+  }
+}

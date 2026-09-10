@@ -1,0 +1,1660 @@
+import Foundation
+import AppKit
+import Combine
+import ImageIO
+import UniformTypeIdentifiers
+
+/// Manages a collection of imported images with async thumbnail generation.
+@MainActor
+final class ImageCollection: ObservableObject {
+
+    /// A Photos picker payload. The local identifier is preferred for durable edit identity; the
+    /// ordinal fallback keeps two picker items with identical bytes distinct when the provider does
+    /// not expose an identifier.
+    struct PhotoImportItem: Sendable, Equatable {
+        let name: String
+        let data: Data
+        let localIdentifier: String?
+        /// Computed once while the transferred payload is handed to the import pipeline. The
+        /// digest is shared by the durable source record, thumbnails, and the first render.
+        let contentDigest: String
+
+        init(name: String, data: Data, localIdentifier: String? = nil, contentDigest: String? = nil) {
+            self.name = name
+            self.data = data
+            self.localIdentifier = localIdentifier
+            self.contentDigest = contentDigest ?? PhotoAssetID.contentDigest(data)
+        }
+    }
+
+    /// A display-only reservation made before a streamed Photos payload arrives. It deliberately
+    /// contains no source bytes or `PhotoAsset`; the slot exists only to keep the destination
+    /// thumbnail order stable while the provider transfers the corresponding item.
+    struct PendingImportSlot: Identifiable, Equatable, Sendable {
+        enum State: String, Sendable, Equatable {
+            case pending
+            case failed
+        }
+
+        let id: PhotoAssetID
+        let ordinal: Int
+        var assetID: PhotoAssetID?
+        var name: String?
+        var state: State
+
+        init(ordinal: Int, name: String? = nil, state: State = .pending) {
+            self.id = .imported(UUID())
+            self.ordinal = ordinal
+            self.assetID = nil
+            self.name = name
+            self.state = state
+        }
+    }
+
+    /// The ordered thumbnail presentation. Loaded entries carry an index into `items`; pending
+    /// and failed entries carry only their reservation metadata and therefore cannot be selected.
+    struct ThumbnailEntry: Identifiable, Equatable {
+        let id: PhotoAssetID
+        let itemIndex: Int?
+        let placeholder: PendingImportSlot?
+        let aspectRatio: Double
+
+        var isPlaceholder: Bool { placeholder != nil }
+    }
+
+    final class Item: ObservableObject, Identifiable {
+        @Published var asset: PhotoAsset
+        @Published var thumbnail: NSImage?
+        /// The source thumbnail remains available while an edited render is being produced. Keeping
+        /// it separate prevents a slow edited render from turning a useful cell into a spinner and
+        /// lets a failed render fall back to the original source image.
+        private var originalThumbnail: NSImage?
+        private var editedThumbnail: NSImage?
+        private var editedThumbnailUsesFallback = false
+        private(set) var editedThumbnailRevision: String?
+        /// Filled after discovery. A nil value means deferred metadata work has not completed.
+        @Published var metadata: ImageMetadata? = nil
+        /// Relative directory from the source-folder root ("" for top level).
+        /// Drives the grouped file browser; empty for Photos imports.
+        @Published var subfolder: String
+
+        var id: PhotoAssetID { asset.id }
+        var url: URL? { asset.url }
+        var displayName: String { asset.displayName }
+        var imageData: Data? { asset.source.data }
+        var dataFingerprint: String? { asset.source.fingerprint.sampleDigest }
+        var thumbnailNativeExtent: CGSize {
+            guard let dimensions = asset.dimensions,
+                  dimensions.width > 0, dimensions.height > 0 else { return .zero }
+            return CGSize(width: dimensions.width, height: dimensions.height)
+        }
+
+        /// The upright display ratio is available from deferred metadata as soon as ImageIO has
+        /// read it. Until then use a photographic 4:3 placeholder, which keeps the first layout
+        /// deterministic and independent of thumbnail completion order.
+        var libraryAspectRatio: Double {
+            guard let dimensions = asset.dimensions,
+                  dimensions.width > 0, dimensions.height > 0 else { return 4.0 / 3.0 }
+            return LibraryGridLayout.normalizedAspectRatio(
+                Double(dimensions.width) / Double(dimensions.height)
+            )
+        }
+
+        init(
+            asset: PhotoAsset,
+            thumbnail: NSImage? = nil,
+            metadata: ImageMetadata? = nil,
+            subfolder: String = ""
+        ) {
+            self.asset = asset
+            self.thumbnail = thumbnail
+            self.originalThumbnail = thumbnail
+            self.metadata = metadata
+            self.subfolder = subfolder
+        }
+
+        func setOriginalThumbnail(_ thumbnail: NSImage?) {
+            originalThumbnail = thumbnail
+            if editedThumbnailRevision == nil || editedThumbnailUsesFallback {
+                self.thumbnail = thumbnail
+            }
+        }
+
+        func invalidateEditedThumbnail() {
+            editedThumbnailRevision = nil
+            editedThumbnail = nil
+            editedThumbnailUsesFallback = false
+            thumbnail = originalThumbnail
+        }
+
+        func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
+            guard editedThumbnailRevision == nil || editedThumbnailRevision != revision else { return }
+            editedThumbnailRevision = revision
+            editedThumbnail = thumbnail
+            editedThumbnailUsesFallback = thumbnail == nil
+            self.thumbnail = thumbnail ?? originalThumbnail
+        }
+
+        /// UI compatibility initializer. The durable record is built first; the AppKit thumbnail
+        /// remains a presentation concern of `ImageCollection.Item`.
+        convenience init(
+            url: URL?,
+            displayName: String,
+            thumbnail: NSImage? = nil,
+            imageData: Data?,
+            metadata: ImageMetadata? = nil,
+            subfolder: String = ""
+        ) {
+            if let url {
+                self.init(asset: PhotoAsset(url: url, filename: displayName), thumbnail: thumbnail,
+                          metadata: metadata, subfolder: subfolder)
+            } else if let imageData {
+                self.init(asset: PhotoAsset(data: imageData, filename: displayName), thumbnail: thumbnail,
+                          metadata: metadata, subfolder: subfolder)
+            } else {
+                preconditionFailure("An image item needs either a URL or image data")
+            }
+        }
+    }
+
+    /// A non-fatal problem encountered while a folder is being discovered or its deferred data is
+    /// loaded. The scan keeps publishing usable files when one file disappears or is malformed.
+    struct ScanWarning: Identifiable, Equatable, Sendable {
+        let id: String
+        let message: String
+
+        init(id: String, message: String) {
+            self.id = id
+            self.message = message
+        }
+    }
+
+    @Published var items: [Item] = []
+    @Published var selectedIndex: Int = 0
+    @Published private(set) var selection = LibrarySelectionModel()
+    @Published var isActive: Bool = false
+    @Published var isScanning: Bool = false
+    @Published private(set) var scanWarnings: [ScanWarning] = []
+    @Published private(set) var filter = LibraryFilter.all
+    /// The persistent user-selected source folder, if one is set. Imported files live in
+    /// `libraryFolderURL` and are present regardless of this value.
+    @Published var sourceFolderURL: URL?
+
+    /// AppViewModel supplies the edit-aware half of thumbnail generation. The collection owns
+    /// admission and the shared item bitmap; the app model owns edit-store and Look resolution.
+    var onThumbnailDemand: (@MainActor @Sendable (PhotoAssetID, ImageWorkScheduler.Priority) -> Void)?
+
+    /// Kromora's managed, durable destination for files imported from Photos or one-off opens.
+    /// This is intentionally injectable for tests and remains separate from a user's source folder.
+    let libraryFolderURL: URL
+
+    /// Revisions cover only inputs to the shared collection projections. In particular, thumbnail
+    /// state and the decoded NSImage live on `Item` and do not advance this value.
+    private var collectionRevision: UInt64 = 0
+    private var filterRevision: UInt64 = 0
+    private var projectionCache = CollectionProjection.Cache()
+
+    private static let bookmarkKey = "imageSourceFolderBookmark"
+    private static let cullingStateKey = "imageLibraryCullingState"
+    private struct PersistedCullingState: Codable, Equatable {
+        let rating: Int
+        let flag: PhotoFlag
+
+        var libraryState: PhotoAssetLibraryState {
+            PhotoAssetLibraryState(rating: rating, flag: flag)
+        }
+    }
+
+    private let defaults: UserDefaults
+    private var persistedCullingStates: [String: PersistedCullingState]
+    private struct CullingChange {
+        let itemID: PhotoAssetID
+        let oldState: PhotoAssetLibraryState
+        let activeIDBefore: PhotoAssetID?
+    }
+    private var cullingUndoStack: [CullingChange] = []
+    private var scanTask: Task<Void, Never>?
+    private var scanGeneration: UInt64 = 0
+    /// Finishes the current discovery stream when a scan is cancelled. Cancelling the consumer
+    /// task alone does not wake an `AsyncStream` waiting for its next element.
+    private var discoveryContinuation: AsyncStream<DiscoveryEvent>.Continuation?
+    private var metadataTask: Task<Void, Never>?
+    private var metadataContinuation: AsyncStream<MetadataRequest>.Continuation?
+    private let scheduler: ImageWorkScheduler
+    private var thumbnailJobIDs: Set<ImageWorkScheduler.JobID> = []
+    private var thumbnailGeneration: UInt64 = 0
+    /// Grid cells opt into this mode when they appear. The fallback mode keeps the inherited
+    /// filmstrip/source-browser behavior, while the grid admits only its visible/prefetched cells.
+    private var isThumbnailDemandDriven = false
+    private var thumbnailDemandIDs: Set<PhotoAssetID> = []
+    private var thumbnailDemandPriorities: [PhotoAssetID: ImageWorkScheduler.Priority] = [:]
+    /// The selected filmstrip item and its small neighborhood stay warm even when SwiftUI has not
+    /// materialized those cells yet. This keeps ←/→ stepping from waiting on a cold thumbnail.
+    private var preparedThumbnailIDs: Set<PhotoAssetID> = []
+    /// Reservations are kept separate from `items` so a placeholder can never become a selection
+    /// or editing target. They are cleared once the streamed operation ends.
+    @Published private(set) var pendingImportSlots: [PendingImportSlot] = []
+    /// Data imports can finish out of order. Keeping their ordinals alongside the items preserves
+    /// picker order without changing the stable source IDs used by editing and persistence.
+    private var dataImportOrdinals: [Int] = []
+    private var dataImportStartIndex = 0
+    private var dataImportAcceptedCount = 0
+    /// Arrivals without a matching reservation are an exceptional provider/caller condition. Keep
+    /// their IDs so the projection can render them at the tail instead of silently hiding them.
+    private var dataImportOverflowItemIDs: Set<PhotoAssetID> = []
+    /// The streamed-import projection is evaluated by multiple views on every update. Keep the
+    /// source ID lookup alongside the ordinal array so projecting loaded slots does not scan all
+    /// items once per slot.
+    private var dataImportItemIndices: [PhotoAssetID: Int] = [:]
+    /// Folder whose security scope we hold open, released when we move on.
+    private var scopedURL: URL?
+
+    init(
+        scheduler: ImageWorkScheduler = ImageWorkScheduler(),
+        defaults: UserDefaults = .standard,
+        libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL
+    ) {
+        let standardizedLibraryFolderURL = libraryFolderURL.standardizedFileURL
+        let standardizedDefaultLibraryFolderURL = Self.defaultLibraryFolderURL.standardizedFileURL
+        if Self.shouldRejectProductionLibraryInTests,
+           standardizedLibraryFolderURL == standardizedDefaultLibraryFolderURL {
+            preconditionFailure(
+                "Tests must use TempDirectoryTestCase.makeTestCollection() with an isolated "
+                    + "libraryFolderURL and UserDefaults."
+            )
+        }
+        self.scheduler = scheduler
+        self.defaults = defaults
+        self.libraryFolderURL = standardizedLibraryFolderURL
+        if let data = defaults.data(forKey: Self.cullingStateKey),
+           let states = try? JSONDecoder().decode([String: PersistedCullingState].self, from: data) {
+            self.persistedCullingStates = states
+        } else {
+            self.persistedCullingStates = [:]
+        }
+    }
+
+    nonisolated static var defaultLibraryFolderURL: URL {
+        KromoraStorage.applicationSupportRoot()
+            .appendingPathComponent("Library", isDirectory: true)
+    }
+
+    private nonisolated static var shouldRejectProductionLibraryInTests: Bool {
+        ProcessInfo.processInfo.environment["KROMORA_TEST_ISOLATION"] == "1"
+            || NSClassFromString("XCTestCase") != nil
+    }
+
+    deinit {
+        metadataContinuation?.finish()
+        metadataTask?.cancel()
+        scopedURL?.stopAccessingSecurityScopedResource()
+    }
+
+    var selectedItem: Item? {
+        guard isActive, let activeID = selection.activeID else { return nil }
+        return items.first { $0.id == activeID }
+    }
+
+    /// Token for callers that wait on a scan and must not act on a later incremental import that
+    /// cancelled that scan.
+    var scanToken: UInt64 { scanGeneration }
+
+    /// The current edit-transfer destinations, in source order. The active item remains separate
+    /// from this selection so command-click can prepare a batch without changing the open photo.
+    var selectedIndices: [Int] {
+        CollectionProjection.selectedIndices(items: items, selection: selection)
+    }
+
+    var selectedItems: [Item] {
+        selectedIndices.map { items[$0] }
+    }
+
+    var filteredItems: [Item] {
+        let projection = collectionProjection
+        return projection.filteredIndices.map { items[$0] }
+    }
+
+    var filteredIndices: [Int] {
+        collectionProjection.filteredIndices
+    }
+
+    var filteredItemCount: Int { filteredIndices.count }
+
+    /// Internal performance evidence for the opt-in large-library benchmark and cache tests.
+    var projectionRebuildCount: Int { projectionCache.rebuildCount }
+
+    func setFilter(_ filter: LibraryFilter) {
+        guard self.filter != filter else { return }
+        self.filter = filter
+        filterRevision &+= 1
+        reconcileFilteredSelection()
+    }
+
+    func clearFilter() {
+        setFilter(.all)
+    }
+
+    /// Set the focused asset's flag. Pick/reject keyboard workflows advance to the next visible
+    /// asset; callers can opt out for a toolbar or programmatic edit.
+    @discardableResult
+    func setFlag(_ flag: PhotoFlag, for id: PhotoAssetID? = nil, advance shouldAdvance: Bool = false) -> Bool {
+        guard let itemID = id ?? selectedItem?.id,
+              let index = items.firstIndex(where: { $0.id == itemID }) else { return false }
+        let oldState = items[index].asset.libraryState
+        guard oldState.flag != flag else {
+            if shouldAdvance { advance(from: index) }
+            return false
+        }
+        recordCullingChange(itemID: itemID, oldState: oldState)
+        invalidateCollectionProjection(notify: true)
+        items[index].asset.flag = flag
+        persistCullingState(for: items[index].asset)
+        if shouldAdvance { advance(from: index) }
+        if !filteredIndices.contains(selectedIndex) { reconcileFilteredSelection() }
+        return true
+    }
+
+    /// Set the focused asset's star rating without advancing the browsing focus.
+    @discardableResult
+    func setRating(_ rating: Int, for id: PhotoAssetID? = nil) -> Bool {
+        guard let itemID = id ?? selectedItem?.id,
+              let index = items.firstIndex(where: { $0.id == itemID }) else { return false }
+        let clamped = min(max(rating, 0), 5)
+        let oldState = items[index].asset.libraryState
+        guard oldState.rating != clamped else { return false }
+        recordCullingChange(itemID: itemID, oldState: oldState)
+        invalidateCollectionProjection(notify: true)
+        items[index].asset.rating = clamped
+        persistCullingState(for: items[index].asset)
+        if !filteredIndices.contains(selectedIndex) { reconcileFilteredSelection() }
+        return true
+    }
+
+    var canUndoCulling: Bool { !cullingUndoStack.isEmpty }
+
+    @discardableResult
+    func undoLastCullingChange() -> Bool {
+        guard let change = cullingUndoStack.popLast(),
+              let index = items.firstIndex(where: { $0.id == change.itemID }) else { return false }
+        items[index].asset.libraryState = change.oldState
+        invalidateCollectionProjection(notify: true)
+        persistCullingState(for: items[index].asset)
+        if let activeID = change.activeIDBefore,
+           filteredIndices.contains(where: { items[$0].id == activeID }) {
+            var next = selection
+            next.focus(activeID, in: items.map(\.id))
+            selection = next
+            syncSelectedIndex()
+        } else {
+            reconcileFilteredSelection()
+        }
+        return true
+    }
+
+    // MARK: - Source folder
+
+    /// Set (and persist) a folder as the image source: saves a security-scoped
+    /// bookmark, records the URL, and scans it. Mirrors `LUTLibrary`'s folder
+    /// persistence so the source survives relaunches and the App Sandbox.
+    @discardableResult
+    func setSourceFolder(_ url: URL) -> Bool {
+        stopScopedURL()
+        let didPersistBookmark = saveBookmark(for: url)
+        sourceFolderURL = url
+        loadFromFolder(url)
+        return didPersistBookmark
+    }
+
+    /// Restore a previously-chosen source folder on launch. Returns true if a
+    /// folder was resolved; the scan itself runs asynchronously.
+    @discardableResult
+    func restoreSourceFolder() -> Bool {
+        guard let data = defaults.data(forKey: Self.bookmarkKey) else { return false }
+        var isStale = false
+        guard let url = try? URL(
+            resolvingBookmarkData: data,
+            options: [.withSecurityScope],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ), url.startAccessingSecurityScopedResource() else { return false }
+
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = url
+
+        // A stale bookmark resolves this once but won't next launch; mint a
+        // fresh one now that access is held.
+        if isStale { saveBookmark(for: url) }
+
+        sourceFolderURL = url
+        loadFromFolder(url)
+        return true
+    }
+
+    /// Whether launch found a persisted source-folder choice. This is deliberately separate from
+    /// `restoreSourceFolder()`: an unreadable bookmark must not be mistaken for a first launch,
+    /// because doing so would silently switch the user to the managed-library fallback.
+    var hasPersistedSourceFolderBookmark: Bool {
+        defaults.data(forKey: Self.bookmarkKey) != nil
+    }
+
+    /// Restore Kromora-managed imports when no user source folder is configured. The folder is not
+    /// created on launch, so a clean profile remains an empty library without a warning.
+    @discardableResult
+    func restoreLibrary() -> Bool {
+        guard Self.isDirectory(libraryFolderURL), Self.containsSupportedImage(in: libraryFolderURL) else {
+            return false
+        }
+        sourceFolderURL = nil
+        loadFromFolder(libraryFolderURL)
+        return true
+    }
+
+    @discardableResult
+    private func saveBookmark(for url: URL) -> Bool {
+        do {
+            let bookmark = try url.bookmarkData(
+                options: [.withSecurityScope],
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            // Do not leave a bookmark behind that this process cannot resolve using the same
+            // security-scope contract used at relaunch. The source remains usable for the current
+            // session, but the failed persistence is reported rather than silently becoming a
+            // future restore failure.
+            var isStale = false
+            guard let resolved = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ), resolved.startAccessingSecurityScopedResource() else {
+                print("Failed to validate source bookmark for \(url.path)")
+                return false
+            }
+            resolved.stopAccessingSecurityScopedResource()
+            defaults.set(bookmark, forKey: Self.bookmarkKey)
+            return true
+        } catch {
+            print("Failed to save source bookmark: \(error)")
+            return false
+        }
+    }
+
+    /// Re-scan the current source folder (e.g. after files change on disk).
+    func refresh() {
+        let url = sourceFolderURL ?? libraryFolderURL
+        guard Self.isDirectory(url) else { return }
+        loadFromFolder(url)
+    }
+
+    /// Wait for the in-flight folder scan and its deferred metadata work to finish, so callers
+    /// that need a complete asset snapshot (open the first image, say) can do so without racing it.
+    func scanCompletion() async {
+        await scanTask?.value
+        await metadataTask?.value
+    }
+
+    /// Wait for metadata already queued by the current scan/import to finish. Thumbnail work is
+    /// intentionally not included: it is demand-prioritized and may continue while the user edits.
+    func metadataCompletion() async {
+        await metadataTask?.value
+    }
+
+    /// Stop collection-owned discovery, metadata, and thumbnail work and wait for the detached
+    /// readers to observe cancellation. This is an explicit lifecycle seam for fixture teardown;
+    /// normal source changes continue to use the non-blocking cancellation paths below.
+    func shutdown() async {
+        scanGeneration &+= 1
+        cancelThumbnailWork()
+        discoveryContinuation?.finish()
+        discoveryContinuation = nil
+        let scan = scanTask
+        scanTask?.cancel()
+        scanTask = nil
+
+        let metadata = metadataTask
+        stopMetadataLoading()
+
+        if let scan { await scan.value }
+        if let metadata { await metadata.value }
+        stopScopedURL()
+        isScanning = false
+    }
+
+    /// Scan a folder recursively for supported images, recording each file's
+    /// relative subfolder so the browser can group them. Items are ordered by
+    /// subfolder, then natural filename order.
+    ///
+    /// The enumeration runs off the main actor — a deep folder on a slow or
+    /// network volume would otherwise stall the window, and this runs during
+    /// app launch when a source folder is restored.
+    func loadFromFolder(_ url: URL) {
+        scanGeneration &+= 1
+        let generation = scanGeneration
+        cancelThumbnailWork()
+        discoveryContinuation?.finish()
+        discoveryContinuation = nil
+        scanTask?.cancel()
+        stopMetadataLoading()
+        items = []
+        invalidateCollectionProjection()
+        pendingImportSlots.removeAll()
+        dataImportOrdinals.removeAll()
+        dataImportOverflowItemIDs.removeAll()
+        dataImportItemIndices.removeAll()
+        selectedIndex = 0
+        selection.clear()
+        thumbnailDemandIDs.removeAll()
+        thumbnailDemandPriorities.removeAll()
+        preparedThumbnailIDs.removeAll()
+        isActive = false
+        isScanning = true
+        scanWarnings = []
+        startMetadataLoading()
+
+        scanTask = Task { [weak self] in
+            guard let self else { return }
+            var interval = KromoraSignpostInterval(
+                .scan,
+                context: KromoraTraceContext(sourceFingerprint: url.standardizedFileURL.path, quality: "background")
+            )
+            defer { interval.end() }
+
+            var seenItemIDs = Set<PhotoAssetID>()
+            for scanURL in self.scanURLs(primary: url) {
+                let (stream, continuation) = Self.discoveryStream(
+                    scanURL, managedLibraryURL: self.libraryFolderURL
+                )
+                self.discoveryContinuation = continuation
+                for await event in stream {
+                    guard !Task.isCancelled, self.scanGeneration == generation else { return }
+                    switch event {
+                    case .warning(let warning):
+                        self.addScanWarning(warning)
+                    case .batch(let discoveries):
+                        for discovery in discoveries {
+                            guard seenItemIDs.insert(discovery.asset.id).inserted else { continue }
+                            let item = Item(
+                                asset: restoredCullingState(for: discovery.asset),
+                                thumbnail: nil,
+                                metadata: nil,
+                                subfolder: discovery.subfolder
+                            )
+                            self.items.append(item)
+                            self.enqueueMetadata(for: item, generation: generation)
+                        }
+
+                        self.invalidateCollectionProjection()
+                        self.reconcileSelection()
+                        self.isActive = !self.items.isEmpty
+                        self.generateThumbnails()
+                        // Let SwiftUI and cancellation run between batches even on a fast local disk.
+                        await Task.yield()
+                    }
+                }
+                self.discoveryContinuation = nil
+            }
+
+            guard !Task.isCancelled, self.scanGeneration == generation else { return }
+            self.isScanning = false
+            self.metadataContinuation?.finish()
+            self.metadataContinuation = nil
+        }
+    }
+
+    private func scanURLs(primary: URL) -> [URL] {
+        let canonicalPrimary = primary.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalLibrary = libraryFolderURL.standardizedFileURL.resolvingSymlinksInPath()
+        // A user-selected source folder remains an isolated browsing scope. Managed imports are
+        // scanned when the managed library itself is restored, while the in-memory collection
+        // still retains any imports already present when a new source is chosen.
+        return [canonicalPrimary == canonicalLibrary ? canonicalLibrary : canonicalPrimary]
+    }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
+    }
+
+    private static func containsSupportedImage(in url: URL) -> Bool {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]
+        ) else { return false }
+        return enumerator.lazy.compactMap { $0 as? URL }.contains { imageURL in
+            guard (try? imageURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else {
+                return false
+            }
+            return ImageDecoder.supportedExtensions.contains(imageURL.pathExtension.lowercased())
+        }
+    }
+
+    private struct DiscoveredItem: Sendable {
+        let url: URL
+        let asset: PhotoAsset
+        let displayName: String
+        let subfolder: String
+    }
+
+    private enum DiscoveryEvent: Sendable {
+        case batch([DiscoveredItem])
+        case warning(String)
+    }
+
+    private struct MetadataRequest: Sendable {
+        let itemID: PhotoAssetID
+        let generation: UInt64
+        let name: String
+        let source: ImageSource.Backing
+    }
+
+    private enum MetadataOutcome: Sendable {
+        case success(ImageMetadata)
+        case failure(String)
+    }
+
+    private nonisolated static let scanBatchSize = 32
+
+    /// Discover file names, relative folders, and durable file identities off the main actor.
+    /// Resource values and the bounded fingerprint are captured before a record crosses to the
+    /// publication task; dimensions and capture metadata remain a separate deferred stage.
+    private nonisolated static func discoveryStream(
+        _ url: URL, managedLibraryURL: URL
+    ) -> (stream: AsyncStream<DiscoveryEvent>, continuation: AsyncStream<DiscoveryEvent>.Continuation) {
+        let (stream, continuation) = AsyncStream<DiscoveryEvent>.makeStream()
+        let producer = Task.detached {
+            let fm = FileManager.default
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+                _ = continuation.yield(.warning("Can't find “\(url.lastPathComponent)” — it may have been moved or renamed."))
+                continuation.finish()
+                return
+            }
+            guard fm.isReadableFile(atPath: url.path) else {
+                _ = continuation.yield(.warning("No permission to read “\(url.lastPathComponent)”."))
+                continuation.finish()
+                return
+            }
+            guard let enumerator = fm.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) else {
+                _ = continuation.yield(.warning("Can't read “\(url.lastPathComponent)”."))
+                continuation.finish()
+                return
+            }
+
+            let rootPath = url.resolvingSymlinksInPath().path
+            let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+            var discoveries: [DiscoveredItem] = []
+            while let fileURL = enumerator.nextObject() as? URL {
+                guard !Task.isCancelled else { break }
+                let values = try? fileURL.resourceValues(forKeys: [.isRegularFileKey])
+                guard values?.isRegularFile == true else { continue }
+                let ext = fileURL.pathExtension.lowercased()
+                guard ImageDecoder.supportedExtensions.contains(ext) else { continue }
+
+                if !fm.isReadableFile(atPath: fileURL.path) {
+                    _ = continuation.yield(.warning("Skipping unreadable image “\(fileURL.lastPathComponent)”."))
+                    continue
+                }
+
+                let name = Self.displayName(for: fileURL, root: url, managedLibraryURL: managedLibraryURL)
+                let dir = fileURL.deletingLastPathComponent().resolvingSymlinksInPath().path
+                let subfolder = dir == rootPath || dir.hasPrefix(rootPrefix)
+                    ? String(dir.dropFirst(rootPath.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    : ""
+                let canonicalURL = fileURL.standardizedFileURL.resolvingSymlinksInPath()
+                let fingerprint = PhotoSourceFingerprint.file(at: canonicalURL)
+                let asset = PhotoAsset(
+                    source: PhotoAssetSource(
+                        url: canonicalURL,
+                        fingerprint: fingerprint
+                    ),
+                    filename: name,
+                    fileType: canonicalURL.pathExtension
+                )
+                discoveries.append(DiscoveredItem(
+                    url: canonicalURL,
+                    asset: asset,
+                    displayName: name,
+                    subfolder: subfolder
+                ))
+            }
+
+            guard !Task.isCancelled else {
+                continuation.finish()
+                return
+            }
+            discoveries.sort(by: discoveredItemPrecedes)
+            for start in stride(from: 0, to: discoveries.count, by: scanBatchSize) {
+                guard !Task.isCancelled else { return }
+                let end = min(start + scanBatchSize, discoveries.count)
+                guard case .enqueued = continuation.yield(
+                    .batch(Array(discoveries[start..<end]))
+                ) else { return }
+                await Task.yield()
+            }
+            continuation.finish()
+        }
+        continuation.onTermination = { _ in producer.cancel() }
+        return (stream, continuation)
+    }
+
+    private nonisolated static func discoveredItemPrecedes(
+        _ lhs: DiscoveredItem, _ rhs: DiscoveredItem
+    ) -> Bool {
+        if lhs.subfolder != rhs.subfolder {
+            return lhs.subfolder.localizedStandardCompare(rhs.subfolder) == .orderedAscending
+        }
+        let nameOrder = lhs.displayName.localizedStandardCompare(rhs.displayName)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        return lhs.url.standardizedFileURL.path < rhs.url.standardizedFileURL.path
+    }
+
+    private nonisolated static func displayName(
+        for fileURL: URL, root: URL, managedLibraryURL: URL
+    ) -> String {
+        let filename = fileURL.lastPathComponent
+        let canonicalRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalLibrary = managedLibraryURL.standardizedFileURL.resolvingSymlinksInPath()
+        if canonicalRoot == canonicalLibrary,
+           filename.count > 17,
+           filename[filename.index(filename.startIndex, offsetBy: 16)] == "-" {
+            let prefix = filename.prefix(16)
+            if prefix.allSatisfy({ $0.isHexDigit }) {
+                let original = String(filename.dropFirst(17))
+                return URL(fileURLWithPath: original).deletingPathExtension().lastPathComponent
+            }
+        }
+        return fileURL.deletingPathExtension().lastPathComponent
+    }
+
+    // MARK: - Deferred metadata
+
+    private func startMetadataLoading() {
+        let (stream, continuation) = AsyncStream<MetadataRequest>.makeStream()
+        metadataContinuation = continuation
+        metadataTask = Task.detached { [weak self] in
+            for await request in stream {
+                guard !Task.isCancelled else { return }
+                let outcome = Self.readMetadata(request.source, name: request.name)
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self?.applyMetadata(outcome, itemID: request.itemID, generation: request.generation)
+                }
+            }
+        }
+    }
+
+    private func stopMetadataLoading() {
+        metadataContinuation?.finish()
+        metadataContinuation = nil
+        metadataTask?.cancel()
+        metadataTask = nil
+    }
+
+    private func enqueueMetadata(for item: Item, generation: UInt64) {
+        guard let source = item.url.map(ImageSource.Backing.url)
+            ?? item.imageData.map(ImageSource.Backing.data) else { return }
+        _ = metadataContinuation?.yield(MetadataRequest(
+            itemID: item.id,
+            generation: generation,
+            name: item.url?.lastPathComponent ?? item.displayName,
+            source: source
+        ))
+    }
+
+    private nonisolated static func readMetadata(
+        _ source: ImageSource.Backing, name: String
+    ) -> MetadataOutcome {
+        switch source {
+        case .url(let url):
+            guard FileManager.default.isReadableFile(atPath: url.path),
+                  let imageSource = CGImageSourceCreateWithURL(url as CFURL, nil),
+                  CGImageSourceGetCount(imageSource) > 0 else {
+                return .failure("Skipping unreadable image “\(name)”.")
+            }
+            return .success(ImageMetadata.read(from: url))
+        case .data(let data):
+            guard let imageSource = CGImageSourceCreateWithData(data as CFData, nil),
+                  CGImageSourceGetCount(imageSource) > 0 else {
+                return .failure("Skipping unreadable image “\(name)”.")
+            }
+            return .success(ImageMetadata.read(from: data))
+        }
+    }
+
+    private func applyMetadata(_ outcome: MetadataOutcome, itemID: PhotoAssetID, generation: UInt64) {
+        guard generation == scanGeneration,
+              let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        switch outcome {
+        case .success(let metadata):
+            items[index].metadata = metadata
+            items[index].asset.updateMetadata(from: metadata)
+            invalidateCollectionProjection(notify: true)
+        case .failure(let warning):
+            addScanWarning(warning)
+            let item = items[index]
+            if let slotIndex = pendingImportSlots.firstIndex(where: { $0.assetID == itemID }) {
+                pendingImportSlots[slotIndex].assetID = nil
+                pendingImportSlots[slotIndex].name = item.displayName
+                pendingImportSlots[slotIndex].state = .failed
+            }
+            scheduler.cancel(id: thumbnailJobID(for: item))
+            thumbnailJobIDs.remove(thumbnailJobID(for: item))
+            items.remove(at: index)
+            invalidateCollectionProjection()
+            dataImportOverflowItemIDs.remove(itemID)
+            let relativeIndex = index - dataImportStartIndex
+            if dataImportOrdinals.indices.contains(relativeIndex) {
+                dataImportOrdinals.remove(at: relativeIndex)
+            }
+            removeDataImportItemIndex(for: itemID, at: index)
+            reconcileSelection()
+            selectedIndex = min(selectedIndex, max(0, items.count - 1))
+            isActive = !items.isEmpty || !pendingImportSlots.isEmpty
+        }
+    }
+
+    private func addScanWarning(_ message: String) {
+        let id = message
+        guard !scanWarnings.contains(where: { $0.id == id }) else { return }
+        scanWarnings.append(ScanWarning(id: id, message: message))
+    }
+
+    private func removeDataImportItemIndex(for itemID: PhotoAssetID, at index: Int) {
+        guard dataImportItemIndices.removeValue(forKey: itemID) != nil else { return }
+        let shiftedIDs = dataImportItemIndices.compactMap { remainingID, remainingIndex in
+            remainingIndex > index ? remainingID : nil
+        }
+        for remainingID in shiftedIDs {
+            dataImportItemIndices[remainingID, default: index] -= 1
+        }
+    }
+
+    // MARK: - Data import (from Photos picker)
+
+    /// Adopt a set of Photos-picker payloads as the collection.
+    ///
+    /// **The second thumbnail site.** `generateThumbnails` below is the obvious one; this one builds
+    /// its thumbnails inline and is easy to miss when the thumbnail path moves — which is why
+    /// `docs/PHASE2_SPEC.md` §6 names both explicitly. Step 7 pointed both at `Thumbnails`.
+    @discardableResult
+    func addFromData(_ dataItems: [(name: String, data: Data)]) -> [PhotoAssetID] {
+        beginDataImport(reservedCount: dataItems.count)
+        var identifiers: [PhotoAssetID] = []
+        for (ordinal, item) in dataItems.enumerated() {
+            identifiers.append(appendDataImport(
+                PhotoImportItem(name: item.name, data: item.data), ordinal: ordinal
+            ))
+        }
+        finishDataImport()
+        return identifiers
+    }
+
+    /// Adopt selected local files as URL-backed assets without reading their source bytes into
+    /// memory. Non-source-folder files are copied into Kromora's managed library first; the renderer
+    /// remains responsible for RAW demosaicing and preview-scale decoding.
+    @discardableResult
+    func addFromURLs(_ urls: [URL]) -> [PhotoAssetID] {
+        prepareForIncrementalImport()
+
+        var seen = Set<PhotoAssetID>()
+        var importedIDs: [PhotoAssetID] = []
+        for url in urls.sorted(by: {
+            $0.standardizedFileURL.path.localizedStandardCompare($1.standardizedFileURL.path)
+                == .orderedAscending
+        }) {
+            let canonicalURL = url.standardizedFileURL.resolvingSymlinksInPath()
+            guard FileManager.default.isReadableFile(atPath: canonicalURL.path) else {
+                addScanWarning("Skipped \(canonicalURL.lastPathComponent): the file is no longer readable.")
+                continue
+            }
+
+            guard ImageDecoder.supportedExtensions.contains(canonicalURL.pathExtension.lowercased()) else {
+                addScanWarning("Skipped unsupported image \(canonicalURL.lastPathComponent).")
+                continue
+            }
+            guard let destinationURL = durableURL(for: canonicalURL) else {
+                addScanWarning("Could not copy \(canonicalURL.lastPathComponent) into Kromora's library.")
+                continue
+            }
+            let metadata = ImageMetadata.read(from: destinationURL)
+            let asset = restoredCullingState(for: PhotoAsset(
+                url: destinationURL,
+                filename: canonicalURL.deletingPathExtension().lastPathComponent,
+                metadata: PhotoAssetMetadata(imageMetadata: metadata),
+                bookmarkData: PhotoAssetSource.bookmarkData(for: destinationURL)
+            ))
+            if let existingItem = items.first(where: { $0.url?.standardizedFileURL == destinationURL }) {
+                importedIDs.append(existingItem.id)
+                continue
+            }
+            guard seen.insert(asset.id).inserted else {
+                addScanWarning("Skipped duplicate \(canonicalURL.lastPathComponent).")
+                continue
+            }
+            items.append(Item(asset: asset, metadata: metadata))
+            persistCullingState(for: asset)
+            importedIDs.append(asset.id)
+        }
+
+        invalidateCollectionProjection()
+        reconcileSelection()
+        isActive = !items.isEmpty
+        enqueueThumbnails()
+        return importedIDs
+    }
+
+    /// Copy a file into the managed library using a deterministic path. Re-importing the same
+    /// source therefore addresses the existing managed copy instead of creating another item.
+    private func durableURL(for sourceURL: URL) -> URL? {
+        let canonicalSource = sourceURL.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalLibrary = libraryFolderURL.standardizedFileURL.resolvingSymlinksInPath()
+        if canonicalSource == canonicalLibrary || canonicalSource.path.hasPrefix(canonicalLibrary.path + "/") {
+            return canonicalSource
+        }
+        if items.contains(where: { $0.url?.standardizedFileURL == canonicalSource }) {
+            return canonicalSource
+        }
+        if let sourceFolderURL {
+            let canonicalSourceFolder = sourceFolderURL.standardizedFileURL.resolvingSymlinksInPath()
+            if canonicalSource == canonicalSourceFolder
+                || canonicalSource.path.hasPrefix(canonicalSourceFolder.path + "/") {
+                return canonicalSource
+            }
+        }
+
+        let token = PhotoAssetID.contentDigest(Data(canonicalSource.path.utf8)).prefix(16)
+        let filename = "\(token)-\(canonicalSource.lastPathComponent)"
+        let destinationURL = canonicalLibrary.appendingPathComponent(filename)
+        do {
+            try FileManager.default.createDirectory(
+                at: canonicalLibrary, withIntermediateDirectories: true
+            )
+            if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                try FileManager.default.copyItem(at: canonicalSource, to: destinationURL)
+            } else if !sameCopiedContent(
+                PhotoSourceFingerprint.file(at: canonicalSource),
+                PhotoSourceFingerprint.file(at: destinationURL)
+            ) {
+                let temporaryURL = canonicalLibrary.appendingPathComponent(
+                    ".(UUID().uuidString)-(canonicalSource.lastPathComponent)"
+                )
+                try FileManager.default.copyItem(at: canonicalSource, to: temporaryURL)
+                _ = try FileManager.default.replaceItemAt(destinationURL, withItemAt: temporaryURL)
+            }
+            return destinationURL.standardizedFileURL.resolvingSymlinksInPath()
+        } catch {
+            return nil
+        }
+    }
+
+    /// A managed copy intentionally has a different resource identifier and usually a different
+    /// modification date from its source. Those fields still belong in render/cache fingerprints,
+    /// but using the complete fingerprint here makes every reopen replace the copy and therefore
+    /// changes its file-resource asset ID. Compare only the bounded content signature when deciding
+    /// whether the deterministic managed destination is already current.
+    private func sameCopiedContent(
+        _ source: PhotoSourceFingerprint,
+        _ destination: PhotoSourceFingerprint
+    ) -> Bool {
+        source.byteCount == destination.byteCount
+            && source.sampleDigest == destination.sampleDigest
+    }
+
+    /// Stop a folder scan before appending. Existing items are deliberately retained; the import
+    /// becomes part of the same library rather than replacing a source-folder or earlier import.
+    private func prepareForIncrementalImport() {
+        scanGeneration &+= 1
+        scanTask?.cancel()
+        scanTask = nil
+        stopMetadataLoading()
+        isScanning = false
+        pendingImportSlots.removeAll()
+        dataImportOrdinals.removeAll()
+        dataImportItemIndices.removeAll()
+        dataImportOverflowItemIDs.removeAll()
+        dataImportAcceptedCount = 0
+        startMetadataLoading()
+    }
+
+    /// Adopt selected files from a removable volume by copying them into the managed library. The
+    /// source volume is never modified, and existing collection items remain available.
+    @discardableResult
+    func addFromMediaVolume(_ volume: MediaVolume, files: [MediaVolumeFile]) -> [PhotoAssetID] {
+        let accessURL = volume.resolvedAccessURL()
+        _ = accessURL.startAccessingSecurityScopedResource()
+        scopedURL = accessURL
+        return addFromURLs(files.map(\.url))
+    }
+
+    /// Start a streamed Photos import. Items are published as they arrive instead of waiting for
+    /// the picker to transfer the entire selection, so the first asset can be opened immediately
+    /// and one failed/cancelled transfer does not discard earlier successes.
+    func beginDataImport(reservedCount: Int = 0) {
+        prepareForIncrementalImport()
+        cancelThumbnailWork()
+        pendingImportSlots = (0..<max(0, reservedCount)).map { PendingImportSlot(ordinal: $0) }
+        invalidateCollectionProjection()
+        dataImportStartIndex = items.count
+        dataImportOrdinals.removeAll()
+        isThumbnailDemandDriven = false
+        thumbnailDemandIDs.removeAll()
+        thumbnailDemandPriorities.removeAll()
+        preparedThumbnailIDs.removeAll()
+        isScanning = false
+        isActive = !pendingImportSlots.isEmpty
+        scanWarnings = []
+        startMetadataLoading()
+    }
+
+    /// Append one full-fidelity Photos payload to the live collection. The bytes are copied into
+    /// the managed library and the resulting URL is the durable source; the transferred bytes are
+    /// retained only as a current-session cache.
+    @discardableResult
+    func appendDataImport(_ item: PhotoImportItem, ordinal: Int) -> PhotoAssetID {
+        let importKey = item.localIdentifier
+            ?? "\(item.contentDigest):ordinal:\(ordinal)"
+        let destinationURL = durableDataURL(for: item, key: importKey)
+        let identifier = PhotoAssetID.file(destinationURL)
+        if let existingIndex = items.firstIndex(where: { $0.url == destinationURL }) {
+            let existingID = items[existingIndex].id
+            dataImportItemIndices[existingID] = existingIndex
+            if let slotIndex = pendingImportSlots.firstIndex(where: { $0.ordinal == ordinal }) {
+                pendingImportSlots[slotIndex].assetID = existingID
+                pendingImportSlots[slotIndex].name = item.name
+            }
+            return existingID
+        }
+
+        let source = PhotoAssetSource(
+            url: destinationURL, id: identifier, data: item.data,
+            bookmarkData: PhotoAssetSource.bookmarkData(for: destinationURL)
+        )
+        let asset = restoredCullingState(for: PhotoAsset(
+            source: source,
+            filename: item.name,
+            fileType: destinationURL.pathExtension
+        ))
+        var interval = KromoraSignpostInterval(
+            .photoCollectionInsert,
+            context: KromoraTraceContext(sourceFingerprint: identifier.raw, quality: "photosImport")
+        )
+        let relativeIndex = dataImportOrdinals.firstIndex(where: { $0 > ordinal })
+            ?? dataImportOrdinals.count
+        let insertionIndex = dataImportStartIndex + relativeIndex
+        items.insert(Item(asset: asset, metadata: nil), at: insertionIndex)
+        invalidateCollectionProjection()
+        dataImportOrdinals.insert(ordinal, at: relativeIndex)
+        let shiftedIDs = dataImportItemIndices.compactMap { itemID, itemIndex in
+            itemIndex >= insertionIndex ? itemID : nil
+        }
+        for itemID in shiftedIDs {
+            dataImportItemIndices[itemID, default: insertionIndex] += 1
+        }
+        dataImportItemIndices[identifier] = insertionIndex
+        if let slotIndex = pendingImportSlots.firstIndex(where: { $0.ordinal == ordinal }) {
+            pendingImportSlots[slotIndex].assetID = identifier
+            pendingImportSlots[slotIndex].name = item.name
+            pendingImportSlots[slotIndex].state = .pending
+            invalidateCollectionProjection()
+        } else {
+            // Keep an unexpected ordinal visible as a tail entry for this streamed operation.
+            // The normal PHPhotosPicker path reserves every ordinal, so this is a defensive
+            // fallback for a provider delivering more items than it declared or a misused caller.
+            dataImportOverflowItemIDs.insert(identifier)
+            invalidateCollectionProjection()
+        }
+        reconcileSelection()
+        isActive = true
+        dataImportAcceptedCount += 1
+        persistCullingState(for: asset)
+        enqueueMetadata(for: items[insertionIndex], generation: scanGeneration)
+        enqueueThumbnails()
+        interval.end()
+        return identifier
+    }
+
+    private func durableDataURL(for item: PhotoImportItem, key: String) -> URL {
+        let suppliedURL = URL(fileURLWithPath: item.name)
+        let ext = suppliedURL.pathExtension.isEmpty
+            ? inferredExtension(for: item.data)
+            : suppliedURL.pathExtension
+        let stem = suppliedURL.deletingPathExtension().lastPathComponent
+        let safeStem = stem.isEmpty ? "Imported Photo" : stem
+        let token = PhotoAssetID.contentDigest(Data(key.utf8)).prefix(16)
+        if let existing = (try? FileManager.default.contentsOfDirectory(
+            at: libraryFolderURL, includingPropertiesForKeys: nil
+        ))?.first(where: { $0.lastPathComponent.hasPrefix("\(token)-") }) {
+            return existing.standardizedFileURL.resolvingSymlinksInPath()
+        }
+        let filename = "\(token)-\(safeStem).\(ext)"
+        let destination = libraryFolderURL.appendingPathComponent(filename)
+        do {
+            try FileManager.default.createDirectory(
+                at: libraryFolderURL, withIntermediateDirectories: true
+            )
+            if !FileManager.default.fileExists(atPath: destination.path) {
+                try item.data.write(to: destination, options: .atomic)
+            }
+        } catch {
+            addScanWarning("Could not save imported photo \(item.name) into Kromora's library.")
+        }
+        return destination.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    private func inferredExtension(for data: Data) -> String {
+        if let source = CGImageSourceCreateWithData(data as CFData, nil),
+           let typeIdentifier = CGImageSourceGetType(source),
+           let type = UTType(typeIdentifier as String),
+           let ext = type.preferredFilenameExtension,
+           ImageDecoder.supportedExtensions.contains(ext.lowercased()) {
+            return ext
+        }
+        return "jpg"
+    }
+
+    /// Finish a streamed import after the picker task has transferred all items it can. Deferred
+    /// metadata still drains the values already queued before its stream is closed.
+    func finishDataImport() {
+        metadataContinuation?.finish()
+        metadataContinuation = nil
+        pendingImportSlots.removeAll()
+        dataImportOverflowItemIDs.removeAll()
+        invalidateCollectionProjection()
+        isActive = !items.isEmpty
+        enqueueThumbnails()
+    }
+
+    /// Mark one ordinal as unavailable without manufacturing a photo asset. The failed slot stays
+    /// visible until the streamed operation is finished, making partial failures understandable.
+    func recordDataImportFailure(ordinal: Int, name: String) {
+        guard let index = pendingImportSlots.firstIndex(where: { $0.ordinal == ordinal }) else {
+            return
+        }
+        pendingImportSlots[index].name = name
+        pendingImportSlots[index].state = .failed
+        invalidateCollectionProjection()
+    }
+
+    /// Mark the next unresolved reservation as failed for compatibility with callers that do not
+    /// have an ordinal (older programmatic import callers use this form).
+    func recordDataImportFailure(name: String) {
+        guard let ordinal = pendingImportSlots.first(where: { $0.state == .pending })?.ordinal else {
+            return
+        }
+        recordDataImportFailure(ordinal: ordinal, name: name)
+    }
+
+    /// The library/filmstrip projection includes reservations in source order but never exposes
+    /// them through the collection's selectable item indices. Placeholders are deliberately
+    /// unfiltered so they continue to describe the in-flight import. Loaded arrivals do respect
+    /// the active culling filter and can therefore collapse out during an import. An arrival with
+    /// no reservation is rendered as a loaded tail entry rather than being silently omitted.
+    var thumbnailEntries: [ThumbnailEntry] {
+        collectionProjection.thumbnailEntries
+    }
+
+    /// Resolve a projected entry against the current item array.
+    ///
+    /// SwiftUI can keep a row alive for one update after an item is inserted or removed. The
+    /// projection's index is therefore only a fast path; the stable asset ID is authoritative.
+    /// Returning nil for an entry that was removed lets the view drop that stale cell safely.
+    func resolvedItem(for entry: ThumbnailEntry) -> (index: Int, item: Item)? {
+        guard let projectedIndex = entry.itemIndex else { return nil }
+
+        if items.indices.contains(projectedIndex), items[projectedIndex].id == entry.id {
+            return (projectedIndex, items[projectedIndex])
+        }
+
+        guard let currentIndex = items.firstIndex(where: { $0.id == entry.id }) else {
+            return nil
+        }
+        return (currentIndex, items[currentIndex])
+    }
+
+    private var collectionProjection: CollectionProjection.Snapshot {
+        projectionCache.snapshot(
+            items: items,
+            filter: filter,
+            collectionRevision: collectionRevision,
+            filterRevision: filterRevision,
+            pendingSlots: pendingImportSlots,
+            itemIndices: dataImportItemIndices,
+            overflowIDs: dataImportOverflowItemIDs
+        )
+    }
+
+    private func invalidateCollectionProjection(notify: Bool = false) {
+        collectionRevision &+= 1
+        if notify {
+            objectWillChange.send()
+        }
+    }
+
+    /// Number of source items currently retained by a streamed import.
+    var importedDataCount: Int { items.count }
+
+    /// Number of newly accepted items in the current streamed import operation.
+    var currentDataImportCount: Int { dataImportAcceptedCount }
+
+    // MARK: - Navigation
+
+    /// Begin viewport-driven thumbnail admission for the library grid. Existing completed
+    /// thumbnails are retained, while queued work is cancelled so a scan of a large folder cannot
+    /// continue filling memory with cells the user has not seen.
+    func beginThumbnailDemand() {
+        guard !isThumbnailDemandDriven else { return }
+        isThumbnailDemandDriven = true
+        cancelThumbnailWork()
+        prepareAdjacentThumbnails(around: selectedIndex)
+        fillThumbnailQueue()
+    }
+
+    /// Request the thumbnail for a cell that SwiftUI has materialized. LazyVGrid's own small
+    /// prefetch window means this naturally covers visible and near-visible cells only.
+    func requestThumbnail(
+        for id: PhotoAssetID,
+        priority: ImageWorkScheduler.Priority = .visibleGrid
+    ) {
+        guard isThumbnailDemandDriven, let index = items.firstIndex(where: { $0.id == id }) else {
+            return
+        }
+        // Edited thumbnails are a separate layer and may be needed even after the original
+        // fallback has finished. Notify the app model before the source-thumbnail fast path.
+        onThumbnailDemand?(id, priority)
+        guard items[index].thumbnail == nil else { return }
+        thumbnailDemandIDs.insert(id)
+        thumbnailDemandPriorities[id] = priority
+        let jobID = thumbnailJobID(for: items[index])
+        if !scheduler.contains(jobID) {
+            enqueueThumbnail(
+                for: items[index], at: index, generation: thumbnailGeneration, priority: priority
+            )
+        } else {
+            scheduler.updatePriority(for: jobID, to: priority)
+        }
+    }
+
+    /// Release a cell that has left the grid's materialized window. A finished thumbnail is kept
+    /// as a cheap cache in the item; only in-flight work is cancelled.
+    func releaseThumbnail(for id: PhotoAssetID) {
+        guard isThumbnailDemandDriven else { return }
+        thumbnailDemandIDs.remove(id)
+        thumbnailDemandPriorities.removeValue(forKey: id)
+        guard !preparedThumbnailIDs.contains(id) else { return }
+        guard let index = items.firstIndex(where: { $0.id == id }), items[index].thumbnail == nil else {
+            return
+        }
+        let jobID = thumbnailJobID(for: items[index])
+        scheduler.cancel(id: jobID)
+        thumbnailJobIDs.remove(jobID)
+        items[index].asset.thumbnailState = .notRequested
+    }
+
+    func selectAll() {
+        var next = selection
+        next.selectAll(in: filteredItems.map(\.id))
+        selection = next
+        syncSelectedIndex()
+        prepareAdjacentThumbnails(around: selectedIndex)
+        reprioritizeThumbnails()
+    }
+
+    func select(at index: Int, modifiers: LibrarySelectionModel.Modifiers = []) {
+        guard isActive, items.indices.contains(index), filter.matches(
+            flag: items[index].asset.flag, rating: items[index].asset.rating
+        ) else { return }
+        var next = selection
+        next.click(items[index].id, in: filteredItems.map(\.id), modifiers: modifiers)
+        selection = next
+        syncSelectedIndex()
+        prepareAdjacentThumbnails(around: selectedIndex)
+        reprioritizeThumbnails()
+    }
+
+    func selectNext() {
+        guard let nextIndex = filteredIndices.first(where: { $0 > selectedIndex }) else { return }
+        select(at: nextIndex)
+    }
+
+    func selectPrevious() {
+        guard let previousIndex = filteredIndices.last(where: { $0 < selectedIndex }) else { return }
+        select(at: previousIndex)
+    }
+
+    /// Select an arbitrary item and move thumbnail priority to its local neighborhood. This is the
+    /// path used by taps in the filmstrip and source browser; keyboard navigation uses the methods
+    /// above so both paths apply the same policy.
+    func select(at index: Int) {
+        select(at: index, modifiers: [])
+    }
+
+    /// Focus an item for an editor handoff while retaining any multi-selection made in the grid.
+    /// The focused item becomes the edit target; the selected set remains the user's batch.
+    func focus(id: PhotoAssetID) {
+        guard isActive, let index = items.firstIndex(where: { $0.id == id }),
+              filter.matches(flag: items[index].asset.flag, rating: items[index].asset.rating)
+        else { return }
+        var next = selection
+        next.focus(id, in: filteredItems.map(\.id))
+        selection = next
+        syncSelectedIndex()
+        prepareAdjacentThumbnails(around: selectedIndex)
+        reprioritizeThumbnails()
+    }
+
+    /// Select an item for edit-transfer without opening it. This compatibility seam keeps tests and
+    /// non-view callers independent of the modifier bitset used by the library UI.
+    func setSelection(at index: Int, additive: Bool = false) {
+        select(at: index, modifiers: additive ? [.command] : [])
+    }
+
+    /// Clear the in-session collection (e.g. when opening a one-off single
+    /// image). The persisted source-folder bookmark is left intact so it still
+    /// restores on next launch; only the live browsing state is dropped.
+    func clear() {
+        scanGeneration &+= 1
+        cancelThumbnailWork()
+        scanTask?.cancel()
+        scanTask = nil
+        stopMetadataLoading()
+        stopScopedURL()
+        items = []
+        invalidateCollectionProjection()
+        pendingImportSlots.removeAll()
+        dataImportOrdinals.removeAll()
+        dataImportOverflowItemIDs.removeAll()
+        dataImportItemIndices.removeAll()
+        selectedIndex = 0
+        selection.clear()
+        isThumbnailDemandDriven = false
+        thumbnailDemandIDs.removeAll()
+        thumbnailDemandPriorities.removeAll()
+        preparedThumbnailIDs.removeAll()
+        isActive = false
+        isScanning = false
+        scanWarnings = []
+        sourceFolderURL = nil
+    }
+
+    private func stopScopedURL() {
+        scopedURL?.stopAccessingSecurityScopedResource()
+        scopedURL = nil
+    }
+
+    // MARK: - Thumbnail generation
+
+    /// Fill in each item's thumbnail through the bounded scheduler. Work is ranked around the
+    /// selected photo and the decode itself stays detached from the main actor.
+    private func generateThumbnails() {
+        enqueueThumbnails()
+    }
+
+    private func enqueueThumbnails() {
+        let generation = thumbnailGeneration
+
+        if isThumbnailDemandDriven {
+            fillThumbnailQueue()
+            return
+        }
+
+        for (index, item) in items.enumerated() where item.thumbnail == nil {
+            let id = thumbnailJobID(for: item)
+            guard !scheduler.contains(id) else {
+                scheduler.updatePriority(for: id, to: priority(for: index))
+                continue
+            }
+            enqueueThumbnail(for: item, at: index, generation: generation)
+        }
+    }
+
+    private func reprioritizeThumbnails() {
+        let keep: Set<ImageWorkScheduler.JobID>
+        if isThumbnailDemandDriven {
+            keep = Set(items.compactMap { item in
+                isThumbnailDemanded(item.id) && item.thumbnail == nil
+                    ? thumbnailJobID(for: item) : nil
+            })
+        } else {
+            keep = Set(items.enumerated().compactMap { index, item -> ImageWorkScheduler.JobID? in
+                guard item.thumbnail == nil, distance(from: index) <= 2 else { return nil }
+                return thumbnailJobID(for: item)
+            })
+        }
+
+        let obsolete = thumbnailJobIDs.subtracting(keep)
+        scheduler.cancel(ids: obsolete)
+        thumbnailJobIDs.subtract(obsolete)
+
+        for (index, item) in items.enumerated() where item.thumbnail == nil {
+            let id = thumbnailJobID(for: item)
+            guard keep.contains(id) else { continue }
+            if scheduler.contains(id) {
+                scheduler.updatePriority(
+                    for: id, to: priority(for: index, requested: thumbnailDemandPriorities[item.id])
+                )
+            } else {
+                // The operation was dropped by the bounded queue. Re-admit only useful work after
+                // navigation; the scheduler may still drop it if the neighborhood is full.
+                enqueueThumbnail(
+                    for: item, at: index, generation: thumbnailGeneration,
+                    priority: thumbnailDemandPriorities[item.id]
+                )
+            }
+        }
+        fillThumbnailQueue()
+    }
+
+    private func enqueueThumbnail(
+        for item: Item, at index: Int, generation: UInt64,
+        priority requestedPriority: ImageWorkScheduler.Priority? = nil
+    ) {
+        let id = thumbnailJobID(for: item)
+        let url = item.url
+        let data = item.imageData
+        let dataFingerprint = item.dataFingerprint
+        let itemID = item.id
+        scheduler.enqueue(
+            id: id, lane: .thumbnail,
+            priority: priority(for: index, requested: requestedPriority)
+        ) { [weak self] in
+            let thumbnail: NSImage?
+            if let url {
+                thumbnail = await Task.detached { Thumbnails.generate(from: url) }.value
+            } else if let data {
+                thumbnail = await Task.detached {
+                    Thumbnails.generate(from: data, dataFingerprint: dataFingerprint)
+                }.value
+            } else {
+                thumbnail = nil
+            }
+            guard !Task.isCancelled else { return }
+            self?.applyThumbnail(thumbnail, itemID: itemID, generation: generation)
+        }
+        if scheduler.contains(id), let currentIndex = items.firstIndex(where: { $0.id == itemID }) {
+            thumbnailJobIDs.insert(id)
+            items[currentIndex].asset.thumbnailState = .loading
+        }
+    }
+
+    private func applyThumbnail(_ thumbnail: NSImage?, itemID: PhotoAssetID, generation: UInt64) {
+        guard generation == thumbnailGeneration,
+              let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        thumbnailJobIDs.remove(thumbnailJobID(for: items[index]))
+        items[index].setOriginalThumbnail(thumbnail)
+        items[index].asset.thumbnailState = thumbnail == nil ? .failed : .ready
+        fillThumbnailQueue()
+    }
+
+    /// Replace the displayed thumbnail only if it still belongs to the requested edit revision.
+    /// Both the filmstrip and grid observe this same Item, so a single edited render updates both
+    /// browsing surfaces without duplicate work.
+    func invalidateEditedThumbnail(for id: PhotoAssetID) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        item.invalidateEditedThumbnail()
+    }
+
+    func applyEditedThumbnail(
+        _ thumbnail: NSImage?, for id: PhotoAssetID, revision: String
+    ) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        item.applyEditedThumbnail(thumbnail, revision: revision)
+    }
+
+    /// Admit the next useful work after a worker finishes. The scan can discover thousands of files,
+    /// but only the bounded scheduler queue is ever populated at once. Candidates are ordered by
+    /// the same neighborhood policy used for navigation so a replenishment cannot push adjacent
+    /// photos behind folder tail work.
+    private func fillThumbnailQueue() {
+        let candidates = items.indices
+            .filter {
+                items[$0].thumbnail == nil
+                    && (!isThumbnailDemandDriven || isThumbnailDemanded(items[$0].id))
+            }
+            .sorted {
+                let lhs = priority(for: $0)
+                let rhs = priority(for: $1)
+                if lhs != rhs { return lhs.rawValue < rhs.rawValue }
+                return distance(from: $0) < distance(from: $1)
+            }
+
+        for index in candidates {
+            guard scheduler.canQueueThumbnail else { return }
+            let item = items[index]
+            let id = thumbnailJobID(for: item)
+            guard !scheduler.contains(id) else { continue }
+            enqueueThumbnail(
+                for: item, at: index, generation: thumbnailGeneration,
+                priority: thumbnailDemandPriorities[item.id]
+            )
+        }
+    }
+
+    private func cancelThumbnailWork() {
+        thumbnailGeneration &+= 1
+        scheduler.cancel(ids: thumbnailJobIDs)
+        thumbnailJobIDs.removeAll()
+    }
+
+    /// Keep the selected photo and up to two visible neighbors eligible for thumbnail work. The
+    /// IDs are tracked separately from viewport demand so a cell disappearing from the lazy stack
+    /// cannot cancel a photo that keyboard navigation is about to use.
+    private func prepareAdjacentThumbnails(around index: Int) {
+        guard isThumbnailDemandDriven else { return }
+        let prepared = Set(items.indices.filter { abs($0 - index) <= 2 }.map { items[$0].id })
+        let obsolete = preparedThumbnailIDs.subtracting(prepared)
+        preparedThumbnailIDs = prepared
+        thumbnailDemandPriorities = thumbnailDemandPriorities.filter { id, _ in
+            thumbnailDemandIDs.contains(id) || prepared.contains(id)
+        }
+        for id in prepared {
+            thumbnailDemandPriorities[id] = .adjacentFilmstrip
+            onThumbnailDemand?(id, .adjacentFilmstrip)
+        }
+        for id in obsolete where !thumbnailDemandIDs.contains(id) {
+            guard let item = items.first(where: { $0.id == id }), item.thumbnail == nil else { continue }
+            scheduler.cancel(id: thumbnailJobID(for: item))
+            thumbnailJobIDs.remove(thumbnailJobID(for: item))
+        }
+    }
+
+    private func isThumbnailDemanded(_ id: PhotoAssetID) -> Bool {
+        thumbnailDemandIDs.contains(id) || preparedThumbnailIDs.contains(id)
+    }
+
+    private func reconcileSelection() {
+        var next = selection
+        let ids = items.map(\.id)
+        next.reconcile(with: ids)
+        // `reconcile` alone can leave the selection empty (e.g. the sole selected item was just
+        // removed as unreadable) even though other items remain; fall back to the first one so a
+        // non-empty library always keeps an active item, matching native list behavior.
+        if next.isEmpty, let first = ids.first {
+            next.click(first, in: ids)
+        }
+        selection = next
+        syncSelectedIndex()
+    }
+
+    private func reconcileFilteredSelection() {
+        let visible = filteredIndices
+        guard let firstVisible = visible.first else {
+            // Preserve the selection and active asset for when the filter is cleared. An empty
+            // result has no visible navigation target, but it must not erase culling state.
+            return
+        }
+        guard !visible.contains(selectedIndex) else { return }
+        var next = selection
+        next.focus(items[firstVisible].id, in: items.map(\.id))
+        selection = next
+        syncSelectedIndex()
+        reprioritizeThumbnails()
+    }
+
+    private func advance(from index: Int) {
+        guard let nextIndex = filteredIndices.first(where: { $0 > index }) else { return }
+        select(at: nextIndex)
+    }
+
+    private func recordCullingChange(itemID: PhotoAssetID, oldState: PhotoAssetLibraryState) {
+        cullingUndoStack.append(CullingChange(
+            itemID: itemID,
+            oldState: oldState,
+            activeIDBefore: selection.activeID
+        ))
+        // Keep a useful bounded history for long culling sessions.
+        if cullingUndoStack.count > 100 { cullingUndoStack.removeFirst() }
+    }
+
+    private func persistCullingState(for asset: PhotoAsset) {
+        persistedCullingStates[asset.id.raw] = PersistedCullingState(
+            rating: asset.rating,
+            flag: asset.flag
+        )
+        guard let data = try? JSONEncoder().encode(persistedCullingStates) else { return }
+        defaults.set(data, forKey: Self.cullingStateKey)
+    }
+
+    private func restoredCullingState(for asset: PhotoAsset) -> PhotoAsset {
+        guard let persisted = persistedCullingStates[asset.id.raw] else { return asset }
+        var restored = asset
+        restored.libraryState = persisted.libraryState
+        return restored
+    }
+
+    private func syncSelectedIndex() {
+        guard let activeID = selection.activeID,
+              let index = items.firstIndex(where: { $0.id == activeID }) else {
+            if items.isEmpty { selectedIndex = 0 }
+            return
+        }
+        selectedIndex = index
+    }
+
+    private func thumbnailJobID(for item: Item) -> ImageWorkScheduler.JobID {
+        if let url = item.url {
+            return ImageWorkScheduler.JobID("thumbnail:url:\(url.standardizedFileURL.path)")
+        }
+        return ImageWorkScheduler.JobID("thumbnail:item:\(item.id.raw)")
+    }
+
+    private func distance(from index: Int) -> Int {
+        abs(index - selectedIndex)
+    }
+
+    private func priority(
+        for index: Int,
+        requested requestedPriority: ImageWorkScheduler.Priority? = nil
+    ) -> ImageWorkScheduler.Priority {
+        if let requestedPriority { return requestedPriority }
+        switch distance(from: index) {
+        case 0...2: return .adjacentFilmstrip
+        case 3...12: return .visibleGrid
+        default: return .background
+        }
+    }
+}

@@ -14,7 +14,7 @@ the durable identity fallback, source fingerprint, thumbnail cache key, and firs
 local identifiers remain the durable asset identity when the provider supplies one.
 
 The import path emits these Points of Interest intervals under
-`com.lumo.app` / `workflow`:
+`com.kromora.app` / `workflow`:
 
 - `PhotoTransfer` — one `PhotosPickerItem.loadTransferable` call.
 - `Decode` with `quality=photosImport` — the first imported source's eager decode. RAW data uses
@@ -28,8 +28,8 @@ Use a licensed representative RAW outside the repository. The repository deliber
 include a 40–60 MP camera file. On the reference Mac, run:
 
 ```sh
-LUMO_PHOTOS_BENCHMARK=1 \
-LUMO_PHOTOS_RAW=/absolute/path/to/representative.dng \
+KROMORA_PHOTOS_BENCHMARK=1 \
+KROMORA_PHOTOS_RAW=/absolute/path/to/representative.dng \
 swift test --filter PhotosImportPerformanceTests
 ```
 

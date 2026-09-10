@@ -1,10 +1,10 @@
 # Managed Library test-fixture cleanup
 
-Older collection tests used Lumo's production managed Library by default. If those tests have
+Older collection tests used Kromora's production managed Library by default. If those tests have
 already been run on a development Mac, inspect the directory below before removing anything:
 
 ```sh
-library="$HOME/Library/Application Support/Lumo/Library"
+library="$HOME/Library/Application Support/Kromora/Library"
 ls -lh "$library"
 file "$library"/* | sort
 ```

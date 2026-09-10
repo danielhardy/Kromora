@@ -1,0 +1,155 @@
+import XCTest
+@testable import KromoraKit
+
+@MainActor
+final class LibraryGridTests: TempDirectoryTestCase {
+    func testMosaicRowsPreserveMixedOrientationWithoutOverlapAtRepresentativeWidths() {
+        let layout = LibraryGridLayout()
+        let aspects = [1.5, 0.75, 1.0, 1.5, 0.75, 1.0, 1.5, 0.75]
+
+        for width in [320.0, 768.0, 1_280.0] {
+            let rows = layout.mosaicRows(aspectRatios: aspects, width: width)
+            XCTAssertEqual(rows.flatMap(\.itemIndices), Array(aspects.indices))
+
+            for row in rows {
+                XCTAssertEqual(row.itemIndices.count, row.itemWidths.count)
+                XCTAssertGreaterThan(row.imageHeight, 0)
+                XCTAssertLessThanOrEqual(
+                    row.itemWidths.reduce(0, +) + layout.spacing * Double(max(0, row.itemWidths.count - 1)),
+                    max(width, layout.minimumCellWidth) + 0.001
+                )
+                XCTAssertTrue(row.itemWidths.allSatisfy { $0 > 0 })
+            }
+        }
+    }
+
+    func testMosaicRowsKeepCellIdentityAndAspectRatioAttachedToSourceOrder() {
+        let layout = LibraryGridLayout()
+        let aspects = [3.0 / 2.0, 3.0 / 4.0, 1.0]
+        let rows = layout.mosaicRows(aspectRatios: aspects, width: 900)
+        let positions = rows.flatMap { row in
+            zip(row.itemIndices, row.itemWidths).map { ($0, $1 / row.imageHeight) }
+        }
+
+        XCTAssertEqual(positions.map(\.0), [0, 1, 2])
+        for (index, ratio) in positions {
+            XCTAssertEqual(ratio, aspects[index], accuracy: 0.000_001)
+        }
+    }
+
+    func testInvalidAspectRatiosUseStablePhotographicFallback() {
+        XCTAssertEqual(LibraryGridLayout.normalizedAspectRatio(.nan), 4.0 / 3.0)
+        XCTAssertEqual(LibraryGridLayout.normalizedAspectRatio(.infinity), 4.0 / 3.0)
+        XCTAssertEqual(LibraryGridLayout.normalizedAspectRatio(0), 4.0 / 3.0)
+        XCTAssertEqual(LibraryGridLayout.normalizedAspectRatio(10), 3.0)
+    }
+
+    func testMosaicCacheFreezesPlacedRowsWhenDeferredAspectRatioArrives() {
+        let cache = LibraryMosaicLayoutCache()
+        let layout = LibraryGridLayout()
+        let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
+        let itemIDs = fallback.indices.map { _ in PhotoAssetID.imported(UUID()) }
+
+        let initial = cache.rows(
+            itemIDs: itemIDs,
+            width: 900,
+            layout: layout,
+            aspectRatioAt: { fallback[$0] }
+        )
+        let resolved = cache.rows(
+            itemIDs: itemIDs,
+            width: 900,
+            layout: layout,
+            aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] }
+        )
+
+        XCTAssertEqual(resolved, initial, "metadata must not move already-placed mosaic rows")
+        XCTAssertEqual(cache.recomputeCount, 1, "a metadata update must not redo full-collection row math")
+    }
+
+    func testMosaicCacheRecomputesWhenOrderedItemIdentitiesChange() {
+        let cache = LibraryMosaicLayoutCache()
+        let layout = LibraryGridLayout()
+        let firstIDs = [PhotoAssetID.imported(UUID()), PhotoAssetID.imported(UUID())]
+        let secondIDs = [firstIDs[1], firstIDs[0]]
+
+        _ = cache.rows(
+            itemIDs: firstIDs,
+            width: 900,
+            layout: layout,
+            aspectRatioAt: { _ in 4.0 / 3.0 }
+        )
+        _ = cache.rows(
+            itemIDs: secondIDs,
+            width: 900,
+            layout: layout,
+            aspectRatioAt: { _ in 4.0 / 3.0 }
+        )
+
+        XCTAssertEqual(cache.recomputeCount, 2, "a changed item order must invalidate the mosaic")
+    }
+
+    func testProjectedEntryResolvesByStableIDWhenItsIndexIsStale() async throws {
+        for name in ["a.jpg", "b.jpg", "c.jpg"] {
+            try Fixtures.writeJPEG(
+                width: 16, height: 12, orientation: 1, named: name, in: tempDirectory
+            )
+        }
+
+        let collection = makeTestCollection()
+        collection.loadFromFolder(tempDirectory)
+        await collection.scanCompletion()
+
+        let entry = try XCTUnwrap(collection.thumbnailEntries.dropFirst().first)
+        let expectedID = try XCTUnwrap(entry.itemIndex.map { collection.items[$0].id })
+
+        // Simulate SwiftUI retaining a row while an earlier item disappears. The projected index
+        // is now stale, but the entry's stable ID still identifies the correct current item.
+        collection.items.removeFirst()
+
+        let resolved = try XCTUnwrap(collection.resolvedItem(for: entry))
+        XCTAssertEqual(resolved.index, 0)
+        XCTAssertEqual(resolved.item.id, expectedID)
+    }
+
+    func testDemandDrivenGridWaitsForMaterializedCellsBeforeDecoding() async throws {
+        for index in 0..<64 {
+            try Fixtures.writeJPEG(
+                width: 64,
+                height: 48,
+                orientation: 1,
+                named: String(format: "photo-%03d.jpg", index),
+                in: tempDirectory
+            )
+        }
+
+        let scheduler = ImageWorkScheduler(configuration: .init(
+            maxConcurrentThumbnails: 1,
+            maxQueuedThumbnails: 4
+        ))
+        let collection = makeTestCollection(scheduler: scheduler)
+        collection.beginThumbnailDemand()
+        collection.loadFromFolder(tempDirectory)
+        await collection.scanCompletion()
+
+        XCTAssertEqual(collection.items.count, 64)
+        XCTAssertTrue(
+            collection.items.allSatisfy { $0.thumbnail == nil },
+            "a virtualized grid must not decode every discovered cell before it appears"
+        )
+
+        let firstID = try XCTUnwrap(collection.items.first?.id)
+        collection.requestThumbnail(for: firstID)
+
+        let deadline = Date().addingTimeInterval(5)
+        while collection.items.first?.thumbnail == nil {
+            if Date() > deadline { return XCTFail("the materialized cell thumbnail did not arrive") }
+            await Task.yield()
+        }
+
+        XCTAssertTrue(
+            collection.items.dropFirst().allSatisfy { $0.thumbnail == nil },
+            "requesting one materialized cell must not admit the rest of the folder"
+        )
+    }
+}
