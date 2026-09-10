@@ -28,7 +28,7 @@ import CoreGraphics
 /// re-fitting derive in P3 *or* stamping the build space onto the `CubeLUT` — never blindly threading
 /// `.current` into the sampler, whose neutral RAW baseline is itself an sRGB-default render.
 ///
-/// See `docs/PHASE2_SPEC.md` §4.4.
+/// See `docs/ENGINEERING_GUIDE.md`
 enum WorkingSpace: String, Codable, Sendable, Equatable, CaseIterable {
     case sRGB
     case displayP3

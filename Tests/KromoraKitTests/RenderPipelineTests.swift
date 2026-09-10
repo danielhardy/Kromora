@@ -513,7 +513,7 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     /// The direction of `temperatureTint`, pinned deliberately.
     ///
     /// With the source neutral pinned at D65 and only `targetNeutral` moving, **raising Kelvin cools
-    /// the image** — the inverse of the Lightroom convention. `docs/PHASE2_SPEC.md` §8.7 leaves the
+    /// the image** — the inverse of the Lightroom convention. `docs/ENGINEERING_GUIDE.md` leaves the
     /// mapping open on purpose; this test records what ships today so that changing it later is a
     /// deliberate act with a failing test attached, rather than a silent look change.
     ///

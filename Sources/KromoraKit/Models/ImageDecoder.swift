@@ -13,7 +13,7 @@ import ImageIO
 /// needed a `CIContext` at all; its output vocabulary moved to `ExportFormat`.
 ///
 /// What remains is value-level and stateless, so it is a caseless `enum` rather than an instance:
-/// there is nothing left to own. `docs/PHASE2_SPEC.md` §4.5 named this as the shape to land on.
+/// there is nothing left to own. `docs/ENGINEERING_GUIDE.md` named this as the shape to land on.
 ///
 /// Note `RenderPipeline.developedSource` is the decoder the *render* stack uses — it re-develops
 /// from the file at a chosen scale, because `CIRAWFilter` must be configured before it yields an

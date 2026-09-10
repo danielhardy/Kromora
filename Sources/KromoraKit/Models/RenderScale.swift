@@ -5,7 +5,7 @@ import CoreGraphics
 ///
 /// Preview/export parity is structural in Phase 2 rather than a pair of code paths that merely agree:
 /// both call the same `buildImage`, and this value is the only argument that changes. See
-/// `docs/PHASE2_SPEC.md` §1.
+/// `docs/ENGINEERING_GUIDE.md`
 ///
 /// The scale is applied **early** — `CIRAWFilter.scaleFactor` before `outputImage` for RAW, an ImageIO
 /// thumbnail decode for standard images — so adjustment and LUT nodes operate on a preview-sized

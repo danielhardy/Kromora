@@ -8,7 +8,7 @@ import CoreImage
 /// and configured before it produces an image; you cannot chain develop onto an already-developed
 /// `CIImage`. So develop is consumed at the source stage of the pipeline, and `ImageSource` carries a
 /// URL or `Data` rather than an image so the RAW can be re-developed per render. The asymmetry is
-/// forced by the framework, not a modelling preference. See `docs/PHASE2_SPEC.md` §4.2.
+/// forced by the framework, not a modelling preference. See `docs/ENGINEERING_GUIDE.md`
 ///
 /// **Every property is optional, and `nil` means "leave `CIRAWFilter` at its decoder default".** That
 /// is not a stylistic choice: several of these defaults *vary per image* (`baselineExposure`,
@@ -17,7 +17,7 @@ import CoreImage
 /// `ImageDecoder.developRAWNeutral`, which sets nothing at all.
 ///
 /// Property names mirror `CIRAWFilter`'s exactly so there is no translation layer to get wrong. The
-/// set below is header-verified (`docs/PHASE2_SPEC.md` §9); an earlier draft of the spec contained
+/// set below is header-verified (`docs/ENGINEERING_GUIDE.md`); an earlier draft of the spec contained
 /// fabricated names.
 ///
 /// Note `scaleFactor` and `draftModeEnabled` are absent by design — they are properties of *how* a

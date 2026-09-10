@@ -249,7 +249,7 @@ final class PreviewCostBenchmark: XCTestCase {
     /// Measures the Effects inspector's common interactive path on a large preview-sized image.
     /// This is deliberately a signpost/benchmark rather than a hard wall: Core Image timing varies
     /// materially by Apple GPU and OS revision, while the release threshold is recorded in
-    /// `docs/EFFECTS_VALIDATION.md` and must be checked on the reference hardware.
+    /// `docs/TESTING.md` and must be checked on the reference hardware.
     func testMeasureEffectsInteractiveCost() throws {
         try XCTSkipUnless(
             ProcessInfo.processInfo.environment["KROMORA_BENCH"] != nil,

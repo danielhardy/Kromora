@@ -96,7 +96,7 @@ and become one undo entry when committed; numeric fields and resets use the sett
 - Applies LUTs through `CIColorCubeWithColorSpace` with Metal-backed Core Image rendering.
 - Ships four original, read-only starter Looks across Monochrome, Cinematic, Film-inspired, and
   Warm slide-inspired categories. Provenance, licensing, attribution, redistribution, and approval
-  records live in [`docs/STARTER_LOOKS.md`](docs/STARTER_LOOKS.md) and the bundled manifest.
+  records live in [`docs/LOOKS.md`](docs/LOOKS.md) and the bundled manifest.
 - Scans a Look folder recursively, groups files by subfolder, supports search and None, and keeps
   folder access through App Sandbox security-scoped bookmarks.
 - Imports external `.cube` and `.look` files (`⌘⌥L`) and refreshes the library after files are
@@ -338,7 +338,7 @@ The important boundaries are:
   memory pressure. Thumbnail work is prioritized around the visible library neighborhood.
 - **Coordinators:** `AppViewModel` is the composition root while dedicated source, persistence,
   preview, export, derive, and Look-preview collaborators own their stable responsibilities. The
-  ownership contract is documented in [`docs/ARCHITECTURE_BOUNDARIES.md`](docs/ARCHITECTURE_BOUNDARIES.md).
+  ownership contract is documented in [`docs/ENGINEERING_GUIDE.md`](docs/ENGINEERING_GUIDE.md).
 - **Observability:** signposts and bounded live telemetry distinguish input, render, GPU completion,
   and actual drawable presentation so profiling does not confuse “render finished” with “user saw
   the frame.”
@@ -350,7 +350,7 @@ Useful starting points are [`EditDocument`](Sources/KromoraKit/Models/EditDocume
 
 ## Preparing for the App Store
 
-1. Build and verify the product icon and signed bundle with [`scripts/build-macos-app.sh`](scripts/build-macos-app.sh), [`scripts/verify-app-icon.sh`](scripts/verify-app-icon.sh), and [`scripts/verify-app-signature.sh`](scripts/verify-app-signature.sh); see [`docs/KROMORA_ICON.md`](docs/KROMORA_ICON.md) for the source, safe area, and review checklist. Packaging renders into disposable `.build/` staging paths and does not modify tracked source files.
+1. Build and verify the product icon and signed bundle with [`scripts/build-macos-app.sh`](scripts/build-macos-app.sh), [`scripts/verify-app-icon.sh`](scripts/verify-app-icon.sh), and [`scripts/verify-app-signature.sh`](scripts/verify-app-signature.sh); see [`docs/PACKAGING.md`](docs/PACKAGING.md) for the release workflow. Packaging renders into disposable `.build/` staging paths and does not modify tracked source files.
    Release signing uses `KROMORA_CODESIGN_IDENTITY` (or `CODE_SIGN_IDENTITY`) and optionally `KROMORA_PROVISIONING_PROFILE` (or `PROVISIONING_PROFILE`). If neither is set, the script uses an ad-hoc signature for local/CI structural verification; configure the release identity and profile in CI for distribution builds.
 2. Set the Bundle Identifier and Team in Xcode's Signing & Capabilities.
 3. Keep App Sandbox enabled with the included entitlements.

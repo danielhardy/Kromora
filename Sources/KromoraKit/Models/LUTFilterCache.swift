@@ -15,7 +15,7 @@ import CoreImage
 /// **Deliberately not `Sendable`.** `CIFilter` is a mutable reference type and using a cached one means
 /// writing `inputImage` to it, so a shared instance across concurrent renders would be a data race.
 /// This is owned by `actor RenderEngine` (Step 4), which serializes access — the GPU boundary is the
-/// isolation boundary. See `docs/PHASE2_SPEC.md` §4.5.
+/// isolation boundary. See `docs/ENGINEERING_GUIDE.md`
 ///
 /// Reusing a filter is safe *because* `CIFilter.outputImage` snapshots the current inputs into an
 /// immutable image graph rather than reading them lazily at render time. That is load-bearing for this

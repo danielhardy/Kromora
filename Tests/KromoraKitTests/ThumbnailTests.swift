@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 
 /// Thumbnails, and the two `ImageCollection` sites that produce them.
 ///
-/// `docs/PHASE2_SPEC.md` §6 names both sites explicitly — `generateThumbnails` and `addFromData` —
+/// `docs/ENGINEERING_GUIDE.md` names both sites explicitly — `generateThumbnails` and `addFromData` —
 /// because they are independent code paths that happen to want the same thing, and the second one is
 /// easy to miss. Before Step 7 only the first had any coverage at all: `addFromData` built its
 /// thumbnails inline and nothing tested it, so pointing one site at a new helper and forgetting the

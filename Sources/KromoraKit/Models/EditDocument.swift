@@ -5,7 +5,7 @@ import Foundation
 /// This is the spine of Phase 2. Today Kromora holds a *baked* `processedImage`; after the migration it
 /// holds one of these and rebuilds the image from it on demand. Being a `Codable`, `Sendable`,
 /// `Equatable` value is what buys undo, presets, per-image edits, and a clean actor boundary all at
-/// once — none of which a baked bitmap can give. See `docs/PHASE2_SPEC.md` §3.
+/// once — none of which a baked bitmap can give. See `docs/ENGINEERING_GUIDE.md`
 ///
 /// **An empty document is the identity transform.** `EditDocument()` must render the source
 /// unchanged; that invariant is what lets the migration introduce the new spine under the old
@@ -107,7 +107,7 @@ struct EditDocument: Codable, Sendable, Equatable {
 
     /// What "the original" means for A/B comparison: **develop applied, nothing else**.
     ///
-    /// `docs/PHASE2_SPEC.md` §8.5 asked whether the comparison baseline should be develop-applied or
+    /// `docs/ENGINEERING_GUIDE.md` asked whether the comparison baseline should be develop-applied or
     /// the decoder's neutral defaults, and recommended develop-applied — holding Space should show
     /// the same photograph without the *look*, not a different rendering of the negative. This
     /// implements that.

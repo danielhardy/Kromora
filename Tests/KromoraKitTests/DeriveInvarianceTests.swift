@@ -17,7 +17,7 @@ import simd
 /// **These tests skip in CI, and that is not a hedge — it is the arrangement.** A licence-clean DNG
 /// small enough to commit does not exist, `realworldtest/` is gitignored, and `Fixtures.localRAWURL`
 /// returns `nil` on a runner. Read the suite's green tick on CI as saying nothing whatsoever about
-/// derive; the coverage here is local-only. See `docs/PHASE2_SPEC.md` §8.9.
+/// derive; the coverage here is local-only. See `docs/ENGINEERING_GUIDE.md`.
 final class DeriveInvarianceTests: XCTestCase {
 
     /// One derive, shared by every test here.

@@ -6,7 +6,7 @@ import Foundation
 /// `Equatable`/`Codable` and would need a hand-written type-tag coder — which would undermine the
 /// value-state spine that earns undo and Swift 6 cleanliness in the first place. A closed enum is
 /// equally ordered and composable, costs one case plus one switch arm to extend, and gets both
-/// conformances free. See `docs/PHASE2_SPEC.md` §4.1.
+/// conformances free. See `docs/ENGINEERING_GUIDE.md`
 ///
 /// **Order is meaningful.** `[.exposure(ev: 1), .colorControls(…)]` is not the same render as the
 /// reverse, and duplicates are allowed (two exposure nodes stack). The array in `EditDocument` is a
@@ -15,7 +15,7 @@ import Foundation
 /// **Every case must use normalized units.** These five are inherently scale-invariant, which is what
 /// lets a preview render early-downscaled and still match a full-resolution export. Any future
 /// pixel-sized node — grain, blur, sharpen — **must** express its radius as a fraction of the image,
-/// or preview and export diverge silently. See `docs/PHASE2_SPEC.md` §5.
+/// or preview and export diverge silently. See `docs/ENGINEERING_GUIDE.md`
 enum AdjustmentNode: Codable, Sendable, Equatable {
     /// `CIExposureAdjust`. Identity at 0.
     case exposure(ev: Double)
@@ -26,7 +26,7 @@ enum AdjustmentNode: Codable, Sendable, Equatable {
     /// `CITemperatureAndTint`. Identity at (6500, 0).
     ///
     /// The filter only sets `targetNeutral` against a fixed 6500 K source, so raising Kelvin *cools*
-    /// the image, inverting the Lightroom convention (`docs/PHASE2_SPEC.md` §8.7, pinned by
+    /// the image, inverting the Lightroom convention (`docs/ENGINEERING_GUIDE.md`, pinned by
     /// `testRaisingKelvinCoolsTheImage`). §8.7 is closed: rather than change this node's convention,
     /// the Adjust panel's slider is reflected about D65 in `AdjustmentControl.sliderMapped(_:)`.
     /// Identity at (6500, 0) holds either way, which is why it was a safe seed to define from the start.

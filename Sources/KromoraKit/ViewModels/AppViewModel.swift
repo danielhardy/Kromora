@@ -150,7 +150,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     /// **The look, as a value.** Phase 2's spine: everything the user has chosen lives here, and the
-    /// preview is rebuilt from it rather than from a baked image (`docs/PHASE2_SPEC.md` §3).
+    /// preview is rebuilt from it rather than from a baked image (`docs/ENGINEERING_GUIDE.md`).
     ///
     /// Stored in a per-photo session keyed by stable source identity. Navigation restores the active
     /// photo's Light, other edits, and history without carrying them onto a different frame.
@@ -4130,7 +4130,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Internal rather than private because `NSSavePanel` cannot run headless, so this is the only
     /// way to assert the part of `exportDialog` that has content — *which* document goes to disk. The
     /// wrapper around it is the two lines the panel makes untestable, which is the same trade
-    /// `docs/CODE_REVIEW.md` §5 already records for every other panel in the app.
+    /// `docs/ENGINEERING_GUIDE.md` already records for every other panel in the app.
     var exportRequest: (source: ImageSource, document: EditDocument, lut: CubeLUT?, baseName: String)? {
         guard let imageSource else { return nil }
         // `sourceURL` is the managed copy for one-off opens and may carry Kromora's internal
