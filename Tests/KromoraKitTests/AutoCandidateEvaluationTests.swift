@@ -139,6 +139,25 @@ final class AutoCandidateEvaluationTests: TempDirectoryTestCase {
         XCTAssertGreaterThan(evaluation.report.renderHeight, evaluation.report.renderWidth)
     }
 
+    func testEvaluateRecordsGeometryMismatchInsteadOfSpuriousZeroDiff() async throws {
+        // The target box is computed from the baseline's orientation only; a proposal that
+        // changes rotation renders at a genuinely different extent through the real pipeline
+        // and must not be silently compared as if nothing changed.
+        let url = try Fixtures.writeGradientPNG(width: 96, height: 64, named: "auto-eval-rot.png", in: tempDirectory)
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
+        var rotatedProposal = EditDocument()
+        rotatedProposal.rotation = .clockwise90
+
+        let evaluation = await AutoCandidateEvaluator().evaluate(
+            fixtureID: "real-rotation-mismatch", source: source,
+            baseDocument: EditDocument(), proposedDocument: rotatedProposal,
+            engine: RenderEngine()
+        )
+        XCTAssertTrue(evaluation.report.renderFailures.contains("geometry-mismatch"))
+        XCTAssertNil(evaluation.report.measurements)
+        XCTAssertNil(evaluation.diffPNG)
+    }
+
     func testEvaluateRecordsFailuresInsteadOfPresentingMissingRenderAsSuccess() async {
         let engine = DocumentBrightnessEngine()
         await engine.setShouldFail(true)
