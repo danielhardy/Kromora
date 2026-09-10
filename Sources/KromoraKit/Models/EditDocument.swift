@@ -34,6 +34,9 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// Non-destructive framing in normalized, oriented-image coordinates.
     var crop: CropAdjustments = .neutral
 
+    /// Non-destructive quarter-turn rotation, applied before crop and other spatial edits.
+    var rotation: ImageRotation = .zero
+
     /// Ordered tone/colour stages. Order matters and duplicates are allowed — see `AdjustmentNode`.
     var adjustments: [AdjustmentNode] = []
 
@@ -44,9 +47,9 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// only semantic intent, vectors, and analytic geometry live in the document.
     var localAdjustments: [LocalAdjustmentLayer] = []
 
-    /// v2 reserves the local-mask field. A v1 document decodes with an empty local-layer array;
-    /// a v1 writer therefore cannot accidentally discard a masked document from a newer build.
-    static let currentVersion = 2
+    /// v2 added the local-mask field. v3 adds the image rotation field. Missing fields decode to
+    /// their neutral values so existing edit records remain readable and are upgraded on save.
+    static let currentVersion = 3
 
     init(
         version: Int = EditDocument.currentVersion,
@@ -55,6 +58,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         color: ColorAdjustments = .neutral,
         effects: EffectsAdjustments = .neutral,
         crop: CropAdjustments = .neutral,
+        rotation: ImageRotation = .zero,
         adjustments: [AdjustmentNode] = [],
         lut: LUTSettings = .none,
         localAdjustments: [LocalAdjustmentLayer] = []
@@ -65,6 +69,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.color = color
         self.effects = effects
         self.crop = crop
+        self.rotation = rotation
         self.adjustments = adjustments
         self.lut = lut
         self.localAdjustments = localAdjustments
@@ -73,6 +78,7 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// True when this document would leave the source untouched.
     var isIdentity: Bool {
         rawDevelop.isNeutral && light.isIdentity && color.isIdentity && effects.isIdentity && crop.isIdentity &&
+            rotation == .zero &&
             adjustments.allSatisfy(\.isIdentity) && lut.isIdentity && localAdjustments.allSatisfy(\.isIdentity)
     }
 
@@ -80,7 +86,7 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// RAW develop settings intentionally do not count: the comparison baseline keeps the
     /// developed source, so a develop-only comparison would show identical pixels.
     var hasVisibleLookEdits: Bool {
-        !light.isIdentity || !color.isIdentity || !effects.isIdentity || !crop.isIdentity ||
+        !light.isIdentity || !color.isIdentity || !effects.isIdentity || !crop.isIdentity || rotation != .zero ||
             !adjustments.allSatisfy(\.isIdentity) || !lut.isIdentity || localAdjustments.contains(where: \.hasVisibleLook)
     }
 
@@ -115,7 +121,7 @@ struct EditDocument: Codable, Sendable, Equatable {
     var originalForComparison: EditDocument {
         EditDocument(
             version: version, rawDevelop: rawDevelop, light: .neutral, color: .neutral,
-            effects: .neutral, crop: crop,
+            effects: .neutral, crop: crop, rotation: rotation,
             adjustments: [], lut: .none, localAdjustments: []
         )
     }
@@ -126,7 +132,7 @@ struct EditDocument: Codable, Sendable, Equatable {
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case version, rawDevelop, light, color, effects, crop, adjustments, lut, localAdjustments
+        case version, rawDevelop, light, color, effects, crop, rotation, adjustments, lut, localAdjustments
     }
 
     /// Decoded field by field rather than by synthesis, for two reasons.
@@ -156,6 +162,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.color = try container.decodeIfPresent(ColorAdjustments.self, forKey: .color) ?? .neutral
         self.effects = try container.decodeIfPresent(EffectsAdjustments.self, forKey: .effects) ?? .neutral
         self.crop = try container.decodeIfPresent(CropAdjustments.self, forKey: .crop) ?? .neutral
+        self.rotation = try container.decodeIfPresent(ImageRotation.self, forKey: .rotation) ?? .zero
         self.adjustments = try container.decodeIfPresent([AdjustmentNode].self, forKey: .adjustments) ?? []
         self.lut = try container.decodeIfPresent(LUTSettings.self, forKey: .lut) ?? .none
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustmentLayer].self, forKey: .localAdjustments) ?? []

@@ -424,6 +424,24 @@ private struct CanvasToolbarControls: View {
               : "Crop the photo with a freeform or preset frame")
         .disabled(!hasImage)
 
+        Button { viewModel.rotateCounterClockwise() } label: {
+            Label("Rotate Left", systemImage: "rotate.left")
+        }
+        .help("Rotate the selected image 90° counterclockwise")
+        .disabled(!hasImage || canvasState.isCropToolActive)
+
+        Button { viewModel.rotateClockwise() } label: {
+            Label("Rotate Right", systemImage: "rotate.right")
+        }
+        .help("Rotate the selected image 90° clockwise")
+        .disabled(!hasImage || canvasState.isCropToolActive)
+
+        Button { viewModel.resetRotation() } label: {
+            Label("Reset Rotation", systemImage: "arrow.uturn.backward")
+        }
+        .help("Reset the selected image rotation")
+        .disabled(!hasImage || viewModel.document.rotation == .zero || canvasState.isCropToolActive)
+
         // Canvas navigation is presentation-only; these controls never touch the edit document.
         Menu {
             Button("Fit") { viewModel.fitCanvas() }

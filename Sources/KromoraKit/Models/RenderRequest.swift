@@ -99,12 +99,13 @@ struct RenderRequest: Sendable, Equatable {
     /// identity remains visible in the request so a future scheduler or cache can distinguish them,
     /// while the current implementation uses the requested viewport as the only pixel policy.
     var renderScale: RenderScale {
+        let nativeExtent = document.rotation.orientedExtent(source.nativeExtent)
         switch quality {
         case .thumbnail, .preview:
-            return .preview(maxSize: targetSize ?? source.nativeExtent)
+            return .preview(maxSize: targetSize ?? nativeExtent)
         case .interactive:
             return .interactive(
-                maxSize: targetSize ?? source.nativeExtent,
+                maxSize: targetSize ?? nativeExtent,
                 frameBudgetMilliseconds: frameBudgetMilliseconds
             )
         case .fullResolution:
@@ -116,7 +117,7 @@ struct RenderRequest: Sendable, Equatable {
             // Keep both dimensions proportional to the one long-edge factor. Passing the rounded
             // output plan here lets an extreme aspect ratio's short axis become the tightest ratio
             // and changes the factor before the renderer reaches the encoder.
-            return .preview(maxSize: options.sizing.unroundedOutputSize(for: source.nativeExtent))
+            return .preview(maxSize: options.sizing.unroundedOutputSize(for: nativeExtent))
         }
     }
 
@@ -126,7 +127,7 @@ struct RenderRequest: Sendable, Equatable {
     var exportOutputSize: CGSize? {
         guard quality == .export, let options = exportOptions,
               options.sizing.longEdge != nil else { return nil }
-        return options.outputSize(for: source.nativeExtent)
+        return options.outputSize(for: document.rotation.orientedExtent(source.nativeExtent))
     }
 }
 
