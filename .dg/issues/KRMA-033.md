@@ -70,7 +70,7 @@ Scope: full re-derivation of the render-math correctness, not just re-running th
   - `balance` shifts only the luminance sample used for region classification (`shiftedLuminance`), not the luminance used to compute each wheel's target hue color — this keeps balance's effect on region weighting independent of the wheel colors themselves, consistent with "independent, monotonic effects."
   - Zero-saturation identity, tonal-region dominance, and gradient continuity are all exercised by dedicated tests with concrete pixel assertions, not just structural checks.
 - Confirmed `cacheVersion` bump to 9 is wired through `RenderEngine` and `Thumbnails` cache keys, so cached renders correctly invalidate on upgrade.
-- Confirmed stage placement: HSL mixer → grading → ordered effects/LUT, matching `docs/COLOR_MODEL.md` and the scope requirement to keep stage order versioned.
+- Confirmed stage placement: HSL mixer → grading → ordered effects/LUT, matching `docs/ENGINEERING_GUIDE.md` and the scope requirement to keep stage order versioned.
 
 **Finding (fixed inline, non-blocking)**
 - `ColorGradingChannel` type alias (`Sources/LumoKit/Models/ColorGradingAdjustments.swift`) had zero callers anywhere in `Sources/` or `Tests/` — dead speculative API surface. Removed as a localized, behavior-preserving cleanup in commit d342a92. Rebuilt and reran the full suite (412 passed) after the change to confirm no regression.

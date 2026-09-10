@@ -23,7 +23,7 @@ Keep edit durability reliable while making persistence work proportional to usef
 
 ## Context and evidence
 
-Performance audit item 5, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 5, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1150) calls `saveActiveDocument` for each changed slider value. [queuePersistence](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1950) chains every task behind its predecessor without coalescing. [EditDocumentStore.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/EditDocumentStore.swift:318) encodes all records, reads/validates the previous catalog, and atomically writes backup and primary on every save. Locator/bookmark creation also repeats.

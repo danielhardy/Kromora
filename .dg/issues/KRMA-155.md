@@ -79,7 +79,7 @@ the two new unit tests exercise both the mapping and the live-update propagation
 
 **Blocker 1 — the fix is unreachable from the committed history** ([[KRMA-160]]):
 `git show d67e322 --stat` touches only `Sources/Lumo/LumoApp.swift`,
-`LumoWindowAppearanceController.swift` (+tests), and `docs/THEME_VALIDATION.md`. At
+`LumoWindowAppearanceController.swift` (+tests), and `docs/TESTING.md`. At
 HEAD there is no `Settings { }` scene in `LumoApp.swift`, no `SettingsLink()`/menu
 item in `MenuCommands.swift`, and `LumoSettingsView.swift` was never committed
 (`git cat-file -e HEAD:Sources/LumoKit/Views/LumoSettingsView.swift` → missing). A

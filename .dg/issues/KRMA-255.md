@@ -111,7 +111,7 @@ for the `@Model`/`@ModelActor` viability answer if option (a) is chosen.
 
 ### Comment — codex @ 2026-09-07T00:03:25.257Z
 
-Implemented and verified KRMA-255. MaskStore now writes raw Float32 sidecars with metadata-only JSON, structurally prevents new float arrays from being JSON-encoded, validates sidecar sizes, and keeps legacy inline payloads readable. Render refinement reuses exact-size cached results, neutral semantic definitions use the identity fast path, and the permanent sidecar/edit-persistence split is documented in docs/MASK_PERSISTENCE.md. Added focused sidecar, legacy-load, cache-reuse, target-size, and metadata tests. Verification: swift build; swift test (917 passed, 41 skipped, 0 failures); git diff --check; dg validate. Commit: 8c5e72f.
+Implemented and verified KRMA-255. MaskStore now writes raw Float32 sidecars with metadata-only JSON, structurally prevents new float arrays from being JSON-encoded, validates sidecar sizes, and keeps legacy inline payloads readable. Render refinement reuses exact-size cached results, neutral semantic definitions use the identity fast path, and the permanent sidecar/edit-persistence split is documented in docs/ENGINEERING_GUIDE.md. Added focused sidecar, legacy-load, cache-reuse, target-size, and metadata tests. Verification: swift build; swift test (917 passed, 41 skipped, 0 failures); git diff --check; dg validate. Commit: 8c5e72f.
 
 ## Agent log
 

@@ -22,7 +22,7 @@ Measure real user-visible latency without telemetry adding repeated filesystem w
 
 ## Context and evidence
 
-Performance audit item 9, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 9, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [Observability.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/Observability.swift:85) repeatedly derives a trace token from `source.cacheFingerprint`. [ImageSource.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/ImageSource.swift:119) performs URL resource queries and `lstat`; pointer/render/GPU/display events repeat this work, including on the main actor. [LiveEditTelemetry.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/LiveEditTelemetry.swift:90) retains all samples indefinitely and reports requested rather than effective dimensions. Settled promotion allocates a new revision without registering an input sample, so final-frame completion is not fully represented. The existing “60 MP-class” coordinator benchmark uses a fake renderer and measures publication, not GPU presentation.
@@ -42,7 +42,7 @@ The user requested tangible responsiveness improvements without sacrificing visu
 
 ## Verification plan
 
-Extend ObservabilityTests and PreviewCoordinatorTests for bounded retention, revision linkage, effective dimensions, and failed/skipped/stale presentation events. Update docs/INSTRUMENTS.md and the hardware capture report. Keep wall-clock hardware gates out of fake-renderer unit tests.
+Extend ObservabilityTests and PreviewCoordinatorTests for bounded retention, revision linkage, effective dimensions, and failed/skipped/stale presentation events. Update docs/TESTING.md and the hardware capture report. Keep wall-clock hardware gates out of fake-renderer unit tests.
 
 Start with these relevant checks, then run `swift test` and `swift build -c release` before implementation handoff:
 
@@ -86,8 +86,8 @@ PASS on the localized bounding/linkage work: reviewed ImageSource.swift, LiveEdi
 - Minor, non-blocking: LiveEditTelemetry.trimIfNeeded rebuilds the whole 256-entry index dictionary on every append once the cap is reached (steady-state removeCount is always 1), which is a small constant-factor inefficiency on the interactive input path; not worth a targeted fix given the 256-entry bound, but flagged for awareness.
 
 BLOCKER — AC items 6, 7, and 8 are not met, despite the closing comment describing the work as complete:
-- AC6 ("A real Metal presentation scenario measures p50/p95/p99 latency, delivered FPS, worst gap, CPU/GPU time, and memory; fake-renderer tests are clearly labeled orchestration-only"): only the labeling half exists (docs/INSTRUMENTS.md and PreviewCoordinatorTests' 60 MP-class benchmark now say fake-renderer coverage is orchestration-only, not a hardware result). No real Metal presentation benchmark scenario exists anywhere in the repo — grepped Tests/LumoKitTests for MTLDevice/MTKView/real-Metal benchmark usage and found none; PreviewSurface's actual MTKView/CAMetalLayer code is production-only, never exercised as a measured benchmark.
-- AC7 ("Archive reproducible Release captures for large standard images plus 24 MP and 40-60 MP RAW, cold/warm and with/without supporting work, with hardware/OS/commit/decoder details"): docs/INSTRUMENTS.md's 'Release-gate capture matrix' is still a manual recipe/template (rows describe what to run, not archived results) — no captured data was added.
+- AC6 ("A real Metal presentation scenario measures p50/p95/p99 latency, delivered FPS, worst gap, CPU/GPU time, and memory; fake-renderer tests are clearly labeled orchestration-only"): only the labeling half exists (docs/TESTING.md and PreviewCoordinatorTests' 60 MP-class benchmark now say fake-renderer coverage is orchestration-only, not a hardware result). No real Metal presentation benchmark scenario exists anywhere in the repo — grepped Tests/LumoKitTests for MTLDevice/MTKView/real-Metal benchmark usage and found none; PreviewSurface's actual MTKView/CAMetalLayer code is production-only, never exercised as a measured benchmark.
+- AC7 ("Archive reproducible Release captures for large standard images plus 24 MP and 40-60 MP RAW, cold/warm and with/without supporting work, with hardware/OS/commit/decoder details"): docs/TESTING.md's 'Release-gate capture matrix' is still a manual recipe/template (rows describe what to run, not archived results) — no captured data was added.
 - AC8 ("Measure instrumentation overhead with equivalent tracing enabled/disabled scenarios"): no such measurement exists in tests or docs.
 
 These require new benchmark infrastructure and an actual hardware run, which is out of scope for a localized, testable verification fix (no new product behavior/APIs, but this is materially new measurement infrastructure, not a bugfix). Filed as urgent child KRMA-117 (depends_on: KRMA-114, label verification) and returning this issue to review rather than completing it, since the acceptance criteria as written are not fully satisfied.
@@ -101,7 +101,7 @@ PASS on AC1-5: re-confirmed no regression from KRMA-115/KRMA-116 commits landed 
 AC6 and AC8 now genuinely satisfied by commit 7e8308a (KRMA-117), verified by actually running the opt-in benchmarks rather than only reading them:
 - `LUMO_METAL_BENCHMARK=1 swift test --filter MetalPresentationBenchmark` ran a real CAMetalLayer/CAMetalDrawable presentation loop through RenderEngine.presentationContext and produced real output: p50=16.051ms p95=31.529ms p99=31.529ms worst_gap=16.749ms mean_cpu_encode=0.040ms peak_memory_delta=1540096B (20 iterations, this machine). This is a genuine hardware measurement, not orchestration-only.
 - `LUMO_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark` produced enabled_ms=107.805 disabled_ms=13.270 overhead_per_event_us=1.891 over 50k iterations — a real enabled-vs-disabled comparison.
-- docs/PERFORMANCE_CAPTURE_MATRIX_2026-09-01.md correctly labels the fake-renderer coordinator benchmark as orchestration-only and documents reproduction commands for both real benchmarks.
+- docs/TESTING.md correctly labels the fake-renderer coordinator benchmark as orchestration-only and documents reproduction commands for both real benchmarks.
 
 AC7 remains unmet: the capture matrix's rows are still "pending local Release run" / "requires licensed local RAW" — no archived hardware data exists anywhere in the repo. This is not a code defect in this checkout; closing it requires a human operator on a logged-in Mac with a Release build, licensed 24 MP and 40-60 MP RAW source files, and a manual Instruments (Points of Interest + Metal System Trace) session driving every visible Light/Adjust/Effects control per matrix row — none of which is achievable through swift test/swift build automation, and building app/Instruments UI-driving automation would itself be a broad new capability out of scope for a localized fix.
 
@@ -126,7 +126,7 @@ Re-verified all remaining acceptance criteria against the current tree:
 - AC6/AC8 (real Metal presentation benchmark, tracing-overhead measurement): unchanged since round 2's
   direct execution of `LUMO_METAL_BENCHMARK=1`/`LUMO_TRACE_BENCHMARK=1` runs, which produced genuine
   hardware numbers, not orchestration-only fakes; no reason to re-run given no code changed.
-- AC7 (as amended): satisfied — docs/PERFORMANCE_CAPTURE_MATRIX_2026-09-01.md documents the
+- AC7 (as amended): satisfied — docs/TESTING.md documents the
   reproducible capture procedure/schema; archival execution is correctly tracked outside this ticket
   by KRMA-118/KRMA-119.
 - `swift build -c release`: clean (only pre-existing CIKernel/CIColorKernel deprecation warnings,

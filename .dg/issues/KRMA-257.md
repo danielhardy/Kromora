@@ -64,7 +64,7 @@ Under the old JSON store the equivalent scan (`records.first(where:)`) was a lin
 already-fully-loaded in-memory dictionary — cheap, no disk I/O, paid once at process start. The
 SwiftData version pays a fresh SQL fetch and full-row deserialization on every call, so browsing
 N unedited photos in a library with M edited photos costs O(N*M) disk-backed work — exactly the
-scaling problem `docs/EDIT_PERSISTENCE_BENCHMARK_2026-09-01.md` and this epic were created to
+scaling problem `docs/TESTING.md` and this epic were created to
 remove, just moved from "every edit" to "every unedited-photo open."
 
 Not a blocker: no test in the current suite exercises this path at scale, and the epic's definition

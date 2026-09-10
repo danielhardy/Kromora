@@ -46,7 +46,7 @@ Do not expand into the concept's explicitly excluded V2 features. Avoid a giant 
 
 ### Comment — codex @ 2026-08-31T03:01:44.865Z
 
-Implemented and committed as dcff059. Completed Epic 0 documentation and baseline closure: README now explains Lumo intent and the agent-led development methodology with DispatchGraph; added docs/BUILD_BASELINE.md; updated living docs to Lumo naming and corrected LUMO_BENCH. Historical LUTzy attribution is preserved. Verification: swift build passed; swift test passed (308 executed, 20 skipped, 0 failures); swift build -c release passed; dg validate passed. Existing RAW, LUT, thumbnail, Photos, metadata, histogram, and export behavior remains covered by the full suite. Ready for review.
+Implemented and committed as dcff059. Completed Epic 0 documentation and baseline closure: README now explains Lumo intent and the agent-led development methodology with DispatchGraph; added docs/ENGINEERING_GUIDE.md; updated living docs to Lumo naming and corrected LUMO_BENCH. Historical LUTzy attribution is preserved. Verification: swift build passed; swift test passed (308 executed, 20 skipped, 0 failures); swift build -c release passed; dg validate passed. Existing RAW, LUT, thumbnail, Photos, metadata, histogram, and export behavior remains covered by the full suite. Ready for review.
 
 ### Comment — claude @ 2026-08-31T03:02:48.513Z
 
@@ -61,10 +61,10 @@ Reviewed independently after human review, with all declared checks re-run from 
 - `dg validate` — OK (pre-existing unrelated warnings: agents.pickup.runner model name, KRMA-005 context completeness — out of scope for this issue).
 
 **MVP outcome checklist verified against repo state:**
-- Product/package identifiers use Lumo except historical attribution: confirmed. No `lutzy` hits under Sources/Tests; Package.swift targets are Lumo/LumoKit/LumoKitTests; entitlements file is Lumo.entitlements. Remaining `lutzy` matches are all intentional historical references (README fork/attribution section, docs/BUILD_BASELINE.md, .context/initial_concept.md, archived docs/superpowers design notes).
+- Product/package identifiers use Lumo except historical attribution: confirmed. No `lutzy` hits under Sources/Tests; Package.swift targets are Lumo/LumoKit/LumoKitTests; entitlements file is Lumo.entitlements. Remaining `lutzy` matches are all intentional historical references (README fork/attribution section, docs/ENGINEERING_GUIDE.md, .context/initial_concept.md, archived docs/superpowers design notes).
 - README explains product intent and the agent-led/DispatchGraph methodology: confirmed, present and substantive.
 - Debug + release builds and test suite pass: confirmed via independent re-run above.
-- Existing RAW/LUT/thumbnail/Photos/metadata/histogram/export capabilities intact: covered by the passing 308-test suite (RenderPipelineTests, ThumbnailTests, WorkingSpaceTests, RenderStackTests, etc.), consistent with docs/BUILD_BASELINE.md's retained-capabilities list.
+- Existing RAW/LUT/thumbnail/Photos/metadata/histogram/export capabilities intact: covered by the passing 308-test suite (RenderPipelineTests, ThumbnailTests, WorkingSpaceTests, RenderStackTests, etc.), consistent with docs/ENGINEERING_GUIDE.md's retained-capabilities list.
 - All three child tickets (KRMA-002, KRMA-003, KRMA-004) confirmed status=done via `dg issue show`.
 
 **Findings:** none. No correctness, maintainability, security, or performance issues found in the rename/documentation/baseline work. No localized fixes required; no child tickets created.

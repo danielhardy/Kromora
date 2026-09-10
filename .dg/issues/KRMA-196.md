@@ -24,7 +24,7 @@ commits:
 **Type:** Task
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/PhotoAnalysisCache.swift`
 **Depends on:** KRMA-195, KRMA-194
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §5
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md
 
 ## 1. Problem
 
@@ -44,10 +44,10 @@ different consumption pattern.
    `PhotoAnalysisCoordinator.analyze(...)` (KRMA-195).
 3. Editing `EditDocument` fields (Light, Color, LUT, etc.) must **not** change the cache key or
    invalidate the entry — regression test this explicitly (same feedback-loop concern as
-   `docs/PHASE3_SPEC.md` §5).
+   `docs/ENGINEERING_GUIDE.md).
 4. Bumping `AnalysisVersion` invalidates old entries cleanly.
 5. Cache reads/writes are cancellable-safe.
-6. Cache-hit latency target < 5 ms (`docs/PHASE3_SPEC.md` §6).
+6. Cache-hit latency target < 5 ms (`docs/ENGINEERING_GUIDE.md).
 7. Swift 6 clean, zero escape hatches.
 
 ## 3. Implementation notes

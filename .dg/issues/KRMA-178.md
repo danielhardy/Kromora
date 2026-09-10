@@ -118,7 +118,7 @@ and import all of them — not be forced to repeat *Open Image…* for every pho
 - Existing tests must stay green (`swift test`); no new `@unchecked Sendable` / escape hatches.
 
 ---
-Ported from a spec drafted by another AI session as `docs/KRMA-177-open-multiple-images.md`,
+Ported from a spec drafted by another AI session as `docs/ENGINEERING_GUIDE.md`,
 which was never registered as a real dg ticket (no `dg issue create` was run). Re-filed here as
 KRMA-178 since KRMA-177 was already taken by an unrelated ticket.
 

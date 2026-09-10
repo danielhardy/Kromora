@@ -36,14 +36,14 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/MaskRefinement.swift`
 **Depends on:** KRMA-201, KRMA-186
-**Epic:** KRMA-181 — see mask-quality rationale in `docs/PHASE3_SPEC.md` / KRMA-184
+**Epic:** KRMA-181 — see mask-quality rationale in `docs/ENGINEERING_GUIDE.md` / KRMA-184
 
 ## 1. Problem
 
 Auto only ever needs a `.analysis`-quality mask (~768px); the Masking UI (KRMA-201) shows
 `.preview`-quality masks for selection. Neither is precise enough for a local adjustment painted
 and rendered at full resolution — that needs `.render`-quality: full-resolution, likely tile-based
-to stay within the memory budget (`docs/PHASE3_SPEC.md` §6), refined mattes. This ticket builds
+to stay within the memory budget (`docs/ENGINEERING_GUIDE.md), refined mattes. This ticket builds
 that upgrade path, reusing the semantic detection result as *reusable source data* rather than
 re-running Vision from scratch at full resolution.
 

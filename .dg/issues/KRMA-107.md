@@ -25,7 +25,7 @@ Make warm canvas movement a cheap transform of completed GPU pixels while expens
 
 ## Context and evidence
 
-Performance audit item 2, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 2, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [RenderEngine.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:140) returns a graph from `makeCIImage`. [PreviewSurface.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Views/PreviewSurface.swift:210) calls `context.render` inside the `@MainActor` MTKView coordinator. Navigation transforms that graph and submits it again. The actor method finishing therefore does not mean image processing finished. GPU execution is asynchronous, but graph evaluation/encoding and drawable acquisition still occur on the UI path.
@@ -95,7 +95,7 @@ Checks run:
 - `swift test` (full suite) — 576 tests, 0 failures, 30 skipped, on HEAD with the working tree's unrelated uncommitted local RAW fixture (`Tests/LumoKitTests/Fixtures.swift`, `realworldtest/`) temporarily stashed. With that fixture present, three unrelated pre-existing tests fail/skip differently (`CropWorkflowTests.testReenteringCropRequestsTheFullUncroppedStageAndRestoresOnExit`, `ImageSourceTests.testRAWBytesAreDetectedWithoutAFilename`, `RAWCapabilitiesTests.testProbingARealRAWReportsItsDecodersSeeds`) — confirmed unrelated to this ticket's changes by reproducing the same failures on the pre-3195e55 parent commit in a scratch worktree once the same local RAW fixture is present; none touch RenderEngine/PreviewSurface/PreviewCoordinator code paths. Not treated as blockers for KRMA-107.
 - `swift build -c release` — succeeds (pre-existing CIKernel deprecation warnings only, unrelated to this change).
 
-Gap (non-blocking, filed as follow-up): KRMA-107's own acceptance criterion 6 (p95 input-to-present ≤33 ms warm/ordinary, ≤200 ms release-to-settled, measured on the reference 60 Hz display) has no hardware capture taken after this commit. The only archived capture (`docs/KRMA-118-DSC07826-...-summary.md`, p95 35.966 ms) predates 3195e55 and exercised the old lazy-graph presentation path, so it cannot confirm or refute this ticket's target. Per the KRMA-118/KRMA-119 precedent (measurement requires a human-operated session with a real display; explicitly does not block completion of the ticket it measures), filed KRMA-121 (priority medium, label verification, non-blocking) to capture that evidence on a commit at or after 3195e55.
+Gap (non-blocking, filed as follow-up): KRMA-107's own acceptance criterion 6 (p95 input-to-present ≤33 ms warm/ordinary, ≤200 ms release-to-settled, measured on the reference 60 Hz display) has no hardware capture taken after this commit. The only archived capture (`docs/TESTING.md`, p95 35.966 ms) predates 3195e55 and exercised the old lazy-graph presentation path, so it cannot confirm or refute this ticket's target. Per the KRMA-118/KRMA-119 precedent (measurement requires a human-operated session with a real display; explicitly does not block completion of the ticket it measures), filed KRMA-121 (priority medium, label verification, non-blocking) to capture that evidence on a commit at or after 3195e55.
 
 No code changes made during this verification pass.
 

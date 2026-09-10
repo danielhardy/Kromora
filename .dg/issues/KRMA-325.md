@@ -18,7 +18,7 @@ verification_report:
       notes: Not exercised in this verification pass; no code path for this was changed by the fix (only test isolation), and it was not part of the reviewed diff.
     - criterion: "Manual: reporter runs documented cleanup; swift test leaves the real Library untouched; swift run no longer shows brown grid"
       result: pass
-      notes: "docs/TEST_LIBRARY_CLEANUP.md added with an inspection-only, no-auto-delete procedure. Verified independently: snapshotted ~/Library/Application Support/Lumo/Library (32 pre-existing orphaned fixtures from before this fix) before and after both fast and serial lanes; directory listing was byte-identical after each run, confirming no new pollution."
+      notes: "docs/TESTING.md added with an inspection-only, no-auto-delete procedure. Verified independently: snapshotted ~/Library/Application Support/Lumo/Library (32 pre-existing orphaned fixtures from before this fix) before and after both fast and serial lanes; directory listing was byte-identical after each run, confirming no new pollution."
   checks_run:
     - swift build (clean, zero diagnostics)
     - scripts/ci-tests.sh fast (668 tests, 0 failures)
@@ -112,7 +112,7 @@ Acceptance criteria:
 - [x] TestLibraryIsolationTest: no test constructs ImageCollection with the production default folder (pass) — grep for bare ImageCollection( in Tests/LumoKitTests returns only the makeTestCollection helper in Fixtures.swift; new LibraryIsolationTests.testTestCollectionUsesAnIsolatedManagedLibrary asserts the helper's libraryFolderURL != defaultLibraryFolderURL; a preconditionFailure guard in ImageCollection.init now rejects the production folder under XCTest or LUMO_TEST_ISOLATION=1.
 - [x] PhotosImportHermeticTest: appendDataImport/addFromURLs write only under the injected temp libraryFolderURL (pass) — All PhotosImportTests, ImportedPhotoDurabilityTests, MediaVolumeTests and ThumbnailTests sites route through makeTestCollection/explicit temp libraryFolderURL; ran scripts/ci-tests.sh fast (668 tests) and serial (326 tests), both green, with the real managed Library file list unchanged before/after (diff of directory listing empty).
 - [ ] LaunchRestoreTest / manual verification of restoreLibrary on empty library (not_applicable) — Not exercised in this verification pass; no code path for this was changed by the fix (only test isolation), and it was not part of the reviewed diff.
-- [x] Manual: reporter runs documented cleanup; swift test leaves the real Library untouched; swift run no longer shows brown grid (pass) — docs/TEST_LIBRARY_CLEANUP.md added with an inspection-only, no-auto-delete procedure. Verified independently: snapshotted ~/Library/Application Support/Lumo/Library (32 pre-existing orphaned fixtures from before this fix) before and after both fast and serial lanes; directory listing was byte-identical after each run, confirming no new pollution.
+- [x] Manual: reporter runs documented cleanup; swift test leaves the real Library untouched; swift run no longer shows brown grid (pass) — docs/TESTING.md added with an inspection-only, no-auto-delete procedure. Verified independently: snapshotted ~/Library/Application Support/Lumo/Library (32 pre-existing orphaned fixtures from before this fix) before and after both fast and serial lanes; directory listing was byte-identical after each run, confirming no new pollution.
 Checks run:
 - swift build (clean, zero diagnostics)
 - scripts/ci-tests.sh fast (668 tests, 0 failures)

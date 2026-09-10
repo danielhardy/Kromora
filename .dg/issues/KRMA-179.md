@@ -109,7 +109,7 @@ not erase another, and an imported photo should not disappear when the app is re
 - `swift test` stays green; no new escape hatches (`@unchecked Sendable`, etc.).
 
 ---
-Ported from a spec drafted by another AI session as `docs/KRMA-178-imported-photos-durable.md`,
+Ported from a spec drafted by another AI session as `docs/ENGINEERING_GUIDE.md`,
 which was never registered as a real dg ticket (no `dg issue create` was run). Re-filed here as
 KRMA-179 since the intended KRMA-177/178 numbers were already taken/reused.
 

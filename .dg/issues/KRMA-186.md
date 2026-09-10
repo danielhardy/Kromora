@@ -48,7 +48,7 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/MaskOperations.swift`
 **Depends on:** KRMA-184
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` (revised mask-foundation sequencing)
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md` (revised mask-foundation sequencing)
 
 ## 1. Problem
 

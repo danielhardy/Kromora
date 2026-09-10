@@ -68,7 +68,7 @@ update only at gesture boundaries. Export still needs the original vector intent
 
 ## Implementation notes
 
-Follow Section 4.3 and Step 6 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Likely work spans a
+Follow Section 4.3 and Step 6 of `docs/ENGINEERING_GUIDE.md`. Likely work spans a
 native pointer surface, `MaskInteractionState`, brush geometry/resampling helpers, overlay renderer,
 mask render cache, and `AppViewModel+Masking.swift`.
 

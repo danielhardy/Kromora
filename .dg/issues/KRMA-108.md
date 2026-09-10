@@ -27,7 +27,7 @@ Maintain sharp, accurate crop and zoom previews without rebuilding source develo
 
 ## Context and evidence
 
-Performance audit item 3, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 3, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1276) derives target resolution from the whole uncropped source and continuously varying zoom. Cache dimensions are exact floating-point values. [RenderPipeline.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderPipeline.swift:105) crops after source downscaling. Pinch updates request interactive rendering even when a sharper settled image is already available.
@@ -76,13 +76,13 @@ These tickets provide concrete implementation work for the broader KRMA-055/KRMA
 
 ### Comment — codex @ 2026-09-02T02:38:45.544Z
 
-Implemented in 79b96cb. Added crop-aware ResolutionPlanner using committed crop, actual drawable backing pixels, native bounds, discrete 1/8–native levels, visible-region metadata, and downgrade hysteresis; wired per-panel MTKView drawable sizing; prevented lower-detail same-source/document frames from replacing sharper frames. Preserved crop-after-adjustments ordering and documented the no-explicit-tiling/Core Image ROI boundary in docs/KRMA-108-RESOLUTION-PLANNING.md. Verification: focused CanvasNavigationTests, CropPipelineTests, RenderCacheTests; 24 affected resolution/cutover/surface tests; swift build -c release all passed. Full swift test completed 580 tests with 13 skips and 7 known pre-existing RAW fixture/host failures unrelated to this change; git diff --cached --check passed.
+Implemented in 79b96cb. Added crop-aware ResolutionPlanner using committed crop, actual drawable backing pixels, native bounds, discrete 1/8–native levels, visible-region metadata, and downgrade hysteresis; wired per-panel MTKView drawable sizing; prevented lower-detail same-source/document frames from replacing sharper frames. Preserved crop-after-adjustments ordering and documented the no-explicit-tiling/Core Image ROI boundary in docs/ENGINEERING_GUIDE.md. Verification: focused CanvasNavigationTests, CropPipelineTests, RenderCacheTests; 24 affected resolution/cutover/surface tests; swift build -c release all passed. Full swift test completed 580 tests with 13 skips and 7 known pre-existing RAW fixture/host failures unrelated to this change; git diff --cached --check passed.
 
 ### Comment — claude @ 2026-09-02T02:51:40.293Z
 
 ## Verification report — counterpoint review of KRMA-108 (commit 79b96cb)
 
-**Scope reviewed:** ResolutionPlanner.swift, AppViewModel.swift/PreviewSurface.swift/PreviewView.swift wiring, ResolutionPlannerTests, PreviewSurfaceTests, PreviewCutoverTests, ExportCutoverTests, and docs/KRMA-108-RESOLUTION-PLANNING.md.
+**Scope reviewed:** ResolutionPlanner.swift, AppViewModel.swift/PreviewSurface.swift/PreviewView.swift wiring, ResolutionPlannerTests, PreviewSurfaceTests, PreviewCutoverTests, ExportCutoverTests, and docs/ENGINEERING_GUIDE.md.
 
 **Correctness:**
 - Verified the required-scale derivation by hand against the planner's own tests: `fitScale = viewportSize / cropSize` is already in native-fraction units because `cropSize = native * cropRect`, so the quarter-crop case correctly selects native detail (6000x4000) rather than a viewport-relative fraction — confirms acceptance criterion 2.

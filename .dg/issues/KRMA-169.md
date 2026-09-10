@@ -9,7 +9,7 @@ verification_report:
   acceptance_criteria:
     - criterion: README and living audit/spec documents match the current product name, architecture, and test counts.
       result: pass
-      notes: README states 735 XCTest methods; grep of Tests/LumoKitTests/*.swift confirms 735 occurrences of func test. docs/CODE_REVIEW.md and docs/PHASE2_SPEC.md renamed LUTzy to Lumo and reconciled historical findings against the current architecture.
+      notes: README states 735 XCTest methods; grep of Tests/LumoKitTests/*.swift confirms 735 occurrences of func test. docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md renamed LUTzy to Lumo and reconciled historical findings against the current architecture.
     - criterion: A checked-in Swift-format configuration matches the house style and CI reports actionable changed-file violations.
       result: pass
       notes: .swift-format is checked in; scripts/check-swift-format.sh diffs against SWIFT_FORMAT_BASE (PR base ref or HEAD^) and runs swift format lint --strict only on changed .swift files, printing per-file violations. Ran it locally against 63b7724^ and it correctly scoped to the one changed Swift file (Fixtures.swift) for that commit.
@@ -29,7 +29,7 @@ verification_report:
     - swift build
     - swift format lint --strict via scripts/check-swift-format.sh with SWIFT_FORMAT_BASE=63b7724^
     - grep -c func test across Tests/LumoKitTests/*.swift (735, matches README claim)
-    - manual diff review of 63b7724 covering .github/workflows/ci.yml, .swift-format, scripts/check-swift-format.sh, scripts/smoke-macos-app.sh, realworldtest/README.md, .gitignore, docs/CODE_REVIEW.md, docs/PHASE2_SPEC.md, README.md
+    - manual diff review of 63b7724 covering .github/workflows/ci.yml, .swift-format, scripts/check-swift-format.sh, scripts/smoke-macos-app.sh, realworldtest/README.md, .gitignore, docs/ENGINEERING_GUIDE.md, docs/ENGINEERING_GUIDE.md, README.md
     - git status --porcelain to confirm only the intended ci.yml fix was introduced by this verification pass
   findings:
     - "tests-fast's skip list and tests-slow's filter were not complementary: EditPersistenceBenchmarkTests and TracingOverheadBenchmark were skipped by the fast lane but absent from the slow lane's filter, so neither lane selected them. Both are opt-in, XCTSkipUnless-gated by env vars CI never sets, so there was no observed behavior change, but the lane-selection sets did not match the stated intent. Fixed in 502e211."
@@ -90,7 +90,7 @@ Implemented in 63b7724. Added checked-in Swift-format policy with strict changed
 - 2026-09-04T04:09:07.754Z: Verification report
 Verdict: PASS
 Acceptance criteria:
-- [x] README and living audit/spec documents match the current product name, architecture, and test counts. (pass) — README states 735 XCTest methods; grep of Tests/LumoKitTests/*.swift confirms 735 occurrences of func test. docs/CODE_REVIEW.md and docs/PHASE2_SPEC.md renamed LUTzy to Lumo and reconciled historical findings against the current architecture.
+- [x] README and living audit/spec documents match the current product name, architecture, and test counts. (pass) — README states 735 XCTest methods; grep of Tests/LumoKitTests/*.swift confirms 735 occurrences of func test. docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md renamed LUTzy to Lumo and reconciled historical findings against the current architecture.
 - [x] A checked-in Swift-format configuration matches the house style and CI reports actionable changed-file violations. (pass) — .swift-format is checked in; scripts/check-swift-format.sh diffs against SWIFT_FORMAT_BASE (PR base ref or HEAD^) and runs swift format lint --strict only on changed .swift files, printing per-file violations. Ran it locally against 63b7724^ and it correctly scoped to the one changed Swift file (Fixtures.swift) for that commit.
 - [x] Packaging generates build artifacts without modifying tracked source files. (pass) — scripts/build-macos-app.sh stages the asset catalog into a build output directory rather than editing Sources/Lumo/Assets.xcassets in place; CI package job asserts git status --porcelain --untracked-files=all is empty after building.
 - [x] RAW fixture storage/privacy/licensing is documented and the repository strategy is consistent with project guidance. (pass) — realworldtest ARW files (49MB each) were removed from git; realworldtest/README.md documents the LUMO_RAW_FIXTURE_DIR opt-in policy and the CC BY 4.0 license terms for locally supplied fixtures; .gitignore excludes realworldtest contents except the README.
@@ -100,7 +100,7 @@ Checks run:
 - swift build
 - swift format lint --strict via scripts/check-swift-format.sh with SWIFT_FORMAT_BASE=63b7724^
 - grep -c func test across Tests/LumoKitTests/*.swift (735, matches README claim)
-- manual diff review of 63b7724 covering .github/workflows/ci.yml, .swift-format, scripts/check-swift-format.sh, scripts/smoke-macos-app.sh, realworldtest/README.md, .gitignore, docs/CODE_REVIEW.md, docs/PHASE2_SPEC.md, README.md
+- manual diff review of 63b7724 covering .github/workflows/ci.yml, .swift-format, scripts/check-swift-format.sh, scripts/smoke-macos-app.sh, realworldtest/README.md, .gitignore, docs/ENGINEERING_GUIDE.md, docs/ENGINEERING_GUIDE.md, README.md
 - git status --porcelain to confirm only the intended ci.yml fix was introduced by this verification pass
 Findings:
 - tests-fast's skip list and tests-slow's filter were not complementary: EditPersistenceBenchmarkTests and TracingOverheadBenchmark were skipped by the fast lane but absent from the slow lane's filter, so neither lane selected them. Both are opt-in, XCTSkipUnless-gated by env vars CI never sets, so there was no observed behavior change, but the lane-selection sets did not match the stated intent. Fixed in 502e211.

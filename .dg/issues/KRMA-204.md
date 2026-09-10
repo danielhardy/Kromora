@@ -35,7 +35,7 @@ commits:
 **Type:** Task
 **Component:** new `Tests/LumoKitTests/Fixtures/` additions + `Tests/LumoKitTests/PhotoIntelligenceCorpusTests.swift`
 **Depends on:** KRMA-200
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §7, original proposal §37–39
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md, original proposal §37–39
 
 ## 1. Problem
 
@@ -73,7 +73,7 @@ committed** — this ticket works within that constraint.
 
 - `Tests/LumoKitTests/Fixtures.swift`.
 - CLAUDE.md's Layout section — fixture-generation and `LUMO_RAW_FIXTURE_DIR` conventions.
-- `docs/PHASE3_SPEC.md` §7.
+- `docs/ENGINEERING_GUIDE.md
 
 ## 5. Testing
 

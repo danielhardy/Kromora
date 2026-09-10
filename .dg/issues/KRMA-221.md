@@ -79,7 +79,7 @@ with rendered pixels across navigation, crop, and backing-scale changes.
 
 ## Implementation notes
 
-Follow Section 4.4 and Step 4 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Reuse the overlay,
+Follow Section 4.4 and Step 4 of `docs/ENGINEERING_GUIDE.md`. Reuse the overlay,
 coordinate-transform, draft/commit, and render seams established by KRMA-217 through KRMA-220.
 
 Keep analytic math in a pure model/renderer helper shared by hit-test/golden tests and the GPU

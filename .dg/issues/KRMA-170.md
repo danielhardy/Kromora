@@ -18,7 +18,7 @@ verification_report:
       notes: Photos local identifiers remain the preferred identity; identifier-free imports preserve content-plus-name-plus-ordinal identity, source bytes, orientation, and existing RAW/content classification behavior.
     - criterion: Regression coverage and documentation cover the new invariant.
       result: pass
-      notes: Added digest propagation and precomputed ImageSource fingerprint tests and documented the memory/hash invariant in docs/PHOTOS_IMPORT_PERFORMANCE.md.
+      notes: Added digest propagation and precomputed ImageSource fingerprint tests and documented the memory/hash invariant in docs/TESTING.md.
   checks_run:
     - swift test --filter PhotosImportTests|PhotoAssetTests|ImageSourceTests|ThumbnailTests (39 passed)
     - swift test (727 passed, 14 expected skips)
@@ -76,7 +76,7 @@ Acceptance criteria:
 - [x] Photos transfer memory remains bounded during selection import. (pass) — The picker path transfers and publishes one item at a time; no temporary batch payload array is retained, picker selection remains capped at 50, and thumbnail work uses the existing four-worker/24-queued scheduler. Accepted originals are retained once because RAW re-development requires full bytes.
 - [x] Large payload hashing does not repeat across import consumers or block the UI actor. (pass) — ContentView computes one SHA-256 digest in a utility Task after transfer. PhotoImportItem carries it through the durable identity fallback and PhotoSourceFingerprint; collection item fingerprints are reused by thumbnails, first render, navigation, and adjacent prefetch.
 - [x] Import correctness and durable identity are preserved. (pass) — Photos local identifiers remain the preferred identity; identifier-free imports preserve content-plus-name-plus-ordinal identity, source bytes, orientation, and existing RAW/content classification behavior.
-- [x] Regression coverage and documentation cover the new invariant. (pass) — Added digest propagation and precomputed ImageSource fingerprint tests and documented the memory/hash invariant in docs/PHOTOS_IMPORT_PERFORMANCE.md.
+- [x] Regression coverage and documentation cover the new invariant. (pass) — Added digest propagation and precomputed ImageSource fingerprint tests and documented the memory/hash invariant in docs/TESTING.md.
 Checks run:
 - swift test --filter PhotosImportTests|PhotoAssetTests|ImageSourceTests|ThumbnailTests (39 passed)
 - swift test (727 passed, 14 expected skips)

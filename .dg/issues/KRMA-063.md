@@ -36,12 +36,12 @@ Call sites: `AppViewModel.schedulePreview()` and `AppViewModel.scheduleOriginalP
 `Sources/LumoKit/Models/RenderEngine.swift`.
 
 Previously `RenderEngine.makeCGImage` called `context.createCGImage(...)` directly and handed the
-result out via `sending CGImage?` — no encode, no decode. `docs/CODE_REVIEW.md` records that this
+result out via `sending CGImage?` — no encode, no decode. `docs/ENGINEERING_GUIDE.md` records that this
 exact preview path was already the subject of a prior main-thread-blocking performance fix
 (`renderPreview` / `Task.detached`), so it's a path this project has previously cared about keeping
 fast; adding a full PNG encode + decode on every debounced edit tick is a regression against that
 history even though it introduces no correctness bug (all KRMA-012 tests and acceptance criteria
-pass, and `docs/PHASE2_SPEC.md` §4.5 already documents dropping the old "zero-copy" property as the
+pass, and `docs/ENGINEERING_GUIDE.md already documents dropping the old "zero-copy" property as the
 explicit cost of `CGImage` non-`Sendable`-ness).
 
 Not blocking KRMA-012: the API contract (Sendable `RenderRequest`/`RenderResult`, no
@@ -94,7 +94,7 @@ Reviewed commit 0b0e2a7 against the acceptance criteria and re-ran all declared 
 - Benchmark numbers in the implementation comment (205.5ms direct vs 234.3ms PNG round-trip,
   +28.8ms/1.14x at 1600x1200) are consistent with the acceptance criteria's ask to measure and act on
   the per-frame cost.
-- One doc-only gap found and fixed in this pass: docs/PHASE2_SPEC.md §4.5 still said CGImage is
+- One doc-only gap found and fixed in this pass: docs/ENGINEERING_GUIDE.md §4.5 still said CGImage is
   "decoded from raster result bytes only after the renderer boundary" for all cases, which is now
   false for the interactive path. Corrected in commit 86ba0ee to describe both the export/default path
   and the new makeCGImage accessor.
@@ -122,4 +122,4 @@ state. Re-run `dg issue complete KRMA-063 --commit 86ba0ee` once KRMA-064 lands 
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
 
-- 2026-08-31T15:18:23.694Z: Independent verification passed: reviewed 0b0e2a7's makeCGImage accessor against acceptance criteria, re-ran full test suite (332 passed/20 skipped), release build, and dg validate — all clean. Fixed one stale doc reference in docs/PHASE2_SPEC.md §4.5 (commit 86ba0ee). No blockers.
+- 2026-08-31T15:18:23.694Z: Independent verification passed: reviewed 0b0e2a7's makeCGImage accessor against acceptance criteria, re-ran full test suite (332 passed/20 skipped), release build, and dg validate — all clean. Fixed one stale doc reference in docs/ENGINEERING_GUIDE.md §4.5 (commit 86ba0ee). No blockers.

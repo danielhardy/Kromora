@@ -49,7 +49,7 @@ pixels solely to solve window chrome appearance.
 
 ### Comment — codex @ 2026-09-01T14:59:28.006Z
 
-Implemented in commit 839fc08. Added centralized appearance-aware window/control surfaces across the shell, preview canvas surround, inspector, Look browser, library, modal, and chart/report UI; preserved intentionally dark histogram, tone-curve, and Metal letterbox analysis surfaces with scoped documentation. Added docs/THEME_VALIDATION.md covering light/dark launch and live transition smoke tests. Verification: swift test — 492 passed, 25 expected skips, 0 failures; swift build and swift build -c release passed; git diff --check passed; dg validate passed with only the pre-existing pickup-runner model warning.
+Implemented in commit 839fc08. Added centralized appearance-aware window/control surfaces across the shell, preview canvas surround, inspector, Look browser, library, modal, and chart/report UI; preserved intentionally dark histogram, tone-curve, and Metal letterbox analysis surfaces with scoped documentation. Added docs/TESTING.md covering light/dark launch and live transition smoke tests. Verification: swift test — 492 passed, 25 expected skips, 0 failures; swift build and swift build -c release passed; git diff --check passed; dg validate passed with only the pre-existing pickup-runner model warning.
 
 ### Comment — claude @ 2026-09-01T15:00:54.554Z
 
@@ -75,7 +75,7 @@ Reran checks: `swift build` clean, `swift test` — 492 passed, 25 expected skip
 (matches the implementer's report). `git diff --check 839fc08^ 839fc08` clean. `dg validate`
 OK with only the pre-existing unrelated pickup-runner model warning.
 
-docs/THEME_VALIDATION.md documents the manual smoke test for both launch appearances and a
+docs/TESTING.md documents the manual smoke test for both launch appearances and a
 live transition, satisfying the "regression check or documented manual smoke test"
 acceptance criterion (no automated UI test exists for appearance, which is expected for a
 SwiftUI/AppKit-appearance concern with no host test harness in this repo).

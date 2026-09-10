@@ -54,7 +54,7 @@ Implemented in commit 59013b0. Removed the production previewNSImage/originalPre
 
 **Maintainability / security / performance**
 - No new abstractions, no public API/schema changes, no migrations.
-- `docs/CODE_REVIEW.md:59` still mentions `previewNSImage` by name, but that's a historical note describing a fixed-and-superseded issue (B-series), not a live reference — left as-is since it documents what was true when B was fixed.
+- `docs/ENGINEERING_GUIDE.md:59` still mentions `previewNSImage` by name, but that's a historical note describing a fixed-and-superseded issue (B-series), not a live reference — left as-is since it documents what was true when B was fixed.
 - No security-relevant surface touched (no I/O, no new external input handling).
 - No performance regression: this removes an NSImage allocation/copy on every settled publish, which is a small win, not a cost.
 

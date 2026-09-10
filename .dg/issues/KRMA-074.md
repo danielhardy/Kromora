@@ -36,7 +36,7 @@ still open.
   that measures per-tick allocation/time for `RenderPipeline.applyToneCurve` / `ToneCurveFilterCache`
   under a curve drag, and records before/after numbers (the "before" cube path can be reconstructed
   from git history at c459816^ if needed for a comparison run).
-- Record the result in `docs/LIGHT_MODEL.md` or `docs/CODE_REVIEW.md`.
+- Record the result in `docs/ENGINEERING_GUIDE.md` or `docs/ENGINEERING_GUIDE.md`.
 
 ## Acceptance
 
@@ -47,7 +47,7 @@ still open.
 
 ### Comment — codex @ 2026-08-31T23:59:19.713Z
 
-Added an opt-in PreviewCostBenchmark that reconstructs the pre-KRMA-071 64³ CIColorCube baseline, drives 30 changing curve values, and forces 1024×768 GPU rasterization against the cached 256×1 kernel path. Recorded the captured before/after result in docs/LIGHT_MODEL.md: 4,194,304 → 4,096 bytes per tick and 85.40 → 3.31 ms/tick (25.8×). Verification: targeted benchmark passed, swift test passed (427 tests, 24 expected skips), swift build -c release passed, and git diff --check passed. Commit: 41c99cf
+Added an opt-in PreviewCostBenchmark that reconstructs the pre-KRMA-071 64³ CIColorCube baseline, drives 30 changing curve values, and forces 1024×768 GPU rasterization against the cached 256×1 kernel path. Recorded the captured before/after result in docs/ENGINEERING_GUIDE.md: 4,194,304 → 4,096 bytes per tick and 85.40 → 3.31 ms/tick (25.8×). Verification: targeted benchmark passed, swift test passed (427 tests, 24 expected skips), swift build -c release passed, and git diff --check passed. Commit: 41c99cf
 
 
 ### Comment — claude @ 2026-09-01T00:00:44.201Z
@@ -77,7 +77,7 @@ Checked commit 41c99cf against the acceptance criteria and the KRMA-071 finding 
   caveat, not a defect.
 - **Full suite**: `swift build`, `swift test` (427 tests, 24 expected skips, 0 failures), and
   `swift build -c release` all pass.
-- **Doc**: `docs/LIGHT_MODEL.md` records the measured before/after table and the exact command to
+- **Doc**: `docs/ENGINEERING_GUIDE.md` records the measured before/after table and the exact command to
   reproduce it. Both acceptance boxes are satisfiable from this evidence.
 - **Tree**: no unreviewed source changes found; git status matches the pre-existing DispatchGraph
   bookkeeping state only.

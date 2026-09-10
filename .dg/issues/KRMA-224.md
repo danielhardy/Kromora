@@ -31,7 +31,7 @@ verification_report:
     - swift build — clean
     - swift test --filter 'SmartMaskTests|LocalMaskRenderingTests|MaskingWorkspaceTests|PhotoAnalysisCoordinatorTests|VisionSemanticMaskProviderTests' — 36 executed, 0 failures
     - dg validate — OK (pre-existing runner-model warning only)
-    - git show 74c7f52 (full diff read) against LUMO-224 acceptance criteria and docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md Sections 4.2/6/Step 7
+    - git show 74c7f52 (full diff read) against LUMO-224 acceptance criteria and docs/ENGINEERING_GUIDE.md Sections 4.2/6/Step 7
   findings:
     - "LUMO-232 (non-blocking): the requestRevision guard added to RenderEngine.resolvedLocalMasks is vacuously true on every path (cache hits are re-stamped to match before the check; resolver results echo the same value back), so it does not actually detect staleness — real revision-staleness protection lives in AppViewModel's own sourceRevision/displayRevision publication gate."
     - "LUMO-233 (non-blocking): PhotoAnalysisCoordinator.performMask now special-cases kind == .background with its own foreground-union+invert composition, making VisionSemanticMaskProvider's own .background case unreachable from production code (only exercised by a test that calls the provider directly) — a duplicate, independently-maintained composition of the same result."
@@ -95,7 +95,7 @@ select, regenerate after cache deletion, and never attach a late result to anoth
 
 ## Implementation notes
 
-Follow Sections 4.2 and 6 plus Step 7 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Reuse
+Follow Sections 4.2 and 6 plus Step 7 of `docs/ENGINEERING_GUIDE.md`. Reuse
 `PhotoAnalysisCoordinator`, `VisionSemanticMaskProvider`, `MaskStore`, `MaskRefinement`,
 `RegionMask`, and `MaskOperations`; do not create a parallel Vision/cache path.
 
@@ -127,7 +127,7 @@ Checks run:
 - swift build — clean
 - swift test --filter 'SmartMaskTests|LocalMaskRenderingTests|MaskingWorkspaceTests|PhotoAnalysisCoordinatorTests|VisionSemanticMaskProviderTests' — 36 executed, 0 failures
 - dg validate — OK (pre-existing runner-model warning only)
-- git show 74c7f52 (full diff read) against KRMA-224 acceptance criteria and docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md Sections 4.2/6/Step 7
+- git show 74c7f52 (full diff read) against KRMA-224 acceptance criteria and docs/ENGINEERING_GUIDE.md Sections 4.2/6/Step 7
 Findings:
 - KRMA-232 (non-blocking): the requestRevision guard added to RenderEngine.resolvedLocalMasks is vacuously true on every path (cache hits are re-stamped to match before the check; resolver results echo the same value back), so it does not actually detect staleness — real revision-staleness protection lives in AppViewModel's own sourceRevision/displayRevision publication gate.
 - KRMA-233 (non-blocking): PhotoAnalysisCoordinator.performMask now special-cases kind == .background with its own foreground-union+invert composition, making VisionSemanticMaskProvider's own .background case unreachable from production code (only exercised by a test that calls the provider directly) — a duplicate, independently-maintained composition of the same result.

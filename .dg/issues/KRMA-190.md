@@ -57,7 +57,7 @@ commits:
 **Component:** `Sources/LumoKit/Models/PhotoAnalysis/VisionSemanticMaskProvider.swift`
 (+`.foregroundInstance`/`.background`)
 **Depends on:** KRMA-187, KRMA-185
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §4 (Tier 2)
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md (Tier 2)
 
 ## 1. Problem
 
@@ -83,14 +83,14 @@ other.
 ## 3. Implementation notes
 
 - This is the heaviest analyzer here — pay attention to `AnalysisTimings.foregroundMasking`
-  against the `.detailed`-level budget in `docs/PHASE3_SPEC.md` §6 (< 300 ms); if it's blowing the
+  against the `.detailed`-level budget in `docs/ENGINEERING_GUIDE.md (< 300 ms); if it's blowing the
   budget on a representative fixture, say so in the PR (KRMA-206 owns the formal benchmark suite,
   but don't ship something wildly over budget unmeasured).
 - Always prefer the real pixel mask Vision returns over any bounding rectangle it also provides.
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §4, §6.
+- `docs/ENGINEERING_GUIDE.md, §6.
 - KRMA-186's `MaskOperations` — for deriving `.background`.
 
 ## 5. Testing

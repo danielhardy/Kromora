@@ -57,7 +57,7 @@ commits:
 **Component:** `Sources/LumoKit/Models/PhotoAnalysis/VisionSemanticMaskProvider.swift` (+`.face`
 mask + face detection)
 **Depends on:** KRMA-187, KRMA-185
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §4 (Tier 3), original proposal §19
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md (Tier 3), original proposal §19
 
 ## 1. Problem
 
@@ -95,7 +95,7 @@ demographics, and explicitly not a "target skin brightness" heuristic.
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §4, §19 rationale.
+- `docs/ENGINEERING_GUIDE.md, §19 rationale.
 - KRMA-184's `SemanticMaskKind.foregroundInstance(Int)` — the existing pattern for multi-instance
   kinds, reusable for faces.
 

@@ -23,7 +23,7 @@ Display the full oriented adjusted image under the full-source crop overlay when
 
 ## Context and evidence
 
-Performance audit item 10, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 10, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [AppViewModel.beginCrop](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1381) resets navigation and exposes the draft but does not request an uncropped image. [PreviewView.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Views/PreviewView.swift:103) continues using the committed cropped surface while its overlay uses full `sourceSize` coordinates.

@@ -56,7 +56,7 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/GlobalToneAnalyzer.swift`
 **Depends on:** KRMA-182, KRMA-183
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §4 (Tier 0)
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md (Tier 0)
 
 ## 1. Problem
 
@@ -95,7 +95,7 @@ before mask-dependent analysis (KRMA-193+) is built, and it works from the canon
 
 - `Tests/LumoKitTests/GlobalToneAnalyzerTests.swift` (new): synthetic images with hand-computable
   expected percentiles; clipping-fraction correctness for deliberately over/underexposed fixtures.
-- Rough timing check against the < 20 ms Tier-0 budget (`docs/PHASE3_SPEC.md` §6) — full benchmark
+- Rough timing check against the < 20 ms Tier-0 budget (`docs/ENGINEERING_GUIDE.md) — full benchmark
   infra is KRMA-206.
 
 ## Agent log

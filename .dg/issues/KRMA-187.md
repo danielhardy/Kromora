@@ -49,7 +49,7 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/VisionSemanticMaskProvider.swift`
 **Depends on:** KRMA-183, KRMA-184
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §2, §8
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md, §8
 
 ## 1. Problem
 
@@ -91,7 +91,7 @@ the Masking UI caring.
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §2, §8; CLAUDE.md's "SDK vs deployment target" section.
+- `docs/ENGINEERING_GUIDE.md, §8; CLAUDE.md's "SDK vs deployment target" section.
 - `Sources/LumoKit/Models/RAWCapabilities.swift` — existing capability-probing pattern.
 - KRMA-184's `SemanticMaskProviding` protocol — the seam this actor conforms to.
 

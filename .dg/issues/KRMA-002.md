@@ -64,8 +64,8 @@ declared checks.
 **Identifier sweep:** grep for `LUTzy` (case-insensitive) across the tree, excluding `.git`/`.dg`/`.build`.
 Remaining hits are confined to:
 - `.context/initial_concept.md` — the source product brief, describes the pre-rename starting point (historical).
-- `docs/superpowers/plans/2026-08-06-*.md` — dated planning transcripts for already-completed steps (historical).
-- `docs/PHASE2_SPEC.md`, `docs/CODE_REVIEW.md` — living reference docs per CLAUDE.md, not attribution/history. Filed as **KRMA-060** (backlog, `verification` label, non-blocking) rather than fixed inline, since it's doc-only cleanup outside this issue's declared scope (Package.swift/imports/paths/entry point/entitlements/test target/user-visible strings).
+- `docs/DOCUMENTATION_AUDIT.md` — dated planning transcripts for already-completed steps (historical).
+- `docs/ENGINEERING_GUIDE.md`, `docs/ENGINEERING_GUIDE.md` — living reference docs per CLAUDE.md, not attribution/history. Filed as **KRMA-060** (backlog, `verification` label, non-blocking) rather than fixed inline, since it's doc-only cleanup outside this issue's declared scope (Package.swift/imports/paths/entry point/entitlements/test target/user-visible strings).
 - `LICENSE` — unchanged; copyright is "Tim", never referenced LUTzy by name. No fork-acknowledgment text exists in README before or after the rename — pre-existing gap, not introduced by this change.
 
 **Bundle-facing surfaces:** Package.swift products/targets (`Lumo`, `LumoKit`), entry point
@@ -105,9 +105,9 @@ products/targets, `Sources/Lumo`/`Sources/LumoKit`, `Tests/LumoKitTests`, entry 
 remains. No compatibility shims.
 
 Remaining `LUTzy` hits from the sweep are all pre-existing and out of this issue's scope:
-- `.context/initial_concept.md`, `docs/superpowers/plans/*.md`, `docs/superpowers/specs/*.md` —
+- `.context/initial_concept.md`, `docs/DOCUMENTATION_AUDIT.md`, `docs/DOCUMENTATION_AUDIT.md` —
   historical/dated transcripts, correctly left alone.
-- `docs/PHASE2_SPEC.md`, `docs/CODE_REVIEW.md` — the living-doc gap already filed as **KRMA-060**
+- `docs/ENGINEERING_GUIDE.md`, `docs/ENGINEERING_GUIDE.md` — the living-doc gap already filed as **KRMA-060**
   and fixed there (commits `b936c0b`, `669268c`). Those commits live on branch `agent/lumo-060`,
   not on `agent/lumo-002`/`main` yet — expected, since KRMA-060 is a separate ticket with its own
   branch under this project's worktree-per-issue setup. Re-confirmed KRMA-060 is `status=done`
@@ -180,9 +180,9 @@ entitlements, `Notification.Name` constants, and `PackageSettingsTests` remain c
 application- or package-facing `LUTzy` identifier exists. No compatibility shims.
 
 Remaining `LUTzy` hits are unchanged from prior passes and out of scope:
-- `.context/initial_concept.md`, `docs/superpowers/plans/*.md`, `docs/superpowers/specs/*.md` —
+- `.context/initial_concept.md`, `docs/DOCUMENTATION_AUDIT.md`, `docs/DOCUMENTATION_AUDIT.md` —
   historical/dated transcripts, correctly left alone.
-- `docs/PHASE2_SPEC.md`, `docs/CODE_REVIEW.md` — already filed and fixed under **KRMA-060**
+- `docs/ENGINEERING_GUIDE.md`, `docs/ENGINEERING_GUIDE.md` — already filed and fixed under **KRMA-060**
   (status=done, commits `b936c0b`/`669268c` on `agent/lumo-060`, not required on this branch).
 
 No new findings. No unresolved blocker. No new child ticket needed — KRMA-060 already covers the

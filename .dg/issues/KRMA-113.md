@@ -24,7 +24,7 @@ Keep visible image interaction responsive while supporting jobs run, and ensure 
 
 ## Context and evidence
 
-Performance audit item 8, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 8, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** Histogram processing and exports use the same RenderEngine actor as display graph construction. [RenderEngine.histogram](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:341) lacks an entry cancellation check and performs synchronous bitmap rendering. [AppViewModel.publishPreview](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:1599) starts supporting work after graph publication, before actual presentation. Comparison baseline work is scheduled at open even when hidden.
@@ -69,7 +69,7 @@ These tickets provide concrete implementation work for the broader KRMA-055/KRMA
 
 ### Comment — codex @ 2026-09-02T04:04:31.549Z
 
-Implemented and committed as df1143b. Visible preview work now uses explicit priority through a bounded editor lane, evicts queued support work when needed, and adds cancellation checks at scheduler/render boundaries. Histogram, comparison, and prefetch are bounded/coalesced; support work is released only after the visible frame is actually presented (with hidden comparison gated and crop edits invalidating comparison). Production export uses an isolated render actor and serial batch output to limit display contention and resident full-resolution memory. Added scheduling documentation and focused tests. Verification: focused scheduler/histogram/export/preview/comparison/cutover/develop suites passed; swift test passed 594 tests with 13 skipped and one known host-specific RAW lens-correction failure; swift build -c release passed with existing Core Image deprecation warnings; git diff --check and dg validate passed with existing warnings. Hardware simultaneous export/edit telemetry capture remains pending on target hardware and is documented in docs/KRMA-113-SCHEDULING.md.
+Implemented and committed as df1143b. Visible preview work now uses explicit priority through a bounded editor lane, evicts queued support work when needed, and adds cancellation checks at scheduler/render boundaries. Histogram, comparison, and prefetch are bounded/coalesced; support work is released only after the visible frame is actually presented (with hidden comparison gated and crop edits invalidating comparison). Production export uses an isolated render actor and serial batch output to limit display contention and resident full-resolution memory. Added scheduling documentation and focused tests. Verification: focused scheduler/histogram/export/preview/comparison/cutover/develop suites passed; swift test passed 594 tests with 13 skipped and one known host-specific RAW lens-correction failure; swift build -c release passed with existing Core Image deprecation warnings; git diff --check and dg validate passed with existing warnings. Hardware simultaneous export/edit telemetry capture remains pending on target hardware and is documented in docs/ENGINEERING_GUIDE.md.
 
 ### Comment — claude @ 2026-09-02T04:16:13.704Z
 
@@ -88,7 +88,7 @@ One inert-but-harmless observation: the `guard !Task.isCancelled` added inside `
 - `dg validate` — OK (only pre-existing unrelated warnings: `agents.pickup.runner` model name, KRMA-121 context completeness).
 - `git status --porcelain` on `Sources/`/`Tests/` — only pre-existing unrelated modifications to `Fixtures.swift`/`MetalPresentationBenchmark.swift` that predate this verification session; no side-effect edits from this review.
 
-**Gap found, not blocking:** acceptance criterion 7 (editor p95 latency/worst-frame-gap and export throughput/memory recorded during *simultaneous* batch export + editing on real hardware) is explicitly documented as not yet done in `docs/KRMA-113-SCHEDULING.md` — it requires real Metal hardware and is intentionally not fabricated in CI. The scheduling mechanism it would measure is implemented and unit-tested; only the empirical hardware capture is outstanding. Filed as KRMA-123 (verification, low priority, parent/depends_on KRMA-113) rather than treating it as a blocker, since it does not indicate a defect in the shipped code.
+**Gap found, not blocking:** acceptance criterion 7 (editor p95 latency/worst-frame-gap and export throughput/memory recorded during *simultaneous* batch export + editing on real hardware) is explicitly documented as not yet done in `docs/ENGINEERING_GUIDE.md` — it requires real Metal hardware and is intentionally not fabricated in CI. The scheduling mechanism it would measure is implemented and unit-tested; only the empirical hardware capture is outstanding. Filed as KRMA-123 (verification, low priority, parent/depends_on KRMA-113) rather than treating it as a blocker, since it does not indicate a defect in the shipped code.
 
 **Verdict: PASS.** Moving to done.
 

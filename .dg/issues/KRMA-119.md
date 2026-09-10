@@ -37,7 +37,7 @@ full app UI, which is outside this ticket's scope.
 - Run `scripts/run-lumo-118-capture.sh` with one source, then use its generated trace and summary.
   Cold/warm and supporting-work comparisons may be added later; driving every control and every
   matrix row is explicitly out of scope.
-- Update docs/PERFORMANCE_CAPTURE_MATRIX_2026-09-01.md's "Current checkout record" section with the captured subset and an explicit list of unrun combinations.
+- Update docs/TESTING.md's "Current checkout record" section with the captured subset and an explicit list of unrun combinations.
 
 ## Scope boundaries
 

@@ -51,7 +51,7 @@ Part of **Epic 4 — Photographic Light controls**. The source product brief is 
 
 ### Comment — codex @ 2026-08-31T19:25:06.126Z
 
-Implemented in commit 0ddada9. Added LightAdjustments with photographer-facing ranges, finite/clamped Codable values, normalized versioned master RGB curve, neutral identity, and deterministic editHash coverage. Integrated Light before inherited ordered adjustments in RenderPipeline; kept legacy exposure/contrast/highlight/shadow nodes unchanged when light is absent, preserving old document looks. Documented pipeline order and cache-version impact in docs/LIGHT_MODEL.md. Checks: swift test (359 passed, 20 expected skips), swift build -c release, dg validate (OK; only pre-existing warnings).
+Implemented in commit 0ddada9. Added LightAdjustments with photographer-facing ranges, finite/clamped Codable values, normalized versioned master RGB curve, neutral identity, and deterministic editHash coverage. Integrated Light before inherited ordered adjustments in RenderPipeline; kept legacy exposure/contrast/highlight/shadow nodes unchanged when light is absent, preserving old document looks. Documented pipeline order and cache-version impact in docs/ENGINEERING_GUIDE.md. Checks: swift test (359 passed, 20 expected skips), swift build -c release, dg validate (OK; only pre-existing warnings).
 
 ### Comment — codex @ 2026-08-31T19:25:45.856Z
 

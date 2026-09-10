@@ -50,7 +50,7 @@ Part of **Epic 0 — Product identity and clean baseline**. The source product b
 
 ### Comment — codex @ 2026-08-31T02:55:05.688Z
 
-Implemented and verified the post-rename baseline in commit e14b03c. Added docs/BUILD_BASELINE.md and linked it from README.md.
+Implemented and verified the post-rename baseline in commit e14b03c. Added docs/ENGINEERING_GUIDE.md and linked it from README.md.
 
 Verification: Swift 6.3.3, Xcode 26.6, macOS 26.5 SDK, arm64 deployment target macOS 14. `swift build` passed; `swift test` passed with 308 test cases, 20 expected environment-gated skips, and 0 failures; `swift build -c release` passed. CI has no stale LUTzy/LUTzyKit references and already runs the renamed SwiftPM package through debug build, tests, and release build. No rename-related code failures were found.
 
@@ -70,7 +70,7 @@ Toolchain observed: Swift 6.3.3, arm64-apple-macosx26.0 target — consistent wi
 
 Checked CI (.github/workflows/ci.yml): runs on macos-26, uses the renamed SwiftPM package with no stale LUTzy/LUTzyKit target or scheme references, and executes debug build → test → release build as required.
 
-Checked docs/BUILD_BASELINE.md: present, linked from README.md, and its stated toolchain/test-count/retained-capabilities/known-gaps content matches what was independently reproduced.
+Checked docs/ENGINEERING_GUIDE.md: present, linked from README.md, and its stated toolchain/test-count/retained-capabilities/known-gaps content matches what was independently reproduced.
 
 git status --porcelain clean of tracked-file changes (only pre-existing untracked .dg/ directory). No code changes required; this was a read-only verification pass.
 

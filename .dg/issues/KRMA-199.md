@@ -76,7 +76,7 @@ global-histogram-only Auto.
 - `Tests/LumoKitTests/SceneCharacteristicsAnalyzerTests.swift` (new): synthetic `PhotoAnalysis`
   fixtures for normal daylight, clear backlit, intentional high-key, intentional low-key — assert
   the corresponding likelihood is clearly dominant for each (semantic assertions, not exact-float
-  equality, per `docs/PHASE3_SPEC.md` §7).
+  equality, per `docs/ENGINEERING_GUIDE.md).
 
 ## Agent log
 

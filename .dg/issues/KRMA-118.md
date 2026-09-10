@@ -20,7 +20,7 @@ exhaustive benchmark of every source size, control, cache state, or supporting-w
 
 ## Context
 
-KRMA-117 built the automated infrastructure this ticket needs (MetalPresentationBenchmark.swift, TracingOverheadBenchmark.swift, docs/PERFORMANCE_CAPTURE_MATRIX_2026-09-01.md). A representative ARW capture is now archived in docs/KRMA-118-DSC07826-20260901-201604-summary.md; the full matrix remains intentionally out of scope. The reduced capture uses a logged-in Mac with a display, available source files, and the repository's xctrace wrapper. The wrapper drives the benchmark and tracing service without manual Instruments or UI interaction.
+KRMA-117 built the automated infrastructure this ticket needs (MetalPresentationBenchmark.swift, TracingOverheadBenchmark.swift, docs/TESTING.md). A representative ARW capture is now archived in docs/TESTING.md; the full matrix remains intentionally out of scope. The reduced capture uses a logged-in Mac with a display, available source files, and the repository's xctrace wrapper. The wrapper drives the benchmark and tracing service without manual Instruments or UI interaction.
 
 Verified during KRMA-114 counterpoint re-verification (2026-09-02): both opt-in benchmarks run successfully and produce real numbers on this machine (`LUMO_METAL_BENCHMARK=1 swift test --filter MetalPresentationBenchmark` and `LUMO_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark`), confirming AC6/AC8 infrastructure is genuine, not just present. The representative capture requirement is satisfied using the available ARW source; the full matrix remains optional future profiling.
 
@@ -35,7 +35,7 @@ Verified during KRMA-114 counterpoint re-verification (2026-09-02): both opt-in 
   and supporting-work comparisons are optional follow-up measurements, not completion gates for
   this representative capture. A specific 24 MP or 40–60 MP file is welcome but not required when
   that source is unavailable.
-- [x] Update docs/PERFORMANCE_CAPTURE_MATRIX_2026-09-01.md's "Current checkout record" section to
+- [x] Update docs/TESTING.md's "Current checkout record" section to
   list the representative archived captures and explicitly identify unrun matrix combinations;
   this ticket does not claim exhaustive coverage of every row or control.
 
@@ -61,7 +61,7 @@ Investigation complete: no code change can satisfy this capture-only issue from 
 Counterpoint verification (independent re-review of the codex implementation-agent's 'no code change can satisfy this' finding), HEAD 90c1b95.
 
 CONFIRMED — genuine unresolved blocker, not fabricatable from this checkout:
-- docs/PERFORMANCE_CAPTURE_MATRIX_2026-09-01.md still has zero archived rows: all STD-* rows read "pending local Release run"; all RAW24-*/RAW40-60-* rows read "requires licensed local RAW". The 'Current checkout record' section still states captures are pending.
+- docs/TESTING.md still has zero archived rows: all STD-* rows read "pending local Release run"; all RAW24-*/RAW40-60-* rows read "requires licensed local RAW". The 'Current checkout record' section still states captures are pending.
 - No RAW fixtures anywhere in the repo outside .build: `find . -iname '*.dng' -o -iname '*.cr2' -o -iname '*.cr3' -o -iname '*.nef' -o -iname '*.arw'` returns nothing; no realworldtest/ directory exists.
 - `ioreg -c IODisplayConnect` reported 0 connected displays in this verification session (despite a logged-in console user per `who`), consistent with the prior agent's finding that this cannot be driven headlessly.
 - xctrace is present but there is no CLI/agent path to drive the live app UI through every Light/Adjust/Effects control per matrix row, or to drive an Instruments Points-of-Interest + Metal System Trace recording, without a human operator.

@@ -26,7 +26,7 @@ verification_report:
     - swift test --filter AutoLightEngineTests
     - swift test --filter PhotoIntelligenceCorpusTests
     - swift test --filter "PhotoAnalysis|AutoAdjustment|AutoLight|PhotoIntelligence"
-    - git show 3d7d707 (full diff review of AutoLightEngine.swift, AutoLightEngineTests.swift, docs/PHOTO_INTELLIGENCE_TUNING_2026-09-04.md)
+    - git show 3d7d707 (full diff review of AutoLightEngine.swift, AutoLightEngineTests.swift, docs/ENGINEERING_GUIDE.md)
     - grep for other consumers of algorithmVersion / AutoLightConfiguration.currentVersion (none found needing update)
     - dg validate
   findings:
@@ -101,7 +101,7 @@ but-unvalidated constants. This ticket is the deliberate tuning pass against the
 
 ### Comment — codex @ 2026-09-04T18:49:14.507Z
 
-Implemented and verified in commit 3d7d707. Tuned AutoLightEngine policy constants against the 21 generated corpus fixtures: normal daylight highlights/shadows -23.937/+24.727 → -12.889/+9.891; clear backlight remains protective/opening at -16.596/+20.485 without the prior +38 clamp; high-key blacks -18.000 → -9.617; low-key exposure/shadows/whites +0.423/+18.700/+16.120 → +0.252/+7.025/+11.606. Bumped algorithm version 1 → 2, added range-based golden tests and clipping checks, and recorded the baseline/tuned comparisons in docs/PHOTO_INTELLIGENCE_TUNING_2026-09-04.md. Passed AutoLightEngineTests, PhotoIntelligenceCorpusTests, visual harness (21 cards), and swift build. Full serial swift test reproduced the repository's pre-existing unrelated failures: 817 executed, 41 skipped, 15 failures in inspector/persistence/thumbnail/LUT integration timing paths. Generated report: artifacts/photo-intelligence/report-tuned.html. Corpus limitation: generated synthetic fixtures only; real-photo validation remains opt-in via LUMO_RAW_FIXTURE_DIR.
+Implemented and verified in commit 3d7d707. Tuned AutoLightEngine policy constants against the 21 generated corpus fixtures: normal daylight highlights/shadows -23.937/+24.727 → -12.889/+9.891; clear backlight remains protective/opening at -16.596/+20.485 without the prior +38 clamp; high-key blacks -18.000 → -9.617; low-key exposure/shadows/whites +0.423/+18.700/+16.120 → +0.252/+7.025/+11.606. Bumped algorithm version 1 → 2, added range-based golden tests and clipping checks, and recorded the baseline/tuned comparisons in docs/ENGINEERING_GUIDE.md. Passed AutoLightEngineTests, PhotoIntelligenceCorpusTests, visual harness (21 cards), and swift build. Full serial swift test reproduced the repository's pre-existing unrelated failures: 817 executed, 41 skipped, 15 failures in inspector/persistence/thumbnail/LUT integration timing paths. Generated report: artifacts/photo-intelligence/report-tuned.html. Corpus limitation: generated synthetic fixtures only; real-photo validation remains opt-in via LUMO_RAW_FIXTURE_DIR.
 
 ## Agent log
 
@@ -136,7 +136,7 @@ Checks run:
 - swift test --filter AutoLightEngineTests
 - swift test --filter PhotoIntelligenceCorpusTests
 - swift test --filter "PhotoAnalysis|AutoAdjustment|AutoLight|PhotoIntelligence"
-- git show 3d7d707 (full diff review of AutoLightEngine.swift, AutoLightEngineTests.swift, docs/PHOTO_INTELLIGENCE_TUNING_2026-09-04.md)
+- git show 3d7d707 (full diff review of AutoLightEngine.swift, AutoLightEngineTests.swift, docs/ENGINEERING_GUIDE.md)
 - grep for other consumers of algorithmVersion / AutoLightConfiguration.currentVersion (none found needing update)
 - dg validate
 Findings:

@@ -58,7 +58,7 @@ KRMA-012 acceptance coverage:
 - Represented thumbnail, interactive, preview, fullResolution, and export tiers using one `EditDocument` and one deterministic pipeline.
 - Preview and export now call the request API directly; no UI framework enters the renderer boundary.
 - Neutral oriented renders preserve upright extent; results report encoded extent and working color space.
-- Adapted the fake renderer and added request contract/parity tests; documented output, color-space, and pipeline-ordering contracts in `docs/PHASE2_SPEC.md`.
+- Adapted the fake renderer and added request contract/parity tests; documented output, color-space, and pipeline-ordering contracts in `docs/ENGINEERING_GUIDE.md`.
 
 ### Comment — claude @ 2026-08-31T13:15:39.481Z
 
@@ -91,7 +91,7 @@ decodes it back (`CGImageSourceCreateImageAtIndex` / `NSImage(data:)`), because 
 `Sendable`. This lands on the interactive/live-edit preview hot path
 (`AppViewModel.schedulePreview()` / `scheduleOriginalPreview()`, debounced per slider tick, up to
 1600×1200) where the old `makeCGImage` produced a `CGImage` directly via `context.createCGImage`
-with no encode/decode round trip. `docs/CODE_REVIEW.md` already documents a prior fix to this exact
+with no encode/decode round trip. `docs/ENGINEERING_GUIDE.md` already documents a prior fix to this exact
 preview path for main-thread-blocking performance, so this is a regression against a path the
 project has previously cared about — not a correctness bug, and not something a localized
 verification-pass fix can safely resolve without touching the `RenderResult`/`RenderEngining`

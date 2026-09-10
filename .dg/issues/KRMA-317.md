@@ -44,7 +44,7 @@ Fix (or correct the test for) the KRMA-308 "speculate-then-correct" preview flow
 
 In practice the test observes only **one** preview request ever reaching the render engine, and it already carries the *stored* document (exposure/vibrance), not the speculative identity document — i.e. the two `schedulePreview()` calls are being coalesced into a single request before the first ever reaches `RenderEngine`/`PreviewCoordinator`. This defeats the latency goal the speculative path was added for (first pixels no longer arrive before persistence resolves) and leaves `main`'s test suite red.
 
-This was discovered during KRMA-316 (git-history restoration for KRMA-305/307/308) while re-running the serial test lane after committing KRMA-308's diff verbatim. KRMA-316's own scope was purely commit hygiene, so this defect was filed separately rather than fixed inline — see `docs/CODE_REVIEW.md` conventions and `AGENTS.md`'s "localized fixes only" rule for verifiers.
+This was discovered during KRMA-316 (git-history restoration for KRMA-305/307/308) while re-running the serial test lane after committing KRMA-308's diff verbatim. KRMA-316's own scope was purely commit hygiene, so this defect was filed separately rather than fixed inline — see `docs/ENGINEERING_GUIDE.md` conventions and `AGENTS.md`'s "localized fixes only" rule for verifiers.
 
 **Reproduce:**
 ```

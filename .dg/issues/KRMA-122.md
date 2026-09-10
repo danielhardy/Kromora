@@ -58,7 +58,7 @@ no compiler or test signal.
 Low priority / non-blocking: not a defect in current behavior, since all present call sites agree
 on crop and viewport. This is a latent coupling risk for the next feature that touches
 `previewRenderTargetSize`, `scheduleOriginalPreview`, or independently-sized comparison panels.
-See `docs/KRMA-108-RESOLUTION-PLANNING.md` for the planner's design rationale.
+See `docs/ENGINEERING_GUIDE.md` for the planner's design rationale.
 
 ### Comment — codex @ 2026-09-02T04:55:52.723Z
 

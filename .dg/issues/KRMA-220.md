@@ -68,7 +68,7 @@ to the selected layer's settings, and reliable transitions between masking, navi
 
 ## Implementation notes
 
-Follow Section 5 plus Step 3 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Likely integration
+Follow Section 5 plus Step 3 of `docs/ENGINEERING_GUIDE.md`. Likely integration
 points are `ContentView.swift`, `PreviewView.swift`, `PreviewSurface.swift`, inspector state/routing,
 keyboard/menu commands, `AppViewModel+Masking.swift`, and the new `MaskInteractionState`.
 
@@ -96,7 +96,7 @@ Implemented in commit 0af0c30. Added persistent masking workspace, document-owne
     }
   ],
   "unresolved_blocker": {
-    "summary": "Overlay color-wash/grayscale inspection and per-layer 'Solo' are non-functional: MaskCanvasOverlay only draws vector geometry guides, never the layer's resolved mask alpha, and soloLayerID is set/cleared but read nowhere. docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md Section 5.2 explicitly requires 'The active mask may be soloed to inspect its alpha without changing the document,' which this ticket's implementation notes point to.",
+    "summary": "Overlay color-wash/grayscale inspection and per-layer 'Solo' are non-functional: MaskCanvasOverlay only draws vector geometry guides, never the layer's resolved mask alpha, and soloLayerID is set/cleared but read nowhere. docs/ENGINEERING_GUIDE.md Section 5.2 explicitly requires 'The active mask may be soloed to inspect its alpha without changing the document,' which this ticket's implementation notes point to.",
     "why_not_fixed_here": "Requires rendering the resolved per-pixel mask alpha into the preview overlay, which touches the RenderEngine/CIImage boundary (CLAUDE.md: CIImage/CIFilter/CIContext must stay inside RenderEngine) -- a real feature addition, not a localized/testable fix appropriate for a verification pass.",
     "child_ticket": "KRMA-229"
   },
