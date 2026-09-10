@@ -174,7 +174,7 @@ public struct ContentView: View {
                     LibraryGridView(
                         collection: viewModel.collection,
                         viewModel: viewModel,
-                        onOpen: viewModel.openActiveCollectionImage
+                        onOpen: viewModel.openLibraryImageForEditing
                     )
                     StatusBar(viewModel: viewModel, onCancelImport: cancelPhotosImport,
                               onCancelExport: viewModel.cancelExport)

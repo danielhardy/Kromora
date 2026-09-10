@@ -185,4 +185,30 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.navigation.mode, .edit)
         XCTAssertTrue(viewModel.isSourceBrowserPresented)
     }
+
+    func testLibraryDoubleClickOpensInspectorAndClosesSourceBrowser() async throws {
+        try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "photo.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+
+        // Simulate the source browser having been left visible by an earlier explicit toolbar
+        // action. A Library double-click must establish its own Edit presentation state.
+        viewModel.isSourceBrowserPresented = true
+        viewModel.isInspectorPresented = false
+        viewModel.selectLibraryItem(at: 0)
+
+        viewModel.openLibraryImageForEditing()
+
+        XCTAssertEqual(viewModel.navigation.mode, .edit)
+        XCTAssertFalse(viewModel.isSourceBrowserPresented)
+        XCTAssertTrue(viewModel.isInspectorPresented)
+
+        try await waitUntil("the double-clicked library photo") {
+            viewModel.sourceURL == viewModel.collection.items[0].url
+        }
+    }
 }
