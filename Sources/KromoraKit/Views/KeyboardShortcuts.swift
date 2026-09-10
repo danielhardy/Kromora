@@ -229,7 +229,7 @@ final class KeyMonitor {
             return nil
         case 36: // Return — open the active grid item in Edit
             if isDown, vm.navigation.isGrid {
-                vm.openActiveCollectionImage()
+                vm.openLibraryImageForEditing()
                 return nil
             }
             return event
