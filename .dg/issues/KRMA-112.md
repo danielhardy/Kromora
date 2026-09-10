@@ -26,7 +26,7 @@ Keep pointer-frequency navigation and crop changes local to the affected views r
 
 ## Context and evidence
 
-Performance audit item 7, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 7, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [PreviewView.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Views/PreviewView.swift:6) and the surrounding editor observe the broad AppViewModel. Navigation and crop draft mutations are published there. `PreviewSurface` already isolates image publication, but not pointer-frequency navigation/document/draft updates.
@@ -72,4 +72,4 @@ These tickets provide concrete implementation work for the broader KRMA-055/KRMA
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
 
-- 2026-09-02T03:46:13.021Z: Implemented narrow CanvasInteractionState and InspectorState observation boundaries. Pan/zoom, crop drafts, and inspector chrome no longer publish through AppViewModel; committed crop/history/persistence and render behavior remain in AppViewModel. Added publisher-isolation and source-reset regressions plus docs/CANVAS_OBSERVATION_PERFORMANCE.md. Verification: focused canvas/crop/comparison suites pass; swift build -c release passes; full swift test has 592 tests, 13 expected skips, and one pre-existing host-specific RAWCapabilities lensCorrectionEnabled seed failure; dg validate passes with existing warnings.
+- 2026-09-02T03:46:13.021Z: Implemented narrow CanvasInteractionState and InspectorState observation boundaries. Pan/zoom, crop drafts, and inspector chrome no longer publish through AppViewModel; committed crop/history/persistence and render behavior remain in AppViewModel. Added publisher-isolation and source-reset regressions plus docs/ENGINEERING_GUIDE.md. Verification: focused canvas/crop/comparison suites pass; swift build -c release passes; full swift test has 592 tests, 13 expected skips, and one pre-existing host-specific RAWCapabilities lensCorrectionEnabled seed failure; dg validate passes with existing warnings.

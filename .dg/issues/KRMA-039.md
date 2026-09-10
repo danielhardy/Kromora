@@ -79,7 +79,7 @@ Implemented in commit afea245. Added the Effects inspector tab with collapsible 
 - Codable round-trip covered by `testEffectsDocumentRoundTripsAsCopyableValue`.
 - No `@unchecked Sendable`/`nonisolated(unsafe)`/`@preconcurrency` introduced; all new enums are `Sendable` value types per project convention.
 
-**Performance gate:** `testMeasureEffectsInteractiveCost` is opt-in (`LUMO_BENCH=1`) and produces p50/p95 signposts rather than a hard assertion, per `docs/EFFECTS_VALIDATION.md` — appropriately treated as hardware-dependent follow-up rather than a CI gate, consistent with the existing `PreviewCostBenchmark` pattern for tone-curve/preview cost.
+**Performance gate:** `testMeasureEffectsInteractiveCost` is opt-in (`LUMO_BENCH=1`) and produces p50/p95 signposts rather than a hard assertion, per `docs/TESTING.md` — appropriately treated as hardware-dependent follow-up rather than a CI gate, consistent with the existing `PreviewCostBenchmark` pattern for tone-curve/preview cost.
 
 **Verdict:** No blockers found. No localized fixes needed. Verification passes.
 

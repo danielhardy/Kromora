@@ -64,7 +64,7 @@ refinement, brush painting, comparison, histogram, persistence, and export remai
 ## Implementation notes
 
 Follow Steps 9 and 11 plus the full test plan in
-`docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Fix only issues within this epic's scope; file separate
+`docs/ENGINEERING_GUIDE.md`. Fix only issues within this epic's scope; file separate
 DG tickets for unrelated findings rather than expanding this gate indefinitely.
 
 The epic is not complete if a required mask type works only in the overlay, only in preview, or only
@@ -72,7 +72,7 @@ in export. The same saved definition must drive every quality tier.
 
 ### Comment — codex @ 2026-09-05T15:28:54.678Z
 
-Implemented and committed as 9833e1b (KRMA-226: Harden masking integration). Added bounded live brush sampling and stroke-history preservation, byte-bounded/flushable brush raster caching, async mask revision supersession guards, source/cache/memory-pressure invalidation, composed overlay solo/inspection/accessibility actions, masking keyboard shortcuts/help, and regression coverage. Focused mask/cache/accessibility lane passes 59 tests with one intentional RAW skip; Release app bundle, package asset/signature checks, dg validate, and git diff --check pass. Full parallel suite still reproduces the known unrelated KRMA-231 failures. Published methodology/results in docs/KRMA-226-MASKING-HARDENING-REPORT-2026-09-05.md; no hardware p95 claim is made because this session could not obtain a drawable/pointer callback.
+Implemented and committed as 9833e1b (KRMA-226: Harden masking integration). Added bounded live brush sampling and stroke-history preservation, byte-bounded/flushable brush raster caching, async mask revision supersession guards, source/cache/memory-pressure invalidation, composed overlay solo/inspection/accessibility actions, masking keyboard shortcuts/help, and regression coverage. Focused mask/cache/accessibility lane passes 59 tests with one intentional RAW skip; Release app bundle, package asset/signature checks, dg validate, and git diff --check pass. Full parallel suite still reproduces the known unrelated KRMA-231 failures. Published methodology/results in docs/ENGINEERING_GUIDE.md; no hardware p95 claim is made because this session could not obtain a drawable/pointer callback.
 
 ## Agent log
 

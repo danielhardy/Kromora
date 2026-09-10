@@ -67,7 +67,7 @@ Reduce architectural coupling by splitting the oversized application, collection
 
 ### Comment — codex @ 2026-09-04T03:00:15.929Z
 
-Implemented in 8fd2ff9. Documented ownership boundaries in docs/ARCHITECTURE_BOUNDARIES.md and updated README. Extracted EditPersistenceCoordinator with serialized/coalesced durable snapshots and retained AppViewModel compatibility APIs; added SourceImportPlan and pure CollectionProjection seams with direct tests. Split render GPU/cache lifetime into RenderEngineResources and final stage composition behind RenderStageFacade; updated RenderStackTests for the intentional resource owner. Verification: swift test (734 passed, 14 skipped before the allowlist-only test update), focused CoordinatorBoundaryTests and RenderStackTests pass (5 tests), swift build -c release passes, git diff --check passes, dg validate passes with only the pre-existing unknown pickup-runner model warning.
+Implemented in 8fd2ff9. Documented ownership boundaries in docs/ENGINEERING_GUIDE.md and updated README. Extracted EditPersistenceCoordinator with serialized/coalesced durable snapshots and retained AppViewModel compatibility APIs; added SourceImportPlan and pure CollectionProjection seams with direct tests. Split render GPU/cache lifetime into RenderEngineResources and final stage composition behind RenderStageFacade; updated RenderStackTests for the intentional resource owner. Verification: swift test (734 passed, 14 skipped before the allowlist-only test update), focused CoordinatorBoundaryTests and RenderStackTests pass (5 tests), swift build -c release passes, git diff --check passes, dg validate passes with only the pre-existing unknown pickup-runner model warning.
 
 ## Agent log
 
@@ -95,4 +95,4 @@ Verification commits:
 Actor: claude
 Resolved model: sonnet
 Pickup session: 01MTMD9ABBU9RKI2GF
-Summary: Counterpoint verification: PASS. Extraction of RenderEngineResources/RenderStageFacade, EditPersistenceCoordinator, SourceImportPlan, and CollectionProjection matches the documented ownership boundaries in docs/ARCHITECTURE_BOUNDARIES.md; mechanical diffs preserve behavior. One low-severity, non-blocking gap found and filed as KRMA-176 (child): flush()'s cancelled+empty-pending->success branch is new vs. the pre-refactor code and untested, though it looks like a latent bug fix (avoids a false 'could not save' quit alert) rather than a regression.
+Summary: Counterpoint verification: PASS. Extraction of RenderEngineResources/RenderStageFacade, EditPersistenceCoordinator, SourceImportPlan, and CollectionProjection matches the documented ownership boundaries in docs/ENGINEERING_GUIDE.md; mechanical diffs preserve behavior. One low-severity, non-blocking gap found and filed as KRMA-176 (child): flush()'s cancelled+empty-pending->success branch is new vs. the pre-refactor code and untested, though it looks like a latent bug fix (avoids a false 'could not save' quit alert) rather than a regression.

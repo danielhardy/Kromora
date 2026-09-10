@@ -27,7 +27,7 @@ Avoid reconfiguring RAW development and rebuilding unchanged upstream processing
 
 ## Context and evidence
 
-Performance audit item 6, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 6, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [RenderEngine.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:549) sends every interactive RAW request through `InteractiveRAWFilterSession.output`, even for downstream light/color/LUT changes. That method restores all baseline values, reapplies settings, writes scale, and requests `outputImage` every time. [RenderPipeline.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderPipeline.swift:92) reconstructs the full downstream graph. The final preview cache belongs to the encoded `render` path, not `makeCIImage`.

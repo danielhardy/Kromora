@@ -2,7 +2,7 @@
 id: KRMA-335
 title: Clarify MIT licensing and reserve Kromora branding
 type: task
-status: claimed
+status: done
 priority: medium
 creation_provenance:
   runner: codex
@@ -12,16 +12,12 @@ labels:
   - legal
   - documentation
 created: 2026-09-10T13:03:27.613Z
-updated: 2026-09-10T13:03:47.506Z
-order: a0
+updated: 2026-09-10T13:18:28.822Z
+order: zzy
 board: product
-claim:
-  actor: codex
-  session: 01MTVJGENI03T8OOD0
-  claimed_at: 2026-09-10T13:03:47.502Z
-  expires_at: 2026-09-10T14:03:47.502Z
-  branch: main
 branch: main
+commits:
+  - cd807d2
 ---
 
 ## Objective
@@ -55,9 +51,13 @@ establishes different ownership.
 
 ## Implementation notes
 
-Use `BRANDING.md` for the policy and link it from `README.md` and `docs/KROMORA_ICON.md`. Do not add
+Use `BRANDING.md` for the policy and link it from `README.md` and `docs/PACKAGING.md`. Do not add
 `TM` or `®` claims. Keep the policy limited to use of the Kromora identity; it must not restrict the
 MIT rights to copy, modify, or distribute the code.
+
+### Comment — codex @ 2026-09-10T13:04:52.791Z
+
+Implemented and committed as cd807d2. Kept the MIT license, preserved Tim's original copyright notice, added Daniel Hardy for later contributions, added BRANDING.md without trademark-registration claims, and updated the README and icon documentation to separate code licensing from product identity. Verification: dg validate passed (with the pre-existing runner-model warning); git diff --check passed.
 
 ## Agent log
 

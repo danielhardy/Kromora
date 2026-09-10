@@ -48,7 +48,7 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/AnalysisImage.swift` + point/rect coordinate types
 **Depends on:** KRMA-182
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §3–4
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md–4
 
 ## 1. Problem
 

@@ -46,7 +46,7 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/` (suggested new group)
 **Depends on:** none (foundation ticket)
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §3
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md
 
 ## 1. Problem
 
@@ -94,7 +94,7 @@ in KRMA-194, once masks and regional statistics exist to fill it).
 - `Sources/LumoKit/Models/AutoAdjustment.swift` — existing Tier-0 statistics + version-clamp
   precedent.
 - `Sources/LumoKit/Models/EditDocument.swift`, `AdjustmentNode.swift` — house style.
-- `docs/PHASE3_SPEC.md` §3.
+- `docs/ENGINEERING_GUIDE.md
 
 ## 5. Testing
 

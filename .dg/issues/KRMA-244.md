@@ -40,7 +40,7 @@ board: product
 
 `EditDocumentStore` currently persists every photo's edits into a single JSON file
 (`~/Library/Application Support/Lumo/edit-records.json`), rewriting the *entire* file on every
-single edit (`EditDocumentStore.swift:354` `persist()`). `docs/EDIT_PERSISTENCE_BENCHMARK_2026-09-01.md`
+single edit (`EditDocumentStore.swift:354` `persist()`). `docs/TESTING.md`
 shows this doesn't scale: at 10,000 edited photos, one edit rewrites ~14MB and costs ~3.4s CPU /
 ~1.25s termination flush.
 

@@ -47,7 +47,7 @@ commits:
 ## Objective
 
 Make the masking workspace's overlay-inspection controls actually inspect the mask, per
-`docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md` Section 5.2 and Step 8 ("solo inspection"), which
+`docs/ENGINEERING_GUIDE.md` Section 5.2 and Step 8 ("solo inspection"), which
 KRMA-220 references but does not implement.
 
 ## Problem
@@ -101,7 +101,7 @@ verification pass for KRMA-220.
 - Related: KRMA-219 (Render ordered local adjustments through resolved soft masks) — likely source
   of the `LocalMaskResolving` boundary this overlay should reuse to get alpha without duplicating
   mask-resolution logic.
-- Plan: `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md` Section 5.2, Step 8.
+- Plan: `docs/ENGINEERING_GUIDE.md` Section 5.2, Step 8.
 
 ## Agent log
 

@@ -64,7 +64,7 @@ normalized brush vectors, and analytic gradient geometry.
 
 ## Implementation notes
 
-Follow Sections 3 and 4 plus Step 1 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Likely work is
+Follow Sections 3 and 4 plus Step 1 of `docs/ENGINEERING_GUIDE.md`. Likely work is
 centered in new local-mask model files plus `EditDocument.swift`, `EditHistory.swift`,
 `EditDocumentStore.swift`, `EditClipboard.swift`, and `CanvasNavigation.swift`.
 

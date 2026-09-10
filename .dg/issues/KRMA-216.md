@@ -40,7 +40,7 @@ return later to edit every mask and setting non-destructively.
 
 KRMA-201 and KRMA-202 proved semantic mask selection and render-quality refinement, but the current
 Masking sheet cannot attach a mask to `EditDocument` or affect rendered pixels. The durable product
-plan is `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`.
+plan is `docs/ENGINEERING_GUIDE.md`.
 
 The implementation must preserve Lumo's value-state document, single render path, source/revision
 safety, on-device processing, Swift 6 concurrency guarantees, and zero-dependency policy.
@@ -62,7 +62,7 @@ safety, on-device processing, Swift 6 concurrency guarantees, and zero-dependenc
 
 This is a tracking epic and depends on KRMA-217 through KRMA-226. The dependency graph is
 authoritative; close the epic only after every required child is verified and the integrated
-Definition of Done in `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md` passes.
+Definition of Done in `docs/ENGINEERING_GUIDE.md` passes.
 
 Existing KRMA-201/KRMA-202 behavior is an input, not a second masking product. Retire or reduce the
 selection-only sheet once the persistent workspace replaces it.

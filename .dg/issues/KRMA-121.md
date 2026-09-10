@@ -28,7 +28,7 @@ concurrency boundaries, and pixel-parity/failure-path test coverage sound — `P
 `PreviewCoordinatorTests`, full `swift test`, and `swift build -c release` all pass on commit
 3195e55. What is not yet verified is the ticket's own quantitative target: no hardware capture has
 been taken *after* this change landed. The only archived capture in
-`docs/PERFORMANCE_CAPTURE_MATRIX_2026-09-01.md` / `docs/KRMA-118-DSC07826-...-summary.md` was taken
+`docs/TESTING.md` / `docs/TESTING.md` was taken
 under KRMA-118 on commit 90c1b95 (predates 3195e55) and measured p95 input-to-present at 35.966 ms —
 over the 33 ms target — but that capture exercised the pre-KRMA-107 lazy-graph presentation path, so
 it says nothing about whether KRMA-107 closed the gap.
@@ -59,7 +59,7 @@ different code path. Parent: KRMA-107.
 
 ### Comment — codex @ 2026-09-02T04:28:34.097Z
 
-Implemented and archived the post-KRMA-107 hardware evidence in commit 59a9fc5. The Release Metal System Trace is /tmp/lumo-121-capture-final2/KRMA-121-DSC07826-20260901-222341.trace; durable summary: docs/KRMA-121-DSC07826-20260901-222341-summary.md. On MacBookPro18,3 M1 Pro / macOS 26.6, DSC07826.ARW 6000x4000 at 1280x800: warm p95 input-to-present 8.632 ms (target <=33 ms) and release-to-settled p95 9.139 ms (target <=200 ms), with drawable acquisition, presentation encoding, and GPU timing separated. Focused tests, Release build, benchmark, diff check, and dg validate pass. Full swift test has two unrelated pre-existing host/fixture failures: CropWorkflowTests.testReenteringCropRequestsTheFullUncroppedStageAndRestoresOnExit and RAWCapabilitiesTests.testProbingARealRAWReportsItsDecodersSeeds.
+Implemented and archived the post-KRMA-107 hardware evidence in commit 59a9fc5. The Release Metal System Trace is /tmp/lumo-121-capture-final2/KRMA-121-DSC07826-20260901-222341.trace; durable summary: docs/TESTING.md. On MacBookPro18,3 M1 Pro / macOS 26.6, DSC07826.ARW 6000x4000 at 1280x800: warm p95 input-to-present 8.632 ms (target <=33 ms) and release-to-settled p95 9.139 ms (target <=200 ms), with drawable acquisition, presentation encoding, and GPU timing separated. Focused tests, Release build, benchmark, diff check, and dg validate pass. Full swift test has two unrelated pre-existing host/fixture failures: CropWorkflowTests.testReenteringCropRequestsTheFullUncroppedStageAndRestoresOnExit and RAWCapabilitiesTests.testProbingARealRAWReportsItsDecodersSeeds.
 
 
 ### Comment — claude @ 2026-09-02T04:32:59.524Z
@@ -79,7 +79,7 @@ issue's acceptance criteria and the KRMA-107 numeric targets.
 - Focused suites `PreviewSurfaceTests` and `PreviewCoordinatorTests`: pass.
 - `dg validate`: OK.
 - Commit ancestry: confirmed `3195e55` (KRMA-107) is an ancestor of the capture commit `df1143b`.
-- Cross-checked the archived summary (`docs/KRMA-121-DSC07826-20260901-222341-summary.md`) against
+- Cross-checked the archived summary (`docs/TESTING.md`) against
   the raw `METAL_PRESENTATION_BENCHMARK` line in
   `/tmp/lumo-121-capture-final2/KRMA-121-DSC07826-20260901-222341-summary.txt` — every reported
   figure (p50/p95/p99, drawable acquisition, presentation encoding, GPU time, release-to-settled)

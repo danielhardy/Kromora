@@ -49,7 +49,7 @@ the *relationship* ("subject is 0.31 darker than background"). Compute it once h
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §3, original proposal §20.
+- `docs/ENGINEERING_GUIDE.md, original proposal §20.
 - KRMA-197 (primary subject), KRMA-194 (region stats), KRMA-192 (global stats) — the three inputs.
 
 ## 5. Testing

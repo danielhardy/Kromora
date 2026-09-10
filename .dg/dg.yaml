@@ -25,7 +25,7 @@ agents:
     - opencode
     - codex
     - pi
-  ai_ticket_creation: backlog
+  ai_ticket_creation: ready
   options:
     cursor:
       skip_permissions: true

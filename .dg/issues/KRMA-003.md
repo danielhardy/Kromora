@@ -104,7 +104,7 @@ removed after verification and this branch's own tree is unchanged.
   section naming LUTzy, linking the license, and marking LUTzy mentions as historical.
 - `grep -rn "LUTzy\|lutzy" Sources Tests Package.swift .github` → no matches (clean rename).
 - Remaining "LUTzy" hits repo-wide are confined to historical planning docs
-  (`docs/PHASE2_SPEC.md`, `docs/CODE_REVIEW.md`, `docs/superpowers/**`) and the source brief
+  (`docs/ENGINEERING_GUIDE.md`, `docs/ENGINEERING_GUIDE.md`, `docs/DOCUMENTATION_AUDIT.md`) and the source brief
   (`.context/initial_concept.md`) — expected historical/out-of-scope references, not stale product
   identity.
 - Spot-checked every file/symbol path named in the README (entitlements, asset catalog,

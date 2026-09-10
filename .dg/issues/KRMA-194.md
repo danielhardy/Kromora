@@ -56,7 +56,7 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/PhotoAnalysis.swift` (assembly)
 **Depends on:** KRMA-188, KRMA-189, KRMA-190, KRMA-191, KRMA-193
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §3
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md
 
 ## 1. Problem
 
@@ -101,7 +101,7 @@ something masks get bolted onto afterward.
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §3 — original domain-model shape, now revised per this ticket.
+- `docs/ENGINEERING_GUIDE.md — original domain-model shape, now revised per this ticket.
 - KRMA-184 (`RegionMask`/`SemanticMaskKind`), KRMA-193 (`MaskedToneAnalyzer`) — direct inputs.
 
 ## 5. Testing

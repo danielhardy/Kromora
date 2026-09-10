@@ -26,7 +26,7 @@ Show the selected edited photo sooner and prevent obsolete navigation loads from
 
 ## Context and evidence
 
-Performance audit item 4, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 4, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [AppViewModel.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/ViewModels/AppViewModel.swift:695) starts an unstructured detached `ImageDecoder.load`, waits for it, then loads the edit record. [ImageDecoder.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/ImageDecoder.swift:113) accesses a neutral RAW filter's `outputImage`; the engine subsequently creates its own source graph. `sourceImage` is used as an availability flag rather than as the renderer's source. RAW capabilities instantiate another filter. Canceling the parent load does not cancel the detached operation.

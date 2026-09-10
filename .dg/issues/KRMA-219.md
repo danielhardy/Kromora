@@ -57,7 +57,7 @@ semantic caches, analytic gradients, vector brushes, soft composition, and cance
 
 ## Implementation notes
 
-Follow Sections 3.3 and 6 plus Step 2 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Primary seams
+Follow Sections 3.3 and 6 plus Step 2 of `docs/ENGINEERING_GUIDE.md`. Primary seams
 are `RenderRequest.swift`, `RenderPipeline.swift`, `RenderEngine.swift`, render cache resources, and
 the local-mask model from KRMA-218.
 

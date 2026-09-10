@@ -98,7 +98,7 @@ remain visible and deterministic.
 ## Implementation notes
 
 Follow the layer/component model in Section 4, workspace behavior in Section 5, renderer rules in
-Section 6, and Step 8 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`.
+Section 6, and Step 8 of `docs/ENGINEERING_GUIDE.md`.
 
 Do not destructively flatten components into one authoritative bitmap. Cached composites are
 derived resources and must be rebuildable from the saved definitions.

@@ -36,7 +36,7 @@ commits:
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/AutoLightEngine.swift` +
 `Sources/LumoKit/ViewModels/AppViewModel.swift` (`runAutoAdjustment`)
 **Depends on:** KRMA-199
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §2, original proposal §30–36
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md, original proposal §30–36
 
 ## 1. Problem
 
@@ -59,7 +59,7 @@ level (`.analysis`), which the shared foundation already supports by design (KRM
 
 1. `AutoLightEngine` is a **pure function**: `(analysis: PhotoAnalysis, currentEdits:
    EditDocument, configuration: AutoLightConfiguration) -> AutoAdjustmentResult`. No Vision, no
-   Core Image, no actor, no async, no filesystem, no UI — matches `docs/PHASE3_SPEC.md` §2 and
+   Core Image, no actor, no async, no filesystem, no UI — matches `docs/ENGINEERING_GUIDE.md and
    mirrors `RenderPipeline.buildImage`'s pure-function shape.
 2. Composed from independent evaluators (`ExposureEvaluator`, `HighlightEvaluator`,
    `ShadowEvaluator`, `WhitePointEvaluator`, `BlackPointEvaluator`, `ContrastEvaluator`), each

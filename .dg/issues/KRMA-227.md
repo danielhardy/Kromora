@@ -32,7 +32,7 @@ under 16.7 ms), or whether the architecture decision needs revisiting.
 
 KRMA-217 prototyped a transparent Metal sibling (`MaskOverlaySurfaceView`/`MaskOverlayRenderer`)
 for pointer-frequency mask overlays and recorded a Release baseline
-(`docs/KRMA-217-MASK-OVERLAY-BASELINE-2026-09-04.md`). The main-thread state-update budget passed
+(`docs/TESTING.md`). The main-thread state-update budget passed
 (p95 0.020 ms, target < 2 ms), but the end-to-end overlay display latency did not: p95 40.334 ms
 against a 16.7 ms target, measured with `MaskOverlayPerformanceBenchmark` under an aggressively
 back-to-back synthetic input stream (no inter-frame pacing) rather than a real pointer trace. The
@@ -53,7 +53,7 @@ follow-up before Step 0's performance gate is treated as closed.
       (compare against the existing ~24-25 ms persistent-preview cadence) vs. sibling-view-specific
       overhead (pipeline setup, command buffer scheduling, `addPresentedHandler` timing, etc).
 - [ ] Record updated p95/p99 numbers under the real pointer stream, using the same table format as
-      `docs/KRMA-217-MASK-OVERLAY-BASELINE-2026-09-04.md`.
+      `docs/TESTING.md`.
 - [ ] State explicitly whether the 16.7 ms gate is met, and if not, whether it is achievable with
       the current sibling-view architecture or requires reconsidering the alternative (an added
       `PreviewSurfaceView` Metal pass) recorded in `ADR-KRMA-217-lumo-217-transparent-metal-sibling-overlay.md`.

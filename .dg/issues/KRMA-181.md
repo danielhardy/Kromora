@@ -32,7 +32,7 @@ commits:
 ---
 
 **Type:** Epic
-**Spec:** [`docs/PHASE3_SPEC.md`](../../docs/PHASE3_SPEC.md)
+**Spec:** [`docs/ENGINEERING_GUIDE.md`](../../docs/ENGINEERING_GUIDE.md)
 **Depends on:** none
 
 ## 1. What this is
@@ -112,7 +112,7 @@ whole restructure exists to prevent — stop and fix the shared abstraction inst
 
 ## 4. Child tickets
 
-See `docs/PHASE3_SPEC.md` §9 for the full table. Sequence:
+See `docs/ENGINEERING_GUIDE.md for the full table. Sequence:
 
 `182` (core value types) → `183` (analysis image + coordinates) → `184` (RegionMask core
 abstraction) → {`185` (MaskStore), `186` (MaskOperations)} → `187` (Vision mask-provider

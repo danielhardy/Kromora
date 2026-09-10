@@ -48,7 +48,7 @@ commits:
 **Type:** Feature
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/RegionMask.swift`
 **Depends on:** KRMA-183
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §3 (revised: mask foundation precedes analysis)
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md (revised: mask foundation precedes analysis)
 
 ## 1. Problem — read this before starting
 
@@ -91,7 +91,7 @@ to make that impossible by construction: everything downstream — Auto's region
    cached masks — document the forward-compat story (e.g. an `.unknown(String)` fallback case, or
    a documented policy that new cases invalidate the mask cache via a version field).
 5. `enum MaskQuality: Sendable, Codable, Equatable, Comparable { case analysis, preview, render }`
-   — see `docs/PHASE3_SPEC.md` for the rationale: Auto only ever needs `.analysis` (the ~768px
+   — see `docs/ENGINEERING_GUIDE.md` for the rationale: Auto only ever needs `.analysis` (the ~768px
    canonical image); a user painting/refining a mask for a local adjustment eventually needs
    `.render` (full-res/tile-based, built in KRMA-202). `.preview` sits between (e.g. for the
    Masking UI's live editing view before a final high-quality commit).
@@ -135,7 +135,7 @@ to make that impossible by construction: everything downstream — Auto's region
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §3 — types this ticket supersedes/refines from the original domain model
+- `docs/ENGINEERING_GUIDE.md — types this ticket supersedes/refines from the original domain model
   draft.
 - `Sources/LumoKit/Models/PhotoAsset.swift` — `PhotoAssetID` pattern for `MaskCacheKey`.
 - KRMA-183 — `NormalizedRect`/`NormalizedPoint`, which `NormalizedMask`/`RegionMask` build on.

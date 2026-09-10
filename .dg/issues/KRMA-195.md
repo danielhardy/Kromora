@@ -62,7 +62,7 @@ commits:
 **Type:** Task
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/PhotoAnalysisCoordinator.swift`
 **Depends on:** KRMA-187, KRMA-192
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §5, original proposal §11–12
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md, original proposal §11–12
 
 ## 1. Problem
 
@@ -87,7 +87,7 @@ necessarily wanting a full `PhotoAnalysis` recomputed.
 2. Concurrent calls for the same underlying work (same `assetID` + `sourceFingerprint` +
    requested kind/quality, or same `level`) share one in-flight `Task` — test with N concurrent
    calls, assert the underlying provider ran exactly once.
-3. `enum PhotoAnalysisLevel { case fast, standard, detailed }` (per `docs/PHASE3_SPEC.md` §4) maps
+3. `enum PhotoAnalysisLevel { case fast, standard, detailed }` (per `docs/ENGINEERING_GUIDE.md) maps
    to which mask kinds + `MaskQuality` get requested for a full `analyze(...)` call; this ticket
    only needs Tier 0 wired for real (KRMA-192) — later tickets (KRMA-197+) don't need to touch the
    coordinator's structure again, just register as additional stages.

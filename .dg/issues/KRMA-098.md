@@ -50,13 +50,13 @@ single Look surface from KRMA-085; do not trade away current GPU-backed renderin
 
 ### Comment — codex @ 2026-09-01T18:48:45.043Z
 
-Implemented and committed as db2cc14. Restored external Look workflow: import .cube and text-based .look files from ordinary file locations through the Look inspector and File menu; persist security-scoped file references; re-read imported files with a visible Refresh action; and invalidate the GPU LUT cache on library changes/replacements. Hardened parsing for BOMs, tabs, CRLF, comments/metadata, DOMAIN_MIN/MAX, LUT_3D_INPUT_RANGE, finite values, common 3D sizes 2…65, and explicit rejection of 1D/oversized/malformed data. Added parser, discovery/import, replacement, persistence, preview request, and menu regression coverage plus docs/LUT_FORMAT.md. Verification: focused LUT suites passed; full swift test passed (545 executed, 26 expected skips, 0 failures); swift build -c release passed; dg validate passed with only the pre-existing runner-model warning.
+Implemented and committed as db2cc14. Restored external Look workflow: import .cube and text-based .look files from ordinary file locations through the Look inspector and File menu; persist security-scoped file references; re-read imported files with a visible Refresh action; and invalidate the GPU LUT cache on library changes/replacements. Hardened parsing for BOMs, tabs, CRLF, comments/metadata, DOMAIN_MIN/MAX, LUT_3D_INPUT_RANGE, finite values, common 3D sizes 2…65, and explicit rejection of 1D/oversized/malformed data. Added parser, discovery/import, replacement, persistence, preview request, and menu regression coverage plus docs/LOOKS.md. Verification: focused LUT suites passed; full swift test passed (545 executed, 26 expected skips, 0 failures); swift build -c release passed; dg validate passed with only the pre-existing runner-model warning.
 
 ### Comment — claude @ 2026-09-01T19:03:43.547Z
 
 ## Counterpoint verification report (independent, post-human-review)
 
-**Scope reviewed:** commit db2cc14 (feat(KRMA-098): restore external LUT import support) — CubeLUT.swift, LUTLibrary.swift, AppViewModel.swift, LookInspectorView.swift, MenuCommands.swift, plus added tests and docs/LUT_FORMAT.md.
+**Scope reviewed:** commit db2cc14 (feat(KRMA-098): restore external LUT import support) — CubeLUT.swift, LUTLibrary.swift, AppViewModel.swift, LookInspectorView.swift, MenuCommands.swift, plus added tests and docs/LOOKS.md.
 
 **Checks run independently:**
 - `swift build` — clean, 0 diagnostics.
@@ -72,7 +72,7 @@ Implemented and committed as db2cc14. Restored external Look workflow: import .c
 - Stable `LUTID` (file path derived) is preserved across import/replace/rescan — confirmed by `testRefreshingAnImportedFileReplacesItsTableAtTheSameStablePath` and `testRescanReplacesAFileBackedTableAtTheSameStablePath`.
 - Persistence of imported files uses security-scoped bookmarks (`importedBookmarksKey`), restored and re-resolved on `LUTLibrary.init()`; `deinit` releases all scopes. `URL`/`[URL]` are `Sendable`, so the `nonisolated deinit` touching them is safe under Swift 6 mode (consistent with the project's zero-escape-hatch concurrency rule) — confirmed no `@unchecked Sendable` or similar introduced.
 
-**Maintainability/docs:** `docs/LUT_FORMAT.md` accurately documents the supported format boundary (sizes 2…65, DOMAIN_MIN/MAX, LUT_3D_INPUT_RANGE, rejected 1D/oversized/malformed) and matches the implemented behavior.
+**Maintainability/docs:** `docs/LOOKS.md` accurately documents the supported format boundary (sizes 2…65, DOMAIN_MIN/MAX, LUT_3D_INPUT_RANGE, rejected 1D/oversized/malformed) and matches the implemented behavior.
 
 **No blockers found.** No localized fixes were needed. No new child tickets required — this closes cleanly.
 

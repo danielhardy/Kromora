@@ -47,7 +47,7 @@ unverified.
       deferred until mouse-up" acceptance criterion.
 - [ ] Benchmark 10, 1,000, and 10,000 edited-photo catalogs under sustained input and report writes,
       bytes, queue depth, CPU, source-switch delay, and termination flush time, with hardware/OS/
-      commit/configuration recorded per `docs/PERFORMANCE_AUDIT_2026-09-01.md` conventions.
+      commit/configuration recorded per `docs/TESTING.md` conventions.
 
 ## Implementation notes
 
@@ -58,7 +58,7 @@ test double.
 
 ### Comment — codex @ 2026-09-01T23:31:29.855Z
 
-Implemented and verified in commit 0342965. Added internal slow/failing EditDocumentStore seams, regression coverage for forced flush waiting, retry-preserved dirty snapshots, and 250 ms long-gesture checkpoint writes. Added opt-in 10/1,000/10,000 edited-catalog benchmark reporting writes, bytes, peak queue, CPU, source-switch delay, and termination flush time; recorded the measured baseline and environment in docs/EDIT_PERSISTENCE_BENCHMARK_2026-09-01.md. Verification: full swift test passed (574 tests, 29 expected skips), LUMO_PERSISTENCE_BENCHMARK=1 benchmark passed for all catalog sizes, swift build -c release passed, git diff --check passed, and dg validate passed with only the pre-existing pickup-runner model warning.
+Implemented and verified in commit 0342965. Added internal slow/failing EditDocumentStore seams, regression coverage for forced flush waiting, retry-preserved dirty snapshots, and 250 ms long-gesture checkpoint writes. Added opt-in 10/1,000/10,000 edited-catalog benchmark reporting writes, bytes, peak queue, CPU, source-switch delay, and termination flush time; recorded the measured baseline and environment in docs/TESTING.md. Verification: full swift test passed (574 tests, 29 expected skips), LUMO_PERSISTENCE_BENCHMARK=1 benchmark passed for all catalog sizes, swift build -c release passed, git diff --check passed, and dg validate passed with only the pre-existing pickup-runner model warning.
 
 ### Comment — claude @ 2026-09-01T23:34:48.628Z
 
@@ -71,7 +71,7 @@ Re-ran the claimed verification steps from a clean tree at commit 0342965:
   testFailedPersistenceRemainsDirtyUntilAForcedRetrySucceeds, and
   testLongGestureCheckpointsIntermediateSnapshotsBeforeMouseUp).
 - LUMO_PERSISTENCE_BENCHMARK=1 swift test --filter EditPersistenceBenchmarkTests: passed;
-  reproduced writes/bytes and timings consistent with docs/EDIT_PERSISTENCE_BENCHMARK_2026-09-01.md
+  reproduced writes/bytes and timings consistent with docs/TESTING.md
   (10/1,000/10,000 catalogs; e.g. 10,000-record case ~3.3s CPU, ~14MB write, matching the recorded baseline).
 - swift build -c release: clean.
 - git diff --check and dg validate: clean (only the pre-existing pickup-runner model warning).

@@ -55,7 +55,7 @@ Implemented in commit 716ac6a. Added Codable/Equatable/Sendable ColorAdjustments
 
 Verification report (independent counterpoint review, post-human-review):
 
-Scope: reviewed commit 716ac6a (ColorAdjustments.swift, EditDocument.swift, RenderPipeline.swift, AppViewModel.swift, docs/COLOR_MODEL.md) plus the new ColorAdjustmentsTests.swift and ColorPipelineTests.swift against the acceptance criteria.
+Scope: reviewed commit 716ac6a (ColorAdjustments.swift, EditDocument.swift, RenderPipeline.swift, AppViewModel.swift, docs/ENGINEERING_GUIDE.md) plus the new ColorAdjustmentsTests.swift and ColorPipelineTests.swift against the acceptance criteria.
 
 Correctness:
 - Mapping is exact and documented: vibrance -100...100 -> CIVibrance.inputAmount -1...1; saturation -100...100 -> CIColorControls.inputSaturation 0...2 (neutral = 1, exact identity at 0). Confirmed by testNeutralValuesAndNormalizedMapping.
@@ -65,7 +65,7 @@ Correctness:
 - Inputs are finite-clamped at construction and mutation (didSet), including +-infinity/NaN; extremes checked finite post-render via RGBAf readback.
 - Alpha and colour-space metadata preserved (Core Image node, no CPU pixel loop); explicit alpha-preservation test at 0.4 alpha.
 - Migration is additive: `color` missing on an older document decodes to `.neutral`; `originalForComparison` strips `color` like `light`; `RenderPipeline.cacheVersion` bumped 6->7 so cached graphs don't silently miss the new stage.
-- Gamut handling is documented in docs/COLOR_MODEL.md (out-of-gamut values left in the lazy graph, clipped by the requested WorkingSpace output format, shared by preview/export).
+- Gamut handling is documented in docs/ENGINEERING_GUIDE.md (out-of-gamut values left in the lazy graph, clipped by the requested WorkingSpace output format, shared by preview/export).
 
 Checks run independently (not just re-trusting the implementer's log):
 - `swift test` (full suite): 397 tests, 21 expected skips, 0 failures.

@@ -23,7 +23,7 @@ Ensure cached development obeys the effective resolution requested by every qual
 
 ## Context and evidence
 
-Performance audit item 1, evaluated at commit `724ad99`: [September 1 audit](../../docs/PERFORMANCE_AUDIT_2026-09-01.md).
+Performance audit item 1, evaluated at commit `724ad99`: [September 1 audit](../../docs/TESTING.md).
 The user requested tangible responsiveness improvements without sacrificing visual fidelity or accuracy; prioritize code quality and measured impact over minimizing implementation effort.
 
 **Evidence:** [RenderCacheKey.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderCacheKey.swift:25) maps `.preview(size)` and `.interactive(size, budget)` to the same width/height bits. It ignores the interactive budget. [RenderScale.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderScale.swift:30) caps interactive output at 1.5 MP, while [RenderEngine.swift](/Users/dhardy/Dev/Lumo/Sources/LumoKit/Models/RenderEngine.swift:543) uses that shared key for standard-image development.

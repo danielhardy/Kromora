@@ -2,7 +2,7 @@
 id: KRMA-312
 title: Present preview via textured quad instead of CI render per drawable
 type: task
-status: review
+status: verification
 priority: medium
 verification_agent: pi
 verification_model: openrouter/meta/muse-spark-1.3-contributor
@@ -47,9 +47,9 @@ labels:
   - preview
   - metal
 created: 2026-09-09T02:38:52.036Z
-updated: 2026-09-10T12:53:55.761Z
+updated: 2026-09-10T16:29:01.440Z
 estimate: 5
-order: w
+order: n
 board: product
 ---
 

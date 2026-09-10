@@ -33,33 +33,33 @@ no application- or package-facing `LUTzy` identifiers remain in `Sources/`, `Tes
 However, two docs that CLAUDE.md treats as **living** references (not attribution/history) still
 reference the old module/paths:
 
-- `docs/PHASE2_SPEC.md` — "the implementation plan for the non-destructive render pipeline"
+- `docs/ENGINEERING_GUIDE.md` — "the implementation plan for the non-destructive render pipeline"
   (CLAUDE.md: "keep it a distillation"), still says `LUTzyKit` throughout.
-- `docs/CODE_REVIEW.md` — "records the standing review findings: what was fixed, and what is
+- `docs/ENGINEERING_GUIDE.md` — "records the standing review findings: what was fixed, and what is
   still open" (CLAUDE.md), still titled "LUTzy — code review" and references `LUTzyKit`.
 
-These are distinct from `.context/initial_concept.md` and `docs/superpowers/plans/*.md`, which are
+These are distinct from `.context/initial_concept.md` and `docs/DOCUMENTATION_AUDIT.md`, which are
 dated historical transcripts of already-completed steps and were correctly left alone.
 
 ## Scope
 
-- Update `docs/PHASE2_SPEC.md` and `docs/CODE_REVIEW.md`: replace `LUTzy`/`LUTzyKit` module/path
+- Update `docs/ENGINEERING_GUIDE.md` and `docs/ENGINEERING_GUIDE.md`: replace `LUTzy`/`LUTzyKit` module/path
   references with `Lumo`/`LumoKit` where they describe current/ongoing state.
-- Leave `.context/initial_concept.md` and `docs/superpowers/plans/*.md` untouched (historical).
+- Leave `.context/initial_concept.md` and `docs/DOCUMENTATION_AUDIT.md` untouched (historical).
 
 ## Acceptance criteria
 
-- [x] `docs/PHASE2_SPEC.md` and `docs/CODE_REVIEW.md` reference `LumoKit`/`Lumo` paths, not `LUTzyKit`/`LUTzy`.
+- [x] `docs/ENGINEERING_GUIDE.md` and `docs/ENGINEERING_GUIDE.md` reference `LumoKit`/`Lumo` paths, not `LUTzyKit`/`LUTzy`.
 - [x] No content/decision history is rewritten — path/module names only.
 
 ## Out of scope
 
-- Editing `.context/initial_concept.md` or `docs/superpowers/plans/*.md`.
+- Editing `.context/initial_concept.md` or `docs/DOCUMENTATION_AUDIT.md`.
 
 
 ### Comment — codex @ 2026-08-31T02:28:29.677Z
 
-Implemented in b936c0b: updated the living reference docs docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md to use Lumo/LumoKit names. Historical .context/initial_concept.md and docs/superpowers/plans/*.md were left untouched. Verification: dg validate passed; swift test passed (308 tests, 20 expected skips, 0 failures).
+Implemented in b936c0b: updated the living reference docs docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md to use Lumo/LumoKit names. Historical .context/initial_concept.md and docs/DOCUMENTATION_AUDIT.md were left untouched. Verification: dg validate passed; swift test passed (308 tests, 20 expected skips, 0 failures).
 
 
 ### Comment — claude @ 2026-08-31T02:29:49.780Z
@@ -71,15 +71,15 @@ Implemented in b936c0b: updated the living reference docs docs/PHASE2_SPEC.md an
 ### Checks run
 - `dg validate` — OK
 - `swift test` — 308 tests, 20 expected skips, 0 failures
-- `grep -in lutzy docs/PHASE2_SPEC.md docs/CODE_REVIEW.md` — no matches (post-fix)
+- `grep -in lutzy docs/ENGINEERING_GUIDE.md docs/ENGINEERING_GUIDE.md` — no matches (post-fix)
 
 ### Independent review
-Confirmed the prior implementation (commit b936c0b) correctly retitled `docs/CODE_REVIEW.md`
-and replaced the prose/path references in `docs/PHASE2_SPEC.md`, and correctly left
+Confirmed the prior implementation (commit b936c0b) correctly retitled `docs/ENGINEERING_GUIDE.md`
+and replaced the prose/path references in `docs/ENGINEERING_GUIDE.md`, and correctly left
 `.context/initial_concept.md`, `README.md` (explicitly marked historical), and
-`docs/superpowers/**` untouched.
+`docs/DOCUMENTATION_AUDIT.md` untouched.
 
-Found one miss: `docs/PHASE2_SPEC.md:296` still read `LUTZY_BENCH=1` in the benchmark
+Found one miss: `docs/ENGINEERING_GUIDE.md:296` still read `LUTZY_BENCH=1` in the benchmark
 reproduction instructions ("`swift test --filter PreviewCostBenchmark` with `LUTZY_BENCH=1`
 reproduces the numbers"). The actual code (`Tests/LumoKitTests/PreviewCostBenchmark.swift`)
 checks `ProcessInfo.processInfo.environment["LUMO_BENCH"]` — so this wasn't just a stale
@@ -89,7 +89,7 @@ This is a localized, testable, in-scope doc correction (no behavior/API/schema c
 fixed directly in commit 669268c rather than opening a child ticket.
 
 ### Acceptance criteria
-- [x] `docs/PHASE2_SPEC.md` and `docs/CODE_REVIEW.md` reference `LumoKit`/`Lumo`, not `LUTzyKit`/`LUTzy`.
+- [x] `docs/ENGINEERING_GUIDE.md` and `docs/ENGINEERING_GUIDE.md` reference `LumoKit`/`Lumo`, not `LUTzyKit`/`LUTzy`.
 - [x] No content/decision history rewritten — only module/path names and the one env var name touched.
 
 ### Verification commit
@@ -114,7 +114,7 @@ Automatic merge into `main` failed: Issue has no branch to merge
 
 ### Comment — claude @ 2026-08-31T02:32:13.831Z
 
-Finalizing verification: prior counterpoint review (this session) already ran independent checks (dg validate OK; swift test 308 passed/0 failed; grep for lutzy/LUTzy in docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md — no matches) and applied the LUTZY_BENCH env-var fix in 669268c. Re-confirmed clean on resumption: dg validate OK, grep clean, no uncommitted source changes. Automatic merge is not applicable here — git.mode=manual and branch_per_issue=false in dg.yaml, so 'Issue has no branch to merge' is expected, not a failure. Claim released; moving issue to done.
+Finalizing verification: prior counterpoint review (this session) already ran independent checks (dg validate OK; swift test 308 passed/0 failed; grep for lutzy/LUTzy in docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md — no matches) and applied the LUTZY_BENCH env-var fix in 669268c. Re-confirmed clean on resumption: dg validate OK, grep clean, no uncommitted source changes. Automatic merge is not applicable here — git.mode=manual and branch_per_issue=false in dg.yaml, so 'Issue has no branch to merge' is expected, not a failure. Claim released; moving issue to done.
 
 ### Comment — claude @ 2026-08-31T02:32:17.380Z
 
@@ -137,14 +137,14 @@ Automatic merge into `main` failed: Issue has no branch to merge
 Resumed verification session for KRMA-060. Re-ran independent checks on current tree state:
 - `git status --porcelain` — clean (no uncommitted source changes)
 - `dg validate` — OK
-- `grep -in lutzy docs/PHASE2_SPEC.md docs/CODE_REVIEW.md` — no matches
+- `grep -in lutzy docs/ENGINEERING_GUIDE.md docs/ENGINEERING_GUIDE.md` — no matches
 
 Prior verification pass in this session already found and fixed one gap (stale `LUTZY_BENCH`
-env var reference in docs/PHASE2_SPEC.md, corrected in commit 669268c to match the actual
+env var reference in docs/ENGINEERING_GUIDE.md, corrected in commit 669268c to match the actual
 `LUMO_BENCH` check in `Tests/LumoKitTests/PreviewCostBenchmark.swift`). No further issues found.
 
 ### Acceptance criteria
-- [x] docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md reference LumoKit/Lumo, not LUTzyKit/LUTzy.
+- [x] docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md reference LumoKit/Lumo, not LUTzyKit/LUTzy.
 - [x] No content/decision history rewritten — only module/path names and the one env var name touched.
 
 ### Verification commit
@@ -179,15 +179,15 @@ Re-confirmed independently on resumed session, current tree state:
 - `git status --porcelain` — clean (only untracked .dg/ scratch dir, unrelated)
 - `dg validate` — OK
 - `swift build` — clean, no changes needed
-- `grep -in lutzy docs/PHASE2_SPEC.md docs/CODE_REVIEW.md` — no matches
+- `grep -in lutzy docs/ENGINEERING_GUIDE.md docs/ENGINEERING_GUIDE.md` — no matches
 
 Both living-reference docs correctly use Lumo/LumoKit naming. The one substantive gap found in
-an earlier pass this session (stale `LUTZY_BENCH` env var in docs/PHASE2_SPEC.md, which didn't
+an earlier pass this session (stale `LUTZY_BENCH` env var in docs/ENGINEERING_GUIDE.md, which didn't
 match the actual `LUMO_BENCH` check in Tests/LumoKitTests/PreviewCostBenchmark.swift) is already
 fixed and committed as 669268c. No further issues found; not re-fixing anything already fixed.
 
 ### Acceptance criteria
-- [x] docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md reference LumoKit/Lumo, not LUTzyKit/LUTzy.
+- [x] docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md reference LumoKit/Lumo, not LUTzyKit/LUTzy.
 - [x] No content/decision history rewritten — only module/path names and the one env var name touched.
 
 ### Note on prior noise in this thread
@@ -218,15 +218,15 @@ Automatic merge into `main` failed: Issue has no branch to merge
 Re-confirmed independently on resumed session, current tree state:
 - `git status --porcelain` — clean (only untracked `.dg/` scratch dir, unrelated)
 - `swift build` — clean, no changes needed
-- `grep -in lutzy docs/PHASE2_SPEC.md docs/CODE_REVIEW.md` — no matches
+- `grep -in lutzy docs/ENGINEERING_GUIDE.md docs/ENGINEERING_GUIDE.md` — no matches
 
 No new findings. This confirms the same clean state reported across all prior verification
 passes in this issue's history. The one substantive gap found earlier (stale `LUTZY_BENCH` env
-var in docs/PHASE2_SPEC.md vs. the actual `LUMO_BENCH` check in
+var in docs/ENGINEERING_GUIDE.md vs. the actual `LUMO_BENCH` check in
 Tests/LumoKitTests/PreviewCostBenchmark.swift) remains fixed in commit 669268c.
 
 ### Acceptance criteria
-- [x] docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md reference LumoKit/Lumo, not LUTzyKit/LUTzy.
+- [x] docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md reference LumoKit/Lumo, not LUTzyKit/LUTzy.
 - [x] No content/decision history rewritten — only module/path names and the one env var name touched.
 
 ### Verification commit
@@ -243,13 +243,13 @@ Automatic merge into `main` failed: Issue has no branch to merge
 
 ## Agent log
 
-- 2026-08-31T02:30:39.753Z: Verification PASS: docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md updated to Lumo/LumoKit naming; fixed one additional stale LUTZY_BENCH env var reference (669268c).
+- 2026-08-31T02:30:39.753Z: Verification PASS: docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md updated to Lumo/LumoKit naming; fixed one additional stale LUTZY_BENCH env var reference (669268c).
 
-- 2026-08-31T02:32:01.629Z: Verification PASS: docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md updated to Lumo/LumoKit naming; stale LUTZY_BENCH env var fixed (669268c). git.mode=manual, branch_per_issue=false, so no automatic merge is expected.
+- 2026-08-31T02:32:01.629Z: Verification PASS: docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md updated to Lumo/LumoKit naming; stale LUTZY_BENCH env var fixed (669268c). git.mode=manual, branch_per_issue=false, so no automatic merge is expected.
 
-- 2026-08-31T02:32:49.725Z: Independent verification passed: docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md use Lumo/LumoKit naming; stale LUTZY_BENCH env var fixed in 669268c. dg validate OK, swift test 308/0 failed, no residual LUTzy references.
+- 2026-08-31T02:32:49.725Z: Independent verification passed: docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md use Lumo/LumoKit naming; stale LUTZY_BENCH env var fixed in 669268c. dg validate OK, swift test 308/0 failed, no residual LUTzy references.
 
-- 2026-08-31T02:33:22.414Z: Independent verification passed: docs/PHASE2_SPEC.md and docs/CODE_REVIEW.md use Lumo/LumoKit naming; stale LUTZY_BENCH env var fixed in 669268c. dg validate OK, swift test 308/0 failed, no residual LUTzy references.
+- 2026-08-31T02:33:22.414Z: Independent verification passed: docs/ENGINEERING_GUIDE.md and docs/ENGINEERING_GUIDE.md use Lumo/LumoKit naming; stale LUTZY_BENCH env var fixed in 669268c. dg validate OK, swift test 308/0 failed, no residual LUTzy references.
 
 - 2026-08-31T02:33:48.298Z: Independent verification passed: docs use Lumo/LumoKit naming; stale LUTZY_BENCH env var fixed in 669268c. dg validate OK, swift test 308/0 failed, tree clean.
 

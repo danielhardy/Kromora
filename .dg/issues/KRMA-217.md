@@ -9,7 +9,7 @@ verification_report:
   acceptance_criteria:
     - criterion: Record a Release-build baseline for current preview, zoom/pan, and mask display with hardware, OS, source dimensions, viewport/backing size, and cold/warm state.
       result: pass
-      notes: docs/LUMO-217-MASK-OVERLAY-BASELINE-2026-09-04.md (as committed in 5b52f70) records M1 Pro/macOS 26.6, 1280x800pt / 2560x1600px 2x Retina viewport/backing, 6000x4000 source fixture, and warm cache state explicitly.
+      notes: docs/TESTING.md (as committed in 5b52f70) records M1 Pro/macOS 26.6, 1280x800pt / 2560x1600px 2x Retina viewport/backing, 6000x4000 source fixture, and warm cache state explicitly.
     - criterion: Prototype synthetic brush cursor/stroke and linear/radial handle overlays over the persistent preview surface; do not add durable mask behavior in this ticket.
       result: pass
       notes: MaskOverlayPrototype.swift implements MaskOverlaySurfaceView/MaskOverlayRenderer drawing synthetic brush/linear/radial geometry, gated behind LUMO_MASK_OVERLAY_PROTOTYPE=1; no path reaches AppViewModel/EditDocument.
@@ -79,9 +79,9 @@ pointer-frequency observation boundary. This ticket resolves how those systems s
 ## Implementation notes
 
 Follow Sections 3.2, 3.4, and 7 plus Step 0 of
-`docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Start at `PreviewSurface.swift`, `PreviewView.swift`,
+`docs/ENGINEERING_GUIDE.md`. Start at `PreviewSurface.swift`, `PreviewView.swift`,
 `CanvasNavigation.swift`, `CanvasInteractionState`, `MaskingPanel.swift`, and
-`docs/CANVAS_OBSERVATION_PERFORMANCE.md`.
+`docs/ENGINEERING_GUIDE.md`.
 
 The lasting output is the benchmark evidence, transform tests, and documented architecture
 decision. Remove throwaway prototype code that is not part of the chosen path.
@@ -109,7 +109,7 @@ Implemented in commit 5b52f70. Added the opt-in transparent Metal sibling protot
 
 **Blocker — unmet acceptance criterion:**
 The ticket's AC explicitly requires "Overlay response is p95 under 16.7 ms ... on the recorded baseline." The implementation's own baseline doc
-(`docs/KRMA-217-MASK-OVERLAY-BASELINE-2026-09-04.md`) reports overlay input-to-present p95 of **40.334 ms**, more than double the gate, and states outright that "this issue does not claim the display gate as met" and that Instruments trace evidence with a real pointer stream is needed "before the Step 0 performance gate is treated as closed." That is an honestly-reported gap, not a fabricated pass, but it is still a failed AC on a ticket whose stated purpose is to validate the architecture before durable mask UI work builds on it (KRMA-182+). Per the verification action rules, a real-latency-fix or Instruments investigation is out of scope for a localized/safe verification fix, so this is returned as a blocker rather than patched in place.
+(`docs/TESTING.md`) reports overlay input-to-present p95 of **40.334 ms**, more than double the gate, and states outright that "this issue does not claim the display gate as met" and that Instruments trace evidence with a real pointer stream is needed "before the Step 0 performance gate is treated as closed." That is an honestly-reported gap, not a fabricated pass, but it is still a failed AC on a ticket whose stated purpose is to validate the architecture before durable mask UI work builds on it (KRMA-182+). Per the verification action rules, a real-latency-fix or Instruments investigation is out of scope for a localized/safe verification fix, so this is returned as a blocker rather than patched in place.
 
 **Action taken:**
 - Filed **KRMA-227** ("Close the mask overlay 16.7ms display-latency gate with Instruments trace"), priority urgent, labeled `verification`, and recorded it as a dependency of this issue (`depends_on: KRMA-227`). It scopes the Instruments capture, cadence attribution (vs. the existing ~24-25 ms persistent-preview presentation cadence), and the go/no-go call on the sibling-view architecture vs. the ADR's alternative.
@@ -124,7 +124,7 @@ The ticket's AC explicitly requires "Overlay response is p95 under 16.7 ms ... o
 - 2026-09-05T02:02:04.896Z: Verification report
 Verdict: PASS
 Acceptance criteria:
-- [x] Record a Release-build baseline for current preview, zoom/pan, and mask display with hardware, OS, source dimensions, viewport/backing size, and cold/warm state. (pass) — docs/KRMA-217-MASK-OVERLAY-BASELINE-2026-09-04.md (as committed in 5b52f70) records M1 Pro/macOS 26.6, 1280x800pt / 2560x1600px 2x Retina viewport/backing, 6000x4000 source fixture, and warm cache state explicitly.
+- [x] Record a Release-build baseline for current preview, zoom/pan, and mask display with hardware, OS, source dimensions, viewport/backing size, and cold/warm state. (pass) — docs/TESTING.md (as committed in 5b52f70) records M1 Pro/macOS 26.6, 1280x800pt / 2560x1600px 2x Retina viewport/backing, 6000x4000 source fixture, and warm cache state explicitly.
 - [x] Prototype synthetic brush cursor/stroke and linear/radial handle overlays over the persistent preview surface; do not add durable mask behavior in this ticket. (pass) — MaskOverlayPrototype.swift implements MaskOverlaySurfaceView/MaskOverlayRenderer drawing synthetic brush/linear/radial geometry, gated behind LUMO_MASK_OVERLAY_PROTOTYPE=1; no path reaches AppViewModel/EditDocument.
 - [x] Pin viewport-to-oriented-source coordinate conversion under orientation, crop, fit/fill, custom zoom, pan, window resize, non-square images, and Retina backing scale. (pass) — CanvasMaskTransform plus CanvasNavigationTests cover oriented/cropped/fit-fill/zoom-pan/resize/non-square/1x-2x Retina cases; re-ran and all pass.
 - [x] Decide, with trace evidence, between an added PreviewSurfaceView Metal pass and a coordinated transparent Metal sibling view; document lifecycle, hit-testing, and resource ownership. (pass) — ADR-KRMA-217 (accepted) documents the transparent-sibling decision with lifecycle, hit-test ownership (hitTest returns self only while active/not in crop mode), and shared device/queue resource ownership, backed by the Release benchmark harness.

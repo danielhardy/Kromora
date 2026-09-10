@@ -31,7 +31,7 @@ live preview performance a release gate.
 
 The existing `PreviewCoordinator` benchmark reports roughly 6-7 ms for a 60 MP-class request, but
 uses `FakeRenderEngine`; the source extent is realistic while no RAW decode, Core Image graph,
-rasterization, UI publication, or display presentation is measured. `docs/INSTRUMENTS.md` targets
+rasterization, UI publication, or display presentation is measured. `docs/TESTING.md` targets
 slider-input-to-render completion at 50 ms, but does not measure the presented frame or exercise
 every Light, Develop, Adjust, and curve path. KRMA-063 recorded a real 1600 x 1200 direct raster cost
 near 205.5 ms for its generated standard-image case, showing why the fake number cannot close this
@@ -58,7 +58,7 @@ requirement.
 
 ## Implementation notes
 
-Extend the existing Points of Interest vocabulary and `docs/INSTRUMENTS.md`; use signpost revision
+Extend the existing Points of Interest vocabulary and `docs/TESTING.md`; use signpost revision
 IDs or another privacy-safe correlation token. Run before/after captures for KRMA-069 through
 KRMA-071. If a decoder-specific control cannot meet the numeric gate, document the exact source,
 decoder, and measured bottleneck and create a targeted blocker rather than weakening all thresholds.

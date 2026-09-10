@@ -87,7 +87,7 @@ photos (a couple, a person + dog, two children).
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §3, original proposal §18.
+- `docs/ENGINEERING_GUIDE.md, original proposal §18.
 - KRMA-194's `PhotoAnalysis.regions` — the only input.
 
 ## 5. Testing

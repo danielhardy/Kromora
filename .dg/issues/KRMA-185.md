@@ -48,7 +48,7 @@ commits:
 **Type:** Task
 **Component:** new `Sources/LumoKit/Models/PhotoAnalysis/MaskStore.swift`
 **Depends on:** KRMA-184
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` (revised mask-foundation sequencing)
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md` (revised mask-foundation sequencing)
 
 ## 1. Problem
 
@@ -79,7 +79,7 @@ here, not duplicated.
    *may* expose a helper that finds the best available quality at or above a requested minimum, as
    an explicit, separate call (this is what KRMA-202's quality-upgrade path uses).
 4. Editing the document (Light, Color, LUT, etc.) does **not** invalidate cached masks — masks
-   describe the source scene, same non-invalidation rule as `docs/PHASE3_SPEC.md` §5 establishes
+   describe the source scene, same non-invalidation rule as `docs/ENGINEERING_GUIDE.md establishes
    for `PhotoAnalysis`. Regression-test this explicitly.
 5. Survives app relaunch (persistent, not an in-memory-only cache).
 6. Swift 6 clean, zero escape hatches.

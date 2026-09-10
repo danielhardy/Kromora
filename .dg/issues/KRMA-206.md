@@ -37,12 +37,12 @@ commits:
 **Component:** `Tests/LumoKitTests/PhotoAnalysisPerformanceTests.swift` (new) + instrumentation
 additions across `Sources/LumoKit/Models/PhotoAnalysis/`
 **Depends on:** KRMA-196, KRMA-190
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §6, original proposal §26–28, §43
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md, original proposal §26–28, §43
 
 ## 1. Problem
 
 Every analysis/mask ticket was asked to populate `AnalysisTimings` per stage, but nothing yet
-enforces the performance budgets in `docs/PHASE3_SPEC.md` §6, and the 768px canonical-image
+enforces the performance budgets in `docs/ENGINEERING_GUIDE.md, and the 768px canonical-image
 dimension (left as `// TODO(KRMA-206)` since KRMA-183) is unbenchmarked. This ticket closes both
 gaps.
 
@@ -58,7 +58,7 @@ gaps.
 4. Resolve the `// TODO(KRMA-206)` from KRMA-183: benchmark 512/768/1024 canonical dimensions for
    timing + a rough quality signal (does subject detection still succeed); update the default if
    the data supports a different value, otherwise confirm 768 with the numbers that justified it.
-5. Confirm measured numbers against `docs/PHASE3_SPEC.md` §6's targets on a representative Apple
+5. Confirm measured numbers against `docs/ENGINEERING_GUIDE.md's targets on a representative Apple
    Silicon Mac; record results in the completion comment.
 6. Rough transient-memory check that `.standard` analysis stays well under the ~50MB target.
 7. Swift 6 clean.
@@ -71,7 +71,7 @@ gaps.
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §6.
+- `docs/ENGINEERING_GUIDE.md
 - KRMA-183's `AnalysisConfiguration.maximumDimension` TODO.
 - Every prior mask-provider/analyzer ticket's `AnalysisTimings` population points.
 

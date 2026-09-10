@@ -9,7 +9,7 @@ verification_report:
   acceptance_criteria:
     - criterion: Both obsolete benchmark files are removed
       result: pass
-    - criterion: docs/CODE_REVIEW.md records the finding as resolved with a pointer to epic LUMO-244
+    - criterion: docs/ENGINEERING_GUIDE.md records the finding as resolved with a pointer to epic LUMO-244
       result: pass
     - criterion: swift test passes with the benchmark test removed
       result: pass
@@ -42,19 +42,19 @@ Remove the obsolete whole-catalog-rewrite benchmark now that persistence is row-
 ## Context
 
 `Tests/LumoKitTests/EditPersistenceBenchmarkTests.swift` and
-`docs/EDIT_PERSISTENCE_BENCHMARK_2026-09-01.md` exist to measure the cost of rewriting the whole
+`docs/TESTING.md` exist to measure the cost of rewriting the whole
 JSON catalog per edit. Once Child 2 lands row-level SwiftData persistence, that premise is moot.
 
 ## Work
 
 - Delete `Tests/LumoKitTests/EditPersistenceBenchmarkTests.swift`.
-- Delete `docs/EDIT_PERSISTENCE_BENCHMARK_2026-09-01.md`.
-- Add a one-line note to `docs/CODE_REVIEW.md` closing out that finding as resolved by this epic.
+- Delete `docs/TESTING.md`.
+- Add a one-line note to `docs/ENGINEERING_GUIDE.md` closing out that finding as resolved by this epic.
 
 ## Acceptance criteria
 
 - [ ] Both files removed.
-- [ ] `docs/CODE_REVIEW.md` records the finding as resolved, with a pointer to this epic.
+- [ ] `docs/ENGINEERING_GUIDE.md` records the finding as resolved, with a pointer to this epic.
 - [ ] `swift test` still passes with the benchmark test removed.
 
 ## Depends on
@@ -67,7 +67,7 @@ Child 2.
 Verdict: PASS
 Acceptance criteria:
 - [x] Both obsolete benchmark files are removed (pass)
-- [x] docs/CODE_REVIEW.md records the finding as resolved with a pointer to epic KRMA-244 (pass)
+- [x] docs/ENGINEERING_GUIDE.md records the finding as resolved with a pointer to epic KRMA-244 (pass)
 - [x] swift test passes with the benchmark test removed (pass)
 Checks run:
 - git diff --check

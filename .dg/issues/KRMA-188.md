@@ -51,7 +51,7 @@ commits:
 **Type:** Feature
 **Component:** `Sources/LumoKit/Models/PhotoAnalysis/VisionSemanticMaskProvider.swift` (+`.subject`)
 **Depends on:** KRMA-187, KRMA-185
-**Epic:** KRMA-181 — see `docs/PHASE3_SPEC.md` §4 (Tier 1)
+**Epic:** KRMA-181 — see `docs/ENGINEERING_GUIDE.md (Tier 1)
 
 ## 1. Problem
 
@@ -84,7 +84,7 @@ later tickets have at least one real mask to test against.
 
 ## 4. Where to look
 
-- `docs/PHASE3_SPEC.md` §1, §4 — saliency's role.
+- `docs/ENGINEERING_GUIDE.md, §4 — saliency's role.
 - KRMA-187's dispatch structure; KRMA-184's `RegionMask`/`SemanticMaskKind`.
 
 ## 5. Testing

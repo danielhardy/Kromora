@@ -78,7 +78,7 @@ handles disagree with the rendered selection.
 
 ## Implementation notes
 
-Follow Section 4.5 and Step 5 of `docs/MASKING_AND_LOCAL_ADJUSTMENTS_PLAN.md`. Reuse the linear
+Follow Section 4.5 and Step 5 of `docs/ENGINEERING_GUIDE.md`. Reuse the linear
 gradient's overlay, gesture ownership, hit testing, accessibility, and analytic-render patterns.
 
 Pin aspect correction and rotation with pure geometry tests before wiring pointer behavior.

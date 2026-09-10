@@ -11,9 +11,6 @@ columns:
   - id: claimed
     name: Claimed
     status: claimed
-  - id: blocked
-    name: Blocked
-    status: blocked
   - id: review
     name: Review
     status: review
