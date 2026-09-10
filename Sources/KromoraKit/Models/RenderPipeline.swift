@@ -39,7 +39,8 @@ enum RenderPipeline {
     /// v23 bakes the EXIF orientation into every RAW decode. `CIRAWFilter.outputImage` is
     /// sensor-native, so an orientation-3 ARW rendered upside-down while its ImageIO thumbnail
     /// (transform baked) stood upright.
-    static let cacheVersion = 23
+    /// v24 adds the durable quarter-turn image rotation stage.
+    static let cacheVersion = 24
 
     /// Build the graph for `document` over `source`.
     ///
@@ -70,22 +71,26 @@ enum RenderPipeline {
         lutCache: LUTFilterCache? = nil,
         sourceROI: CGRect? = nil
     ) -> CIImage? {
-        guard let developed = developedSource(source, rawDevelop: document.rawDevelop, scale: scale) else {
+        guard let developed = developedSource(
+            source, rawDevelop: document.rawDevelop, scale: scale, rotation: document.rotation
+        ) else {
             return nil
         }
+        let orientedNativeExtent = document.rotation.orientedExtent(source.nativeExtent)
+        let orientedDeveloped = applyingRotation(document.rotation, to: developed)
         let fullFrame = scaledSourceExtent(
-            nativeExtent: source.nativeExtent,
-            imageExtent: developed.extent,
-            scale: scale.factor(for: source.nativeExtent)
+            nativeExtent: orientedNativeExtent,
+            imageExtent: orientedDeveloped.extent,
+            scale: scale.factor(for: orientedNativeExtent)
         )
         let visibleROI = (!scale.isFull ? sourceROI : nil)
         let processingROI = visibleROI.map {
-            expandedSourceROI($0, nativeExtent: source.nativeExtent,
+            expandedSourceROI($0, nativeExtent: orientedNativeExtent,
                                needsSpatialSupport: document.effects.hasSpatialWork)
         }
         let working = processingROI.map {
-            cropSourceROI($0, nativeExtent: source.nativeExtent, in: developed)
-        } ?? developed
+            cropSourceROI($0, nativeExtent: orientedNativeExtent, in: orientedDeveloped)
+        } ?? orientedDeveloped
         let earlyCrop = visibleROI != nil
         let finalFrame: CGRect? = {
             guard earlyCrop, let crop = document.crop.normalizedRect else {
@@ -103,11 +108,11 @@ enum RenderPipeline {
             includePostRenderWhiteBalance: source.kind == .standard,
             grainSeed: grainSeed(for: source), applyCommittedCrop: !earlyCrop,
             spatialReferenceExtent: earlyCrop ? fullFrame : nil,
-            finalFrameExtent: finalFrame
+            finalFrameExtent: finalFrame, applyRotation: false
         )
         guard let visibleROI, earlyCrop else { return result }
         return result.cropped(to: scaledSourceRect(
-            visibleROI, nativeExtent: source.nativeExtent, imageExtent: fullFrame
+            visibleROI, nativeExtent: orientedNativeExtent, imageExtent: fullFrame
         ))
     }
 
@@ -132,8 +137,10 @@ enum RenderPipeline {
         grainSeed: UInt32 = 0,
         applyCommittedCrop: Bool = true,
         spatialReferenceExtent: CGRect? = nil,
-        finalFrameExtent: CGRect? = nil
+        finalFrameExtent: CGRect? = nil,
+        applyRotation: Bool = true
     ) -> CIImage {
+        let developed = applyRotation ? applyingRotation(document.rotation, to: developed) : developed
         let adjusted = buildPreLUTImage(
             developed: developed, document: document, toneCurveCache: toneCurveCache,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
@@ -269,6 +276,14 @@ enum RenderPipeline {
         return image.cropped(to: cropRect)
     }
 
+    /// Apply a canonical quarter-turn while keeping the result in Core Image's finite image
+    /// extent. `CIImage.oriented` also performs the required translation, so the returned image
+    /// starts at the same zero-based coordinate convention used by the source decoder.
+    static func applyingRotation(_ rotation: ImageRotation, to image: CIImage) -> CIImage {
+        guard let orientation = rotation.coreImageOrientation else { return image }
+        return image.oriented(orientation)
+    }
+
     /// Map a native-source ROI into a decoded image's coordinates without rasterizing it. The
     /// decoded image remains the cacheable planner-sized source; only the stages after this seam
     /// see the smaller extent.
@@ -341,7 +356,8 @@ enum RenderPipeline {
     static func developedSource(
         _ source: ImageSource,
         rawDevelop: RAWDevelopSettings,
-        scale: RenderScale
+        scale: RenderScale,
+        rotation: ImageRotation = .zero
     ) -> CIImage? {
         switch source.kind {
         case .raw:
@@ -353,9 +369,8 @@ enum RenderPipeline {
             // apply it so the canvas agrees with the filmstrip (orientation 3 arrived
             // upside-down; quarter-turns additionally swap the axes).
             let orientation = rawOrientation(for: source.backing)
-            let factor = scale.factor(for: ImageDecoder.orientedDimensions(
-                filter.nativeSize, for: orientation
-            ))
+            let orientedSize = ImageDecoder.orientedDimensions(filter.nativeSize, for: orientation)
+            let factor = scale.factor(for: rotation.orientedExtent(orientedSize))
             if factor < 1 {
                 filter.scaleFactor = Float(factor)
             }
@@ -369,13 +384,14 @@ enum RenderPipeline {
             // a thumbnail (and for malformed inputs, where it remains the normal nil failure).
             if !scale.isFull,
                let preview = previewStandardImage(
-                   for: source.backing, nativeExtent: source.nativeExtent, scale: scale
+                   for: source.backing,
+                   nativeExtent: rotation.orientedExtent(source.nativeExtent), scale: scale
                ) {
                 return preview
             }
 
             guard let image = standardImage(for: source.backing) else { return nil }
-            let factor = scale.factor(for: image.extent.size)
+            let factor = scale.factor(for: rotation.orientedExtent(image.extent.size))
             guard factor < 1 else { return image }
             return lanczosScaled(image, by: factor)
         }

@@ -1557,6 +1557,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             activeHistory = EditHistory()
             documentChanged = document != stored.document
             document = stored.document
+            sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
             comparisonBaselineDocument = document.comparisonBaseline
             editSessions[request.assetID] = PhotoEditSession(document: document, history: activeHistory)
             restoreMaskSelection()
@@ -2792,12 +2793,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         )
         let cropChanged = updated.crop != document.crop
         let localAdjustmentsChanged = updated.localAdjustments != document.localAdjustments
+        let rotationChanged = updated.rotation != document.rotation
         let frameChanged = invalidatesComparisonBaseline || developChanged
-        let comparisonChanged = frameChanged || cropChanged || localAdjustmentsChanged
+        let comparisonChanged = frameChanged || cropChanged || localAdjustmentsChanged || rotationChanged
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         activeHistory.recordChange(from: document, to: updated)
         document = updated
+        if rotationChanged {
+            sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
+        }
         if !document.hasVisibleLookEdits { isShowingOriginal = false }
         refreshLUTResolutionStatus()
         saveActiveDocument()
@@ -2963,7 +2968,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     ) -> CGSize {
         var planner = ResolutionPlanner()
         return planner.plan(
-            nativeExtent: nativeExtent,
+            nativeExtent: document.rotation.orientedExtent(nativeExtent),
             crop: document.crop,
             viewportSize: previewBackingSize,
             // `openImage` resets presentation navigation for the next source before it plans
@@ -2987,21 +2992,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         switch surface {
         case .mainPreview:
             return mainPreviewResolutionPlanner.plan(
-                nativeExtent: nativeExtent,
+                nativeExtent: document.rotation.orientedExtent(nativeExtent),
                 crop: document.crop,
                 viewportSize: viewportSize,
                 navigation: canvasState.navigation
             )
         case .comparisonBaseline:
             return comparisonResolutionPlanner.plan(
-                nativeExtent: nativeExtent,
+                nativeExtent: document.rotation.orientedExtent(nativeExtent),
                 crop: document.crop,
                 viewportSize: viewportSize,
                 navigation: canvasState.navigation
             )
         case .histogram:
             return histogramResolutionPlanner.plan(
-                nativeExtent: nativeExtent,
+                nativeExtent: document.rotation.orientedExtent(nativeExtent),
                 crop: document.crop,
                 viewportSize: viewportSize,
                 navigation: canvasState.navigation
@@ -3071,7 +3076,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             source: source, assetID: assetID, document: document, lut: lut,
             targetSize: plan.sourceSize,
             sourceROI: canonical || cropInteractionActive
-                ? nil : plan.previewSourceROI(nativeExtent: source.nativeExtent),
+                ? nil : plan.previewSourceROI(
+                    nativeExtent: document.rotation.orientedExtent(source.nativeExtent)
+                ),
             presentationImageExtent: plan.presentationImageExtent,
             quality: .preview,
             output: .raster, space: .current, requestRevision: requestRevision
@@ -3083,7 +3090,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     ) -> ResolutionPlan {
         var planner = ResolutionPlanner()
         return planner.plan(
-            nativeExtent: nativeExtent,
+            nativeExtent: document.rotation.orientedExtent(nativeExtent),
             crop: document.crop,
             viewportSize: CGSize(
                 width: CGFloat(PreviewDiskCache.canonicalLongEdge),
@@ -3208,7 +3215,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             source: imageSource, assetID: activeAssetID, document: requested, lut: lut,
             targetSize: plan.sourceSize,
             sourceROI: canvasState.isCropToolActive
-                ? nil : plan.previewSourceROI(nativeExtent: imageSource.nativeExtent),
+                ? nil : plan.previewSourceROI(
+                    nativeExtent: requested.rotation.orientedExtent(imageSource.nativeExtent)
+                ),
             presentationImageExtent: plan.presentationImageExtent,
             quality: .interactive,
             output: .raster, space: .current, requestRevision: displayRevision
@@ -3367,6 +3376,53 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         }
     }
 
+    // MARK: - Rotation
+
+    /// Rotate the active image one quarter-turn clockwise. The edit is value state, so it is
+    /// persisted with the photo and participates in the ordinary document history.
+    func rotateClockwise() {
+        rotateImage(clockwise: true)
+    }
+
+    /// Rotate the active image one quarter-turn counterclockwise.
+    func rotateCounterClockwise() {
+        rotateImage(clockwise: false)
+    }
+
+    /// Compatibility spelling for callers that expose rotation as a selected-image action.
+    func rotateSelectedImage(clockwise: Bool) {
+        rotateImage(clockwise: clockwise)
+    }
+
+    /// Clear only the rotation while preserving crop, tone, colour, and other spatial edits.
+    func resetRotation() {
+        guard sourceImage != nil else {
+            statusMessage = "Open an image first"
+            return
+        }
+        endUndoGrouping()
+        updateDocument { $0.rotation = .zero }
+        canvasState.fit()
+        statusMessage = "Rotation reset"
+    }
+
+    private func rotateImage(clockwise: Bool) {
+        guard sourceImage != nil else {
+            statusMessage = "Open an image first"
+            return
+        }
+        // A draft crop is expressed in the current image coordinates. Finish that transient tool
+        // before changing the coordinate system so an unapplied rectangle cannot be committed
+        // against the wrong orientation later.
+        if canvasState.isCropToolActive { cancelCrop() }
+        endUndoGrouping()
+        updateDocument { document in
+            document.rotation = document.rotation.addingClockwiseQuarterTurns(clockwise ? 1 : -1)
+        }
+        canvasState.fit()
+        statusMessage = "Rotated \(clockwise ? "clockwise" : "counterclockwise")"
+    }
+
     // MARK: - Canvas navigation
 
     func fitCanvas() {
@@ -3427,7 +3483,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard let imageSource else { return }
         canvasState.pan(
             by: CGSize(width: delta.width, height: -delta.height),
-            imageExtent: CGRect(origin: .zero, size: imageSource.nativeExtent),
+            imageExtent: CGRect(
+                origin: .zero,
+                size: document.rotation.orientedExtent(imageSource.nativeExtent)
+            ),
             viewportSize: viewportSize
         )
     }
@@ -3517,10 +3576,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             from: document.rawDevelop, to: restored.rawDevelop
         )
         let comparisonChanged = developChanged || restored.crop != document.crop ||
-            restored.localAdjustments != document.localAdjustments
+            restored.rotation != document.rotation || restored.localAdjustments != document.localAdjustments
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         document = restored
+        sourceSize = restored.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
         if comparisonChanged {
             comparisonBaselineDocument = restored.comparisonBaseline
             comparisonPreviewScheduledRevision = nil

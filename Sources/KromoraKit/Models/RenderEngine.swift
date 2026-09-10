@@ -160,14 +160,15 @@ struct RenderBuildPlan: Sendable, Equatable {
     ) -> Self {
         let maskIdentity = RenderCacheHash.digest(RenderEngine.MaskRecipeIdentity(document.localAdjustments))
         let documentIdentity = RenderCacheHash.digest(document)
+        let nativeExtent = document.rotation.orientedExtent(source.nativeExtent)
         let cropNativeRect = document.crop.normalizedRect.map { rect in
             CGRect(
-                x: rect.minX * source.nativeExtent.width,
-                y: rect.minY * source.nativeExtent.height,
-                width: rect.width * source.nativeExtent.width,
-                height: rect.height * source.nativeExtent.height
+                x: rect.minX * nativeExtent.width,
+                y: rect.minY * nativeExtent.height,
+                width: rect.width * nativeExtent.width,
+                height: rect.height * nativeExtent.height
             )
-        } ?? CGRect(origin: .zero, size: source.nativeExtent)
+        } ?? CGRect(origin: .zero, size: nativeExtent)
         let effectiveROI = sourceROI.flatMap { roi -> CGRect? in
             let intersection = roi.intersection(cropNativeRect)
             return intersection.isNull || intersection.width <= 0 || intersection.height <= 0
@@ -175,7 +176,7 @@ struct RenderBuildPlan: Sendable, Equatable {
         }
         let processingROI = effectiveROI.map {
             RenderPipeline.expandedSourceROI(
-                $0, nativeExtent: source.nativeExtent,
+                $0, nativeExtent: nativeExtent,
                 needsSpatialSupport: document.effects.hasSpatialWork
             )
         }
@@ -184,8 +185,8 @@ struct RenderBuildPlan: Sendable, Equatable {
         let fullFrameExtent = CGRect(
             origin: .zero,
             size: CGSize(
-                width: source.nativeExtent.width * scale.factor(for: source.nativeExtent),
-                height: source.nativeExtent.height * scale.factor(for: source.nativeExtent)
+                width: nativeExtent.width * scale.factor(for: nativeExtent),
+                height: nativeExtent.height * scale.factor(for: nativeExtent)
             )
         )
         let hasEarlyCrop = !scale.isFull && effectiveROI != nil
@@ -1349,21 +1350,24 @@ actor RenderEngine: RenderEngining {
             toneCurveSpace = space
         }
         guard let developedFull = await developedSourceForBuild(
-            source, document.rawDevelop, scale, space: space,
+            source, document.rawDevelop, scale, rotation: document.rotation, space: space,
             interactive: quality == .interactive,
             thumbnail: quality == .thumbnail
         ) else { return nil }
         try Task.checkCancellation()
-        let effectivePlan = plan.rebased(to: developedFull.extent, crop: document.crop)
+        let orientedDeveloped = RenderPipeline.applyingRotation(document.rotation, to: developedFull)
+        let effectivePlan = plan.rebased(to: orientedDeveloped.extent, crop: document.crop)
         let effectiveROI = effectivePlan.sourceROI
         let processingROI = effectivePlan.processingROI
         let working: CIImage
         if !scale.isFull, let processingROI {
             working = RenderPipeline.cropSourceROI(
-                processingROI, nativeExtent: source.nativeExtent, in: developedFull
+                processingROI,
+                nativeExtent: document.rotation.orientedExtent(source.nativeExtent),
+                in: orientedDeveloped
             )
         } else {
-            working = developedFull
+            working = orientedDeveloped
         }
         let hasEarlyCrop = effectivePlan.hasEarlyCrop
         let finalFrameExtent = effectivePlan.finalFrameExtent
@@ -1429,7 +1433,9 @@ actor RenderEngine: RenderEngining {
         )
         guard hasEarlyCrop, let effectiveROI else { return output }
         return output.cropped(to: RenderPipeline.scaledSourceRect(
-            effectiveROI, nativeExtent: source.nativeExtent, imageExtent: fullFrameExtent
+            effectiveROI,
+            nativeExtent: document.rotation.orientedExtent(source.nativeExtent),
+            imageExtent: fullFrameExtent
         ))
     }
 
@@ -1442,20 +1448,23 @@ actor RenderEngine: RenderEngining {
         _ source: ImageSource,
         _ rawDevelop: RAWDevelopSettings,
         _ scale: RenderScale,
+        rotation: ImageRotation,
         space: WorkingSpace,
         interactive: Bool,
         thumbnail: Bool
     ) async -> CIImage? {
         guard source.kind == .standard else {
             return developedSource(
-                source, rawDevelop, scale, space: space, interactive: interactive,
+                source, rawDevelop, scale, rotation: rotation, space: space, interactive: interactive,
                 thumbnail: thumbnail
             )
         }
         let key: DevelopedSourceCacheKey? = scale.isFull ? nil : DevelopedSourceCacheKey(
             source: RenderSourceFingerprint(source),
             developHash: RenderCacheHash.digest(rawDevelop),
-            scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
+            scale: RenderScaleKey(
+                scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
+            ),
             pipelineVersion: RenderPipeline.cacheVersion
         )
         if let key {
@@ -1476,7 +1485,7 @@ actor RenderEngine: RenderEngining {
             let task = Task.detached(priority: .userInitiated) { () -> CIImage? in
                 guard !Task.isCancelled else { return nil }
                 return RenderPipeline.developedSource(
-                    source, rawDevelop: rawDevelop, scale: scale
+                    source, rawDevelop: rawDevelop, scale: scale, rotation: rotation
                 )
             }
             if thumbnail {
@@ -1514,7 +1523,9 @@ actor RenderEngine: RenderEngining {
 
         return await Task.detached(priority: .userInitiated) { () -> CIImage? in
             guard !Task.isCancelled else { return nil }
-            return RenderPipeline.developedSource(source, rawDevelop: rawDevelop, scale: scale)
+            return RenderPipeline.developedSource(
+                source, rawDevelop: rawDevelop, scale: scale, rotation: rotation
+            )
         }.value
     }
 
@@ -2206,6 +2217,7 @@ actor RenderEngine: RenderEngining {
         _ source: ImageSource,
         _ rawDevelop: RAWDevelopSettings,
         _ scale: RenderScale,
+        rotation: ImageRotation = .zero,
         space: WorkingSpace,
         interactive: Bool = false,
         thumbnail: Bool = false
@@ -2221,7 +2233,7 @@ actor RenderEngine: RenderEngining {
                 detail: "layer=interactiveRAWFilter reused=\(reused)"
             )
             let result = session.output(
-                rawDevelop: rawDevelop, scale: scale,
+                rawDevelop: rawDevelop, scale: scale, rotation: rotation,
                 materialize: { [self] image in
                     materializedImage(
                         image, space: space,
@@ -2234,12 +2246,16 @@ actor RenderEngine: RenderEngining {
             return result.image
         }
         guard !scale.isFull else {
-            return RenderPipeline.developedSource(source, rawDevelop: rawDevelop, scale: scale)
+            return RenderPipeline.developedSource(
+                source, rawDevelop: rawDevelop, scale: scale, rotation: rotation
+            )
         }
         let key = DevelopedSourceCacheKey(
             source: RenderSourceFingerprint(source),
             developHash: RenderCacheHash.digest(rawDevelop),
-            scale: RenderScaleKey(scale, nativeExtent: source.nativeExtent),
+            scale: RenderScaleKey(
+                scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
+            ),
             pipelineVersion: RenderPipeline.cacheVersion
         )
         let cache = thumbnail ? thumbnailDevelopedSourceCache : developedSourceCache
@@ -2259,7 +2275,7 @@ actor RenderEngine: RenderEngining {
         defer { decodeInterval.end() }
 
         guard let image = RenderPipeline.developedSource(
-            source, rawDevelop: rawDevelop, scale: scale
+            source, rawDevelop: rawDevelop, scale: scale, rotation: rotation
         ) else { return nil }
 
         // RAW output is mutable-filter-backed. Complete it before putting it in the settled cache,
@@ -2405,12 +2421,15 @@ actor RenderEngine: RenderEngining {
         func output(
             rawDevelop: RAWDevelopSettings,
             scale: RenderScale,
+            rotation: ImageRotation = .zero,
             materialize: (CIImage) -> CIImage?
         ) -> OutputResult {
             // The scale factor is computed from the display size so a quarter-turned sensor
             // fits the preview box the same way the settled path does; the decoder output
             // below is then baked upright so the canvas agrees with the filmstrip.
-            let orientedSize = ImageDecoder.orientedDimensions(filter.nativeSize, for: orientation)
+            let orientedSize = rotation.orientedExtent(
+                ImageDecoder.orientedDimensions(filter.nativeSize, for: orientation)
+            )
             let factor = scale.factor(for: orientedSize)
             let key = OutputKey(
                 sourceRevision: fingerprint,

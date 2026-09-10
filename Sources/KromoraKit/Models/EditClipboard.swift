@@ -8,13 +8,14 @@ import Foundation
 /// can later choose categories without replacing the clipboard schema or teaching every caller how
 /// to split an `EditDocument`.
 struct EditClipboardPayload: Codable, Sendable, Equatable {
-    static let currentVersion = 2
+    static let currentVersion = 3
 
     enum Category: String, Codable, CaseIterable, Hashable, Sendable {
         case light
         case color
         case effects
         case crop
+        case rotation
         case lut
         case develop
         case localAdjustments
@@ -27,7 +28,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
     }
 
     /// The crop stage copied as a normalized, non-destructive framing value, including its selected
-    /// ratio. Rotation/straighten remains out of scope for this crop tool.
+    /// ratio.
     struct CropCategory: Codable, Sendable, Equatable {
         var normalizedRect: CGRect?
         var aspectRatio: CropAspectRatio
@@ -71,6 +72,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
     var colorAdjustments = ColorAdjustments.neutral
     var effectAdjustments = EffectsAdjustments.neutral
     var crop = CropCategory.neutral
+    var rotation: ImageRotation = .zero
     var lut = LUTSettings.none
     var develop = RAWDevelopSettings.neutral
     var localAdjustments: [LocalAdjustmentLayer] = []
@@ -91,6 +93,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         color: AdjustmentCategory = AdjustmentCategory(),
         effects: AdjustmentCategory = AdjustmentCategory(),
         crop: CropCategory = .neutral,
+        rotation: ImageRotation = .zero,
         lut: LUTSettings = .none,
         develop: RAWDevelopSettings = .neutral,
         developPolicy: DevelopPolicy = .copyExplicitSettings,
@@ -101,6 +104,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.color = color
         self.effects = effects
         self.crop = crop
+        self.rotation = rotation
         self.lut = lut
         self.develop = develop
         self.developPolicy = developPolicy
@@ -109,7 +113,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case version, light, color, effects, lightAdjustments, colorAdjustments, effectAdjustments,
-             crop, lut, develop, developPolicy, localAdjustments
+             crop, rotation, lut, develop, developPolicy, localAdjustments
     }
 
     init(from decoder: Decoder) throws {
@@ -130,6 +134,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.colorAdjustments = try container.decodeIfPresent(ColorAdjustments.self, forKey: .colorAdjustments) ?? .neutral
         self.effectAdjustments = try container.decodeIfPresent(EffectsAdjustments.self, forKey: .effectAdjustments) ?? .neutral
         self.crop = try container.decodeIfPresent(CropCategory.self, forKey: .crop) ?? .neutral
+        self.rotation = try container.decodeIfPresent(ImageRotation.self, forKey: .rotation) ?? .zero
         self.lut = try container.decodeIfPresent(LUTSettings.self, forKey: .lut) ?? .none
         self.develop = try container.decodeIfPresent(RAWDevelopSettings.self, forKey: .develop) ?? .neutral
         self.developPolicy = try container.decodeIfPresent(DevelopPolicy.self, forKey: .developPolicy) ?? .copyExplicitSettings
@@ -145,6 +150,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
             color: AdjustmentCategory(adjustments: document.adjustments.filter {
                 !lightSlots.contains($0.slot)
             }.sorted { $0.slot < $1.slot }),
+            rotation: document.rotation,
             lut: document.lut,
             develop: document.rawDevelop,
             developPolicy: developPolicy,
@@ -194,6 +200,9 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
                 aspectRatio: crop.aspectRatio,
                 orientation: crop.orientation
             )
+        }
+        if categories.contains(.rotation) {
+            result.rotation = rotation
         }
         if categories.contains(.lut) {
             result.lut = lut
