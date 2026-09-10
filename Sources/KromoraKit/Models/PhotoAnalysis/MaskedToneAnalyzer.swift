@@ -40,6 +40,21 @@ struct MaskedToneAnalyzer: Sendable {
         image: AnalysisImage,
         through mask: RegionMask
     ) async throws -> (tone: ToneStatistics, color: ColorStatistics) {
+        try await statistics(
+            image: image, through: mask, document: EditDocument(), lut: nil, space: .sRGB
+        )
+    }
+
+    /// Document-aware regional analysis (KRMA-343). Measures the mask through the current
+    /// rendered edit so regional facts describe what the photographer sees. The overload above
+    /// preserves source measurement for existing callers.
+    func statistics(
+        image: AnalysisImage,
+        through mask: RegionMask,
+        document: EditDocument,
+        lut: CubeLUT?,
+        space: WorkingSpace
+    ) async throws -> (tone: ToneStatistics, color: ColorStatistics) {
         try Task.checkCancellation()
         var interval = KromoraObservability.begin(
             .analysisMaskedStatistics, source: image.source, maskQuality: mask.quality
@@ -56,11 +71,11 @@ struct MaskedToneAnalyzer: Sendable {
 
         let histogram = await engine.maskedHistogram(
             source: image.source,
-            document: EditDocument(),
-            lut: nil,
+            document: document,
+            lut: lut,
             scale: .preview(
                 maxSize: CGSize(width: image.dimensions.width, height: image.dimensions.height)),
-            space: .sRGB,
+            space: space,
             mask: pixels
         )
         try Task.checkCancellation()

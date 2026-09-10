@@ -437,6 +437,17 @@ actor FakeRenderEngine: RenderEngining {
 
     func setStubbedCapabilities(_ value: RAWCapabilities?) { stubbedCapabilities = value }
 
+    // MARK: - CurrentEditSampling (KRMA-343)
+
+    /// Stubbed analysis-scale pixels returned by the sampling seam. `nil` models an
+    /// unsupported renderer, in which case measurement must report unavailable, not guess.
+    var sampledStub: RenderedPixelSamples?
+    /// Every `renderedSamples` call, in order, so tests can assert *which* document was measured.
+    private(set) var sampleRequests: [Request] = []
+    /// Stubbed native patch rasters, aligned with the requested specs. `nil` models unsupported.
+    var nativeStub: [NativePatchPixels]?
+    private(set) var nativeRequests: [[NativePatchSpec]] = []
+
     func setShouldFailEncode(_ value: Bool) { shouldFailEncode = value }
 
     /// Let the first encode finish but hold the second until the test chooses to release it.
@@ -469,5 +480,33 @@ actor FakeRenderEngine: RenderEngining {
         CGImageDestinationAddImage(destination, image, nil)
         guard CGImageDestinationFinalize(destination) else { return nil }
         return data as Data
+    }
+}
+
+extension FakeRenderEngine: CurrentEditSampling {
+    func renderedSamples(
+        source: ImageSource,
+        document: EditDocument,
+        lut: CubeLUT?,
+        targetLongEdge: Int,
+        space: WorkingSpace
+    ) async -> RenderedPixelSamples? {
+        sampleRequests.append(Request(
+            document: document, lutID: lut?.lutID,
+            scale: .preview(maxSize: CGSize(width: targetLongEdge, height: targetLongEdge)),
+            space: space, format: nil, source: source, maskResolution: .resolved
+        ))
+        return sampledStub
+    }
+
+    func nativeDetailPatches(
+        source: ImageSource,
+        document: EditDocument,
+        lut: CubeLUT?,
+        specs: [NativePatchSpec],
+        space: WorkingSpace
+    ) async -> [NativePatchPixels]? {
+        nativeRequests.append(specs)
+        return nativeStub
     }
 }
