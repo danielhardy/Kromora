@@ -32,6 +32,18 @@ struct GlobalToneAnalyzer: Sendable {
     }
 
     func analyze(image: AnalysisImage) async throws -> GlobalToneAnalysis {
+        try await analyze(image: image, document: EditDocument(), lut: nil, space: .sRGB)
+    }
+
+    /// Document-aware Tier-0 analysis (KRMA-343). Measures the current rendered edit instead
+    /// of the source: `document`/`lut` select what the renderer tallies. The parameterless
+    /// overload above preserves the source-measurement behavior for existing callers.
+    func analyze(
+        image: AnalysisImage,
+        document: EditDocument,
+        lut: CubeLUT?,
+        space: WorkingSpace
+    ) async throws -> GlobalToneAnalysis {
         try Task.checkCancellation()
         var interval = KromoraObservability.begin(
             .analysisGlobalTone, source: image.source, maskQuality: .analysis
@@ -40,10 +52,10 @@ struct GlobalToneAnalyzer: Sendable {
         let dimensions = image.dimensions
         let histogram = await engine.histogram(
             source: image.source,
-            document: EditDocument(),
-            lut: nil,
+            document: document,
+            lut: lut,
             scale: .preview(maxSize: CGSize(width: dimensions.width, height: dimensions.height)),
-            space: .sRGB,
+            space: space,
             maxDimension: max(dimensions.width, dimensions.height)
         )
         try Task.checkCancellation()
