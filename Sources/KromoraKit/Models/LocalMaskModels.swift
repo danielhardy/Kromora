@@ -527,14 +527,25 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
     var amount: Double { didSet { amount = Self.clamp(amount, 0...1, default: 1) } }
     var components: [MaskComponent]
     var adjustments: LocalAdjustments
+    /// Explicit ownership keeps Auto replacement separate from normal user editing.
+    var ownership: AutoLayerOwnership
+    var autoProvenance: AutoLayerProvenance?
 
-    init(id: UUID = UUID(), name: String = "Local Adjustment", isEnabled: Bool = true, isInverted: Bool = false, amount: Double = 1, components: [MaskComponent] = [], adjustments: LocalAdjustments = .neutral) {
+    init(id: UUID = UUID(), name: String = "Local Adjustment", isEnabled: Bool = true, isInverted: Bool = false, amount: Double = 1, components: [MaskComponent] = [], adjustments: LocalAdjustments = .neutral, ownership: AutoLayerOwnership = .user, autoProvenance: AutoLayerProvenance? = nil) {
         self.id = id; self.name = name; self.isEnabled = isEnabled; self.isInverted = isInverted
         self.amount = Self.clamp(amount, 0...1, default: 1); self.components = components; self.adjustments = adjustments
+        self.ownership = ownership
+        self.autoProvenance = ownership == .auto ? autoProvenance : nil
     }
 
     var isIdentity: Bool { !isEnabled || amount == 0 || !components.contains(where: \.isUsable) || adjustments.isIdentity }
     var hasVisibleLook: Bool { isEnabled && amount > 0 && components.contains(where: \.isUsable) && !adjustments.isIdentity }
+    var isAutoOwned: Bool { ownership == .auto && autoProvenance != nil }
+
+    mutating func markUserOwned() {
+        ownership = .user
+        autoProvenance = nil
+    }
 
     /// Whether this layer may still be drawn in the two-phase preview's first frame, where semantic
     /// components are not resolved yet.
@@ -557,7 +568,9 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
         }
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, isEnabled, isInverted, amount, components, adjustments }
+    private enum CodingKeys: String, CodingKey {
+        case id, name, isEnabled, isInverted, amount, components, adjustments, ownership, autoProvenance
+    }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
@@ -567,7 +580,9 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
             isInverted: try c.decodeIfPresent(Bool.self, forKey: .isInverted) ?? false,
             amount: try c.decodeIfPresent(Double.self, forKey: .amount) ?? 1,
             components: try c.decodeIfPresent([MaskComponent].self, forKey: .components) ?? [],
-            adjustments: try c.decodeIfPresent(LocalAdjustments.self, forKey: .adjustments) ?? .neutral
+            adjustments: try c.decodeIfPresent(LocalAdjustments.self, forKey: .adjustments) ?? .neutral,
+            ownership: try c.decodeIfPresent(AutoLayerOwnership.self, forKey: .ownership) ?? .user,
+            autoProvenance: try c.decodeIfPresent(AutoLayerProvenance.self, forKey: .autoProvenance)
         )
     }
     private static func clamp(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {

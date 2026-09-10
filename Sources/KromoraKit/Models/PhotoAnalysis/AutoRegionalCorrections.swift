@@ -284,7 +284,20 @@ enum AutoRegionalCorrections {
     static func applying(_ plan: AutoRegionalPlan, to document: EditDocument) -> EditDocument {
         guard !plan.layers.isEmpty else { return document }
         var updated = document
-        updated.localAdjustments.append(contentsOf: plan.layers)
+        var layers = document.localAdjustments
+        for generated in plan.layers {
+            guard let purpose = generated.autoProvenance?.purpose else { continue }
+            if let index = layers.firstIndex(where: {
+                $0.isAutoOwned && $0.autoProvenance?.purpose == purpose
+            }) {
+                var replacement = generated
+                replacement.id = layers[index].id
+                layers[index] = replacement
+            } else if !layers.contains(where: { $0.autoProvenance?.purpose == purpose }) {
+                layers.append(generated)
+            }
+        }
+        updated.localAdjustments = layers
         return updated
     }
 
@@ -411,7 +424,9 @@ enum AutoRegionalCorrections {
         return LocalAdjustmentLayer(
             name: AutoRegionalPurpose.subjectLift.layerName,
             components: [semanticComponent(target: target)],
-            adjustments: LocalAdjustments(exposure: exposure, shadows: shadows)
+            adjustments: LocalAdjustments(exposure: exposure, shadows: shadows),
+            ownership: .auto,
+            autoProvenance: AutoLayerProvenance(purpose: .subjectLift)
         )
     }
 
@@ -426,7 +441,9 @@ enum AutoRegionalCorrections {
         return LocalAdjustmentLayer(
             name: AutoRegionalPurpose.backgroundProtection.layerName,
             components: [semanticComponent(target: .background)],
-            adjustments: LocalAdjustments(highlights: highlights, whites: whites)
+            adjustments: LocalAdjustments(highlights: highlights, whites: whites),
+            ownership: .auto,
+            autoProvenance: AutoLayerProvenance(purpose: .backgroundProtection)
         )
     }
 
@@ -438,7 +455,9 @@ enum AutoRegionalCorrections {
         return LocalAdjustmentLayer(
             name: AutoRegionalPurpose.colorCorrection.layerName,
             components: [semanticComponent(target: target)],
-            adjustments: LocalAdjustments(temperature: temperature)
+            adjustments: LocalAdjustments(temperature: temperature),
+            ownership: .auto,
+            autoProvenance: AutoLayerProvenance(purpose: .colorCorrection)
         )
     }
 

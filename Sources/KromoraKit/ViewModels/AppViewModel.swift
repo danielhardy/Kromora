@@ -1132,6 +1132,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let sourceRevision = self.sourceRevision
         let documentRevision = self.documentRevision
         let assetID = self.activeAssetID
+        let currentDocument = document
+        let currentLUT = resolvedLUT(document.lut.lutID)
         var analysisDocument = document
         analysisDocument.light = .neutral
         analysisDocument.color.vibrance = 0
@@ -1145,6 +1147,57 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         statusMessage = "Analyzing \(sourceName) for Auto adjustments…"
         autoAdjustmentTask?.cancel()
         autoAdjustmentTask = Task { @MainActor [weak self, engine] in
+            // The content-aware path is deliberately capability-gated. Test and legacy engines
+            // that expose only histogram rendering continue through the established global-only
+            // fallback below; a missing optional semantic signal never blocks that fallback.
+            if let assetID,
+               let contentEngine = engine as? any RenderEngining & CurrentEditSampling,
+               contentEngine is RenderEngine {
+                let maskStore = await photoAnalysisCoordinator.maskStore
+                let result = await ContentAwareAutoEngine(
+                    engine: contentEngine,
+                    analysisCoordinator: photoAnalysisCoordinator,
+                    maskStore: maskStore
+                ).run(
+                    source: imageSource,
+                    assetID: assetID,
+                    current: currentDocument,
+                    lut: currentLUT
+                )
+                guard !Task.isCancelled, let self else { return }
+                let isSamePhoto = self.activeAssetID == assetID
+                    && self.sourceRevision == sourceRevision
+                    && self.imageSource == imageSource
+                guard isSamePhoto, self.documentRevision == documentRevision else {
+                    if isSamePhoto { self.autoAdjustmentState = .ready }
+                    return
+                }
+                switch result.status {
+                case .improved:
+                    let applied = EditDocument.applyingAutoResult(result, to: self.document)
+                    self.updateDocument(preservingAutoResult: true) { document in
+                        document = applied
+                    }
+                    self.autoAdjustmentState = .ready
+                    let count = result.changedControls.count
+                    self.statusMessage = "Auto applied — \(count) coordinated control\(count == 1 ? "" : "s") (undo to restore previous edits)"
+                case .unchanged, .noCandidate:
+                    self.autoAdjustmentState = .ready
+                    self.statusMessage = "No further improvement found"
+                case .cancelled:
+                    self.autoAdjustmentState = .ready
+                    self.statusMessage = "Auto cancelled; nothing was changed."
+                case .staleRevision:
+                    self.autoAdjustmentState = .ready
+                case .renderUnavailable:
+                    // A renderer failure is recoverable and must not mutate the document. Keep
+                    // the action available so a later retry can use a healthy render surface.
+                    self.autoAdjustmentState = .failed(result.reasons.first ?? "Auto could not render the current edit.")
+                    self.statusMessage = self.autoAdjustmentState.message
+                }
+                return
+            }
+
             let photoAnalysis: PhotoAnalysis?
             if let assetID {
                 photoAnalysis = try? await photoAnalysisCoordinator.analyze(
@@ -2741,7 +2794,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// it is what the inspector will call. Keeping `document` `private(set)` behind it means every
     /// mutation goes through one place that knows to re-render.
     func updateDocument(_ transform: (inout EditDocument) -> Void) {
-        updateDocument(debounced: false, invalidatesComparisonBaseline: false, transform)
+        updateDocument(debounced: false, invalidatesComparisonBaseline: false, preservingAutoResult: false, transform)
     }
 
     /// Mutate the document and re-render, optionally coalescing a burst of edits into one render.
@@ -2776,16 +2829,30 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     func updateDocument(debounced: Bool, _ transform: (inout EditDocument) -> Void) {
-        updateDocument(debounced: debounced, invalidatesComparisonBaseline: false, transform)
+        updateDocument(debounced: debounced, invalidatesComparisonBaseline: false, preservingAutoResult: false, transform)
+    }
+
+    /// Apply a completed content-aware Auto value without interpreting its generated layer
+    /// replacement as a manual edit. This is the only production call site that may preserve
+    /// Auto ownership; every inspector mutation takes the normal ownership-transition path.
+    func updateDocument(preservingAutoResult: Bool, _ transform: (inout EditDocument) -> Void) {
+        updateDocument(
+            debounced: false, invalidatesComparisonBaseline: false,
+            preservingAutoResult: preservingAutoResult, transform
+        )
     }
 
     func updateDocument(
         debounced: Bool,
         invalidatesComparisonBaseline: Bool,
+        preservingAutoResult: Bool = false,
         _ transform: (inout EditDocument) -> Void
     ) {
         var updated = document
         transform(&updated)
+        if !preservingAutoResult {
+            updated = EditDocument.markingManualEdits(from: document, to: updated)
+        }
         guard updated != document else { return }
 
         let developChanged = Self.rawDevelopChangedComparisonFrame(

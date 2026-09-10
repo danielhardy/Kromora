@@ -829,6 +829,9 @@ struct AutoEnhancementCoordinatorResult: Sendable, Equatable {
     let budget: AutoRenderBudgetUsage
     /// Rejection/failure notes per changed candidate, keyed by provenance name.
     let candidateNotes: [String: String]
+    /// Validation components for the selected candidate, when one completed successfully.
+    /// Failure/no-op results leave this nil rather than fabricating measurements.
+    let selectedScore: AutoCandidateScore?
     /// Hash of the input document this run evaluated, and the source fingerprint it rendered.
     let evaluatedDocumentHash: String
     let sourceFingerprint: String
@@ -903,12 +906,14 @@ struct AutoEnhancementCoordinator: Sendable {
             provenance: AutoCandidateProvenance?,
             message: String,
             usage: (small: Int, raw: Int, evaluated: Int, skipped: Int),
-            notes: [String: String]
+            notes: [String: String],
+            selectedScore: AutoCandidateScore? = nil
         ) -> AutoEnhancementCoordinatorResult {
             AutoEnhancementCoordinatorResult(
                 status: status, document: document, provenance: provenance, message: message,
                 budget: budget(elapsed: Date().timeIntervalSince(started), usage: usage),
                 candidateNotes: notes,
+                selectedScore: selectedScore,
                 evaluatedDocumentHash: current.editHash,
                 sourceFingerprint: source.cacheFingerprint
             )
@@ -1168,7 +1173,8 @@ struct AutoEnhancementCoordinator: Sendable {
             provenance: selected.candidate.provenance,
             message: "Selected \(selected.candidate.provenance.displayName) "
                 + "(\(selected.candidate.changedControlCount) controls) over the current edit.",
-            usage: (smallRenders, rawRedevelopments, evaluated, skipped), notes: notes
+            usage: (smallRenders, rawRedevelopments, evaluated, skipped), notes: notes,
+            selectedScore: selected.score
         )
     }
 }

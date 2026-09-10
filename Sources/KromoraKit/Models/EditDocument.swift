@@ -47,9 +47,14 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// only semantic intent, vectors, and analytic geometry live in the document.
     var localAdjustments: [LocalAdjustmentLayer] = []
 
+    /// Metadata from the last successful content-aware Auto run. It has no rendering effect and
+    /// is excluded from `renderingHash`, so it can be used for repeat-run no-op detection without
+    /// invalidating image caches.
+    var lastAutoRunFingerprint: AutoRunFingerprint?
+
     /// v2 added the local-mask field. v3 adds the image rotation field. Missing fields decode to
     /// their neutral values so existing edit records remain readable and are upgraded on save.
-    static let currentVersion = 3
+    static let currentVersion = 4
 
     init(
         version: Int = EditDocument.currentVersion,
@@ -61,7 +66,8 @@ struct EditDocument: Codable, Sendable, Equatable {
         rotation: ImageRotation = .zero,
         adjustments: [AdjustmentNode] = [],
         lut: LUTSettings = .none,
-        localAdjustments: [LocalAdjustmentLayer] = []
+        localAdjustments: [LocalAdjustmentLayer] = [],
+        lastAutoRunFingerprint: AutoRunFingerprint? = nil
     ) {
         self.version = version
         self.rawDevelop = rawDevelop
@@ -73,6 +79,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.adjustments = adjustments
         self.lut = lut
         self.localAdjustments = localAdjustments
+        self.lastAutoRunFingerprint = lastAutoRunFingerprint
     }
 
     /// True when this document would leave the source untouched.
@@ -101,9 +108,59 @@ struct EditDocument: Codable, Sendable, Equatable {
         }
     }
 
-    /// Stable SHA-256 identity for caches, undo diagnostics, and persistence comparisons.
-    /// `RenderCacheHash` uses sorted JSON keys, so this does not depend on dictionary iteration order.
-    var editHash: String { RenderCacheHash.digest(self) }
+    /// Stable SHA-256 identity for caches, undo diagnostics, and persistence comparisons. Auto
+    /// review metadata is intentionally excluded because it has no effect on rendered pixels.
+    var editHash: String { renderingHash }
+
+    /// Stable visible-edit identity. Auto provenance is review metadata, not a render input.
+    var renderingHash: String {
+        var copy = self
+        copy.lastAutoRunFingerprint = nil
+        return RenderCacheHash.digest(copy)
+    }
+
+    /// Applies a value produced by a normal editor control. Auto metadata is invalidated when a
+    /// visible edit changes, and a touched Auto layer becomes user-owned before it is persisted.
+    static func markingManualEdits(from old: Self, to proposed: Self) -> Self {
+        guard old.renderingHash != proposed.renderingHash else { return proposed }
+        var updated = proposed
+        updated.lastAutoRunFingerprint = nil
+        for index in updated.localAdjustments.indices {
+            guard let oldLayer = old.localAdjustments.first(where: { $0.id == updated.localAdjustments[index].id }),
+                  oldLayer.isAutoOwned,
+                  oldLayer != updated.localAdjustments[index] else { continue }
+            updated.localAdjustments[index].markUserOwned()
+        }
+        return updated
+    }
+
+    /// Reconciles the Auto-generated recipes in a candidate with the current document. Stable
+    /// purpose identity updates an existing Auto layer in place, while any user-owned layer is
+    /// protected from replacement. User layers not mentioned by the candidate are byte-for-byte
+    /// retained.
+    static func applyingAutoResult(_ result: AutoEnhancementResult, to current: Self) -> Self {
+        guard result.status == .improved else { return current }
+        var applied = result.proposedDocument
+        let generated = applied.localAdjustments.filter(\.isAutoOwned)
+        var reconciled = current.localAdjustments
+        for generatedLayer in generated {
+            guard let purpose = generatedLayer.autoProvenance?.purpose else { continue }
+            if let index = reconciled.firstIndex(where: {
+                $0.isAutoOwned && $0.autoProvenance?.purpose == purpose
+            }) {
+                var replacement = generatedLayer
+                replacement.id = reconciled[index].id
+                reconciled[index] = replacement
+            } else if !reconciled.contains(where: {
+                $0.autoProvenance?.purpose == purpose
+            }) {
+                reconciled.append(generatedLayer)
+            }
+        }
+        applied.localAdjustments = reconciled
+        if let fingerprint = result.fingerprint { applied.lastAutoRunFingerprint = fingerprint }
+        return applied
+    }
 
     /// What "the original" means for A/B comparison: **develop applied, nothing else**.
     ///
@@ -132,7 +189,8 @@ struct EditDocument: Codable, Sendable, Equatable {
     // MARK: - Codable
 
     enum CodingKeys: String, CodingKey {
-        case version, rawDevelop, light, color, effects, crop, rotation, adjustments, lut, localAdjustments
+        case version, rawDevelop, light, color, effects, crop, rotation, adjustments, lut,
+             localAdjustments, lastAutoRunFingerprint
     }
 
     /// Decoded field by field rather than by synthesis, for two reasons.
@@ -166,5 +224,8 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.adjustments = try container.decodeIfPresent([AdjustmentNode].self, forKey: .adjustments) ?? []
         self.lut = try container.decodeIfPresent(LUTSettings.self, forKey: .lut) ?? .none
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustmentLayer].self, forKey: .localAdjustments) ?? []
+        self.lastAutoRunFingerprint = try container.decodeIfPresent(
+            AutoRunFingerprint.self, forKey: .lastAutoRunFingerprint
+        )
     }
 }
