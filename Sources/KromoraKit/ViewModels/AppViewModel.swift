@@ -2633,6 +2633,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         openActiveCollectionImage(loadMode: true)
     }
 
+    /// Enter Edit from a Library double-click with the editor chrome in its expected presentation
+    /// state. The source browser is an explicit Edit control, so it must not leak into this
+    /// transition from the source-folder session; the inspector is the actionable editor surface
+    /// for the newly opened photo.
+    func openLibraryImageForEditing() {
+        guard collection.selectedItem != nil else { return }
+        isSourceBrowserPresented = false
+        inspectorState.isPresented = true
+        openActiveCollectionImage()
+    }
+
     private func openActiveCollectionImage(loadMode: Bool) {
         guard let item = collection.selectedItem else { return }
         if loadMode { navigation.move(to: .edit) }
