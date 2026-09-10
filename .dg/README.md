@@ -1,4 +1,4 @@
-# Lumo
+# Kromora
 
 Native macOS RAW photo editor
 

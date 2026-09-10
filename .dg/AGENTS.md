@@ -1,4 +1,4 @@
-# AGENTS.md — Lumo
+# AGENTS.md — Kromora
 
 This project is managed with DispatchGraph: markdown issues, YAML boards, and an MCP tool contract.
 
