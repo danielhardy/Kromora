@@ -71,6 +71,31 @@ final class RenderEngineTests: TempDirectoryTestCase {
                           "completed preview pixels must match the actor-owned raster path")
     }
 
+    func testCompletedTexturePreservesTaggedJPEGOrientation() async throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal is unavailable on this host")
+        }
+
+        let url = try Fixtures.writeGradientJPEG(
+            width: 80, height: 60, orientation: 3,
+            named: "completed-orientation.jpg", in: tempDirectory
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 80, height: 60))
+        let request = RenderRequest(
+            source: source, document: EditDocument(),
+            targetSize: CGSize(width: 80, height: 60), quality: .preview, output: .raster
+        )
+        let actualCandidate = await RenderEngine().makeCIImage(request)
+        let actual = try XCTUnwrap(actualCandidate)
+        let expected = try XCTUnwrap(RenderPipeline.buildImage(
+            source: source, document: EditDocument(), lut: nil, scale: .full
+        ))
+        assertPixelsEqual(
+            try Pixels.bytes(of: actual), try Pixels.bytes(of: expected),
+            "completed preview texture must preserve the JPG's display orientation"
+        )
+    }
+
     /// A nonzero vignette must remain one frame-wide field after the completed texture is handed
     /// to the presentation context. This intentionally uses a large source and crosses the same
     /// fit/zoom transitions that move the production planner between preview detail levels.
