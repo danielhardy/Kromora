@@ -276,21 +276,25 @@ swift test -c release --filter MetalPresentationBenchmark/testRealMetalPresentat
 
 # Automated xctrace capture with Points of Interest + Metal System Trace.
 KROMORA_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
-scripts/run-kromora-118-capture.sh /absolute/path/to/fixtures/DSC07826.ARW
+scripts/run-kromora-capture.sh --benchmark metal-presentation \
+  --source /absolute/path/to/fixtures/DSC07826.ARW
+
+# Concurrent export/editing capture; requires the same display and fixture inputs.
+scripts/run-kromora-capture.sh --benchmark concurrent-export-editing \
+  --source /absolute/path/to/fixtures/DSC07826.ARW
 
 # Tracing overhead with and without an active Instruments recording.
 KROMORA_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark/testMeasureTracingOverhead
 
 ```
 
-The historical LUMO-227 standalone mask-overlay capture host has been retired. Existing trace
-measurements remain documented in the performance records, but that capture workflow is no longer
-available from this checkout.
+The historical standalone mask-overlay capture host has been retired. Use the supported capture
+wrapper and see [`scripts/README.md`](scripts/README.md) for the lifecycle and requirements of every
+script under `scripts/`.
 
 Hardware latency claims require a logged-in display and a Release build; the opt-in Metal benchmark
-does not turn CI timings into a product claim. See [Instruments capture recipe](docs/INSTRUMENTS.md)
-and the [performance audit](docs/PERFORMANCE_AUDIT_2026-09-01.md) for capture procedure, limits,
-and the current matrix.
+does not turn CI timings into a product claim. See [testing and profiling](docs/TESTING.md) for
+capture procedure and limits.
 
 ---
 
@@ -312,7 +316,7 @@ Sources/
 Tests/
 └── KromoraKitTests/               # model, pipeline, integration, regression, and opt-in benchmarks
 
-docs/                           # architecture, validation, profiling, and audit records
+docs/                           # durable engineering, Looks, packaging, testing, and audit guidance
 ```
 
 The important boundaries are:
