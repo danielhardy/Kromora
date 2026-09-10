@@ -45,6 +45,9 @@ actor PhotoAnalysisCoordinator {
     let maskStore: MaskStore
     private let assembler: PhotoAnalysisAssembler
     private let cache: PhotoAnalysisCache
+    /// Optional Vision scene labels for KRMA-344 scene evidence. Classification failures yield
+    /// `nil` and only reduce scene confidence; they never fail the analysis.
+    private let sceneClassifier: any SceneClassifierProviding
     private let stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]
 
     /// `waiters` is the count of callers currently attached to `task`. The shared task is only
@@ -65,10 +68,12 @@ actor PhotoAnalysisCoordinator {
         maskStore: MaskStore = MaskStore(),
         cache: PhotoAnalysisCache = PhotoAnalysisCache(),
         maskProvider: (any SemanticMaskProviding)? = nil,
+        sceneClassifier: (any SceneClassifierProviding)? = nil,
         stages: [PhotoAnalysisLevel: [PhotoAnalysisStage]]? = nil
     ) {
         self.maskStore = maskStore
         self.maskProvider = maskProvider ?? VisionSemanticMaskProvider(store: maskStore)
+        self.sceneClassifier = sceneClassifier ?? VisionSceneClassifier()
         self.cache = cache
         self.assembler = PhotoAnalysisAssembler(
             globalToneAnalyzer: GlobalToneAnalyzer(engine: engine),
@@ -295,7 +300,13 @@ actor PhotoAnalysisCoordinator {
         }
 
         try Task.checkCancellation()
-        let result = try await assembler.assemble(image: image, masks: masks, timings: timings)
+        // Scene labels are optional evidence: the classifier never throws, and a `nil` result
+        // only reduces scene confidence downstream.
+        let sceneObservations = await sceneClassifier.classifications(for: image)
+        let result = try await assembler.assemble(
+            image: image, masks: masks, timings: timings,
+            classifications: sceneObservations
+        )
         try Task.checkCancellation()
         let completed = result.withTimings(
             result.timings.replacing(total: totalStart.duration(to: clock.now))

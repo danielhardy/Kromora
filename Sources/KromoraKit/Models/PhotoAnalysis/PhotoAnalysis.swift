@@ -67,6 +67,14 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
     let primarySubject: PrimarySubjectSelection
     let relationships: RegionRelationships
     let scene: SceneCharacteristics
+    /// The on-device Vision labels the scene likelihoods were derived from (KRMA-344). Persisted
+    /// alongside the scene so `SceneCharacteristicsAnalyzer.analyze(_:)` reproduces the stored
+    /// value exactly from persisted facts alone; empty when the classifier was unavailable.
+    let sceneClassifications: [SceneClassificationObservation]
+    /// Per-signal confidence for Auto policy (KRMA-344). Derived from the same assembled facts
+    /// when not supplied, so older call sites keep working and older caches decode to a value
+    /// derived from their persisted facts with no Vision labels and no native detail.
+    let signalConfidence: AutoSignalConfidence
     let quality: AnalysisQuality
     let timings: AnalysisTimings
 
@@ -78,6 +86,8 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
         primarySubject: PrimarySubjectSelection = .none,
         relationships: RegionRelationships? = nil,
         scene: SceneCharacteristics? = nil,
+        classifications: [SceneClassificationObservation]? = nil,
+        signalConfidence: AutoSignalConfidence? = nil,
         quality: AnalysisQuality,
         timings: AnalysisTimings = .zero
     ) {
@@ -90,11 +100,24 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
             globalTone: globalTone, regions: regions, primarySubject: primarySubject
         )
         self.relationships = resolvedRelationships
-        self.scene = scene ?? SceneCharacteristicsAnalyzer.analyze(
+        let resolvedScene = scene ?? SceneCharacteristicsAnalyzer.analyze(
             globalTone: globalTone,
+            color: SceneColorFacts.from(colorStatistics),
             regions: regions,
             relationships: resolvedRelationships,
-            primarySubject: primarySubject
+            primarySubject: primarySubject,
+            classifications: classifications
+        )
+        self.scene = resolvedScene
+        self.sceneClassifications = classifications ?? []
+        self.signalConfidence = signalConfidence ?? AutoSignalConfidence.make(
+            globalToneAvailable: quality.globalToneAvailable,
+            color: SceneColorFacts.from(colorStatistics),
+            sceneConfidence: resolvedScene.sceneConfidence,
+            regions: regions,
+            primarySubject: primarySubject,
+            classifications: classifications,
+            detailAvailable: nil
         )
         self.quality = quality
         self.timings = timings
@@ -102,7 +125,7 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case version, globalTone, colorStatistics, regions, primarySubject, relationships, scene,
-             quality, timings
+             sceneClassifications, signalConfidence, quality, timings
     }
 
     /// Scene characteristics were added after the first cache schema. A missing scene is safely
@@ -127,15 +150,36 @@ struct PhotoAnalysis: Sendable, Codable, Equatable {
         self.regions = regions
         self.primarySubject = primarySubject
         self.relationships = relationships
+        // Decoded before the scene fallback below so a cache entry that predates the stored
+        // scene value still recomputes from the same labels the entry was derived from.
+        // Entries predating KRMA-344 decode to empty: missing Vision evidence, not an error.
+        self.sceneClassifications = try container.decodeIfPresent(
+            [SceneClassificationObservation].self, forKey: .sceneClassifications
+        ) ?? []
+        let storedClassifications = self.sceneClassifications
         self.scene = try container.decodeIfPresent(SceneCharacteristics.self, forKey: .scene)
             ?? SceneCharacteristicsAnalyzer.analyze(
                 globalTone: globalTone,
+                color: SceneColorFacts.from(colorStatistics),
                 regions: regions,
                 relationships: relationships,
-                primarySubject: primarySubject
+                primarySubject: primarySubject,
+                classifications: storedClassifications
             )
-        self.quality = try container.decodeIfPresent(AnalysisQuality.self, forKey: .quality)
+        let quality = try container.decodeIfPresent(AnalysisQuality.self, forKey: .quality)
             ?? .unavailable
+        self.signalConfidence = try container.decodeIfPresent(
+            AutoSignalConfidence.self, forKey: .signalConfidence
+        ) ?? AutoSignalConfidence.make(
+            globalToneAvailable: quality.globalToneAvailable,
+            color: SceneColorFacts.from(colorStatistics),
+            sceneConfidence: scene.sceneConfidence,
+            regions: regions,
+            primarySubject: primarySubject,
+            classifications: storedClassifications,
+            detailAvailable: nil
+        )
+        self.quality = quality
         self.timings = try container.decodeIfPresent(AnalysisTimings.self, forKey: .timings) ?? .zero
     }
 }
@@ -158,7 +202,8 @@ struct PhotoAnalysisAssembler: Sendable {
         image: AnalysisImage,
         masks: [RegionMask],
         version: AnalysisVersion = .current,
-        timings: AnalysisTimings = .zero
+        timings: AnalysisTimings = .zero,
+        classifications: [SceneClassificationObservation]? = nil
     ) async throws -> PhotoAnalysis {
         let clock = ContinuousClock()
         let assemblyStart = clock.now
@@ -219,6 +264,7 @@ struct PhotoAnalysisAssembler: Sendable {
                 regions: regions,
                 primarySubject: primarySubject
             ),
+            classifications: classifications,
             quality: quality,
             timings: timings.replacing(
                 globalTone: globalDuration,
@@ -277,6 +323,8 @@ extension PhotoAnalysis {
             primarySubject: primarySubject,
             relationships: relationships,
             scene: scene,
+            classifications: sceneClassifications,
+            signalConfidence: signalConfidence,
             quality: quality,
             timings: timings
         )
@@ -289,13 +337,17 @@ extension PhotoAnalysis {
         masks: [RegionMask],
         version: AnalysisVersion = .current,
         timings: AnalysisTimings = .zero,
+        classifications: [SceneClassificationObservation]? = nil,
         globalToneAnalyzer: GlobalToneAnalyzer = GlobalToneAnalyzer(),
         maskedToneAnalyzer: MaskedToneAnalyzer = MaskedToneAnalyzer()
     ) async throws -> PhotoAnalysis {
         try await PhotoAnalysisAssembler(
             globalToneAnalyzer: globalToneAnalyzer,
             maskedToneAnalyzer: maskedToneAnalyzer
-        ).assemble(image: image, masks: masks, version: version, timings: timings)
+        ).assemble(
+            image: image, masks: masks, version: version, timings: timings,
+            classifications: classifications
+        )
     }
 
     /// Label matching the domain term used by the architecture proposal.
@@ -304,6 +356,7 @@ extension PhotoAnalysis {
         masks: [RegionMask],
         version: AnalysisVersion = .current,
         timings: AnalysisTimings = .zero,
+        classifications: [SceneClassificationObservation]? = nil,
         globalToneAnalyzer: GlobalToneAnalyzer = GlobalToneAnalyzer(),
         toneAnalyzer: MaskedToneAnalyzer
     ) async throws -> PhotoAnalysis {
@@ -312,6 +365,7 @@ extension PhotoAnalysis {
             masks: masks,
             version: version,
             timings: timings,
+            classifications: classifications,
             globalToneAnalyzer: globalToneAnalyzer,
             maskedToneAnalyzer: toneAnalyzer
         )
