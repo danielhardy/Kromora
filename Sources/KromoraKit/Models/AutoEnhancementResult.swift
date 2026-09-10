@@ -22,6 +22,10 @@ struct AutoLayerProvenance: Codable, Sendable, Equatable {
         self.algorithmVersion = max(1, algorithmVersion)
         self.generationID = generationID
     }
+
+    /// The identity used to reconcile a generated layer across Auto runs. The generation ID is
+    /// diagnostic provenance for one run; it must not make a new run append a duplicate layer.
+    var stableIdentity: String { purpose.rawValue }
 }
 
 /// The inputs that identify a successful Auto result. The document hash is the visible edit
@@ -181,11 +185,7 @@ struct AutoEnhancementResult: Codable, Sendable, Equatable {
     var isNoOp: Bool { status != .improved || changedControls.isEmpty }
 
     func applying(to current: EditDocument) -> EditDocument {
-        var applied = proposedDocument
-        if status == .improved, let fingerprint {
-            applied.lastAutoRunFingerprint = fingerprint
-        }
-        return applied
+        EditDocument.applyingAutoResult(self, to: current)
     }
 }
 

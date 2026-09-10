@@ -113,9 +113,86 @@ final class AutoEnhancementResultTests: TempDirectoryTestCase {
             from: old, to: EditDocument(localAdjustments: [editedLayer], lastAutoRunFingerprint: old.lastAutoRunFingerprint)
         )
         XCTAssertEqual(updated.localAdjustments.first?.ownership, .user)
-        XCTAssertNil(updated.localAdjustments.first?.autoProvenance)
+        XCTAssertEqual(updated.localAdjustments.first?.autoProvenance?.purpose, .subjectLift)
         XCTAssertNil(updated.lastAutoRunFingerprint)
         XCTAssertEqual(updated.localAdjustments.first?.adjustments.exposure, 0.5)
+    }
+
+    func testProtectedUserLayerIsNotDuplicatedByLaterAutoResult() {
+        let generated = LocalAdjustmentLayer(
+            name: AutoRegionalPurpose.subjectLift.layerName,
+            components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: .subject)))],
+            adjustments: LocalAdjustments(exposure: 0.2), ownership: .auto,
+            autoProvenance: AutoLayerProvenance(purpose: .subjectLift)
+        )
+        var userLayer = generated
+        userLayer.adjustments.exposure = 0.8
+        userLayer.markUserOwned()
+
+        var replacement = generated
+        replacement.adjustments.exposure = 0.1
+        let result = AutoEnhancementResult(
+            proposedDocument: EditDocument(localAdjustments: [replacement]),
+            changedControls: [.exposure]
+        )
+        let applied = result.applying(to: EditDocument(localAdjustments: [userLayer]))
+
+        XCTAssertEqual(applied.localAdjustments.count, 1)
+        XCTAssertEqual(applied.localAdjustments[0].ownership, .user)
+        XCTAssertEqual(applied.localAdjustments[0].adjustments.exposure, 0.8)
+        XCTAssertEqual(applied.localAdjustments[0].autoProvenance?.purpose, .subjectLift)
+    }
+
+    func testFingerprintMatchesDocumentAfterExistingAutoLayerIsReused() throws {
+        let image = try source()
+        let existing = LocalAdjustmentLayer(
+            id: UUID(), name: AutoRegionalPurpose.subjectLift.layerName,
+            components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: .subject)))],
+            adjustments: LocalAdjustments(exposure: 0.2), ownership: .auto,
+            autoProvenance: AutoLayerProvenance(purpose: .subjectLift)
+        )
+        var candidateLayer = existing
+        candidateLayer.id = UUID()
+        candidateLayer.adjustments.exposure = 0.6
+        let candidate = EditDocument(localAdjustments: [candidateLayer])
+        let result = AutoEnhancementResult(
+            proposedDocument: candidate,
+            changedControls: [.exposure],
+            fingerprint: AutoRunFingerprint(
+                sourceFingerprint: image.cacheFingerprint,
+                documentHash: candidate.renderingHash,
+                algorithmVersion: 9,
+                renderIdentity: "renderer-test"
+            )
+        )
+
+        let applied = result.applying(to: EditDocument(localAdjustments: [existing]))
+        XCTAssertEqual(applied.localAdjustments.first?.id, existing.id)
+        XCTAssertTrue(applied.lastAutoRunFingerprint?.matches(
+            source: image, document: applied, algorithmVersion: 9,
+            renderIdentity: "renderer-test"
+        ) == true)
+    }
+
+    func testAutoAndUserOwnedLayersSurviveRecordSaveAndReopen() throws {
+        let autoLayer = LocalAdjustmentLayer(
+            name: AutoRegionalPurpose.subjectLift.layerName,
+            components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: .subject)))],
+            adjustments: LocalAdjustments(exposure: 0.3), ownership: .auto,
+            autoProvenance: AutoLayerProvenance(purpose: .subjectLift, generationID: "run-1")
+        )
+        let userLayer = LocalAdjustmentLayer(
+            name: "My mask",
+            components: [MaskComponent(source: .semantic(SemanticMaskDefinition(target: .background)))],
+            adjustments: LocalAdjustments(highlights: -20)
+        )
+        let document = EditDocument(localAdjustments: [autoLayer, userLayer])
+        let record = try EditRecord(assetID: "asset-1", document: document)
+
+        let reopened = try record.decodeDocument()
+        XCTAssertEqual(reopened.localAdjustments, document.localAdjustments)
+        XCTAssertEqual(reopened.localAdjustments[0].ownership, .auto)
+        XCTAssertEqual(reopened.localAdjustments[1].ownership, .user)
     }
 
     func testAutoResultReusesExistingAutoLayerButProtectsUserLayer() {
