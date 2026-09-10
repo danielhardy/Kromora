@@ -188,7 +188,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         let support = await faceSupportMask(image: image, quality: quality)
         var masks: [RegionMask] = []
         masks.reserveCapacity(landmarkFaces.count)
-        for (index, points) in landmarkFaces.enumerated() {
+        for points in landmarkFaces {
             try Task.checkCancellation()
             let raster = try FaceLandmarkMask.rasterize(points: points, size: image.dimensions)
             let pixels: NormalizedMask
@@ -202,10 +202,15 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             // onto one person matte). Skipping keeps one RegionMask per face the support agrees
             // with, instead of emitting an empty matte the planner would only reject later.
             guard pixels.coverage > 0 else { continue }
-            let kind: SemanticMaskKind = index == 0 ? .face : .faceInstance(index)
+            // Number by position among surviving faces, not by detection order: a dropped face
+            // must not leave a gap (e.g. only `.faceInstance(1)` with no `.face`), since callers
+            // such as `faceMask(index:)` and the cache reload above both assume a contiguous
+            // `.face`, `.faceInstance(1)`, `.faceInstance(2)`, ... sequence.
+            let outputIndex = masks.count
+            let kind: SemanticMaskKind = outputIndex == 0 ? .face : .faceInstance(outputIndex)
             let key = cacheKey(for: kind, image: image, quality: quality)
             let reference = try await store.store(pixels, for: key, quality: quality)
-            masks.append(makeFaceMask(index: index, pixels: pixels, reference: reference,
+            masks.append(makeFaceMask(index: outputIndex, pixels: pixels, reference: reference,
                                        quality: quality))
         }
         guard !masks.isEmpty else { throw VisionSemanticMaskError.noFaceDetected }
