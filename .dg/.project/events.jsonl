@@ -6126,3 +6126,8 @@
 {"id":"evt_mtv0bngq_lafid5","type":"issue.created","ts":"2026-09-10T04:08:12.938Z","actor":"codex","issue_id":"LUMO-332","payload":{"title":"Add image rotation"}}
 {"id":"evt_mtv0c5ty_z48534","type":"issue.created","ts":"2026-09-10T04:08:36.742Z","actor":"codex","issue_id":"LUMO-333","payload":{"title":"Use C as the crop tool hotkey"}}
 {"id":"evt_mtvj3rlo_t7fnmy","type":"project.prefix_renamed","ts":"2026-09-10T12:53:57.756Z","actor":"cli","payload":{"from":"LUMO","to":"KRMA","renamed":333}}
+{"id":"evt_mtvj98wr_x941qc","type":"issue.created","ts":"2026-09-10T12:58:13.467Z","actor":"codex","issue_id":"KRMA-334","payload":{"title":"Audit and retire obsolete scripts under scripts/"}}
+{"id":"evt_mtvjfzcz_2fgiea","type":"issue.created","ts":"2026-09-10T13:03:27.683Z","actor":"codex","issue_id":"KRMA-335","payload":{"title":"Clarify MIT licensing and reserve Kromora branding"}}
+{"id":"evt_mtvjge8h_1x646s","type":"issue.moved","ts":"2026-09-10T13:03:46.961Z","actor":"human","issue_id":"KRMA-335","payload":{"before":{"status":"backlog","order":"y"},"after":{"status":"ready","order":"a0"},"fields":["status","order"]}}
+{"id":"evt_mtvjgepe_ineztg","type":"issue.moved","ts":"2026-09-10T13:03:47.570Z","actor":"codex","issue_id":"KRMA-335","payload":{"before":{"status":"ready","order":"a0"},"after":{"status":"claimed","order":"a0"},"fields":["status","claim","branch"]}}
+{"id":"evt_mtvjgepj_n2wxea","type":"issue.claimed","ts":"2026-09-10T13:03:47.575Z","actor":"codex","issue_id":"KRMA-335","payload":{"session":"01MTVJGENI03T8OOD0","branch":"main","expires_at":"2026-09-10T14:03:47.502Z"}}
