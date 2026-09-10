@@ -11,18 +11,20 @@ struct VisionConfiguration: Codable, Sendable, Equatable, Hashable {
     let foregroundRevision: Int
     let faceRevision: Int
     let personRevision: Int
+    let faceLandmarkRevision: Int
 
-    init(attentionRevision: Int = 2, foregroundRevision: Int = 1, faceRevision: Int = 1, personRevision: Int = 1) {
+    init(attentionRevision: Int = 2, foregroundRevision: Int = 1, faceRevision: Int = 1, personRevision: Int = 1, faceLandmarkRevision: Int = 1) {
         self.attentionRevision = max(1, attentionRevision)
         self.foregroundRevision = max(1, foregroundRevision)
         self.faceRevision = max(1, faceRevision)
         self.personRevision = max(1, personRevision)
+        self.faceLandmarkRevision = max(1, faceLandmarkRevision)
     }
 
     static let `default` = VisionConfiguration()
 
     var providerVersion: String {
-        "vision-a\(attentionRevision)-f\(foregroundRevision)-face\(faceRevision)-person\(personRevision)"
+        "vision-a\(attentionRevision)-f\(foregroundRevision)-face\(faceRevision)-person\(personRevision)-lm\(faceLandmarkRevision)"
     }
 }
 
@@ -153,8 +155,11 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
 
     /// Returns every detected face as an independently cached `RegionMask`. `.face` is the
     /// source-compatible spelling for index zero; later detections use `.faceInstance(index)`.
-    /// The mask is intentionally bounding-rectangle-derived in v1. Landmark parsing is deferred
-    /// until a concrete `.render` consumer demonstrates that the additional complexity is needed.
+    /// Each matte is landmark-derived (see `FaceLandmarkMask`): an ellipse fit to the observed
+    /// facial-feature points, expanded to whole-face extent and feathered, then intersected with
+    /// person/foreground support when cached. Rectangle-only face mattes are never produced on
+    /// this path — a hard-edged box would stamp any masked correction onto the photo — so a face
+    /// without landmark points is skipped rather than boxed.
     func faceMasks(image: AnalysisImage, quality: MaskQuality) async throws -> [RegionMask] {
         try Task.checkCancellation()
         let firstKey = cacheKey(for: .face, image: image, quality: quality)
@@ -174,21 +179,36 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             return cached
         }
 
-        let observations = try await detectFaces(image: image)
-        guard !observations.isEmpty else { throw VisionSemanticMaskError.noFaceDetected }
+        let landmarkFaces = try await detectFaceLandmarks(image: image)
+        guard !landmarkFaces.isEmpty else { throw VisionSemanticMaskError.noFaceDetected }
 
+        // Intersect with the strongest available support so overlapping people keep their own
+        // mattes and face weight cannot bleed past the segmented boundary. Best-effort: when no
+        // support is cached yet, the feathered landmark matte stands on its own.
+        let support = await faceSupportMask(image: image, quality: quality)
         var masks: [RegionMask] = []
-        masks.reserveCapacity(observations.count)
-        for (index, observation) in observations.enumerated() {
+        masks.reserveCapacity(landmarkFaces.count)
+        for (index, points) in landmarkFaces.enumerated() {
             try Task.checkCancellation()
-            let bounds = NormalizedRect.fromVision(observation.boundingBox)
-            let pixels = try rectangularMask(bounds: bounds, size: image.dimensions)
+            let raster = try FaceLandmarkMask.rasterize(points: points, size: image.dimensions)
+            let pixels: NormalizedMask
+            if let support,
+               let combined = AutoRegionalCorrections.intersectedWithSupport(raster, support: support) {
+                pixels = combined
+            } else {
+                pixels = raster
+            }
+            // Support may legitimately wipe a face (e.g. two overlapping detections resolving
+            // onto one person matte). Skipping keeps one RegionMask per face the support agrees
+            // with, instead of emitting an empty matte the planner would only reject later.
+            guard pixels.coverage > 0 else { continue }
             let kind: SemanticMaskKind = index == 0 ? .face : .faceInstance(index)
             let key = cacheKey(for: kind, image: image, quality: quality)
             let reference = try await store.store(pixels, for: key, quality: quality)
             masks.append(makeFaceMask(index: index, pixels: pixels, reference: reference,
-                                      quality: quality))
+                                       quality: quality))
         }
+        guard !masks.isEmpty else { throw VisionSemanticMaskError.noFaceDetected }
         return masks
     }
 
@@ -376,14 +396,19 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
                           reference: reference, confidence: 1, coverage: pixels.coverage)
     }
 
-    private func detectFaces(image: AnalysisImage) async throws -> [VNFaceObservation] {
-        let request = VNDetectFaceRectanglesRequest()
-        guard VNDetectFaceRectanglesRequest.supportedRevisions.contains(configuration.faceRevision) else {
+    /// Detects faces and returns each face's landmark points in normalized upper-left source
+    /// coordinates. `VNFaceLandmarkRegion2D` points are relative to the face bounding box, so
+    /// each point is composed through its observation's box (both in Vision's lower-left space)
+    /// before the shared upper-left conversion. Faces without landmark points are omitted: the
+    /// Auto path must never fall back to a rectangle-only matte.
+    private func detectFaceLandmarks(image: AnalysisImage) async throws -> [[NormalizedPoint]] {
+        let request = VNDetectFaceLandmarksRequest()
+        guard VNDetectFaceLandmarksRequest.supportedRevisions.contains(configuration.faceLandmarkRevision) else {
             throw VisionSemanticMaskError.requestFailed(
-                "Vision face revision \(configuration.faceRevision) is unavailable"
+                "Vision face landmark revision \(configuration.faceLandmarkRevision) is unavailable"
             )
         }
-        request.revision = configuration.faceRevision
+        request.revision = configuration.faceLandmarkRevision
         let handler = try makeRequestHandler(for: image)
         do {
             try await perform(request, using: handler)
@@ -392,7 +417,35 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         } catch {
             throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
         }
-        return request.results ?? []
+        try Task.checkCancellation()
+        return (request.results ?? []).compactMap { observation in
+            guard let points = observation.landmarks?.allPoints?.normalizedPoints,
+                  !points.isEmpty else { return nil }
+            let box = observation.boundingBox
+            return points.map { point in
+                NormalizedPoint.fromVision(CGPoint(
+                    x: box.origin.x + point.x * box.width,
+                    y: box.origin.y + point.y * box.height
+                ))
+            }
+        }
+    }
+
+    /// The strongest cached segmentation available for face/support intersection, resized to the
+    /// analysis dimensions. Person is preferred over the foreground union: it is the tighter
+    /// support, and saliency is deliberately never consulted here — it must not choose subjects
+    /// (see `AutoRegionalCorrections`). Returns `nil` when nothing usable is cached, in which
+    /// case the feathered landmark matte stands on its own.
+    private func faceSupportMask(image: AnalysisImage, quality: MaskQuality) async -> NormalizedMask? {
+        for kind in [SemanticMaskKind.person, .foreground] {
+            guard let reference = await store.mask(
+                for: cacheKey(for: kind, image: image, quality: quality), quality: quality
+            ), let pixels = await store.pixels(for: reference),
+                  let resized = try? MaskOperations.resized(pixels, to: image.dimensions),
+                  resized.coverage > 0 else { continue }
+            return resized
+        }
+        return nil
     }
 
     /// Bridge structured-concurrency cancellation into Vision's synchronous request API. Vision
