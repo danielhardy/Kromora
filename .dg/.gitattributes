@@ -1,4 +1,4 @@
 # BEGIN DispatchGraph
-# Append-only JSONL merge rules — managed by dg init / dg update. Do not edit this block.
+# Append-only JSONL merge rules — managed by dg init / dg project update. Do not edit this block.
 .project/events.jsonl merge=union
 # END DispatchGraph

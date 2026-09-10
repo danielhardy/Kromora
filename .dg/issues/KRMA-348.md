@@ -2,7 +2,7 @@
 id: KRMA-348
 title: Add selective Auto-owned regional correction layers
 type: feature
-status: ready
+status: review
 priority: high
 agent: pi
 model: openrouter/meta/muse-spark-1.3-contributor
@@ -15,12 +15,17 @@ labels:
   - masking
   - rendering
 created: 2026-09-10T14:40:07.847Z
-updated: 2026-09-10T14:53:42.362Z
+updated: 2026-09-10T20:10:26.521Z
 depends_on:
   - KRMA-347
   - KRMA-181
-order: zx
+order: w
 board: product
+claim:
+  actor: pi
+  session: 01MTVYH3P5N53XFML4
+  claimed_at: 2026-09-10T20:05:27.125Z
+  expires_at: 2026-09-10T21:05:27.125Z
 ---
 
 ## Parent epic
@@ -72,3 +77,8 @@ Create local corrections only when regional evidence shows that a global proposa
 ## Verification
 
 Run focused mask/render tests, generated backlit/person/face fixtures, preview/export parity tests, `swift build`, and `git diff --check`.
+
+
+### Comment — pi @ 2026-09-10T20:09:59.623Z
+
+Completion summary (pi): selective Auto-owned regional correction layers are implemented on branch krma-348-regional-corrections at 7d8fa20 (base cf46f2a plus a ±800K comment correction). Pure AutoRegionalCorrections planner emits at most three ordinary editable semantic recipes (Auto — Subject / Background / Color) only on material post-global regional conflict, with explained skips for missing evidence, unverifiable separation, overlap, hard edges, coverage/confidence, crop misalignment, and existing Auto layers; FaceLandmarkMask replaces rectangle face treatment with feathered landmark-derived ellipses intersected with person/foreground support, and VisionSemanticMaskProvider.faceMasks now skips landmark-less faces instead of boxing them. Verification: 21/21 AutoRegionalCorrectionsTests, 81/81 across the four Auto suites, 45/45 masking/rotation neighbors, VisionSemanticMaskProviderTests 7/7, swift build clean, git diff --check clean, scripts/ci-tests.sh fast and serial lanes exit 0. Moving to review for verification.

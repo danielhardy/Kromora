@@ -16,7 +16,7 @@ labels:
   - photo-intelligence
   - rendering
 created: 2026-09-10T14:39:07.864Z
-updated: 2026-09-10T16:22:07.113Z
+updated: 2026-09-10T22:53:31.840Z
 depends_on:
   - KRMA-181
 order: v
@@ -90,3 +90,28 @@ Each child ticket is independently reviewable. Before implementation, read the c
 ### Comment — pi @ 2026-09-10T15:18:11.234Z
 
 Progress increment: KRMA-342 (renderer-backed evaluation/reporting foundation, delivery-sequence step 1) is implemented on branch krma-342-auto-evaluation with a full completion summary recorded in its comment thread: AutoCandidateEvaluation seam, analysis-view transform, diff/mask-overlay artifacts, 9/9 focused tests green, artifact generator scripts/auto-evaluation-report.sh. KRMA-342 remains claimed by pi pending session handoff to review/verification; remaining children KRMA-343-352 are still dependency-blocked and out of scope for this increment. Epic stays claimed; no epic acceptance boxes checked yet.
+
+
+### Comment — pi @ 2026-09-10T16:59:21.903Z
+
+Progress increment: KRMA-343 (current-render measurement pipeline, delivery-sequence step 2) is implemented on main at 71d167a with a full completion summary in its comment thread: CurrentEditMeasurer + CurrentEditSampling seam, linear/display tone, pixel-correlated color/neutrals, separate highlight headroom, regional measurement with independent confidence, bounded deterministic native detail, revision-guarded cache identity; 22/22 focused tests green, neighboring suites + fast/serial lanes green. KRMA-343 moved to review for verification; remaining children KRMA-344-352 still dependency-blocked and out of scope for this increment. Epic stays claimed; no epic acceptance boxes checked yet.
+
+
+### Comment — pi @ 2026-09-10T18:19:35.037Z
+
+Progress increment: KRMA-344 (scene classification evidence + per-signal confidence, delivery-sequence step 2) is implemented in the working tree with a full completion summary in its comment thread: 7 continuous scene likelihoods, VisionSceneClassifier adapter (nil-on-failure, on-device), SceneProvenance, AutoSignalConfidence aggregation, persisted sceneClassifications preserving the scene-is-pure-function-of-facts invariant, CurrentEditMeasurement bridge; 19/19 focused tests green, corpus + fast/serial lanes green. KRMA-344 moved to review for verification; remaining children KRMA-345-352 still out of scope for this increment. Epic stays claimed; no epic acceptance boxes checked yet.
+
+
+### Comment — pi @ 2026-09-10T19:03:26.458Z
+
+Progress increment: KRMA-345 (pure coordinated AutoEnhancementPolicy proposals, delivery-sequence step 3) is implemented on main at 9103358 with a full completion summary in its comment thread: exposure-first residual coordination, neutral-or-agreement white balance with correct RAW/standard direction, restrained color, fog-only dehaze, byte-for-byte preservation of user-owned state, advisory-only masks; 20/20 focused tests green, Auto suites + fast/serial lanes green. KRMA-345 moved to done for verification; KRMA-346 (Apple enhancement reference) is now unblocked, remaining children KRMA-346-352 out of scope for this increment. Epic stays claimed; no epic acceptance boxes checked yet.
+
+
+### Comment — pi @ 2026-09-10T20:10:30.582Z
+
+Progress increment: KRMA-348 (selective Auto-owned regional correction layers, delivery-sequence step 5) is implemented on branch krma-348-regional-corrections at 7d8fa20 with a full completion summary in its comment thread: pure AutoRegionalCorrections planner emitting at most three ordinary editable semantic recipes only on material post-global conflict with explained skips, feathered landmark-derived face mattes intersected with person/foreground support replacing rectangle treatment, 21/21 focused tests green, Auto suites + masking/rotation neighbors green, fast/serial lanes green. KRMA-348 moved to review for verification; remaining children KRMA-349-352 still out of scope for this increment. Epic stays claimed; no epic acceptance boxes checked yet.
+
+
+### Comment — pi @ 2026-09-10T22:53:26.911Z
+
+Progress increment: no new implementation this session. Verified KRMA-348 branch state (krma-348-regional-corrections at 7d8fa20): 21/21 AutoRegionalCorrectionsTests green, working tree clean aside from .dg bookkeeping churn, no source changes made. KRMA-342-347 are done; KRMA-348 remains in review pending verification_agent (codex), so KRMA-349-352 stay dependency-blocked and out of scope. Epic stays claimed; no epic acceptance boxes checked yet.

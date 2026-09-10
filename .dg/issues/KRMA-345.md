@@ -2,7 +2,7 @@
 id: KRMA-345
 title: Implement pure coordinated AutoEnhancementPolicy proposals
 type: feature
-status: ready
+status: done
 priority: high
 agent: pi
 model: openrouter/meta/muse-spark-1.3-contributor
@@ -14,11 +14,11 @@ labels:
   - auto
   - policy
 created: 2026-09-10T14:40:05.095Z
-updated: 2026-09-10T14:53:40.307Z
+updated: 2026-09-10T19:03:59.869Z
 depends_on:
   - KRMA-343
   - KRMA-344
-order: zh
+order: zzz
 board: product
 ---
 
@@ -71,3 +71,17 @@ Replace independent slider formulas with a pure, coordinated `AutoEnhancementPol
 ## Verification
 
 Add pure unit tests for neutral, clipped, cast, high-key, low-key, sunset, backlit, unsupported-detail, weak-neutral, and already-edited documents. Run focused Auto tests and `swift build`.
+
+
+### Comment — pi @ 2026-09-10T19:03:23.311Z
+
+Implementation complete on main at 9103358 (1 production file + 1 test file, +1243 lines). Pure coordinated AutoEnhancementPolicy proposals:
+
+What was built
+- AutoEnhancementPolicy.swift (new): AutoEnhancementPolicy.propose(facts:current:sourceKind:) — pure deterministic, no actor/renderer/Vision/UI. AutoEnhancementFacts (measurement tone + pixel-correlated color + scene + signal confidence + headroom + detail availability + as-shot WB), AutoSourceKind (raw/standard), AutoControlChange (previous/proposed/confidence/reason/evidence per moved control), AutoEvidenceUsed, AutoEnhancementProposal (full proposed document + change map + requested/avoided masks + notes, Codable/Sendable/Equatable, isNoOp when empty).
+- Coordination: exposure places first (median + tonal-key brakes + backlight lift + clipping guard, ±1.25 EV); tails shrink by max(0.6, 1-|E|*0.25) so they correct only the residual, with extra highlight protection on positive exposure. User edits refine at half strength; controls past half range are untouched; tone section skipped entirely below 0.2 global-tone confidence.
+- White balance through the existing mapping (RAW neutralTemperature/Tint photographic direction, standard temperatureTint node inverted about D65 — warm cast lowers RAW temp, raises standard temp, tint same sign). Requires credible non-mixed neutral candidate or mean/median estimator agreement; vetoes on mixed/mono/mixed-light/weak color confidence; sunset warmth preserved when neutral evidence is weak; RAW without a base temperature is left untouched.
+- Color restrained (clip-driven saturation cut or muted-scene vibrance lift, skipped when mixed/mono/night/sunset/weak evidence); detail is fog-gated dehaze only (≤25, RAW detail knobs and texture/clarity never touched); master curve never synthesized in v1 (identity stays identity, custom preserved byte-for-byte).
+- Mask advisory only, no layers: requested [.subject] when backlit + prominent, avoided [.face, .person] always.
+
+Verification: 20/20 AutoEnhancementPolicyTests green (range/invariant assertions, never exact float equality); all Auto suites green; swift build clean; ci-tests fast (exit 0) and serial (328 tests, 0 failures) lanes green. No image leaves the device; no concurrency escape hatch.
