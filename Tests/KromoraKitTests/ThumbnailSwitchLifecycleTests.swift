@@ -293,6 +293,59 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         })
     }
 
+    func testComparisonRequestsShareFitGeometryAcrossThumbnailDrivenOrientations() async throws {
+        let landscape = try Fixtures.writeGradientPNG(
+            width: 24, height: 16, named: "a-landscape.png", in: tempDirectory
+        )
+        let portrait = try Fixtures.writeGradientPNG(
+            width: 16, height: 24, named: "b-portrait.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        viewModel.isSideBySide = true
+        try await loadCollection(viewModel, first: landscape, second: portrait)
+
+        for (index, image) in [landscape, portrait].enumerated() {
+            viewModel.selectCollectionImage(at: index)
+            try await waitUntil("the adjusted and original \(image.lastPathComponent) previews") {
+                viewModel.sourceURL == image
+                    && viewModel.previewSurface.image != nil
+                    && viewModel.originalPreviewSurface.image != nil
+            }
+            XCTAssertEqual(
+                viewModel.previewSurface.presentationImageExtent,
+                viewModel.originalPreviewSurface.presentationImageExtent,
+                "both visible panes must use the same virtual source bounds"
+            )
+
+            // Give the two panes distinct documents so the corresponding requests are unambiguous.
+            viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+            try await waitUntil("the edited comparison for \(image.lastPathComponent)") {
+                let requests = await engine.previewRequests
+                return requests.contains {
+                    $0.source?.backing == .url(image)
+                        && !$0.document.isIdentity
+                } && requests.contains {
+                    $0.source?.backing == .url(image)
+                        && $0.document.isIdentity
+                }
+            }
+
+            let requests = await engine.previewRequests.filter {
+                $0.source?.backing == .url(image)
+            }
+            let adjusted = try XCTUnwrap(requests.last(where: { !$0.document.isIdentity }))
+            let original = try XCTUnwrap(requests.last(where: { $0.document.isIdentity }))
+            XCTAssertEqual(adjusted.scale, original.scale)
+            XCTAssertEqual(adjusted.sourceROI, original.sourceROI)
+            XCTAssertEqual(
+                adjusted.presentationImageExtent,
+                original.presentationImageExtent,
+                "both panes must use the same virtual source bounds for fit"
+            )
+        }
+    }
+
     func testSequentialOpenPresentsReplacementWithoutAnotherUserAction() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "sequential-first.png", in: tempDirectory

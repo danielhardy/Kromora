@@ -2943,32 +2943,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     private var histogramResolutionPlanner = ResolutionPlanner()
     private static let intensityDebounceMs = 60
 
-    /// Request enough source detail for the current display scale while leaving the final
-    /// placement to `PreviewSurfaceView`. The coalescing coordinator keeps a zoom gesture from
-    /// building a queue of obsolete high-resolution renders.
-    private func previewRenderTargetSize(
-        for document: EditDocument,
-        surface: ResolutionPlannerSurface = .mainPreview
-    ) -> CGSize {
-        guard let plan = previewRenderPlan(for: document, surface: surface) else {
-            return previewBackingSize
-        }
-        return plan.sourceSize
-    }
-
-    private func previewRenderPlan(
-        for document: EditDocument,
-        surface: ResolutionPlannerSurface = .mainPreview
-    ) -> ResolutionPlan? {
-        guard let imageSource else { return nil }
-        return resolutionPlan(
-            for: document,
-            nativeExtent: imageSource.nativeExtent,
-            viewportSize: previewBackingSize,
-            surface: surface
-        )
-    }
-
     /// Plan an adjacent photo as if it were the next navigation target. The selected photo's
     /// planner is intentionally not used: it carries hysteresis from the current source, while
     /// `openImage` resets the planner before the subsequent selected-preview request.
@@ -2992,7 +2966,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     ///
     /// This stays an internal value seam so tests can exercise the same surface routing without
     /// depending on asynchronous image preparation or a real drawable size. Production render
-    /// requests use `previewRenderTargetSize(for:surface:)` above.
+    /// requests use the returned plan's source size, ROI, and presentation extent together.
     func resolutionPlan(
         for document: EditDocument,
         nativeExtent: CGSize,
@@ -3733,7 +3707,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         }
         guard comparisonPreviewScheduledRevision != comparisonRevision else { return }
         let baseline = comparisonBaselineDocument
-        let box = previewRenderTargetSize(for: baseline, surface: .comparisonBaseline)
+        let plan = resolutionPlan(
+            for: baseline,
+            nativeExtent: imageSource.nativeExtent,
+            viewportSize: previewBackingSize,
+            surface: .comparisonBaseline
+        )
         let sourceRevision = self.sourceRevision
         let comparisonRevision = self.comparisonRevision
         let assetID = self.activeAssetID
@@ -3763,9 +3742,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                   sourceRevision == self.sourceRevision,
                   comparisonRevision == self.comparisonRevision,
                   self.imageSource == imageSource else { return }
-            let request = RenderRequest(
-                source: imageSource, assetID: assetID, document: baseline, lut: nil,
-                targetSize: box, quality: .preview, output: .raster, space: .current
+            let request = self.makeSettledPreviewRequest(
+                source: imageSource,
+                assetID: assetID,
+                document: baseline,
+                lut: nil,
+                plan: plan
             )
             let gpuImage = await engine.makeCIImage(request)
             if let gpuImage {
@@ -3775,8 +3757,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                       comparisonRevision == self.comparisonRevision,
                       self.imageSource == imageSource else { return }
                 let hadValidOriginal = self.originalPreviewSurface.image != nil
-                guard self.originalPreviewSurface.present(gpuImage, space: request.space)
-                        || hadValidOriginal else {
+                guard self.originalPreviewSurface.present(
+                    gpuImage,
+                    space: request.space,
+                    presentationImageExtent: request.presentationImageExtent
+                ) || hadValidOriginal else {
                     self.comparisonPreviewDidFail(
                         sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
                     )
@@ -3793,7 +3778,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                   let cgImage else { return }
             let hadValidOriginal = self.originalPreviewSurface.image != nil
             guard self.originalPreviewSurface.present(
-                CIImage(cgImage: cgImage), space: request.space
+                CIImage(cgImage: cgImage),
+                space: request.space,
+                presentationImageExtent: request.presentationImageExtent
             ) || hadValidOriginal else {
                 self.comparisonPreviewDidFail(
                     sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
