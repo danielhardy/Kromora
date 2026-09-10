@@ -357,6 +357,9 @@ Useful starting points are [`EditDocument`](Sources/KromoraKit/Models/EditDocume
 Kromora is released under the [MIT License](LICENSE). The LUTzy fork attribution and original license
 terms are preserved as described above.
 
+The Kromora name, logo, app icon, and related visual identity are project branding and are not granted
+for use in modified products or in a way that implies endorsement. See [BRANDING.md](BRANDING.md).
+
 <div align="center">
 <sub>Built with SwiftUI · Core Image · Metal — and nothing else.</sub>
 </div>

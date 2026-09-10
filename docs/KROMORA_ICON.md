@@ -2,8 +2,9 @@
 
 `Sources/Kromora/Branding/KromoraIcon.svg` is the canonical source artwork. It is an
 original Kromora mark made from geometric paths and gradients; it uses no external
-fonts, stock art, logos, or third-party assets. It is covered by the repository's
-MIT License.
+fonts, stock art, logos, or third-party assets. The source code is covered by the
+repository's MIT License. The Kromora name, logo, icon, and related visual identity
+are governed separately by [`BRANDING.md`](../BRANDING.md).
 
 ## Construction and export
 
