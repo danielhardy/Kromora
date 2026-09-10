@@ -7,7 +7,7 @@ import XCTest
 /// scan — a `UUID`, say — every saved and every undo document would silently stop resolving the next
 /// time the library was rescanned, and `saveDerivedLUT` triggers a rescan. The failure is quiet: the
 /// document is intact, the LUT is on disk, the lookup just misses. So the ID's determinism across a
-/// rescan is tested directly. See `docs/PHASE2_SPEC.md` §4.3 and §7.
+/// rescan is tested directly. See `docs/ENGINEERING_GUIDE.md`.
 @MainActor
 final class LUTIDTests: TempDirectoryTestCase {
 
@@ -48,7 +48,8 @@ final class LUTIDTests: TempDirectoryTestCase {
     /// A LUT that exists only in memory gets a `derived://` ID, and that ID follows its **contents**.
     ///
     /// **Step 9 reversed this property, deliberately.** It used to be a `UUID`, so constructing the
-    /// same cube twice produced two identities. `docs/PHASE2_SPEC.md` §4.3's objection to a `UUID` is
+    /// same cube twice produced two identities. `docs/ENGINEERING_GUIDE.md`'s content-derived identity
+    /// rule is
     /// that it mints fresh identity on construction, which is exactly what that did — one level down
     /// from the rescan case the section is written about. Identity now follows the table, so the same
     /// cube is the same LUT: they render identically and are interchangeable in `LUTFilterCache`.
@@ -135,8 +136,8 @@ final class LUTIDTests: TempDirectoryTestCase {
     /// A folder scan can never produce a `derived://` ID.
     ///
     /// This is what makes registry-and-library resolution order unobservable, which in turn is why a
-    /// mutation swapping that order is *equivalent* rather than a coverage gap — see the note in
-    /// `scripts/mutate-step9.sh`. The reasoning is that `LUTLibrary.scanSync` only ever builds
+    /// mutation swapping that order is *equivalent* rather than a coverage gap — see the migration
+    /// invariants in `docs/ENGINEERING_GUIDE.md`. The reasoning is that `LUTLibrary.scanSync` only ever builds
     /// `CubeLUT(url:)`, whose ID is a filesystem path and so begins with `/`. That is airtight today
     /// and load-bearing for an argument recorded in the migration notes, so it is worth a test rather
     /// than a paragraph: if the library ever starts minting synthetic IDs, the equivalence quietly

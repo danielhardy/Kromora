@@ -32,7 +32,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         // `FakeRenderEngine.stubbedCapabilities`' own field default, so an `AppViewModel` that
         // hardcoded it and never called the engine would pass this test just as happily, and the
         // first is a named constant in the module under test. This is the "wrote a value that
-        // equals the default" weakness (docs/CODE_REVIEW.md §2) — use a value built here, with a
+        // equals the default" weakness (`docs/ENGINEERING_GUIDE.md`) — use a value built here, with a
         // mixed set of flags and non-round seeds, so the test can only pass if the engine's answer
         // actually made it through.
         let distinctiveCapabilities = RAWCapabilities(
@@ -381,9 +381,9 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// develop settings that were never touched on it — a second full render on a file the user has
     /// only just opened.
     ///
-    /// Found by `scripts/mutate-step10a.sh`: deleting that one line left every other test in this
-    /// file green. It is the harness's own worked example of a survivor being a gap rather than an
-    /// equivalence.
+    /// Found during the historical mutation audit: deleting that one line left every other test in
+    /// this file green. It is the audit's worked example of a survivor being a gap rather than an
+    /// equivalence; the retired harness is preserved only in git history.
     func testAPendingDevelopFlagDoesNotSurviveOpeningAnotherImage() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
