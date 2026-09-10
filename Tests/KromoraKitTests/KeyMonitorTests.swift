@@ -98,4 +98,14 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .shift))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .command))
     }
+
+    func testCropShortcutIsPlainCOnly() {
+        XCTAssertTrue(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: []))
+        XCTAssertTrue(KeyMonitorPolicy.isCropShortcut(characters: "C", modifiers: []))
+        XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "x", modifiers: []))
+        XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: .shift))
+        XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: .command))
+        XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: .option))
+        XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: .control))
+    }
 }

@@ -61,6 +61,12 @@ enum KeyMonitorPolicy {
     static func isPlainCharacterShortcut(modifiers: NSEvent.ModifierFlags) -> Bool {
         modifiers.intersection(.deviceIndependentFlagsMask).isEmpty && !modifiers.contains(.shift)
     }
+
+    static func isCropShortcut(
+        characters: String, modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
+        isPlainCharacterShortcut(modifiers: modifiers) && characters.lowercased() == "c"
+    }
 }
 
 /// Owns an NSEvent local monitor for the lifetime of the main content view.
@@ -256,6 +262,13 @@ final class KeyMonitor {
             return nil
         }
         switch chars {
+        case "c":
+            // Crop is an editor command: leave the key alone when there is no current image, and
+            // preserve shifted/system-modified C for AppKit and the focused control.
+            guard KeyMonitorPolicy.isCropShortcut(characters: chars, modifiers: mods),
+                  vm.sourceImage != nil else { return event }
+            vm.toggleCropTool()
+            return nil
         case "g":
             if vm.navigate(to: .grid) { return nil }
             return event
