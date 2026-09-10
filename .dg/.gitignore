@@ -1,5 +1,5 @@
 # BEGIN DispatchGraph
-# Disposable runtime files — managed by dg init / dg update. Do not edit this block.
+# Disposable runtime files — managed by dg init / dg project update. Do not edit this block.
 .project/index.json
 .project/index.sqlite
 .project/index.sqlite-*
@@ -9,6 +9,7 @@
 .project/runs-drain.json
 .project/locks/
 .project/mutations/
+.project/mutations.json
 PROJ-*-finish.sh
 # END DispatchGraph
 
