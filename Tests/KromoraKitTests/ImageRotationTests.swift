@@ -111,6 +111,47 @@ final class ImageRotationTests: TempDirectoryTestCase {
         XCTAssertEqual(cropped.extent.integral.size, CGSize(width: 32, height: 48))
     }
 
+    func testCropRotatesWithImageSoItStaysAnchoredToTheSameContent() {
+        // Bottom-left quadrant, normalized bottom-left origin, y-up (matches CropAdjustments).
+        let bottomLeft = CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0.5, height: 0.5))
+
+        let afterOneCW = bottomLeft.rotated(byClockwiseQuarterTurns: 1)
+        // A quarter-turn clockwise carries the old bottom-left quadrant to the new top-left.
+        XCTAssertEqual(afterOneCW.normalizedRect, CGRect(x: 0, y: 0.5, width: 0.5, height: 0.5))
+
+        let afterFourCW = bottomLeft.rotated(byClockwiseQuarterTurns: 4)
+        XCTAssertEqual(afterFourCW.normalizedRect, bottomLeft.normalizedRect)
+
+        let thereAndBack = bottomLeft.rotated(byClockwiseQuarterTurns: 1)
+            .rotated(byClockwiseQuarterTurns: -1)
+        XCTAssertEqual(thereAndBack.normalizedRect, bottomLeft.normalizedRect)
+
+        XCTAssertNil(CropAdjustments.neutral.rotated(byClockwiseQuarterTurns: 1).normalizedRect)
+    }
+
+    func testRotatingAnImageWithACommittedCropKeepsTheSameFramedContent() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "rotation-committed-crop.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.openImage(url: url)
+        try await waitUntil("the selected image") { viewModel.sourceImage != nil }
+
+        let originalCrop = CGRect(x: 0, y: 0, width: 0.5, height: 0.5)
+        viewModel.updateDocument { $0.crop = CropAdjustments(normalizedRect: originalCrop) }
+
+        viewModel.rotateClockwise()
+        XCTAssertEqual(
+            viewModel.document.crop.normalizedRect,
+            CropAdjustments(normalizedRect: originalCrop)
+                .rotated(byClockwiseQuarterTurns: 1).normalizedRect
+        )
+
+        viewModel.resetRotation()
+        XCTAssertEqual(viewModel.document.rotation, .zero)
+        XCTAssertEqual(viewModel.document.crop.normalizedRect, originalCrop)
+    }
+
     func testRenderEnginePreviewAndExportAgreeForRotatedCrop() async throws {
         let url = try Fixtures.writeGradientPNG(
             width: 96, height: 64, named: "rotation-export.png", in: tempDirectory

@@ -3401,7 +3401,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             return
         }
         endUndoGrouping()
-        updateDocument { $0.rotation = .zero }
+        updateDocument { document in
+            let turnsToUndo = document.rotation.rawValue / 90
+            document.crop = document.crop.rotated(byClockwiseQuarterTurns: -turnsToUndo)
+            document.rotation = .zero
+        }
         canvasState.fit()
         statusMessage = "Rotation reset"
     }
@@ -3418,6 +3422,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         endUndoGrouping()
         updateDocument { document in
             document.rotation = document.rotation.addingClockwiseQuarterTurns(clockwise ? 1 : -1)
+            document.crop = document.crop.rotated(byClockwiseQuarterTurns: clockwise ? 1 : -1)
         }
         canvasState.fit()
         statusMessage = "Rotated \(clockwise ? "clockwise" : "counterclockwise")"
