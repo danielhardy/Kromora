@@ -13,7 +13,10 @@ import CoreImage
 /// So the invariant is not "one context in the module". It is "one context in the live render path,
 /// owned by RenderEngineResources, plus explicitly named one-shot samplers. PreviewDiskCache is
 /// intentionally one of those samplers: it rasterizes an already-presented frame on a detached
-/// background task and never participates in RenderEngine's live graph.
+/// background task and never participates in RenderEngine's live graph. AppleEnhancementReference
+/// (KRMA-346) is one for the same reason: it renders a single ≤768px Apple-enhancement reference
+/// through a method-local, uncached context once per Auto invocation — outside preview, export,
+/// and every cache — and only value pixels cross back out.
 ///
 /// **This reads source text, and that is deliberate.** A `CIContext` leaves no observable trace —
 /// two of them render identically, cost twice the memory, and no runtime assertion can tell them
@@ -71,10 +74,12 @@ final class RenderStackTests: XCTestCase {
             [
                 "LookLUTConverter.swift", "RenderEngine.swift", "RenderEngineResources.swift",
                 "PreviewDiskCache.swift", "RecipeExtractor.swift",
+                "AppleEnhancementReference.swift",
             ],
             """
             RenderEngineResources owns the live render context. RecipeExtractor, LookLUTConverter, \
-            and PreviewDiskCache are explicit one-shot samplers outside the live render path.
+            PreviewDiskCache, and AppleEnhancementReference are explicit one-shot samplers outside \
+            the live render path.
             """
         )
     }
