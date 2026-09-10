@@ -207,6 +207,92 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         XCTAssertTrue(requests.last?.source?.backing == .url(second))
     }
 
+    func testFilmstripSelectionKeepsOriginalComparisonInSync() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "comparison-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "comparison-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: first, second: second)
+        viewModel.collection.beginThumbnailDemand()
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the first comparison") {
+            viewModel.previewState == .ready
+                && viewModel.previewSurface.image != nil
+        }
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        XCTAssertTrue(viewModel.toggleSideBySide())
+        try await waitUntil("the first original comparison") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+
+        let previewCountBeforeSwitch = await engine.previewRequests.count
+        await engine.gatePreviews()
+        viewModel.selectCollectionImage(at: 1)
+        try await waitUntil("the second adjusted request") {
+            await engine.previewRequests.count > previewCountBeforeSwitch
+        }
+        await engine.releaseNextPreview()
+        try await waitUntil("the second original request") {
+            await engine.previewRequests.count > previewCountBeforeSwitch + 1
+        }
+        await engine.releaseNextPreview()
+        await engine.releasePreviews()
+        try await waitUntil("the second comparison") {
+            viewModel.sourceURL == second
+                && viewModel.previewState == .ready
+                && viewModel.previewSurface.image != nil
+                && viewModel.originalPreviewSurface.image != nil
+        }
+
+        let requests = await engine.previewRequests
+        XCTAssertGreaterThanOrEqual(
+            requests.filter { $0.source?.backing == .url(second) }.count, 2,
+            "the selected thumbnail needs both an Adjusted and Original request"
+        )
+        XCTAssertTrue(requests.contains {
+            $0.source?.backing == .url(second) && $0.document.isIdentity
+        })
+    }
+
+    func testFilmstripSelectionSchedulesOriginalBeforeAdjustedDrawableConfirmation() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "drawable-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "drawable-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        viewModel.previewSurface.attachPresentationLifecycle()
+        viewModel.isSideBySide = true
+        try await loadCollection(viewModel, first: first, second: second)
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the first adjusted publication") {
+            viewModel.sourceURL == first && viewModel.previewSurface.image != nil
+        }
+        viewModel.selectCollectionImage(at: 1)
+        try await waitUntil("the second original publication") {
+            viewModel.sourceURL == second
+                && viewModel.previewSurface.image != nil
+                && viewModel.originalPreviewSurface.image != nil
+        }
+
+        let requests = await engine.previewRequests
+        XCTAssertGreaterThanOrEqual(
+            requests.filter { $0.source?.backing == .url(second) }.count, 2,
+            "the selected thumbnail needs both an Adjusted and Original request"
+        )
+        XCTAssertTrue(requests.contains {
+            $0.source?.backing == .url(second) && $0.document.isIdentity
+        })
+    }
+
     func testSequentialOpenPresentsReplacementWithoutAnotherUserAction() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "sequential-first.png", in: tempDirectory

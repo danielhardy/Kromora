@@ -327,6 +327,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// adjusted render can follow every Temperature/Tint tick, but it must not enqueue the same
     /// Original request again when the baseline revision is unchanged.
     private var comparisonPreviewScheduledRevision: UInt64?
+    /// A failed Original render gets one retry after the scheduler has retired the failed attempt.
+    /// The revision key prevents a persistent renderer failure from spinning the editor lane.
+    private var comparisonPreviewRetriedRevision: UInt64?
+    private var comparisonPreviewRetryTask: Task<Void, Never>?
     /// The last settled request confirmed by the presentation surface. Supporting work is never
     /// admitted before this lifecycle boundary.
     private var lastPresentedVisibleRequest: RenderRequest?
@@ -1364,6 +1368,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         metadataTask?.cancel()
         metadata = ImageMetadata()
         cancelComparisonPreview(pump: false)
+        comparisonPreviewRetryTask?.cancel()
+        comparisonPreviewRetryTask = nil
         comparisonPreviewScheduledRevision = nil
         workScheduler.cancel(id: adjacentPreviewPrefetchJobID, pump: false)
         prefetchDelayTask?.cancel()
@@ -3488,6 +3494,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         comparisonBaselineDocument = document.comparisonBaseline
         comparisonRevision &+= 1
         comparisonPreviewScheduledRevision = nil
+        comparisonPreviewRetryTask?.cancel()
+        comparisonPreviewRetryTask = nil
         cancelComparisonPreview(pump: false)
         originalPreviewSurface.clear()
         pendingDevelopChange = true
@@ -3604,6 +3612,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         }
         if publication.phase == .settled {
             lastPublishedVisibleRequest = request
+            // A thumbnail switch can publish the new Adjusted candidate before its MTKView has a
+            // drawable (for example while SwiftUI is replacing the selected filmstrip cell). Do
+            // not make the new Original pane depend on that later confirmation; both requests are
+            // already fenced to this source and display revision.
+            if isSideBySideVisible {
+                scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
+            }
         }
 
     }
@@ -3724,8 +3739,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let assetID = self.activeAssetID
         comparisonPreviewScheduledRevision = comparisonRevision
 
-        workScheduler.enqueue(
-            id: comparisonPreviewJobID, lane: .editor, priority: .comparison
+        let accepted = workScheduler.enqueue(
+            id: comparisonPreviewJobID, lane: .editor, priority: .comparison,
+            onTerminal: { [weak self] outcome in
+                guard outcome != .completed,
+                      let self,
+                      assetID == self.activeAssetID,
+                      sourceRevision == self.sourceRevision,
+                      comparisonRevision == self.comparisonRevision,
+                      self.comparisonPreviewScheduledRevision == comparisonRevision else { return }
+                // A queued comparison can be evicted by a newer active-editor render. Leave the
+                // revision retryable so the next settled publication can re-admit it; otherwise a
+                // valid selected image could keep the Original pane blank forever.
+                self.comparisonPreviewScheduledRevision = nil
+            }
         ) { [weak self, engine] in
             guard !Task.isCancelled, let self else { return }
             // Cancellation can arrive after this job has been admitted to the scheduler but
@@ -3747,7 +3774,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                       sourceRevision == self.sourceRevision,
                       comparisonRevision == self.comparisonRevision,
                       self.imageSource == imageSource else { return }
-                self.originalPreviewSurface.present(gpuImage, space: request.space)
+                let hadValidOriginal = self.originalPreviewSurface.image != nil
+                guard self.originalPreviewSurface.present(gpuImage, space: request.space)
+                        || hadValidOriginal else {
+                    self.comparisonPreviewDidFail(
+                        sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
+                    )
+                    return
+                }
                 return
             }
             let cgImage = await engine.makeCGImage(request)
@@ -3757,7 +3791,44 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                   comparisonRevision == self.comparisonRevision,
                   self.imageSource == imageSource,
                   let cgImage else { return }
-            self.originalPreviewSurface.present(CIImage(cgImage: cgImage), space: request.space)
+            let hadValidOriginal = self.originalPreviewSurface.image != nil
+            guard self.originalPreviewSurface.present(
+                CIImage(cgImage: cgImage), space: request.space
+            ) || hadValidOriginal else {
+                self.comparisonPreviewDidFail(
+                    sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
+                )
+                return
+            }
+        }
+        if !accepted, comparisonPreviewScheduledRevision == comparisonRevision {
+            comparisonPreviewScheduledRevision = nil
+        }
+    }
+
+    private func comparisonPreviewDidFail(
+        sourceRevision: UInt64, comparisonRevision: UInt64
+    ) {
+        guard activeAssetID != nil,
+              sourceRevision == self.sourceRevision,
+              comparisonRevision == self.comparisonRevision,
+              isSideBySideVisible,
+              comparisonPreviewScheduledRevision == comparisonRevision else { return }
+        comparisonPreviewScheduledRevision = nil
+        originalPreviewSurface.clear()
+        statusMessage = "Could not display the comparison preview. Retrying…"
+        guard comparisonPreviewRetriedRevision != comparisonRevision else { return }
+        comparisonPreviewRetriedRevision = comparisonRevision
+        comparisonPreviewRetryTask?.cancel()
+        comparisonPreviewRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(25))
+            guard !Task.isCancelled, let self,
+                  sourceRevision == self.sourceRevision,
+                  comparisonRevision == self.comparisonRevision,
+                  self.isSideBySideVisible,
+                  self.comparisonPreviewScheduledRevision != comparisonRevision else { return }
+            self.comparisonPreviewRetryTask = nil
+            self.scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
         }
     }
 
@@ -4224,6 +4295,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         comparisonRevision &+= 1
         previewDebounceGeneration &+= 1
         pendingSourceLoad = nil
+        comparisonPreviewRetryTask?.cancel()
+        comparisonPreviewRetryTask = nil
 
         // Disconnect callbacks first so a child that finishes while shutdown is re-entrant cannot
         // schedule new work or publish into the model.
