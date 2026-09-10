@@ -208,11 +208,15 @@ struct AutoCandidateEvaluator: Sendable {
 
         let measurements: AutoEvaluationReport.Measurements?
         let diffPNG: Data?
-        if let base, let proposed {
+        if let base, let proposed, base.width == proposed.width, base.height == proposed.height {
             let comparison = Self.compare(base: base, proposed: proposed)
             measurements = comparison.measurements
             diffPNG = comparison.diffPNG
         } else {
+            // A dimension mismatch (e.g. the proposal changes `rotation`, so its oriented extent
+            // no longer matches the target box computed from the baseline) is not comparable.
+            // Report it as a failure rather than silently emitting a spurious zero-diff result.
+            if base != nil, proposed != nil { failures.append("geometry-mismatch") }
             measurements = nil
             diffPNG = nil
         }
