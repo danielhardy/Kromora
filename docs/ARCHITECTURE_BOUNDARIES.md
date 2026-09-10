@@ -1,4 +1,4 @@
-# Lumo architecture boundaries
+# Kromora architecture boundaries
 
 This document records the ownership boundaries for the application and render stack. It is
 deliberately written before the coordinator extractions in LUMO-168 so future changes can be judged

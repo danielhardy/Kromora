@@ -69,12 +69,12 @@ mutate() {
   fi
 }
 
-VM=Sources/LumoKit/ViewModels/AppViewModel.swift
-DC=Sources/LumoKit/ViewModels/DeriveCoordinator.swift
-CL=Sources/LumoKit/Models/CubeLUT.swift
-LL=Sources/LumoKit/Models/LUTLibrary.swift
-DR=Sources/LumoKit/Models/DerivedLUTRegistry.swift
-RE=Sources/LumoKit/Models/RenderEngine.swift
+VM=Sources/KromoraKit/ViewModels/AppViewModel.swift
+DC=Sources/KromoraKit/ViewModels/DeriveCoordinator.swift
+CL=Sources/KromoraKit/Models/CubeLUT.swift
+LL=Sources/KromoraKit/Models/LUTLibrary.swift
+DR=Sources/KromoraKit/Models/DerivedLUTRegistry.swift
+RE=Sources/KromoraKit/Models/RenderEngine.swift
 
 echo "=== identity ==="
 mutate "CubeLUT: derived id back to a UUID" "$CL" \
@@ -166,7 +166,7 @@ mutate "CONTROL (expected to survive): resolve library-first instead of registry
 
 echo "=== the derive gate ==="
 mutate "RenderPipeline: derive gate — LUT stage skipped in the pipeline" \
-  Sources/LumoKit/Models/RenderPipeline.swift \
+  Sources/KromoraKit/Models/RenderPipeline.swift \
   's/return applyLUT\(document\.lut, lut: lut, to: adjusted, space: space, cache: lutCache\)/return adjusted/' \
   "DeriveInvarianceTests"
 

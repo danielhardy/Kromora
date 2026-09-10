@@ -16,7 +16,7 @@ The sibling's one-in-flight pacer retains the newest normalized geometry and req
 after completion. Preview surface, overlay view, and renderer each own only their own view/delegate
 state; the shared device/queue are the sole GPU ownership seam.
 
-The feature is opt-in with `LUMO_MASK_OVERLAY_PROTOTYPE=1`. It draws synthetic brush, linear, and
+The feature is opt-in with `KROMORA_MASK_OVERLAY_PROTOTYPE=1`. It draws synthetic brush, linear, and
 radial geometry plus a brush cursor. `MaskOverlayInteractionState` stores only transient normalized
 upper-left source coordinates. Pointer events convert viewport points once through
 `CanvasMaskTransform`; they never enter `AppViewModel` or persistence.
@@ -57,8 +57,8 @@ input stream is synthetic rather than an AppKit pointer trace.
 The overlay harness is reproducible with:
 
 ```sh
-LUMO_MASK_OVERLAY_BENCHMARK=1 \
-LUMO_MASK_OVERLAY_ITERATIONS=30 \
+KROMORA_MASK_OVERLAY_BENCHMARK=1 \
+KROMORA_MASK_OVERLAY_ITERATIONS=30 \
 swift test -c release \
   --filter MaskOverlayPerformanceBenchmark/testRealMaskOverlayPresentationBenchmark
 ```
@@ -93,7 +93,7 @@ The follow-up previously included a Release-only, standalone AppKit capture host
 capture workflow was retired in LUMO-230 after the historical attempts below; the host and wrapper
 are no longer available from this checkout.
 
-The host uses `LUMO_MASK_OVERLAY_PROTOTYPE=1`, a real `NSWindow` containing the same
+The host uses `KROMORA_MASK_OVERLAY_PROTOTYPE=1`, a real `NSWindow` containing the same
 `MaskOverlayMTKView`/`MaskOverlayRenderer` path, and `xctrace` with Metal System Trace plus Points
 of Interest. It emits overlay-specific `MaskOverlayPointerInput`, `MaskOverlayPresentationEncoded`,
 `MaskOverlayGPUComplete`, and `MaskOverlayDrawablePresented` events so drawable/vsync cadence,
@@ -102,7 +102,7 @@ GPU completion, and presentation scheduling can be inspected independently.
 Three local capture attempts on the reference host produced valid trace files, but the available
 desktop automation did not deliver pointer events to the capture process (`input_events=0`,
 `presentations=0`). Those traces are diagnostic only and are not evidence for a real-pointer p95 or
-p99. The last attempt is `/tmp/lumo-227-real4/LUMO-227-mask-overlay-20260904-164958.trace`.
+p99. The last attempt is `/tmp/kromora-227-real4/LUMO-227-mask-overlay-20260904-164958.trace`.
 Consequently the real-pointer p95/p99 table and the cadence-versus-sibling attribution remain
 pending a human-driven gesture session; the 40.334 ms synthetic result and 24.645 ms persistent
 preview comparison above remain the only measured numbers. The 16.7 ms gate is still explicitly

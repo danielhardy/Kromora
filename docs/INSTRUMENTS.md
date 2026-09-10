@@ -1,7 +1,7 @@
-# Lumo Instruments capture recipe
+# Kromora Instruments capture recipe
 
-Lumo's render workflow emits Points of Interest signposts under subsystem
-`com.lumo.app`, category `workflow`. The signpost names are stable across builds:
+Kromora's render workflow emits Points of Interest signposts under subsystem
+`com.kromora.app`, category `workflow`. The signpost names are stable across builds:
 `Launch`, `Scan`, `Decode`, `Render`, `Cache`, `PhotoSwitch`, `Histogram`, and
 `Export`, and `LiveEdit`, plus the Photos import stages `PhotoTransfer`, `PhotoThumbnail`, and
 `PhotoCollectionInsert`. Cache outcomes are events named `CacheHit` and `CacheMiss`; cancelled
@@ -20,12 +20,12 @@ keeps live editing separate from settled preview and export work.
 
 ## Capture steps
 
-1. Build the `Lumo` scheme in Release configuration. Use a clean launch for a
+1. Build the `Kromora` scheme in Release configuration. Use a clean launch for a
    cold-cache run; relaunch without clearing caches for a warm-cache run. Record
    the Mac model, OS, build commit, source format/resolution, and whether the
    LUT folder was already scanned.
 2. Open **Instruments**, choose **Points of Interest** and **Time Profiler**,
-   select Lumo as the target, and press Record before launching the app.
+   select Kromora as the target, and press Record before launching the app.
 3. For launch and scan, let the app restore or choose a source folder and a LUT
    folder. Stop after the first image and its filmstrip have appeared. In the
    Points of Interest timeline, inspect `Launch` and `Scan`; expand `Decode`

@@ -1,4 +1,4 @@
-# Lumo performance capture archive — 2026-09-01
+# Kromora performance capture archive — 2026-09-01
 
 This is the reproducible archive manifest for LUMO-117. It records what was captured and what
 cannot be captured from this checkout. Hardware rows are not represented as passing until a Release
@@ -12,15 +12,15 @@ swift test --filter 'ObservabilityTests|PreviewCoordinatorTests'
 swift build -c release
 
 # real drawable presentation; requires a logged-in display
-LUMO_METAL_BENCHMARK=1 swift test --filter MetalPresentationBenchmark/testRealMetalPresentationBenchmark
+KROMORA_METAL_BENCHMARK=1 swift test --filter MetalPresentationBenchmark/testRealMetalPresentationBenchmark
 
 # automated representative RAW drawable capture; writes a .trace and summary under /tmp
-# Set LUMO_CAPTURE_ID=LUMO-121 and LUMO_RAW_FIXTURE_DIR for a licensed local fixture.
-LUMO_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
-scripts/run-lumo-118-capture.sh /absolute/path/to/fixtures/DSC07826.ARW
+# Set KROMORA_CAPTURE_ID=LUMO-121 and KROMORA_RAW_FIXTURE_DIR for a licensed local fixture.
+KROMORA_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
+scripts/run-kromora-118-capture.sh /absolute/path/to/fixtures/DSC07826.ARW
 
 # tracing overhead; run with and without an active Instruments recording
-LUMO_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark/testMeasureTracingOverhead
+KROMORA_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark/testMeasureTracingOverhead
 ```
 
 The Metal test creates a visible `CAMetalLayer`, renders through the shipping
@@ -57,6 +57,6 @@ Do not substitute the fake renderer's 60 MP-class test for these rows: it is orc
 The historical post-LUMO-107 representative Release capture using `DSC07826.ARW` is recorded in
 [the LUMO-121 durable summary](LUMO-121-DSC07826-20260901-222341-summary.md); the generated `.trace`
 remains at the capture host's `/tmp` path recorded there. New captures require a licensed local
-fixture directory selected with `LUMO_RAW_FIXTURE_DIR`. The historical run measures the
+fixture directory selected with `KROMORA_RAW_FIXTURE_DIR`. The historical run measures the
 completed-texture warm-transform path and ordinary Light-adjustment settle path; it does not claim
 cold coverage, supporting-work coverage, exhaustive controls, or full source-size coverage.

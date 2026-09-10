@@ -17,6 +17,6 @@ from the other Effects controls. Real-photo review should compare the four cases
 Lightroom, and the camera JPEG when those references are available.
 
 The interactive gate is measured separately from the unit tests. Run the opt-in Effects benchmark on
-the reference Apple Silicon Mac with `LUMO_BENCH=1 swift test --filter PreviewCostBenchmark`, then
+the reference Apple Silicon Mac with `KROMORA_BENCH=1 swift test --filter PreviewCostBenchmark`, then
 capture p50/p95 input-to-present signposts for 24 MP and 40–60 MP RAW files. XCTest proves the binding
 uses the interactive/coalesced path; Instruments supplies the hardware-specific timing result.

@@ -1,10 +1,10 @@
 <div align="center">
 
-# Lumo
+# Kromora
 
 ### A native macOS RAW photo editor — develop, grade, and export on Apple's own stack.
 
-Lumo is a fast, non-destructive photo workflow for RAW and standard images. It is built with
+Kromora is a fast, non-destructive photo workflow for RAW and standard images. It is built with
 SwiftUI, Core Image, Metal, AppKit, PhotosUI, Swift Charts, ImageIO, and `simd` — with **zero
 third-party dependencies**.
 
@@ -18,9 +18,9 @@ third-party dependencies**.
 
 ---
 
-## What is Lumo?
+## What is Kromora?
 
-Lumo is a native macOS RAW editor organised around a real photo workflow:
+Kromora is a native macOS RAW editor organised around a real photo workflow:
 
 1. **Import** a folder, individual image, drag-and-drop payload, or up to 50 Photos assets.
 2. **Cull** in a grid-first Library workspace with picks, rejects, star ratings, filters, and
@@ -33,16 +33,16 @@ Lumo is a native macOS RAW editor organised around a real photo workflow:
 Every edit is stored as data, never as a baked preview bitmap. Preview and export use the same
 pipeline, so the image on screen and the image written to disk follow the same edit order.
 
-Lumo is also an agent-driven software project. Agents plan, claim, implement, verify, and advance
+Kromora is also an agent-driven software project. Agents plan, claim, implement, verify, and advance
 work through [DispatchGraph](.dg/README.md), making the development process part of the experiment.
 
 ## Fork and attribution
 
-Lumo began as a fork of [LUTzy](https://github.com/tsvb/lutzy), an MIT-licensed macOS LUT
+Kromora began as a fork of [LUTzy](https://github.com/tsvb/lutzy), an MIT-licensed macOS LUT
 color-grading app. The original copyright notice and [MIT License](LICENSE) are retained. The fork
 provided the initial `.cube` parsing/application, RAW decoding, folder/export plumbing, Look
 derivation, and much of the original test foundation; the current product and package targets are
-Lumo's own.
+Kromora's own.
 
 ---
 
@@ -106,8 +106,8 @@ and become one undo entry when committed; numeric fields and resets use the sett
 
 ### Derive a Look from a JPG
 
-Lumo can manufacture a portable `.cube` Look from a camera RAW and its straight-out-of-camera JPG.
-Use `File ▸ Derive Look from JPG…` (`⌘D`) to choose the pair. Lumo renders the RAW through the
+Kromora can manufacture a portable `.cube` Look from a camera RAW and its straight-out-of-camera JPG.
+Use `File ▸ Derive Look from JPG…` (`⌘D`) to choose the pair. Kromora renders the RAW through the
 same neutral `CIRAWFilter` baseline used by the editor, validates the pair's aspect ratio, aligns
 the images, masks JPEG edges, samples smooth regions, and builds a smoothed 33³ cube.
 
@@ -140,7 +140,7 @@ library Look; the stable derived identity keeps the edit resolving across rescan
 
 ## Persistence and editing state
 
-Edits are isolated per photo and survive navigation and relaunch. Lumo stores a versioned JSON edit
+Edits are isolated per photo and survive navigation and relaunch. Kromora stores a versioned JSON edit
 catalog under the user's Application Support directory; writes are serialized, coalesced during
 slider activity, atomically replaced, and backed up. The store also supports:
 
@@ -148,7 +148,7 @@ slider activity, atomically replaced, and backed up. The store also supports:
 - Copy/paste of all edits between photos, including destinations that were never opened.
 - Recovery from a corrupt primary catalog using the last known-good backup.
 - Relinking a moved source through its stored bookmark/locator and re-keying the record.
-- Schema-version checks that refuse to overwrite edits written by a newer Lumo build.
+- Schema-version checks that refuse to overwrite edits written by a newer Kromora build.
 - A termination flush so queued edits are durable before the app exits.
 
 Source records use stable filesystem identities where available and cache fingerprints include file
@@ -198,7 +198,7 @@ modifiers, and the derive sheet.
 
 ## Build, run, and test
 
-Lumo is a Swift Package; there is no `.xcodeproj` to maintain.
+Kromora is a Swift Package; there is no `.xcodeproj` to maintain.
 
 ### Requirements
 
@@ -229,7 +229,7 @@ SWIFT_FORMAT_BASE=HEAD^ scripts/check-swift-format.sh
 `swift run` launches the bare Swift Package executable. It does not include the bundled asset
 catalog or App Sandbox entitlements, so the app icon and security-scoped bookmark persistence are
 not active in that mode. For bundled app behavior, open `Package.swift` in Xcode, select the
-**Lumo** scheme, and run. The included [`Lumo.entitlements`](Sources/Lumo/Lumo.entitlements) is
+**Kromora** scheme, and run. The included [`Kromora.entitlements`](Sources/Kromora/Kromora.entitlements) is
 configured for user-selected read/write access, read-only access to mounted removable media, and
 app-scope bookmarks.
 
@@ -238,7 +238,7 @@ supported files on mounted removable/ejectable volumes under the removable-media
 does not write to the source volume. The provider still attempts
 `startAccessingSecurityScopedResource()` because a caller may supply a scoped URL, but raw mount
 URLs are normally entitlement-authorized rather than security-scoped. If macOS does not authorize
-a particular volume class from the entitlement alone, Lumo keeps the volume visible, asks the user
+a particular volume class from the entitlement alone, Kromora keeps the volume visible, asks the user
 to select its root in an Open panel, and scans the resulting security-scoped bookmark. Run the full
 Xcode-built app to verify this path; `swift run` does not apply the entitlement.
 
@@ -254,8 +254,8 @@ scripts/ci-tests.sh serial     # required render/UI lane, serial
 ```
 
 RAW-fixture and benchmark methods are deliberately outside the required gate. Run
-`scripts/ci-tests.sh optional` with the documented `LUMO_*` settings; RAW/derive coverage requires
-a separately licensed local fixture directory through `LUMO_RAW_FIXTURE_DIR`, and Metal/AppKit
+`scripts/ci-tests.sh optional` with the documented `KROMORA_*` settings; RAW/derive coverage requires
+a separately licensed local fixture directory through `KROMORA_RAW_FIXTURE_DIR`, and Metal/AppKit
 capture requires a logged-in display. Without those inputs the methods skip with an explanatory
 message. CI builds/verifies a signed app bundle on every push and pull request using the macOS 26
 runner.
@@ -264,22 +264,22 @@ Optional local benchmarks:
 
 ```bash
 # Coalesced edit persistence across 10, 1,000, and 10,000-record catalogs.
-LUMO_PERSISTENCE_BENCHMARK=1 swift test --filter EditPersistenceBenchmarkTests
+KROMORA_PERSISTENCE_BENCHMARK=1 swift test --filter EditPersistenceBenchmarkTests
 
 # Real CAMetalLayer drawable presentation and input-to-presentation latency.
-LUMO_METAL_BENCHMARK=1 swift test --filter MetalPresentationBenchmark/testRealMetalPresentationBenchmark
+KROMORA_METAL_BENCHMARK=1 swift test --filter MetalPresentationBenchmark/testRealMetalPresentationBenchmark
 
 # The same real drawable benchmark using a licensed local RAW fixture.
-LUMO_METAL_BENCHMARK=1 \
-LUMO_METAL_BENCHMARK_RAW=/absolute/path/to/representative.ARW \
+KROMORA_METAL_BENCHMARK=1 \
+KROMORA_METAL_BENCHMARK_RAW=/absolute/path/to/representative.ARW \
 swift test -c release --filter MetalPresentationBenchmark/testRealMetalPresentationBenchmark
 
 # Automated xctrace capture with Points of Interest + Metal System Trace.
-LUMO_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
-scripts/run-lumo-118-capture.sh /absolute/path/to/fixtures/DSC07826.ARW
+KROMORA_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
+scripts/run-kromora-118-capture.sh /absolute/path/to/fixtures/DSC07826.ARW
 
 # Tracing overhead with and without an active Instruments recording.
-LUMO_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark/testMeasureTracingOverhead
+KROMORA_TRACE_BENCHMARK=1 swift test --filter TracingOverheadBenchmark/testMeasureTracingOverhead
 
 ```
 
@@ -296,21 +296,21 @@ and the current matrix.
 
 ## Architecture
 
-The package is split into a thin executable and a testable `LumoKit` library:
+The package is split into a thin executable and a testable `KromoraKit` library:
 
 ```text
 Sources/
-├── Lumo/
-│   ├── LumoApp.swift           # @main app, window, delegate, termination flush
+├── Kromora/
+│   ├── KromoraApp.swift           # @main app, window, delegate, termination flush
 │   ├── Assets.xcassets/        # app icon and accent color
-│   └── Lumo.entitlements       # sandbox file access and bookmarks
-└── LumoKit/
+│   └── Kromora.entitlements       # sandbox file access and bookmarks
+└── KromoraKit/
     ├── Models/                 # value state, source projections, pipeline, GPU/cache resources
     ├── ViewModels/             # AppViewModel and focused source/persistence/export coordinators
     └── Views/                  # Library, canvas, filmstrip, inspectors, menus, status bar
 
 Tests/
-└── LumoKitTests/               # model, pipeline, integration, regression, and opt-in benchmarks
+└── KromoraKitTests/               # model, pipeline, integration, regression, and opt-in benchmarks
 
 docs/                           # architecture, validation, profiling, and audit records
 ```
@@ -339,22 +339,22 @@ The important boundaries are:
   and actual drawable presentation so profiling does not confuse “render finished” with “user saw
   the frame.”
 
-Useful starting points are [`EditDocument`](Sources/LumoKit/Models/EditDocument.swift),
-[`RenderPipeline`](Sources/LumoKit/Models/RenderPipeline.swift),
-[`RenderEngine`](Sources/LumoKit/Models/RenderEngine.swift), and
-[`EditDocumentStore`](Sources/LumoKit/Models/EditDocumentStore.swift).
+Useful starting points are [`EditDocument`](Sources/KromoraKit/Models/EditDocument.swift),
+[`RenderPipeline`](Sources/KromoraKit/Models/RenderPipeline.swift),
+[`RenderEngine`](Sources/KromoraKit/Models/RenderEngine.swift), and
+[`EditDocumentStore`](Sources/KromoraKit/Models/EditDocumentStore.swift).
 
 ## Preparing for the App Store
 
-1. Build and verify the product icon and signed bundle with [`scripts/build-macos-app.sh`](scripts/build-macos-app.sh), [`scripts/verify-app-icon.sh`](scripts/verify-app-icon.sh), and [`scripts/verify-app-signature.sh`](scripts/verify-app-signature.sh); see [`docs/LUMO_ICON.md`](docs/LUMO_ICON.md) for the source, safe area, and review checklist. Packaging renders into disposable `.build/` staging paths and does not modify tracked source files.
-   Release signing uses `LUMO_CODESIGN_IDENTITY` (or `CODE_SIGN_IDENTITY`) and optionally `LUMO_PROVISIONING_PROFILE` (or `PROVISIONING_PROFILE`). If neither is set, the script uses an ad-hoc signature for local/CI structural verification; configure the release identity and profile in CI for distribution builds.
+1. Build and verify the product icon and signed bundle with [`scripts/build-macos-app.sh`](scripts/build-macos-app.sh), [`scripts/verify-app-icon.sh`](scripts/verify-app-icon.sh), and [`scripts/verify-app-signature.sh`](scripts/verify-app-signature.sh); see [`docs/KROMORA_ICON.md`](docs/KROMORA_ICON.md) for the source, safe area, and review checklist. Packaging renders into disposable `.build/` staging paths and does not modify tracked source files.
+   Release signing uses `KROMORA_CODESIGN_IDENTITY` (or `CODE_SIGN_IDENTITY`) and optionally `KROMORA_PROVISIONING_PROFILE` (or `PROVISIONING_PROFILE`). If neither is set, the script uses an ad-hoc signature for local/CI structural verification; configure the release identity and profile in CI for distribution builds.
 2. Set the Bundle Identifier and Team in Xcode's Signing & Capabilities.
 3. Keep App Sandbox enabled with the included entitlements.
 4. Use **Product ▸ Archive ▸ Distribute App ▸ App Store Connect**.
 
 ## License
 
-Lumo is released under the [MIT License](LICENSE). The LUTzy fork attribution and original license
+Kromora is released under the [MIT License](LICENSE). The LUTzy fork attribution and original license
 terms are preserved as described above.
 
 <div align="center">

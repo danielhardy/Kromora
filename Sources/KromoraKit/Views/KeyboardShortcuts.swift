@@ -1,0 +1,324 @@
+import SwiftUI
+import AppKit
+
+//
+// SwiftUI's `.onKeyPress` modifier only fires when the modified view (or a
+// descendant) has focus. Inside a NavigationSplitView the sidebar list eats
+// focus when clicked and the detail pane has nothing focusable by default, so
+// `.onKeyPress` was effectively never firing. We use an NSEvent local monitor
+// instead, which catches every key event at the window level regardless of
+// which subview has focus. Menu shortcuts (⌘-anything) still go through the
+// standard menu system — we explicitly let those events pass through.
+
+struct KeyboardShortcuts: ViewModifier {
+    @ObservedObject var viewModel: AppViewModel
+    @State private var monitor: KeyMonitor?
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear {
+                if monitor == nil {
+                    monitor = KeyMonitor(viewModel: viewModel)
+                }
+            }
+            .onDisappear {
+                monitor?.stop()
+                monitor = nil
+            }
+    }
+}
+
+/// Keyboard routing rules that do not depend on the view model. Keeping these small policies pure
+/// makes the focus and system-shortcut contract testable without synthesizing an AppKit window.
+enum KeyMonitorPolicy {
+    static func textInputOwnsKeyboard(_ responder: NSResponder?) -> Bool {
+        responder is NSText
+    }
+
+    /// Native controls have their own keyboard contract. In particular, a focused slider must
+    /// keep arrow keys for value changes, a text field must keep letters/digits for editing, and a
+    /// focused button or picker must keep Space/Return for activation. The global monitor should
+    /// only route keys when the canvas or library itself owns focus.
+    static func controlOwnsKeyboard(_ responder: NSResponder?) -> Bool {
+        textInputOwnsKeyboard(responder) || responder is NSControl
+    }
+
+    static func globalShortcutsOwnKeyboard(_ responder: NSResponder?) -> Bool {
+        !controlOwnsKeyboard(responder)
+    }
+
+    static func isPlainSpace(modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.intersection(.deviceIndependentFlagsMask).isEmpty
+    }
+
+    static func hasSystemModifier(_ modifiers: NSEvent.ModifierFlags) -> Bool {
+        let system = modifiers.intersection(.deviceIndependentFlagsMask)
+        return system.contains(.command) || system.contains(.option) || system.contains(.control)
+    }
+
+    /// Character shortcuts are deliberately plain-key gestures. Shift/Command/Option/Control
+    /// combinations belong to the system or the focused control and must reach AppKit unchanged.
+    static func isPlainCharacterShortcut(modifiers: NSEvent.ModifierFlags) -> Bool {
+        modifiers.intersection(.deviceIndependentFlagsMask).isEmpty && !modifiers.contains(.shift)
+    }
+}
+
+/// Owns an NSEvent local monitor for the lifetime of the main content view.
+@MainActor
+final class KeyMonitor {
+    private var token: Any?
+    private weak var viewModel: AppViewModel?
+    private let removeMonitor: (Any) -> Void
+
+    /// True while a monitor is installed. Internal so the lifecycle that replaced `deinit` can be
+    /// asserted at all.
+    var isMonitoring: Bool { token != nil }
+
+    /// - Parameter removeMonitor: how to tear the monitor down. Injectable **only** because there is
+    ///   no way to observe from outside AppKit whether `NSEvent.removeMonitor` was actually called —
+    ///   `isMonitoring` alone would pass against a `stop()` that dropped the token and leaked the
+    ///   monitor, which is precisely the failure this step's teardown change could introduce. A
+    ///   mutation demonstrated that gap. Same seam as `RenderEngine.init(context:)`.
+    init(
+        viewModel: AppViewModel,
+        removeMonitor: @escaping (Any) -> Void = { NSEvent.removeMonitor($0) }
+    ) {
+        self.viewModel = viewModel
+        self.removeMonitor = removeMonitor
+        self.token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
+            return self?.handle(event) ?? event
+        }
+    }
+
+    /// Remove the monitor.
+    ///
+    /// **Explicit rather than in `deinit`, because Step 8 turned Swift 6 language mode on.** A
+    /// `deinit` is `nonisolated` — it can run on any thread, so the compiler refuses to let it touch
+    /// `token`, which is the `Any?` AppKit hands back and is not `Sendable`. The escape hatches are
+    /// `nonisolated(unsafe)` or an `@unchecked Sendable` box, and this module does not use either.
+    ///
+    /// Losing the `deinit` safety net costs nothing real and fixes something: `NSEvent.removeMonitor`
+    /// is an AppKit call that wants the main thread, and reaching it from a `deinit` that could run
+    /// anywhere was already the wrong shape. `KeyboardShortcuts.onDisappear` owns the lifetime now,
+    /// on the actor that owns the window. Idempotent, so calling it twice is harmless.
+    func stop() {
+        if let token { removeMonitor(token) }
+        token = nil
+    }
+
+    private func handle(_ event: NSEvent) -> NSEvent? {
+        guard let vm = viewModel else { return event }
+
+        // If a sheet is up, let the sheet's text fields and buttons handle keys.
+        if vm.derive.isSheetPresented { return event }
+
+        // Don't hijack keys while editing text (the search field, etc.) — a
+        // focused SwiftUI TextField makes the window's field editor (an NSText)
+        // the first responder.
+        if !KeyMonitorPolicy.globalShortcutsOwnKeyboard(NSApp.keyWindow?.firstResponder) {
+            return event
+        }
+
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let isDown = event.type == .keyDown
+
+        // Command-A is the one grid command handled here; other Command-modified events belong to
+        // the menu bar.
+        if mods.contains(.command) {
+            if isDown,
+               vm.navigation.isGrid,
+               event.charactersIgnoringModifiers?.lowercased() == "a" {
+                vm.collection.selectAll()
+                return nil
+            }
+            if isDown, event.charactersIgnoringModifiers?.lowercased() == "z" {
+                if mods.contains(.shift) {
+                    if vm.canRedo {
+                        vm.redo()
+                        return nil
+                    }
+                } else if vm.canUndo {
+                    vm.undo()
+                    return nil
+                } else if vm.undoCullingChange() {
+                    return nil
+                }
+            }
+            return event
+        }
+
+        // Option- and Control-modified keys belong to AppKit, input sources, or accessibility
+        // tools. They are never Kromora's global navigation/comparison shortcuts.
+        if KeyMonitorPolicy.hasSystemModifier(mods) { return event }
+
+        // Hardware key codes (US layout independent for arrows/space).
+        // ↑/↓ audition Looks; ←/→ step through the source files.
+        switch event.keyCode {
+        case 53: // Escape — cancel a mask gesture first, then leave the masking workspace/tool.
+            guard isDown else { return event }
+            if vm.maskInteractionState.hasDraft {
+                vm.cancelMaskGesture()
+            } else if vm.inspectorState.isMaskingWorkspacePresented,
+                      vm.maskInteractionState.activeTool != .selection {
+                vm.setMaskTool(.selection)
+            } else if vm.inspectorState.isMaskingWorkspacePresented {
+                vm.closeMaskingWorkspace()
+            } else {
+                return event
+            }
+            return nil
+        case 49:  // Space — hold to compare original
+            guard KeyMonitorPolicy.isPlainSpace(modifiers: mods) else { return event }
+            if vm.inspectorState.isMaskingWorkspacePresented,
+               vm.maskInteractionState.activeTool != .selection {
+                vm.maskInteractionState.setSpacePanning(isDown)
+                return nil
+            }
+            // A one-off or untouched photo has no meaningful before/after surface. Let Space
+            // continue through in that state instead of consuming a key that did nothing.
+            guard vm.isComparisonAvailable else { return event }
+            _ = vm.showOriginal(isDown)
+            return nil
+        case 126: // Up arrow — previous Look
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 0, dy: -1, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            if isDown { vm.selectPreviousLook() }
+            return nil
+        case 125: // Down arrow — next Look
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 0, dy: 1, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            if isDown { vm.selectNextLook() }
+            return nil
+        case 123: // Left arrow — previous image
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: -1, dy: 0, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            guard vm.collection.isActive else { return event }
+            if isDown {
+                if vm.navigation.isGrid {
+                    vm.collection.selectPrevious()
+                } else {
+                    vm.selectPreviousImage()
+                }
+            }
+            return nil
+        case 124: // Right arrow — next image
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 1, dy: 0, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            guard vm.collection.isActive else { return event }
+            if isDown {
+                if vm.navigation.isGrid {
+                    vm.collection.selectNext()
+                } else {
+                    vm.selectNextImage()
+                }
+            }
+            return nil
+        case 36: // Return — open the active grid item in Edit
+            if isDown, vm.navigation.isGrid {
+                vm.openActiveCollectionImage()
+                return nil
+            }
+            return event
+        default:
+            break
+        }
+
+        // Character keys (key-down only)
+        guard isDown, let chars = event.charactersIgnoringModifiers?.lowercased() else {
+            return event
+        }
+        if let command = LibraryCullingCommand.parse(
+            characters: chars, hasModifiers: !mods.isEmpty
+        ) {
+            // Culling belongs to a browsable collection. A one-off image opened outside the
+            // library should not swallow P/X/rating keys when there is no focused asset to edit.
+            guard vm.collection.isActive else { return event }
+            switch command {
+            case .pick:
+                vm.setFocusedFlag(.pick, advance: true)
+            case .reject:
+                vm.setFocusedFlag(.reject, advance: true)
+            case .clearFlag:
+                vm.setFocusedFlag(.none, advance: true)
+            case .clearRating:
+                vm.setFocusedRating(0)
+            case .rating(let rating):
+                vm.setFocusedRating(rating)
+            }
+            return nil
+        }
+        switch chars {
+        case "g":
+            if vm.navigate(to: .grid) { return nil }
+            return event
+        case "e":
+            if vm.inspectorState.isMaskingWorkspacePresented {
+                vm.setMaskTool(.erase)
+                return nil
+            }
+            if vm.navigate(to: .edit) { return nil }
+            return event
+        case "b":
+            guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
+            vm.setMaskTool(.brush)
+            return nil
+        case "l":
+            guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
+            vm.setMaskTool(.linear)
+            return nil
+        case "r":
+            guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
+            vm.setMaskTool(.radial)
+            return nil
+        case "v":
+            guard KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods) else { return event }
+            return vm.toggleSideBySide() ? nil : event
+        case "[":
+            if vm.inspectorState.isMaskingWorkspacePresented,
+               (vm.maskInteractionState.activeTool == .brush
+                || vm.maskInteractionState.activeTool == .erase) {
+                if mods.contains(.shift) {
+                    vm.maskInteractionState.adjustBrushFeather(by: -0.05)
+                } else {
+                    vm.maskInteractionState.adjustBrushRadius(by: -0.005)
+                }
+                return nil
+            }
+            guard vm.collection.isActive else { return event }
+            if vm.navigation.isGrid {
+                vm.collection.selectPrevious()
+            } else {
+                vm.selectPreviousImage()
+            }
+            return nil
+        case "]":
+            if vm.inspectorState.isMaskingWorkspacePresented,
+               (vm.maskInteractionState.activeTool == .brush
+                || vm.maskInteractionState.activeTool == .erase) {
+                if mods.contains(.shift) {
+                    vm.maskInteractionState.adjustBrushFeather(by: 0.05)
+                } else {
+                    vm.maskInteractionState.adjustBrushRadius(by: 0.005)
+                }
+                return nil
+            }
+            guard vm.collection.isActive else { return event }
+            if vm.navigation.isGrid {
+                vm.collection.selectNext()
+            } else {
+                vm.selectNextImage()
+            }
+            return nil
+        default:
+            return event
+        }
+    }
+}

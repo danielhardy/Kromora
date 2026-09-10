@@ -1,12 +1,12 @@
-# Lumo — code review and guardrail audit
+# Kromora — code review and guardrail audit
 
-_Historical findings reconciled with the current Lumo package, CI, and `PHASE2_SPEC.md` on September
+_Historical findings reconciled with the current Kromora package, CI, and `PHASE2_SPEC.md` on September
 3, 2026._
 
 The original review found no tests and a build-only CI job. That baseline is historical: the current
 package has **958 XCTest methods**, a checked-in Swift-format policy, changed-file linting, separate
 parallel/serial test lanes, signed bundle verification, and an application smoke path. The findings below
-retain their historical evidence while current status and names use Lumo's present architecture.
+retain their historical evidence while current status and names use Kromora's present architecture.
 
 Findings are marked **[fixed]** where this pass resolved them and **[open]** where they are recorded for
 later. Severity is about user impact, not effort.
@@ -167,7 +167,7 @@ one remaining site, deliberately deferred out of that pass's scope.
 
 **[open]** unless noted.
 
-- ~~**No tests, anywhere.**~~ **[fixed]** — the package is split into `LumoKit` plus a thin `@main`
+- ~~**No tests, anywhere.**~~ **[fixed]** — the package is split into `KromoraKit` plus a thin `@main`
   executable, with 958 XCTest methods and `swift test` wired into CI. Generated fixtures are never
   committed; licensed camera files are local-only. Coverage is deliberately concentrated where the
   review found real defects: the `.cube`
@@ -252,7 +252,7 @@ one remaining site, deliberately deferred out of that pass's scope.
   ~231 lines: the layout and the toolbar, nothing else.
 - `HistogramChart` lives at the bottom of `InfoInspectorView.swift`, away from `Histogram.swift`.
 - **`docs/PHASE2_SPEC.md` is a living implementation record** rather than the original 4,180-line
-  multi-agent output. It is kept reconciled with the current Lumo architecture and test inventory;
+  multi-agent output. It is kept reconciled with the current Kromora architecture and test inventory;
   the original contradictory draft remains in git history. It still records the old meta-commentary
   ("FABRICATED PRE-EXISTING BUG (verified false)"). Its actual decisions — the
   `EditDocument` value spine, the `RenderPipeline.buildImage` fold, the `actor RenderEngine`, the
@@ -280,7 +280,7 @@ so the README was the only wrong copy of the keymap.
 
 ## 5. Suggested order for the follow-up work
 
-1. ~~**`LumoKit` split + test target.**~~ **Done** — see §2.
+1. ~~**`KromoraKit` split + test target.**~~ **Done** — see §2.
 2. ~~**Split `AppViewModel` and the rest of `ContentView`.**~~ **Done** — see §3.
 3. ~~**Distil `PHASE2_SPEC.md`**~~ **Done** — 292 lines, §6 of it is the ordered migration.
 
@@ -300,13 +300,13 @@ Worth knowing before leaning on the suite:
 - **`RecipeExtractor.derive` end-to-end is tested only where a RAW exists.** Phase 2 Step 9 added
   `DeriveInvarianceTests`, which runs a real derive on a local licensed RAW/JPG pair and checks the
   cube lands the same way through the new pipeline as it does over `developRAWNeutral`. **It skips
-  when `LUMO_RAW_FIXTURE_DIR` is not supplied** — read the deterministic lane's green tick as saying
+  when `KROMORA_RAW_FIXTURE_DIR` is not supplied** — read the deterministic lane's green tick as saying
   nothing about derive. The pure pieces (`buildCube`, `workingSize`, the error messages) are covered
   everywhere; alignment and the sample loop are covered locally only. A small synthetic DNG remains
   the only way to close that, and is still not worth the effort of generating one.
 - **No SwiftUI view tests.** Views are exercised only insofar as the view model is.
 - **The `CIRAWFilter` half of `RAWDevelopSettings` only runs where a RAW exists.** Several tests build
-  a real filter from `Fixtures.localRAWURL` — a file under `LUMO_RAW_FIXTURE_DIR` — and `XCTSkip` when
+  a real filter from `Fixtures.localRAWURL` — a file under `KROMORA_RAW_FIXTURE_DIR` — and `XCTSkip` when
   there is none. The value semantics are covered everywhere; the framework wiring runs in the
   separately documented optional RAW lane when a licensed fixture is available.
 

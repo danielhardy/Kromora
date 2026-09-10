@@ -1,7 +1,7 @@
 # Starter Looks
 
-Lumo ships a deliberately small, read-only starter library in
-`Sources/LumoKit/Resources/StarterLooks`. The library currently contains four original procedural
+Kromora ships a deliberately small, read-only starter library in
+`Sources/KromoraKit/Resources/StarterLooks`. The library currently contains four original procedural
 `.cube` assets:
 
 | Category | Look |
@@ -12,7 +12,7 @@ Lumo ships a deliberately small, read-only starter library in
 | Warm slide-inspired | Warm Slide |
 
 The names are descriptive and do not identify or imply endorsement by a camera manufacturer or film
-stock. The transforms are authored in-house and distributed under Lumo's MIT License. No
+stock. The transforms are authored in-house and distributed under Kromora's MIT License. No
 third-party attribution is required; the user-visible acknowledgement is stored in
 `manifest.json` and shown below the bundled Looks in the Look inspector.
 

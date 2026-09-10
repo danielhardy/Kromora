@@ -8,7 +8,7 @@ cd "$project_root"
 # deterministic model assertions and real-RAW methods, so the latter are listed by method below.
 # The verify mode treats optional methods as optional before assigning an overlapping method to the
 # serialized render/UI lane.
-serial_filter='(AnalysisDebugPanelTests|BundledLookTests|ColorGradingTests|ColorMixerTests|ColorPipelineTests|CollectionProjectionPerformanceTests|CropPipelineTests|EffectsPipelineTests|HistogramTests|ImageLoadingTests|InfoSemanticMaskRenderingTests|KeyMonitorTests|LocalMaskRenderingTests|LookInspectorViewTests|LookLUTExportTests|LookPreviewTests|LumoWindowAppearanceControllerTests|MenuCommandTests|PersonSignalWarmingTests|PhotoIntelligenceCorpusTests|PhotosDeliveryTests|PhotosImportTests|PreviewCutoverTests|PreviewSurfaceTests|RenderCacheTests|RenderEngineInteractivePrecisionTests|RenderEngineTests|RenderPipelineTests|RenderStackTests|ThumbnailTests|VisionSemanticMaskProviderTests|WorkingSpaceTests)'
+serial_filter='(AnalysisDebugPanelTests|BundledLookTests|ColorGradingTests|ColorMixerTests|ColorPipelineTests|CollectionProjectionPerformanceTests|CropPipelineTests|EffectsPipelineTests|HistogramTests|ImageLoadingTests|InfoSemanticMaskRenderingTests|KeyMonitorTests|LocalMaskRenderingTests|LookInspectorViewTests|LookLUTExportTests|LookPreviewTests|KromoraWindowAppearanceControllerTests|MenuCommandTests|PersonSignalWarmingTests|PhotoIntelligenceCorpusTests|PhotosDeliveryTests|PhotosImportTests|PreviewCutoverTests|PreviewSurfaceTests|RenderCacheTests|RenderEngineInteractivePrecisionTests|RenderEngineTests|RenderPipelineTests|RenderStackTests|ThumbnailTests|VisionSemanticMaskProviderTests|WorkingSpaceTests)'
 
 # These tests need a licensed external RAW/JPG, a logged-in display, or deliberately opt-in
 # benchmark settings. They are not part of the required CI gate. Keep the method-level entries
@@ -26,7 +26,7 @@ usage() {
 audit_lanes() {
     local counts
     counts="$(swift test list | awk -v serial="$serial_filter" -v optional="$optional_filter" '
-        /^LumoKitTests\..+\// {
+        /^KromoraKitTests\..+\// {
             total++
             if ($0 ~ optional) {
                 optional_count++
@@ -77,21 +77,21 @@ case "${1:-}" in
         skip_filter="($serial_filter|$optional_filter)"
         run_lane "deterministic-parallel" \
             "swift test --parallel --skip '$skip_filter'" \
-            env LUMO_TEST_ISOLATION=1 swift test --parallel --skip "$skip_filter"
+            env KROMORA_TEST_ISOLATION=1 swift test --parallel --skip "$skip_filter"
         ;;
     serial)
         audit_lanes
         run_lane "render-ui-serial" \
             "swift test --no-parallel --filter '$serial_filter' --skip '$optional_filter'" \
-            env LUMO_TEST_ISOLATION=1 \
+            env KROMORA_TEST_ISOLATION=1 \
             swift test --no-parallel --filter "$serial_filter" --skip "$optional_filter"
         ;;
     optional)
         audit_lanes
-        print "Requirements: LUMO_RAW_FIXTURE_DIR for RAW/JPG coverage; benchmark-specific LUMO_* settings; a logged-in display for Metal/AppKit capture."
+        print "Requirements: KROMORA_RAW_FIXTURE_DIR for RAW/JPG coverage; benchmark-specific KROMORA_* settings; a logged-in display for Metal/AppKit capture."
         run_lane "optional-raw-benchmarks" \
             "swift test --no-parallel --filter '$optional_filter'" \
-            env LUMO_TEST_ISOLATION=1 swift test --no-parallel --filter "$optional_filter"
+            env KROMORA_TEST_ISOLATION=1 swift test --no-parallel --filter "$optional_filter"
         ;;
     *)
         usage

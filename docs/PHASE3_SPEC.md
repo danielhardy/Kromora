@@ -1,4 +1,4 @@
-# Lumo Phase 3 — Photo Intelligence, shared mask foundation & subject-aware Auto
+# Kromora Phase 3 — Photo Intelligence, shared mask foundation & subject-aware Auto
 
 **Status:** not started. This is the implementation plan for a reusable, deterministic
 photo-understanding layer, built as a first-class subsystem rather than as "the code behind the
@@ -12,11 +12,11 @@ step, not here.
 
 ## 1. What Phase 3 is for
 
-Lumo ships one Auto today: `AutoAdjustmentSettings` / `AutoImageStatistics` /
+Kromora ships one Auto today: `AutoAdjustmentSettings` / `AutoImageStatistics` /
 `AutoAdjustmentAnalyzer` in
-[`Sources/LumoKit/Models/AutoAdjustment.swift`](../Sources/LumoKit/Models/AutoAdjustment.swift),
+[`Sources/KromoraKit/Models/AutoAdjustment.swift`](../Sources/KromoraKit/Models/AutoAdjustment.swift),
 wired up in `AppViewModel.runAutoAdjustment()`
-([`AppViewModel.swift:861`](../Sources/LumoKit/ViewModels/AppViewModel.swift)). It reads a 256-bin
+([`AppViewModel.swift:861`](../Sources/KromoraKit/ViewModels/AppViewModel.swift)). It reads a 256-bin
 luma/RGB histogram from `RenderEngine.histogram(...)` and sets global Light + Color values. It has
 **no notion of subject, face, or background** — every pixel counts equally. That is Tier 0 in the
 tier scheme below, and Phase 3 does not replace it; Phase 3 adds the tiers above it and, only in
@@ -77,7 +77,7 @@ downstream consequence: "Select Subject" and similar masking-UI affordances are 
 when they're built — they expose capabilities Auto already required and proved.
 
 **The rule that matters most, otherwise unchanged:** the Auto engine never imports Vision or Core
-Image types. It consumes `PhotoAnalysis`/`RegionMask`, Lumo-owned `Sendable, Codable` values. This
+Image types. It consumes `PhotoAnalysis`/`RegionMask`, Kromora-owned `Sendable, Codable` values. This
 mirrors the pattern Phase 2 already established for rendering (`EditDocument` → pure
 `RenderPipeline.buildImage` → `actor RenderEngine`, see `PHASE2_SPEC.md` §3).
 

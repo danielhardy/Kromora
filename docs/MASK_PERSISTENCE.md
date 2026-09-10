@@ -1,7 +1,7 @@
 # Mask persistence
 
 `MaskStore` is a durable cache, separate from edit persistence. The permanent design is the
-sidecar layout under `~/Library/Application Support/Lumo/Masks/`:
+sidecar layout under `~/Library/Application Support/Kromora/Masks/`:
 
 - `mask-<digest>.json` contains only the exact `MaskCacheKey` and pixel dimensions.
 - `mask-<digest>.bin` contains the corresponding raw `Float32` pixel buffer.

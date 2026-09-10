@@ -1,6 +1,6 @@
 # CLAUDE.md — project guidance for AI agents
 
-Lumo is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**): it develops RAW through `CIRAWFilter`, applies tone/colour adjustments and `.cube` LUTs through one Metal-backed render pipeline, and can derive a `.cube` LUT from a (RAW, JPG) pair.
+Kromora is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**): it develops RAW through `CIRAWFilter`, applies tone/colour adjustments and `.cube` LUTs through one Metal-backed render pipeline, and can derive a `.cube` LUT from a (RAW, JPG) pair.
 
 ## Build / run / test
 
@@ -28,8 +28,8 @@ If CI ever needs to move back to an older image, that reference is the thing tha
 
 ## Swift 6 language mode is on, for every target
 
-`Package.swift` is a 6.0 tools version and declares `.swiftLanguageMode(.v6)` on `LumoKit`, `Lumo`
-and `LumoKitTests`. Data-race safety is **errors, not warnings** — Phase 2 Step 8 turned it on after
+`Package.swift` is a 6.0 tools version and declares `.swiftLanguageMode(.v6)` on `KromoraKit`, `Kromora`
+and `KromoraKitTests`. Data-race safety is **errors, not warnings** — Phase 2 Step 8 turned it on after
 Steps 4–7 removed the last shared mutable state, and the module compiles with **zero** diagnostics
 and **zero** escape hatches: no `@unchecked Sendable`, no `nonisolated(unsafe)`, no
 `@preconcurrency`. `PackageSettingsTests` fails if any of that changes, because none of it is
@@ -53,12 +53,12 @@ Practical consequences when writing code here:
 
 The package is split so the app's code is testable (`@testable` can't import an executable target):
 
-- `Sources/LumoKit/` — everything of substance (Models, ViewModels, Views). Only `ContentView` and
-  `LumoCommands` are `public`; keep the rest internal.
-- `Sources/Lumo/` — the `@main` entry point, `AppDelegate`, and the asset catalog. Nothing else belongs here.
-- `Tests/LumoKitTests/` — XCTest. **Fixtures are generated, never committed** (`Fixtures.swift` builds
+- `Sources/KromoraKit/` — everything of substance (Models, ViewModels, Views). Only `ContentView` and
+  `KromoraCommands` are `public`; keep the rest internal.
+- `Sources/Kromora/` — the `@main` entry point, `AppDelegate`, and the asset catalog. Nothing else belongs here.
+- `Tests/KromoraKitTests/` — XCTest. **Fixtures are generated, never committed** (`Fixtures.swift` builds
   `.cube` files and orientation-tagged JPEGs into a temp dir). Licensed camera files for the opt-in
-  RAW lane live outside the checkout and are selected with `LUMO_RAW_FIXTURE_DIR`.
+  RAW lane live outside the checkout and are selected with `KROMORA_RAW_FIXTURE_DIR`.
 
 When a test needs something currently `private`, widen it to internal with a comment saying why —
 `RecipeExtractor.buildCube` and `workingSize` are the precedent.
