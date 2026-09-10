@@ -231,7 +231,7 @@ extension AutoEnhancementResult {
             validationMeasurements: .init(score: coordinator.selectedScore ?? .acceptable),
             candidateProvenance: coordinator.provenance,
             fingerprint: fingerprint,
-            generatedLayerIDs: coordinator.document.localAdjustments.map(\.id)
+            generatedLayerIDs: coordinator.document.localAdjustments.filter(\.isAutoOwned).map(\.id)
         )
     }
 }
