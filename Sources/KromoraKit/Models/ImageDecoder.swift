@@ -85,8 +85,13 @@ enum ImageDecoder {
             throw ImageError.cannotLoad(name)
         }
 
-        let orientation = (properties[kCGImagePropertyOrientation] as? NSNumber)?.intValue ?? 1
-        let swapsAxes = [5, 6, 7, 8].contains(orientation)
+        let orientation = exifOrientation(in: properties)
+        let swapsAxes = [
+            CGImagePropertyOrientation.leftMirrored,
+            .left,
+            .rightMirrored,
+            .right,
+        ].contains(orientation)
         return swapsAxes
             ? CGSize(width: storedHeight, height: storedWidth)
             : CGSize(width: storedWidth, height: storedHeight)
