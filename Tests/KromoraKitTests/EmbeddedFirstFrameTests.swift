@@ -103,6 +103,18 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         }
 
         XCTAssertEqual(viewModel.statusMessage, "Loading first.ARW...")
+        XCTAssertEqual(
+            viewModel.previewSurface.image?.extent.size, CGSize(width: 16, height: 12),
+            "the camera JPEG must keep its own pixels; native rasterization stalls every switch"
+        )
+        XCTAssertEqual(
+            viewModel.previewSurface.presentationImageExtent,
+            CGRect(origin: .zero, size: CGSize(width: 4000, height: 3000))
+        )
+        XCTAssertTrue(
+            viewModel.previewSurface.coversPresentationExtent,
+            "Fit/Fill must stretch the JPEG across the native RAW frame"
+        )
         XCTAssertNotNil(viewModel.sourceImage, "the transparent source marker remains authoritative")
         XCTAssertNil(viewModel.histogram, "supporting work must wait for the settled confirmation")
         let thumbnailRequestCount = await fake.thumbnailRequests.count
@@ -115,6 +127,10 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             viewModel.previewState == .ready
         }
         XCTAssertGreaterThan(viewModel.previewSurface.revision, provisionalRevision)
+        XCTAssertTrue(
+            viewModel.previewSurface.coversPresentationExtent,
+            "a complete settled frame is a stand-in for Fit, even when the raster is smaller than native"
+        )
         XCTAssertEqual(
             viewModel.statusMessage,
             "first.ARW  4000\u{00D7}3000",
@@ -186,6 +202,11 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         try await waitUntil("the second provisional frame") {
             viewModel.previewState == .loading && viewModel.previewSurface.image?.extent.width == 5
         }
+        XCTAssertTrue(viewModel.previewSurface.coversPresentationExtent)
+        XCTAssertEqual(
+            viewModel.previewSurface.presentationImageExtent?.size,
+            CGSize(width: 4000, height: 3000)
+        )
         let secondProvisionalRevision = viewModel.previewSurface.revision
 
         // Complete A after B is visible. The cancelled extraction still returns its late JPEG,

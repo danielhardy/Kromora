@@ -36,6 +36,32 @@ final class CanvasNavigationTests: XCTestCase {
         XCTAssertEqual(transform.origin.y, 0, accuracy: 0.000_001)
     }
 
+    func testFitCentersAPortraitImageInALandscapeViewport() {
+        let navigation = CanvasNavigation()
+        let portrait = CGRect(x: 0, y: 0, width: 200, height: 400)
+        let viewport = CGSize(width: 400, height: 200)
+        let transform = navigation.transform(imageExtent: portrait, viewportSize: viewport)
+
+        XCTAssertEqual(transform.scale, 0.5, accuracy: 0.000_001)
+        XCTAssertEqual(transform.imageSize, CGSize(width: 100, height: 200))
+        XCTAssertEqual(transform.origin.x, 150, accuracy: 0.000_001)
+        XCTAssertEqual(transform.origin.y, 0, accuracy: 0.000_001)
+    }
+
+    func testFillCoversALandscapeViewportWithAPortraitImage() {
+        var navigation = CanvasNavigation()
+        navigation.fill()
+        let portrait = CGRect(x: 0, y: 0, width: 200, height: 400)
+        let viewport = CGSize(width: 400, height: 200)
+        let transform = navigation.transform(imageExtent: portrait, viewportSize: viewport)
+
+        XCTAssertEqual(transform.scale, 2, accuracy: 0.000_001)
+        XCTAssertEqual(transform.imageSize.width, viewport.width, accuracy: 0.000_001)
+        XCTAssertGreaterThan(transform.imageSize.height, viewport.height)
+        XCTAssertEqual(transform.origin.x, 0, accuracy: 0.000_001)
+        XCTAssertLessThan(transform.origin.y, 0)
+    }
+
     func testPanIsClampedToKeepTheImageCoveringTheViewport() {
         var navigation = CanvasNavigation()
         navigation.setZoom(4)

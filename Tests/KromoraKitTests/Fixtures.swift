@@ -575,7 +575,7 @@ class TempDirectoryTestCase: XCTestCase {
         previewDiskCacheDirectory: URL? = nil,
         previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
-            Thumbnails.generate(from: url, maxPixelSize: 1600)
+            Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         }
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults

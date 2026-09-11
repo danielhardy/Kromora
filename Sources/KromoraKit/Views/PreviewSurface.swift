@@ -27,6 +27,10 @@ final class PreviewSurface: ObservableObject {
     @Published private(set) var revision: UInt64 = 0
     private(set) var image: CIImage?
     private(set) var presentationImageExtent: CGRect?
+    /// When true, a smaller texture is a stand-in for the whole `presentationImageExtent`
+    /// (the camera JPEG first frame). Fit/Fill then fill the canvas instead of treating
+    /// the JPEG as a top-left ROI of the native RAW. Settled ROI previews leave this false.
+    private(set) var coversPresentationExtent = false
     private(set) var space: WorkingSpace = .current
     /// The last image known to have made it through the presentation command buffer. Production
     /// frames are already completed texture-backed images; the confirmation still matters because
@@ -40,6 +44,7 @@ final class PreviewSurface: ObservableObject {
     private var lastValidPresentationTexture: MTLTexture?
     private var lastValidPresentationTextureExtent: CGRect?
     private var lastValidPresentationImageExtent: CGRect?
+    private var lastValidCoversPresentationExtent = false
     private var lastValidSpace: WorkingSpace = .current
     private var lastValidDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
     private var currentDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
@@ -102,6 +107,7 @@ final class PreviewSurface: ObservableObject {
                  detailIdentity: PreviewFrameIdentity? = nil,
                  detailFactor: CGFloat? = nil,
                  presentationImageExtent: CGRect? = nil,
+                 coversPresentationExtent: Bool = false,
                  onPresented: (() -> Void)? = nil) -> Bool {
         guard let image,
               image.extent.width > 0, image.extent.height > 0,
@@ -121,7 +127,11 @@ final class PreviewSurface: ObservableObject {
             return false
         }
         self.image = image
-        self.presentationImageExtent = presentationImageExtent
+        self.presentationImageExtent = Self.presentationExtentMatchingPixelAxes(
+            planned: presentationImageExtent, pixels: image.extent,
+            covers: coversPresentationExtent
+        )
+        self.coversPresentationExtent = coversPresentationExtent
         self.space = space
         // The new publication must not sample the previous frame's texture. Until the async
         // materialization completes, draw() intentionally takes the CI fallback path for this
@@ -175,8 +185,69 @@ final class PreviewSurface: ObservableObject {
         requestDisplay()
         return true
     }
+    /// A complete frame must keep the pixels' landscape/portrait axes. Stretching a 4000×6000
+    /// photo onto a 3:2 planner rectangle fills the window by distorting, and Fill then has no
+    /// tall frame left to zoom into.
+    fileprivate static func presentationExtentMatchingPixelAxes(
+        planned: CGRect?, pixels: CGRect, covers: Bool
+    ) -> CGRect? {
+        guard covers, let planned,
+              planned.width > 1, planned.height > 1,
+              pixels.width > 1, pixels.height > 1,
+              planned.width.isFinite, planned.height.isFinite,
+              pixels.width.isFinite, pixels.height.isFinite else {
+            return planned
+        }
+        let plannedLandscape = planned.width >= planned.height
+        let pixelsLandscape = pixels.width >= pixels.height
+        if plannedLandscape != pixelsLandscape {
+            return CGRect(origin: .zero, size: pixels.size)
+        }
+        return planned
+    }
+
     fileprivate func pendingPresentationRevision() -> UInt64? { pendingGPURevision }
     func pendingDisplayRevision() -> UInt64? { pendingDisplayID }
+
+    /// The quad/layout rectangle for the current texture. A first-frame JPEG is mapped onto
+    /// the native presentation extent; an ROI preview keeps its source-space texture rectangle.
+    fileprivate func layoutExtent(forTextureExtent textureExtent: CGRect) -> CGRect {
+        if coversPresentationExtent, let presentationImageExtent,
+           presentationImageExtent.width > 0, presentationImageExtent.height > 0 {
+            return presentationImageExtent
+        }
+        return textureExtent
+    }
+
+    fileprivate func mappedImageForPresentation(_ image: CIImage) -> CIImage {
+        guard coversPresentationExtent, let presentationImageExtent,
+              presentationImageExtent.width > 0, presentationImageExtent.height > 0 else {
+            return image
+        }
+        return Self.imageMapped(image, onto: presentationImageExtent)
+    }
+
+    fileprivate static func imageMapped(_ image: CIImage, onto target: CGRect) -> CIImage {
+        let src = image.extent
+        guard src.width > 0, src.height > 0,
+              target.width > 0, target.height > 0,
+              src.width.isFinite, src.height.isFinite,
+              target.width.isFinite, target.height.isFinite else {
+            return image
+        }
+        let scale = min(target.width / src.width, target.height / src.height)
+        guard scale.isFinite, scale > 0 else { return image }
+        let fitted = CGSize(width: src.width * scale, height: src.height * scale)
+        let origin = CGPoint(
+            x: target.minX + (target.width - fitted.width) / 2,
+            y: target.minY + (target.height - fitted.height) / 2
+        )
+        return image.transformed(by: CGAffineTransform(
+            a: scale, b: 0, c: 0, d: scale,
+            tx: origin.x - src.minX * scale,
+            ty: origin.y - src.minY * scale
+        ))
+    }
 
     func markPresentationSucceeded(displayRevision: UInt64) {
         guard pendingDisplayID == displayRevision else { return }
@@ -184,6 +255,7 @@ final class PreviewSurface: ObservableObject {
         lastValidPresentationTexture = presentationTexture
         lastValidPresentationTextureExtent = presentationTextureExtent
         lastValidPresentationImageExtent = presentationImageExtent
+        lastValidCoversPresentationExtent = coversPresentationExtent
         lastValidSpace = space
         lastValidDetail = currentDetail
         pendingDisplayID = nil
@@ -196,6 +268,7 @@ final class PreviewSurface: ObservableObject {
         presentationTexture = lastValidPresentationTexture
         presentationTextureExtent = lastValidPresentationTextureExtent
         presentationImageExtent = lastValidPresentationImageExtent
+        coversPresentationExtent = lastValidCoversPresentationExtent
         space = lastValidSpace
         currentDetail = lastValidDetail
         pendingPresentationMaterializationRevision = nil
@@ -361,6 +434,7 @@ final class PreviewSurface: ObservableObject {
     func clear() {
         image = nil
         presentationImageExtent = nil
+        coversPresentationExtent = false
         space = .current
         lastValidImage = nil
         presentationTexture = nil
@@ -369,6 +443,7 @@ final class PreviewSurface: ObservableObject {
         lastValidPresentationTexture = nil
         lastValidPresentationTextureExtent = nil
         lastValidPresentationImageExtent = nil
+        lastValidCoversPresentationExtent = false
         lastValidSpace = .current
         lastValidDetail = nil
         currentDetail = nil
@@ -665,7 +740,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                let textureExtent = surface.presentationTextureExtent,
                let pipeline, let samplerState,
                var geometry = Self.quadGeometry(
-                   imageExtent: textureExtent, navigation: navigation,
+                   imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
+                   navigation: navigation,
                    destination: destination, virtualExtent: surface.presentationImageExtent
                ),
                let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
@@ -685,7 +761,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                                        vertexCount: geometry.vertices.count)
                 encoder.endEncoding()
             } else if let output = Self.presentationImage(
-                image, navigation: navigation, destination: destination,
+                surface.mappedImageForPresentation(image), navigation: navigation,
+                destination: destination,
                 virtualExtent: surface.presentationImageExtent
             ) {
                 // Compatibility seam for a host without a usable Metal texture/pipeline. The
@@ -970,7 +1047,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             descriptor.storageMode = .shared
             guard let target = device.makeTexture(descriptor: descriptor),
                   var geometry = Self.quadGeometry(
-                      imageExtent: textureExtent,
+                      imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
                       navigation: navigation,
                       destination: CGRect(x: 0, y: 0, width: width, height: height),
                       virtualExtent: surface.presentationImageExtent

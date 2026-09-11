@@ -27,14 +27,17 @@ vertex PreviewQuadOutput preview_quad_vertex(
     float2 pixelPosition = uniforms.transformOrigin
         + (uniforms.imageOrigin + vertices[vertexID].position * uniforms.imageSize)
             * uniforms.scale;
+    // CanvasNavigation and MaskOverlay are y-down (pixel y=0 is the top of the view). Metal
+    // clip space is y-up, so the top of the view is NDC y=+1 — the same mapping as
+    // MaskOverlay.metal. Mapping y=0 to NDC -1 inverts the presented frame on screen while
+    // still looking upright through CIImage(mtlTexture:) in offscreen tests.
     float2 ndc = float2(
         pixelPosition.x / uniforms.viewportSize.x * 2.0 - 1.0,
-        pixelPosition.y / uniforms.viewportSize.y * 2.0 - 1.0
+        1.0 - pixelPosition.y / uniforms.viewportSize.y * 2.0
     );
     output.position = float4(ndc, 0.0, 1.0);
-    // Core Image's completed texture is authored in a y-up image space, while the Metal
-    // drawable's row zero is the top of the presented frame. Keep the geometry origin shared
-    // with CanvasNavigation and invert only the texture sampling axis at the presentation edge.
+    // Core Image's completed texture is authored in a y-up image space (row 0 is the visual
+    // bottom). Invert only the sampling axis so the top of the view samples the visual top.
     output.texcoord = float2(vertices[vertexID].texcoord.x,
                              1.0 - vertices[vertexID].texcoord.y);
     return output;

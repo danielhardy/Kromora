@@ -27,6 +27,11 @@ enum Thumbnails {
     /// The filmstrip's thumbnail size, in pixels on the long edge.
     static let defaultMaxPixelSize = 240
 
+    /// Long-edge cap for the RAW-open first frame. Large enough to fill a Retina editor
+    /// canvas at Fit, small enough that it is not a native 24–60MP GPU upload. ImageIO
+    /// will not invent pixels: a camera JPEG that is already 1616px stays 1616px.
+    static let firstFrameMaxPixelSize = 2880
+
     /// Thumbnails are small, but a long folder navigation session can otherwise retain one image per
     /// file forever. The cache stores the decoded `CGImage` behind its lock, so a cache hit only has
     /// to wrap the retained bitmap for AppKit instead of encoding and decoding a PNG.
