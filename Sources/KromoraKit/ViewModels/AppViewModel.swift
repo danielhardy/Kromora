@@ -811,7 +811,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         previewDiskCacheDirectory: URL? = nil,
         previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
-            Thumbnails.generate(from: url, maxPixelSize: 1600)
+            Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         }
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
@@ -1687,19 +1687,55 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                   let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
             else { return }
 
+            // The camera JPEG is a stand-in for the whole photo. Do not rasterize it at
+            // native RAW size — that is a 24–60MP GPU upload on every filmstrip click and
+            // stalls the develop that should replace it. Keep the JPEG's own pixels and tell
+            // the surface to stretch them across the native Fit/Fill frame. If the preview
+            // is still sensor-landscape while native display size is portrait, rotate first
+            // so the stretch cannot look like a 90° error.
+            let native = preparation.nativeExtent
+            let provisional = Self.alignedEmbeddedFirstFrame(
+                CIImage(cgImage: cgImage), to: native
+            )
+
             // The settled preview is submitted through the coordinator and always publishes at a
             // newer surface revision. The guards above keep a late provisional JPEG from ever
             // replacing that settled frame, so no explicit clear is needed here.
             self.previewSurface.present(
-                CIImage(cgImage: cgImage), space: .current,
+                provisional, space: .current,
                 revision: self.displayRevision,
                 source: preparation.source,
                 quality: .preview,
-                presentationImageExtent: CGRect(origin: .zero, size: preparation.nativeExtent),
+                presentationImageExtent: CGRect(origin: .zero, size: native),
+                coversPresentationExtent: true,
                 onPresented: nil
             )
             self.embeddedFirstFrameTask = nil
         }
+    }
+
+    /// Camera previews are often still sensor-landscape when the RAW's display size is portrait.
+    /// Stretching that JPEG onto the native frame looks like a 90° rotation; one quarter-turn
+    /// that matches native aspect is enough, and a matching pair of axes is a no-op.
+    static func alignedEmbeddedFirstFrame(_ image: CIImage, to native: CGSize) -> CIImage {
+        let src = image.extent.size
+        guard src.width > 1, src.height > 1, native.width > 1, native.height > 1,
+              src.width.isFinite, src.height.isFinite,
+              native.width.isFinite, native.height.isFinite else {
+            return image
+        }
+        let srcLandscape = src.width >= src.height
+        let nativeLandscape = native.width >= native.height
+        guard srcLandscape != nativeLandscape else { return image }
+        let nativeAspect = native.width / native.height
+        func aspectMismatch(_ candidate: CIImage) -> CGFloat {
+            let size = candidate.extent.size
+            guard size.height > 0 else { return .greatestFiniteMagnitude }
+            return abs(size.width / size.height - nativeAspect)
+        }
+        let right = image.oriented(.right)
+        let left = image.oriented(.left)
+        return aspectMismatch(right) <= aspectMismatch(left) ? right : left
     }
 
     private func adoptStoredEdits(
@@ -3816,6 +3852,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                                    detailIdentity: detailIdentity,
                                    detailFactor: detailFactor,
                                    presentationImageExtent: request.presentationImageExtent,
+                                   coversPresentationExtent: request.sourceROI == nil,
                                    onPresented: nil)
         } else if let cgImage = publication.image {
             // Non-GPU conformers retain a raster compatibility seam, but it terminates at the
@@ -3829,6 +3866,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                                    detailIdentity: detailIdentity,
                                    detailFactor: detailFactor,
                                    presentationImageExtent: request.presentationImageExtent,
+                                   coversPresentationExtent: request.sourceROI == nil,
                                    onPresented: nil)
         }
         guard publication.gpuImage != nil || publication.image != nil else {
@@ -3875,6 +3913,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             detailIdentity: detailIdentity,
             detailFactor: detailFactor,
             presentationImageExtent: request.presentationImageExtent,
+            coversPresentationExtent: request.sourceROI == nil,
             onPresented: { [weak self] in
                 self?.didPresentVisibleFrame(
                     request, assetID: assetID, sourceRevision: sourceRevision,
@@ -4015,7 +4054,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 guard self.originalPreviewSurface.present(
                     gpuImage,
                     space: request.space,
-                    presentationImageExtent: request.presentationImageExtent
+                    presentationImageExtent: request.presentationImageExtent,
+                    coversPresentationExtent: request.sourceROI == nil
                 ) || hadValidOriginal else {
                     self.comparisonPreviewDidFail(
                         sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
@@ -4035,7 +4075,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             guard self.originalPreviewSurface.present(
                 CIImage(cgImage: cgImage),
                 space: request.space,
-                presentationImageExtent: request.presentationImageExtent
+                presentationImageExtent: request.presentationImageExtent,
+                coversPresentationExtent: request.sourceROI == nil
             ) || hadValidOriginal else {
                 self.comparisonPreviewDidFail(
                     sourceRevision: sourceRevision, comparisonRevision: comparisonRevision

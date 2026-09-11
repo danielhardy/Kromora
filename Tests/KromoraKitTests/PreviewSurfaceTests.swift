@@ -3,6 +3,7 @@ import CoreImage
 import CoreGraphics
 import MetalKit
 import AppKit
+import UniformTypeIdentifiers
 @testable import KromoraKit
 
 @MainActor
@@ -314,7 +315,9 @@ final class PreviewSurfaceTests: XCTestCase {
 
     /// The required LUMO-312 acceptance test: compare ultrawide, square, and portrait quad output
     /// against the CPU-composited reference, including an orientation-asymmetric fixture and the
-    /// letterbox color. The top/bottom assertions make a vertical flip fail loudly.
+    /// letterbox color. Orientation is asserted from Metal framebuffer bytes (row 0 is the top
+    /// of the window). Wrapping the target as `CIImage(mtlTexture:)` hides a vertical flip that
+    /// MTKView then shows on screen.
     func testGeometryGoldenTest() async throws {
         let surface = PreviewSurface()
         let image = try makeOrientationAsymmetricFixture()
@@ -335,17 +338,23 @@ final class PreviewSurfaceTests: XCTestCase {
             let actualTexture = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
                 surface: surface, navigation: navigation, destinationSize: size
             ))
-            let actual = try XCTUnwrap(CIImage(
-                mtlTexture: actualTexture,
-                options: [CIImageOption.colorSpace: WorkingSpace.current.cgColorSpace]
-            ))
-            let actualBytes = try Pixels.bytes(of: actual)
+            let width = Int(size.width)
+            let height = Int(size.height)
+            var metalBytes = [UInt8](repeating: 0, count: width * height * 4)
+            metalBytes.withUnsafeMutableBytes { raw in
+                actualTexture.getBytes(
+                    raw.baseAddress!,
+                    bytesPerRow: width * 4,
+                    from: MTLRegionMake2D(0, 0, width, height),
+                    mipmapLevel: 0
+                )
+            }
             let referenceBytes = try Pixels.bytes(of: reference)
             let transform = navigation.transform(imageExtent: image.extent,
                                                   viewportSize: destination.size)
             var worstDelta = 0
-            for y in 0..<Int(size.height) {
-                for x in 0..<Int(size.width) {
+            for y in 0..<height {
+                for x in 0..<width {
                     // Core Image's CPU compositor blends one edge sample just outside the
                     // transformed image rectangle; the Metal quad has a hard rasterized edge.
                     // Compare the stable interior and assert the sampled border independently.
@@ -354,40 +363,271 @@ final class PreviewSurfaceTests: XCTestCase {
                         CGFloat(y) >= ceil(transform.origin.y) + 1 &&
                         CGFloat(y) < floor(transform.origin.y + transform.imageSize.height) - 1
                     guard inside else { continue }
-                    let offset = (y * Int(size.width) + x) * 4
-                    for channel in 0..<4 {
+                    let actual = rgba(fromBGRA: metalBytes, width: width, at: (x, y))
+                    let referenceOffset = (y * width + x) * 4
+                    for channel in 0..<3 {
                         worstDelta = max(worstDelta,
-                                         abs(Int(actualBytes[offset + channel]) -
-                                             Int(referenceBytes[offset + channel])))
+                                         abs(Int(actual[channel]) -
+                                             Int(referenceBytes[referenceOffset + channel])))
                     }
                 }
             }
             XCTAssertLessThanOrEqual(worstDelta, 1,
                                      "retained quad geometry for \(Int(size.width))x\(Int(size.height))")
-
-            let bytes = try Pixels.bytes(of: actual)
-            let width = Int(size.width)
-            let height = Int(size.height)
             let border = try XCTUnwrap(windowBackgroundBytes())
             for point in [(0, 0), (width - 1, height - 1)] {
-                let offset = (point.1 * width + point.0) * 4
                 if isLetterbox(point: point, imageExtent: image.extent, destination: destination) {
-                    XCTAssertEqual(Array(bytes[offset..<(offset + 4)]), border,
+                    XCTAssertEqual(rgba(fromBGRA: metalBytes, width: width, at: point), border,
                                    "letterbox pixel \(point) must equal KromoraTheme.windowBackground")
                 }
             }
 
-            let bottomPoint = (Int(transform.origin.x + transform.imageSize.width / 2),
-                               Int(transform.origin.y + transform.imageSize.height * 0.25))
-            let topPoint = (Int(transform.origin.x + transform.imageSize.width / 2),
-                            Int(transform.origin.y + transform.imageSize.height * 0.75))
-            let bottom = pixel(in: bytes, width: width, at: bottomPoint)
-            let top = pixel(in: bytes, width: width, at: topPoint)
+            let x = Int(transform.origin.x + transform.imageSize.width / 2)
+            let topPoint = (x, Int(transform.origin.y + transform.imageSize.height * 0.25))
+            let bottomPoint = (x, Int(transform.origin.y + transform.imageSize.height * 0.75))
+            let top = bgraPixel(in: metalBytes, width: width, at: topPoint)
+            let bottom = bgraPixel(in: metalBytes, width: width, at: bottomPoint)
             XCTAssertTrue(bottom.0 != top.0 || bottom.1 != top.1 || bottom.2 != top.2,
                           "orientation-asymmetric fixture must not be flattened")
-            XCTAssertGreaterThan(bottom.0, top.0,
-                                 "the fixture's bottom half must remain the red half after quad mapping")
+            XCTAssertGreaterThan(top.0, bottom.0,
+                                 "Metal row 0 is the top of the window; the fixture's red half is the visual top")
         }
+    }
+
+    /// MTKView presents framebuffer row 0 at the top of the window. `CIImage(mtlTexture:)` is not
+    /// that convention — it can hide a vertical flip that the packaged app then shows on screen.
+    func testMetalFramebufferRowZeroIsVisualTop() async throws {
+        let surface = PreviewSurface()
+        let image = try makeOrientationAsymmetricFixture()
+        XCTAssertTrue(surface.present(image))
+        _ = try await waitForPresentationTexture(surface)
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let size = CGSize(width: 16, height: 16)
+        let texture = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: CanvasNavigation(), destinationSize: size
+        ))
+        let width = texture.width
+        let height = texture.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(
+                raw.baseAddress!,
+                bytesPerRow: width * 4,
+                from: MTLRegionMake2D(0, 0, width, height),
+                mipmapLevel: 0
+            )
+        }
+        let transform = CanvasNavigation().transform(imageExtent: image.extent, viewportSize: size)
+        let x = Int(transform.origin.x + transform.imageSize.width / 2)
+        let topY = Int(transform.origin.y + transform.imageSize.height * 0.25)
+        let bottomY = Int(transform.origin.y + transform.imageSize.height * 0.75)
+        let top = bgraPixel(in: bytes, width: width, at: (x, topY))
+        let bottom = bgraPixel(in: bytes, width: width, at: (x, bottomY))
+        XCTAssertGreaterThan(
+            top.0, bottom.0,
+            "Metal row 0 is the top of the window; the fixture's red half is the visual top of the CGImage"
+        )
+    }
+
+    /// The editor presents `RenderEngine.makeCIImage` (a completed Metal texture wrapped as a
+    /// CIImage), not a generator image. That wrap is the production seam the on-screen canvas uses.
+    func testCompletedEngineTexturePresentsVisualTopAtFramebufferRowZero() async throws {
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal is unavailable on this host")
+        }
+        let directory = try Fixtures.makeTempDirectory("preview-orientation")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cgImage = try makeOrientationAsymmetricCGImage(width: 32, height: 16)
+        let url = directory.appendingPathComponent("asymmetric.png")
+        let destination = try XCTUnwrap(CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil
+        ))
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 32, height: 16))
+        let maybeImage = await RenderEngine().makeCIImage(RenderRequest(
+            source: source, document: EditDocument(),
+            targetSize: CGSize(width: 32, height: 16),
+            quality: .preview, output: .raster
+        ))
+        let engineImage = try XCTUnwrap(maybeImage)
+        let surface = PreviewSurface()
+        XCTAssertTrue(surface.present(engineImage))
+        _ = try await waitForPresentationTexture(surface)
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let size = CGSize(width: 32, height: 16)
+        let texture = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: CanvasNavigation(), destinationSize: size
+        ))
+        var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(
+                raw.baseAddress!,
+                bytesPerRow: texture.width * 4,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                mipmapLevel: 0
+            )
+        }
+        let top = bgraPixel(in: bytes, width: texture.width, at: (16, 4))
+        let bottom = bgraPixel(in: bytes, width: texture.width, at: (16, 12))
+        XCTAssertGreaterThan(
+            top.0, bottom.0,
+            "completed preview textures must display the source's visual top at the top of the window"
+        )
+    }
+
+    /// A camera JPEG is a stand-in for the whole photo. Fit must stretch it across the native
+    /// frame rather than leaving it as a postage stamp at the origin of a much larger canvas.
+    func testProxyFirstFrameFillsFitCanvas() async throws {
+        let surface = PreviewSurface()
+        let jpeg = CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 6))
+        let native = CGRect(origin: .zero, size: CGSize(width: 40, height: 30))
+        XCTAssertTrue(surface.present(
+            jpeg, presentationImageExtent: native, coversPresentationExtent: true
+        ))
+        _ = try await waitForPresentationTexture(surface)
+        XCTAssertEqual(surface.presentationTexture?.width, 8,
+                       "the JPEG must not be rasterized at native RAW size")
+        XCTAssertEqual(surface.presentationTexture?.height, 6)
+
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let dest = CGSize(width: 40, height: 30)
+        let texture = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: CanvasNavigation(), destinationSize: dest
+        ))
+        var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(
+                raw.baseAddress!,
+                bytesPerRow: texture.width * 4,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                mipmapLevel: 0
+            )
+        }
+        let top = bgraPixel(in: bytes, width: texture.width, at: (20, 7))
+        let bottom = bgraPixel(in: bytes, width: texture.width, at: (20, 22))
+        XCTAssertGreaterThan(
+            top.0, bottom.0,
+            "Fit must fill the canvas with the JPEG; the fixture's red half is the visual top"
+        )
+        let border = try windowBackgroundBytes()
+        let center = rgba(fromBGRA: bytes, width: texture.width, at: (20, 15))
+        XCTAssertGreaterThan(
+            abs(Int(center[0]) - Int(border[0])) + abs(Int(center[1]) - Int(border[1])),
+            40,
+            "the canvas center must be image pixels, not the letterbox"
+        )
+    }
+
+    /// Without the stand-in flag, a smaller texture is an ROI of the virtual canvas — the
+    /// geometry that makes a 1600px JPEG look like a postage stamp on a 60MP RAW.
+    func testUncoveredROIStaysAtVirtualOriginOnFit() async throws {
+        let surface = PreviewSurface()
+        let jpeg = CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 6))
+        let native = CGRect(origin: .zero, size: CGSize(width: 40, height: 30))
+        XCTAssertTrue(surface.present(jpeg, presentationImageExtent: native))
+        _ = try await waitForPresentationTexture(surface)
+
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let dest = CGSize(width: 40, height: 30)
+        let texture = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: CanvasNavigation(), destinationSize: dest
+        ))
+        var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(
+                raw.baseAddress!,
+                bytesPerRow: texture.width * 4,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                mipmapLevel: 0
+            )
+        }
+        let border = try windowBackgroundBytes()
+        let center = rgba(fromBGRA: bytes, width: texture.width, at: (20, 15))
+        XCTAssertLessThanOrEqual(
+            abs(Int(center[0]) - Int(border[0])), 2,
+            "an uncovered JPEG must not fill Fit; the canvas center is letterbox"
+        )
+        XCTAssertLessThanOrEqual(abs(Int(center[1]) - Int(border[1])), 2)
+        XCTAssertLessThanOrEqual(abs(Int(center[2]) - Int(border[2])), 2)
+    }
+
+    /// A portrait stand-in must not be stretched onto a landscape planner rectangle. Fit keeps
+    /// the pixel axes and centers the letterbox; Fill then has a tall frame to zoom into.
+    func testPortraitStandInDoesNotStretchOntoLandscapePresentationExtent() async throws {
+        let surface = PreviewSurface()
+        let jpeg = CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 12))
+        let landscapePlan = CGRect(origin: .zero, size: CGSize(width: 40, height: 30))
+        XCTAssertTrue(surface.present(
+            jpeg, presentationImageExtent: landscapePlan, coversPresentationExtent: true
+        ))
+        XCTAssertEqual(surface.presentationImageExtent?.size, CGSize(width: 8, height: 12))
+        _ = try await waitForPresentationTexture(surface)
+
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let dest = CGSize(width: 24, height: 12)
+        let texture = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: CanvasNavigation(), destinationSize: dest
+        ))
+        var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(
+                raw.baseAddress!,
+                bytesPerRow: texture.width * 4,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                mipmapLevel: 0
+            )
+        }
+        let border = try windowBackgroundBytes()
+        let left = rgba(fromBGRA: bytes, width: texture.width, at: (1, 6))
+        let center = rgba(fromBGRA: bytes, width: texture.width, at: (12, 6))
+        XCTAssertLessThanOrEqual(abs(Int(left[0]) - Int(border[0])), 2,
+                                 "Fit of a portrait must letterbox, not stretch to the left edge")
+        XCTAssertGreaterThan(
+            abs(Int(center[0]) - Int(border[0])) + abs(Int(center[1]) - Int(border[1])),
+            40,
+            "the centered portrait must still be visible"
+        )
+    }
+
+    func testFillCoversTheViewportWithAPortraitStandIn() async throws {
+        let surface = PreviewSurface()
+        let jpeg = CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 12))
+        XCTAssertTrue(surface.present(
+            jpeg, presentationImageExtent: CGRect(origin: .zero, size: CGSize(width: 8, height: 12)),
+            coversPresentationExtent: true
+        ))
+        _ = try await waitForPresentationTexture(surface)
+        var navigation = CanvasNavigation()
+        navigation.fill()
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let dest = CGSize(width: 24, height: 12)
+        let texture = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: navigation, destinationSize: dest
+        ))
+        var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(
+                raw.baseAddress!,
+                bytesPerRow: texture.width * 4,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height),
+                mipmapLevel: 0
+            )
+        }
+        let border = try windowBackgroundBytes()
+        let left = rgba(fromBGRA: bytes, width: texture.width, at: (1, 6))
+        let right = rgba(fromBGRA: bytes, width: texture.width, at: (22, 6))
+        XCTAssertGreaterThan(
+            abs(Int(left[0]) - Int(border[0])) + abs(Int(left[1]) - Int(border[1])),
+            40,
+            "Fill must cover the left edge instead of leaving a Fit letterbox"
+        )
+        XCTAssertGreaterThan(
+            abs(Int(right[0]) - Int(border[0])) + abs(Int(right[1]) - Int(border[1])),
+            40,
+            "Fill must cover the right edge instead of leaving a Fit letterbox"
+        )
     }
 
     /// The required LUMO-312 acceptance test: a settled visible-frame callback is one-shot even
@@ -444,27 +684,31 @@ final class PreviewSurfaceTests: XCTestCase {
     }
 
     private func makeOrientationAsymmetricFixture() throws -> CIImage {
+        CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 4))
+    }
+
+    /// CGImage row 0 is the visual top. Those rows are red; the visual bottom is cyan.
+    private func makeOrientationAsymmetricCGImage(width: Int, height: Int) throws -> CGImage {
         let space = try XCTUnwrap(CGColorSpace(name: CGColorSpace.sRGB))
-        var pixels = [UInt8](repeating: 0, count: 8 * 4 * 4)
-        for y in 0..<4 {
-            for x in 0..<8 {
-                let offset = (y * 8 + x) * 4
-                let isBottom = y < 2
-                pixels[offset] = isBottom ? 220 : 25
-                pixels[offset + 1] = isBottom ? 40 : 180
-                pixels[offset + 2] = isBottom ? 30 : 220
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let isTop = y < height / 2
+                pixels[offset] = isTop ? 220 : 25
+                pixels[offset + 1] = isTop ? 40 : 180
+                pixels[offset + 2] = isTop ? 30 : 220
                 pixels[offset + 3] = 255
             }
         }
         let provider = CGDataProvider(data: Data(pixels) as CFData)
-        let cgImage = try XCTUnwrap(CGImage(
-            width: 8, height: 4, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 32,
-            space: space,
+        return try XCTUnwrap(CGImage(
+            width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: width * 4, space: space,
             bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
             provider: try XCTUnwrap(provider), decode: nil, shouldInterpolate: false,
             intent: .defaultIntent
         ))
-        return CIImage(cgImage: cgImage)
     }
 
     private func waitForPresentationTexture(_ surface: PreviewSurface) async throws -> MTLTexture {
@@ -478,11 +722,19 @@ final class PreviewSurfaceTests: XCTestCase {
                              "async presentation texture did not complete")
     }
 
-    private func pixel(in bytes: [UInt8], width: Int, at point: (Int, Int)) -> (UInt8, UInt8, UInt8) {
+    /// `renderRetainedTextureForTesting` targets are `.bgra8Unorm`. Channel 0 is blue.
+    private func bgraPixel(in bytes: [UInt8], width: Int, at point: (Int, Int)) -> (UInt8, UInt8, UInt8) {
         let x = min(max(point.0, 0), width - 1)
         let y = min(max(point.1, 0), bytes.count / (width * 4) - 1)
         let offset = (y * width + x) * 4
-        return (bytes[offset], bytes[offset + 1], bytes[offset + 2])
+        return (bytes[offset + 2], bytes[offset + 1], bytes[offset])
+    }
+
+    private func rgba(fromBGRA bytes: [UInt8], width: Int, at point: (Int, Int)) -> [UInt8] {
+        let x = min(max(point.0, 0), width - 1)
+        let y = min(max(point.1, 0), bytes.count / (width * 4) - 1)
+        let offset = (y * width + x) * 4
+        return [bytes[offset + 2], bytes[offset + 1], bytes[offset], bytes[offset + 3]]
     }
 
     private func isLetterbox(point: (Int, Int), imageExtent: CGRect, destination: CGRect) -> Bool {
