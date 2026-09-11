@@ -36,4 +36,34 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(Notification.Name.chooseLookFolder.rawValue, "Kromora.chooseLookFolder")
         XCTAssertEqual(Notification.Name.importLook.rawValue, "Kromora.importLook")
     }
+
+    func testViewMenuRoutesRelocatedEditorActionsAndKeepsComparisonToolbarStable() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        let menuCommands = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
+            encoding: .utf8
+        )
+        let contentView = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(menuCommands.contains("Button(\"Reset Rotation\") { post(.resetRotation) }"))
+        XCTAssertTrue(menuCommands.contains("Button(\"Info Inspector\") { post(.toggleInspector) }"))
+        XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"i\", modifiers: .command)"))
+        XCTAssertTrue(menuCommands.contains(".onReceive(NotificationCenter.default.publisher(for: .resetRotation))"))
+        XCTAssertTrue(menuCommands.contains(".onReceive(NotificationCenter.default.publisher(for: .toggleInspector))"))
+
+        XCTAssertEqual(contentView.components(separatedBy: "Label(\"Reset Rotation\"").count, 1)
+        XCTAssertEqual(contentView.components(separatedBy: "Label(\"Info\", systemImage: \"sidebar.right\"").count, 1)
+        XCTAssertTrue(contentView.contains(".disabled(!viewModel.isComparisonPresentationAvailable)"))
+    }
+
+    func testRelocatedViewActionsHaveStableNotificationNames() {
+        XCTAssertEqual(Notification.Name.resetRotation.rawValue, "Kromora.resetRotation")
+        XCTAssertEqual(Notification.Name.toggleInspector.rawValue, "Kromora.toggleInspector")
+    }
 }

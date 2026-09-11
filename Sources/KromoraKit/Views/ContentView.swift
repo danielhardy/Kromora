@@ -251,23 +251,21 @@ public struct ContentView: View {
         .help(viewModel.autoAdjustmentHelp)
         .disabled(!viewModel.canRunAutoAdjustment)
 
-        // An active retained side-by-side preference remains actionable on an identity document so
-        // the user can return to single view after switching photos or using Reset Photo. Starting
-        // side-by-side from single view still follows the meaningful-comparison gate.
-        if viewModel.isComparisonPresentationAvailable {
-            Button {
-                viewModel.toggleSideBySide()
-            } label: {
-                Label(
-                    viewModel.isSideBySide ? "Single View" : "Side by Side",
-                    systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
-                )
-            }
-            .accessibilityLabel("Comparison view")
-            .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
-            .accessibilityHint("Switch comparison view (V)")
-            .help("Switch between single-photo and side-by-side comparison (V)")
+        // Keep the comparison affordance in a stable toolbar position. The model still guards
+        // the action, so an untouched or unloaded image cannot enter an invalid comparison.
+        Button {
+            viewModel.toggleSideBySide()
+        } label: {
+            Label(
+                viewModel.isSideBySide ? "Single View" : "Side by Side",
+                systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
+            )
         }
+        .accessibilityLabel("Comparison view")
+        .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
+        .accessibilityHint("Switch comparison view (V)")
+        .help("Switch between single-photo and side-by-side comparison (V)")
+        .disabled(!viewModel.isComparisonPresentationAvailable)
 
         // Source folder browser
         Button {
@@ -277,16 +275,6 @@ public struct ContentView: View {
         }
         .help("Show the source folder file browser")
         .disabled(viewModel.collection.items.isEmpty)
-
-        // Info inspector (histogram + EXIF)
-        Button {
-            viewModel.toggleInspector()
-        } label: {
-            Label("Info", systemImage: "sidebar.right")
-        }
-        .help("Show histogram & EXIF (⌘I)")
-        .keyboardShortcut("i", modifiers: .command)
-        .disabled(viewModel.sourceImage == nil)
 
         // Keep reset scopes together and visible: the panel reset affects only the current stage,
         // while Reset Photo clears every edit on the active source. The File menu retains the
@@ -427,12 +415,6 @@ private struct CanvasToolbarControls: View {
         }
         .help("Rotate the selected image 90° clockwise")
         .disabled(!hasImage || canvasState.isCropToolActive)
-
-        Button { viewModel.resetRotation() } label: {
-            Label("Reset Rotation", systemImage: "arrow.uturn.backward")
-        }
-        .help("Reset the selected image rotation")
-        .disabled(!hasImage || viewModel.document.rotation == .zero || canvasState.isCropToolActive)
 
         // Canvas navigation is presentation-only; these controls never touch the edit document.
         Menu {

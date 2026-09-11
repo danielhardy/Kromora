@@ -4182,6 +4182,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     // MARK: - Info inspector (EXIF + histogram)
 
     func toggleInspector() {
+        guard sourceImage != nil else {
+            statusMessage = "Open an image first"
+            return
+        }
         isInspectorPresented.toggle()
     }
 
