@@ -243,7 +243,9 @@ final class AppleEnhancementReferenceTests: XCTestCase {
             return XCTFail("expected an exposure change, got \(proposal.changedControls)")
         }
         XCTAssertGreaterThan(exposure.proposed, 0)
-        XCTAssertLessThanOrEqual(exposure.proposed, 1.25)
+        XCTAssertLessThanOrEqual(
+            exposure.proposed, AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
+        )
         XCTAssertEqual(proposal.provenance.fitMethod, .renderCompare)
         XCTAssertEqual(proposal.provenance.filterNames, ["CIToneCurve"])
         XCTAssertEqual(proposal.provenance.sourceKind, .standard)

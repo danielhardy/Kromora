@@ -507,10 +507,20 @@ enum AppleReferenceFitter {
         let toneConfidence = fitConfidence(signalConfidence: signalConfidence, kind: .tone)
         let colorConfidence = fitConfidence(signalConfidence: signalConfidence, kind: .color)
 
-        // Exposure reproduces the median placement Apple chose, in the policy's ±1.25 EV envelope.
+        // Exposure reproduces the median placement Apple chose, in the same bounded envelope as
+        // the neutral policy. The renderer-backed coordinator remains the authority on whether
+        // the stronger candidate is safe for this particular image.
         let baseMedian = max(Double(baseTone.p50), 0.03)
         let refMedian = max(Double(refTone.p50), 0.03)
-        let exposureDelta = bounded(log2(refMedian / baseMedian), -1.25...1.25)
+        let exposureDelta = bounded(
+            log2(refMedian / baseMedian),
+            ClosedRange(
+                uncheckedBounds: (
+                    lower: -AutoExposureObjective.ordinaryCorrectionCapEV,
+                    upper: AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
+                )
+            )
+        )
         if exposureDelta.isFinite, abs(exposureDelta) >= 0.05 {
             suggestedTotal += abs(exposureDelta)
             let exposureRange = LightAdjustments.exposureRange

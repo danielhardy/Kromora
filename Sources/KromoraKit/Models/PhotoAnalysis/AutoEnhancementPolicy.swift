@@ -35,7 +35,9 @@ import Foundation
 /// `AdjustmentControl.sliderMapped`). A warm cast therefore *lowers* the RAW temperature and
 /// *raises* the standard temperature. Tint runs the same way on both paths (+ is magenta).
 enum AutoEnhancementPolicy {
-    static let algorithmVersion = 1
+    /// Bumped when the exposure objective changes so a prior near-no-op Auto result is not
+    /// treated as current by the repeat-run fingerprint.
+    static let algorithmVersion = 2
 
     static func propose(
         facts: AutoEnhancementFacts,
@@ -57,10 +59,11 @@ enum AutoEnhancementPolicy {
             confidence.globalTone, confidence.scene, method: .tone
         )
         if confidence.globalTone >= 0.2 {
-        let exposureTarget = ExposurePlacement.desiredExposure(
-            median: tone.p50,
-            highlightClipping: tone.highlightClippingFraction,
-            scene: scene
+        let neutralTarget = AutoExposureObjective.targetMedian(tone: tone, scene: scene)
+        let exposureTarget = AutoExposureObjective.desiredExposure(
+            tone: tone,
+            scene: scene,
+            headroom: facts.highlightHeadroom
         )
         let exposureChange = restrainedDelta(
             target: exposureTarget,
@@ -74,13 +77,20 @@ enum AutoEnhancementPolicy {
             working.light.exposure = bounded(
                 exposure, LightAdjustments.exposureRange
             )
+            let underexposure = AutoExposureObjective.robustUnderexposureEvidence(tone: tone)
+            let evidence = "p05=\(format(tone.p05)) p10=\(format(tone.p10)) "
+                + "p50=\(format(tone.p50)) p75=\(format(tone.p75)) "
+                + "p95=\(format(tone.p95)) spread=\(format(tone.p95 - tone.p05)) "
+                + "underExposure=\(format(Float(underexposure))) "
+                + "highKey=\(format(scene.highKeyLikelihood)) "
+                + "lowKey=\(format(scene.lowKeyLikelihood))"
             changes.append(AutoControlChange(
                 control: .exposure,
                 previous: current.light.exposure,
                 proposed: working.light.exposure,
                 confidence: toneConfidence,
-                reason: "Median (\(format(tone.p50))) EV placement, restrained by tonal-key intent.",
-                evidence: "tone.p50=\(format(tone.p50)) highKey=\(format(scene.highKeyLikelihood)) lowKey=\(format(scene.lowKeyLikelihood))"
+                reason: "Robust neutral median target (\(format(Float(neutralTarget)))) with scene-key restraint when supported.",
+                evidence: evidence
             ))
         }
 
@@ -503,23 +513,90 @@ struct AutoEnhancementProposal: Codable, Sendable, Equatable {
 
 // MARK: - Placement stages
 
-/// Exposure establishes global placement before any other tone control is derived.
-private enum ExposurePlacement {
+/// Shared neutral-exposure objective used by both proposal generation and renderer-backed
+/// candidate scoring. It is deliberately facts-only: no fixed per-image boost and no CSS or
+/// synthetic preview is involved.
+///
+/// The neutral target is a perceptual median of 0.48 for ordinary photographic frames. A key
+/// scene (high-key, low-key, or night) pulls that target back toward the measured median, but
+/// only while the robust distribution is consistent with intent. A low p50 by itself is not
+/// enough to override the key brake: the p10/p75/p95 spread must also show usable scene
+/// structure. This is what lets a materially underexposed mountain frame lift while a genuinely
+/// low-key frame stays low-key.
+enum AutoExposureObjective {
+    static let neutralMedian = 0.48
+    static let ordinaryCorrectionCapEV = 1.25
+    static let structurallyUnderexposedCorrectionCapEV = 1.75
+    /// A small but non-zero evidence gate avoids letting a barely dark frame inherit a key-scene
+    /// brake while keeping a measured, broad distribution eligible for the stronger search bound.
+    static let structuralEvidenceGate = 0.05
+
+    static func targetMedian(tone: ToneStatistics, scene: SceneCharacteristics) -> Double {
+        let intent = Double(max(
+            scene.highKeyLikelihood,
+            max(scene.lowKeyLikelihood, scene.nightLikelihood)
+        ))
+        let underexposure = robustUnderexposureEvidence(tone: tone)
+        // Keep a clearly intentional key unchanged when the distribution is not materially
+        // contradictory. Once the evidence crosses the structural-underexposure gate, use the
+        // neutral target fully; a fractional key brake is exactly the near-no-op failure this
+        // objective is meant to avoid.
+        let intentWeight = underexposure >= structuralEvidenceGate
+            ? 0
+            : intent
+        let target = neutralMedian * (1 - intentWeight)
+            + Double(tone.p50) * intentWeight
+        return bounded(target, 0.18...0.82)
+    }
+
     static func desiredExposure(
-        median: Float, highlightClipping: Float, scene: SceneCharacteristics
+        tone: ToneStatistics,
+        scene: SceneCharacteristics,
+        headroom: HighlightHeadroom
     ) -> Double {
-        let floored = max(Double(median), 0.03)
-        var desired = log2(0.48 / floored)
-        desired *= pow(Double(1 - scene.highKeyLikelihood), 4)
-        desired *= pow(Double(1 - scene.lowKeyLikelihood), 4)
+        let floored = max(Double(tone.p50), 0.03)
+        let target = targetMedian(tone: tone, scene: scene)
+        var desired = log2(target / floored)
         desired += Double(scene.backlightingLikelihood)
             * Double(scene.subjectProminence) * 0.20
-        // A clipped frame has no headroom for a lift; scale the positive half down.
-        if desired > 0, highlightClipping > 0.01 {
-            desired *= max(0.3, 1 - Double(highlightClipping) * 4)
+
+        // A clipped frame has no display headroom for a lift. RAW recovery support is allowed to
+        // preserve a little more of a positive lift because the renderer can recover highlights
+        // before the preview/export tone path clips them.
+        let recoveryAllowance = headroom.rawRecoveryLikely ? 0.12 : 0
+        if desired > 0, tone.highlightClippingFraction > 0.01 {
+            desired *= max(0.3, 1 - Double(tone.highlightClippingFraction) * 4)
         }
+        let cap = robustUnderexposureEvidence(tone: tone) >= structuralEvidenceGate
+            ? structurallyUnderexposedCorrectionCapEV + recoveryAllowance
+            : ordinaryCorrectionCapEV
         guard desired.isFinite else { return 0 }
-        return min(max(desired, -1.25), 1.25)
+        return min(max(desired, -ordinaryCorrectionCapEV), cap)
+    }
+
+    /// Confidence that a dark median is a placement defect rather than a tonal-key choice.
+    /// The three terms are intentionally robust quantiles, not a mean or a fixed exposure delta:
+    /// mid-tone deficit (p50), retained upper structure (p95), and usable spread (p95−p05).
+    /// Shadow clipping is a supporting signal, never a requirement, because a developed RAW can
+    /// report a dark p10 before the display histogram reaches zero.
+    static func robustUnderexposureEvidence(tone: ToneStatistics) -> Double {
+        let midDeficit = smooth(1 - tone.p50, start: 0.45, full: 0.80)
+        let upperStructure = smooth(tone.p95, start: 0.38, full: 0.68)
+        let spread = smooth(tone.p95 - tone.p05, start: 0.30, full: 0.60)
+        let shadowClipping = min(max(Double(tone.shadowClippingFraction) * 8, 0), 1)
+        let structure = max(upperStructure * spread, shadowClipping * 0.75)
+        return bounded(midDeficit * structure, 0...1)
+    }
+
+    private static func smooth(_ value: Float, start: Float, full: Float) -> Double {
+        guard full > start else { return value >= full ? 1 : 0 }
+        let t = min(max((value - start) / (full - start), 0), 1)
+        return Double(t * t * (3 - 2 * t))
+    }
+
+    private static func bounded(_ value: Double, _ range: ClosedRange<Double>) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, range.lowerBound), range.upperBound)
     }
 }
 
