@@ -28,7 +28,18 @@ struct FilmstripView: View {
                                 )
                             }
                             .buttonStyle(.plain)
-                            .onKeyPress(keys: [.leftArrow, .rightArrow]) { press in
+                            // A focused thumbnail owns the arrow gesture. Consume every phase so
+                            // AppKit's native button responder never sees a successful navigation,
+                            // a boundary no-op, or the key-up after SwiftUI replaces the selected
+                            // cell. The button's normal activation and accessibility behavior are
+                            // otherwise left intact.
+                            .onKeyPress(
+                                keys: [.leftArrow, .rightArrow],
+                                phases: .all
+                            ) { press in
+                                let result = FilmstripNavigation.keyPressResult(for: press.phase)
+                                guard result == .handled else { return result }
+                                guard press.phase != .up else { return result }
                                 let direction: FilmstripNavigation.Direction =
                                     press.key == .leftArrow ? .previous : .next
                                 guard let adjacentIndex = FilmstripNavigation.adjacentIndex(
@@ -36,10 +47,12 @@ struct FilmstripView: View {
                                     selectedIndex: collection.selectedIndex,
                                     direction: direction
                                 ) else {
-                                    return .ignored
+                                    // Reaching either end is an intentional no-op, but the arrow
+                                    // still belongs to the focused filmstrip control.
+                                    return result
                                 }
                                 onSelect(adjacentIndex, false)
-                                return .handled
+                                return result
                             }
                             // Use the source ID for navigation scrolling; the mosaic keeps the
                             // reservation ID internally so this cell can be replaced in place.
@@ -83,6 +96,16 @@ enum FilmstripNavigation {
     enum Direction {
         case previous
         case next
+    }
+
+    /// Arrow key events are handled at the focused SwiftUI button boundary. In particular, the
+    /// key-up must be consumed even though it does not select another item: after a selection
+    /// changes the old button can be replaced before AppKit dispatches that event.
+    static func keyPressResult(for phase: KeyPress.Phases) -> KeyPress.Result {
+        guard phase == .down || phase == .repeat || phase == .up else {
+            return .ignored
+        }
+        return .handled
     }
 
     static func adjacentIndex(

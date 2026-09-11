@@ -1,8 +1,24 @@
 import XCTest
+import SwiftUI
 @testable import KromoraKit
 
 @MainActor
 final class FilmstripNavigationTests: TempDirectoryTestCase {
+    func testFocusedArrowPressConsumesDownRepeatAndUp() {
+        XCTAssertEqual(
+            FilmstripNavigation.keyPressResult(for: .down), .handled
+        )
+        XCTAssertEqual(
+            FilmstripNavigation.keyPressResult(for: .repeat), .handled
+        )
+        XCTAssertEqual(
+            FilmstripNavigation.keyPressResult(for: .up), .handled
+        )
+        XCTAssertEqual(
+            FilmstripNavigation.keyPressResult(for: []), .ignored
+        )
+    }
+
     func testAdjacentIndexFollowsFilteredDisplayOrder() {
         let visibleIndices = [1, 4, 7]
 
