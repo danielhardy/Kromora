@@ -15,6 +15,18 @@ struct ContentAwareAutoEngine: Sendable {
         lut: CubeLUT? = nil,
         onProgress: (@MainActor @Sendable (AutoEnhancementPhase) -> Void)? = nil
     ) async -> AutoEnhancementResult {
+        // KRMA-352 telemetry: a few `ContinuousClock` reads plus signpost intervals.
+        // Timings are recorded, never read by selection — attaching them cannot change
+        // candidate behavior. Decode (image preparation) is separated from Auto work.
+        let clock = ContinuousClock()
+        let totalStart = clock.now
+        var totalInterval = KromoraObservability.begin(.autoTotal, source: source)
+        defer { totalInterval.end() }
+        func partialTimings() -> AutoRunTimings {
+            AutoRunTimings(
+                totalSeconds: AutoTimingClock.seconds(totalStart.duration(to: clock.now))
+            )
+        }
         if let fingerprint = current.lastAutoRunFingerprint,
             fingerprint.matches(source: source, document: current)
         {
@@ -22,20 +34,43 @@ struct ContentAwareAutoEngine: Sendable {
                 status: .unchanged, proposedDocument: current,
                 algorithmVersion: AutoEnhancementPolicy.algorithmVersion,
                 reasons: ["No further improvement found; the current Auto result is unchanged."],
-                fingerprint: fingerprint
+                fingerprint: fingerprint,
+                timings: partialTimings()
             )
         }
         let expectedHash = current.editHash
         await onProgress?(.analyzing)
         let sourceKind: AutoSourceKind = source.kind == .raw ? .raw : .standard
+        let analysisStart = clock.now
+        var analysisInterval = KromoraObservability.begin(
+            .autoAnalysis, source: source, maskQuality: .analysis
+        )
         let sourceAnalysis = try? await analysisCoordinator.analyze(
             assetID: assetID, source: source, level: .standard
         )
+        analysisInterval.end()
+        let analysisElapsed = AutoTimingClock.seconds(analysisStart.duration(to: clock.now))
+        // Decode is the image-preparation portion of the analysis; everything else is Auto work.
+        // Clamp to the measured analyze window so a cache-hit warm run (which performs no
+        // decode) reports ~zero decode rather than the cached analysis's stale value.
+        let rawDecode = sourceAnalysis.map { AutoTimingClock.decodeSeconds($0.timings) } ?? 0
+        let decodeSeconds = min(rawDecode, analysisElapsed)
+        let analysisSeconds = max(0, analysisElapsed - decodeSeconds)
+        // A cache hit returns the original analysis timings, but no mask work ran during this
+        // invocation. Bound the diagnostic subset to the current analysis window so warm runs do
+        // not report stale mask-generation latency from the cached record.
+        let rawMaskSeconds = sourceAnalysis.map { AutoTimingClock.maskSeconds($0.timings) } ?? 0
+        let maskSeconds = min(rawMaskSeconds, analysisSeconds)
 
         guard !Task.isCancelled else {
             return AutoEnhancementResult(
                 status: .cancelled, proposedDocument: current,
-                reasons: ["Auto was cancelled during analysis."]
+                reasons: ["Auto was cancelled during analysis."],
+                timings: AutoRunTimings(
+                    decodeSeconds: decodeSeconds, analysisSeconds: analysisSeconds,
+                    maskSeconds: maskSeconds,
+                    totalSeconds: AutoTimingClock.seconds(totalStart.duration(to: clock.now))
+                )
             )
         }
 
@@ -54,6 +89,7 @@ struct ContentAwareAutoEngine: Sendable {
         await onProgress?(.renderingCandidates)
         let measurer = CurrentEditMeasurer(engine: engine, store: maskStore)
         let measurement: CurrentEditMeasurement
+        let measurementStart = clock.now
         do {
             measurement = try await measurer.measure(
                 source: source, assetID: assetID, document: current,
@@ -63,14 +99,30 @@ struct ContentAwareAutoEngine: Sendable {
         } catch is CancellationError {
             return AutoEnhancementResult(
                 status: .cancelled, proposedDocument: current,
-                reasons: ["Auto was cancelled while measuring the current edit."]
+                reasons: ["Auto was cancelled while measuring the current edit."],
+                timings: AutoRunTimings(
+                    decodeSeconds: decodeSeconds, analysisSeconds: analysisSeconds,
+                    maskSeconds: maskSeconds,
+                    measurementSeconds: AutoTimingClock.seconds(
+                        measurementStart.duration(to: clock.now)),
+                    totalSeconds: AutoTimingClock.seconds(totalStart.duration(to: clock.now))
+                )
             )
         } catch {
             return AutoEnhancementResult(
                 status: .renderUnavailable, proposedDocument: current,
-                reasons: [error.localizedDescription]
+                reasons: [error.localizedDescription],
+                timings: AutoRunTimings(
+                    decodeSeconds: decodeSeconds, analysisSeconds: analysisSeconds,
+                    maskSeconds: maskSeconds,
+                    measurementSeconds: AutoTimingClock.seconds(
+                        measurementStart.duration(to: clock.now)),
+                    totalSeconds: AutoTimingClock.seconds(totalStart.duration(to: clock.now))
+                )
             )
         }
+        let measurementSeconds = AutoTimingClock.seconds(
+            measurementStart.duration(to: clock.now))
 
         let classifications = sourceAnalysis?.sceneClassifications
         let scene = SceneCharacteristicsAnalyzer.analyze(
@@ -98,6 +150,9 @@ struct ContentAwareAutoEngine: Sendable {
             facts: facts, current: current, sourceKind: sourceKind
         )
 
+        // The Apple-reference adapter renders the analysis view through the sampler; that
+        // render work belongs to the candidate-render stage, so it is clocked here.
+        let appleReferenceStart = clock.now
         let apple = await AppleEnhancementReferenceAdapter(
             engine: engine, space: .sRGB
         ).referenceProposal(
@@ -105,19 +160,46 @@ struct ContentAwareAutoEngine: Sendable {
             scene: scene, signalConfidence: signalConfidence,
             asShotTemperature: facts.asShotTemperature, asShotTint: facts.asShotTint
         ).proposal
+        let appleReferenceSeconds = AutoTimingClock.seconds(
+            appleReferenceStart.duration(to: clock.now))
 
         let coordinator = AutoEnhancementCoordinator(engine: engine)
+        var renderInterval = KromoraObservability.begin(.autoCandidateRender, source: source)
         let selected = await coordinator.run(
             source: source, current: current, expectedDocumentHash: expectedHash,
             facts: facts, regions: measurement.regions, native: native, apple: apple,
             sourceKind: sourceKind, lut: lut, onProgress: onProgress
         )
+        renderInterval.end()
 
         // Regional corrections are planned from the selected global candidate, not from the
         // source/current measurement above. This keeps a region that the global proposal already
         // fixed from earning a redundant local layer, while retaining the same renderer and
         // MaskStore seams for the post-global evidence.
         await onProgress?(.validating)
+        let regionalStart = clock.now
+        // Assemble the final timings from the frozen stage clocks and the coordinator
+        // budget. Persistence stays zero here by design: the apply path owns async
+        // coalesced persistence outside the engine, so the engine reports rather than guesses.
+        func finalTimings(regionalSeconds: Double, budget: AutoRenderBudgetUsage)
+            -> AutoRunTimings
+        {
+            AutoRunTimings(
+                decodeSeconds: decodeSeconds,
+                analysisSeconds: analysisSeconds,
+                maskSeconds: maskSeconds,
+                measurementSeconds: measurementSeconds,
+                candidateRenderSeconds: budget.renderSeconds + appleReferenceSeconds,
+                rawRedevelopmentSeconds: budget.rawRenderSeconds,
+                validationSeconds: budget.scoringSeconds,
+                regionalSeconds: regionalSeconds,
+                totalSeconds: AutoTimingClock.seconds(totalStart.duration(to: clock.now)),
+                candidateCount: budget.evaluated + budget.skipped,
+                evaluatedCount: budget.evaluated,
+                smallRenders: budget.smallRenders,
+                rawRedevelopments: budget.rawRedevelopments
+            )
+        }
         let regionalPlan: AutoRegionalPlan
         switch selected.status {
         case .improved, .unchanged, .noCandidate:
@@ -139,7 +221,12 @@ struct ContentAwareAutoEngine: Sendable {
             return AutoEnhancementResult(
                 status: .cancelled,
                 proposedDocument: current,
-                reasons: ["Auto was cancelled while planning regional corrections."]
+                reasons: ["Auto was cancelled while planning regional corrections."],
+                timings: finalTimings(
+                    regionalSeconds: AutoTimingClock.seconds(
+                        regionalStart.duration(to: clock.now)),
+                    budget: selected.budget
+                )
             )
         }
 
@@ -169,7 +256,12 @@ struct ContentAwareAutoEngine: Sendable {
             selectedWithRegionalCorrections, current: current,
             confidence: max(native.confidence, signalConfidence.overall),
             source: source,
-            regionalNotes: regionalPlan.notes
+            regionalNotes: regionalPlan.notes,
+            timings: finalTimings(
+                regionalSeconds: AutoTimingClock.seconds(
+                    regionalStart.duration(to: clock.now)),
+                budget: selected.budget
+            )
         )
     }
 

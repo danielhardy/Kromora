@@ -30,6 +30,9 @@ enum KromoraWorkflowStage: CaseIterable {
     case analysisMaskedStatistics
     case analysisAssembly
     case analysisTotal
+    case autoTotal
+    case autoAnalysis
+    case autoCandidateRender
 
     var name: StaticString {
         switch self {
@@ -55,6 +58,9 @@ enum KromoraWorkflowStage: CaseIterable {
         case .analysisMaskedStatistics: return "PhotoAnalysisMaskedStatistics"
         case .analysisAssembly: return "PhotoAnalysisAssembly"
         case .analysisTotal: return "PhotoAnalysisTotal"
+        case .autoTotal: return "AutoTotal"
+        case .autoAnalysis: return "AutoAnalysis"
+        case .autoCandidateRender: return "AutoCandidateRender"
         }
     }
 }
