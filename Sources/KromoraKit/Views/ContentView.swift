@@ -237,14 +237,8 @@ public struct ContentView: View {
             hasImage: viewModel.sourceImage != nil
         )
 
-        Button {
+        AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
             viewModel.runAutoAdjustment()
-        } label: {
-            if viewModel.isAutoAdjustmentInProgress {
-                Label("Auto…", systemImage: "hourglass")
-            } else {
-                Label("Auto", systemImage: "wand.and.stars")
-            }
         }
         .accessibilityLabel("Auto photo adjustment")
         .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
@@ -377,6 +371,28 @@ public struct ContentView: View {
             }
             .help("Export the selected photos from their originals and saved edits (⌘⇧E)")
             .disabled(viewModel.isExporting)
+        }
+    }
+}
+
+/// The Auto action changes its symbol and progress title while its work is running. Keep both
+/// presentations in one layout so the widest state establishes the button footprint before the
+/// state changes. The hidden presentation is still laid out, but is removed from accessibility
+/// because the button supplies the stable action label and hint above.
+struct AutoToolbarButton: View {
+    let isInProgress: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Label("Auto…", systemImage: "hourglass")
+                    .opacity(isInProgress ? 1 : 0)
+                Label("Auto", systemImage: "wand.and.stars")
+                    .opacity(isInProgress ? 0 : 1)
+            }
+            .fixedSize()
+            .accessibilityHidden(true)
         }
     }
 }
