@@ -163,6 +163,9 @@ struct AutoEnhancementResult: Codable, Sendable, Equatable {
     let candidateProvenance: AutoCandidateProvenance?
     let fingerprint: AutoRunFingerprint?
     let generatedLayerIDs: [UUID]
+    /// Bounded per-stage latency record (KRMA-352). Value-only diagnostics; never read by
+    /// selection, apply, or persistence — attaching it cannot change candidate behavior.
+    let timings: AutoRunTimings
 
     init(
         status: Status = .improved,
@@ -174,7 +177,8 @@ struct AutoEnhancementResult: Codable, Sendable, Equatable {
         validationMeasurements: AutoValidationMeasurements = .init(),
         candidateProvenance: AutoCandidateProvenance? = nil,
         fingerprint: AutoRunFingerprint? = nil,
-        generatedLayerIDs: [UUID] = []
+        generatedLayerIDs: [UUID] = [],
+        timings: AutoRunTimings = .zero
     ) {
         self.status = status
         self.proposedDocument = proposedDocument
@@ -186,6 +190,7 @@ struct AutoEnhancementResult: Codable, Sendable, Equatable {
         self.candidateProvenance = candidateProvenance
         self.fingerprint = fingerprint
         self.generatedLayerIDs = generatedLayerIDs
+        self.timings = timings
     }
 
     /// Compatibility spelling for callers that treat the result as the selected document.
@@ -208,7 +213,8 @@ extension AutoEnhancementResult {
         algorithmVersion: Int = AutoEnhancementPolicy.algorithmVersion,
         renderIdentity: String = RenderIdentity.current,
         source: ImageSource,
-        regionalNotes: [String] = []
+        regionalNotes: [String] = [],
+        timings: AutoRunTimings = .zero
     ) -> Self {
         let changed: [AutoPolicyControl]
         if coordinator.status == .improved {
@@ -239,7 +245,9 @@ extension AutoEnhancementResult {
             validationMeasurements: .init(score: coordinator.selectedScore ?? .acceptable),
             candidateProvenance: coordinator.provenance,
             fingerprint: fingerprint,
-            generatedLayerIDs: coordinator.document.localAdjustments.filter(\.isAutoOwned).map(\.id)
+            generatedLayerIDs: coordinator.document.localAdjustments.filter(\.isAutoOwned)
+                .map(\.id),
+            timings: timings
         )
     }
 }

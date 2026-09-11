@@ -344,6 +344,102 @@ enum Fixtures {
         return url
     }
 
+    /// Write any CGImage as lossless PNG. The gradient/orientation writers above fix their
+    /// content; Auto quality fixtures (KRMA-351) compose arbitrary pixels and share this writer
+    /// so every corpus image is a lossless decode of what the test composed.
+    @discardableResult
+    static func writePNG(
+        _ image: CGImage,
+        named name: String,
+        in directory: URL
+    ) throws -> URL {
+        let url = directory.appendingPathComponent(name)
+        guard
+            let dest = CGImageDestinationCreateWithURL(
+                url as CFURL, UTType.png.identifier as CFString, 1, nil
+            )
+        else { throw FixtureError.cannotCreateDestination }
+        CGImageDestinationAddImage(dest, image, nil)
+        guard CGImageDestinationFinalize(dest) else { throw FixtureError.cannotWriteImage }
+        return url
+    }
+
+    /// Encode a CGImage as JPEG data (in-memory). Lets Auto quality tests build `ImageSource`
+    /// values without touching disk; file-backed variants should use `writeGradientPNG` etc.
+    static func jpegData(for image: CGImage, quality: CGFloat = 0.92) throws -> Data {
+        let data = NSMutableData()
+        guard
+            let dest = CGImageDestinationCreateWithData(
+                data, UTType.jpeg.identifier as CFString, 1, nil
+            )
+        else { throw FixtureError.cannotCreateDestination }
+        CGImageDestinationAddImage(
+            dest, image, [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+        )
+        guard CGImageDestinationFinalize(dest) else { throw FixtureError.cannotWriteImage }
+        return data as Data
+    }
+
+    /// Fill an image pixel-by-pixel. `fill` receives normalized (nx, ny) in 0...1 and returns
+    /// sRGB (r, g, b) in 0...1. Small (analysis-scale) images only; the corpus stays at
+    /// 96x64 or below so the actual-render lane measures in milliseconds.
+    static func makeParametricCGImage(
+        width: Int,
+        height: Int,
+        fill: (Double, Double) -> (Double, Double, Double)
+    ) throws -> CGImage {
+        let space = CGColorSpace(name: CGColorSpace.sRGB)!
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                let nx = (Double(x) + 0.5) / Double(width)
+                let ny = (Double(y) + 0.5) / Double(height)
+                let (r, g, b) = fill(nx, ny)
+                let offset = (y * width + x) * 4
+                pixels[offset] = UInt8(min(max(r * 255, 0), 255))
+                pixels[offset + 1] = UInt8(min(max(g * 255, 0), 255))
+                pixels[offset + 2] = UInt8(min(max(b * 255, 0), 255))
+                pixels[offset + 3] = 255
+            }
+        }
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        guard
+            let image = CGImage(
+                width: width, height: height,
+                bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: width * 4, space: space,
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent
+            )
+        else { throw FixtureError.cannotCreateContext }
+        return image
+    }
+
+    /// Mean per-channel levels and clipping shares of a decoded image. Pure CPU sampling for
+    /// range assertions ("defect improved", "no new clipping"); exact render math belongs to
+    /// `AutoCandidateEvaluator.compare`, not to this helper.
+    static func sampleLevels(of image: CGImage) -> (meanR: Double, meanG: Double, meanB: Double, highlightClip: Double, shadowClip: Double)? {
+        guard
+            let pixels = AutoCandidateEvaluator.rgba8Pixels(image: image), !pixels.bytes.isEmpty
+        else { return nil }
+        let count = pixels.width * pixels.height
+        var sumR = 0.0, sumG = 0.0, sumB = 0.0
+        var bright = 0, dark = 0
+        for i in 0..<count {
+            let r = Double(pixels.bytes[i * 4]) / 255
+            let g = Double(pixels.bytes[i * 4 + 1]) / 255
+            let b = Double(pixels.bytes[i * 4 + 2]) / 255
+            sumR += r; sumG += g; sumB += b
+            let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+            if luma >= 0.985 { bright += 1 }
+            if luma <= 0.015 { dark += 1 }
+        }
+        return (
+            sumR / Double(count), sumG / Double(count), sumB / Double(count),
+            Double(bright) / Double(count), Double(dark) / Double(count)
+        )
+    }
+
     // MARK: - Local-only RAW
 
     /// A real RAW file, if a caller supplied a local fixture directory.

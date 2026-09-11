@@ -787,13 +787,21 @@ struct AutoCoordinatorConfiguration: Sendable, Equatable {
 }
 
 /// Observable render-budget counters for one run. Returned with every result so tests and
-/// diagnostics can assert the bounds held.
+/// diagnostics can assert the bounds held. The seconds fields are low-overhead
+/// `ContinuousClock` reads around the sampler and the pure scoring function; they never
+/// influence selection.
 struct AutoRenderBudgetUsage: Sendable, Equatable {
     var smallRenders: Int
     var rawRedevelopments: Int
     var evaluated: Int
     var skipped: Int
     var elapsedSeconds: Double
+    /// Time spent inside the sampler (candidate renders), for the KRMA-352 stage breakdown.
+    var renderSeconds: Double = 0
+    /// RAW-redevelopment subset of `renderSeconds`.
+    var rawRenderSeconds: Double = 0
+    /// Time spent in pure scoring and guardrail evaluation (validation).
+    var scoringSeconds: Double = 0
 
     static let none = AutoRenderBudgetUsage(
         smallRenders: 0, rawRedevelopments: 0, evaluated: 0, skipped: 0, elapsedSeconds: 0
@@ -891,13 +899,21 @@ struct AutoEnhancementCoordinator: Sendable {
     ) async -> AutoEnhancementCoordinatorResult {
         let started = Date()
         let sourceKindIsRAW = source.kind == .raw
+        // KRMA-352 stage clocks. Two `ContinuousClock` reads per render/score; the values
+        // are recorded in the budget and never influence selection.
+        let stageClock = ContinuousClock()
+        var renderSeconds = 0.0
+        var rawRenderSeconds = 0.0
+        var scoringSeconds = 0.0
 
         func budget(elapsed: Double, usage: (small: Int, raw: Int, evaluated: Int, skipped: Int))
             -> AutoRenderBudgetUsage
         {
             AutoRenderBudgetUsage(
                 smallRenders: usage.small, rawRedevelopments: usage.raw,
-                evaluated: usage.evaluated, skipped: usage.skipped, elapsedSeconds: elapsed
+                evaluated: usage.evaluated, skipped: usage.skipped, elapsedSeconds: elapsed,
+                renderSeconds: renderSeconds, rawRenderSeconds: rawRenderSeconds,
+                scoringSeconds: scoringSeconds
             )
         }
 
@@ -971,10 +987,17 @@ struct AutoEnhancementCoordinator: Sendable {
             }
             smallRenders += 1
             if sourceKindIsRAW { rawRedevelopments += 1 }
-            return await engine.renderedSamples(
+            let renderStart = stageClock.now
+            let timedSamples = await engine.renderedSamples(
                 source: source, document: candidate.document, lut: lut,
                 targetLongEdge: configuration.candidateLongEdge, space: configuration.space
             )
+            let renderElapsed = stageClock.now - renderStart
+            renderSeconds += AutoTimingClock.seconds(renderElapsed)
+            if sourceKindIsRAW {
+                rawRenderSeconds += AutoTimingClock.seconds(renderElapsed)
+            }
+            return timedSamples
         }
 
         // The unchanged baseline always renders first: it is both candidate zero and the
@@ -982,10 +1005,17 @@ struct AutoEnhancementCoordinator: Sendable {
         // candidates only — a spent budget stops the run after the baseline, never before it.
         smallRenders += 1
         if sourceKindIsRAW { rawRedevelopments += 1 }
-        guard let baselineSamples = await engine.renderedSamples(
+        let baselineRenderStart = stageClock.now
+        let baselineRender = await engine.renderedSamples(
             source: source, document: candidates[0].document, lut: lut,
             targetLongEdge: configuration.candidateLongEdge, space: configuration.space
-        ) else {
+        )
+        let baselineRenderElapsed = stageClock.now - baselineRenderStart
+        renderSeconds += AutoTimingClock.seconds(baselineRenderElapsed)
+        if sourceKindIsRAW {
+            rawRenderSeconds += AutoTimingClock.seconds(baselineRenderElapsed)
+        }
+        guard let baselineSamples = baselineRender else {
             if Task.isCancelled {
                 return finish(
                     .cancelled, document: current, provenance: nil,
@@ -1008,10 +1038,12 @@ struct AutoEnhancementCoordinator: Sendable {
         }
         let pixelBaseline = AutoPixelBaseline.frozen(samples: baselineSamples)
         await onProgress?(.validating)
+        let baselineScoreStart = stageClock.now
         let baselineScore = AutoCandidateScoring.score(
             samples: baselineSamples, candidate: candidates[0],
             targets: targets, baseline: pixelBaseline, isUnchanged: true
         )
+        scoringSeconds += AutoTimingClock.seconds(stageClock.now - baselineScoreStart)
         evaluated += 1
 
         struct Evaluated: Sendable {
@@ -1060,10 +1092,12 @@ struct AutoEnhancementCoordinator: Sendable {
                     usage: (smallRenders, rawRedevelopments, evaluated, skipped), notes: notes
                 )
             }
+            let scoreStart = stageClock.now
             let score = AutoCandidateScoring.score(
                 samples: samples, candidate: candidates[index],
                 targets: targets, baseline: pixelBaseline, isUnchanged: false
             )
+            scoringSeconds += AutoTimingClock.seconds(stageClock.now - scoreStart)
             evaluated += 1
             let record = Evaluated(index: index, candidate: candidates[index], score: score)
             completed.append(record)

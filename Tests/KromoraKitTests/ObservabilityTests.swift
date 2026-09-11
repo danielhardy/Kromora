@@ -12,6 +12,7 @@ final class ObservabilityTests: XCTestCase {
             "PhotoAnalysisGlobalTone", "PhotoAnalysisSubjectMask", "PhotoAnalysisFaceMask",
             "PhotoAnalysisForegroundMask", "PhotoAnalysisBackgroundMask", "PhotoAnalysisPersonMask",
             "PhotoAnalysisMaskedStatistics", "PhotoAnalysisAssembly", "PhotoAnalysisTotal",
+            "AutoTotal", "AutoAnalysis", "AutoCandidateRender",
         ])
     }
 
