@@ -531,6 +531,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
         view.framebufferOnly = false
         view.colorPixelFormat = .bgra8Unorm
         view.autoResizeDrawable = true
+        view.onEffectiveAppearanceChange = { [weak coordinator = context.coordinator] appearance in
+            coordinator?.appearanceDidChange(appearance)
+        }
         context.coordinator.startDisplayObservation()
         return view
     }
@@ -732,7 +735,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
             isDrawing = true
             let presentationEncodingStart = LiveEditTelemetryClock.now
             let renderPass = view.currentRenderPassDescriptor
-            renderPass?.colorAttachments[0].clearColor = Self.windowBackgroundClearColor
+            let appearance = view.effectiveAppearance
+            let clearColor = Self.windowBackgroundClearColor(for: appearance)
+            renderPass?.colorAttachments[0].clearColor = clearColor
             renderPass?.colorAttachments[0].loadAction = .clear
             renderPass?.colorAttachments[0].storeAction = .store
 
@@ -763,7 +768,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             } else if let output = Self.presentationImage(
                 surface.mappedImageForPresentation(image), navigation: navigation,
                 destination: destination,
-                virtualExtent: surface.presentationImageExtent
+                virtualExtent: surface.presentationImageExtent,
+                appearance: appearance
             ) {
                 // Compatibility seam for a host without a usable Metal texture/pipeline. The
                 // production path above never evaluates this graph on presentation-only redraws.
@@ -843,7 +849,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// never downscaled here; only pixels outside the current viewport are discarded.
         static func presentationImage(
             _ image: CIImage, navigation: CanvasNavigation, destination: CGRect,
-            virtualExtent: CGRect? = nil
+            virtualExtent: CGRect? = nil, appearance: NSAppearance? = nil
         ) -> CIImage? {
             guard destination.width > 0, destination.height > 0,
                   destination.width.isFinite, destination.height.isFinite,
@@ -860,10 +866,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let displayed = image
                 .transformed(by: transform.affineTransform(for: transformExtent))
                 .cropped(to: destination)
-            // The image-presentation letterbox follows the SwiftUI shell's resolved window
-            // background. It is scoped to the drawable, so it still updates with appearance
-            // changes without adding a Core Image evaluation to a repaint.
-            let clear = windowBackgroundClearColor
+            // Resolve the dynamic AppKit color against the editor view's effective appearance.
+            // Resolving without that appearance is not reliable at the native presentation
+            // boundary: a dark window can otherwise produce a light letterbox.
+            let clear = windowBackgroundClearColor(for: appearance)
             let background = CIImage(
                 color: CIColor(red: CGFloat(clear.red), green: CGFloat(clear.green),
                                blue: CGFloat(clear.blue), alpha: 1)
@@ -871,9 +877,14 @@ struct PreviewSurfaceView: NSViewRepresentable {
             return displayed.composited(over: background).cropped(to: destination)
         }
 
-        private static var windowBackgroundClearColor: MTLClearColor {
-            let color = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
-                ?? NSColor.windowBackgroundColor
+        static func windowBackgroundClearColor(for appearance: NSAppearance? = nil) -> MTLClearColor {
+            let effectiveAppearance = appearance ?? NSApp?.effectiveAppearance
+                ?? NSAppearance(named: .aqua)!
+            var color = NSColor.windowBackgroundColor
+            effectiveAppearance.performAsCurrentDrawingAppearance {
+                color = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
+                    ?? NSColor.windowBackgroundColor
+            }
             return MTLClearColor(red: Double(color.redComponent),
                                  green: Double(color.greenComponent),
                                  blue: Double(color.blueComponent), alpha: 1)
@@ -1029,7 +1040,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// pipeline as the drawable path. This is an acceptance-test seam for geometry and
         /// repaint behavior on hosts without a logged-in display; it never evaluates Core Image.
         func renderRetainedTextureForTesting(
-            surface: PreviewSurface, navigation: CanvasNavigation, destinationSize: CGSize
+            surface: PreviewSurface, navigation: CanvasNavigation, destinationSize: CGSize,
+            appearance: NSAppearance? = nil
         ) -> MTLTexture? {
             guard destinationSize.width > 0, destinationSize.height > 0,
                   destinationSize.width.isFinite, destinationSize.height.isFinite,
@@ -1056,7 +1068,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = target
-            pass.colorAttachments[0].clearColor = Self.windowBackgroundClearColor
+            pass.colorAttachments[0].clearColor = Self.windowBackgroundClearColor(for: appearance)
             pass.colorAttachments[0].loadAction = .clear
             pass.colorAttachments[0].storeAction = .store
             guard let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
@@ -1083,6 +1095,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
             commandBuffer.waitUntilCompleted()
             return commandBuffer.status == .completed ? target : nil
         }
+
+        func appearanceDidChange(_ _: NSAppearance) {
+            displayConfigurationChanged()
+        }
     }
 }
 
@@ -1091,6 +1107,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
 private final class PreviewMTKView: MTKView {
     var onScrollZoom: ((CGFloat) -> Void)?
     var onDoubleClick: (() -> Void)?
+    var onEffectiveAppearanceChange: ((NSAppearance) -> Void)?
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
@@ -1111,6 +1128,13 @@ private final class PreviewMTKView: MTKView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        onEffectiveAppearanceChange?(effectiveAppearance)
+        setNeedsDisplay(bounds)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        onEffectiveAppearanceChange?(effectiveAppearance)
         setNeedsDisplay(bounds)
     }
 
