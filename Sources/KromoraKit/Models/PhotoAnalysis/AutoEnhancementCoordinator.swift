@@ -307,8 +307,9 @@ struct AutoRegionTarget: Codable, Sendable, Equatable {
 /// amplification) anchor to the unchanged candidate's own render, which is scored first and
 /// frozen as the pixel baseline before any other candidate is evaluated.
 struct AutoEvaluationTargets: Codable, Sendable, Equatable {
-    /// Global placement target: 0.48 pulled toward the baseline median by scene intent so
-    /// high-key, low-key, and night frames are not "corrected" toward middle gray.
+    /// Global placement target from the shared robust neutral-exposure objective. Ordinary frames
+    /// target a perceptual median of 0.48; high-key, low-key, and night frames are pulled toward
+    /// their measured median unless p10/p50/p75/p95 show a structurally underexposed frame.
     let globalTargetMedian: Double
     /// Baseline global median (the status quo the relative terms compare against).
     let baselineMedian: Double
@@ -332,11 +333,9 @@ struct AutoEvaluationTargets: Codable, Sendable, Equatable {
     ) -> AutoEvaluationTargets {
         let scene = facts.scene
         let baselineMedian = Double(facts.tonePerceptual.p50)
-        let intentStrength = Double(
-            max(scene.highKeyLikelihood, max(scene.lowKeyLikelihood, scene.nightLikelihood))
+        let globalTarget = AutoExposureObjective.targetMedian(
+            tone: facts.tonePerceptual, scene: scene
         )
-        let clampedIntent = min(max(intentStrength.isFinite ? intentStrength : 0, 0), 1)
-        let globalTarget = 0.48 * (1 - clampedIntent) + baselineMedian * clampedIntent
 
         let meanRGB = facts.color.meanRGB
         let warm = Double(meanRGB.x - meanRGB.z)
@@ -355,11 +354,12 @@ struct AutoEvaluationTargets: Codable, Sendable, Equatable {
             .sorted { $0.importance > $1.importance }
             .prefix(AutoCandidateScoring.maximumScoredRegions)
             .map { region -> AutoRegionTarget in
-                let regionBaseline = Double(region.tone.p50)
                 return AutoRegionTarget(
                     kind: region.kind,
                     bounds: region.bounds,
-                    targetMedian: 0.48 * (1 - clampedIntent) + regionBaseline * clampedIntent,
+                    targetMedian: AutoExposureObjective.targetMedian(
+                        tone: region.tone, scene: scene
+                    ),
                     importance: Double(region.importance),
                     confidence: Double(region.confidence)
                 )
@@ -558,7 +558,11 @@ enum AutoCandidateScoring {
         if targets.regions.isEmpty { missingEvidencePenalty += 0.03 }
         if neutralUnsupported { missingEvidencePenalty += 0.02 }
 
-        let total = globalExposure * 1.0
+        // Neutral placement is the primary defect for this policy. Giving it the strongest
+        // weight prevents movement/complexity penalties from selecting a barely visible half-
+        // strength candidate when a rendered full-strength lift materially closes the measured
+        // luminance gap.
+        let total = globalExposure * 2.0
             + regionExposure * 1.5
             + clipping * 3.0
             + neutral * 1.2
@@ -617,7 +621,7 @@ enum AutoCandidateScoring {
             let delta = abs(change.proposed - change.previous)
             let envelope: Double
             switch control {
-            case .exposure: envelope = 1.25
+            case .exposure: envelope = AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
             case .temperature: envelope = 2500
             case .tint: envelope = 150
             default: envelope = 100

@@ -249,7 +249,10 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
         )
         let exposure = proposal.changes[.exposure]?.proposed ?? 0
         XCTAssertGreaterThan(exposure, 0.4, "underexposed frame must lift")
-        XCTAssertLessThanOrEqual(exposure, 1.25, "lift must respect the policy cap")
+        XCTAssertLessThanOrEqual(
+            exposure, AutoExposureObjective.structurallyUnderexposedCorrectionCapEV,
+            "lift must respect the structural-underexposure cap"
+        )
         XCTAssertLessThan(abs(proposal.changes[.shadows]?.proposed ?? 0), 20)
     }
 
@@ -709,7 +712,10 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
         // Full-path guardrails: whatever the policy proposes for a dark frame must stay
         // bounded and must not invent clipping. (The policy's own lift is pinned pure above;
         // the renderer-honors-lift half follows.)
-        XCTAssertLessThanOrEqual(abs(proposal.changes[.exposure]?.proposed ?? 0), 1.25)
+        XCTAssertLessThanOrEqual(
+            abs(proposal.changes[.exposure]?.proposed ?? 0),
+            AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
+        )
         XCTAssertNotNil(report.measurements)
         // Renderer half, KRMA-342 style: the representative +1EV correction the policy class
         // proposes must lift the defect metric (luma toward the 0.48 band) without clipping.

@@ -98,6 +98,43 @@ final class ContentAwareAutoEngineTests: TempDirectoryTestCase {
         XCTAssertTrue(result.reasons.contains { $0.contains("no material regional cast") })
     }
 
+    func testUnderexposedFrameSelectsMeaningfulExposureThroughProductionRenderer() async throws {
+        let sourceData = try Fixtures.jpegData(
+            for: Fixtures.makeParametricCGImage(width: 96, height: 64) { nx, ny in
+                let value = 0.04 + 0.56 * ((nx + ny) / 2)
+                return (value, value, value * 0.98)
+            }
+        )
+        let source = ImageSource(data: sourceData, nativeExtent: CGSize(width: 96, height: 64))
+        let assetID = PhotoAssetID.data(sourceData)
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("masks-underexposed"))
+        let engine = RenderEngine()
+        let analysisCoordinator = PhotoAnalysisCoordinator(
+            engine: engine,
+            maskStore: store,
+            cache: PhotoAnalysisCache(
+                directory: tempDirectory.appendingPathComponent("analysis-underexposed")
+            ),
+            maskProvider: FixtureRegionalMaskProvider(masks: [:]),
+            stages: [:]
+        )
+        defer { Task { await analysisCoordinator.shutdown() } }
+
+        let result = await ContentAwareAutoEngine(
+            engine: engine,
+            analysisCoordinator: analysisCoordinator,
+            maskStore: store
+        ).run(source: source, assetID: assetID, current: EditDocument())
+
+        XCTAssertEqual(result.status, .improved, result.reasons.joined(separator: " "))
+        XCTAssertGreaterThan(
+            result.proposedDocument.light.exposure, 0.45,
+            "a materially dark developed render must not collapse to a near-no-op"
+        )
+        XCTAssertTrue(result.changedControls.contains(.exposure))
+        XCTAssertTrue(result.proposedDocument.localAdjustments.isEmpty)
+    }
+
     private static let maskSize = PixelDimensions(width: 64, height: 48)
 
     private func makeRegionalMasks(

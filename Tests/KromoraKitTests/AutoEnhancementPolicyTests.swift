@@ -148,12 +148,49 @@ final class AutoEnhancementPolicyTests: XCTestCase {
         )
         let exposure = proposal.changes[.exposure]?.proposed ?? 0
         XCTAssertGreaterThan(exposure, 0.5)
-        XCTAssertLessThanOrEqual(exposure, 1.25)
+        XCTAssertLessThanOrEqual(
+            exposure, AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
+        )
         // Tails correct the residual, never the full independent defect: bounded well inside
         // the model ranges even for a two-stop error.
         XCTAssertLessThan(abs(proposal.changes[.shadows]?.proposed ?? 0), 20)
         XCTAssertLessThan(abs(proposal.changes[.whites]?.proposed ?? 0), 18)
         XCTAssertLessThan(abs(proposal.changes[.blacks]?.proposed ?? 0), 18)
+    }
+
+    func testStructuredUnderexposureOverridesLowKeyBrake() {
+        let proposal = AutoEnhancementPolicy.propose(
+            facts: facts(
+                median: 0.20, p05: 0.01, p10: 0.04, p25: 0.10,
+                p75: 0.36, p90: 0.52, p95: 0.60,
+                scene: SceneCharacteristics(lowKeyLikelihood: 0.9)
+            ),
+            current: EditDocument(), sourceKind: .standard
+        )
+        XCTAssertGreaterThan(
+            proposal.changes[.exposure]?.proposed ?? 0, 0.8,
+            "broad tonal structure contradicts a low-key classification"
+        )
+        XCTAssertLessThanOrEqual(
+            proposal.changes[.exposure]?.proposed ?? 0,
+            AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
+        )
+    }
+
+    func testRAWUsesTheSameNeutralObjectiveAndBoundedLift() {
+        let proposal = AutoEnhancementPolicy.propose(
+            facts: facts(
+                median: 0.14, p05: 0.005, p10: 0.02, p25: 0.07,
+                p75: 0.30, p90: 0.50, p95: 0.64,
+                asShotTemperature: 5200
+            ),
+            current: EditDocument(), sourceKind: .raw
+        )
+        let exposure = proposal.changes[.exposure]?.proposed ?? 0
+        XCTAssertGreaterThan(exposure, 1.0)
+        XCTAssertLessThanOrEqual(
+            exposure, AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
+        )
     }
 
     func testClippedHighlightsRecoverWithoutExposureLift() {
