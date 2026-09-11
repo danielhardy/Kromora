@@ -7,6 +7,7 @@ struct StatusBar: View {
     @ObservedObject var viewModel: AppViewModel
     var onCancelImport: () -> Void = {}
     var onCancelExport: () -> Void = {}
+    var onCancelAuto: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 0) {
@@ -35,6 +36,18 @@ struct StatusBar: View {
                     .lineLimit(1)
                     .padding(.leading, 8)
                 Button("Cancel") { onCancelExport() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .padding(.leading, 8)
+            } else if viewModel.isAutoAdjustmentInProgress {
+                ProgressView()
+                    .controlSize(.small)
+                Text(viewModel.statusMessage)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .padding(.leading, 8)
+                Button("Cancel") { onCancelAuto() }
                     .buttonStyle(.borderless)
                     .font(.caption)
                     .padding(.leading, 8)

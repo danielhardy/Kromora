@@ -886,7 +886,8 @@ struct AutoEnhancementCoordinator: Sendable {
         native: AutoEnhancementProposal? = nil,
         apple: AppleReferenceProposal? = nil,
         sourceKind: AutoSourceKind,
-        lut: CubeLUT? = nil
+        lut: CubeLUT? = nil,
+        onProgress: (@MainActor @Sendable (AutoEnhancementPhase) -> Void)? = nil
     ) async -> AutoEnhancementCoordinatorResult {
         let started = Date()
         let sourceKindIsRAW = source.kind == .raw
@@ -934,6 +935,8 @@ struct AutoEnhancementCoordinator: Sendable {
                 usage: (0, 0, 0, 0), notes: [:]
             )
         }
+
+        await onProgress?(.renderingCandidates)
 
         // Freeze targets and candidates for the entire run.
         let targets = AutoEvaluationTargets.frozen(facts: facts, regions: regions)
@@ -1004,6 +1007,7 @@ struct AutoEnhancementCoordinator: Sendable {
             )
         }
         let pixelBaseline = AutoPixelBaseline.frozen(samples: baselineSamples)
+        await onProgress?(.validating)
         let baselineScore = AutoCandidateScoring.score(
             samples: baselineSamples, candidate: candidates[0],
             targets: targets, baseline: pixelBaseline, isUnchanged: true

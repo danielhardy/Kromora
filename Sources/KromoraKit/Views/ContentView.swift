@@ -177,7 +177,8 @@ public struct ContentView: View {
                         onOpen: viewModel.openLibraryImageForEditing
                     )
                     StatusBar(viewModel: viewModel, onCancelImport: cancelPhotosImport,
-                              onCancelExport: viewModel.cancelExport)
+                              onCancelExport: viewModel.cancelExport,
+                              onCancelAuto: viewModel.cancelAutoAdjustment)
                 }
             } else {
                 HStack(spacing: 0) {
@@ -203,7 +204,8 @@ public struct ContentView: View {
                         }
 
                             StatusBar(viewModel: viewModel, onCancelImport: cancelPhotosImport,
-                                      onCancelExport: viewModel.cancelExport)
+                                      onCancelExport: viewModel.cancelExport,
+                                      onCancelAuto: viewModel.cancelAutoAdjustment)
                     }
                 }
             }

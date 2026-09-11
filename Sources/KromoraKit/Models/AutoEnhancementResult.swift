@@ -1,5 +1,13 @@
 import Foundation
 
+/// User-visible milestones for one content-aware Auto run. The callback is deliberately value-only
+/// so the editor can publish progress without exposing analysis or renderer objects.
+enum AutoEnhancementPhase: Sendable, Equatable {
+    case analyzing
+    case renderingCandidates
+    case validating
+}
+
 /// The owner of a local layer. Auto-created recipes remain ordinary editable layers; this
 /// marker only controls whether a later Auto run may replace them.
 enum AutoLayerOwnership: String, Codable, Sendable, Equatable {
