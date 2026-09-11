@@ -76,6 +76,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.isSideBySide)
         XCTAssertTrue(viewModel.isSideBySideVisible,
                       "a retained side-by-side preference must remain visible for an identity photo")
+        XCTAssertTrue(viewModel.isComparisonPresentationAvailable)
         XCTAssertFalse(viewModel.isShowingOriginal, "Space comparison must not leak across photos")
     }
 
@@ -154,6 +155,27 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.isSideBySide)
         XCTAssertTrue(viewModel.toggleSideBySide(), "the retained comparison must be dismissible")
         XCTAssertFalse(viewModel.isSideBySide)
+    }
+
+    func testSpaceIsSingleViewOnly() {
+        let viewModel = makeViewModel(defaults: makeDefaults())
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        XCTAssertTrue(viewModel.toggleSideBySide())
+
+        XCTAssertFalse(viewModel.showOriginal(true))
+        XCTAssertFalse(viewModel.isShowingOriginal)
+    }
+
+    func testUndoToIdentityClearsTransientOriginal() {
+        let viewModel = makeViewModel(defaults: makeDefaults())
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        XCTAssertTrue(viewModel.showOriginal(true))
+        XCTAssertTrue(viewModel.isShowingOriginal)
+
+        viewModel.undo()
+
+        XCTAssertTrue(viewModel.document.isIdentity)
+        XCTAssertFalse(viewModel.isShowingOriginal)
     }
 
     func testEnteringSideBySideAfterSettledPreviewRequestsAndPublishesBaseline() async throws {

@@ -264,7 +264,7 @@ public struct ContentView: View {
         // An active retained side-by-side preference remains actionable on an identity document so
         // the user can return to single view after switching photos or using Reset Photo. Starting
         // side-by-side from single view still follows the meaningful-comparison gate.
-        if viewModel.isComparisonAvailable || viewModel.isSideBySideVisible {
+        if viewModel.isComparisonPresentationAvailable {
             Button {
                 viewModel.toggleSideBySide()
             } label: {

@@ -124,9 +124,16 @@ library Look; the stable derived identity keeps the edit resolving across rescan
 
 ### Compare, inspect, and export
 
-- Single-view and side-by-side comparison (`V`) share the same render source. Hold `Space` to show
-  the develop-applied photo without the visible Light/Color/Effects/Look edits; crop framing is
-  retained.
+- Kromora uses the always-both comparison model: when a meaningful before/after exists, the
+  top-bar comparison control and `V` consistently switch between the primary side-by-side view
+  and the alternate single-photo view. In single-photo view, hold `Space` to temporarily show the
+  comparison baseline (the develop-applied photo without the visible Light/Color/Effects/Look
+  edits); Space is inert in side-by-side view because both labeled surfaces are already visible.
+  The selected single/side-by-side presentation is retained across photo switching and relaunch;
+  the transient Space state clears when switching photos, resetting to identity, undoing/redoing to
+  identity, or when no meaningful comparison remains. Side-by-side may remain selected after a
+  reset or on an unedited photo, where both panes intentionally show the same source pixels. See
+  [the comparison mode decision](docs/COMPARISON_MODE.md) for the complete interaction contract.
 - Info inspector (`⌘I`) shows a live RGB/luma histogram and EXIF, TIFF, and GPS metadata.
 - Export the edited document as 16-bit TIFF, JPEG, or PNG. The format is selected in the save flow
   and the last choice is retained for the session. The export panel explicitly controls camera
@@ -169,7 +176,7 @@ imports use a SHA-256 identity for the delivered bytes.
 | `←` / `→` or `[` / `]` | Previous / next image |
 | `↑` / `↓` | Previous / next Look |
 | `V` | Toggle single-view / side-by-side comparison |
-| `Space` (hold) | Show the comparison baseline |
+| `Space` (hold) | Show the comparison baseline in single-photo view |
 | `B` | Select the Brush mask tool |
 | `E` (masking workspace) | Select the Erase mask tool |
 | `L` | Select the Linear Gradient mask tool |

@@ -182,7 +182,10 @@ final class KeyMonitor {
             }
             // A one-off or untouched photo has no meaningful before/after surface. Let Space
             // continue through in that state instead of consuming a key that did nothing.
-            guard vm.isComparisonAvailable else { return event }
+            // Side-by-side already exposes both surfaces. Space is reserved for the temporary
+            // Original view in single-image mode and must not replace the adjusted pane beneath
+            // a split presentation.
+            guard vm.isComparisonAvailable && !vm.isSideBySide else { return event }
             _ = vm.showOriginal(isDown)
             return nil
         case 126: // Up arrow — previous Look
