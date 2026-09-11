@@ -247,6 +247,30 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         XCTAssertEqual(requests.last?.document.color.saturation, 0)
     }
 
+    func testCancellingAutoLeavesDocumentUntouchedAndClearsLoadingState() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+        let before = viewModel.document
+        await fake.gateHistogram()
+
+        viewModel.runAutoAdjustment()
+        let deadline = Date().addingTimeInterval(5)
+        while !viewModel.isAutoAdjustmentInProgress {
+            if Date() > deadline { return XCTFail("timed out waiting for Auto") }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        viewModel.cancelAutoAdjustment()
+        XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
+        XCTAssertEqual(viewModel.autoAdjustmentState, .cancelled)
+        await fake.releaseHistograms()
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertEqual(viewModel.document, before)
+        XCTAssertEqual(viewModel.statusMessage, "Auto cancelled; nothing was changed.")
+    }
+
     func testRepeatingAutoIsDeterministicAndDoesNotAddAnotherHistoryEntry() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
@@ -262,7 +286,8 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         let depth = viewModel.undoDepth
 
         viewModel.runAutoAdjustment()
-        while !viewModel.statusMessage.hasPrefix("Auto applied") {
+        while !viewModel.statusMessage.hasPrefix("Auto applied")
+            && viewModel.statusMessage != "No further improvement found" {
             if Date() > deadline { return XCTFail("timed out waiting for repeated Auto") }
             try await Task.sleep(for: .milliseconds(10))
         }

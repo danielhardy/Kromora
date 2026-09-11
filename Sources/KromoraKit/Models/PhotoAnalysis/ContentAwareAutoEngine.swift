@@ -12,7 +12,8 @@ struct ContentAwareAutoEngine: Sendable {
         source: ImageSource,
         assetID: PhotoAssetID,
         current: EditDocument,
-        lut: CubeLUT? = nil
+        lut: CubeLUT? = nil,
+        onProgress: (@MainActor @Sendable (AutoEnhancementPhase) -> Void)? = nil
     ) async -> AutoEnhancementResult {
         if let fingerprint = current.lastAutoRunFingerprint,
             fingerprint.matches(source: source, document: current)
@@ -25,6 +26,7 @@ struct ContentAwareAutoEngine: Sendable {
             )
         }
         let expectedHash = current.editHash
+        await onProgress?(.analyzing)
         let sourceKind: AutoSourceKind = source.kind == .raw ? .raw : .standard
         let sourceAnalysis = try? await analysisCoordinator.analyze(
             assetID: assetID, source: source, level: .standard
@@ -49,6 +51,7 @@ struct ContentAwareAutoEngine: Sendable {
                 )
             } ?? []
 
+        await onProgress?(.renderingCandidates)
         let measurer = CurrentEditMeasurer(engine: engine, store: maskStore)
         let measurement: CurrentEditMeasurement
         do {
@@ -107,13 +110,14 @@ struct ContentAwareAutoEngine: Sendable {
         let selected = await coordinator.run(
             source: source, current: current, expectedDocumentHash: expectedHash,
             facts: facts, regions: measurement.regions, native: native, apple: apple,
-            sourceKind: sourceKind, lut: lut
+            sourceKind: sourceKind, lut: lut, onProgress: onProgress
         )
 
         // Regional corrections are planned from the selected global candidate, not from the
         // source/current measurement above. This keeps a region that the global proposal already
         // fixed from earning a redundant local layer, while retaining the same renderer and
         // MaskStore seams for the post-global evidence.
+        await onProgress?(.validating)
         let regionalPlan: AutoRegionalPlan
         switch selected.status {
         case .improved, .unchanged, .noCandidate:
