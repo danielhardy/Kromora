@@ -2,11 +2,49 @@
 id: KRMA-341
 title: Content-aware Auto engine and renderer-backed candidate evaluation
 type: feature
-status: ready
+status: done
 priority: high
-agent: pi
+agent: codex
 verification_agent: codex
-model: openrouter/meta/muse-spark-1.3-contributor
+model: gpt-5.6-luna
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: The production content-aware Auto invocation adds selective Auto-owned regional corrections when global edits cannot solve a measured regional conflict.
+      result: pass
+      notes: Current ContentAwareAutoEngine performs post-global renderer-backed regional measurement and invokes AutoRegionalCorrections.plan/applying; the real conflict regression creates an editable Auto-Subject layer.
+    - criterion: Candidate evaluation, guardrails, cancellation, revision fencing, and atomic persistence apply through the real renderer.
+      result: pass
+      notes: Coordinator, AppViewModel integration, renderer-backed conflict/no-mask tests, persistence/lifecycle tests, and required fast/serial lanes pass.
+    - criterion: Auto result ownership and repeat-run no-op behavior are durable and user-editable.
+      result: pass
+      notes: Ownership transitions, stable provenance reconciliation, schema-v4 document round trips, repeat-run no-op behavior, undo/redo, and save/reopen coverage pass.
+  checks_run:
+    - git diff --check (pass)
+    - dg validate (pass; known unknown-model warnings only)
+    - swift build (pass)
+    - focused Auto/regional/result/persistence/quality/diagnostics tests (119 passed, 1 expected opt-in skip)
+    - scripts/ci-tests.sh fast (872/872 passed)
+    - scripts/ci-tests.sh serial (328/328 passed)
+    - scripts/ci-tests.sh verify (pass; required lanes disjoint)
+    - scripts/auto-quality-report.sh (25 policy tests and 6 actual-render tests passed)
+    - KROMORA_AUTO_BENCHMARK=1 swift test --no-parallel --filter AutoPerformanceDiagnosticsTests/testAutoEndToEndBenchmark (pass; cold 6.561s, warm 5.917s; warm masks 0.001s after fix)
+    - KROMORA_PHOTO_ANALYSIS_BENCHMARK=1 swift test --no-parallel --filter PhotoAnalysisPerformanceTests (3 documented baseline drift failures; 5 other tests passed)
+    - scripts/check-swift-format.sh (baseline violations in touched pre-existing/new KRMA-351/352 files; no violation on verification-added lines)
+    - production call-site search for AutoRegionalCorrections.plan/applying (present)
+  findings:
+    - "[fixed][diagnostics] Warm analysis-cache hits reused cached mask-generation duration, misreporting stale mask latency despite no mask work in the current invocation. ContentAwareAutoEngine now clamps maskSeconds to the current analysis window, with a cold/warm regression assertion and corrected release note."
+    - "[non-blocking][performance] Debug end-to-end Auto remains above the rough 2-5s target (cold 6.561s, warm 5.917s); the existing KRMA-352 release note attributes this to renderer measurement, candidate renders, regional re-measurement, and Debug scoring. No correctness gate was relaxed."
+    - "[non-blocking][baseline] The opt-in photo-analysis benchmark still shows the documented global-tone, masked-tone, and person-mask baseline drifts; required fast/serial lanes pass and the changed Auto path is not implicated."
+  fixes:
+    - Clamped cached mask timing to the current invocation window in Sources/KromoraKit/Models/PhotoAnalysis/ContentAwareAutoEngine.swift.
+    - Added a warm-run mask-timing regression assertion in Tests/KromoraKitTests/AutoPerformanceDiagnosticsTests.swift.
+    - Updated docs/AUTO_PERFORMANCE.md so the warm mask measurement reflects cache-hit behavior.
+  verification_commits: []
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-11T00:58:11.885Z
+  session: 01MTW8ORVON0HV4QFA
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -16,10 +54,10 @@ labels:
   - photo-intelligence
   - rendering
 created: 2026-09-10T14:39:07.864Z
-updated: 2026-09-10T22:53:31.840Z
+updated: 2026-09-11T00:58:11.888Z
 depends_on:
   - KRMA-181
-order: v
+order: a0
 board: product
 ---
 
@@ -115,3 +153,76 @@ Progress increment: KRMA-348 (selective Auto-owned regional correction layers, d
 ### Comment — pi @ 2026-09-10T22:53:26.911Z
 
 Progress increment: no new implementation this session. Verified KRMA-348 branch state (krma-348-regional-corrections at 7d8fa20): 21/21 AutoRegionalCorrectionsTests green, working tree clean aside from .dg bookkeeping churn, no source changes made. KRMA-342-347 are done; KRMA-348 remains in review pending verification_agent (codex), so KRMA-349-352 stay dependency-blocked and out of scope. Epic stays claimed; no epic acceptance boxes checked yet.
+
+
+### Comment — pi @ 2026-09-10T23:01:03.378Z
+
+Progress increment: no new implementation this session. Verified krma-348-regional-corrections at 7d8fa20 in an isolated throwaway worktree (main tree untouched): 21/21 AutoRegionalCorrectionsTests green, 89/89 Auto-filtered tests green, 41/41 Masking tests green, 7/7 VisionSemanticMaskProviderTests green, swift build clean. KRMA-342-347 are done (346/347 verified PASS, commits d424821/854beac live on branches, not yet on main); KRMA-348 remains in review pending verification_agent (codex), so KRMA-349-352 stay dependency-blocked and out of scope. Noted integration gap: verified 346/347 commits are not in main history (main at 93773a9, post-345); left unmerged deliberately to avoid diverging the stacked 348 review branch — integration should land with or after 348 verification. Epic stays claimed; no epic acceptance boxes checked yet.
+
+
+### Comment — codex @ 2026-09-10T23:27:10.924Z
+
+Implementation increment complete on main. Integrated the verified KRMA-346/347/348 stack (Core Image reference fitting, bounded renderer-backed coordinator, selective Auto-owned regional recipes) and added KRMA-349/350 core seams: Codable Sendable AutoEnhancementResult with scalar validation/provenance, explicit Auto/user layer ownership with manual-edit release, stable source/document/algorithm/render fingerprints, schema v4 migration defaults, duplicate-safe layer reconciliation, current-render ContentAwareAutoEngine orchestration, real RenderEngine Auto action integration, atomic history/persistence apply, cancellation/stale guards, and no-op status. Focused suites: AutoEnhancementResult 5, coordinator 19, regional 21, persistence/document 29, AppViewModel Auto 11; repository fast lane 834/834 passed. swift build, dg validate, and git diff --check pass. Commits: d5fdff5, 20cef62, efba752, d0bab1f, df936ac. Remaining release-corpus/performance gate work is tracked by KRMA-351/352.
+
+## Agent log
+
+- 2026-09-10T23:32:41.484Z: Verification report
+Verdict: BLOCKER
+Acceptance criteria:
+- [ ] The production content-aware Auto invocation adds selective Auto-owned regional corrections when global edits cannot solve a measured regional conflict. (fail) — ContentAwareAutoEngine.run() rehydrates masks and measures regions, then sends only global native and Apple proposals to AutoEnhancementCoordinator. It never invokes AutoRegionalCorrections.plan() or AutoRegionalCorrections.applying(); the only plan/apply call sites are AutoRegionalCorrectionsTests. Therefore a real Auto action cannot create any regional layer.
+- [x] Candidate evaluation, guardrails, cancellation, revision fencing, and atomic persistence apply through the real renderer. (pass) — Reviewed the coordinator and AppViewModel integration; focused coordinator/persistence tests and both required lanes pass.
+- [x] Auto result ownership and repeat-run no-op behavior are durable and user-editable. (pass) — Reviewed AutoEnhancementResult, schema-v4 decoding, ownership transitions, fingerprinting, and reconciliation tests; no separate blocker found in these seams.
+Checks run:
+- git diff --check (pass)
+- dg validate (pass; only existing unknown-model warnings)
+- swift build (pass)
+- swift test --filter KromoraKitTests.AutoEnhancementCoordinatorTests (19/19 passed)
+- swift test --filter KromoraKitTests.AutoRegionalCorrectionsTests (21/21 passed)
+- swift test --filter KromoraKitTests.AutoAdjustmentTests (11/11 passed)
+- swift test --filter KromoraKitTests.EditPersistenceIntegrationTests (11/11 passed)
+- scripts/ci-tests.sh fast (834/834 passed)
+- scripts/ci-tests.sh serial (328/328 passed)
+- rg verification: AutoRegionalCorrections.plan/applying has no production call sites
+Findings:
+- [blocker][correctness] Sources/KromoraKit/Models/PhotoAnalysis/ContentAwareAutoEngine.swift:51-124 measures regional masks but builds the coordinator only from global native/Apple proposals. AutoRegionalCorrections.plan() and applying() are never called from production code; repo-wide search finds those calls only in AutoRegionalCorrectionsTests. Consequently the real Auto action can never add Auto — Subject, Auto — Background, or Auto — Color layers, so the epic objective and regional-conflict acceptance criterion remain unmet despite the isolated KRMA-348 planner tests passing.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTW5Q8VUDZTJW9OH
+Summary: Blocker: production ContentAwareAutoEngine never invokes the implemented regional correction planner, so real Auto runs cannot create selective Auto-owned layers; see urgent child KRMA-355.
+
+- 2026-09-11T00:58:11.885Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] The production content-aware Auto invocation adds selective Auto-owned regional corrections when global edits cannot solve a measured regional conflict. (pass) — Current ContentAwareAutoEngine performs post-global renderer-backed regional measurement and invokes AutoRegionalCorrections.plan/applying; the real conflict regression creates an editable Auto-Subject layer.
+- [x] Candidate evaluation, guardrails, cancellation, revision fencing, and atomic persistence apply through the real renderer. (pass) — Coordinator, AppViewModel integration, renderer-backed conflict/no-mask tests, persistence/lifecycle tests, and required fast/serial lanes pass.
+- [x] Auto result ownership and repeat-run no-op behavior are durable and user-editable. (pass) — Ownership transitions, stable provenance reconciliation, schema-v4 document round trips, repeat-run no-op behavior, undo/redo, and save/reopen coverage pass.
+Checks run:
+- git diff --check (pass)
+- dg validate (pass; known unknown-model warnings only)
+- swift build (pass)
+- focused Auto/regional/result/persistence/quality/diagnostics tests (119 passed, 1 expected opt-in skip)
+- scripts/ci-tests.sh fast (872/872 passed)
+- scripts/ci-tests.sh serial (328/328 passed)
+- scripts/ci-tests.sh verify (pass; required lanes disjoint)
+- scripts/auto-quality-report.sh (25 policy tests and 6 actual-render tests passed)
+- KROMORA_AUTO_BENCHMARK=1 swift test --no-parallel --filter AutoPerformanceDiagnosticsTests/testAutoEndToEndBenchmark (pass; cold 6.561s, warm 5.917s; warm masks 0.001s after fix)
+- KROMORA_PHOTO_ANALYSIS_BENCHMARK=1 swift test --no-parallel --filter PhotoAnalysisPerformanceTests (3 documented baseline drift failures; 5 other tests passed)
+- scripts/check-swift-format.sh (baseline violations in touched pre-existing/new KRMA-351/352 files; no violation on verification-added lines)
+- production call-site search for AutoRegionalCorrections.plan/applying (present)
+Findings:
+- [fixed][diagnostics] Warm analysis-cache hits reused cached mask-generation duration, misreporting stale mask latency despite no mask work in the current invocation. ContentAwareAutoEngine now clamps maskSeconds to the current analysis window, with a cold/warm regression assertion and corrected release note.
+- [non-blocking][performance] Debug end-to-end Auto remains above the rough 2-5s target (cold 6.561s, warm 5.917s); the existing KRMA-352 release note attributes this to renderer measurement, candidate renders, regional re-measurement, and Debug scoring. No correctness gate was relaxed.
+- [non-blocking][baseline] The opt-in photo-analysis benchmark still shows the documented global-tone, masked-tone, and person-mask baseline drifts; required fast/serial lanes pass and the changed Auto path is not implicated.
+Fixes:
+- Clamped cached mask timing to the current invocation window in Sources/KromoraKit/Models/PhotoAnalysis/ContentAwareAutoEngine.swift.
+- Added a warm-run mask-timing regression assertion in Tests/KromoraKitTests/AutoPerformanceDiagnosticsTests.swift.
+- Updated docs/AUTO_PERFORMANCE.md so the warm mask measurement reflects cache-hit behavior.
+Verification commits:
+- None
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MTW8ORVON0HV4QFA

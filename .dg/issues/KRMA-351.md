@@ -2,7 +2,7 @@
 id: KRMA-351
 title: Build generated Auto quality fixtures and actual-render regression coverage
 type: task
-status: ready
+status: done
 priority: high
 agent: pi
 model: openrouter/meta/muse-spark-1.3-contributor
@@ -15,7 +15,7 @@ labels:
   - testing
   - fixtures
 created: 2026-09-10T14:40:09.965Z
-updated: 2026-09-10T14:53:44.436Z
+updated: 2026-09-11T00:24:22.359Z
 depends_on:
   - KRMA-342
   - KRMA-347
@@ -73,3 +73,7 @@ Build the generated fixture corpus and actual-render regression coverage require
 ## Verification
 
 Run focused corpus/regression tests and the actual-render report command. Record fixture counts, metrics, skipped optional RAW cases, and any accepted limitations in the completion comment.
+
+## Agent log
+
+- 2026-09-11T00:24:22.357Z: KRMA-351 done on working tree: 16-class generated Auto quality corpus + 25-test actual-render regression suite (Tests/KromoraKitTests/AutoQualityRegressionTests.swift), Fixtures helpers (writePNG/jpegData/makeParametricCGImage/sampleLevels), scripts/auto-quality-report.sh writing gitignored artifacts/auto-quality/ (unchanged/proposed/diff/report.json/report.md per fixture). Policy lane pins balanced closeness, exposure/cast improvement, 7 intent preservations, backlit/overlap/feathered/crop/noise/unsupported-capability coverage, repeat-Auto no-op, no-duplicate layers, save/reopen/undo-redo, RAW-vs-standard WB direction. Render lane (real RenderEngine 96x64): balanced mean-diff 0.0086, dark +1EV lift 0.173->0.249 no clip, warm-card WB 6500->7132K cast shrinks, fog dehaze +15, backlit split-tone + preview/export parity, reproducible artifact round-trip. Verification: 25/25 focused green; 92/92 neighboring Auto suites green; scripts/ci-tests.sh fast exit 0 (one SmartMask parallel flake passed isolated + on rerun); serial exit 0; swift build clean; git diff --check clean; dg validate OK. No RAW fixture dir (optional lane skipped); no real photos committed. Known limitations documented in test header: flat-field fog confounding (corpus uses spread fixtures), dark+dehaze interaction backstopped by coordinator unchanged-wins (KRMA-347), no subjective parity claims, Vision masks out of scope (synthetic mattes). No production tuning constants changed.
