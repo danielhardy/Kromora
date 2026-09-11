@@ -47,6 +47,24 @@ enum KeyMonitorPolicy {
         !controlOwnsKeyboard(responder)
     }
 
+    /// Image navigation is an app-level gesture only while a browsable collection is active and
+    /// the event is not owned by the focused AppKit control. Returning this decision as a policy
+    /// keeps the event-consumption contract separate from the selection side effects, including
+    /// the intentional no-op at either end of the collection.
+    static func imageNavigationOwnsKeyboard(
+        keyCode: UInt16,
+        eventType: NSEvent.EventType,
+        collectionIsActive: Bool,
+        responder: NSResponder?
+    ) -> Bool {
+        guard collectionIsActive,
+              keyCode == 123 || keyCode == 124,
+              eventType == .keyDown || eventType == .keyUp else {
+            return false
+        }
+        return globalShortcutsOwnKeyboard(responder)
+    }
+
     static func isPlainSpace(modifiers: NSEvent.ModifierFlags) -> Bool {
         modifiers.intersection(.deviceIndependentFlagsMask).isEmpty
     }
@@ -84,6 +102,7 @@ final class KeyMonitor {
     private var token: Any?
     private weak var viewModel: AppViewModel?
     private let removeMonitor: (Any) -> Void
+    private let firstResponderProvider: (NSEvent) -> NSResponder?
     /// Tracks the Command+Backslash key-down independently of modifier flags on key-up. Users can
     /// release Command before Backslash, but the temporary Original presentation must still end.
     private var commandBackslashIsHeld = false
@@ -99,10 +118,14 @@ final class KeyMonitor {
     ///   mutation demonstrated that gap. Same seam as `RenderEngine.init(context:)`.
     init(
         viewModel: AppViewModel,
-        removeMonitor: @escaping (Any) -> Void = { NSEvent.removeMonitor($0) }
+        removeMonitor: @escaping (Any) -> Void = { NSEvent.removeMonitor($0) },
+        firstResponderProvider: @escaping (NSEvent) -> NSResponder? = { event in
+            event.window?.firstResponder ?? NSApp?.keyWindow?.firstResponder
+        }
     ) {
         self.viewModel = viewModel
         self.removeMonitor = removeMonitor
+        self.firstResponderProvider = firstResponderProvider
         self.token = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { [weak self] event in
             return self?.handle(event) ?? event
         }
@@ -139,10 +162,12 @@ final class KeyMonitor {
         // If a sheet is up, let the sheet's text fields and buttons handle keys.
         if vm.derive.isSheetPresented { return event }
 
-        // Don't hijack keys while editing text (the search field, etc.) — a
-        // focused SwiftUI TextField makes the window's field editor (an NSText)
-        // the first responder.
-        if !KeyMonitorPolicy.globalShortcutsOwnKeyboard(NSApp.keyWindow?.firstResponder) {
+        // Resolve focus from the window that owns this event. Looking only at NSApp.keyWindow can
+        // consult the wrong window during transitions and can also be nil in a test or before the
+        // first app window exists. A focused SwiftUI TextField makes that event window's field
+        // editor (an NSText) the first responder.
+        let firstResponder = firstResponderProvider(event)
+        if !KeyMonitorPolicy.globalShortcutsOwnKeyboard(firstResponder) {
             return event
         }
 
@@ -239,7 +264,12 @@ final class KeyMonitor {
                 vm.nudgeSelectedMask(dx: -1, dy: 0, accelerated: mods.contains(.shift)) {
                 return nil
             }
-            guard vm.collection.isActive else { return event }
+            guard KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: event.keyCode,
+                eventType: event.type,
+                collectionIsActive: vm.collection.isActive,
+                responder: firstResponder
+            ) else { return event }
             if isDown {
                 if vm.navigation.isGrid {
                     vm.collection.selectPrevious()
@@ -253,7 +283,12 @@ final class KeyMonitor {
                 vm.nudgeSelectedMask(dx: 1, dy: 0, accelerated: mods.contains(.shift)) {
                 return nil
             }
-            guard vm.collection.isActive else { return event }
+            guard KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: event.keyCode,
+                eventType: event.type,
+                collectionIsActive: vm.collection.isActive,
+                responder: firstResponder
+            ) else { return event }
             if isDown {
                 if vm.navigation.isGrid {
                     vm.collection.selectNext()

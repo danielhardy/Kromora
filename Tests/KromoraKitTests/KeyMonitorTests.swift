@@ -37,6 +37,25 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         )
     }
 
+    private func keyEvent(
+        _ type: NSEvent.EventType,
+        keyCode: UInt16,
+        isARepeat: Bool = false
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: type,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "",
+            charactersIgnoringModifiers: "",
+            isARepeat: isARepeat,
+            keyCode: keyCode
+        ))
+    }
+
     func testAMonitorIsInstalledOnInitAndRemovedByStop() {
         let removals = Removals()
         let monitor = makeMonitor(removals)
@@ -98,6 +117,75 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertTrue(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: []))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .shift))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .command))
+    }
+
+    func testImageNavigationOwnershipConsumesDownAndUpIncludingBoundaries() {
+        for keyCode in [UInt16(123), UInt16(124)] {
+            XCTAssertTrue(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyDown, collectionIsActive: true, responder: nil
+            ))
+            XCTAssertTrue(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyUp, collectionIsActive: true, responder: NSView()
+            ))
+        }
+
+        XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+            keyCode: 123, eventType: .keyDown, collectionIsActive: false, responder: nil
+        ))
+        XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+            keyCode: 36, eventType: .keyDown, collectionIsActive: true, responder: nil
+        ))
+        XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+            keyCode: 123, eventType: .keyDown, collectionIsActive: true, responder: NSSlider()
+        ))
+        XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+            keyCode: 124, eventType: .keyUp, collectionIsActive: true, responder: NSTextField()
+        ))
+    }
+
+    func testArrowNavigationConsumesKeyDownAndKeyUpAtMiddleAndCollectionBoundaries() async throws {
+        for name in ["first.png", "middle.png", "third.png"] {
+            try Fixtures.writeGradientPNG(width: 8, height: 8, named: name, in: tempDirectory)
+        }
+
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        XCTAssertEqual(viewModel.collection.items.count, 3)
+        viewModel.collection.setSelection(at: 1)
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+
+        let monitor = KeyMonitor(viewModel: viewModel)
+        defer { monitor.stop() }
+
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 123)))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 0, "Left should move once")
+        XCTAssertNil(monitor.handle(try keyEvent(.keyUp, keyCode: 123)))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 0, "key-up must not navigate again")
+
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 123, isARepeat: true)))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 0, "repeated Left at the first image is a no-op")
+
+        viewModel.collection.setSelection(at: 2)
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 124)))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 2, "Right at the last image is a no-op")
+        XCTAssertNil(monitor.handle(try keyEvent(.keyUp, keyCode: 124)))
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 124, isARepeat: true)))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 2, "repeated Right at the last image is silent and stable")
+    }
+
+    func testArrowNavigationDefersToFocusedNativeControl() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let slider = NSSlider(value: 0.5, minValue: 0, maxValue: 1, target: nil, action: nil)
+        let monitor = KeyMonitor(
+            viewModel: viewModel,
+            firstResponderProvider: { _ in slider }
+        )
+        defer { monitor.stop() }
+
+        let event = try keyEvent(.keyDown, keyCode: 123)
+        XCTAssertNotNil(monitor.handle(event), "a focused slider owns Left and must receive it")
+        XCTAssertEqual(viewModel.collection.selectedIndex, 0)
     }
 
     func testCommandBackslashIsTheOnlyOriginalShortcut() {
