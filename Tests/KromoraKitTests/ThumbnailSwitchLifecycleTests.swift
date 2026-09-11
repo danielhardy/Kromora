@@ -615,4 +615,72 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         XCTAssertNil(histogramViewModel.histogram)
     }
+
+    /// KRMA-308's `refreshMaterializedEditedThumbnails()` re-requests every item that already has a
+    /// materialized edited thumbnail after a Look-folder scan, independent of the edit debounce path
+    /// above. `applyEditedThumbnail` early-returns when the revision is unchanged (`ImageCollection.swift`),
+    /// so a real refresh must be observed as both a revision change and a new published `NSImage`
+    /// instance — a no-op would leave both untouched.
+    func testEditAndLUTFolderScanRefreshBothUpdateTheMaterializedEditedThumbnail() async throws {
+        let photoFolder = tempDirectory.appendingPathComponent("photos")
+        try FileManager.default.createDirectory(at: photoFolder, withIntermediateDirectories: true)
+        let source = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "refresh.png", in: photoFolder
+        )
+        let lookFolder = tempDirectory.appendingPathComponent("looks")
+        try FileManager.default.createDirectory(at: lookFolder, withIntermediateDirectories: true)
+
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        viewModel.library.setFolder(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        viewModel.openImage(url: source)
+        try await waitUntil("the source photo") { viewModel.sourceName == "refresh.png" }
+
+        // Reference a Look file that does not exist in the folder yet, so the reference starts
+        // unresolved (mirrors LUTWorkflowTests' "missing reference" pattern) and the later scan is
+        // what resolves it, not the edit itself.
+        let missingLUTURL = lookFolder.appendingPathComponent("Refresh Look.cube")
+        viewModel.updateDocument {
+            $0.lut.lutID = LUTID(raw: missingLUTURL.path)
+            $0.lut.intensity = 1
+            $0.adjustments = [.exposure(ev: 0.5)]
+        }
+
+        try await waitUntil("the first edited thumbnail") {
+            viewModel.collection.items[0].thumbnail != nil
+                && viewModel.collection.items[0].editedThumbnailRevision != nil
+        }
+        let firstRevision = try XCTUnwrap(viewModel.collection.items[0].editedThumbnailRevision)
+        XCTAssertTrue(
+            firstRevision.hasSuffix(":unresolved"),
+            "an unresolved Look reference must not be mistaken for a resolved fingerprint"
+        )
+        let firstThumbnail = viewModel.collection.items[0].thumbnail
+
+        // Now the Look file appears in the folder, and a folder scan (not an edit) is the only
+        // thing that resolves it.
+        _ = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "Refresh Look.cube", in: lookFolder
+        )
+        viewModel.library.scan(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        try await waitUntil("the LUT-scan-refreshed edited thumbnail") {
+            if let revision = viewModel.collection.items[0].editedThumbnailRevision {
+                return revision != firstRevision
+            }
+            return false
+        }
+        let secondRevision = try XCTUnwrap(viewModel.collection.items[0].editedThumbnailRevision)
+        XCTAssertFalse(
+            secondRevision.hasSuffix(":unresolved"),
+            "resolving the Look via a folder scan must bump the materialized revision"
+        )
+        XCTAssertTrue(
+            viewModel.collection.items[0].thumbnail !== firstThumbnail,
+            "a resolved refresh must publish a newly materialized thumbnail, not reuse the stale one"
+        )
+    }
 }
