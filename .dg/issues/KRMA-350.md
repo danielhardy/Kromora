@@ -2,10 +2,44 @@
 id: KRMA-350
 title: Integrate content-aware Auto with atomic apply, undo, cancellation, and status UI
 type: feature
-status: ready
+status: done
 priority: high
-agent: pi
-model: openrouter/meta/muse-spark-1.3-contributor
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: The user-facing Auto action invokes the content-aware path and falls back to global-only candidates when optional semantic analysis fails.
+      result: pass
+    - criterion: One invocation produces exactly one undoable history operation, including generated layers and global changes.
+      result: pass
+    - criterion: Revision guards prevent stale analysis from applying after navigation or manual edits; cancellation completes without a late write.
+      result: pass
+    - criterion: Progress/status text distinguishes analysis, rendering candidates, validating, applied, no-op, cancelled, and failed states.
+      result: pass
+    - criterion: Render/validation failure leaves the previous document and ownership untouched and clears all transient loading state.
+      result: pass
+    - criterion: Repeating Auto on an unchanged successful result reports no further improvement and does not create a duplicate history entry or persistence write.
+      result: pass
+    - criterion: Undo/redo, save/reopen, thumbnail navigation, cancellation during work, and manual edits during work are covered by regression tests.
+      result: pass
+      notes: Existing lifecycle suites cover undo/redo, persistence/reopen, and thumbnail navigation; this change adds explicit Auto cancellation coverage.
+    - criterion: Existing Auto action compatibility remains intact for unsupported images and the global-only fallback.
+      result: pass
+  checks_run:
+    - swift build
+    - swift test --filter 'AutoAdjustmentTests|ContentAwareAutoEngineTests|AutoEnhancementCoordinatorTests|AutoEnhancementResultTests' — 41 passed
+    - scripts/ci-tests.sh fast — 840 required-fast tests passed
+    - git diff --check
+    - dg validate — OK; pre-existing unknown pickup-runner model warnings only
+  findings:
+    - scripts/check-swift-format.sh remains red on the repository baseline, including many pre-existing violations in untouched files; no broad reformat was applied.
+  fixes:
+    - Added durable Auto fingerprints/no-op handling to the global fallback, invocation tokens, manual-edit/undo/navigation cancellation guards, progress phases, and a visible Cancel action.
+  verification_commits:
+    - 20a1dff
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-11T00:12:45.903Z
+  session: 01MTW6WCSIT4MLRXWK
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -15,12 +49,14 @@ labels:
   - editor
   - integration
 created: 2026-09-10T14:40:09.265Z
-updated: 2026-09-10T14:53:43.752Z
+updated: 2026-09-11T00:12:45.905Z
 depends_on:
   - KRMA-347
   - KRMA-349
 order: zz
 board: product
+commits:
+  - 20a1dff
 ---
 
 ## Parent epic
@@ -74,3 +110,33 @@ Wire the candidate engine and durable result into the existing Auto action and e
 ## Verification
 
 Run focused AppViewModel/history/persistence/cancellation tests, then the repository fast lane. Exercise both a real generated fixture and injected failure paths.
+
+## Agent log
+
+- 2026-09-11T00:12:45.903Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] The user-facing Auto action invokes the content-aware path and falls back to global-only candidates when optional semantic analysis fails. (pass)
+- [x] One invocation produces exactly one undoable history operation, including generated layers and global changes. (pass)
+- [x] Revision guards prevent stale analysis from applying after navigation or manual edits; cancellation completes without a late write. (pass)
+- [x] Progress/status text distinguishes analysis, rendering candidates, validating, applied, no-op, cancelled, and failed states. (pass)
+- [x] Render/validation failure leaves the previous document and ownership untouched and clears all transient loading state. (pass)
+- [x] Repeating Auto on an unchanged successful result reports no further improvement and does not create a duplicate history entry or persistence write. (pass)
+- [x] Undo/redo, save/reopen, thumbnail navigation, cancellation during work, and manual edits during work are covered by regression tests. (pass) — Existing lifecycle suites cover undo/redo, persistence/reopen, and thumbnail navigation; this change adds explicit Auto cancellation coverage.
+- [x] Existing Auto action compatibility remains intact for unsupported images and the global-only fallback. (pass)
+Checks run:
+- swift build
+- swift test --filter 'AutoAdjustmentTests|ContentAwareAutoEngineTests|AutoEnhancementCoordinatorTests|AutoEnhancementResultTests' — 41 passed
+- scripts/ci-tests.sh fast — 840 required-fast tests passed
+- git diff --check
+- dg validate — OK; pre-existing unknown pickup-runner model warnings only
+Findings:
+- scripts/check-swift-format.sh remains red on the repository baseline, including many pre-existing violations in untouched files; no broad reformat was applied.
+Fixes:
+- Added durable Auto fingerprints/no-op handling to the global fallback, invocation tokens, manual-edit/undo/navigation cancellation guards, progress phases, and a visible Cancel action.
+Verification commits:
+- 20a1dff
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTW6WCSIT4MLRXWK
+Summary: Hardened content-aware Auto integration with atomic durable apply, fingerprinted no-op fallback, progress phases, cancellation, and stale-completion guards.
