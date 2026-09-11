@@ -394,6 +394,58 @@ final class PreviewSurfaceTests: XCTestCase {
         }
     }
 
+    func testEffectiveAppearanceResolvesTheSameLetterboxForMetalAndCoreImage() async throws {
+        let surface = PreviewSurface()
+        let image = CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 12))
+        XCTAssertTrue(surface.present(image))
+        _ = try await waitForPresentationTexture(surface)
+
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let destination = CGRect(x: 0, y: 0, width: 24, height: 12)
+
+        let darkMetal = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: CanvasNavigation(), destinationSize: destination.size,
+            appearance: darkAppearance
+        ))
+        let lightMetal = try XCTUnwrap(coordinator.renderRetainedTextureForTesting(
+            surface: surface, navigation: CanvasNavigation(), destinationSize: destination.size,
+            appearance: lightAppearance
+        ))
+        let darkCoreImage = try XCTUnwrap(
+            PreviewSurfaceView.Coordinator.presentationImage(
+                image, navigation: CanvasNavigation(), destination: destination,
+                appearance: darkAppearance
+            )
+        )
+        let lightCoreImage = try XCTUnwrap(
+            PreviewSurfaceView.Coordinator.presentationImage(
+                image, navigation: CanvasNavigation(), destination: destination,
+                appearance: lightAppearance
+            )
+        )
+
+        let darkExpected = try windowBackgroundBytes(for: darkAppearance)
+        let lightExpected = try windowBackgroundBytes(for: lightAppearance)
+        XCTAssertNotEqual(darkExpected, lightExpected,
+                          "the regression must exercise distinct light and dark resolutions")
+
+        let darkMetalPixel = try pixel(from: darkMetal, at: (1, 6))
+        let lightMetalPixel = try pixel(from: lightMetal, at: (1, 6))
+        let darkCoreImagePixel = try rgbaPixel(
+            from: darkCoreImage, destination: destination, at: (1, 6)
+        )
+        let lightCoreImagePixel = try rgbaPixel(
+            from: lightCoreImage, destination: destination, at: (1, 6)
+        )
+        XCTAssertEqual(darkMetalPixel, darkExpected)
+        XCTAssertEqual(lightMetalPixel, lightExpected)
+        XCTAssertEqual(darkCoreImagePixel, darkExpected)
+        XCTAssertEqual(lightCoreImagePixel, lightExpected)
+        XCTAssertTrue(surface.image === image, "appearance repaint must not replace photo pixels")
+    }
+
     /// MTKView presents framebuffer row 0 at the top of the window. `CIImage(mtlTexture:)` is not
     /// that convention — it can hide a vertical flip that the packaged app then shows on screen.
     func testMetalFramebufferRowZeroIsVisualTop() async throws {
@@ -747,9 +799,39 @@ final class PreviewSurfaceTests: XCTestCase {
     }
 
     private func windowBackgroundBytes() throws -> [UInt8] {
-        let color = try XCTUnwrap(NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB))
-        return [UInt8((color.redComponent * 255).rounded()),
-                UInt8((color.greenComponent * 255).rounded()),
-                UInt8((color.blueComponent * 255).rounded()), 255]
+        try windowBackgroundBytes(for: NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!)
+    }
+
+    private func windowBackgroundBytes(for appearance: NSAppearance) throws -> [UInt8] {
+        var color: NSColor?
+        appearance.performAsCurrentDrawingAppearance {
+            color = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
+        }
+        let resolvedColor = try XCTUnwrap(color)
+        return [UInt8((resolvedColor.redComponent * 255).rounded()),
+                UInt8((resolvedColor.greenComponent * 255).rounded()),
+                UInt8((resolvedColor.blueComponent * 255).rounded()), 255]
+    }
+
+    private func pixel(from texture: MTLTexture, at point: (Int, Int)) throws -> [UInt8] {
+        var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
+        bytes.withUnsafeMutableBytes { raw in
+            texture.getBytes(
+                raw.baseAddress!, bytesPerRow: texture.width * 4,
+                from: MTLRegionMake2D(0, 0, texture.width, texture.height), mipmapLevel: 0
+            )
+        }
+        return rgba(fromBGRA: bytes, width: texture.width, at: point)
+    }
+
+    private func rgbaPixel(
+        from image: CIImage, destination: CGRect, at point: (Int, Int)
+    ) throws -> [UInt8] {
+        let rendered = try XCTUnwrap(
+            RenderEngine.presentationContext.createCGImage(image, from: destination)
+        )
+        let bytes = try Pixels.bytes(of: rendered)
+        let offset = (point.1 * rendered.width + point.0) * 4
+        return Array(bytes[offset..<(offset + 4)])
     }
 }
