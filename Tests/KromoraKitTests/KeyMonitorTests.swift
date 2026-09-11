@@ -1,4 +1,5 @@
 import XCTest
+import CoreImage
 import AppKit
 @testable import KromoraKit
 
@@ -97,6 +98,90 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertTrue(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: []))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .shift))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .command))
+    }
+
+    func testCommandBackslashIsTheOnlyOriginalShortcut() {
+        XCTAssertTrue(KeyMonitorPolicy.isCommandBackslashShortcut(keyCode: 42, modifiers: .command))
+        XCTAssertFalse(KeyMonitorPolicy.isCommandBackslashShortcut(keyCode: 42, modifiers: []))
+        XCTAssertFalse(KeyMonitorPolicy.isCommandBackslashShortcut(keyCode: 42, modifiers: [.command, .shift]))
+        XCTAssertFalse(KeyMonitorPolicy.isCommandBackslashShortcut(keyCode: 42, modifiers: [.command, .option]))
+        XCTAssertFalse(KeyMonitorPolicy.isCommandBackslashShortcut(keyCode: 41, modifiers: .command))
+    }
+
+    func testCommandBackslashKeyDownAndKeyUpFlashOriginal() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.sourceImage = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        let monitor = KeyMonitor(viewModel: viewModel)
+        defer { monitor.stop() }
+
+        let down = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\\",
+            charactersIgnoringModifiers: "\\",
+            isARepeat: false,
+            keyCode: 42
+        ))
+        XCTAssertNil(monitor.handle(down))
+        XCTAssertTrue(viewModel.isShowingOriginal)
+
+        // Release Command first: the monitor's held-shortcut state still restores Edited on the
+        // Backslash key-up instead of leaving the transient preview armed.
+        let up = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyUp,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0.1,
+            windowNumber: 0,
+            context: nil,
+            characters: "\\",
+            charactersIgnoringModifiers: "\\",
+            isARepeat: false,
+            keyCode: 42
+        ))
+        XCTAssertNil(monitor.handle(up))
+        XCTAssertFalse(viewModel.isShowingOriginal)
+    }
+
+    func testUnavailableOrBareBackslashDoesNotChangeOriginalState() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let monitor = KeyMonitor(viewModel: viewModel)
+        defer { monitor.stop() }
+
+        let commandBackslash = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: .command,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: "\\",
+            charactersIgnoringModifiers: "\\",
+            isARepeat: false,
+            keyCode: 42
+        ))
+        XCTAssertNotNil(monitor.handle(commandBackslash))
+        XCTAssertFalse(viewModel.isShowingOriginal)
+
+        let bareBackslash = try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: [],
+            timestamp: 0.1,
+            windowNumber: 0,
+            context: nil,
+            characters: "\\",
+            charactersIgnoringModifiers: "\\",
+            isARepeat: false,
+            keyCode: 42
+        ))
+        XCTAssertNotNil(monitor.handle(bareBackslash))
+        XCTAssertFalse(viewModel.isShowingOriginal)
     }
 
     func testCropShortcutIsPlainCOnly() {
