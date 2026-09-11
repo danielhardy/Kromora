@@ -100,6 +100,7 @@ struct PreviewView: View {
                 panelView(
                     surface: originalPreviewSurface,
                     label: "Original",
+                    accessibilityLabel: "Original photo preview",
                     labelSide: .leading,
                     width: geo.size.width / 2
                 )
@@ -113,6 +114,9 @@ struct PreviewView: View {
                 panelView(
                     surface: previewSurface,
                     label: viewModel.selectedLook?.name ?? "Adjusted",
+                    accessibilityLabel: viewModel.selectedLook.map {
+                        "\($0.name) edited photo preview"
+                    } ?? "Edited photo preview",
                     labelSide: .trailing,
                     width: geo.size.width / 2
                 )
@@ -121,7 +125,10 @@ struct PreviewView: View {
         .padding(8)
     }
 
-    private func panelView(surface: PreviewSurface, label: String, labelSide: HorizontalAlignment, width: CGFloat) -> some View {
+    private func panelView(
+        surface: PreviewSurface, label: String, accessibilityLabel: String,
+        labelSide: HorizontalAlignment, width: CGFloat
+    ) -> some View {
         ZStack(alignment: labelSide == .leading ? .topLeading : .topTrailing) {
             bgColor
 
@@ -139,6 +146,9 @@ struct PreviewView: View {
         }
         .frame(width: width)
         .clipped()
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint("Presentation only; does not change edits or export")
     }
 
     // MARK: - Single image
@@ -193,7 +203,20 @@ struct PreviewView: View {
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(singleViewAccessibilityLabel)
+            .accessibilityHint("Presentation only; does not change edits or export")
         }
+    }
+
+    private var singleViewAccessibilityLabel: String {
+        if viewModel.isShowingOriginal && viewModel.isComparisonAvailable {
+            return "Original photo preview"
+        }
+        if let look = viewModel.selectedLook {
+            return "\(look.name) edited photo preview"
+        }
+        return viewModel.isComparisonAvailable ? "Edited photo preview" : "Photo preview"
     }
 
     /// A full-panel surface with presentation-only mouse and trackpad navigation. The same

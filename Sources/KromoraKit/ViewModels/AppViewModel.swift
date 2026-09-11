@@ -418,6 +418,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// for the transient Space comparison.
     var isSideBySideVisible: Bool { isSideBySide && sourceImage != nil }
 
+    /// The explicit comparison affordance is available for every loaded source when either a
+    /// meaningful before/after exists or the user has retained the side-by-side presentation.
+    /// Keeping this separate from `isComparisonAvailable` prevents the toolbar and status hints
+    /// from disappearing merely because the current document is back at identity.
+    var isComparisonPresentationAvailable: Bool {
+        sourceImage != nil && (isComparisonAvailable || isSideBySide)
+    }
+
     /// The visible render is owned by these surfaces, not published image values on this model.
     let previewSurface = PreviewSurface()
     let originalPreviewSurface = PreviewSurface()
@@ -3142,6 +3150,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         document.lut.intensity = clamped
+        if !document.hasVisibleLookEdits {
+            isShowingOriginal = false
+        }
         activeHistory.recordChange(from: oldDocument, to: document)
         saveActiveDocument()
         documentRevision &+= 1
@@ -3801,6 +3812,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         cancelHistogram(clear: false, pump: false)
         document = restored
         sourceSize = restored.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
+        if !document.hasVisibleLookEdits {
+            // Space is a transient single-view state. Undoing/redoing to identity must not leave
+            // it armed when the before/after surface no longer exists.
+            isShowingOriginal = false
+        }
         if comparisonChanged {
             comparisonBaselineDocument = restored.comparisonBaseline
             comparisonPreviewScheduledRevision = nil
@@ -4122,7 +4138,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Toggle between original and LUT preview (for Space-hold comparison).
     @discardableResult
     func showOriginal(_ show: Bool) -> Bool {
-        guard !show || isComparisonAvailable else {
+        // The always-both model already exposes Original in the left pane. Space is deliberately
+        // single-image-only so it cannot replace the adjusted surface underneath side-by-side.
+        guard !isSideBySide, !show || isComparisonAvailable else {
             if isShowingOriginal {
                 isShowingOriginal = false
                 schedulePreview()
@@ -4146,6 +4164,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         guard isComparisonAvailable || isSideBySideVisible else { return false }
         isSideBySide.toggle()
         if isSideBySide {
+            if isShowingOriginal {
+                isShowingOriginal = false
+                displayRevision &+= 1
+                cancelHistogram(clear: false, pump: false)
+                schedulePreview()
+            }
             scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
         } else {
             cancelComparisonPreview()
