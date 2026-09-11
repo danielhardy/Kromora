@@ -72,6 +72,7 @@ struct StatusBar: View {
                 if viewModel.isComparisonPresentationAvailable {
                     KeyHint(key: "V", label: viewModel.isSideBySide ? "single view" : "side-by-side")
                     if !viewModel.isSideBySideVisible && viewModel.isComparisonAvailable {
+                        KeyHint(key: "⌘\\", label: "show original")
                         KeyHint(key: "Space", label: "show original")
                     }
                 }

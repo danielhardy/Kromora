@@ -62,6 +62,15 @@ enum KeyMonitorPolicy {
         modifiers.intersection(.deviceIndependentFlagsMask).isEmpty && !modifiers.contains(.shift)
     }
 
+    /// Command+Backslash is the dedicated, hold-to-show-Original gesture. The key code keeps the
+    /// shortcut stable across keyboard layouts, while the exact modifier match leaves bare
+    /// Backslash and shifted/system-modified variants available to AppKit and text entry.
+    static func isCommandBackslashShortcut(
+        keyCode: UInt16, modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
+        keyCode == 42 && modifiers.intersection(.deviceIndependentFlagsMask) == .command
+    }
+
     static func isCropShortcut(
         characters: String, modifiers: NSEvent.ModifierFlags
     ) -> Bool {
@@ -75,6 +84,9 @@ final class KeyMonitor {
     private var token: Any?
     private weak var viewModel: AppViewModel?
     private let removeMonitor: (Any) -> Void
+    /// Tracks the Command+Backslash key-down independently of modifier flags on key-up. Users can
+    /// release Command before Backslash, but the temporary Original presentation must still end.
+    private var commandBackslashIsHeld = false
 
     /// True while a monitor is installed. Internal so the lifecycle that replaced `deinit` can be
     /// asserted at all.
@@ -112,8 +124,17 @@ final class KeyMonitor {
         token = nil
     }
 
-    private func handle(_ event: NSEvent) -> NSEvent? {
+    func handle(_ event: NSEvent) -> NSEvent? {
         guard let vm = viewModel else { return event }
+
+        let isDown = event.type == .keyDown
+        // A key-up can arrive after Command has been released. Once this monitor accepted the
+        // matching key-down, consume that key-up and always restore the edited presentation.
+        if !isDown, commandBackslashIsHeld, event.keyCode == 42 {
+            commandBackslashIsHeld = false
+            _ = vm.showOriginal(false)
+            return nil
+        }
 
         // If a sheet is up, let the sheet's text fields and buttons handle keys.
         if vm.derive.isSheetPresented { return event }
@@ -126,11 +147,22 @@ final class KeyMonitor {
         }
 
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let isDown = event.type == .keyDown
-
         // Command-A is the one grid command handled here; other Command-modified events belong to
         // the menu bar.
         if mods.contains(.command) {
+            if KeyMonitorPolicy.isCommandBackslashShortcut(
+                keyCode: event.keyCode, modifiers: mods
+            ) {
+                // A key-up without an accepted key-down is not ours (for example, if focus
+                // changed while the key was pressed), so do not disturb another transient gesture.
+                guard isDown else { return event }
+                guard vm.sourceImage != nil, vm.isComparisonAvailable, !vm.isSideBySide else {
+                    return event
+                }
+                commandBackslashIsHeld = true
+                _ = vm.showOriginal(isDown)
+                return nil
+            }
             if isDown,
                vm.navigation.isGrid,
                event.charactersIgnoringModifiers?.lowercased() == "a" {
