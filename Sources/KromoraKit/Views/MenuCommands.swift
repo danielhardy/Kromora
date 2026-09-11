@@ -31,6 +31,15 @@ public struct KromoraCommands: Commands {
         CommandMenu("View") {
             Toggle("Show Photo Names", isOn: $settings.showPhotoNames)
                 .accessibilityLabel("Show Photo Names")
+
+            Divider()
+
+            Button("Reset Rotation") { post(.resetRotation) }
+                .accessibilityLabel("Reset Rotation")
+
+            Button("Info Inspector") { post(.toggleInspector) }
+                .keyboardShortcut("i", modifiers: .command)
+                .accessibilityLabel("Info Inspector")
         }
 
         CommandGroup(replacing: .newItem) {
@@ -156,6 +165,23 @@ struct MenuCommandReceivers: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .saveLook)) { _ in
                 viewModel.presentSaveLook()
             }
+            .modifier(ViewMenuCommandReceivers(viewModel: viewModel))
+    }
+}
+
+/// Receivers for the editor actions exposed from the View menu. Keeping these separate from the
+/// larger File-menu receiver chain keeps SwiftUI's modifier expression type-checkable.
+private struct ViewMenuCommandReceivers: ViewModifier {
+    @ObservedObject var viewModel: AppViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .resetRotation)) { _ in
+                viewModel.resetRotation()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleInspector)) { _ in
+                viewModel.toggleInspector()
+            }
     }
 }
 
@@ -176,6 +202,8 @@ extension Notification.Name {
     static let undoEdit = Notification.Name("Kromora.undoEdit")
     static let redoEdit = Notification.Name("Kromora.redoEdit")
     static let resetPhoto = Notification.Name("Kromora.resetPhoto")
+    static let resetRotation = Notification.Name("Kromora.resetRotation")
+    static let toggleInspector = Notification.Name("Kromora.toggleInspector")
     static let copyAllEdits = Notification.Name("Kromora.copyAllEdits")
     static let pasteEdits = Notification.Name("Kromora.pasteEdits")
     static let deriveRecipe = Notification.Name("Kromora.deriveRecipe")
