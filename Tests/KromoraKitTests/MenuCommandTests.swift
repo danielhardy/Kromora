@@ -66,4 +66,19 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(Notification.Name.resetRotation.rawValue, "Kromora.resetRotation")
         XCTAssertEqual(Notification.Name.toggleInspector.rawValue, "Kromora.toggleInspector")
     }
+
+    @MainActor
+    func testAutoToolbarButtonKeepsItsFittingSizeAcrossProgressState() {
+        let idle = NSHostingView(rootView: AutoToolbarButton(isInProgress: false, action: {}))
+        let inProgress = NSHostingView(rootView: AutoToolbarButton(isInProgress: true, action: {}))
+
+        idle.layoutSubtreeIfNeeded()
+        inProgress.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(
+            idle.fittingSize,
+            inProgress.fittingSize,
+            "the Auto toolbar button must not reflow when its icon changes"
+        )
+    }
 }
