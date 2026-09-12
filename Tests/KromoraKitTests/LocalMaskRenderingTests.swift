@@ -590,6 +590,52 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         )
     }
 
+    func testSemanticMaskROIKeepsFullSourceCoverageAndMatchesThumbnail() async throws {
+        let source = try source(width: 16, height: 8)
+        let semantic = LocalAdjustmentLayer(
+            components: [MaskComponent(
+                source: .semantic(SemanticMaskDefinition(target: .foreground))
+            )],
+            adjustments: LocalAdjustments(exposure: 2)
+        )
+        let document = EditDocument(localAdjustments: [semantic])
+        let engine = RenderEngine(
+            maskResolver: FixtureMaskResolver(sourceFingerprint: source.cacheFingerprint, shape: .hard)
+        )
+
+        let full = try await engine.render(RenderRequest(
+            source: source, document: document, targetSize: CGSize(width: 16, height: 8),
+            quality: .preview, output: .raster
+        ))
+        let roi = try await engine.render(RenderRequest(
+            source: source, document: document, targetSize: CGSize(width: 16, height: 8),
+            sourceROI: CGRect(x: 8, y: 0, width: 8, height: 8),
+            quality: .preview, output: .raster
+        ))
+
+        let fullPixels = try Pixels.bytes(of: image(from: full))
+        let roiPixels = try Pixels.bytes(of: image(from: roi))
+        var expectedROI = [UInt8]()
+        for y in 0..<8 {
+            let start = (y * 16 + 8) * 4
+            expectedROI.append(contentsOf: fullPixels[start..<(start + 8 * 4)])
+        }
+        assertPixelsEqual(
+            roiPixels, expectedROI, tolerance: 1,
+            "a zoomed semantic preview must preserve full-source mask coordinates"
+        )
+
+        let thumbnailImage = await engine.makeThumbnailCGImage(RenderRequest(
+            source: source, document: document, targetSize: CGSize(width: 16, height: 8),
+            quality: .thumbnail, output: .raster
+        ))
+        let thumbnail = try XCTUnwrap(thumbnailImage)
+        assertPixelsEqual(
+            try Pixels.bytes(of: thumbnail), fullPixels, tolerance: 1,
+            "the primary fit preview and edited thumbnail must show equivalent masked pixels"
+        )
+    }
+
     func testBuiltInResolverRendersAnalyticLinearAndRadialMasks() async throws {
         let source = try source()
         let linear = layer(adjustments: LocalAdjustments(exposure: 1))

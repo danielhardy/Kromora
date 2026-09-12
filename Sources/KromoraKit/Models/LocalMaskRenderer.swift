@@ -6,7 +6,7 @@ import Foundation
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
 final class LocalMaskRenderer {
-    static let version = 6
+    static let version = 7
     private let maxBrushStrokeCacheEntries = 8
     private let maxBrushStrokeCacheCostBytes: Int
     private var brushStrokeCache: [String: [Float]] = [:]
