@@ -6,32 +6,6 @@ import SwiftUI
 import ImageIO
 import UniformTypeIdentifiers
 
-struct PhotosImportProgress: Equatable, Sendable {
-    enum Phase: String, Sendable {
-        case transferring
-        case inserting
-
-        var label: String {
-            switch self {
-            case .transferring: return "Transferring"
-            case .inserting: return "Adding"
-            }
-        }
-    }
-
-    let total: Int
-    var processed: Int
-    var imported: Int
-    var failed: Int
-    var currentName: String?
-    var phase: Phase
-
-    var fraction: Double {
-        guard total > 0 else { return 1 }
-        return min(1, Double(processed) / Double(total))
-    }
-}
-
 struct MediaVolumeImportProgress: Equatable, Sendable {
     let total: Int
     var processed: Int

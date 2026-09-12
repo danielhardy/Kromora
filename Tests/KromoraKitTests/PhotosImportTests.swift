@@ -2,7 +2,187 @@ import XCTest
 @testable import KromoraKit
 
 @MainActor
+private final class TestPhotosImportProvider: PhotosImportProviding {
+    enum ProviderError: Error, Sendable {
+        case unavailable
+    }
+
+    let names: [Int: String?]
+    let responses: [Int: Result<Data?, ProviderError>]
+    var requestedOrdinals: [Int] = []
+    var blockingOrdinal: Int?
+
+    init(
+        names: [Int: String?] = [:],
+        responses: [Int: Result<Data?, ProviderError>]
+    ) {
+        self.names = names
+        self.responses = responses
+    }
+
+    func originalFilename(for selection: PhotosImportSelection) -> String? {
+        names[selection.ordinal] ?? nil
+    }
+
+    func transferData(for selection: PhotosImportSelection) async throws -> Data? {
+        requestedOrdinals.append(selection.ordinal)
+        if selection.ordinal == blockingOrdinal {
+            try await Task.sleep(for: .seconds(30))
+        }
+        switch responses[selection.ordinal] ?? .success(nil) {
+        case .success(let data): return data
+        case .failure(let error): throw error
+        }
+    }
+}
+
+@MainActor
 final class PhotosImportTests: TempDirectoryTestCase {
+
+    func testCoordinatorImportsMultipleItemsThroughInjectedProvider() async throws {
+        let firstURL = try Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "first.jpg", in: tempDirectory
+        )
+        let secondURL = try Fixtures.writeJPEG(
+            width: 24, height: 32, orientation: 1, named: "second.jpg", in: tempDirectory
+        )
+        let firstData = try Data(contentsOf: firstURL)
+        let secondData = try Data(contentsOf: secondURL)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let provider = TestPhotosImportProvider(
+            names: [0: "IMG_0001.HEIC", 1: "IMG_0002.JPG"],
+            responses: [0: .success(firstData), 1: .success(secondData)]
+        )
+
+        coordinator.start(
+            selections: [
+                PhotosImportSelection(ordinal: 0, localIdentifier: "photos.first"),
+                PhotosImportSelection(ordinal: 1, localIdentifier: "photos.second"),
+            ],
+            provider: provider
+        )
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["IMG_0001.HEIC", "IMG_0002.JPG"])
+        XCTAssertEqual(viewModel.collection.items.map(\.imageData), [firstData, secondData])
+        XCTAssertTrue(provider.requestedOrdinals == [0, 1])
+        XCTAssertTrue(coordinator.failures.isEmpty)
+    }
+
+    func testCoordinatorRecordsPartialFailureAndKeepsSuccessfulItems() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "partial.jpg", in: tempDirectory
+        ))
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let provider = TestPhotosImportProvider(
+            names: [0: "First.jpg", 1: "Unavailable.heic", 2: "Third.jpg"],
+            responses: [0: .success(data), 1: .failure(.unavailable), 2: .success(data)]
+        )
+
+        coordinator.start(
+            selections: (0..<3).map {
+                PhotosImportSelection(ordinal: $0, localIdentifier: "photos.\($0)")
+            },
+            provider: provider
+        )
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["First.jpg", "Third.jpg"])
+        XCTAssertEqual(coordinator.failures.count, 1)
+        XCTAssertEqual(coordinator.failures.first?.ordinal, 1)
+        XCTAssertEqual(coordinator.failures.first?.name, "Unavailable.heic")
+        XCTAssertFalse(coordinator.failures.first?.reason.isEmpty ?? true)
+        XCTAssertNil(coordinator.progress)
+    }
+
+    func testCoordinatorUsesFallbackNameWhenProviderHasNoFilename() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "fallback.jpg", in: tempDirectory
+        ))
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let provider = TestPhotosImportProvider(responses: [0: .success(data)])
+
+        coordinator.start(
+            selections: [PhotosImportSelection(ordinal: 0, localIdentifier: nil)],
+            provider: provider
+        )
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertEqual(viewModel.collection.items.first?.displayName, "Photo 1")
+    }
+
+    func testCoordinatorCancellationFinishesWithoutDiscardingEarlierItem() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "cancel.jpg", in: tempDirectory
+        ))
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let provider = TestPhotosImportProvider(
+            names: [0: "Kept.jpg", 1: "Waiting.jpg"],
+            responses: [0: .success(data), 1: .success(data)]
+        )
+        provider.blockingOrdinal = 1
+
+        coordinator.start(
+            selections: [
+                PhotosImportSelection(ordinal: 0, localIdentifier: "photos.kept"),
+                PhotosImportSelection(ordinal: 1, localIdentifier: "photos.waiting"),
+            ],
+            provider: provider
+        )
+        try await waitUntil("the second provider request") {
+            provider.requestedOrdinals.contains(1)
+        }
+        coordinator.cancel()
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["Kept.jpg"])
+        XCTAssertTrue(coordinator.wasCancelled)
+    }
+
+    func testCoordinatorPropagatesOneComputedDigestToDurableSource() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "digest.jpg", in: tempDirectory
+        ))
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let provider = TestPhotosImportProvider(responses: [0: .success(data)])
+
+        coordinator.start(
+            selections: [PhotosImportSelection(ordinal: 0, localIdentifier: "photos.digest")],
+            provider: provider
+        )
+        try await waitForCoordinator(coordinator)
+
+        XCTAssertEqual(viewModel.collection.items.first?.dataFingerprint, PhotoAssetID.contentDigest(data))
+    }
+
+    private func waitForCoordinator(
+        _ coordinator: PhotosImportCoordinator,
+        timeout: Duration = .seconds(5)
+    ) async throws {
+        try await waitUntil("Photos import completion", timeout: timeout) {
+            coordinator.progress == nil
+        }
+    }
+
+    private func waitUntil(
+        _ description: String,
+        timeout: Duration = .seconds(5),
+        condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                XCTFail("timed out waiting for \(description)")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(1))
+        }
+    }
 
     func testStreamingImportRetainsFullBytesAndUsesPhotosIdentity() throws {
         let url = try Fixtures.writeJPEG(

@@ -5,6 +5,7 @@ import SwiftUI
 
 struct StatusBar: View {
     @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var photosImportCoordinator: PhotosImportCoordinator
     var onCancelImport: () -> Void = {}
     var onCancelExport: () -> Void = {}
     var onCancelAuto: () -> Void = {}
@@ -12,7 +13,7 @@ struct StatusBar: View {
     var body: some View {
         HStack(spacing: 0) {
             // Status message
-            if let progress = viewModel.photosImportProgress {
+            if let progress = photosImportCoordinator.progress {
                 ProgressView(value: progress.fraction)
                     .frame(width: 110)
                     .controlSize(.small)
