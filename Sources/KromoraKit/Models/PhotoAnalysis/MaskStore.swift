@@ -115,6 +115,25 @@ actor MaskStore {
         return try? NormalizedMask(size: persisted.mask.size, values: floats)
     }
 
+    /// Remove every quality/provider variant belonging to an asset, including its binary sidecar.
+    /// A missing or malformed cache entry is harmless and is left for the normal cache hygiene
+    /// path; valid entries are removed atomically one file at a time.
+    func remove(for assetID: PhotoAssetID) throws {
+        try Task.checkCancellation()
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
+        for url in files where url.pathExtension.lowercased() == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  let persisted = try? JSONDecoder().decode(PersistedMask.self, from: data),
+                  persisted.key.assetID == assetID else { continue }
+            try Task.checkCancellation()
+            try FileManager.default.removeItem(at: url)
+            let sidecar = url.deletingPathExtension().appendingPathExtension("bin")
+            try? FileManager.default.removeItem(at: sidecar)
+        }
+    }
+
     private func load(for key: MaskCacheKey) -> PersistedMask? {
         loadMetadata(for: key)
     }

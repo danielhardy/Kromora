@@ -65,6 +65,9 @@ public struct KromoraCommands: Commands {
             Button("Refresh Source Folder") { post(.refreshSourceFolder) }
                 .keyboardShortcut("r", modifiers: [.command])
 
+            Button("Delete Selected Photos") { post(.deleteSelectedPhotos) }
+                .keyboardShortcut(.delete)
+
             Divider()
 
             Button("Undo") { post(.undoEdit) }
@@ -117,6 +120,17 @@ struct MenuCommandReceivers: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .modifier(FileMenuCommandReceiver(viewModel: viewModel))
+            .modifier(ViewMenuCommandReceivers(viewModel: viewModel))
+            .modifier(DeleteMenuCommandReceiver(viewModel: viewModel))
+    }
+}
+
+private struct FileMenuCommandReceiver: ViewModifier {
+    @ObservedObject var viewModel: AppViewModel
+
+    func body(content: Content) -> some View {
+        content
             .onReceive(NotificationCenter.default.publisher(for: .openImage)) { _ in
                 viewModel.openImageDialog()
             }
@@ -165,7 +179,16 @@ struct MenuCommandReceivers: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .saveLook)) { _ in
                 viewModel.presentSaveLook()
             }
-            .modifier(ViewMenuCommandReceivers(viewModel: viewModel))
+    }
+}
+
+private struct DeleteMenuCommandReceiver: ViewModifier {
+    @ObservedObject var viewModel: AppViewModel
+
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .deleteSelectedPhotos)) { _ in
+            viewModel.requestDeleteSelectedLibraryItems()
+        }
     }
 }
 
@@ -199,6 +222,7 @@ extension Notification.Name {
     static let openSourceFolder = Notification.Name("Kromora.openSourceFolder")
     static let importFromRemovableMedia = Notification.Name("Kromora.importFromRemovableMedia")
     static let refreshSourceFolder = Notification.Name("Kromora.refreshSourceFolder")
+    static let deleteSelectedPhotos = Notification.Name("Kromora.deleteSelectedPhotos")
     static let undoEdit = Notification.Name("Kromora.undoEdit")
     static let redoEdit = Notification.Name("Kromora.redoEdit")
     static let resetPhoto = Notification.Name("Kromora.resetPhoto")

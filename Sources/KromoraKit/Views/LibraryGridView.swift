@@ -19,7 +19,23 @@ struct LibraryGridView: View {
         let entries = collection.thumbnailEntries
 
         VStack(spacing: 0) {
-            CullingBarView(viewModel: viewModel)
+            HStack(spacing: 0) {
+                CullingBarView(viewModel: viewModel)
+                Divider()
+                    .frame(height: 28)
+                Button(role: .destructive) {
+                    viewModel.requestDeleteSelectedLibraryItems()
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .help("Remove the selected photo(s) from the Library (Delete)")
+                .accessibilityHint(
+                    "Move managed originals to the macOS Trash; keep referenced originals"
+                )
+                .disabled(collection.deletionCandidates.isEmpty)
+                .padding(.horizontal, 12)
+            }
             Divider()
 
             GeometryReader { geometry in
@@ -49,7 +65,11 @@ struct LibraryGridView: View {
                             }
                         }
                         .padding(16)
-                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: geometry.size.height,
+                            alignment: .top
+                        )
                     }
                     .background(KromoraTheme.windowBackground)
                 }

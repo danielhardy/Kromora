@@ -62,6 +62,23 @@ actor PhotoAnalysisCache {
         try data.write(to: fileURL(for: key), options: .atomic)
     }
 
+    /// Remove all analysis entries for an asset. Cache cleanup is keyed by the asset rather than
+    /// by the current source fingerprint because a source may have been edited or relinked since
+    /// an older analysis was written.
+    func remove(for assetID: PhotoAssetID) throws {
+        try Task.checkCancellation()
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
+        for url in files where url.pathExtension.lowercased() == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  let persisted = try? JSONDecoder().decode(PersistedAnalysis.self, from: data),
+                  persisted.key.assetID == assetID else { continue }
+            try Task.checkCancellation()
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     private func fileURL(for key: AnalysisCacheKey) -> URL {
         directory.appendingPathComponent(Self.filename(for: key), isDirectory: false)
     }

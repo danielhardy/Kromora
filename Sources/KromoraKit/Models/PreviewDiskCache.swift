@@ -105,6 +105,18 @@ struct PreviewDiskCache: Sendable {
         }
     }
 
+    /// Invalidate persisted preview rasters after a library deletion. Preview keys intentionally
+    /// use source fingerprints rather than asset IDs, so the cache cannot cheaply map old entries
+    /// back to one source. Removing the rasters is safe and leaves the version marker intact.
+    func invalidateAll() {
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        ) else { return }
+        for file in files where file.pathExtension.lowercased() == "jpg" {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     /// Turns an already-presented image into the cache's canonical upright raster. Callers only
     /// invoke this for a full settled frame; ROI/zoom frames are deliberately not disk-cacheable.
     static func canonicalRaster(from image: CIImage, space: WorkingSpace) -> CGImage? {

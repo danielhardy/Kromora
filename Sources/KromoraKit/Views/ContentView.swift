@@ -75,6 +75,31 @@ public struct ContentView: View {
             } message: { message in
                 Text(message)
             }
+            .confirmationDialog(
+                viewModel.libraryDeletionConfirmation?.title
+                    ?? "Remove selected photo(s) from Library?",
+                isPresented: Binding(
+                    get: { viewModel.libraryDeletionConfirmation != nil },
+                    set: { if !$0 { viewModel.libraryDeletionConfirmation = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                if let confirmation = viewModel.libraryDeletionConfirmation {
+                    let actionTitle = confirmation.count == 1
+                        ? "Delete Photo" : "Delete \(confirmation.count) Photos"
+                    Button(
+                        actionTitle,
+                        role: .destructive
+                    ) {
+                        viewModel.confirmDeleteSelectedLibraryItems()
+                    }
+                }
+                Button("Cancel", role: .cancel) {
+                    viewModel.libraryDeletionConfirmation = nil
+                }
+            } message: {
+                Text(viewModel.libraryDeletionConfirmation?.message ?? "")
+            }
     }
 
     private func handlePhotosSelection(_ selection: [PhotosPickerItem]) {

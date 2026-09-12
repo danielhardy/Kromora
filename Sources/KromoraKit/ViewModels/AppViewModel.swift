@@ -46,6 +46,31 @@ struct MediaVolumeImportProgress: Equatable, Sendable {
     }
 }
 
+struct LibraryDeletionConfirmation: Identifiable, Equatable, Sendable {
+    let id = UUID()
+    let candidates: [ImageCollection.DeletionCandidate]
+
+    var count: Int { candidates.count }
+    var title: String {
+        count == 1 ? "Remove photo from Library?" : "Remove \(count) photos from Library?"
+    }
+    var message: String {
+        let names = candidates.map(\.displayName).joined(separator: ", ")
+        let suffix = candidates.contains(where: { !$0.isManaged })
+            ? " Original files outside Kromora's managed library will be kept."
+            : " Managed originals will be moved to the macOS Trash."
+        return "\(names).\(suffix)"
+    }
+}
+
+struct LibraryDeletionResult: Equatable, Sendable {
+    let deletedIDs: [PhotoAssetID]
+    let failures: [String]
+
+    var deletedCount: Int { deletedIDs.count }
+    var succeeded: Bool { !deletedIDs.isEmpty && failures.isEmpty }
+}
+
 /// Lifecycle state for the source-statistics-driven Auto action.
 enum AutoAdjustmentState: Equatable, Sendable {
     case unavailable(String)
@@ -613,6 +638,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Non-nil when a hard failure should be surfaced as a dismissible alert.
     /// Bound to an `.alert` in ContentView; cleared when the user dismisses it.
     @Published var errorMessage: String?
+    /// The Library owns the confirmation presentation, while the model owns the immutable target
+    /// snapshot so a late selection change cannot redirect a destructive action.
+    @Published var libraryDeletionConfirmation: LibraryDeletionConfirmation?
     /// Compatibility shim for callers that still mention the retired modal sheet.
     @Published var isMaskingPanelPresented = false
 
@@ -2574,6 +2602,168 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     func refreshSource() {
         cancelIdlePreviewBuild(resetCursor: true)
         collection.refresh()
+    }
+
+    /// Capture the current Library selection for a destructive confirmation. The focused item is
+    /// included by `ImageCollection` even for a keyboard/menu invocation with no explicit set.
+    func requestDeleteSelectedLibraryItems() {
+        guard navigation.isGrid else { return }
+        let candidates = collection.deletionCandidates
+        guard !candidates.isEmpty else {
+            statusMessage = "Select at least one photo to remove"
+            return
+        }
+        libraryDeletionConfirmation = LibraryDeletionConfirmation(candidates: candidates)
+    }
+
+    /// Confirm the previously captured target set. The actual work is asynchronous because edit
+    /// records and analysis/mask caches are actor-isolated.
+    func confirmDeleteSelectedLibraryItems() {
+        guard let confirmation = libraryDeletionConfirmation else { return }
+        libraryDeletionConfirmation = nil
+        Task { @MainActor [weak self] in
+            _ = await self?.deleteLibraryItems(confirmation.candidates)
+        }
+    }
+
+    /// Delete the supplied Library targets. This is also the testable seam behind the confirmation
+    /// UI: flush pending edits, clear durable derived data, move managed files to Trash, remove
+    /// edit records, then commit the collection state. A per-item failure leaves that item alone.
+    @discardableResult
+    func deleteSelectedLibraryItems() async -> LibraryDeletionResult {
+        await deleteLibraryItems(collection.deletionCandidates)
+    }
+
+    @discardableResult
+    private func deleteLibraryItems(
+        _ candidates: [ImageCollection.DeletionCandidate]
+    ) async -> LibraryDeletionResult {
+        guard !candidates.isEmpty else {
+            return LibraryDeletionResult(deletedIDs: [], failures: [])
+        }
+
+        let flushResult = await persistence.flush()
+        guard flushResult.succeeded else {
+            let detail: String
+            if case .failure(let message) = flushResult {
+                detail = message
+            } else {
+                detail = "pending edits were not saved"
+            }
+            let message =
+                "Could not remove photos because their edits could not be saved: " + detail
+            presentError(message)
+            return LibraryDeletionResult(deletedIDs: [], failures: [message])
+        }
+
+        var deletedIDs: [PhotoAssetID] = []
+        var failures: [String] = []
+        for candidate in candidates {
+            guard collection.items.contains(where: { $0.id == candidate.id }) else { continue }
+
+            // A stale analysis entry is worse than a missing one if this source is imported again,
+            // so fail closed before changing the source or its edit record.
+            do {
+                try await photoAnalysisCoordinator.removeCaches(for: candidate.id)
+            } catch {
+                failures.append(
+                    "Could not clear cached analysis for \(candidate.displayName): "
+                        + error.localizedDescription
+                )
+                continue
+            }
+
+            var trashedURL: NSURL?
+            do {
+                if candidate.isManaged, let url = candidate.url {
+                    try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+                }
+                try await editStore.delete(
+                    for: EditSourceReference(assetID: candidate.id, url: candidate.url)
+                )
+                deletedIDs.append(candidate.id)
+            } catch {
+                if let trashedURL, let originalURL = candidate.url {
+                    try? FileManager.default.moveItem(at: trashedURL as URL, to: originalURL)
+                }
+                failures.append(
+                    "Could not remove \(candidate.displayName): " + error.localizedDescription
+                )
+            }
+        }
+
+        if !deletedIDs.isEmpty {
+            let deletedSet = Set(deletedIDs)
+            for id in deletedSet {
+                editedThumbnailDebounceTasks[id]?.cancel()
+                editedThumbnailDebounceTasks.removeValue(forKey: id)
+                editedThumbnailGenerations.removeValue(forKey: id)
+                editSessions.removeValue(forKey: id)
+                editSessionRevisions.removeValue(forKey: id)
+                workScheduler.cancel(
+                    id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
+                )
+            }
+            if let pendingEditedThumbnailAssetID,
+               deletedSet.contains(pendingEditedThumbnailAssetID) {
+                self.pendingEditedThumbnailAssetID = nil
+            }
+            _ = collection.removeItems(with: deletedSet)
+            previewDiskCache.invalidateAll()
+            Thumbnails.invalidateCache()
+            await engine.invalidateRenderCaches()
+
+            if let activeAssetID, deletedSet.contains(activeAssetID) {
+                if collection.selectedItem != nil {
+                    openActiveCollectionImage(loadMode: false)
+                } else {
+                    clearActiveSourceAfterLibraryDeletion()
+                }
+            }
+        }
+
+        if !failures.isEmpty {
+            let prefix = deletedIDs.isEmpty ? "Could not remove the selected photos" :
+                "Removed \(deletedIDs.count) photo(s), but some photos could not be removed"
+            presentError(prefix + ": " + failures.joined(separator: " "))
+        } else if !deletedIDs.isEmpty {
+            statusMessage = deletedIDs.count == 1 ? "Photo removed from Library" :
+                "Removed \(deletedIDs.count) photos from Library"
+        }
+        return LibraryDeletionResult(deletedIDs: deletedIDs, failures: failures)
+    }
+
+    private func clearActiveSourceAfterLibraryDeletion() {
+        sourceRevision &+= 1
+        documentRevision &+= 1
+        displayRevision &+= 1
+        cancelPendingPreviewDebounce()
+        previewCoordinator.cancel()
+        capabilitiesTask?.cancel()
+        metadataTask?.cancel()
+        embeddedFirstFrameTask?.cancel()
+        embeddedFirstFrameTask = nil
+        loadTask?.cancel()
+        loadTask = nil
+        pendingSourceLoad = nil
+        sourceImage = nil
+        imageSource = nil
+        sourceURL = nil
+        sourceName = ""
+        sourceSize = .zero
+        activeAssetID = nil
+        activeSourceReference = nil
+        activeHistory = EditHistory()
+        document = EditDocument()
+        metadata = ImageMetadata()
+        histogram = nil
+        isLoading = false
+        previewState = .empty
+        previewSurface.clear()
+        originalPreviewSurface.clear()
+        inspectorState.isPresented = false
+        statusMessage = "Open an image to get started"
+        resetAutoAdjustmentForLifecycle()
     }
 
     func selectCollectionImage(at index: Int, additive: Bool = false) {

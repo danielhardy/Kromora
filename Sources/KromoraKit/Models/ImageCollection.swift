@@ -8,6 +8,20 @@ import UniformTypeIdentifiers
 @MainActor
 final class ImageCollection: ObservableObject {
 
+    enum LibrarySourceKind: String, Sendable, Equatable {
+        case managed
+        case referenced
+    }
+
+    struct DeletionCandidate: Identifiable, Sendable, Equatable {
+        let id: PhotoAssetID
+        let displayName: String
+        let url: URL?
+        let sourceKind: LibrarySourceKind
+
+        var isManaged: Bool { sourceKind == .managed }
+    }
+
     /// A Photos picker payload. The local identifier is preferred for durable edit identity; the
     /// ordinal fallback keeps two picker items with identical bytes distinct when the provider does
     /// not expose an identifier.
@@ -196,6 +210,7 @@ final class ImageCollection: ObservableObject {
 
     private static let bookmarkKey = "imageSourceFolderBookmark"
     private static let cullingStateKey = "imageLibraryCullingState"
+    private static let deletedAssetIDsKey = "imageLibraryDeletedAssetIDs"
     private struct PersistedCullingState: Codable, Equatable {
         let rating: Int
         let flag: PhotoFlag
@@ -207,6 +222,7 @@ final class ImageCollection: ObservableObject {
 
     private let defaults: UserDefaults
     private var persistedCullingStates: [String: PersistedCullingState]
+    private var deletedAssetIDs: Set<String>
     private struct CullingChange {
         let itemID: PhotoAssetID
         let oldState: PhotoAssetLibraryState
@@ -276,6 +292,12 @@ final class ImageCollection: ObservableObject {
         } else {
             self.persistedCullingStates = [:]
         }
+        if let data = defaults.data(forKey: Self.deletedAssetIDsKey),
+           let ids = try? JSONDecoder().decode([String].self, from: data) {
+            self.deletedAssetIDs = Set(ids)
+        } else {
+            self.deletedAssetIDs = []
+        }
     }
 
     nonisolated static var defaultLibraryFolderURL: URL {
@@ -311,6 +333,31 @@ final class ImageCollection: ObservableObject {
 
     var selectedItems: [Item] {
         selectedIndices.map { items[$0] }
+    }
+
+    /// The exact targets used by the Library delete confirmation. Selection is preferred, with
+    /// the focused item as a defensive fallback for callers that have no selected set yet.
+    var deletionCandidates: [DeletionCandidate] {
+        let ids = selection.selectedIDs.isEmpty
+            ? (selection.activeID.map { Set([$0]) } ?? [])
+            : selection.selectedIDs
+        return items.filter { ids.contains($0.id) }.map { item in
+            DeletionCandidate(
+                id: item.id,
+                displayName: item.displayName,
+                url: item.url,
+                sourceKind: sourceKind(for: item)
+            )
+        }
+    }
+
+    func sourceKind(for item: Item) -> LibrarySourceKind {
+        guard let url = item.url else { return .managed }
+        let canonicalURL = url.standardizedFileURL.resolvingSymlinksInPath()
+        let canonicalLibrary = libraryFolderURL.standardizedFileURL.resolvingSymlinksInPath()
+        return canonicalURL == canonicalLibrary
+            || canonicalURL.path.hasPrefix(canonicalLibrary.path + "/")
+            ? .managed : .referenced
     }
 
     var filteredItems: [Item] {
@@ -577,6 +624,9 @@ final class ImageCollection: ObservableObject {
                         self.addScanWarning(warning)
                     case .batch(let discoveries):
                         for discovery in discoveries {
+                            guard !self.deletedAssetIDs.contains(discovery.asset.id.raw) else {
+                                continue
+                            }
                             guard seenItemIDs.insert(discovery.asset.id).inserted else { continue }
                             let item = Item(
                                 asset: restoredCullingState(for: discovery.asset),
@@ -940,6 +990,8 @@ final class ImageCollection: ObservableObject {
                 addScanWarning("Skipped duplicate \(canonicalURL.lastPathComponent).")
                 continue
             }
+            deletedAssetIDs.remove(asset.id.raw)
+            persistDeletedAssetIDs()
             items.append(Item(asset: asset, metadata: metadata))
             persistCullingState(for: asset)
             importedIDs.append(asset.id)
@@ -1093,6 +1145,8 @@ final class ImageCollection: ObservableObject {
             ?? dataImportOrdinals.count
         let insertionIndex = dataImportStartIndex + relativeIndex
         items.insert(Item(asset: asset, metadata: nil), at: insertionIndex)
+        deletedAssetIDs.remove(identifier.raw)
+        persistDeletedAssetIDs()
         invalidateCollectionProjection()
         dataImportOrdinals.insert(ordinal, at: relativeIndex)
         let shiftedIDs = dataImportItemIndices.compactMap { itemID, itemIndex in
@@ -1173,6 +1227,65 @@ final class ImageCollection: ObservableObject {
         invalidateCollectionProjection()
         isActive = !items.isEmpty
         enqueueThumbnails()
+    }
+
+    /// Remove successfully deleted items from the live collection. File and edit-record work is
+    /// deliberately performed by `AppViewModel` first; this method is the final in-memory commit.
+    /// It also records tombstones so a referenced original skipped by deletion is not reintroduced
+    /// by the next source-folder scan or on relaunch.
+    @discardableResult
+    func removeItems(with ids: Set<PhotoAssetID>) -> [DeletionCandidate] {
+        let removed = items.filter { ids.contains($0.id) }.map { item in
+            DeletionCandidate(
+                id: item.id,
+                displayName: item.displayName,
+                url: item.url,
+                sourceKind: sourceKind(for: item)
+            )
+        }
+        guard !removed.isEmpty else { return [] }
+
+        let removedIDs = Set(removed.map(\.id))
+        let removedBeforeImportStart = items.indices.filter {
+            $0 < dataImportStartIndex && removedIDs.contains(items[$0].id)
+        }.count
+        let removedImportOffsets = Set(items.indices.compactMap { index -> Int? in
+            guard index >= dataImportStartIndex,
+                  index - dataImportStartIndex < dataImportOrdinals.count,
+                  removedIDs.contains(items[index].id) else { return nil }
+            return index - dataImportStartIndex
+        })
+        for item in items where removedIDs.contains(item.id) {
+            let jobID = thumbnailJobID(for: item)
+            scheduler.cancel(id: jobID)
+            thumbnailJobIDs.remove(jobID)
+            thumbnailDemandIDs.remove(item.id)
+            thumbnailDemandPriorities.removeValue(forKey: item.id)
+            preparedThumbnailIDs.remove(item.id)
+        }
+        items.removeAll { removedIDs.contains($0.id) }
+        dataImportStartIndex = max(0, dataImportStartIndex - removedBeforeImportStart)
+        deletedAssetIDs.formUnion(removedIDs.map(\.raw))
+        for id in removedIDs {
+            persistedCullingStates.removeValue(forKey: id.raw)
+        }
+        cullingUndoStack.removeAll { removedIDs.contains($0.itemID) }
+        dataImportOverflowItemIDs.subtract(removedIDs)
+        dataImportOrdinals = dataImportOrdinals.enumerated().compactMap { offset, ordinal in
+            removedImportOffsets.contains(offset) ? nil : ordinal
+        }
+        dataImportItemIndices = dataImportItemIndices.reduce(into: [:]) { result, entry in
+            guard let index = items.firstIndex(where: { $0.id == entry.key }) else { return }
+            result[entry.key] = index
+        }
+        invalidateCollectionProjection()
+        persistCullingStates()
+        persistDeletedAssetIDs()
+        reconcileSelection()
+        selectedIndex = min(selectedIndex, max(0, items.count - 1))
+        isActive = !items.isEmpty || !pendingImportSlots.isEmpty
+        enqueueThumbnails()
+        return removed
     }
 
     /// Mark one ordinal as unavailable without manufacturing a photo asset. The failed slot stays
@@ -1621,8 +1734,17 @@ final class ImageCollection: ObservableObject {
             rating: asset.rating,
             flag: asset.flag
         )
+        persistCullingStates()
+    }
+
+    private func persistCullingStates() {
         guard let data = try? JSONEncoder().encode(persistedCullingStates) else { return }
         defaults.set(data, forKey: Self.cullingStateKey)
+    }
+
+    private func persistDeletedAssetIDs() {
+        guard let data = try? JSONEncoder().encode(Array(deletedAssetIDs).sorted()) else { return }
+        defaults.set(data, forKey: Self.deletedAssetIDsKey)
     }
 
     private func restoredCullingState(for asset: PhotoAsset) -> PhotoAsset {

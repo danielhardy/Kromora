@@ -220,6 +220,12 @@ actor PhotoAnalysisCoordinator {
         await maskStore.pixels(for: reference)
     }
 
+    /// Delete durable analysis artifacts for a source after the library has accepted its removal.
+    func removeCaches(for assetID: PhotoAssetID) async throws {
+        try await cache.remove(for: assetID)
+        try await maskStore.remove(for: assetID)
+    }
+
     /// Explicitly establish the face/foreground signals the person gate requires.
     ///
     /// The person gate is deliberately cache-only so speculative callers (Info panel prefetch,
