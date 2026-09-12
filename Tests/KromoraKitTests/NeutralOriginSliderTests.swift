@@ -190,4 +190,3 @@ final class NeutralOriginSliderTests: XCTestCase {
         return knob.width / 2 + travel * CGFloat(fraction)
     }
 }
-
