@@ -253,6 +253,31 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertNil(surface.pendingDisplayRevision())
     }
 
+    /// The sharper-frame rule exists so a cheap interactive level cannot replace a good settled
+    /// frame. It must not outlive its reason: an ROI frame holds pixels for the zoomed region
+    /// only, so the complete photo has to be allowed through even at a lower detail level.
+    func testARetainedROIFrameDoesNotRefuseTheCompletePhoto() throws {
+        let surface = PreviewSurface()
+        let identity = PreviewFrameIdentity(sourceToken: "source", documentHash: "document", space: .current)
+        let zoomedROI = CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300))
+        let completePhoto = CIImage(color: .blue).cropped(to: CGRect(x: 0, y: 0, width: 200, height: 150))
+
+        XCTAssertTrue(surface.present(
+            zoomedROI, detailIdentity: identity, detailFactor: 0.75,
+            presentationImageExtent: CGRect(x: 0, y: 0, width: 800, height: 600),
+            coversPresentationExtent: false
+        ))
+        let roiRevision = try XCTUnwrap(surface.pendingDisplayRevision())
+        surface.markPresentationSucceeded(displayRevision: roiRevision)
+
+        XCTAssertTrue(surface.present(
+            completePhoto, detailIdentity: identity, detailFactor: 0.5,
+            presentationImageExtent: CGRect(x: 0, y: 0, width: 200, height: 150),
+            coversPresentationExtent: true
+        ))
+        XCTAssertTrue(surface.image === completePhoto)
+    }
+
     func testPresentationImageRemainsBoundedAbove100PercentAndKeepsTheSourceVisible() throws {
         let source = CIImage(color: CIColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1))
             .cropped(to: CGRect(x: 37, y: 19, width: 640, height: 400))

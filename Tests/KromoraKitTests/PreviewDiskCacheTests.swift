@@ -159,6 +159,55 @@ final class PreviewDiskCacheTests: TempDirectoryTestCase {
         try await waitUntil("histogram from warm presentation") { viewModel.histogram != nil }
     }
 
+    /// A cached entry is the whole photo at the canonical long edge. A zoomed request asks for an
+    /// ROI, so reusing that entry would publish the complete frame through ROI geometry — which is
+    /// what made a double-click in the editor look like a jump back to Fit.
+    func testZoomedSettledRequestRendersInsteadOfAdoptingTheCanonicalDiskEntry() async throws {
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 64, height: 48, named: "zoom-cache.png", in: tempDirectory
+        )
+        let data = try Data(contentsOf: imageURL)
+        let rendered = try XCTUnwrap(
+            CGImageSourceCreateWithURL(imageURL as CFURL, nil).flatMap {
+                CGImageSourceCreateImageAtIndex($0, 0, nil)
+            }
+        )
+        let fake = FakeRenderEngine(previewResult: rendered)
+        let cacheDirectory = tempDirectory.appendingPathComponent("zoom-preview-cache")
+        let viewModel = makeAppViewModel(
+            engine: fake, previewDiskCacheDirectory: cacheDirectory
+        )
+
+        viewModel.openImage(data: data, name: "zoom-cache.png")
+        try await waitUntil("first preview") { viewModel.previewState == .ready }
+        try await waitUntil("disk cache write") {
+            guard let files = try? FileManager.default.contentsOfDirectory(
+                at: cacheDirectory, includingPropertiesForKeys: nil
+            ) else { return false }
+            return files.contains { $0.pathExtension == "jpg" }
+        }
+        let warmCount = await fake.previewRequests.count
+
+        viewModel.toggleCanvasZoom()
+        XCTAssertEqual(viewModel.canvasState.navigation.mode, .custom)
+        XCTAssertGreaterThan(viewModel.canvasState.navigation.zoom, 1)
+
+        let deadline = Date().addingTimeInterval(5)
+        var renderCount = await fake.previewRequests.count
+        while renderCount <= warmCount, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+            renderCount = await fake.previewRequests.count
+        }
+        XCTAssertGreaterThan(renderCount, warmCount,
+                             "a zoomed settled request must reach the renderer")
+        let requests = await fake.previewRequests
+        let zoomed = try XCTUnwrap(requests.last)
+        XCTAssertNotNil(
+            zoomed.sourceROI,
+            "the zoomed frame must be rendered as an ROI rather than taken from the full-photo cache"
+        )
+    }
+
     private func waitUntil(
         _ description: String, timeout: TimeInterval = 5,
         _ condition: @MainActor @escaping () -> Bool

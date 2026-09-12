@@ -3367,6 +3367,29 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 displayRevision: supersededLookup.displayRevision
             )
         }
+        // A cached entry is always a complete canonical photo, because the disk key deliberately
+        // omits viewport state and `didPresentVisibleFrame` only writes a frame whose `sourceROI`
+        // is nil. A zoomed or panned request asks for an ROI, so adopting that canonical raster
+        // for it would publish the whole photo through ROI geometry — wrong scale, wrong origin —
+        // and the retained frame would then refuse the correct render that follows. Reads have to
+        // refuse the asymmetric case for exactly the reason writes already do.
+        if request.sourceROI != nil {
+            previewDiskCacheLookupTask?.cancel()
+            previewDiskCacheLookupTask = nil
+            pendingPreviewCacheLookup = nil
+            if preemptsPredecessor {
+                previewCoordinator.submit(
+                    request, phase: .settled, assetID: assetID,
+                    sourceRevision: sourceRevision, displayRevision: displayRevision
+                )
+            } else {
+                previewCoordinator.submitCorrective(
+                    request, assetID: assetID,
+                    sourceRevision: sourceRevision, displayRevision: displayRevision
+                )
+            }
+            return
+        }
         previewDiskCacheLookupTask?.cancel()
         previewDiskCacheLookupTask = Task { [weak self, cache, cacheKey, request,
                                              assetID, sourceRevision, displayRevision,
