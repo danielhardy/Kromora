@@ -4,7 +4,6 @@ import CoreImage
 import ImageIO
 import UniformTypeIdentifiers
 import CryptoKit
-import Darwin
 
 /// The value-only result of opening a source. It contains enough information to start rendering,
 /// but intentionally contains no decoded pixels or Core Image objects.
@@ -54,6 +53,9 @@ struct ImageSource: Sendable, Equatable {
     /// The source's full pixel dimensions, upright. Lets `RenderScale` compute a downscale factor
     /// without decoding the image again.
     let nativeExtent: CGSize
+    /// Portable identity captured at the source boundary. Cache consumers must use this value,
+    /// never the URL or filesystem metadata used to obtain the bytes.
+    let portableIdentity: PortablePhotoIdentity
     private let dataFingerprint: String?
     /// Captured when this source session is created. This is for observability grouping only;
     /// cache identity must continue to use the dynamic `cacheFingerprint` below.
@@ -63,7 +65,8 @@ struct ImageSource: Sendable, Equatable {
         backing: Backing,
         kind: Kind,
         nativeExtent: CGSize,
-        dataFingerprint: String? = nil
+        dataFingerprint: String? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
     ) {
         self.backing = backing
         self.kind = kind
@@ -73,6 +76,10 @@ struct ImageSource: Sendable, Equatable {
         } else {
             self.dataFingerprint = nil
         }
+        self.portableIdentity = Self.makePortableIdentity(
+            backing: backing, kind: kind, nativeExtent: nativeExtent,
+            dataFingerprint: self.dataFingerprint, existing: portableIdentity
+        )
         self.traceToken = Self.makeTraceToken(from: Self.fingerprintForTrace(backing: backing,
                                                                               kind: kind,
                                                                               nativeExtent: nativeExtent,
@@ -81,8 +88,13 @@ struct ImageSource: Sendable, Equatable {
 
     /// A file-backed source, classified by extension — the same rule `ImageDecoder.load` uses,
     /// so a file cannot be RAW for one and standard for the other.
-    init(url: URL, nativeExtent: CGSize) {
-        self.init(backing: .url(url), kind: Self.kind(forExtension: url.pathExtension), nativeExtent: nativeExtent)
+    init(
+        url: URL, nativeExtent: CGSize, portableIdentity: PortablePhotoIdentity? = nil
+    ) {
+        self.init(
+            backing: .url(url), kind: Self.kind(forExtension: url.pathExtension),
+            nativeExtent: nativeExtent, portableIdentity: portableIdentity
+        )
     }
 
     /// A bytes-backed source, classified by **content**.
@@ -90,10 +102,13 @@ struct ImageSource: Sendable, Equatable {
     /// There is no filename to inspect here, so the UTI ImageIO reports for the buffer decides. This
     /// is what makes a RAW dropped in as a payload — or a Photos item delivered as one — take the
     /// RAW path rather than being misread as a standard image.
-    init(data: Data, nativeExtent: CGSize, dataFingerprint: String? = nil) {
+    init(
+        data: Data, nativeExtent: CGSize, dataFingerprint: String? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
+    ) {
         self.init(
             backing: .data(data), kind: Self.kind(forData: data), nativeExtent: nativeExtent,
-            dataFingerprint: dataFingerprint
+            dataFingerprint: dataFingerprint, portableIdentity: portableIdentity
         )
     }
 
@@ -125,48 +140,80 @@ struct ImageSource: Sendable, Equatable {
         return CIRAWFilter(imageData: data, identifierHint: nil) != nil ? .raw : .standard
     }
 
-    /// A cache identity that changes when a URL-backed file is replaced in place.
-    ///
-    /// Resource values are cheap to query and include both content metadata and the file identity;
-    /// unlike a path-only key, they do not keep showing old pixels after a source edit. Data-backed
-    /// imports are hashed once during initialization because their bytes already live in memory.
+    /// A cache identity containing only the portable UUID, content hash, decoder revision, and
+    /// geometry. URL-backed content is re-read at this boundary so an in-place replacement cannot
+    /// reuse old pixels; the URL itself never enters the identity.
     var cacheFingerprint: String {
-        let extent = "\(Double(nativeExtent.width).bitPattern):\(Double(nativeExtent.height).bitPattern)"
-        return "\(decoderFingerprint):\(extent)"
+        if case .data = backing, let dataFingerprint {
+            let extent = "\(Double(nativeExtent.width).bitPattern):\(Double(nativeExtent.height).bitPattern)"
+            return "data:\(dataFingerprint):\(kind):\(extent)"
+        }
+        return cacheIdentity.cacheKey
     }
 
     /// Identity used by the renderer-owned RAW session. Geometry is intentionally excluded so the
     /// session created while preparing a zero-extent source is reused after preparation fills in
     /// the decoder's authoritative dimensions.
     var decoderFingerprint: String {
+        cacheIdentity.cacheKey
+    }
+
+    var cacheIdentity: PortablePhotoIdentity {
+        guard case .url(let url) = backing else { return portableIdentity }
+        let fingerprint = try? PortablePhotoSourceFingerprint.file(
+            at: url,
+            sourceRevision: portableIdentity.sourceFingerprint.sourceRevision,
+            decoderVersion: portableIdentity.sourceFingerprint.decoderVersion,
+            geometry: portableIdentity.sourceFingerprint.geometry
+        )
+        return fingerprint.map {
+            PortablePhotoIdentity(assetID: portableIdentity.assetID, sourceFingerprint: $0)
+        } ?? portableIdentity
+    }
+
+    private static func makePortableIdentity(
+        backing: Backing, kind: Kind, nativeExtent: CGSize, dataFingerprint: String?,
+        existing: PortablePhotoIdentity?
+    ) -> PortablePhotoIdentity {
+        let geometry = nativeExtent.width > 0 && nativeExtent.height > 0
+            ? PhotoPixelDimensions(width: Int(nativeExtent.width), height: Int(nativeExtent.height))
+            : nil
+        let fingerprint: PortablePhotoSourceFingerprint
         switch backing {
-        case .data:
-            let fingerprint = dataFingerprint ?? "missing"
-            return "data:\(fingerprint):\(kind)"
+        case .data(let data):
+            fingerprint = PortablePhotoSourceFingerprint(
+                contentHash: PortablePhotoSourceFingerprint.contentHash(of: data),
+                sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
+                decoderVersion: existing?.sourceFingerprint.decoderVersion ?? "imageio-\(kind)-v1",
+                geometry: geometry
+            )
         case .url(let url):
-            let values = try? url.resourceValues(forKeys: [
-                .fileSizeKey, .contentModificationDateKey, .fileResourceIdentifierKey
-            ])
-            let size = values?.fileSize.map(String.init) ?? "missing"
-            let modified = values?.contentModificationDate?.timeIntervalSince1970.description ?? "missing"
-            let resourceID = values?.fileResourceIdentifier.map { String(describing: $0) } ?? "missing"
-            var fileInfo = stat()
-            let statResult = url.withUnsafeFileSystemRepresentation { path in
-                guard let path else { return -1 }
-                return Int(lstat(path, &fileInfo))
-            }
-            let posixFingerprint: String
-            if statResult == 0 {
-                posixFingerprint = [
-                    String(fileInfo.st_dev), String(fileInfo.st_ino), String(fileInfo.st_size),
-                    String(fileInfo.st_mtimespec.tv_sec), String(fileInfo.st_mtimespec.tv_nsec),
-                    String(fileInfo.st_ctimespec.tv_sec), String(fileInfo.st_ctimespec.tv_nsec),
-                ].joined(separator: ":")
-            } else {
-                posixFingerprint = "missing"
-            }
-            return "url:\(url.standardizedFileURL.path):\(size):\(modified):\(resourceID):\(posixFingerprint):\(kind)"
+            let decoderVersion = existing?.sourceFingerprint.decoderVersion
+                ?? "imageio-\(kind)-v1"
+            fingerprint = (try? PortablePhotoSourceFingerprint.file(
+                at: url,
+                sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
+                decoderVersion: decoderVersion, geometry: geometry
+            )) ?? existing?.sourceFingerprint.with(geometry: geometry)
+                ?? PortablePhotoSourceFingerprint(
+                    contentHash: PortablePhotoSourceFingerprint.contentHash(
+                        of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
+                    ),
+                    decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
+                )
         }
+        let fallbackAssetID: PortablePhotoAssetID
+        if let existing {
+            fallbackAssetID = existing.assetID
+        } else {
+            switch backing {
+            case .url(let url):
+                fallbackAssetID = PortablePhotoAssetID.compatibility(from: PhotoAssetID.file(url))
+            case .data(let data):
+                fallbackAssetID = PortablePhotoAssetID.compatibility(from: PhotoAssetID.data(data))
+            }
+        }
+        return PortablePhotoIdentity(assetID: fallbackAssetID, sourceFingerprint: fingerprint)
     }
 
     private static func fingerprintForTrace(backing: Backing, kind: Kind, nativeExtent: CGSize,

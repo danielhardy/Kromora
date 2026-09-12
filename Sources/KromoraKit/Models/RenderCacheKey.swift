@@ -2,17 +2,23 @@ import Foundation
 import CoreGraphics
 import CryptoKit
 
-/// Stable identity for a source as it exists now.
+/// Portable identity for a source at the render boundary.
 ///
-/// URL-backed sources use file resource metadata so editing a file in place cannot reuse a stale
-/// result. Data-backed sources carry their content digest in `ImageSource`, avoiding a hash of the
-/// same Photos payload on every slider tick.
+/// The wrapped value contains the opaque asset UUID plus immutable source content, decoder, and
+/// geometry fields. It deliberately has no URL, inode, device, or timestamp component, so moving
+/// a source does not partition the in-memory render caches.
 struct RenderSourceFingerprint: Hashable, Sendable {
-    let value: String
+    let identity: PortablePhotoIdentity
 
     init(_ source: ImageSource) {
-        self.value = source.cacheFingerprint
+        self.identity = source.cacheIdentity
     }
+
+    init(identity: PortablePhotoIdentity) {
+        self.identity = identity
+    }
+
+    var value: String { identity.cacheKey }
 }
 
 /// The effective source dimensions and scale used by a render. `RenderScale` is intentionally a

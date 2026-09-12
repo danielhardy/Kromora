@@ -274,7 +274,10 @@ extension RenderEngining {
         }
         guard let extent else { return nil }
         return ImageSourcePreparation(source: ImageSource(
-            backing: source.backing, kind: source.kind, nativeExtent: extent
+            backing: source.backing, kind: source.kind, nativeExtent: extent,
+            portableIdentity: source.cacheIdentity.with(
+                geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
+            )
         ))
     }
 
@@ -1142,7 +1145,13 @@ actor RenderEngine: RenderEngining {
             // display axes (quarter-turns swap them). The canvas, crop math, and scale
             // factors all work in display space, matching the standard-image path.
             let preparedSource = ImageSource(
-                backing: source.backing, kind: .raw, nativeExtent: session.orientedNativeSize
+                backing: source.backing, kind: .raw, nativeExtent: session.orientedNativeSize,
+                portableIdentity: source.cacheIdentity.with(
+                    geometry: PhotoPixelDimensions(
+                        width: Int(session.orientedNativeSize.width),
+                        height: Int(session.orientedNativeSize.height)
+                    )
+                )
             )
             return ImageSourcePreparation(source: preparedSource)
         }
@@ -1157,7 +1166,10 @@ actor RenderEngine: RenderEngining {
             extent = try ImageDecoder.prepareStandard(from: data, name: "import")
         }
         return ImageSourcePreparation(source: ImageSource(
-            backing: source.backing, kind: .standard, nativeExtent: extent
+            backing: source.backing, kind: .standard, nativeExtent: extent,
+            portableIdentity: source.cacheIdentity.with(
+                geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
+            )
         ))
     }
 

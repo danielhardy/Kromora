@@ -126,7 +126,8 @@ actor MaskStore {
         for url in files where url.pathExtension.lowercased() == "json" {
             guard let data = try? Data(contentsOf: url),
                   let persisted = try? JSONDecoder().decode(PersistedMask.self, from: data),
-                  persisted.key.assetID == assetID else { continue }
+                  persisted.key.identity.assetID
+                    == PortablePhotoAssetID.compatibility(from: assetID) else { continue }
             try Task.checkCancellation()
             try FileManager.default.removeItem(at: url)
             let sidecar = url.deletingPathExtension().appendingPathExtension("bin")
@@ -190,8 +191,8 @@ actor MaskStore {
     static func filenameForTesting(for key: MaskCacheKey) -> String { filename(for: key) }
 
     private static func filename(for key: MaskCacheKey, extension ext: String = "json") -> String {
-        let identity = [key.assetID.raw, key.sourceFingerprint.cacheKey,
-                        String(describing: key.kind), key.quality.rawValue, key.providerVersion]
+        let identity = [key.identity.cacheKey, String(describing: key.kind),
+                        key.quality.rawValue, key.providerVersion]
             .joined(separator: "\u{1f}")
         let digest = SHA256.hash(data: Data(identity.utf8))
             .map { String(format: "%02x", $0) }.joined()

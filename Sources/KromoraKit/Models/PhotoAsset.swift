@@ -176,11 +176,41 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
     let data: Data?
     let bookmarkData: Data?
     let fingerprint: PhotoSourceFingerprint
+    let portableIdentity: PortablePhotoIdentity
+
+    private enum CodingKeys: String, CodingKey {
+        case id, url, data, bookmarkData, fingerprint, portableIdentity
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(PhotoAssetID.self, forKey: .id)
+        self.url = try container.decodeIfPresent(URL.self, forKey: .url)
+        self.data = try container.decodeIfPresent(Data.self, forKey: .data)
+        self.bookmarkData = try container.decodeIfPresent(Data.self, forKey: .bookmarkData)
+        self.fingerprint = try container.decode(PhotoSourceFingerprint.self, forKey: .fingerprint)
+        self.portableIdentity = try container.decodeIfPresent(
+            PortablePhotoIdentity.self, forKey: .portableIdentity
+        ) ?? PortablePhotoIdentity.compatibility(
+            assetID: self.id, sourceFingerprint: self.fingerprint
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(url, forKey: .url)
+        try container.encodeIfPresent(data, forKey: .data)
+        try container.encodeIfPresent(bookmarkData, forKey: .bookmarkData)
+        try container.encode(fingerprint, forKey: .fingerprint)
+        try container.encode(portableIdentity, forKey: .portableIdentity)
+    }
 
     init(
         url: URL,
         bookmarkData: Data? = nil,
-        fingerprint: PhotoSourceFingerprint? = nil
+        fingerprint: PhotoSourceFingerprint? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
     ) {
         let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
         let resolvedFingerprint = fingerprint ?? PhotoSourceFingerprint.file(at: canonical)
@@ -189,6 +219,10 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         self.data = nil
         self.bookmarkData = bookmarkData
         self.fingerprint = resolvedFingerprint
+        self.portableIdentity = Self.makePortableIdentity(
+            at: canonical, assetID: self.id,
+            existing: portableIdentity
+        )
     }
 
     /// Build a URL-backed record while retaining an already-transferred payload for the current
@@ -199,7 +233,8 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         id: PhotoAssetID,
         data: Data?,
         bookmarkData: Data? = nil,
-        fingerprint: PhotoSourceFingerprint? = nil
+        fingerprint: PhotoSourceFingerprint? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
     ) {
         let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
         self.id = id
@@ -207,12 +242,16 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         self.data = data
         self.bookmarkData = bookmarkData
         self.fingerprint = fingerprint ?? PhotoSourceFingerprint.file(at: canonical)
+        self.portableIdentity = Self.makePortableIdentity(
+            at: canonical, assetID: id, existing: portableIdentity
+        )
     }
 
     init(
         data: Data,
         id: PhotoAssetID? = nil,
-        fingerprint: PhotoSourceFingerprint? = nil
+        fingerprint: PhotoSourceFingerprint? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
     ) {
         let dataFingerprint = fingerprint ?? PhotoSourceFingerprint.data(data)
         if let id {
@@ -228,6 +267,19 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         self.data = data
         self.bookmarkData = nil
         self.fingerprint = dataFingerprint
+        let portableAssetID = portableIdentity?.assetID
+            ?? PortablePhotoAssetID.compatibility(from: self.id)
+        let decoderVersion = portableIdentity?.sourceFingerprint.decoderVersion
+            ?? "imageio-standard-v1"
+        self.portableIdentity = PortablePhotoIdentity(
+            assetID: portableAssetID,
+            sourceFingerprint: .data(
+                data,
+                sourceRevision: portableIdentity?.sourceFingerprint.sourceRevision ?? 0,
+                decoderVersion: decoderVersion,
+                geometry: portableIdentity?.sourceFingerprint.geometry
+            )
+        )
     }
 
     /// Mint a security-scoped bookmark when the caller has authority to persist one. Failure is
@@ -240,10 +292,38 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         )
     }
 
-    var cacheKey: String { "\(id.description)|\(fingerprint.cacheKey)" }
+    /// The source record is an immutable observation. Render-boundary `ImageSource` values refresh
+    /// the bytes when they are opened; this record's cache key remains a stable snapshot.
+    var cacheIdentity: PortablePhotoIdentity { portableIdentity }
+
+    var cacheKey: String { portableIdentity.cacheKey }
 
     func matches(_ other: PhotoAssetSource) -> Bool {
         fingerprint.matches(other.fingerprint)
+    }
+
+    private static func makePortableIdentity(
+        at url: URL, assetID: PhotoAssetID,
+        existing: PortablePhotoIdentity?
+    ) -> PortablePhotoIdentity {
+        let fingerprint = (try? PortablePhotoSourceFingerprint.file(
+            at: url,
+            sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
+            decoderVersion: existing?.sourceFingerprint.decoderVersion
+                ?? "imageio-\(url.pathExtension.lowercased())-v1",
+            geometry: existing?.sourceFingerprint.geometry
+        )) ?? PortablePhotoSourceFingerprint(
+            contentHash: PortablePhotoSourceFingerprint.contentHash(
+                of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
+            ),
+            sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
+            decoderVersion: existing?.sourceFingerprint.decoderVersion ?? "legacy-fallback-v1",
+            geometry: existing?.sourceFingerprint.geometry
+        )
+        return PortablePhotoIdentity(
+            assetID: existing?.assetID ?? PortablePhotoAssetID.compatibility(from: assetID),
+            sourceFingerprint: fingerprint
+        )
     }
 }
 

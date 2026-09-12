@@ -15,7 +15,7 @@ struct PreviewDiskCache: Sendable {
     static let defaultCapBytes: Int64 = 1_000_000_000
 
     struct Key: Hashable, Sendable {
-        let sourceFingerprint: String
+        let identity: PortablePhotoIdentity
         let documentHash: String
         let lookFingerprint: String
         let targetSizeBucket: String
@@ -30,7 +30,26 @@ struct PreviewDiskCache: Sendable {
             space: WorkingSpace = .current,
             pipelineVersion: Int = RenderPipeline.cacheVersion
         ) {
-            self.sourceFingerprint = sourceFingerprint
+            self.identity = .compatibility(
+                assetID: PhotoAssetID(rawValue: "preview-source:\(sourceFingerprint)"),
+                sourceFingerprint: PhotoSourceFingerprint.data(Data(sourceFingerprint.utf8))
+            )
+            self.documentHash = documentHash
+            self.lookFingerprint = lookFingerprint
+            self.targetSizeBucket = targetSizeBucket
+            self.space = space.rawValue
+            self.pipelineVersion = pipelineVersion
+        }
+
+        init(
+            identity: PortablePhotoIdentity,
+            documentHash: String,
+            lookFingerprint: String,
+            targetSizeBucket: String = String(PreviewDiskCache.canonicalLongEdge),
+            space: WorkingSpace = .current,
+            pipelineVersion: Int = RenderPipeline.cacheVersion
+        ) {
+            self.identity = identity
             self.documentHash = documentHash
             self.lookFingerprint = lookFingerprint
             self.targetSizeBucket = targetSizeBucket
@@ -39,7 +58,7 @@ struct PreviewDiskCache: Sendable {
         }
 
         var canonicalKeyString: String {
-            [sourceFingerprint, documentHash, lookFingerprint, targetSizeBucket, space,
+            [identity.cacheKey, documentHash, lookFingerprint, targetSizeBucket, space,
              String(pipelineVersion)].joined(separator: "|")
         }
     }
@@ -106,8 +125,8 @@ struct PreviewDiskCache: Sendable {
     }
 
     /// Invalidate persisted preview rasters after a library deletion. Preview keys intentionally
-    /// use source fingerprints rather than asset IDs, so the cache cannot cheaply map old entries
-    /// back to one source. Removing the rasters is safe and leaves the version marker intact.
+    /// use portable identities, so the cache cannot cheaply map old entries back to one source.
+    /// Removing the rasters is safe and leaves the version marker intact.
     func invalidateAll() {
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]

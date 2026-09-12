@@ -90,6 +90,27 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
         ].joined(separator: "|")
     }
 
+    func with(geometry: PhotoPixelDimensions?) -> Self {
+        Self(
+            contentHash: contentHash,
+            sourceRevision: sourceRevision,
+            decoderVersion: decoderVersion,
+            geometry: geometry
+        )
+    }
+
+    /// Compare a migrated legacy key with a render-boundary identity. Legacy cache keys did not
+    /// carry decoded geometry, so an absent geometry is compatible while two known geometries
+    /// must still agree.
+    func matches(_ other: Self) -> Bool {
+        contentHash == other.contentHash
+            && sourceRevision == other.sourceRevision
+            && (decoderVersion == other.decoderVersion
+                || decoderVersion == "legacy-v1"
+                || other.decoderVersion == "legacy-v1")
+            && (geometry == nil || other.geometry == nil || geometry == other.geometry)
+    }
+
     static func contentHash(of data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
@@ -104,8 +125,8 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
 
 /// The complete portable source identity used by future render, cache, and persistence consumers.
 ///
-/// Keeping the UUID and source fingerprint together gives migration code one value to pass across
-/// those boundaries while allowing this ticket to remain additive. No consumer uses this type yet.
+/// Keeping the UUID and source fingerprint together gives render, cache, and persistence code one
+/// value to pass across those boundaries.
 struct PortablePhotoIdentity: Codable, Hashable, Sendable, Equatable {
     let assetID: PortablePhotoAssetID
     let sourceFingerprint: PortablePhotoSourceFingerprint
@@ -129,11 +150,62 @@ struct PortablePhotoIdentity: Codable, Hashable, Sendable, Equatable {
         encoder.outputFormatting = [.sortedKeys]
         return (try? encoder.encode(self)) ?? Data()
     }
+
+    func with(geometry: PhotoPixelDimensions?) -> Self {
+        Self(
+            assetID: assetID,
+            sourceFingerprint: sourceFingerprint.with(geometry: geometry)
+        )
+    }
+
+    /// Normalize a legacy cache caller without allowing its filesystem-derived spelling into a
+    /// new cache key. This bridge is intentionally deterministic so an old in-memory caller can
+    /// still remove or find the same entry after the cache schema changes. New code should pass a
+    /// real portable identity instead.
+    static func compatibility(
+        assetID: PhotoAssetID,
+        sourceFingerprint: PhotoSourceFingerprint
+    ) -> Self {
+        Self(
+            assetID: PortablePhotoAssetID.compatibility(from: assetID),
+            sourceFingerprint: PortablePhotoSourceFingerprint.compatibility(from: sourceFingerprint)
+        )
+    }
+}
+
+extension PortablePhotoAssetID {
+    static func compatibility(from legacy: PhotoAssetID) -> Self {
+        Self(uuid: UUID.deterministic(from: Data(("asset:" + legacy.raw).utf8)))
+    }
+}
+
+extension PortablePhotoSourceFingerprint {
+    static func compatibility(from legacy: PhotoSourceFingerprint) -> Self {
+        let legacyKey = legacy.cacheKey
+        return Self(
+            contentHash: legacy.sampleDigest
+                ?? Self.contentHash(of: Data(("fingerprint:" + legacyKey).utf8)),
+            decoderVersion: "legacy-v1"
+        )
+    }
+}
+
+private extension UUID {
+    static func deterministic(from data: Data) -> UUID {
+        let digest = SHA256.hash(data: data)
+        var bytes = Array(digest.prefix(16))
+        bytes[6] = (bytes[6] & 0x0f) | 0x50
+        bytes[8] = (bytes[8] & 0x3f) | 0x80
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
 }
 
 // These aliases make the intent explicit at migration call sites while retaining one canonical
 // implementation. The existing PhotoAssetID/PhotoSourceFingerprint types remain legacy-compatible
-// until the cache and persistence tickets switch their consumers.
+// until the remaining persistence consumers switch.
 typealias OpaquePhotoAssetID = PortablePhotoAssetID
 typealias OpaquePhotoSourceFingerprint = PortablePhotoSourceFingerprint
 typealias OpaquePhotoIdentity = PortablePhotoIdentity

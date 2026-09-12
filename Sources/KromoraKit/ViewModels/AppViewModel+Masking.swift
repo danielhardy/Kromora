@@ -112,10 +112,11 @@ extension AppViewModel {
             return
         }
 
-        let expectedFingerprint = PhotoAnalysisCoordinator.sourceFingerprint(for: source).cacheKey
         guard result.kind == kind,
-              result.reference.cacheKey.assetID == assetID,
-              result.reference.cacheKey.sourceFingerprint.cacheKey == expectedFingerprint,
+              result.reference.cacheKey.identity.assetID
+                == PortablePhotoAssetID.compatibility(from: assetID),
+              result.reference.cacheKey.identity.sourceFingerprint
+                .matches(source.cacheIdentity.sourceFingerprint),
               result.reference.quality == result.quality,
               result.reference.cacheKey.kind == kind,
               pixels.size == result.reference.size,

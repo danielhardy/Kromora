@@ -10,6 +10,7 @@ struct SourceImportPlan: Sendable, Equatable {
     let url: URL?
     let data: Data?
     let assetID: PhotoAssetID
+    let portableIdentity: PortablePhotoIdentity?
     let dataFingerprint: String?
     let traceQuality: String
 
@@ -18,6 +19,7 @@ struct SourceImportPlan: Sendable, Equatable {
         url: URL?,
         data: Data?,
         assetID: PhotoAssetID? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil,
         dataFingerprint: String? = nil,
         traceQuality: String = "open"
     ) {
@@ -28,6 +30,7 @@ struct SourceImportPlan: Sendable, Equatable {
             ?? url.map(PhotoAssetID.file)
             ?? data.map(PhotoAssetID.data)
             ?? .data(Data())
+        self.portableIdentity = portableIdentity
         self.dataFingerprint = dataFingerprint
         self.traceQuality = traceQuality
     }
@@ -38,11 +41,17 @@ struct SourceImportPlan: Sendable, Equatable {
 
     var source: ImageSource {
         if let url {
-            return ImageSource(url: url, nativeExtent: .zero)
+            return ImageSource(url: url, nativeExtent: .zero, portableIdentity: portableIdentity)
         }
         if let data {
-            return ImageSource(data: data, nativeExtent: .zero, dataFingerprint: dataFingerprint)
+            return ImageSource(
+                data: data, nativeExtent: .zero, dataFingerprint: dataFingerprint,
+                portableIdentity: portableIdentity
+            )
         }
-        return ImageSource(backing: .data(Data()), kind: .standard, nativeExtent: .zero)
+        return ImageSource(
+            backing: .data(Data()), kind: .standard, nativeExtent: .zero,
+            portableIdentity: portableIdentity
+        )
     }
 }

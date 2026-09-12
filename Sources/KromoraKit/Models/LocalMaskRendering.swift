@@ -372,9 +372,10 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
             )
         }
 
-        guard mask.reference.cacheKey.assetID == request.assetID,
-              mask.reference.cacheKey.sourceFingerprint.cacheKey
-                == PhotoAnalysisCoordinator.sourceFingerprint(for: request.source).cacheKey,
+        guard mask.reference.cacheKey.identity.assetID
+                == PortablePhotoAssetID.compatibility(from: request.assetID),
+              mask.reference.cacheKey.identity.sourceFingerprint
+                .matches(request.source.cacheIdentity.sourceFingerprint),
               mask.reference.cacheKey.kind == kind,
               mask.reference.cacheKey.quality == mask.quality,
               !mask.reference.cacheKey.providerVersion.isEmpty,
