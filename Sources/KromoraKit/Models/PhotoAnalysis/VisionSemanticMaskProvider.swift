@@ -561,18 +561,17 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
 
     /// Internal for the regression tests that seed the store under the provider's own keys.
     func cacheKey(for kind: SemanticMaskKind, image: AnalysisImage, quality: MaskQuality) -> MaskCacheKey {
-        let assetID: PhotoAssetID
-        let fingerprint: PhotoSourceFingerprint
-        switch image.source.backing {
-        case .url(let url):
-            fingerprint = .file(at: url)
-            assetID = .file(url, fingerprint: fingerprint)
-        case .data(let data):
-            fingerprint = .data(data)
-            assetID = .data(data)
+        let identity: PortablePhotoIdentity
+        if let assetID = image.assetID {
+            identity = PortablePhotoIdentity(
+                assetID: PortablePhotoAssetID.compatibility(from: assetID),
+                sourceFingerprint: image.source.cacheIdentity.sourceFingerprint
+            )
+        } else {
+            identity = image.source.cacheIdentity
         }
-        return MaskCacheKey(assetID: image.assetID ?? assetID, sourceFingerprint: fingerprint, kind: kind,
-                            quality: quality, providerVersion: configuration.providerVersion)
+        return MaskCacheKey(identity: identity, kind: kind, quality: quality,
+                            providerVersion: configuration.providerVersion)
     }
 
     private func rectangularMask(bounds: NormalizedRect, size: PixelDimensions) throws -> NormalizedMask {

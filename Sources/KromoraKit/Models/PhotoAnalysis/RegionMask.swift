@@ -29,11 +29,88 @@ enum MaskQuality: String, Codable, Sendable, Equatable, Comparable, CaseIterable
 }
 
 struct MaskCacheKey: Codable, Sendable, Equatable, Hashable {
-    let assetID: PhotoAssetID
-    let sourceFingerprint: PhotoSourceFingerprint
+    /// The only persisted/cache identity. Legacy fields are accepted by the compatibility
+    /// initializer below, but are normalized before they reach this value.
+    let identity: PortablePhotoIdentity
     let kind: SemanticMaskKind
     let quality: MaskQuality
     let providerVersion: String
+    private var legacyAssetID: PhotoAssetID?
+    private var legacySourceFingerprint: PhotoSourceFingerprint?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.identity == rhs.identity
+            && lhs.kind == rhs.kind
+            && lhs.quality == rhs.quality
+            && lhs.providerVersion == rhs.providerVersion
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(identity)
+        hasher.combine(kind)
+        hasher.combine(quality)
+        hasher.combine(providerVersion)
+    }
+
+    /// Compatibility views for analysis code that still speaks the pre-portable model. They are
+    /// derived from the normalized identity and are not part of equality, hashing, or persistence.
+    var assetID: PhotoAssetID {
+        legacyAssetID ?? PhotoAssetID(rawValue: "portable:\(identity.assetID.raw)")
+    }
+    var sourceFingerprint: PhotoSourceFingerprint {
+        legacySourceFingerprint ?? PhotoSourceFingerprint.data(
+            Data(identity.sourceFingerprint.contentHash.utf8),
+            digest: identity.sourceFingerprint.contentHash
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case identity, assetID, sourceFingerprint, kind, quality, providerVersion
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let identity = try container.decodeIfPresent(
+            PortablePhotoIdentity.self, forKey: .identity
+        ) {
+            self.identity = identity
+        } else {
+            let legacyAssetID = try container.decode(PhotoAssetID.self, forKey: .assetID)
+            let legacyFingerprint = try container.decode(
+                PhotoSourceFingerprint.self, forKey: .sourceFingerprint
+            )
+            self.identity = PortablePhotoIdentity.compatibility(
+                assetID: legacyAssetID, sourceFingerprint: legacyFingerprint
+            )
+        }
+        self.kind = try container.decode(SemanticMaskKind.self, forKey: .kind)
+        self.quality = try container.decode(MaskQuality.self, forKey: .quality)
+        self.providerVersion = try container.decode(String.self, forKey: .providerVersion)
+        self.legacyAssetID = nil
+        self.legacySourceFingerprint = nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(identity, forKey: .identity)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(quality, forKey: .quality)
+        try container.encode(providerVersion, forKey: .providerVersion)
+    }
+
+    init(
+        identity: PortablePhotoIdentity,
+        kind: SemanticMaskKind,
+        quality: MaskQuality = .analysis,
+        providerVersion: String = "vision-1"
+    ) {
+        self.identity = identity
+        self.kind = kind
+        self.quality = quality
+        self.providerVersion = providerVersion
+        self.legacyAssetID = nil
+        self.legacySourceFingerprint = nil
+    }
 
     init(
         assetID: PhotoAssetID,
@@ -42,21 +119,33 @@ struct MaskCacheKey: Codable, Sendable, Equatable, Hashable {
         quality: MaskQuality = .analysis,
         providerVersion: String = "vision-1"
     ) {
-        self.assetID = assetID
-        self.sourceFingerprint = sourceFingerprint
-        self.kind = kind
-        self.quality = quality
-        self.providerVersion = providerVersion
+        self.init(
+            identity: PortablePhotoIdentity.compatibility(
+                assetID: assetID, sourceFingerprint: sourceFingerprint
+            ),
+            kind: kind, quality: quality, providerVersion: providerVersion
+        )
+        self.legacyAssetID = assetID
+        self.legacySourceFingerprint = sourceFingerprint
     }
 
     func with(quality: MaskQuality) -> MaskCacheKey {
-        MaskCacheKey(assetID: assetID, sourceFingerprint: sourceFingerprint, kind: kind,
-                     quality: quality, providerVersion: providerVersion)
+        var copy = MaskCacheKey(
+            identity: identity, kind: kind, quality: quality, providerVersion: providerVersion
+        )
+        copy.legacyAssetID = legacyAssetID
+        copy.legacySourceFingerprint = legacySourceFingerprint
+        return copy
     }
 
     func with(kind: SemanticMaskKind, quality: MaskQuality? = nil) -> MaskCacheKey {
-        MaskCacheKey(assetID: assetID, sourceFingerprint: sourceFingerprint, kind: kind,
-                     quality: quality ?? self.quality, providerVersion: providerVersion)
+        var copy = MaskCacheKey(
+            identity: identity, kind: kind, quality: quality ?? self.quality,
+            providerVersion: providerVersion
+        )
+        copy.legacyAssetID = legacyAssetID
+        copy.legacySourceFingerprint = legacySourceFingerprint
+        return copy
     }
 }
 

@@ -1420,7 +1420,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         let durableURL = collection.items.first(where: { $0.id == assetID })?.url
         // Keep the one-off editor's source label compatible with the URL picker and with
         // source-folder opens; the collection item itself uses the extension-free display name.
-        load(name: url.lastPathComponent, url: durableURL ?? url, data: nil, assetID: assetID)
+        load(
+            name: url.lastPathComponent, url: durableURL ?? url, data: nil, assetID: assetID,
+            portableIdentity: collection.items.first(where: { $0.id == assetID })?.asset.source.portableIdentity
+        )
     }
 
     private func openImage(url: URL, assetID: PhotoAssetID) {
@@ -1435,7 +1438,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             }
             return "\(displayName).\(url.pathExtension)"
         } ?? url.lastPathComponent
-        load(name: name, url: url, data: nil, assetID: assetID)
+        load(
+            name: name, url: url, data: nil, assetID: assetID,
+            portableIdentity: collection.items.first(where: { $0.id == assetID })?.asset.source.portableIdentity
+        )
     }
 
     private func selectCollectionItem(id: PhotoAssetID) {
@@ -1473,7 +1479,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// below deliberately has one active preparation and one replaceable pending request.
     private func load(
         name: String, url: URL?, data: Data?, assetID: PhotoAssetID? = nil,
-        traceQuality: String = "open", dataFingerprint: String? = nil
+        traceQuality: String = "open", dataFingerprint: String? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
     ) {
         guard !isShuttingDown else { return }
         // A real open always wins over cache-only work. Keep this adjacent to the existing
@@ -1483,7 +1490,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         embeddedFirstFrameTask = nil
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
-            dataFingerprint: dataFingerprint, traceQuality: traceQuality
+            portableIdentity: portableIdentity, dataFingerprint: dataFingerprint,
+            traceQuality: traceQuality
         )
         let assetID = importPlan.assetID
         endUndoGrouping()
@@ -1832,10 +1840,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 let extent = CGSize(width: dimensions.width, height: dimensions.height)
                 let source: ImageSource
                 if let url = item.url {
-                    source = ImageSource(url: url, nativeExtent: extent)
+                    source = ImageSource(
+                        url: url, nativeExtent: extent,
+                        portableIdentity: item.asset.source.portableIdentity
+                    )
                 } else if let data = item.imageData {
                     source = ImageSource(
-                        data: data, nativeExtent: extent, dataFingerprint: item.dataFingerprint
+                        data: data, nativeExtent: extent, dataFingerprint: item.dataFingerprint,
+                        portableIdentity: item.asset.source.portableIdentity
                     )
                 } else {
                     return nil
@@ -1943,10 +1955,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 let extent = CGSize(width: dimensions.width, height: dimensions.height)
                 let source: ImageSource
                 if let url = item.url {
-                    source = ImageSource(url: url, nativeExtent: extent)
+                    source = ImageSource(
+                        url: url, nativeExtent: extent,
+                        portableIdentity: item.asset.source.portableIdentity
+                    )
                 } else if let data = item.imageData {
                     source = ImageSource(
-                        data: data, nativeExtent: extent, dataFingerprint: item.dataFingerprint
+                        data: data, nativeExtent: extent, dataFingerprint: item.dataFingerprint,
+                        portableIdentity: item.asset.source.portableIdentity
                     )
                 } else {
                     return nil
@@ -2139,7 +2155,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         load(
             name: item.displayName, url: item.url,
             data: item.url == nil ? data : nil, assetID: assetID,
-            dataFingerprint: item.dataFingerprint
+            dataFingerprint: item.dataFingerprint,
+            portableIdentity: item.asset.source.portableIdentity
         )
     }
 
@@ -2752,7 +2769,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         } else if let data = item.imageData {
             load(
                 name: item.displayName, url: nil, data: data, assetID: item.id,
-                dataFingerprint: item.dataFingerprint
+                dataFingerprint: item.dataFingerprint,
+                portableIdentity: item.asset.source.portableIdentity
             )
         }
     }
@@ -2808,11 +2826,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         let source: ImageSource?
         if let url = item.url {
-            source = ImageSource(url: url, nativeExtent: item.thumbnailNativeExtent)
+            source = ImageSource(
+                url: url, nativeExtent: item.thumbnailNativeExtent,
+                portableIdentity: item.asset.source.portableIdentity
+            )
         } else if let data = item.imageData {
             source = ImageSource(
                 data: data, nativeExtent: item.thumbnailNativeExtent,
-                dataFingerprint: item.dataFingerprint
+                dataFingerprint: item.dataFingerprint,
+                portableIdentity: item.asset.source.portableIdentity
             )
         } else {
             source = nil
@@ -3092,7 +3114,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             if loadMode { navigation.move(to: .edit) }
             load(
                 name: item.displayName, url: nil, data: data, assetID: item.id,
-                dataFingerprint: item.dataFingerprint
+                dataFingerprint: item.dataFingerprint,
+                portableIdentity: item.asset.source.portableIdentity
             )
         }
     }
@@ -3659,8 +3682,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     private func previewDiskCacheKey(for request: RenderRequest) -> PreviewDiskCache.Key {
-        PreviewDiskCache.Key(
-            sourceFingerprint: RenderSourceFingerprint(request.source).value,
+        return PreviewDiskCache.Key(
+            identity: request.source.cacheIdentity,
             documentHash: request.document.editHash,
             lookFingerprint: request.lut?.cacheFingerprint ?? "unresolved",
             targetSizeBucket: String(PreviewDiskCache.canonicalLongEdge),

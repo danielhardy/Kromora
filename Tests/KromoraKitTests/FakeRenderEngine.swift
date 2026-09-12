@@ -375,7 +375,10 @@ actor FakeRenderEngine: RenderEngining {
             let extent = source.nativeExtent == .zero
                 ? CGSize(width: 4_000, height: 3_000) : source.nativeExtent
             preparation = ImageSourcePreparation(source: ImageSource(
-                backing: source.backing, kind: .raw, nativeExtent: extent
+                backing: source.backing, kind: .raw, nativeExtent: extent,
+                portableIdentity: source.cacheIdentity.with(
+                    geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
+                )
             ))
         } else {
             let extent: CGSize?
@@ -388,7 +391,10 @@ actor FakeRenderEngine: RenderEngining {
                 return nil
             }
             preparation = ImageSourcePreparation(source: ImageSource(
-                backing: source.backing, kind: source.kind, nativeExtent: extent
+                backing: source.backing, kind: source.kind, nativeExtent: extent,
+                portableIdentity: source.cacheIdentity.with(
+                    geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
+                )
             ))
         }
         emit(.sourcePreparationCompleted(source, preparation))

@@ -97,24 +97,15 @@ struct MaskedToneAnalyzer: Sendable {
             throw MaskedToneAnalysisError.mismatchedMask
         }
 
-        let identity = Self.identity(for: image.source)
-        guard mask.reference.cacheKey.assetID == identity.assetID,
-            mask.reference.cacheKey.sourceFingerprint == identity.fingerprint
+        let expectedAssetID = image.assetID.map(PortablePhotoAssetID.compatibility(from:))
+            ?? image.source.cacheIdentity.assetID
+        guard mask.reference.cacheKey.identity.assetID
+                == expectedAssetID,
+            mask.reference.cacheKey.identity.sourceFingerprint
+                .matches(image.source.cacheIdentity.sourceFingerprint)
         else {
             throw MaskedToneAnalysisError.mismatchedImage
         }
     }
 
-    private static func identity(for source: ImageSource) -> (
-        assetID: PhotoAssetID, fingerprint: PhotoSourceFingerprint
-    ) {
-        switch source.backing {
-        case .url(let url):
-            let fingerprint = PhotoSourceFingerprint.file(at: url)
-            return (PhotoAssetID.file(url, fingerprint: fingerprint), fingerprint)
-        case .data(let data):
-            let fingerprint = PhotoSourceFingerprint.data(data)
-            return (PhotoAssetID.data(data), fingerprint)
-        }
-    }
 }
