@@ -774,7 +774,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     private var isShuttingDown = false
     private var cancellables: [AnyCancellable] = []
     private let mediaVolumeProvider: any MediaVolumeProviding
+    private let mediaVolumeNotificationCenter: NotificationCenter
+    private let applicationNotificationCenter: NotificationCenter
+    private var mediaVolumeObservers: [NSObjectProtocol] = []
+    private var applicationLifecycleObservers: [NSObjectProtocol] = []
     private var mediaVolumeDiscoveryTask: Task<Void, Never>?
+    private var mediaVolumeRefreshTask: Task<Void, Never>?
     private var mediaVolumeScanTask: Task<Void, Never>?
     private var mediaVolumeImportTask: Task<Void, Never>?
 
@@ -812,6 +817,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         editStore: EditDocumentStore = EditDocumentStore.makeDefaultStore(),
         preferences: UserDefaults = .standard,
         mediaVolumeProvider: any MediaVolumeProviding = MountedMediaVolumeProvider(),
+        mediaVolumeNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        applicationNotificationCenter: NotificationCenter = .default,
         includeBundledLooks: Bool = false,
         libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL,
         userLookFolderURL: URL? = nil,
@@ -861,6 +868,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         )
         self.embeddedFirstFrameProvider = embeddedFirstFrameProvider
         self.mediaVolumeProvider = mediaVolumeProvider
+        self.mediaVolumeNotificationCenter = mediaVolumeNotificationCenter
+        self.applicationNotificationCenter = applicationNotificationCenter
 
         collection.onThumbnailDemand = { [weak self] assetID, priority in
             self?.requestEditedThumbnail(for: assetID, priority: priority)
@@ -878,6 +887,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         persistence.onFailure = { [weak self] message in
             self?.statusMessage = message
         }
+
+        startRemovableMediaMonitoring()
 
         // A missing value is the first-launch state: single-photo editing is the primary surface.
         // Read this after all stored properties are initialized because the published property's
@@ -2229,6 +2240,49 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     // MARK: - Removable media import
+
+    /// Keep the Import menu synchronized with hardware changes while retaining the explicit
+    /// refresh action as a user-controlled fallback. Mount notifications can arrive in bursts
+    /// while macOS finishes preparing a card, so discovery is coalesced behind a short debounce.
+    private func startRemovableMediaMonitoring() {
+        let workspaceCenter = mediaVolumeNotificationCenter
+        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
+            mediaVolumeObservers.append(
+                workspaceCenter.addObserver(forName: name, object: nil, queue: .main) {
+                    [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.scheduleRemovableMediaRefresh()
+                    }
+                }
+            )
+        }
+
+        applicationLifecycleObservers.append(
+            applicationNotificationCenter.addObserver(
+                forName: NSApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.scheduleRemovableMediaRefresh()
+                }
+            }
+        )
+    }
+
+    private func scheduleRemovableMediaRefresh() {
+        guard !isShuttingDown else { return }
+        mediaVolumeRefreshTask?.cancel()
+        mediaVolumeRefreshTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled, !self.isShuttingDown else { return }
+            self.refreshRemovableMedia()
+        }
+    }
 
     var selectedRemovableMediaFiles: [MediaVolumeFile] {
         removableMediaFiles.filter { removableMediaSelection.contains($0) }
@@ -4653,6 +4707,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         persistence.onFailure = nil
         cancellables.removeAll()
 
+        for observer in mediaVolumeObservers {
+            mediaVolumeNotificationCenter.removeObserver(observer)
+        }
+        mediaVolumeObservers.removeAll()
+        for observer in applicationLifecycleObservers {
+            applicationNotificationCenter.removeObserver(observer)
+        }
+        applicationLifecycleObservers.removeAll()
+
         // Collection shutdown ends its discovery stream before awaiting the consumer. This also
         // prevents a late scan batch from admitting another thumbnail job.
         await collection.shutdown()
@@ -4666,7 +4729,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             capabilitiesTask, autoAdjustmentTask, smartMaskCreationTask, loadTask,
             metadataTask, prefetchDelayTask, previewDebounceTask, sourceFolderOpenTask,
             idleBuild, personSignalWarmingTask, lutCacheInvalidationTask, semanticCoordinatorInstallTask,
-            mediaVolumeDiscoveryTask, mediaVolumeScanTask, mediaVolumeImportTask,
+            mediaVolumeDiscoveryTask, mediaVolumeRefreshTask, mediaVolumeScanTask, mediaVolumeImportTask,
         ] + thumbnailDebounceTasks
         for task in tasks { task?.cancel() }
         storedEditLoad?.cancel()
@@ -4687,6 +4750,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
         mediaVolumeDiscoveryTask = nil
+        mediaVolumeRefreshTask = nil
         mediaVolumeScanTask = nil
         mediaVolumeImportTask = nil
         if let storedEditLoad { _ = await storedEditLoad.value }
