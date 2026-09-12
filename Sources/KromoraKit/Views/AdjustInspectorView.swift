@@ -62,6 +62,7 @@ struct AdjustInspectorView: View {
                 // neutral through `sliderMapped` is what keeps that a coincidence rather than a
                 // dependency.
                 neutral: control.sliderMapped(control.neutral),
+                trackStyle: control.trackStyle,
                 accessibilityTitle: control.title,
                 accessibilityReadout: readout(for: control),
                 onEditingChanged: { editing in
@@ -90,6 +91,20 @@ struct AdjustInspectorView: View {
             return String(format: "%.0f K", value)
         case .exposure, .brightness, .contrast, .saturation, .highlights, .shadows, .tint, .vibrance:
             return String(format: "%.2f", value)
+        }
+    }
+}
+
+private extension AdjustmentControl {
+    /// Legacy standard-image colour rows mirror the Color inspector; tone-only controls keep the
+    /// adaptive neutral track because colour would misrepresent their effects.
+    var trackStyle: SliderTrackStyle {
+        switch self {
+        case .temperature: return .temperature
+        case .tint: return .tint
+        case .saturation: return .saturation
+        case .vibrance: return .vibrance
+        case .exposure, .brightness, .contrast, .highlights, .shadows: return .neutral
         }
     }
 }

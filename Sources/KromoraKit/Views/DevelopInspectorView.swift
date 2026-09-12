@@ -159,6 +159,7 @@ struct DevelopInspectorView: View {
                     // The decoder default, which for most of these rows is a per-image seed rather
                     // than a constant — see `developNeutral(for:)`.
                     neutral: viewModel.developNeutral(for: control),
+                    trackStyle: control == .whiteBalance ? .temperature : .neutral,
                     accessibilityTitle: control == .whiteBalance
                         ? "White Balance Temperature" : control.title,
                     accessibilityReadout: String(
@@ -197,6 +198,7 @@ struct DevelopInspectorView: View {
                             value: viewModel.developTintBinding(),
                             in: DevelopControl.tintRange,
                             neutral: viewModel.developTintNeutral,
+                            trackStyle: .tint,
                             accessibilityTitle: "White Balance Tint",
                             accessibilityReadout: String(
                                 format: "%.2f", viewModel.developTintBinding().wrappedValue),

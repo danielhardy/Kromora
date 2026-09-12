@@ -72,6 +72,7 @@ struct ColorInspectorView: View {
                             ? viewModel.developNeutral(for: .whiteBalance)
                             : AdjustmentControl.temperature.sliderMapped(
                                 AdjustmentControl.temperature.neutral),
+                        trackStyle: .temperature,
                         readout: temperatureReadout,
                         reset: { viewModel.resetWhiteBalance(.temperature) },
                         resetActionTitle: viewModel.sourceIsRAW ? "Reset to As Shot" : "Reset to neutral",
@@ -86,6 +87,7 @@ struct ColorInspectorView: View {
                         neutral: viewModel.sourceIsRAW
                             ? viewModel.developTintNeutral
                             : AdjustmentControl.tint.neutral,
+                        trackStyle: .tint,
                         readout: tintReadout,
                         reset: { viewModel.resetWhiteBalance(.tint) },
                         resetActionTitle: viewModel.sourceIsRAW ? "Reset to As Shot" : "Reset to neutral",
@@ -112,6 +114,7 @@ struct ColorInspectorView: View {
                         value: viewModel.colorBinding(for: control),
                         range: control.range,
                         neutral: control.neutral,
+                        trackStyle: control.trackStyle,
                         readout: signedWholeReadout,
                         reset: { viewModel.resetColor(control) }
                     )
@@ -141,6 +144,7 @@ struct ColorInspectorView: View {
                                     value: viewModel.mixerBinding(for: channel, control: control),
                                     range: control.range,
                                     neutral: control.neutral,
+                                    trackStyle: control.trackStyle,
                                     readout: signedWholeReadout,
                                     reset: {
                                         viewModel.resetMixer(channel, control)
@@ -189,6 +193,7 @@ struct ColorInspectorView: View {
                                     value: viewModel.gradingBinding(for: zone, control: control),
                                     range: control.range,
                                     neutral: control.neutral,
+                                    trackStyle: control.trackStyle,
                                     readout: control == .hue ? hueReadout : unsignedWholeReadout,
                                     reset: { viewModel.resetGrading(zone, control) }
                                 )
@@ -236,6 +241,7 @@ struct ColorInspectorView: View {
         value: Binding<Double>,
         range: ClosedRange<Double>,
         neutral: Double,
+        trackStyle: SliderTrackStyle = .neutral,
         readout: @escaping (Double) -> String,
         reset: @escaping () -> Void,
         resetActionTitle: String = "Reset to neutral",
@@ -246,6 +252,7 @@ struct ColorInspectorView: View {
             value: value,
             range: range,
             neutral: neutral,
+            trackStyle: trackStyle,
             readout: readout,
             reset: reset,
             resetActionTitle: resetActionTitle,
@@ -304,6 +311,7 @@ private struct ColorValueRow: View {
     let range: ClosedRange<Double>
     /// Where this row's fill is anchored — see `SliderFill`.
     let neutral: Double
+    let trackStyle: SliderTrackStyle
     let readout: (Double) -> String
     let reset: () -> Void
     let resetActionTitle: String
@@ -333,6 +341,7 @@ private struct ColorValueRow: View {
                 value: $value,
                 in: range,
                 neutral: neutral,
+                trackStyle: trackStyle,
                 accessibilityTitle: title,
                 accessibilityReadout: readout(value),
                 onEditingChanged: { editing in

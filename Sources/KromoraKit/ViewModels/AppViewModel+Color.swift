@@ -22,6 +22,13 @@ enum ColorGlobalControl: String, CaseIterable, Hashable, Sendable {
     /// The value at which this control does nothing — the slider's fill baseline, and what
     /// `resetColor(_:)` writes.
     var neutral: Double { 0 }
+
+    var trackStyle: SliderTrackStyle {
+        switch self {
+        case .vibrance: return .vibrance
+        case .saturation: return .saturation
+        }
+    }
 }
 
 enum ColorMixerControl: String, CaseIterable, Hashable, Sendable {
@@ -47,6 +54,16 @@ enum ColorMixerControl: String, CaseIterable, Hashable, Sendable {
 
     /// Every mixer row is signed about an untouched channel.
     var neutral: Double { 0 }
+
+    /// Hue is an absolute hue wheel and saturation has a useful chroma ramp. Luminance stays
+    /// neutral because a colour gradient would misrepresent a lightness-only change.
+    var trackStyle: SliderTrackStyle {
+        switch self {
+        case .hue: return .hue
+        case .saturation: return .saturation
+        case .luminance: return .neutral
+        }
+    }
 }
 
 enum ColorMixerChannelName: String, CaseIterable, Hashable, Sendable {
@@ -82,6 +99,13 @@ enum ColorGradingControl: String, CaseIterable, Hashable, Sendable {
     /// Both wheel rows are unipolar: hue is an absolute 0…360 bearing and saturation an amount, so
     /// the baseline is the bottom of the track and the fill runs from the left as usual.
     var neutral: Double { range.lowerBound }
+
+    var trackStyle: SliderTrackStyle {
+        switch self {
+        case .hue: return .hue
+        case .saturation: return .saturation
+        }
+    }
 }
 
 enum ColorGradingGlobalControl: String, CaseIterable, Hashable, Sendable {

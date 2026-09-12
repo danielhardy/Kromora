@@ -699,15 +699,16 @@ struct MaskingWorkspace: View {
                     layerID: layerID)
                 adjustmentSlider(
                     "Temperature", keyPath: \.temperature, range: LocalAdjustments.temperatureRange,
-                    layerID: layerID)
+                    layerID: layerID, trackStyle: .temperature)
                 adjustmentSlider(
-                    "Tint", keyPath: \.tint, range: LocalAdjustments.tintRange, layerID: layerID)
+                    "Tint", keyPath: \.tint, range: LocalAdjustments.tintRange,
+                    layerID: layerID, trackStyle: .tint)
                 adjustmentSlider(
                     "Saturation", keyPath: \.saturation, range: LocalAdjustments.saturationRange,
-                    layerID: layerID)
+                    layerID: layerID, trackStyle: .saturation)
                 adjustmentSlider(
                     "Vibrance", keyPath: \.vibrance, range: LocalAdjustments.vibranceRange,
-                    layerID: layerID)
+                    layerID: layerID, trackStyle: .vibrance)
                 adjustmentSlider(
                     "Texture", keyPath: \.texture, range: LocalAdjustments.textureRange,
                     layerID: layerID)
@@ -723,7 +724,7 @@ struct MaskingWorkspace: View {
 
     private func adjustmentSlider(
         _ title: String, keyPath: WritableKeyPath<LocalAdjustments, Double>,
-        range: ClosedRange<Double>, layerID: UUID
+        range: ClosedRange<Double>, layerID: UUID, trackStyle: SliderTrackStyle = .neutral
     ) -> some View {
         // Read the baseline off `LocalAdjustments.neutral` rather than listing thirteen literals:
         // twelve of these rows are neutral at 0 and Temperature is neutral at 6500 K, and the model
@@ -739,7 +740,7 @@ struct MaskingWorkspace: View {
                 }
             }
         )
-        return maskSlider(title, value: binding, range: range, neutral: neutral)
+        return maskSlider(title, value: binding, range: range, neutral: neutral, trackStyle: trackStyle)
     }
 
     /// - Parameter neutral: Where the fill is anchored. `nil` means the bottom of the range,
@@ -747,7 +748,7 @@ struct MaskingWorkspace: View {
     ///   or Feather. The signed rows (Angle, and every local adjustment) pass theirs.
     private func maskSlider(
         _ title: String, value: Binding<Double>, range: ClosedRange<Double>,
-        neutral: Double? = nil
+        neutral: Double? = nil, trackStyle: SliderTrackStyle = .neutral
     ) -> some View {
         HStack(spacing: 6) {
             Text(title)
@@ -755,6 +756,7 @@ struct MaskingWorkspace: View {
                 .frame(width: 82, alignment: .leading)
             NeutralOriginSlider(
                 value: value, in: range, neutral: neutral ?? range.lowerBound,
+                trackStyle: trackStyle,
                 accessibilityTitle: title,
                 accessibilityReadout: value.wrappedValue.formatted(
                     .number.precision(.fractionLength(1))),
