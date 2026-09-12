@@ -31,19 +31,14 @@ struct CropOverlayView: View {
             ZStack(alignment: .top) {
                 dimmedOutside(cropRect: cropRect, in: geometry.size)
 
-                Rectangle()
-                    .fill(.clear)
-                    .frame(width: cropRect.width, height: cropRect.height)
-                    .position(x: cropRect.midX, y: cropRect.midY)
-                    // Leave the handle hit zones out of the move surface so a corner drag is
-                    // always owned by its handle, even when the frame is small.
-                    .contentShape(Rectangle().inset(by: 14))
+                cropGuides(cropRect: cropRect)
+                    // The rendered crop frame is the interior move surface. Keeping the gesture
+                    // on this view makes the crop area draggable even when the underlying preview
+                    // is a Metal view or a transparent hit-test surface.
+                    .contentShape(Rectangle())
                     .gesture(moveGesture(imageRect: imageRect))
                     .accessibilityLabel("Crop frame")
                     .accessibilityHint("Drag to move the crop frame without changing its size")
-
-                cropGuides(cropRect: cropRect)
-                    .allowsHitTesting(false)
 
                 ForEach(Handle.allCases, id: \.self) { handle in
                     Circle()
