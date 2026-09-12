@@ -6,7 +6,9 @@ import SwiftUI
 struct CropOverlayView: View {
     typealias Handle = CropHandle
 
-    private let handleHitTargetSize: CGFloat = 44
+    // Internal (not private) so CropOverlayViewTests can verify the hit-target geometry that
+    // fixed KRMA-387 without a UI test harness.
+    let handleHitTargetSize: CGFloat = 44
 
     let normalizedRect: CGRect
     let imageSize: CGSize
@@ -195,7 +197,9 @@ struct CropOverlayView: View {
         }
     }
 
-    private func handleHitPosition(_ handle: Handle, in rect: CGRect) -> CGPoint {
+    // Internal (not private) so CropOverlayViewTests can verify the hit-target geometry that
+    // fixed KRMA-387 without a UI test harness.
+    func handleHitPosition(_ handle: Handle, in rect: CGRect) -> CGPoint {
         let inset = min(handleHitTargetSize / 2, min(rect.width, rect.height) / 2)
         switch handle {
         case .topLeading: return CGPoint(x: rect.minX + inset, y: rect.minY + inset)
