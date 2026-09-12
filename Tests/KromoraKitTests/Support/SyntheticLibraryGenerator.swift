@@ -225,8 +225,8 @@ enum SyntheticLibraryGenerator {
         for index in 0..<scale.assetCount {
             try Task.checkCancellation()
 
-            let metadata = metadata(for: index, seed: seed)
             let cameraIndex = cameraIndex(for: index, seed: seed)
+            let metadata = metadata(for: index, seed: seed, cameraIndex: cameraIndex)
             let payloadKey = PayloadKey(
                 cameraIndex: cameraIndex,
                 orientation: metadata.orientation,
@@ -273,9 +273,9 @@ enum SyntheticLibraryGenerator {
         return Int(generator.next() % UInt64(cameraProfiles.count))
     }
 
-    private static func metadata(for index: Int, seed: UInt64) -> Metadata {
+    private static func metadata(for index: Int, seed: UInt64, cameraIndex: Int) -> Metadata {
         var generator = SeededGenerator(seed: seed &+ UInt64(index) &* 0xA24B_AED4_963E_E407)
-        let camera = cameraProfiles[cameraIndex(for: index, seed: seed)]
+        let camera = cameraProfiles[cameraIndex]
         let orientation = orientations[Int(generator.next() % UInt64(orientations.count))]
 
         // Keep the encoded-payload profile set bounded for the 100k lane while still providing
