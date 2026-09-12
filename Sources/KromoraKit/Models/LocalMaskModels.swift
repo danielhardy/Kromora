@@ -10,19 +10,19 @@ import Foundation
 struct LocalAdjustments: Codable, Sendable, Equatable {
     static let neutral = LocalAdjustments()
 
-    static let exposureRange = -5.0...5.0
-    static let contrastRange = -100.0...100.0
-    static let highlightsRange = -100.0...100.0
-    static let shadowsRange = -100.0...100.0
-    static let whitesRange = -100.0...100.0
-    static let blacksRange = -100.0...100.0
-    static let temperatureRange = 2000.0...11000.0
-    static let tintRange = -150.0...150.0
-    static let saturationRange = -100.0...100.0
-    static let vibranceRange = -100.0...100.0
-    static let textureRange = -100.0...100.0
-    static let clarityRange = -100.0...100.0
-    static let dehazeRange = -100.0...100.0
+    static let exposureRange = LightAdjustments.exposureRange
+    static let contrastRange = LightAdjustments.contrastRange
+    static let highlightsRange = LightAdjustments.highlightsRange
+    static let shadowsRange = LightAdjustments.shadowsRange
+    static let whitesRange = LightAdjustments.whitesRange
+    static let blacksRange = LightAdjustments.blacksRange
+    static let temperatureRange = AdjustmentControl.temperature.range
+    static let tintRange = AdjustmentControl.tint.range
+    static let saturationRange = ColorAdjustments.saturationRange
+    static let vibranceRange = ColorAdjustments.vibranceRange
+    static let textureRange = EffectsAdjustments.textureRange
+    static let clarityRange = EffectsAdjustments.clarityRange
+    static let dehazeRange = EffectsAdjustments.dehazeRange
 
     var exposure: Double { didSet { exposure = Self.clamp(exposure, to: Self.exposureRange, default: 0) } }
     var contrast: Double { didSet { contrast = Self.clamp(contrast, to: Self.contrastRange, default: 0) } }

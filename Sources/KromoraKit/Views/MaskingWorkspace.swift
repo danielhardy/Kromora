@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// Persistent local-mask editor. The workspace is an inspector tab, so it stays beside the canvas
 /// while the photographer changes layers, reopens saved recipes, or switches tools.
@@ -679,68 +679,23 @@ struct MaskingWorkspace: View {
             Text("Local adjustments")
                 .font(.subheadline.weight(.semibold))
             if let layerID {
-                adjustmentSlider(
-                    "Exposure", keyPath: \.exposure, range: LocalAdjustments.exposureRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Contrast", keyPath: \.contrast, range: LocalAdjustments.contrastRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Highlights", keyPath: \.highlights, range: LocalAdjustments.highlightsRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Shadows", keyPath: \.shadows, range: LocalAdjustments.shadowsRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Whites", keyPath: \.whites, range: LocalAdjustments.whitesRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Blacks", keyPath: \.blacks, range: LocalAdjustments.blacksRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Temperature", keyPath: \.temperature, range: LocalAdjustments.temperatureRange,
-                    layerID: layerID, trackStyle: .temperature)
-                adjustmentSlider(
-                    "Tint", keyPath: \.tint, range: LocalAdjustments.tintRange,
-                    layerID: layerID, trackStyle: .tint)
-                adjustmentSlider(
-                    "Saturation", keyPath: \.saturation, range: LocalAdjustments.saturationRange,
-                    layerID: layerID, trackStyle: .saturation)
-                adjustmentSlider(
-                    "Vibrance", keyPath: \.vibrance, range: LocalAdjustments.vibranceRange,
-                    layerID: layerID, trackStyle: .vibrance)
-                adjustmentSlider(
-                    "Texture", keyPath: \.texture, range: LocalAdjustments.textureRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Clarity", keyPath: \.clarity, range: LocalAdjustments.clarityRange,
-                    layerID: layerID)
-                adjustmentSlider(
-                    "Dehaze", keyPath: \.dehaze, range: LocalAdjustments.dehazeRange,
-                    layerID: layerID)
+                ForEach(LocalAdjustmentControl.allCases, id: \.self) { control in
+                    localAdjustmentRow(control, layerID: layerID)
+                }
             }
         }
     }
 
-    private func adjustmentSlider(
-        _ title: String, keyPath: WritableKeyPath<LocalAdjustments, Double>,
-        range: ClosedRange<Double>, layerID: UUID, trackStyle: SliderTrackStyle = .neutral
+    private func localAdjustmentRow(
+        _ control: LocalAdjustmentControl, layerID: UUID
     ) -> some View {
-        // Read the baseline off `LocalAdjustments.neutral` rather than listing thirteen literals:
-        // twelve of these rows are neutral at 0 and Temperature is neutral at 6500 K, and the model
-        // is already the authority on which is which.
-        let neutral = LocalAdjustments.neutral[keyPath: keyPath]
-        let binding = Binding<Double>(
-            get: {
-                inspectorLayer(id: layerID)?.adjustments[keyPath: keyPath] ?? 0
-            },
-            set: { value in
-                viewModel.updateMask(layerID, debounced: true) {
-                    $0.adjustments[keyPath: keyPath] = value
-                }
-            }
+        return LocalAdjustmentValueRow(
+            control: control,
+            value: viewModel.localAdjustmentBinding(control, in: layerID),
+            reset: { viewModel.resetMaskAdjustment(control, in: layerID) },
+            beginInteraction: viewModel.beginPreviewInteraction,
+            endInteraction: viewModel.endPreviewInteraction
         )
-        return maskSlider(title, value: binding, range: range, neutral: neutral, trackStyle: trackStyle)
     }
 
     /// - Parameter neutral: Where the fill is anchored. `nil` means the bottom of the range,
@@ -838,6 +793,68 @@ struct MaskingWorkspace: View {
                 .font(.caption2)
         }
         .foregroundStyle(.secondary)
+    }
+}
+
+/// The local-adjustment row mirrors the global value-entry contract while its binding remains
+/// layer-scoped. Numeric entry and slider changes therefore share the exact persisted value, and
+/// the reset action cannot accidentally clear a global stage.
+private struct LocalAdjustmentValueRow: View {
+    let control: LocalAdjustmentControl
+    @Binding var value: Double
+    let reset: () -> Void
+    let beginInteraction: () -> Void
+    let endInteraction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                ResettableAdjustmentLabel(
+                    title: control.title,
+                    reset: reset
+                )
+                Spacer()
+                TextField(control.title, value: $value, format: .number)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.caption, design: .monospaced))
+                    .frame(width: 78)
+                    .multilineTextAlignment(.trailing)
+                    .accessibilityLabel(control.title)
+                    .accessibilityValue(control.readout(value))
+                    .accessibilitySortPriority(1)
+            }
+
+            NeutralOriginSlider(
+                value: $value,
+                in: control.range,
+                neutral: control.neutral,
+                trackStyle: control.trackStyle,
+                accessibilityTitle: control.title,
+                accessibilityReadout: control.readout(value),
+                onEditingChanged: { editing in
+                    if editing { beginInteraction() }
+                    else { endInteraction() }
+                }
+            )
+            .accessibilityLabel(control.title)
+            .accessibilityValue(control.readout(value))
+            .accessibilitySortPriority(0)
+            .accessibilityAction(named: Text("Reset to neutral"), reset)
+        }
+    }
+}
+
+fileprivate extension LocalAdjustmentControl {
+    var trackStyle: SliderTrackStyle {
+        switch self {
+        case .temperature: return .temperature
+        case .tint: return .tint
+        case .saturation: return .saturation
+        case .vibrance: return .vibrance
+        case .exposure, .contrast, .highlights, .shadows, .whites, .blacks, .texture, .clarity,
+             .dehaze:
+            return .neutral
+        }
     }
 }
 
