@@ -578,7 +578,9 @@ class TempDirectoryTestCase: XCTestCase {
         previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
-        }
+        },
+        fileDialog: any FileDialogProviding = AppKitFileDialog(),
+        fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy()
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults
         if let preferences {
@@ -603,7 +605,9 @@ class TempDirectoryTestCase: XCTestCase {
             previewDiskCacheDirectory: previewDiskCacheDirectory
                 ?? tempDirectory.appendingPathComponent("developed-previews", isDirectory: true),
             previewDiskCacheCapBytes: previewDiskCacheCapBytes,
-            embeddedFirstFrameProvider: embeddedFirstFrameProvider
+            embeddedFirstFrameProvider: embeddedFirstFrameProvider,
+            fileDialog: fileDialog,
+            fileDropActionPolicy: fileDropActionPolicy
         )
         appViewModels.append(viewModel)
         return viewModel

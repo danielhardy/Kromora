@@ -331,12 +331,7 @@ struct PreviewView: View {
             guard let data = item as? Data,
                   let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
             Task { @MainActor in
-                var isDir: ObjCBool = false
-                if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                    viewModel.openSourceFolder(url: url)
-                } else {
-                    viewModel.openImage(url: url)
-                }
+                viewModel.handleDroppedURL(url)
             }
         }
         return true

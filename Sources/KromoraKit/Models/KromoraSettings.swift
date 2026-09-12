@@ -142,6 +142,15 @@ public final class KromoraSettings: ObservableObject {
     public var defaultSourceFolderURL: URL? { sourceFolderStatus.url }
     public var defaultExportFolderURL: URL? { exportFolderStatus.url }
 
+    /// SwiftData may not create the persistent store file until the first successful save. A
+    /// requested on-disk URL is therefore only revealable once the file exists.
+    public static func revealableEditDatabaseURL(
+        for url: URL?, fileManager: FileManager = .default
+    ) -> URL? {
+        guard let url, fileManager.fileExists(atPath: url.path) else { return nil }
+        return url
+    }
+
     public func status(for kind: KromoraFolderKind) -> KromoraFolderStatus {
         kind == .source ? sourceFolderStatus : exportFolderStatus
     }

@@ -1,6 +1,5 @@
 import SwiftUI
 import UniformTypeIdentifiers
-import AppKit
 
 /// Modal sheet for deriving a `.cube` Look from a (RAW, JPG) pair.
 /// Scratch-mode: the derived Look lives in `coordinator.derivedLUT` until the
@@ -8,10 +7,19 @@ import AppKit
 /// whole app view model — this sheet touches nothing else.
 struct RecipeExtractorSheet: View {
     @ObservedObject var coordinator: DeriveCoordinator
+    private let fileDialog: any FileDialogProviding
     @Environment(\.dismiss) private var dismiss
 
     @State private var rawURL: URL?
     @State private var jpgURL: URL?
+
+    init(
+        coordinator: DeriveCoordinator,
+        fileDialog: any FileDialogProviding = AppKitFileDialog()
+    ) {
+        self.coordinator = coordinator
+        self.fileDialog = fileDialog
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -139,31 +147,29 @@ struct RecipeExtractorSheet: View {
     // MARK: - File pickers
 
     private func pickRAW() {
-        let panel = NSOpenPanel()
-        panel.title = "Select RAW or DNG"
-        panel.allowsMultipleSelection = false
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
         // RAW + DNG types — match what ImageDecoder knows how to load
         var types: [UTType] = [.rawImage]
         if let dng = UTType(filenameExtension: "dng") { types.append(dng) }
         for ext in ["cr2", "cr3", "nef", "arw", "orf", "raf", "rw2", "pef", "srw"] {
             if let t = UTType(filenameExtension: ext) { types.append(t) }
         }
-        panel.allowedContentTypes = types
-        if panel.runModal() == .OK, let url = panel.url {
+        if let url = fileDialog.chooseFiles(
+            title: "Select RAW or DNG",
+            allowedContentTypes: types,
+            allowsMultipleSelection: false,
+            startingAt: nil
+        )?.first {
             rawURL = url
         }
     }
 
     private func pickJPG() {
-        let panel = NSOpenPanel()
-        panel.title = "Select JPG"
-        panel.allowsMultipleSelection = false
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.jpeg]
-        if panel.runModal() == .OK, let url = panel.url {
+        if let url = fileDialog.chooseFiles(
+            title: "Select JPG",
+            allowedContentTypes: [.jpeg],
+            allowsMultipleSelection: false,
+            startingAt: nil
+        )?.first {
             jpgURL = url
         }
     }
