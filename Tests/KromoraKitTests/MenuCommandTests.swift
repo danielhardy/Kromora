@@ -58,7 +58,9 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(menuCommands.contains(".onReceive(NotificationCenter.default.publisher(for: .toggleInspector))"))
 
         XCTAssertEqual(contentView.components(separatedBy: "Label(\"Reset Rotation\"").count, 1)
-        XCTAssertEqual(contentView.components(separatedBy: "Label(\"Info\", systemImage: \"sidebar.right\"").count, 1)
+        XCTAssertEqual(contentView.components(separatedBy: "Label(\"Info\", systemImage: \"sidebar.right\"").count, 2)
+        XCTAssertFalse(contentView.contains("systemImage: \"sidebar.leading\""))
+        XCTAssertTrue(contentView.contains("viewModel.toggleInspector()"))
         XCTAssertTrue(contentView.contains(".disabled(!viewModel.isComparisonPresentationAvailable)"))
     }
 
