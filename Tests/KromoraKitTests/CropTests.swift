@@ -1,11 +1,14 @@
 import CoreGraphics
 import CoreImage
+import SwiftUI
 import XCTest
+
 @testable import KromoraKit
 
 final class CropModelTests: XCTestCase {
     func testCommonCropAspectRatiosHaveClearCentralizedLabels() {
-        XCTAssertEqual(CropAspectRatio.allCases.map(\.label), ["Freeform", "1:1", "3:2", "4:3", "16:9"])
+        XCTAssertEqual(
+            CropAspectRatio.allCases.map(\.label), ["Freeform", "1:1", "3:2", "4:3", "16:9"])
     }
 
     func testPresetSelectionPreservesCenterAndAdaptsToImageOrientation() throws {
@@ -22,7 +25,8 @@ final class CropModelTests: XCTestCase {
         XCTAssertEqual(landscape.width * 400 / (landscape.height * 200), 1.5, accuracy: 0.000001)
         XCTAssertEqual(portrait.midX, sourceRect.midX, accuracy: 0.000001)
         XCTAssertEqual(portrait.midY, sourceRect.midY, accuracy: 0.000001)
-        XCTAssertEqual(portrait.width * 200 / (portrait.height * 400), 2.0 / 3.0, accuracy: 0.000001)
+        XCTAssertEqual(
+            portrait.width * 200 / (portrait.height * 400), 2.0 / 3.0, accuracy: 0.000001)
         XCTAssertGreaterThanOrEqual(landscape.minX, 0)
         XCTAssertGreaterThanOrEqual(landscape.minY, 0)
         XCTAssertLessThanOrEqual(landscape.maxX, 1)
@@ -40,7 +44,8 @@ final class CropModelTests: XCTestCase {
 
     func testPresetResizePreservesPixelRatioAndClampsToBounds() {
         let start = CropOverlayInteraction.applying(
-            .sixteenToNine, to: CropAdjustments.unitRect, imageSize: CGSize(width: 1600, height: 900)
+            .sixteenToNine, to: CropAdjustments.unitRect,
+            imageSize: CGSize(width: 1600, height: 900)
         )
         let resized = CropOverlayInteraction.resized(
             start,
@@ -51,7 +56,8 @@ final class CropModelTests: XCTestCase {
             imageSize: CGSize(width: 1600, height: 900)
         )
 
-        XCTAssertEqual(resized.width * 1600 / (resized.height * 900), 16.0 / 9.0, accuracy: 0.000001)
+        XCTAssertEqual(
+            resized.width * 1600 / (resized.height * 900), 16.0 / 9.0, accuracy: 0.000001)
         XCTAssertGreaterThanOrEqual(resized.minX, 0)
         XCTAssertGreaterThanOrEqual(resized.minY, 0)
         XCTAssertLessThanOrEqual(resized.maxX, 1)
@@ -94,7 +100,8 @@ final class CropModelTests: XCTestCase {
             let horizontal = CropOverlayInteraction.resized(
                 start,
                 handle: handle,
-                delta: CGSize(width: handle == .topLeading || handle == .bottomLeading ? 40 : -40, height: 0),
+                delta: CGSize(
+                    width: handle == .topLeading || handle == .bottomLeading ? 40 : -40, height: 0),
                 imageRect: imageRect,
                 aspectRatio: .threeToTwo,
                 orientation: .landscape,
@@ -103,15 +110,20 @@ final class CropModelTests: XCTestCase {
             let vertical = CropOverlayInteraction.resized(
                 start,
                 handle: handle,
-                delta: CGSize(width: 0, height: handle == .topLeading || handle == .topTrailing ? 40 : -40),
+                delta: CGSize(
+                    width: 0, height: handle == .topLeading || handle == .topTrailing ? 40 : -40),
                 imageRect: imageRect,
                 aspectRatio: .threeToTwo,
                 orientation: .landscape,
                 imageSize: imageSize
             )
 
-            XCTAssertEqual(horizontal.width * imageSize.width / (horizontal.height * imageSize.height), 1.5, accuracy: 0.000001)
-            XCTAssertEqual(vertical.width * imageSize.width / (vertical.height * imageSize.height), 1.5, accuracy: 0.000001)
+            XCTAssertEqual(
+                horizontal.width * imageSize.width / (horizontal.height * imageSize.height), 1.5,
+                accuracy: 0.000001)
+            XCTAssertEqual(
+                vertical.width * imageSize.width / (vertical.height * imageSize.height), 1.5,
+                accuracy: 0.000001)
             XCTAssertGreaterThan(horizontal.width, 0)
             XCTAssertGreaterThan(vertical.height, 0)
         }
@@ -186,8 +198,12 @@ final class CropModelTests: XCTestCase {
             .threeToTwo, orientation: .portrait, to: sourceRect, imageSize: imageSize
         )
 
-        XCTAssertEqual(landscape.width * imageSize.width / (landscape.height * imageSize.height), 1.5, accuracy: 0.000001)
-        XCTAssertEqual(portrait.width * imageSize.width / (portrait.height * imageSize.height), 2.0 / 3.0, accuracy: 0.000001)
+        XCTAssertEqual(
+            landscape.width * imageSize.width / (landscape.height * imageSize.height), 1.5,
+            accuracy: 0.000001)
+        XCTAssertEqual(
+            portrait.width * imageSize.width / (portrait.height * imageSize.height), 2.0 / 3.0,
+            accuracy: 0.000001)
         XCTAssertEqual(landscape.midX, sourceRect.midX, accuracy: 0.000001)
         XCTAssertEqual(portrait.midY, sourceRect.midY, accuracy: 0.000001)
 
@@ -218,7 +234,8 @@ final class CropModelTests: XCTestCase {
     }
 
     func testMissingCropFieldKeepsLegacyDocumentsNeutral() throws {
-        let document = try JSONDecoder().decode(EditDocument.self, from: Data("{\"version\":1}".utf8))
+        let document = try JSONDecoder().decode(
+            EditDocument.self, from: Data("{\"version\":1}".utf8))
         XCTAssertEqual(document.crop, .neutral)
         XCTAssertTrue(document.isIdentity)
     }
@@ -255,7 +272,8 @@ final class CropModelTests: XCTestCase {
     }
 
     func testCropClampingRejectsDegenerateInput() {
-        XCTAssertEqual(CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0, height: 1)), .neutral)
+        XCTAssertEqual(
+            CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0, height: 1)), .neutral)
         XCTAssertEqual(CropAdjustments(normalizedRect: nil), .neutral)
     }
 }
@@ -265,7 +283,8 @@ final class CropPipelineTests: TempDirectoryTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        let url = try Fixtures.writeGradientPNG(width: 96, height: 64, named: "crop.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "crop.png", in: tempDirectory)
         source = ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
     }
 
@@ -303,17 +322,19 @@ final class CropPipelineTests: TempDirectoryTestCase {
         XCTAssertEqual(preview.height, 48)
         XCTAssertEqual(decoded.width, preview.width)
         XCTAssertEqual(decoded.height, preview.height)
-        assertPixelsEqual(try Pixels.bytes(of: preview), try Pixels.bytes(of: decoded),
-                          "preview and export must retain crop and post-crop effects identically")
+        assertPixelsEqual(
+            try Pixels.bytes(of: preview), try Pixels.bytes(of: decoded),
+            "preview and export must retain crop and post-crop effects identically")
     }
 
     func testPresetCropPreviewAndFullResolutionExportHaveTheSameExtent() async throws {
         let cropRect = CropOverlayInteraction.applying(
             .sixteenToNine, to: CropAdjustments.unitRect, imageSize: CGSize(width: 96, height: 64)
         )
-        let document = EditDocument(crop: CropAdjustments(
-            normalizedRect: cropRect, aspectRatio: .sixteenToNine
-        ))
+        let document = EditDocument(
+            crop: CropAdjustments(
+                normalizedRect: cropRect, aspectRatio: .sixteenToNine
+            ))
         let engine = RenderEngine()
         let rendered = await engine.makeCGImage(
             source: source, document: document, lut: nil, scale: .full, space: .current
@@ -329,8 +350,9 @@ final class CropPipelineTests: TempDirectoryTestCase {
         XCTAssertEqual(preview.height, 54)
         XCTAssertEqual(decoded.width, preview.width)
         XCTAssertEqual(decoded.height, preview.height)
-        assertPixelsEqual(try Pixels.bytes(of: preview), try Pixels.bytes(of: decoded),
-                          "preset preview and export must retain the same crop extent")
+        assertPixelsEqual(
+            try Pixels.bytes(of: preview), try Pixels.bytes(of: decoded),
+            "preset preview and export must retain the same crop extent")
     }
 }
 
@@ -373,7 +395,8 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     }
 
     func testDraftIsTransientCancelIsFreeAndCommitIsUndoable() async throws {
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "workflow.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "workflow.png", in: tempDirectory)
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore()
@@ -393,7 +416,8 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         viewModel.beginCrop()
         viewModel.updateCropDraft(CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
         viewModel.commitCrop()
-        let committed = CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
+        let committed = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
         XCTAssertEqual(viewModel.document.crop, committed)
         XCTAssertEqual(viewModel.undoDepth, 1)
 
@@ -409,7 +433,8 @@ final class CropWorkflowTests: TempDirectoryTestCase {
             engine: fake,
             editStore: makeInMemoryEditStore()
         )
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "roi-tool.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "roi-tool.png", in: tempDirectory)
         viewModel.openImage(url: url)
         try await waitUntil("the source image") { viewModel.sourceImage != nil }
         while (await fake.previewRequests).isEmpty {
@@ -431,9 +456,10 @@ final class CropWorkflowTests: TempDirectoryTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         let requests = await fake.previewRequests
-        let request = try XCTUnwrap(requests.dropFirst(before).first {
-            $0.document.crop.isIdentity && $0.sourceROI == nil
-        })
+        let request = try XCTUnwrap(
+            requests.dropFirst(before).first {
+                $0.document.crop.isIdentity && $0.sourceROI == nil
+            })
         if case .preview(let size) = request.scale {
             XCTAssertEqual(size, CGSize(width: 32, height: 24))
         } else {
@@ -442,7 +468,8 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     }
 
     func testSelectingPresetStaysDraftUntilApplyAndUndoRedoRestoresTheRatio() async throws {
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "preset-workflow.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "preset-workflow.png", in: tempDirectory)
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore()
@@ -475,7 +502,8 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     /// (rather than only `document.crop`) is what the issue's verification plan means by testing
     /// geometry/UI behavior instead of only the normalized rectangle.
     func testReenteringCropRequestsTheFullUncroppedStageAndRestoresOnExit() async throws {
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "reentry.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "reentry.png", in: tempDirectory)
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(
             engine: fake,
@@ -508,7 +536,9 @@ final class CropWorkflowTests: TempDirectoryTestCase {
             reentryRequest.document.crop.isIdentity,
             "reopening Crop must render the full source stage, not the already-cropped committed frame"
         )
-        XCTAssertEqual(viewModel.document.crop, committed, "the committed document must be untouched while editing")
+        XCTAssertEqual(
+            viewModel.document.crop, committed,
+            "the committed document must be untouched while editing")
 
         let requestsBeforeCancel = await fake.previewRequests.count
         viewModel.cancelCrop()
@@ -524,7 +554,8 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     }
 
     func testCommittedCropSurvivesRelaunch() async throws {
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "persisted.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "persisted.png", in: tempDirectory)
         let container = makeInMemoryEditContainer()
         let first = makeAppViewModel(
             engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
@@ -541,9 +572,67 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         )
         second.openImage(url: url)
         try await waitUntil("the restored crop") {
-            second.sourceImage != nil && second.document.crop == CropAdjustments(
-                normalizedRect: CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8)
-            )
+            second.sourceImage != nil
+                && second.document.crop
+                    == CropAdjustments(
+                        normalizedRect: CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8)
+                    )
+        }
+    }
+}
+
+final class CropOverlayViewTests: XCTestCase {
+    private func makeOverlay() -> CropOverlayView {
+        CropOverlayView(
+            normalizedRect: CGRect(x: 0, y: 0, width: 1, height: 1),
+            imageSize: CGSize(width: 400, height: 300),
+            aspectRatio: .freeform,
+            orientation: .automatic,
+            onChange: { _ in },
+            onAspectRatioChange: { _, _ in },
+            onApply: {},
+            onReset: {},
+            onCancel: {}
+        )
+    }
+
+    // KRMA-387: the top-left handle's hit target must sit inside the crop rect (inset by half
+    // the hit-target size), not on the boundary where it can be clipped or covered.
+    func testHandleHitPositionsAreInsetFromEveryCorner() {
+        let overlay = makeOverlay()
+        let rect = CGRect(x: 10, y: 20, width: 200, height: 150)
+        let inset = overlay.handleHitTargetSize / 2
+
+        XCTAssertEqual(
+            overlay.handleHitPosition(.topLeading, in: rect),
+            CGPoint(x: rect.minX + inset, y: rect.minY + inset)
+        )
+        XCTAssertEqual(
+            overlay.handleHitPosition(.topTrailing, in: rect),
+            CGPoint(x: rect.maxX - inset, y: rect.minY + inset)
+        )
+        XCTAssertEqual(
+            overlay.handleHitPosition(.bottomLeading, in: rect),
+            CGPoint(x: rect.minX + inset, y: rect.maxY - inset)
+        )
+        XCTAssertEqual(
+            overlay.handleHitPosition(.bottomTrailing, in: rect),
+            CGPoint(x: rect.maxX - inset, y: rect.maxY - inset)
+        )
+    }
+
+    // A crop rect smaller than the hit-target size must still produce hit positions within the
+    // rect's bounds rather than overshooting past the opposite edge.
+    func testHandleHitPositionClampsInsetForTinyCropRects() {
+        let overlay = makeOverlay()
+        let rect = CGRect(x: 0, y: 0, width: 10, height: 8)
+
+        for handle in CropHandle.allCases {
+            let point = overlay.handleHitPosition(handle, in: rect)
+            XCTAssertGreaterThanOrEqual(point.x, rect.minX)
+            XCTAssertLessThanOrEqual(point.x, rect.maxX)
+            XCTAssertGreaterThanOrEqual(point.y, rect.minY)
+            XCTAssertLessThanOrEqual(point.y, rect.maxY)
         }
     }
 }
