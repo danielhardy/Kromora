@@ -1,6 +1,9 @@
-# Auto performance diagnostics (KRMA-352)
+# Auto performance diagnostics — dated baseline (KRMA-352)
 
-How Auto latency is measured, what the numbers mean, and the current M1 Pro gate evidence.
+How Auto latency is measured, what the numbers mean, and the M1 Pro gate evidence captured on
+2026-09-11. The implementation is current, but the numeric results below are a dated Debug-build
+baseline and must not be presented as a universal product-latency claim; rerun the documented
+Release/fixture workflow when performance decisions depend on new hardware or code.
 
 ## Stage vocabulary
 

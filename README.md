@@ -33,6 +33,13 @@ Kromora is a native macOS RAW editor organised around a real photo workflow:
 Every edit is stored as data, never as a baked preview bitmap. Preview and export use the same
 pipeline, so the image on screen and the image written to disk follow the same edit order.
 
+The current product is the folder-backed Library/Edit workflow: source folders remain external to
+the app's local edit store, while Photos and one-off imports are copied into the managed
+Application Support Library folder. The shipped workflow includes culling, deletion, RAW develop,
+content-aware Auto, local masking, Looks, comparison, and full-resolution export. A portable
+self-contained library package is a documented future project, not part of the current storage
+format; see [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md).
+
 Kromora is also an agent-driven software project. Agents plan, claim, implement, verify, and advance
 work through [DispatchGraph](.dg/README.md), making the development process part of the experiment.
 
@@ -61,6 +68,8 @@ Kromora's own.
   multi-select, and double-click-to-edit navigation.
 - Pick/reject flags, 0–5 star ratings, and combined culling filters for All, Picks, Rejected, and
   rating ranges.
+- Delete selected library items with an explicit confirmation; managed originals move to the macOS
+  Trash, referenced originals are left untouched, and edit records/derived thumbnails are removed.
 - Edit workspace with a filmstrip, docked source browser, keyboard navigation, canvas pan/zoom,
   Fit/Fill, and resettable panel sections.
 
@@ -86,6 +95,11 @@ Each photo has a `Codable`, `Sendable`, `Equatable` `EditDocument`. Its current 
   non-destructive local adjustments. Brush samples are distance-resampled during the gesture and
   persisted as one compact undoable stroke; the same mask definition drives preview, overlay,
   histogram, comparison, copy/paste, and full-resolution export.
+- **Auto and photo analysis** — cancellable Vision/Core Image analysis produces scene, tone, color,
+  subject, and semantic-mask evidence. Content-aware Auto evaluates unchanged, native, Apple-reference,
+  and reduced-strength candidates through the real renderer, rejects guardrail violations, and can
+  add bounded Auto-owned regional layers. The accepted result is one editable, undoable document
+  change with provenance; repeated runs can be no-ops.
 
 Individual controls and whole sections can be reset. Slider gestures use an interactive render path
 and become one undo entry when committed; numeric fields and resets use the settled path.
@@ -149,15 +163,17 @@ library Look; the stable derived identity keeps the edit resolving across rescan
 
 ## Persistence and editing state
 
-Edits are isolated per photo and survive navigation and relaunch. Kromora stores a versioned JSON edit
-catalog under the user's Application Support directory; writes are serialized, coalesced during
-slider activity, atomically replaced, and backed up. The store also supports:
+Edits are isolated per photo and survive navigation and relaunch. Kromora stores one SwiftData
+`EditRecord` per photo in the local `EditStore.store` container under Application Support. The edit
+document is encoded as versioned JSON data inside that record; writes are serialized and coalesced
+during slider activity, while source paths and security-scoped bookmarks support relinking moved
+files. The store also supports:
 
 - Up to 100 undo and redo snapshots per photo, containing only value-state documents.
 - Copy/paste of all edits between photos, including destinations that were never opened.
-- Recovery from a corrupt primary catalog using the last known-good backup.
-- Relinking a moved source through its stored bookmark/locator and re-keying the record.
-- Schema-version checks that refuse to overwrite edits written by a newer Kromora build.
+- Per-record corruption reporting without replacing the photo with an unmarked blank edit.
+- Relinking a moved source through its stored bookmark/locator and updating the source locator.
+- Schema-version checks that refuse to decode documents written by a newer Kromora build.
 - A termination flush so queued edits are durable before the app exits.
 
 Source records use stable filesystem identities where available and cache fingerprints include file
@@ -251,7 +267,7 @@ a particular volume class from the entitlement alone, Kromora keeps the volume v
 to select its root in an Open panel, and scans the resulting security-scoped bookmark. Run the full
 Xcode-built app to verify this path; `swift run` does not apply the entitlement.
 
-The suite currently contains **958 XCTest methods** (`swift test list`), including deterministic
+The suite currently contains **1,338 XCTest methods** (`swift test list`), including deterministic
 regression coverage and opt-in benchmarks. Fixtures are generated in temporary directories. CI
 partitions the required set into two disjoint macOS 26 lanes: the deterministic/model/fake-engine
 lane runs with `--parallel`, while Core Image/render and AppKit/UI tests run with `--no-parallel`.
@@ -319,25 +335,27 @@ Sources/
 │   └── Kromora.entitlements       # sandbox file access and bookmarks
 └── KromoraKit/
     ├── Models/                 # value state, source projections, pipeline, GPU/cache resources
-    ├── ViewModels/             # AppViewModel and focused source/persistence/export coordinators
+    ├── ViewModels/             # AppViewModel plus import, editor, preview, persistence, export, and Look coordinators
     └── Views/                  # Library, canvas, filmstrip, inspectors, menus, status bar
 
 Tests/
 └── KromoraKitTests/               # model, pipeline, integration, regression, and opt-in benchmarks
 
-docs/                           # durable engineering, Looks, packaging, testing, and audit guidance
+docs/                           # durable architecture, Auto, comparison, Looks, packaging, testing, and audit guidance
 ```
 
 The important boundaries are:
 
 - **Value document:** `EditDocument` contains RAW develop settings, Light, Color, Effects, crop,
-  legacy ordered adjustment nodes, and the Look reference. Empty state is the identity transform.
+  rotation, legacy ordered adjustment nodes, the Look reference, local adjustment recipes, and
+  Auto provenance. Empty state is the identity transform.
 - **One graph, multiple qualities:** `RenderPipeline` folds the document into one lazy Core Image
   graph. `RenderEngine` evaluates it at interactive, preview, thumbnail, or full quality; preview
   and export differ by an explicit quality/output policy rather than separate edit logic.
-- **Deterministic stage order:** source/develop → Light → Color → ordered adjustments → Look → crop
-  → post-crop vignette → deterministic grain. This keeps spatial effects aligned with the final
-  frame while preserving preview/export parity.
+- **Deterministic stage order:** source/develop → orientation/rotation → Light → Color → pre-Look
+  detail effects → ordered adjustments → Look → ordered local adjustments → crop → post-crop
+  vignette → deterministic grain. This keeps spatial effects aligned with the final frame while
+  preserving preview/export parity.
 - **Actor isolation:** Core Image objects stay inside the render engine. Sendable values cross the
   boundary, and the package compiles in Swift 6 language mode without unchecked concurrency escapes.
 - **GPU presentation:** live previews use a persistent Metal-backed presentation surface. Interactive
@@ -345,9 +363,12 @@ The important boundaries are:
   replacement fails.
 - **Bounded work:** developed-source, render, LUT, and thumbnail caches are bounded and respond to
   memory pressure. Thumbnail work is prioritized around the visible library neighborhood.
-- **Coordinators:** `AppViewModel` is the composition root while dedicated source, persistence,
-  preview, export, derive, and Look-preview collaborators own their stable responsibilities. The
-  ownership contract is documented in [`docs/ENGINEERING_GUIDE.md`](docs/ENGINEERING_GUIDE.md).
+- **Coordinators:** `AppViewModel` is the composition root and published active-document owner.
+  `EditorDocumentCoordinator` owns per-photo sessions/history/clipboard, `PhotosImportCoordinator`
+  owns Photos provider interaction and progress, and dedicated preview, persistence, export, derive,
+  Look, and analysis collaborators own their stable responsibilities. See
+  [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) and
+  [`docs/ENGINEERING_GUIDE.md`](docs/ENGINEERING_GUIDE.md).
 - **Observability:** signposts and bounded live telemetry distinguish input, render, GPU completion,
   and actual drawable presentation so profiling does not confuse “render finished” with “user saw
   the frame.”
@@ -356,6 +377,11 @@ Useful starting points are [`EditDocument`](Sources/KromoraKit/Models/EditDocume
 [`RenderPipeline`](Sources/KromoraKit/Models/RenderPipeline.swift),
 [`RenderEngine`](Sources/KromoraKit/Models/RenderEngine.swift), and
 [`EditDocumentStore`](Sources/KromoraKit/Models/EditDocumentStore.swift).
+
+The remaining architecture roadmap is intentionally narrow: review and sequence the portable
+library package in KRMA-384 before changing source identity, import ownership, or the current
+SwiftData edit store. The ready coordinator-extraction follow-ups (native dialogs, view-owned state,
+and platform/domain model separation) are tracked in KRMA-380, KRMA-381, and KRMA-383.
 
 ## Preparing for the App Store
 

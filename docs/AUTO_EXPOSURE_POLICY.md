@@ -1,9 +1,12 @@
-# Auto exposure policy
+# Content-aware Auto policy
 
-Auto's global exposure correction is a renderer-backed, non-destructive candidate selection. The
-policy proposes an editable document, then `AutoEnhancementCoordinator` renders the unchanged,
+Content-aware Auto is a renderer-backed, non-destructive candidate selection workflow. The policy
+proposes an editable document, then `ContentAwareAutoEngine` and its
+`AutoEnhancementCoordinator` render the unchanged,
 native, Apple-reference, and reduced-strength candidates through the same `RenderEngine` seam
-used by preview and export. The selected document is applied as one normal Auto history operation.
+used by preview and export. The selected document, including any measured regional correction
+layers, is applied as one normal Auto history operation. Auto is shipped in the current editor;
+this document records its behavior, not a future proposal.
 
 ## Neutral target
 

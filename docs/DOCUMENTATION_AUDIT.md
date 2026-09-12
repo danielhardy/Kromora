@@ -1,20 +1,41 @@
-# Documentation audit — 2026-09-10
+# Documentation audit — 2026-09-12
 
-KRMA-340 reviewed every file under `docs/` against the current `Sources/`, `Tests/`, `README.md`,
-`CLAUDE.md`, scripts, package manifest, and DispatchGraph records. The final tree intentionally
-contains only durable contributor guidance and this disposition record. Issue history remains in
-`.dg/`; it is not duplicated under `docs/`.
+KRMA-340 first reduced the original `docs/` tree to a small durable set. KRMA-378 re-audited that
+set and the repository's other tracked documentation against the current `Sources/`, `Tests/`,
+`README.md`, `CLAUDE.md`, scripts, package manifest, and recent DispatchGraph records. The current
+product is the folder-backed Library/Edit workflow with SwiftData edit records; Auto/photo analysis,
+comparison, culling/deletion, RAW support, Looks, masking, Photos import orchestration, and the
+coordinator boundaries are shipped. The portable library package remains a future design tracked by
+KRMA-384.
 
-## Final documentation tree
+## Current documentation map
 
-- [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md) — current architecture, render/resource boundaries,
-  persistence, masking, and contributor invariants.
-- [`LOOKS.md`](LOOKS.md) — current LUT interchange, Look save/derive behavior, starter assets, and
-  storage rules.
-- [`PACKAGING.md`](PACKAGING.md) — current icon, bundle, signing, entitlement, and release workflow.
-- [`TESTING.md`](TESTING.md) — required lanes, optional fixtures/benchmarks, profiling metadata, and
-  manual UI verification scope.
-- [`DOCUMENTATION_AUDIT.md`](DOCUMENTATION_AUDIT.md) — this audit and the file-by-file disposition.
+| Path or scope | Classification | Current role |
+| --- | --- | --- |
+| `README.md` | Current, updated | User-facing product workflow, supported features, setup, architecture summary, and remaining roadmap. |
+| `CLAUDE.md` | Current, updated | Agent/build/concurrency guidance and links to current architecture docs. |
+| `BRANDING.md` | Current, retained | Kromora identity and fork/redistribution policy. |
+| `docs/APP_ARCHITECTURE.md` | Current, retained | Application ownership and coordinator boundaries from KRMA-382. |
+| `docs/ENGINEERING_GUIDE.md` | Current, updated | Durable render, persistence, masking, Auto, slider, and contributor invariants. |
+| `docs/AUTO_EXPOSURE_POLICY.md` | Current, updated | Shipped content-aware Auto behavior and quality guardrails. |
+| `docs/AUTO_PERFORMANCE.md` | Current, updated | Diagnostic contract plus explicitly dated baseline evidence and limitations. |
+| `docs/COMPARISON_MODE.md` | Current, retained | Accepted always-both comparison interaction contract. |
+| `docs/LOOKS.md` | Current, retained | LUT interchange, starter Looks, derive/save, and storage behavior. |
+| `docs/LIBRARY_PACKAGE_PLAN.md` | Future plan, updated | Unimplemented portable-library design; KRMA-384 is ready for review/sequencing. |
+| `docs/PACKAGING.md` | Current, retained | Bundle, icon, signing, entitlement, and release workflow. |
+| `docs/TESTING.md` | Current, retained | Required/optional test lanes, profiling, and manual UI checks. |
+| `scripts/README.md` | Current, retained | Script entry points and their requirements. |
+| `realworldtest/README.md` | Current, retained | Local fixture policy and licensing terms. |
+| `.dg/README.md`, `.dg/AGENTS.md` | Current operational guidance | DispatchGraph commands and lifecycle rules. |
+| `.dg/decisions/*.md` | Accepted historical decision records | Durable decisions remain discoverable; issue-specific capture details are not treated as current product docs. |
+| `.dg/issues/*.md` | Canonical issue history | Generated/current lifecycle records; preserved rather than rewritten by this documentation audit. |
+| `.dg/.project/pickup/*.md` | Generated operational packets | Disposable pickup context/log artifacts; not hand-authored product guidance. |
+| `.context/initial_concept.md` | Superseded historical provenance | Clearly marked as the pre-Kromora concept; current readers should use `README.md` and `docs/`. |
+
+The retained `docs/` tree is intentionally larger than the five-file post-KRMA-340 baseline because
+the shipped Auto, comparison, coordinator, and future-library decisions now have distinct current
+roles. Volatile implementation transcripts and dated reports remain excluded unless they explain a
+current constraint or supported workflow.
 
 ## Disposition
 
