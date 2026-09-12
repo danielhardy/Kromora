@@ -21,7 +21,7 @@ public enum KromoraAppearanceMode: Equatable, Sendable {
 /// `Settings` scene, which do not reliably inherit an individual window's override. A `nil`
 /// appearance restores macOS-following behavior instead of hard-coding a light fallback.
 @MainActor
-public final class KromoraWindowAppearanceController {
+public final class AppKitWindowAppearanceController {
     private let settings: KromoraSettings
     private let windowProvider: @MainActor () -> [NSWindow]
     private let applicationAppearanceApplier: @MainActor (NSAppearance?) -> Void
@@ -121,3 +121,6 @@ public final class KromoraWindowAppearanceController {
         applyAppearance(alwaysDarkMode: desiredAlwaysDarkMode, includesApplication: true)
     }
 }
+
+/// Source-compatible spelling retained for the application shell while the platform role is clear.
+public typealias KromoraWindowAppearanceController = AppKitWindowAppearanceController

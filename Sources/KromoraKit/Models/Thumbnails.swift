@@ -22,7 +22,11 @@ import Darwin
 /// `NSImage` is the return type because the filmstrip is AppKit and that is where these land. It is
 /// not `Sendable`, so the *call* belongs off the main actor and the result is published on it —
 /// which is exactly what `ImageCollection` does.
-enum Thumbnails {
+/// AppKit/ImageIO adapter used by the library presentation model and render-side first-frame path.
+///
+/// The adapter returns `NSImage` because its consumers are AppKit presentation surfaces. No
+/// durable model stores this type, and no Core Image/render-engine object crosses this boundary.
+enum PlatformThumbnailProvider {
 
     /// The filmstrip's thumbnail size, in pixels on the long edge.
     static let defaultMaxPixelSize = 240
@@ -143,6 +147,9 @@ enum Thumbnails {
         return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
     }
 }
+
+/// Source-compatible spelling retained for existing library and test seams.
+typealias Thumbnails = PlatformThumbnailProvider
 
 /// A small synchronous, lock-protected image cache for the thumbnail API. `CGImage` is intentionally
 /// kept inside the lock-protected state: it is not `Sendable`, but the cache is shared by detached

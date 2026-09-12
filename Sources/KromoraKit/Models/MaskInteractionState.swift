@@ -1,7 +1,17 @@
 import Combine
 import CoreGraphics
 import Foundation
-import SwiftUI
+
+/// Platform-neutral color payload for the mask overlay controls. SwiftUI's `Color` is reconstructed
+/// by `MaskInteractionPresentationBridge` at the presentation boundary.
+struct MaskOverlayColor: Equatable, Sendable {
+    var red: Double
+    var green: Double
+    var blue: Double
+    var alpha: Double
+
+    static let orange = Self(red: 1, green: 0.5, blue: 0, alpha: 1)
+}
 
 /// Presentation state for the selected semantic mask. An empty result is different from an
 /// unavailable result: the former is a valid analysis with zero coverage, while the latter means
@@ -134,7 +144,7 @@ final class MaskInteractionState: ObservableObject {
     // or a render request; they describe how the photographer is inspecting the saved recipe.
     @Published var showOverlay = true
     @Published var overlayInspection: OverlayInspection = .colorWash
-    @Published var overlayColor: Color = .orange
+    @Published var overlayColorValue: MaskOverlayColor = .orange
     @Published var overlayOpacity: Double = 0.35
     @Published private(set) var soloLayerID: UUID?
     @Published private(set) var soloComponentID: UUID?

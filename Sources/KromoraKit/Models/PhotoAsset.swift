@@ -1,7 +1,5 @@
 import CryptoKit
 import Foundation
-import ImageIO
-import UniformTypeIdentifiers
 
 /// A durable identity for a photo source.
 ///
@@ -366,25 +364,6 @@ struct PhotoAsset: Identifiable, Codable, Hashable, Sendable, Equatable {
         return "Untitled"
     }
 
-    /// A user-facing, stable file type. File extensions are preferred because they preserve the
-    /// source convention; data-backed assets fall back to the type ImageIO decoded from bytes.
-    var displayFileType: String {
-        if let extensionType = [fileType, url?.pathExtension]
-            .compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) })
-            .first(where: { !$0.isEmpty }) {
-            return extensionType.uppercased()
-        }
-
-        if let data = source.data,
-           let source = CGImageSourceCreateWithData(data as CFData, nil),
-           let identifier = CGImageSourceGetType(source),
-           let type = UTType(identifier as String),
-           let preferredExtension = type.preferredFilenameExtension {
-            return preferredExtension.uppercased()
-        }
-        return "Unknown"
-    }
-
     // Convenience accessors keep the record pleasant to use from a grid/culling model while the
     // stored representation remains split into immutable source/metadata and mutable library state.
     var dimensions: PhotoPixelDimensions? { metadata.dimensions }
@@ -455,16 +434,6 @@ struct PhotoAsset: Identifiable, Codable, Hashable, Sendable, Equatable {
         )
     }
 
-    /// Build a record from ImageIO's existing metadata reader without putting that reader or any
-    /// Core Graphics object into the record itself.
-    static func discoveredFile(at url: URL, bookmarkData: Data? = nil) -> PhotoAsset {
-        let imageMetadata = ImageMetadata.read(from: url)
-        return PhotoAsset(
-            url: url,
-            metadata: PhotoAssetMetadata(imageMetadata: imageMetadata),
-            bookmarkData: bookmarkData ?? PhotoAssetSource.bookmarkData(for: url)
-        )
-    }
 }
 
 typealias PhotoAssetState = PhotoAssetLibraryState
