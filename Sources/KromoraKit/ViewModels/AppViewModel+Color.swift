@@ -18,6 +18,10 @@ enum ColorGlobalControl: String, CaseIterable, Hashable, Sendable {
         case .saturation: return ColorAdjustments.saturationRange
         }
     }
+
+    /// The value at which this control does nothing — the slider's fill baseline, and what
+    /// `resetColor(_:)` writes.
+    var neutral: Double { 0 }
 }
 
 enum ColorMixerControl: String, CaseIterable, Hashable, Sendable {
@@ -40,6 +44,9 @@ enum ColorMixerControl: String, CaseIterable, Hashable, Sendable {
         case .luminance: return ColorMixerChannel.luminanceRange
         }
     }
+
+    /// Every mixer row is signed about an untouched channel.
+    var neutral: Double { 0 }
 }
 
 enum ColorMixerChannelName: String, CaseIterable, Hashable, Sendable {
@@ -71,6 +78,10 @@ enum ColorGradingControl: String, CaseIterable, Hashable, Sendable {
         case .saturation: return ColorGradingWheel.saturationRange
         }
     }
+
+    /// Both wheel rows are unipolar: hue is an absolute 0…360 bearing and saturation an amount, so
+    /// the baseline is the bottom of the track and the fill runs from the left as usual.
+    var neutral: Double { range.lowerBound }
 }
 
 enum ColorGradingGlobalControl: String, CaseIterable, Hashable, Sendable {
@@ -83,6 +94,17 @@ enum ColorGradingGlobalControl: String, CaseIterable, Hashable, Sendable {
         switch self {
         case .blending: return ColorGradingAdjustments.blendingRange
         case .balance: return ColorGradingAdjustments.balanceRange
+        }
+    }
+
+    /// **Blending's default is 50, not 0** — `ColorGradingAdjustments`' own initializer says so, and
+    /// its clamp falls back to it. Its track is centred even though its range is unsigned; taking
+    /// the lower bound here would draw an untouched Blending row as fully un-filled while the
+    /// grading it describes is already half-applied.
+    var neutral: Double {
+        switch self {
+        case .blending: return 50
+        case .balance: return 0
         }
     }
 }

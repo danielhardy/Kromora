@@ -142,7 +142,10 @@ struct MaskingWorkspace: View {
                 Text("Opacity")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Slider(value: $maskingState.overlayOpacity, in: 0...1)
+                NeutralOriginSlider(
+                    value: $maskingState.overlayOpacity, in: 0...1, neutral: 0,
+                    accessibilityTitle: "Opacity",
+                    accessibilityReadout: "\(Int(maskingState.overlayOpacity * 100)) percent")
                     .accessibilityValue("\(Int(maskingState.overlayOpacity * 100)) percent")
                 Text(percentage(maskingState.overlayOpacity))
                     .font(.caption.monospacedDigit())
@@ -531,7 +534,7 @@ struct MaskingWorkspace: View {
                             current.angleDegrees = value
                             source = .linear(current)
                         }
-                    }), range: -180...180)
+                    }), range: -180...180, neutral: 0)
             maskSlider(
                 "Falloff",
                 value: componentValue(
@@ -599,7 +602,7 @@ struct MaskingWorkspace: View {
                             current.rotation = value * .pi / 180
                             source = .radial(current)
                         }
-                    }), range: -180...180)
+                    }), range: -180...180, neutral: 0)
             maskSlider(
                 "Feather",
                 value: componentValue(
@@ -658,7 +661,12 @@ struct MaskingWorkspace: View {
             Text(title)
                 .font(.caption)
                 .frame(width: 92, alignment: .leading)
-            Slider(value: value, in: range)
+            // Brush size, feather, flow and density are amounts: nothing is applied at the
+            // bottom of the track, so the left-origin fill is the honest one for all four.
+            NeutralOriginSlider(
+                value: value, in: range, neutral: range.lowerBound,
+                accessibilityTitle: title,
+                accessibilityReadout: "\(Int(value.wrappedValue * 100)) percent")
             Text(Int(value.wrappedValue * 100).description + "%")
                 .font(.caption2.monospacedDigit())
                 .frame(width: 34, alignment: .trailing)
@@ -717,6 +725,10 @@ struct MaskingWorkspace: View {
         _ title: String, keyPath: WritableKeyPath<LocalAdjustments, Double>,
         range: ClosedRange<Double>, layerID: UUID
     ) -> some View {
+        // Read the baseline off `LocalAdjustments.neutral` rather than listing thirteen literals:
+        // twelve of these rows are neutral at 0 and Temperature is neutral at 6500 K, and the model
+        // is already the authority on which is which.
+        let neutral = LocalAdjustments.neutral[keyPath: keyPath]
         let binding = Binding<Double>(
             get: {
                 inspectorLayer(id: layerID)?.adjustments[keyPath: keyPath] ?? 0
@@ -727,18 +739,25 @@ struct MaskingWorkspace: View {
                 }
             }
         )
-        return maskSlider(title, value: binding, range: range)
+        return maskSlider(title, value: binding, range: range, neutral: neutral)
     }
 
-    private func maskSlider(_ title: String, value: Binding<Double>, range: ClosedRange<Double>)
-        -> some View
-    {
+    /// - Parameter neutral: Where the fill is anchored. `nil` means the bottom of the range,
+    ///   which is right for every amount-shaped row here — a mask's Amount, a component's Density
+    ///   or Feather. The signed rows (Angle, and every local adjustment) pass theirs.
+    private func maskSlider(
+        _ title: String, value: Binding<Double>, range: ClosedRange<Double>,
+        neutral: Double? = nil
+    ) -> some View {
         HStack(spacing: 6) {
             Text(title)
                 .font(.caption)
                 .frame(width: 82, alignment: .leading)
-            Slider(
-                value: value, in: range,
+            NeutralOriginSlider(
+                value: value, in: range, neutral: neutral ?? range.lowerBound,
+                accessibilityTitle: title,
+                accessibilityReadout: value.wrappedValue.formatted(
+                    .number.precision(.fractionLength(1))),
                 onEditingChanged: { editing in
                     if editing {
                         viewModel.beginPreviewInteraction()

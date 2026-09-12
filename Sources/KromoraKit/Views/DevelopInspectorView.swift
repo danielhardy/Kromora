@@ -153,9 +153,16 @@ struct DevelopInspectorView: View {
                 .accessibilityValue(viewModel.developValue(for: control) != 0 ? "On" : "Off")
                 .accessibilitySortPriority(sortPriority)
             } else {
-                Slider(
+                NeutralOriginSlider(
                     value: viewModel.developBinding(for: control),
                     in: control.range,
+                    // The decoder default, which for most of these rows is a per-image seed rather
+                    // than a constant — see `developNeutral(for:)`.
+                    neutral: viewModel.developNeutral(for: control),
+                    accessibilityTitle: control == .whiteBalance
+                        ? "White Balance Temperature" : control.title,
+                    accessibilityReadout: String(
+                        format: "%.2f", viewModel.developValue(for: control)),
                     onEditingChanged: { editing in
                         if editing {
                             viewModel.beginPreviewInteraction()
@@ -186,9 +193,13 @@ struct DevelopInspectorView: View {
                             reset: { viewModel.resetWhiteBalance(.tint) },
                             resetActionTitle: "Reset to As Shot"
                         )
-                        Slider(
+                        NeutralOriginSlider(
                             value: viewModel.developTintBinding(),
                             in: DevelopControl.tintRange,
+                            neutral: viewModel.developTintNeutral,
+                            accessibilityTitle: "White Balance Tint",
+                            accessibilityReadout: String(
+                                format: "%.2f", viewModel.developTintBinding().wrappedValue),
                             onEditingChanged: { editing in
                                 if editing {
                                     viewModel.beginPreviewInteraction()
