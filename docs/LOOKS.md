@@ -1,7 +1,7 @@
 # Looks and LUTs
 
 Kromora's Look workflow supports text-based 3D LUTs, derives Looks from a RAW/JPG pair, and ships
-four read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,
+16 read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,
 and `RenderPipeline`; this document records the supported interchange contract.
 
 ## File support
@@ -29,18 +29,40 @@ scratch Look until the user saves it.
 
 ## Starter library and storage
 
-The bundled library contains four original procedural cubes:
+The bundled library contains 16 original procedural cubes:
 
 | Category | Look |
 | --- | --- |
 | Monochrome | Soft Mono |
+| Monochrome | Silver Noir |
+| Monochrome | Paper Grain |
+| Monochrome | Blueprint Mono |
+| Monochrome | Infrared Mono |
 | Cinematic | Evening Cinema |
+| Cinematic | Ember & Cyan |
+| Cinematic | Neon Dusk |
 | Film-inspired | Muted Film |
+| Film-inspired | Honey Negative |
 | Warm slide-inspired | Warm Slide |
+| Pastel | Pastel Wash |
+| Faded | Bleached Daylight |
+| High-contrast | Hard Light |
+| Cool-toned | Midnight Slate |
+| Moody | Forest Shadow |
 
-Their provenance, licensing, and approval metadata live beside the assets in the bundled manifest;
-the package and tests fail closed for missing or malformed approved entries. Bundled Looks are
-read-only. Imported and saved Looks remain user-owned and use the canonical folder
+These are intentionally distinct starting points rather than minor intensity variants. The
+monochrome entries use different luminance curves, while the color entries cover cinematic
+orange-and-teal, warm natural negative-film-inspired, pastel, faded, high-contrast, cool, and
+moody directions.
+
+Their machine-readable provenance, licensing, redistribution terms, and approval metadata live
+beside the assets in the bundled manifest; the package and tests fail closed for missing or
+malformed approved entries. Film and manufacturer references are descriptive inspiration only:
+Kromora does not bundle official camera profiles or copied commercial emulation data. The
+acknowledgement shown in the Look inspector is sourced from that manifest.
+
+Bundled Looks are read-only and visually marked as Starter Looks. Imported and saved Looks remain
+user-owned and use the canonical folder
 `~/Library/Application Support/Kromora/Looks`, with security-scoped bookmarks for selected files.
 
 The selected Look is persisted by stable `LUTID`. A missing file leaves the edit reference intact

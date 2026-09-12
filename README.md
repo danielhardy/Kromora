@@ -94,8 +94,10 @@ and become one undo entry when committed; numeric fields and resets use the sett
 
 - Parses standard `.cube` 3D LUTs, including `LUT_3D_SIZE` and `DOMAIN_MIN`/`DOMAIN_MAX`.
 - Applies LUTs through `CIColorCubeWithColorSpace` with Metal-backed Core Image rendering.
-- Ships four original, read-only starter Looks across Monochrome, Cinematic, Film-inspired, and
-  Warm slide-inspired categories. Provenance, licensing, attribution, redistribution, and approval
+- Ships 16 original, read-only starter Looks across Monochrome, Cinematic, Film-inspired, Warm
+  slide-inspired, Pastel, Faded, High-contrast, Cool-toned, and Moody categories. Film-inspired
+  names are descriptive only; no official camera profiles or commercial emulation data are bundled.
+  Provenance, licensing, attribution, redistribution, and approval
   records live in [`docs/LOOKS.md`](docs/LOOKS.md) and the bundled manifest.
 - Scans a Look folder recursively, groups files by subfolder, supports search and None, and keeps
   folder access through App Sandbox security-scoped bookmarks.
