@@ -20,6 +20,11 @@ Core Image, render, and AppKit/UI-sensitive tests. `scripts/ci-tests.sh optional
 benchmark, and packaging checks when their inputs are available. Generated fixtures are created by
 the tests and are not committed.
 
+The pre-package folder-backed library baseline is documented in
+[`LIBRARY_PACKAGE_BASELINE.md`](LIBRARY_PACKAGE_BASELINE.md). Its opt-in harness runs in the
+optional lane with `KROMORA_LIBRARY_BASELINE_BENCHMARK=1` and emits the stable JSON report shape
+described there.
+
 ## Optional RAW and performance work
 
 Use a licensed RAW outside the checkout and set `KROMORA_RAW_FIXTURE_DIR` as required by the
