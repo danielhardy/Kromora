@@ -2,7 +2,7 @@
 id: KRMA-375
 title: Use effect-specific color tracks for color adjustment sliders
 type: feature
-status: ready
+status: done
 priority: medium
 model: gpt-5.6-terra
 creation_provenance:
@@ -12,7 +12,7 @@ creation_provenance:
 labels:
   - ui
 created: 2026-09-12T14:49:05.651Z
-updated: 2026-09-12T14:58:18.774Z
+updated: 2026-09-12T16:00:04.828Z
 order: t
 board: product
 ---
@@ -35,3 +35,7 @@ The supplied reference shows color-aware tracks: Temperature transitions from co
 - [ ] Colors remain legible and sufficiently contrasted in supported light/dark appearances, and the control remains understandable without relying on color alone.
 - [ ] Existing ranges, numeric values, direct entry, accessibility labels/values, keyboard interaction, reset behavior, undo grouping, persistence, and render semantics remain unchanged.
 - [ ] Add visual/UI regression coverage or snapshot-level verification for the color ramps and manual QA against the supplied reference.
+
+## Agent log
+
+- 2026-09-12T16:00:04.826Z: Added semantic full-range temperature, tint, chroma, and hue slider tracks across Color, Develop/Adjust, and local masks; preserved native behavior and added AppKit raster regression coverage.
