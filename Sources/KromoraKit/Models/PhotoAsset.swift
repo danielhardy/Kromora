@@ -433,7 +433,6 @@ struct PhotoAsset: Identifiable, Codable, Hashable, Sendable, Equatable {
             libraryState: libraryState
         )
     }
-
 }
 
 typealias PhotoAssetState = PhotoAssetLibraryState
