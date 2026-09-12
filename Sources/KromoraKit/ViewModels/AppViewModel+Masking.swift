@@ -1,6 +1,7 @@
-import Foundation
-import CoreGraphics
 import AppKit
+import CoreGraphics
+import Foundation
+import SwiftUI
 
 /// The creation actions exposed by the persistent masking workspace. A layer is created with a
 /// durable recipe immediately; semantic pixels and other render resources remain derived state.
@@ -576,6 +577,43 @@ extension AppViewModel {
     ) {
         guard let id = maskInteractionState.selectedLayerID else { return }
         updateMask(id, debounced: debounced, transform)
+    }
+
+    /// Value-only access for a local control. Draft layers are included so a control never lags
+    /// behind an in-progress mask creation gesture.
+    func localAdjustmentValue(
+        _ control: LocalAdjustmentControl, in layerID: UUID
+    ) -> Double {
+        let layer = maskInteractionState.draftLayer?.id == layerID
+            ? maskInteractionState.draftLayer
+            : document.localAdjustments.first(where: { $0.id == layerID })
+        return control.value(in: layer?.adjustments ?? .neutral)
+    }
+
+    /// The local equivalent of the normal inspector bindings. The layer ID is explicit by design:
+    /// changing a selected layer must never fall through to `document.adjustments` or another
+    /// layer, and the continuous edit path remains debounced for preview and undo consistency.
+    func localAdjustmentBinding(
+        _ control: LocalAdjustmentControl, in layerID: UUID
+    ) -> Binding<Double> {
+        Binding(
+            get: { self.localAdjustmentValue(control, in: layerID) },
+            set: { value in
+                self.updateMask(layerID, debounced: true) { layer in
+                    control.setting(value, in: &layer.adjustments)
+                }
+            }
+        )
+    }
+
+    /// Set one local adjustment to its neutral value without crossing into global state. Like the
+    /// global inspector resets, this is discrete and immediate; a preceding slider group is ended
+    /// first so the reset gets its own undo entry.
+    func resetMaskAdjustment(_ control: LocalAdjustmentControl, in layerID: UUID) {
+        endUndoGrouping()
+        updateMask(layerID) { layer in
+            control.setting(control.neutral, in: &layer.adjustments)
+        }
     }
 
     func addMaskComponent(to layerID: UUID, source: MaskSource, mode: MaskCombineMode = .add) {
