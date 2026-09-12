@@ -261,14 +261,18 @@ public struct ContentView: View {
         .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
         .disabled(!viewModel.isComparisonPresentationAvailable)
 
-        // Source folder browser
+        // Keep the editor controls on the trailing side of the toolbar. Source-folder browsing
+        // remains available from Import, while this button reveals the editor's inspector.
         Button {
-            viewModel.toggleSourceBrowser()
+            viewModel.toggleInspector()
         } label: {
-            Label("Source", systemImage: "sidebar.leading")
+            Label("Info", systemImage: "sidebar.right")
         }
-        .help("Show the source folder file browser")
-        .disabled(viewModel.collection.items.isEmpty)
+        .accessibilityLabel("Editor sidebar")
+        .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
+        .accessibilityHint("Show or hide the editor sidebar")
+        .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
+        .disabled(viewModel.sourceImage == nil)
 
         // Keep reset scopes together and visible: the panel reset affects only the current stage,
         // while Reset Photo clears every edit on the active source. The File menu retains the
