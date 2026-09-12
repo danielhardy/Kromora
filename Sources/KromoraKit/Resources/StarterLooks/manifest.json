@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "acknowledgement": "Starter Looks are original Kromora assets, distributed under the Kromora MIT License. They are read-only and require no third-party attribution. Film and manufacturer references are descriptive inspiration only; no official profiles or commercial emulation data are bundled.",
+  "acknowledgement": "Starter Looks are original Kromora assets. They are read-only and require no third-party attribution. Film and manufacturer references are descriptive inspiration only; no official profiles or commercial emulation data are bundled.",
   "looks": [
     {
       "id": "kromora.starter.soft-mono",

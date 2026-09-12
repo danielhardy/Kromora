@@ -34,6 +34,7 @@ final class BundledLookTests: TempDirectoryTestCase {
         XCTAssertTrue(manifest.looks.contains { $0.name == "Midnight Slate" && $0.category == "Cool-toned" })
         XCTAssertTrue(manifest.looks.contains { $0.name == "Forest Shadow" && $0.category == "Moody" })
         XCTAssertTrue(manifest.acknowledgement.contains("descriptive inspiration"))
+        XCTAssertFalse(manifest.acknowledgement.localizedCaseInsensitiveContains("mit"))
     }
 
     func testApplicationLibrarySeparatesStarterLooksFromUserLooks() async throws {
