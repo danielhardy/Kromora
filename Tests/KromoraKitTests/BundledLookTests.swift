@@ -41,6 +41,12 @@ final class BundledLookTests: TempDirectoryTestCase {
         let library = makeLibrary()
         XCTAssertEqual(library.allLUTs.count, 16)
         XCTAssertTrue(library.allLUTs.allSatisfy { $0.source == .bundled })
+        XCTAssertEqual(library.lookCollections.map(\.title), ["Starter Looks", "My Looks"])
+        XCTAssertEqual(library.starterLooks.count, 16)
+        XCTAssertTrue(library.starterLooks.allSatisfy { $0.source == .bundled })
+        XCTAssertTrue(library.myLooks.isEmpty, "the empty My Looks collection must remain visible")
+        XCTAssertTrue(library.lookCollections[0].isReadOnly)
+        XCTAssertFalse(library.lookCollections[1].isReadOnly)
         XCTAssertEqual(
             library.categories.map(\.name),
             ["Cinematic", "Cool-toned", "Faded", "Film-inspired", "High-contrast",
@@ -58,6 +64,32 @@ final class BundledLookTests: TempDirectoryTestCase {
         XCTAssertEqual(library.allLUTs.filter { $0.source == .bundled }.count, 16)
         XCTAssertEqual(library.allLUTs.filter { $0.source == .user }.map(\.name), ["my-look"])
         XCTAssertEqual(library.categories.filter { $0.source == .user }.map(\.name), ["Imported"])
+        XCTAssertEqual(library.starterLooks.count, 16)
+        XCTAssertEqual(library.myLooks.map(\.name), ["my-look"])
+        XCTAssertTrue(library.myLooks.allSatisfy { $0.source != .bundled })
+        XCTAssertEqual(library.lookCollections.map { $0.looks.count }, [16, 1])
+    }
+
+    func testLookCollectionsHaveDeterministicFlatOrderingAcrossCategories() async throws {
+        let preferences = UserDefaults(suiteName: "Kromora.BundledLookOrderingTests")!
+        preferences.removePersistentDomain(forName: "Kromora.BundledLookOrderingTests")
+        let library = LUTLibrary(
+            preferences: preferences,
+            userLookFolderURL: tempDirectory.appendingPathComponent("user-looks", isDirectory: true)
+        )
+        let folder = tempDirectory.appendingPathComponent("ordered-looks", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let nested = folder.appendingPathComponent("Nested", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "Zebra.cube", in: folder)
+        try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "Alpha.cube", in: nested)
+        try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "Middle.cube", in: folder)
+
+        library.scan(folder)
+        while library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        XCTAssertEqual(library.myLooks.map(\.name), ["Alpha", "Middle", "Zebra"])
+        XCTAssertEqual(library.lookCollections.map { $0.looks.map(\.name) }, [[], ["Alpha", "Middle", "Zebra"]])
     }
 
     func testEveryBundledLookCanApplyWithoutMutatingTheInput() throws {

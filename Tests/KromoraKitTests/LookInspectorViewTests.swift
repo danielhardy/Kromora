@@ -131,6 +131,40 @@ final class LookInspectorViewTests: TempDirectoryTestCase {
         }
     }
 
+    func testRenderedGroupedCollectionsKeepStarterAndMyLooksSeparate() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let starter = CubeLUT(
+            cube: Array(repeating: SIMD3<Float>(0.2, 0.3, 0.4), count: 8),
+            size: 2,
+            name: "Starter Look",
+            category: "Cinematic",
+            source: .bundled
+        )
+        let user = CubeLUT(
+            cube: Array(repeating: SIMD3<Float>(0.6, 0.7, 0.8), count: 8),
+            size: 2,
+            name: "My Look",
+            category: "Imported",
+            source: .user
+        )
+        viewModel.library.categories = [
+            LUTLibrary.Category(
+                id: "bundled:Cinematic", name: "Cinematic", luts: [starter], source: .bundled
+            ),
+            LUTLibrary.Category(
+                id: "user:Imported", name: "Imported", luts: [user], source: .user
+            ),
+        ]
+        viewModel.library.allLUTs = [starter, user]
+
+        XCTAssertEqual(viewModel.library.lookCollections.map(\.title), ["Starter Looks", "My Looks"])
+        XCTAssertEqual(viewModel.library.lookCollections.map { $0.looks.map(\.name) }, [["Starter Look"], ["My Look"]])
+
+        let rendered = render(viewModel: viewModel, width: 280)
+        XCTAssertGreaterThan(rendered.hosting.fittingSize.height, 0)
+        assertRasterized(rendered.hosting, state: .populated)
+    }
+
     private struct RenderedLookInspector {
         let hosting: NSHostingView<LookInspectorView>
         let window: NSWindow
