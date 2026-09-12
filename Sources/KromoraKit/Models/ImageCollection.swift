@@ -249,6 +249,10 @@ final class ImageCollection: ObservableObject {
     /// Folder whose security scope we hold open, released when we move on.
     private var scopedURL: URL?
 
+    /// Test-only visibility for the source-folder scope. Removable-media imports must not leave
+    /// their temporary scope in this slot after their managed copies have been created.
+    var hasActiveSourceFolderScopeForTesting: Bool { scopedURL != nil }
+
     init(
         scheduler: ImageWorkScheduler = ImageWorkScheduler(),
         defaults: UserDefaults = .standard,
@@ -1026,8 +1030,10 @@ final class ImageCollection: ObservableObject {
     @discardableResult
     func addFromMediaVolume(_ volume: MediaVolume, files: [MediaVolumeFile]) -> [PhotoAssetID] {
         let accessURL = volume.resolvedAccessURL()
-        _ = accessURL.startAccessingSecurityScopedResource()
-        scopedURL = accessURL
+        let hasScope = accessURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasScope { accessURL.stopAccessingSecurityScopedResource() }
+        }
         return addFromURLs(files.map(\.url))
     }
 

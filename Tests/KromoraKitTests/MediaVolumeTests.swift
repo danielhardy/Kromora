@@ -154,6 +154,7 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         let ids = collection.addFromMediaVolume(volume, files: [file])
         XCTAssertEqual(ids.count, 1)
         let imported = try XCTUnwrap(collection.items.first)
+        let managedURL = try XCTUnwrap(imported.url)
         XCTAssertEqual(imported.url?.deletingLastPathComponent().standardizedFileURL,
                        libraryFolder.standardizedFileURL)
         XCTAssertEqual(imported.displayName, "DSC0001")
@@ -161,6 +162,22 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         XCTAssertEqual(imported.asset.metadata.dimensions,
                        PhotoPixelDimensions(width: 32, height: 64))
         XCTAssertEqual(try Data(contentsOf: url), original)
+
+        // The source card can be ejected as soon as the synchronous copy returns. The managed
+        // asset must remain usable without the source file or its security scope.
+        try FileManager.default.removeItem(at: url)
+        XCTAssertEqual(try Data(contentsOf: managedURL), original)
+        XCTAssertFalse(collection.hasActiveSourceFolderScopeForTesting)
+    }
+
+    func testFailedMediaVolumeImportDoesNotRetainACollectionScope() throws {
+        let missingURL = tempDirectory.appendingPathComponent("missing.jpg")
+        let volume = MediaVolume(name: "Removed Card", url: tempDirectory)
+        let file = MediaVolumeFile(url: missingURL, filename: "missing.jpg")
+        let collection = makeTestCollection()
+
+        XCTAssertTrue(collection.addFromMediaVolume(volume, files: [file]).isEmpty)
+        XCTAssertFalse(collection.hasActiveSourceFolderScopeForTesting)
     }
 
     private func waitUntil(
