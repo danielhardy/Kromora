@@ -4,9 +4,13 @@ import Combine
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Manages a collection of imported images with async thumbnail generation.
+/// Main-actor presentation model for the image library.
+///
+/// This is intentionally the platform-facing owner of Combine publication, `NSImage` thumbnails,
+/// folder discovery, and demand scheduling. Durable asset identity, selection values, and edit
+/// documents remain value types that this model consumes rather than publishes itself.
 @MainActor
-final class ImageCollection: ObservableObject {
+final class ImageCollectionPresentationModel: ObservableObject {
 
     enum LibrarySourceKind: String, Sendable, Equatable {
         case managed
@@ -1583,10 +1587,10 @@ final class ImageCollection: ObservableObject {
         ) { [weak self] in
             let thumbnail: NSImage?
             if let url {
-                thumbnail = await Task.detached { Thumbnails.generate(from: url) }.value
+                thumbnail = await Task.detached { PlatformThumbnailProvider.generate(from: url) }.value
             } else if let data {
                 thumbnail = await Task.detached {
-                    Thumbnails.generate(from: data, dataFingerprint: dataFingerprint)
+                    PlatformThumbnailProvider.generate(from: data, dataFingerprint: dataFingerprint)
                 }.value
             } else {
                 thumbnail = nil
@@ -1786,3 +1790,7 @@ final class ImageCollection: ObservableObject {
         }
     }
 }
+
+/// Source-compatible spelling retained for the library and test seams while the owning role is
+/// explicit in the implementation type name.
+typealias ImageCollection = ImageCollectionPresentationModel

@@ -1,5 +1,4 @@
 import Foundation
-import AppKit
 import Combine
 
 /// The two folder defaults that affect operations started after the setting changes.
@@ -54,6 +53,10 @@ public struct KromoraFolderTestResult: Sendable, Equatable {
 
 /// Persistent application preferences. Values use namespaced UserDefaults keys and a schema version;
 /// workflow-owned bookmarks and unrelated settings are never replaced by a settings write.
+///
+/// This is an application settings store, not a SwiftUI/AppKit view model. Folder bookmark and
+/// accessibility work is kept in Foundation/FileManager seams so the Settings view can remain the
+/// only owner of folder-panel presentation.
 @MainActor
 public final class KromoraSettings: ObservableObject {
     public static let currentSchemaVersion = 1
@@ -273,13 +276,6 @@ public final class KromoraSettings: ObservableObject {
         } catch {
             return nil
         }
-    }
-
-    @discardableResult
-    public func revealUserLookFolder() -> Bool {
-        guard let folder = ensureUserLookFolder() else { return false }
-        NSWorkspace.shared.activateFileViewerSelecting([folder])
-        return true
     }
 
     private func migrateIfNeeded() {
