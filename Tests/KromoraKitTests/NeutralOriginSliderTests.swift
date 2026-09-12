@@ -128,6 +128,33 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertGreaterThan(magenta.blueComponent, magenta.greenComponent, "the positive tint end should retain blue")
     }
 
+    func testSemanticTrackReachesBothEdgesOfTheBar() {
+        let left = trackColor(style: .temperature, at: 0.02)
+        let right = trackColor(style: .temperature, at: 0.98)
+
+        XCTAssertGreaterThan(
+            left.blueComponent, left.redComponent,
+            "the colored track should reach the cool bar edge"
+        )
+        XCTAssertGreaterThan(
+            right.redComponent, right.blueComponent,
+            "the colored track should reach the warm bar edge"
+        )
+    }
+
+    func testThumbGeometryIsCircularWithoutChangingNativeKnobGeometry() {
+        let slider = makeSlider(range: -100...100, neutral: 0, value: 0)
+        guard let cell = slider.cell as? NeutralOriginSliderCell else {
+            return XCTFail("the slider is not using the neutral-origin cell")
+        }
+
+        let nativeKnob = cell.knobRect(flipped: false)
+        let circle = NeutralOriginSliderCell.circularKnobRect(in: nativeKnob)
+        XCTAssertEqual(circle.width, circle.height, accuracy: 0.001)
+        XCTAssertEqual(circle.midX, nativeKnob.midX, accuracy: 0.001)
+        XCTAssertEqual(circle.midY, nativeKnob.midY, accuracy: 0.001)
+    }
+
     func testColorControlsUseDocumentedSemanticTracks() {
         XCTAssertEqual(ColorGlobalControl.saturation.trackStyle, .saturation)
         XCTAssertEqual(ColorGlobalControl.vibrance.trackStyle, .vibrance)
@@ -177,9 +204,7 @@ final class NeutralOriginSliderTests: XCTestCase {
         cell.drawBar(inside: slider.bounds, flipped: false)
         NSGraphicsContext.restoreGraphicsState()
 
-        let knob = cell.knobRect(flipped: false)
-        let travel = slider.bounds.width - knob.width
-        let point = knob.width / 2 + travel * fraction
+        let point = slider.bounds.minX + slider.bounds.width * fraction
         let scale = CGFloat(rep.pixelsWide) / slider.bounds.width
         let x = min(max(Int(point * scale), 0), rep.pixelsWide - 1)
         let y = rep.pixelsHigh / 2

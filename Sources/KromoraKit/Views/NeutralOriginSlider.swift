@@ -10,7 +10,7 @@ import SwiftUI
 /// `NSSlider` and overrides the single cell method that draws the bar, where the geometry is
 /// available rather than assumed (`knobRect(flipped:)`).
 ///
-/// **Only the bar drawing is ours.** The knob, hit-testing and drag tracking, arrow- and page-key
+/// **Only the bar and knob drawing are ours.** Hit-testing and drag tracking, arrow- and page-key
 /// handling, and the native slider accessibility element all stay AppKit's, which is what keeps the
 /// interaction identical to the `Slider` this replaces.
 ///
@@ -205,8 +205,9 @@ enum SliderTrackStyle: Equatable, Sendable {
 
 /// The one piece of `NeutralOriginSlider` that draws.
 ///
-/// `drawKnob` is deliberately not overridden — the knob stays the system's, so the control still
-/// reads as a macOS slider and picks up focus rings and the accent colour for free.
+/// `drawKnob` only changes the thumb's shape; the cell's knob geometry, hit testing, and tracking
+/// remain AppKit's. That keeps the control behaving like a macOS slider while avoiding the stock
+/// capsule thumb, which leaves the coloured bar looking capped at either end.
 final class NeutralOriginSliderCell: NSSliderCell {
     /// The value the fill is anchored at, in slider space.
     var neutral: Double = 0
@@ -245,9 +246,10 @@ final class NeutralOriginSliderCell: NSSliderCell {
         let origin = bar.minX + knobWidth / 2
         let range = minValue...maxValue
         let neutralFraction = CGFloat((neutral - minValue) / (maxValue - minValue))
-        let trackRect = NSRect(x: origin, y: bar.minY, width: travel, height: bar.height)
-
-        drawTrack(in: bar, travelRect: trackRect, radius: radius, neutralFraction: neutralFraction)
+        // The visual track belongs to the full bar. Only the value-to-position calculation uses
+        // knob travel; using that inset rect for the gradient creates a grey half-thumb cap at both
+        // ends even though the slider's bar itself reaches those edges.
+        drawTrack(in: bar, radius: radius, neutralFraction: neutralFraction)
 
         let fill = SliderFill.span(value: doubleValue, neutral: neutral, in: range)
         guard !fill.isEmpty else {
@@ -260,8 +262,26 @@ final class NeutralOriginSliderCell: NSSliderCell {
             width: travel * (fill.end - fill.start),
             height: bar.height
         )
-        drawActiveFill(in: fillRect, across: trackRect, radius: radius, neutralFraction: neutralFraction)
+        drawActiveFill(in: fillRect, across: bar, radius: radius, neutralFraction: neutralFraction)
         drawNeutralMarker(in: bar, at: origin + travel * neutralFraction)
+    }
+
+    override func drawKnob(_ knobRect: NSRect) {
+        let circle = Self.circularKnobRect(in: knobRect)
+        guard !circle.isEmpty else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        let path = NSBezierPath(ovalIn: circle)
+        let fill = isEnabled ? NSColor.controlBackgroundColor : NSColor.quaternaryLabelColor
+        fill.setFill()
+        path.fill()
+
+        let stroke = isEnabled ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor
+        stroke.setStroke()
+        path.lineWidth = 1
+        path.stroke()
     }
 
     override func startTracking(at startPoint: NSPoint, in controlView: NSView) -> Bool {
@@ -288,31 +308,32 @@ final class NeutralOriginSliderCell: NSSliderCell {
         isEnabled ? .tertiaryLabelColor : .quaternaryLabelColor
     }
 
-    private func drawTrack(
-        in bar: NSRect, travelRect: NSRect, radius: CGFloat, neutralFraction: CGFloat
-    ) {
+    private func drawTrack(in bar: NSRect, radius: CGFloat, neutralFraction: CGFloat) {
         let barPath = NSBezierPath(roundedRect: bar, xRadius: radius, yRadius: radius)
         emptyTrackColor.setFill()
         barPath.fill()
-        guard isEnabled, trackStyle.usesGradient,
-              let gradient = trackStyle.gradient(neutralFraction: neutralFraction), !travelRect.isEmpty
+        guard isEnabled,
+            trackStyle.usesGradient,
+            let gradient = trackStyle.gradient(neutralFraction: neutralFraction)
         else { return }
 
         NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(roundedRect: travelRect, xRadius: radius, yRadius: radius).addClip()
-        gradient.draw(from: NSPoint(x: travelRect.minX, y: travelRect.midY),
-                      to: NSPoint(x: travelRect.maxX, y: travelRect.midY), options: [])
+        barPath.addClip()
+        gradient.draw(
+            from: NSPoint(x: bar.minX, y: bar.midY),
+            to: NSPoint(x: bar.maxX, y: bar.midY), options: []
+        )
         // The full range remains visible, while an active span gets the unmuted ramp below.
         emptyTrackColor.withAlphaComponent(0.38).setFill()
-        NSBezierPath(rect: travelRect).fill()
+        NSBezierPath(rect: bar).fill()
         NSGraphicsContext.restoreGraphicsState()
     }
 
     private func drawActiveFill(
-        in fillRect: NSRect, across travelRect: NSRect, radius: CGFloat, neutralFraction: CGFloat
+        in fillRect: NSRect, across trackRect: NSRect, radius: CGFloat, neutralFraction: CGFloat
     ) {
         guard trackStyle.usesGradient,
-              let gradient = trackStyle.gradient(neutralFraction: neutralFraction)
+            let gradient = trackStyle.gradient(neutralFraction: neutralFraction)
         else {
             fillColor.setFill()
             NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).fill()
@@ -321,10 +342,12 @@ final class NeutralOriginSliderCell: NSSliderCell {
 
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).addClip()
-        // Draw from the travel endpoints, not the fill endpoints: the colour at a value has to be
+        // Draw from the bar endpoints, not the fill endpoints: the colour at a value has to be
         // the same whether the user reaches it from negative or positive territory.
-        gradient.draw(from: NSPoint(x: travelRect.minX, y: travelRect.midY),
-                      to: NSPoint(x: travelRect.maxX, y: travelRect.midY), options: [])
+        gradient.draw(
+            from: NSPoint(x: trackRect.minX, y: trackRect.midY),
+            to: NSPoint(x: trackRect.maxX, y: trackRect.midY), options: []
+        )
         NSGraphicsContext.restoreGraphicsState()
     }
 
@@ -340,6 +363,19 @@ final class NeutralOriginSliderCell: NSSliderCell {
         return NSRect(
             x: rect.minX, y: rect.midY - barThickness / 2,
             width: rect.width, height: barThickness
+        )
+    }
+
+    /// Fits the largest possible circle inside AppKit's native knob rect, preserving its center
+    /// and therefore preserving the knob's existing value geometry and hit target.
+    static func circularKnobRect(in rect: NSRect) -> NSRect {
+        let diameter = min(rect.width, rect.height)
+        guard diameter > 0 else { return .zero }
+        return NSRect(
+            x: rect.midX - diameter / 2,
+            y: rect.midY - diameter / 2,
+            width: diameter,
+            height: diameter
         )
     }
 }
