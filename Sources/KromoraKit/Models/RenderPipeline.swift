@@ -41,8 +41,9 @@ enum RenderPipeline {
     /// (transform baked) stood upright.
     /// v24 adds the durable quarter-turn image rotation stage.
     /// v25 stops re-baking that tag: `CIRAWFilter` already orients `outputImage`, and a second
-    /// bake turned portrait RAWs (EXIF 5–8) back into landscape.
-    static let cacheVersion = 25
+    /// bake turned portrait RAWs (EXIF 5–8) back into landscape. v26 preserves full-source local
+    /// mask coordinates when a preview is evaluated from a non-nil source ROI.
+    static let cacheVersion = 26
 
     /// Build the graph for `document` over `source`.
     ///

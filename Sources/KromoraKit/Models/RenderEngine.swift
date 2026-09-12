@@ -1405,6 +1405,7 @@ actor RenderEngine: RenderEngining {
         }
         let resolvedMasks = try await resolvedLocalMasks(
             for: document.localAdjustments, source: source, extent: upstream.extent,
+            maskExtent: fullFrameExtent,
             quality: quality, transform: maskTransform, assetID: assetID,
             requestRevision: requestRevision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity,
@@ -1640,6 +1641,7 @@ actor RenderEngine: RenderEngining {
         for layers: [LocalAdjustmentLayer],
         source: ImageSource,
         extent: CGRect,
+        maskExtent: CGRect? = nil,
         quality: RenderQuality,
         transform: LocalMaskRenderTransform,
         assetID: PhotoAssetID?,
@@ -1656,8 +1658,13 @@ actor RenderEngine: RenderEngining {
               extent.width <= CGFloat(Int.max), extent.height <= CGFloat(Int.max)
         else { return ResolvedLocalMaskSet(images: [:], cacheIdentity: nil) }
 
+        // Mask definitions are normalized in the complete oriented source. An ROI changes the
+        // upstream image extent, but it must not change the coordinate system used to resolve or
+        // rasterize those definitions. Render the mask in the complete frame and clip it back to
+        // the working extent only after its source-space coverage has been established.
+        let renderExtent = maskExtent ?? extent
         let (payloads, duplicateKeys) = try await resolveMaskPayloads(
-            for: layers, source: source, extent: extent, quality: quality,
+            for: layers, source: source, extent: renderExtent, quality: quality,
             transform: transform, assetID: assetID, requestRevision: requestRevision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity,
             resolveSemanticMasks: resolveSemanticMasks, includeIdentity: includeIdentity,
@@ -1690,7 +1697,7 @@ actor RenderEngine: RenderEngining {
                 if !resolveSemanticMasks, component.source.semanticDefinition != nil { continue }
                 let definitionHash = RenderCacheHash.digest(component.source)
                 let componentTargetSize = maskTargetSize(
-                    for: component, extent: extent, quality: quality
+                    for: component, extent: renderExtent, quality: quality
                 )
                 let key = LocalMaskCacheKey(
                     source: RenderSourceFingerprint(source), definitionHash: definitionHash,
@@ -1730,9 +1737,9 @@ actor RenderEngine: RenderEngining {
                 }
 
                 guard let image = localMaskRenderer.image(
-                    for: payload, extent: extent, transform: transform
+                    for: payload, extent: renderExtent, transform: transform
                 ) else { throw LocalMaskResolutionError.invalidPayload }
-                var componentImage = image
+                var componentImage = image.cropped(to: extent)
                 if component.isInverted {
                     componentImage = localMaskRenderer.inverted(componentImage, extent: extent)
                 }
