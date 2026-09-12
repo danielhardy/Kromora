@@ -78,16 +78,6 @@ struct LookInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var searchText = ""
 
-    /// Names of collapsed folders. Stored as a set of category names (a folder absent from the set
-    /// is expanded), so newly-discovered folders default to expanded. Persisted across launches and
-    /// re-scans.
-    private static let collapsedKey = "kromora.collapsedLUTCategories"
-    private static let legacyCollapsedKey = "lumo.collapsedLUTCategories"
-    @State private var collapsed: Set<String> =
-        Set(UserDefaults.standard.stringArray(forKey: LookInspectorView.collapsedKey)
-            ?? UserDefaults.standard.stringArray(forKey: LookInspectorView.legacyCollapsedKey) ?? [])
-
-    private var isSearching: Bool { !searchText.isEmpty }
     private var hasLooks: Bool { !viewModel.library.allLUTs.isEmpty }
 
     /// Keep the state exposed by the inspector's accessibility container in sync with the
@@ -103,21 +93,32 @@ struct LookInspectorView: View {
         )
     }
 
-    private var filteredCategories: [LUTLibrary.Category] {
-        if searchText.isEmpty {
-            return viewModel.library.categories
-        }
+    private var filteredStarterLooks: [CubeLUT] {
+        filteredLooks(viewModel.library.starterLooks, collection: .starter)
+    }
+
+    private var filteredMyLooks: [CubeLUT] {
+        filteredLooks(viewModel.library.myLooks, collection: .my)
+    }
+
+    private func filteredLooks(
+        _ looks: [CubeLUT], collection: LUTLibrary.LookCollectionID
+    ) -> [CubeLUT] {
+        guard !searchText.isEmpty else { return looks }
         let query = searchText.lowercased()
-        return viewModel.library.categories.compactMap { category in
-            // A folder-name match surfaces the whole folder; otherwise keep only the looks whose
-            // own name matches.
-            if category.name.lowercased().contains(query) {
-                return category
-            }
-            let filtered = category.luts.filter { $0.name.lowercased().contains(query) }
-            return filtered.isEmpty
-                ? nil
-                : LUTLibrary.Category(id: category.id, name: category.name, luts: filtered, source: category.source)
+        guard !collection.title.lowercased().contains(query) else { return looks }
+
+        // Folder/category searches continue to surface the full matching set even though folder
+        // headings are no longer rendered as separate, collapsible groups.
+        let categoryLookIDs = Set(
+            viewModel.library.categories
+                .filter { (collection.isReadOnly ? $0.source == .bundled : $0.source != .bundled)
+                    && $0.name.lowercased().contains(query) }
+                .flatMap(\.luts)
+                .map(\.lutID)
+        )
+        return looks.filter {
+            $0.name.lowercased().contains(query) || categoryLookIDs.contains($0.lutID)
         }
     }
 
@@ -126,23 +127,21 @@ struct LookInspectorView: View {
             header
             if hasLooks {
                 searchField
-                if let scanError = viewModel.library.scanError {
-                    folderErrorBanner(scanError)
-                }
-                if let importError = viewModel.library.importError {
-                    importErrorBanner(importError)
-                }
-                Divider()
-                lookList
-                if !viewModel.library.bundledAcknowledgement.isEmpty,
-                   viewModel.library.allLUTs.contains(where: { $0.source == .bundled }) {
-                    starterAcknowledgement
-                }
-                unresolvedLookSection
-                intensitySection
-            } else {
-                emptyState
             }
+            if let scanError = viewModel.library.scanError {
+                folderErrorBanner(scanError)
+            }
+            if let importError = viewModel.library.importError {
+                importErrorBanner(importError)
+            }
+            Divider()
+            lookList
+            if !viewModel.library.bundledAcknowledgement.isEmpty,
+               !viewModel.library.starterLooks.isEmpty {
+                starterAcknowledgement
+            }
+            unresolvedLookSection
+            intensitySection
         }
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
         .background(KromoraTheme.windowBackground)
@@ -160,28 +159,15 @@ struct LookInspectorView: View {
 
             Spacer()
 
-            if filteredCategories.count > 1 {
-                Button(action: toggleAll) {
-                    Image(systemName: allExpanded ? "rectangle.compress.vertical"
-                                                   : "rectangle.expand.vertical")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .disabled(isSearching)
-                .help(allExpanded ? "Collapse all folders" : "Expand all folders")
+            Button {
+                viewModel.chooseLookFile()
+            } label: {
+                Image(systemName: "plus")
             }
-
-            if hasLooks {
-                Button {
-                    viewModel.chooseLookFile()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .help("Import a Look file")
-                .accessibilityLabel("Import Look")
-            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .help("Import a Look file")
+            .accessibilityLabel("Import Look")
 
             Button {
                 viewModel.refreshLooks()
@@ -252,69 +238,6 @@ struct LookInspectorView: View {
         .onExitCommand { searchText = "" }
         .padding(.horizontal, 12)
         .padding(.bottom, 8)
-    }
-
-    private var emptyState: some View {
-        let state = presentationState
-
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 10) {
-                    if state == .scanning {
-                        ProgressView()
-                            .controlSize(.small)
-                            .frame(width: 44, height: 44)
-                            .background(Color.accentColor.opacity(0.12), in: Circle())
-                            .accessibilityLabel("Scanning Look folder")
-                    } else {
-                        Image(systemName: state.iconName)
-                            .font(.system(size: 24, weight: .medium))
-                            .foregroundStyle(Color.accentColor)
-                            .frame(width: 44, height: 44)
-                            .background(Color.accentColor.opacity(0.12), in: Circle())
-                            .accessibilityHidden(true)
-                    }
-
-                    Text(state.title)
-                        .font(.title3.weight(.semibold))
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    Text(state.message)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                if let scanError = viewModel.library.scanError {
-                    folderErrorBanner(scanError)
-                }
-
-                if let importError = viewModel.library.importError {
-                    importErrorBanner(importError)
-                }
-
-                if viewModel.selectedLookID != nil && viewModel.selectedLook == nil {
-                    unresolvedLookSection
-                }
-
-                importLookButton
-
-                Button {
-                    viewModel.chooseLookFolder()
-                } label: {
-                    Label("Choose Look Folder…", systemImage: "folder")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.regular)
-                .help("Choose a folder containing Look files")
-                .accessibilityHint("Browse for a folder containing external cube or look files")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(state.accessibilityLabel)
     }
 
     private var importLookButton: some View {
@@ -389,53 +312,123 @@ struct LookInspectorView: View {
                 }
             }
 
-            if viewModel.library.isScanning && viewModel.library.allLUTs.isEmpty {
-                scanningRow
-            } else if viewModel.library.allLUTs.isEmpty {
-                emptyFolderRow
-            } else {
-                ForEach(filteredCategories) { category in
-                    Section(isExpanded: isExpandedBinding(category.id)) {
-                        ForEach(category.luts) { lut in
-                            Button {
-                                // Keep the click path ID-based. The library may replace the
-                                // in-memory CubeLUT during a rescan, while the document stores
-                                // only this stable identity.
-                                viewModel.selectLook(id: lut.lutID)
-                            } label: {
-                                LookRow(
-                                    look: lut,
-                                    isSelected: viewModel.selectedLookID == lut.lutID,
-                                    previewProvider: viewModel
-                                )
-                            }
-                            .buttonStyle(.plain)
-                            .tag(Optional(lut.lutID))
-                        }
-                    } header: {
-                        HStack {
-                            Text(category.name)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                            if category.source == .bundled {
-                                Text("Starter • Read-only")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 2)
-                                    .background(Color.accentColor.opacity(0.12), in: Capsule())
-                                    .accessibilityLabel("Starter Looks, read-only")
-                            }
-                            Spacer()
-                            Text("\(category.luts.count)")
-                                .font(.caption2)
-                                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
-                        }
-                    }
+            Section {
+                if filteredStarterLooks.isEmpty {
+                    collectionEmptyRow(
+                        collection: .starter,
+                        hasUnfilteredLooks: !viewModel.library.starterLooks.isEmpty
+                    )
+                } else {
+                    lookRows(filteredStarterLooks)
                 }
+            } header: {
+                collectionHeader(.starter, count: filteredStarterLooks.count)
+            }
+
+            Section {
+                if filteredMyLooks.isEmpty {
+                    collectionEmptyRow(
+                        collection: .my,
+                        hasUnfilteredLooks: !viewModel.library.myLooks.isEmpty
+                    )
+                } else {
+                    lookRows(filteredMyLooks)
+                }
+            } header: {
+                collectionHeader(.my, count: filteredMyLooks.count)
             }
         }
         .listStyle(.sidebar)
+    }
+
+    @ViewBuilder
+    private func lookRows(_ looks: [CubeLUT]) -> some View {
+        ForEach(looks) { lut in
+            Button {
+                // Keep the click path ID-based. The library may replace the in-memory CubeLUT
+                // during a rescan, while the document stores only this stable identity.
+                viewModel.selectLook(id: lut.lutID)
+            } label: {
+                LookRow(
+                    look: lut,
+                    isSelected: viewModel.selectedLookID == lut.lutID,
+                    previewProvider: viewModel
+                )
+            }
+            .buttonStyle(.plain)
+            .tag(Optional(lut.lutID))
+        }
+    }
+
+    private func collectionHeader(
+        _ collection: LUTLibrary.LookCollectionID,
+        count: Int
+    ) -> some View {
+        HStack {
+            Text(collection.title)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            if collection.isReadOnly {
+                Text("Read-only")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    .accessibilityLabel("Starter Looks, read-only")
+            }
+            Spacer()
+            Text("\(count)")
+                .font(.caption2)
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(collection.isReadOnly ? "Starter Looks, read-only" : "My Looks")
+        .accessibilityValue("\(count) \(count == 1 ? "Look" : "Looks")")
+    }
+
+    @ViewBuilder
+    private func collectionEmptyRow(
+        collection: LUTLibrary.LookCollectionID,
+        hasUnfilteredLooks: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if hasUnfilteredLooks {
+                Label(
+                    "No \(collection.title) match “\(searchText)”",
+                    systemImage: "magnifyingglass"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            } else if collection == .my {
+                Label(
+                    viewModel.library.isImporting ? "Importing a Look…" : "No Looks imported yet",
+                    systemImage: viewModel.library.isImporting ? "hourglass" : "plus"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+                Text("Import a .cube or .look file to keep it in My Looks.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                importLookButton
+            } else {
+                Label(
+                    "No Starter Looks available",
+                    systemImage: "wand.and.stars"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 6)
+        .accessibilityElement(children: .combine)
     }
 
     private var selectedLookBinding: Binding<LUTID?> {
@@ -443,32 +436,6 @@ struct LookInspectorView: View {
             get: { viewModel.selectedLookID },
             set: { viewModel.selectLook(id: $0) }
         )
-    }
-
-    private var scanningRow: some View {
-        HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
-            Text("Scanning Look folder…")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .tag(nil as LUTID?)
-    }
-
-    private var emptyFolderRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(viewModel.library.scanError ?? "No Look folder configured")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Choose Folder…") {
-                viewModel.chooseLookFolder()
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
-        .padding(.vertical, 4)
-        .tag(nil as LUTID?)
     }
 
     private var intensitySection: some View {
@@ -546,36 +513,6 @@ struct LookInspectorView: View {
         }
     }
 
-    // MARK: - Folder collapse state
-
-    private var allExpanded: Bool {
-        collapsed.isDisjoint(with: Set(filteredCategories.map(\.id)))
-    }
-
-    private func isExpandedBinding(_ id: String) -> Binding<Bool> {
-        Binding(
-            get: { isSearching || !collapsed.contains(id) },
-            set: { expand in
-                guard !isSearching else { return }
-                if expand { collapsed.remove(id) } else { collapsed.insert(id) }
-                persistCollapsed()
-            }
-        )
-    }
-
-    private func toggleAll() {
-        let ids = Set(filteredCategories.map(\.id))
-        if allExpanded {
-            collapsed.formUnion(ids)
-        } else {
-            collapsed.subtract(ids)
-        }
-        persistCollapsed()
-    }
-
-    private func persistCollapsed() {
-        UserDefaults.standard.set(Array(collapsed), forKey: Self.collapsedKey)
-    }
 }
 
 private struct LookNoneRow: View {

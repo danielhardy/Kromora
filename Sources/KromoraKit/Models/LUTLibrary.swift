@@ -5,6 +5,30 @@ import Combine
 @MainActor
 final class LUTLibrary: ObservableObject {
 
+    enum LookCollectionID: String, CaseIterable, Identifiable, Sendable {
+        case starter
+        case my
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .starter: return "Starter Looks"
+            case .my: return "My Looks"
+            }
+        }
+
+        var isReadOnly: Bool { self == .starter }
+    }
+
+    struct LookCollection: Identifiable, Sendable {
+        let id: LookCollectionID
+        let looks: [CubeLUT]
+
+        var title: String { id.title }
+        var isReadOnly: Bool { id.isReadOnly }
+    }
+
     struct Category: Identifiable, Sendable {
         let id: String      // category name
         let name: String
@@ -31,6 +55,17 @@ final class LUTLibrary: ObservableObject {
     /// Import failures are kept separate from folder-scan failures so one malformed external file
     /// does not blank a healthy Look folder.
     @Published var importError: String?
+
+    /// The two product-facing collections are projections of the canonical category browser.
+    /// Keeping the folder categories underneath preserves folder scans and older integrations,
+    /// while the inspector gets one stable, flat collection for each provenance boundary.
+    var starterLooks: [CubeLUT] { sortedLooks(source: .bundled) }
+    var myLooks: [CubeLUT] { sortedLooks(excluding: .bundled) }
+    var lookCollections: [LookCollection] {
+        LookCollectionID.allCases.map { id in
+            LookCollection(id: id, looks: id == .starter ? starterLooks : myLooks)
+        }
+    }
 
     /// Fired after every scan publishes its results, whatever started it.
     ///
@@ -309,7 +344,7 @@ final class LUTLibrary: ObservableObject {
             return left.name.localizedStandardCompare(right.name) == .orderedAscending
         }.compactMap { key in
             guard let group = byCategory[key] else { return nil }
-            let luts = group.luts.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            let luts = sortedLooks(group.luts)
             return luts.isEmpty ? nil : Category(
                 id: key,
                 name: group.name,
@@ -318,6 +353,22 @@ final class LUTLibrary: ObservableObject {
             )
         }
         allLUTs = categories.flatMap(\.luts)
+    }
+
+    private func sortedLooks(source: LUTSource? = nil, excluding: LUTSource? = nil) -> [CubeLUT] {
+        sortedLooks(allLUTs.filter { look in
+            if let source, look.source != source { return false }
+            if let excluding, look.source == excluding { return false }
+            return true
+        })
+    }
+
+    private func sortedLooks(_ looks: [CubeLUT]) -> [CubeLUT] {
+        looks.sorted { left, right in
+            let nameOrder = left.name.localizedStandardCompare(right.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return left.lutID.raw < right.lutID.raw
+        }
     }
 
     private func retainSecurityScope(for url: URL) {
