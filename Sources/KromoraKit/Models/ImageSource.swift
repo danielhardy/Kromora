@@ -54,8 +54,11 @@ struct ImageSource: Sendable, Equatable {
     /// without decoding the image again.
     let nativeExtent: CGSize
     /// Portable identity captured at the source boundary. Cache consumers must use this value,
-    /// never the URL or filesystem metadata used to obtain the bytes.
+    /// never the URL or filesystem metadata used to obtain the bytes. URL-backed sources retain
+    /// only a bounded file-change signature beside it so replacement checks can avoid a second
+    /// full read for an unchanged file.
     let portableIdentity: PortablePhotoIdentity
+    private let fileChangeSignature: PhotoSourceFingerprint?
     private let dataFingerprint: String?
     /// Captured when this source session is created. This is for observability grouping only;
     /// cache identity must continue to use the dynamic `cacheFingerprint` below.
@@ -75,6 +78,11 @@ struct ImageSource: Sendable, Equatable {
             self.dataFingerprint = dataFingerprint ?? PhotoAssetID.contentDigest(data)
         } else {
             self.dataFingerprint = nil
+        }
+        if case .url(let url) = backing {
+            self.fileChangeSignature = PhotoSourceFingerprint.file(at: url)
+        } else {
+            self.fileChangeSignature = nil
         }
         self.portableIdentity = Self.makePortableIdentity(
             backing: backing, kind: kind, nativeExtent: nativeExtent,
@@ -141,8 +149,9 @@ struct ImageSource: Sendable, Equatable {
     }
 
     /// A cache identity containing only the portable UUID, content hash, decoder revision, and
-    /// geometry. URL-backed content is re-read at this boundary so an in-place replacement cannot
-    /// reuse old pixels; the URL itself never enters the identity.
+    /// geometry. Repeated reads on the render/mask hot path use the captured hash when the bounded
+    /// file-change signature is unchanged. A signature change triggers a fresh content hash, so
+    /// an in-place replacement still gets a new identity; the URL itself never enters the identity.
     var cacheFingerprint: String {
         if case .data = backing, let dataFingerprint {
             let extent = "\(Double(nativeExtent.width).bitPattern):\(Double(nativeExtent.height).bitPattern)"
@@ -159,16 +168,18 @@ struct ImageSource: Sendable, Equatable {
     }
 
     var cacheIdentity: PortablePhotoIdentity {
-        guard case .url(let url) = backing else { return portableIdentity }
-        let fingerprint = try? PortablePhotoSourceFingerprint.file(
-            at: url,
-            sourceRevision: portableIdentity.sourceFingerprint.sourceRevision,
-            decoderVersion: portableIdentity.sourceFingerprint.decoderVersion,
-            geometry: portableIdentity.sourceFingerprint.geometry
-        )
-        return fingerprint.map {
-            PortablePhotoIdentity(assetID: portableIdentity.assetID, sourceFingerprint: $0)
-        } ?? portableIdentity
+        guard case .url(let url) = backing,
+              let fileChangeSignature,
+              PhotoSourceFingerprint.file(at: url) != fileChangeSignature,
+              let fingerprint = try? PortablePhotoSourceFingerprint.file(
+                  at: url,
+                  sourceRevision: portableIdentity.sourceFingerprint.sourceRevision,
+                  decoderVersion: portableIdentity.sourceFingerprint.decoderVersion,
+                  geometry: portableIdentity.sourceFingerprint.geometry
+              ) else {
+            return portableIdentity
+        }
+        return PortablePhotoIdentity(assetID: portableIdentity.assetID, sourceFingerprint: fingerprint)
     }
 
     private static func makePortableIdentity(
