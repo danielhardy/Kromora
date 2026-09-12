@@ -113,6 +113,24 @@ final class PortableCacheIdentityTests: TempDirectoryTestCase {
         XCTAssertNotEqual(beforeKey, RenderSourceFingerprint(after))
     }
 
+    func testImageSourceCacheIdentityRefreshesAfterFileMetadataChanges() throws {
+        let url = tempDirectory.appendingPathComponent("session.png")
+        try Data("before".utf8).write(to: url)
+
+        let source = ImageSource(url: url, nativeExtent: .zero)
+        let sessionIdentity = source.cacheIdentity
+        XCTAssertEqual(source.cacheIdentity, sessionIdentity)
+
+        try Data("after".utf8).write(to: url)
+
+        let refreshedIdentity = source.cacheIdentity
+        XCTAssertNotEqual(refreshedIdentity, sessionIdentity)
+        XCTAssertNotEqual(
+            refreshedIdentity.sourceFingerprint.contentHash,
+            sessionIdentity.sourceFingerprint.contentHash
+        )
+    }
+
     func testPhotoAssetCacheKeySurvivesRelocationAndInvalidatesReplacement() throws {
         let originalURL = tempDirectory.appendingPathComponent("asset.png")
         try Data("asset-before".utf8).write(to: originalURL)
