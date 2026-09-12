@@ -106,6 +106,38 @@ final class NeutralOriginSliderTests: XCTestCase {
         )
     }
 
+    // MARK: - Semantic colour-track snapshots
+
+    /// A raster assertion rather than a palette-only unit test: it proves that the colours survive
+    /// the actual AppKit bar drawing, including the inactive-track veil used at neutral.
+    func testTemperatureTrackRunsFromCoolBlueToWarmAmber() {
+        let cool = trackColor(style: .temperature, at: 0.2)
+        let warm = trackColor(style: .temperature, at: 0.8)
+
+        XCTAssertGreaterThan(cool.blueComponent, cool.redComponent, "the cool end should read blue")
+        XCTAssertGreaterThan(warm.redComponent, warm.blueComponent, "the warm end should read amber")
+        XCTAssertGreaterThan(warm.greenComponent, warm.blueComponent, "the warm end should not read magenta")
+    }
+
+    func testTintTrackRunsFromGreenToMagenta() {
+        let green = trackColor(style: .tint, at: 0.2)
+        let magenta = trackColor(style: .tint, at: 0.8)
+
+        XCTAssertGreaterThan(green.greenComponent, green.redComponent, "the negative tint end should read green")
+        XCTAssertGreaterThan(magenta.redComponent, magenta.greenComponent, "the positive tint end should read magenta")
+        XCTAssertGreaterThan(magenta.blueComponent, magenta.greenComponent, "the positive tint end should retain blue")
+    }
+
+    func testColorControlsUseDocumentedSemanticTracks() {
+        XCTAssertEqual(ColorGlobalControl.saturation.trackStyle, .saturation)
+        XCTAssertEqual(ColorGlobalControl.vibrance.trackStyle, .vibrance)
+        XCTAssertEqual(ColorMixerControl.hue.trackStyle, .hue)
+        XCTAssertEqual(ColorMixerControl.saturation.trackStyle, .saturation)
+        XCTAssertEqual(ColorMixerControl.luminance.trackStyle, .neutral)
+        XCTAssertEqual(ColorGradingControl.hue.trackStyle, .hue)
+        XCTAssertEqual(ColorGradingControl.saturation.trackStyle, .saturation)
+    }
+
     // MARK: - Harness
 
     /// Rasterised geometry lands within a pixel or two of the arithmetic, and the fill's rounded
@@ -113,7 +145,8 @@ final class NeutralOriginSliderTests: XCTestCase {
     private let tolerance: CGFloat = 2
 
     private func makeSlider(
-        range: ClosedRange<Double>, neutral: Double, value: Double
+        range: ClosedRange<Double>, neutral: Double, value: Double,
+        trackStyle: SliderTrackStyle = .neutral
     ) -> NSSlider {
         let slider = NSSlider(frame: NSRect(origin: .zero, size: size))
         let cell = NeutralOriginSliderCell()
@@ -124,7 +157,37 @@ final class NeutralOriginSliderTests: XCTestCase {
         slider.maxValue = range.upperBound
         slider.doubleValue = value
         cell.neutral = neutral
+        cell.trackStyle = trackStyle
         return slider
+    }
+
+    private func trackColor(style: SliderTrackStyle, at fraction: CGFloat) -> NSColor {
+        let slider = makeSlider(range: -100...100, neutral: 0, value: 0, trackStyle: style)
+        guard let cell = slider.cell as? NeutralOriginSliderCell,
+              let rep = slider.bitmapImageRepForCachingDisplay(in: slider.bounds),
+              let context = NSGraphicsContext(bitmapImageRep: rep)
+        else {
+            XCTFail("could not build a drawing context for the colour-track snapshot")
+            return .clear
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        NSColor.black.setFill()
+        slider.bounds.fill()
+        cell.drawBar(inside: slider.bounds, flipped: false)
+        NSGraphicsContext.restoreGraphicsState()
+
+        let knob = cell.knobRect(flipped: false)
+        let travel = slider.bounds.width - knob.width
+        let point = knob.width / 2 + travel * fraction
+        let scale = CGFloat(rep.pixelsWide) / slider.bounds.width
+        let x = min(max(Int(point * scale), 0), rep.pixelsWide - 1)
+        let y = rep.pixelsHigh / 2
+        guard let sampled = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else {
+            XCTFail("could not sample the colour-track snapshot")
+            return .clear
+        }
+        return sampled
     }
 
     /// The horizontal extent of the accent-coloured fill, in points, or `nil` when nothing is

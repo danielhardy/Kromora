@@ -21,6 +21,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
     @Binding private var value: Double
     private let range: ClosedRange<Double>
     private let neutral: Double
+    private let trackStyle: SliderTrackStyle
     private let accessibilityTitle: String?
     private let accessibilityReadout: String?
     private let onEditingChanged: (Bool) -> Void
@@ -36,6 +37,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
         value: Binding<Double>,
         in range: ClosedRange<Double>,
         neutral: Double,
+        trackStyle: SliderTrackStyle = .neutral,
         accessibilityTitle: String? = nil,
         accessibilityReadout: String? = nil,
         onEditingChanged: @escaping (Bool) -> Void = { _ in }
@@ -43,6 +45,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
         self._value = value
         self.range = range
         self.neutral = neutral
+        self.trackStyle = trackStyle
         self.accessibilityTitle = accessibilityTitle
         self.accessibilityReadout = accessibilityReadout
         self.onEditingChanged = onEditingChanged
@@ -82,6 +85,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
         slider.minValue = range.lowerBound
         slider.maxValue = max(range.upperBound, range.lowerBound)
         (slider.cell as? NeutralOriginSliderCell)?.neutral = neutral
+        (slider.cell as? NeutralOriginSliderCell)?.trackStyle = trackStyle
 
         // Never fight the drag: while the knob is being tracked the slider is the source of truth,
         // and the binding behind it is debounced, so writing back mid-gesture would stutter.
@@ -119,6 +123,86 @@ struct NeutralOriginSlider: NSViewRepresentable {
     }
 }
 
+/// The colour vocabulary used by photographic slider tracks.
+///
+/// These are deliberately *descriptions of the adjustment*, rather than the colour of the current
+/// image: a slider needs to explain its available direction before it has a pixel to sample. Every
+/// ramp spans the entire knob travel and is muted outside the active `SliderFill` span; the neutral
+/// marker therefore remains useful at zero/as-shot while either end still advertises its result.
+///
+/// - `temperature`: cool blue → daylight neutral → amber. This is used for both RAW and local
+///   Kelvin controls as well as the standard-image, slider-mapped temperature control.
+/// - `tint`: green → neutral → magenta.
+/// - `saturation` and `vibrance`: restrained/chroma-reduced → neutral → increasingly vivid. They
+///   are intentionally not photo previews; the ramp communicates chroma direction without
+///   suggesting that any one hue will be added to an image.
+/// - `hue`: the continuous colour wheel, appropriate only where the value itself is an absolute
+///   hue. Controls whose effect has no honest colour direction stay `.neutral`.
+enum SliderTrackStyle: Equatable, Sendable {
+    case neutral
+    case temperature
+    case tint
+    case saturation
+    case vibrance
+    case hue
+
+    fileprivate var usesGradient: Bool { self != .neutral }
+
+    fileprivate func gradient(neutralFraction: CGFloat) -> NSGradient? {
+        func color(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> NSColor {
+            NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
+        }
+        let neutral = min(max(neutralFraction, 0), 1)
+        func threePart(_ lower: NSColor, _ middle: NSColor, _ upper: NSColor) -> NSGradient {
+            if neutral <= 0 {
+                return NSGradient(colors: [middle, upper], atLocations: [0, 1], colorSpace: .deviceRGB)!
+            }
+            if neutral >= 1 {
+                return NSGradient(colors: [lower, middle], atLocations: [0, 1], colorSpace: .deviceRGB)!
+            }
+            return NSGradient(
+                colors: [lower, middle, upper], atLocations: [0, neutral, 1], colorSpace: .deviceRGB
+            )!
+        }
+        func intensity(_ reduced: NSColor, _ middle: NSColor, _ vividFirst: NSColor, _ vividLast: NSColor) -> NSGradient {
+            if neutral <= 0 {
+                return NSGradient(colors: [middle, vividFirst, vividLast], atLocations: [0, 0.55, 1], colorSpace: .deviceRGB)!
+            }
+            if neutral >= 1 {
+                return NSGradient(colors: [reduced, middle], atLocations: [0, 1], colorSpace: .deviceRGB)!
+            }
+            let vividStart = neutral + (1 - neutral) * 0.55
+            return NSGradient(
+                colors: [reduced, middle, vividFirst, vividLast],
+                atLocations: [0, neutral, vividStart, 1], colorSpace: .deviceRGB
+            )!
+        }
+        switch self {
+        case .neutral:
+            return nil
+        case .temperature:
+            return threePart(color(0.20, 0.48, 0.82), color(0.72, 0.78, 0.82), color(0.96, 0.67, 0.22))
+        case .tint:
+            return threePart(color(0.25, 0.66, 0.38), color(0.72, 0.76, 0.74), color(0.82, 0.29, 0.63))
+        case .saturation:
+            return intensity(
+                color(0.43, 0.48, 0.52), color(0.55, 0.62, 0.66),
+                color(0.17, 0.75, 0.73), color(0.92, 0.43, 0.32)
+            )
+        case .vibrance:
+            return intensity(
+                color(0.45, 0.47, 0.52), color(0.60, 0.63, 0.68),
+                color(0.28, 0.62, 0.86), color(0.75, 0.35, 0.78)
+            )
+        case .hue:
+            return NSGradient(
+                colors: [.systemRed, .systemYellow, .systemGreen, .systemCyan, .systemBlue, .systemPurple, .systemRed],
+                atLocations: [0, 1.0 / 6, 2.0 / 6, 3.0 / 6, 4.0 / 6, 5.0 / 6, 1], colorSpace: .deviceRGB
+            )
+        }
+    }
+}
+
 /// The one piece of `NeutralOriginSlider` that draws.
 ///
 /// `drawKnob` is deliberately not overridden — the knob stays the system's, so the control still
@@ -126,6 +210,9 @@ struct NeutralOriginSlider: NSViewRepresentable {
 final class NeutralOriginSliderCell: NSSliderCell {
     /// The value the fill is anchored at, in slider space.
     var neutral: Double = 0
+    /// The visual explanation of this slider's effect. `.neutral` retains the ordinary adaptive
+    /// AppKit treatment for controls where colour would imply a result we cannot honestly show.
+    var trackStyle: SliderTrackStyle = .neutral
 
     /// Called with `true` when a drag starts and `false` when it ends. `NSCell`'s tracking pipeline
     /// rather than the action message, because the action also fires for keyboard changes, which
@@ -148,14 +235,7 @@ final class NeutralOriginSliderCell: NSSliderCell {
         barDrawCount += 1
         let bar = Self.barRect(in: rect)
         let radius = bar.height / 2
-        emptyTrackColor.setFill()
-        NSBezierPath(roundedRect: bar, xRadius: radius, yRadius: radius).fill()
-
         guard minValue < maxValue else { return }
-        let fill = SliderFill.span(
-            value: doubleValue, neutral: neutral, in: minValue...maxValue
-        )
-        guard !fill.isEmpty else { return }
 
         // Measure the travel from the knob rather than assuming an inset: the knob centre sits at
         // the bar's left edge plus half a knob at the minimum, and half a knob short of the right
@@ -163,14 +243,25 @@ final class NeutralOriginSliderCell: NSSliderCell {
         let knobWidth = knobRect(flipped: flipped).width
         let travel = max(bar.width - knobWidth, 0)
         let origin = bar.minX + knobWidth / 2
+        let range = minValue...maxValue
+        let neutralFraction = CGFloat((neutral - minValue) / (maxValue - minValue))
+        let trackRect = NSRect(x: origin, y: bar.minY, width: travel, height: bar.height)
+
+        drawTrack(in: bar, travelRect: trackRect, radius: radius, neutralFraction: neutralFraction)
+
+        let fill = SliderFill.span(value: doubleValue, neutral: neutral, in: range)
+        guard !fill.isEmpty else {
+            drawNeutralMarker(in: bar, at: origin + travel * neutralFraction)
+            return
+        }
         let fillRect = NSRect(
             x: origin + travel * fill.start,
             y: bar.minY,
             width: travel * (fill.end - fill.start),
             height: bar.height
         )
-        fillColor.setFill()
-        NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).fill()
+        drawActiveFill(in: fillRect, across: trackRect, radius: radius, neutralFraction: neutralFraction)
+        drawNeutralMarker(in: bar, at: origin + travel * neutralFraction)
     }
 
     override func startTracking(at startPoint: NSPoint, in controlView: NSView) -> Bool {
@@ -195,6 +286,53 @@ final class NeutralOriginSliderCell: NSSliderCell {
 
     private var emptyTrackColor: NSColor {
         isEnabled ? .tertiaryLabelColor : .quaternaryLabelColor
+    }
+
+    private func drawTrack(
+        in bar: NSRect, travelRect: NSRect, radius: CGFloat, neutralFraction: CGFloat
+    ) {
+        let barPath = NSBezierPath(roundedRect: bar, xRadius: radius, yRadius: radius)
+        emptyTrackColor.setFill()
+        barPath.fill()
+        guard isEnabled, trackStyle.usesGradient,
+              let gradient = trackStyle.gradient(neutralFraction: neutralFraction), !travelRect.isEmpty
+        else { return }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: travelRect, xRadius: radius, yRadius: radius).addClip()
+        gradient.draw(from: NSPoint(x: travelRect.minX, y: travelRect.midY),
+                      to: NSPoint(x: travelRect.maxX, y: travelRect.midY), options: [])
+        // The full range remains visible, while an active span gets the unmuted ramp below.
+        emptyTrackColor.withAlphaComponent(0.38).setFill()
+        NSBezierPath(rect: travelRect).fill()
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawActiveFill(
+        in fillRect: NSRect, across travelRect: NSRect, radius: CGFloat, neutralFraction: CGFloat
+    ) {
+        guard trackStyle.usesGradient,
+              let gradient = trackStyle.gradient(neutralFraction: neutralFraction)
+        else {
+            fillColor.setFill()
+            NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).fill()
+            return
+        }
+
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).addClip()
+        // Draw from the travel endpoints, not the fill endpoints: the colour at a value has to be
+        // the same whether the user reaches it from negative or positive territory.
+        gradient.draw(from: NSPoint(x: travelRect.minX, y: travelRect.midY),
+                      to: NSPoint(x: travelRect.maxX, y: travelRect.midY), options: [])
+        NSGraphicsContext.restoreGraphicsState()
+    }
+
+    private func drawNeutralMarker(in bar: NSRect, at position: CGFloat) {
+        guard neutral > minValue, neutral < maxValue else { return }
+        let marker = NSRect(x: position - 0.5, y: bar.minY - 1, width: 1, height: bar.height + 2)
+        NSColor.labelColor.withAlphaComponent(isEnabled ? 0.72 : 0.35).setFill()
+        NSBezierPath(roundedRect: marker, xRadius: 0.5, yRadius: 0.5).fill()
     }
 
     private static func barRect(in rect: NSRect) -> NSRect {
