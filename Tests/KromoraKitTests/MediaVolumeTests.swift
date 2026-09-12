@@ -104,6 +104,26 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
                        "Access needed — open to check for photos.")
     }
 
+    func testMountedVolumeNotificationRefreshesMediaAfterInitialDiscovery() async throws {
+        let volume = MediaVolume(name: "New Card", url: tempDirectory)
+        let notificationCenter = NotificationCenter()
+        let provider = MutableMediaVolumeProvider()
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            mediaVolumeProvider: provider,
+            mediaVolumeNotificationCenter: notificationCenter,
+            applicationNotificationCenter: notificationCenter
+        )
+
+        viewModel.refreshRemovableMedia()
+        try await waitUntil { viewModel.removableMediaVolumes.isEmpty }
+
+        await provider.setVolumes([volume])
+        notificationCenter.post(name: NSWorkspace.didMountNotification, object: volume.url)
+
+        try await waitUntil { viewModel.removableMediaVolumes == [volume] }
+    }
+
     func testEmptyScanKeepsARecoverableEmptyStateAndCancelClosesIt() async throws {
         let volume = MediaVolume(name: "Empty Card", url: tempDirectory)
         let provider = FixtureMediaVolumeProvider(
@@ -163,5 +183,21 @@ private struct FixtureMediaVolumeProvider: MediaVolumeProviding {
 
     func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
         try result.get()
+    }
+}
+
+private actor MutableMediaVolumeProvider: MediaVolumeProviding {
+    private var volumes: [MediaVolume] = []
+
+    func setVolumes(_ volumes: [MediaVolume]) {
+        self.volumes = volumes
+    }
+
+    func discover() async -> [MediaVolume] {
+        volumes
+    }
+
+    func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
+        MediaVolumeScanResult(files: [], warnings: [])
     }
 }

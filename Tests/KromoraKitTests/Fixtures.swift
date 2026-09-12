@@ -568,6 +568,8 @@ class TempDirectoryTestCase: XCTestCase {
         editStore: EditDocumentStore? = nil,
         preferences: UserDefaults? = nil,
         mediaVolumeProvider: any MediaVolumeProviding = MountedMediaVolumeProvider(),
+        mediaVolumeNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        applicationNotificationCenter: NotificationCenter = .default,
         includeBundledLooks: Bool = false,
         libraryFolderURL: URL? = nil,
         userLookFolderURL: URL? = nil,
@@ -590,6 +592,8 @@ class TempDirectoryTestCase: XCTestCase {
             editStore: editStore ?? makeInMemoryEditStore(),
             preferences: isolatedPreferences,
             mediaVolumeProvider: mediaVolumeProvider,
+            mediaVolumeNotificationCenter: mediaVolumeNotificationCenter,
+            applicationNotificationCenter: applicationNotificationCenter,
             includeBundledLooks: includeBundledLooks,
             libraryFolderURL: libraryFolderURL
                 ?? tempDirectory.appendingPathComponent("managed-library", isDirectory: true),
