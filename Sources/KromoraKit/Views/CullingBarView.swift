@@ -107,6 +107,7 @@ struct LibraryFilterControls: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .focusable(false)
             .help("Filter by pick or reject status")
 
             Picker("Rating filter", selection: ratingBinding) {
@@ -121,6 +122,7 @@ struct LibraryFilterControls: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .focusable(false)
             .help("Filter by star rating")
 
             Text("\(collection.filteredItemCount) of \(collection.items.count)")

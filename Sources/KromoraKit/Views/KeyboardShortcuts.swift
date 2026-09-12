@@ -12,19 +12,101 @@ import AppKit
 
 struct KeyboardShortcuts: ViewModifier {
     @ObservedObject var viewModel: AppViewModel
-    @State private var monitor: KeyMonitor?
 
     func body(content: Content) -> some View {
-        content
-            .onAppear {
-                if monitor == nil {
-                    monitor = KeyMonitor(viewModel: viewModel)
-                }
+        content.background(KeyMonitorAnchor(viewModel: viewModel))
+    }
+}
+
+/// Installs the local event monitor once the hosting window exists, and reinstalls it whenever
+/// that window becomes key. Local monitors run most-recent-first; SwiftUI pickers, buttons, and
+/// scroll views register after a SwiftUI `onAppear`, so a one-shot install loses the race and
+/// AppKit still beeps on arrows.
+private struct KeyMonitorAnchor: NSViewRepresentable {
+    var viewModel: AppViewModel
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(viewModel: viewModel)
+    }
+
+    func makeNSView(context: Context) -> AnchorView {
+        let view = AnchorView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateNSView(_ nsView: AnchorView, context: Context) {
+        context.coordinator.viewModel = viewModel
+        nsView.coordinator = context.coordinator
+    }
+
+    static func dismantleNSView(_ nsView: AnchorView, coordinator: Coordinator) {
+        nsView.detach()
+        coordinator.stop()
+    }
+
+    @MainActor
+    final class Coordinator {
+        var viewModel: AppViewModel
+        private var monitor: KeyMonitor?
+
+        init(viewModel: AppViewModel) {
+            self.viewModel = viewModel
+        }
+
+        func install() {
+            monitor?.stop()
+            monitor = KeyMonitor(viewModel: viewModel)
+        }
+
+        func stop() {
+            monitor?.stop()
+            monitor = nil
+        }
+    }
+
+    @MainActor
+    final class AnchorView: NSView {
+        var coordinator: Coordinator?
+        private weak var observedWindow: NSWindow?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            attach(to: window)
+        }
+
+        func detach() {
+            attach(to: nil)
+        }
+
+        private func attach(to window: NSWindow?) {
+            guard observedWindow != window else { return }
+            if let observedWindow {
+                NotificationCenter.default.removeObserver(
+                    self, name: NSWindow.didBecomeKeyNotification, object: observedWindow
+                )
             }
-            .onDisappear {
-                monitor?.stop()
-                monitor = nil
+            observedWindow = window
+            if let window {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(windowBecameKey(_:)),
+                    name: NSWindow.didBecomeKeyNotification,
+                    object: window
+                )
+                coordinator?.install()
+            } else {
+                coordinator?.stop()
             }
+        }
+
+        @objc private func windowBecameKey(_ notification: Notification) {
+            coordinator?.install()
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
     }
 }
 
@@ -37,8 +119,9 @@ enum KeyMonitorPolicy {
 
     /// Native controls have their own keyboard contract. In particular, a focused slider must
     /// keep arrow keys for value changes, a text field must keep letters/digits for editing, and a
-    /// focused button or picker must keep Space/Return for activation. The global monitor should
-    /// only route keys when the canvas or library itself owns focus.
+    /// focused button or picker must keep Space/Return for activation. Character shortcuts still
+    /// defer to any `NSControl`; arrow keys use the narrower value-editing policy below so a
+    /// focused filmstrip thumbnail or Look list does not produce AppKit's error beep.
     static func controlOwnsKeyboard(_ responder: NSResponder?) -> Bool {
         textInputOwnsKeyboard(responder) || responder is NSControl
     }
@@ -47,22 +130,46 @@ enum KeyMonitorPolicy {
         !controlOwnsKeyboard(responder)
     }
 
-    /// Image navigation is an app-level gesture only while a browsable collection is active and
-    /// the event is not owned by the focused AppKit control. Returning this decision as a policy
-    /// keeps the event-consumption contract separate from the selection side effects, including
-    /// the intentional no-op at either end of the collection.
+    /// Arrow keys adjust values on sliders, steppers, and text. Menu pickers, segmented
+    /// workspace controls, buttons, and lists do not — those events belong to photo/Look
+    /// navigation. Deferring to an `NSSegmentedControl` or `NSPopUpButton` is what produced
+    /// AppKit's error beep in Library and the Edit filmstrip: both surfaces keep the toolbar
+    /// workspace picker (and often a culling-bar menu) as first responder after a click.
+    static func valueEditingControlOwnsArrows(_ responder: NSResponder?) -> Bool {
+        if textInputOwnsKeyboard(responder) { return true }
+        if responder is NSTextField { return true }
+        return responder is NSSlider
+            || responder is NSStepper
+            || responder is NSComboBox
+    }
+
+    /// Left/Right step photos. Ownership is independent of whether a collection currently has an
+    /// adjacent item: the event is still consumed as an intentional no-op at either end, or when
+    /// only a single image is open.
     static func imageNavigationOwnsKeyboard(
         keyCode: UInt16,
         eventType: NSEvent.EventType,
-        collectionIsActive: Bool,
         responder: NSResponder?
     ) -> Bool {
-        guard collectionIsActive,
-              keyCode == 123 || keyCode == 124,
+        guard keyCode == 123 || keyCode == 124,
               eventType == .keyDown || eventType == .keyUp else {
             return false
         }
-        return globalShortcutsOwnKeyboard(responder)
+        return !valueEditingControlOwnsArrows(responder)
+    }
+
+    /// Up/Down audition Looks, including the explicit None slot. Same consumption contract as
+    /// image navigation: a focused list or button must not fall through to AppKit's error beep.
+    static func lookNavigationOwnsKeyboard(
+        keyCode: UInt16,
+        eventType: NSEvent.EventType,
+        responder: NSResponder?
+    ) -> Bool {
+        guard keyCode == 125 || keyCode == 126,
+              eventType == .keyDown || eventType == .keyUp else {
+            return false
+        }
+        return !valueEditingControlOwnsArrows(responder)
     }
 
     static func isPlainSpace(modifiers: NSEvent.ModifierFlags) -> Bool {
@@ -93,6 +200,10 @@ enum KeyMonitorPolicy {
         characters: String, modifiers: NSEvent.ModifierFlags
     ) -> Bool {
         isPlainCharacterShortcut(modifiers: modifiers) && characters.lowercased() == "c"
+    }
+
+    static func isArrowKey(_ keyCode: UInt16) -> Bool {
+        keyCode == 123 || keyCode == 124 || keyCode == 125 || keyCode == 126
     }
 }
 
@@ -160,18 +271,33 @@ final class KeyMonitor {
         }
 
         // If a sheet is up, let the sheet's text fields and buttons handle keys.
-        if vm.derive.isSheetPresented { return event }
+        if vm.derive.isSheetPresented
+            || vm.lookSave.isSheetPresented
+            || vm.isRemovableMediaSelectorPresented
+            || vm.isPhotosPickerPresented {
+            return event
+        }
 
         // Resolve focus from the window that owns this event. Looking only at NSApp.keyWindow can
         // consult the wrong window during transitions and can also be nil in a test or before the
         // first app window exists. A focused SwiftUI TextField makes that event window's field
         // editor (an NSText) the first responder.
         let firstResponder = firstResponderProvider(event)
+        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        // Arrow keys are app-level photo/Look gestures except on value-editing controls. Handle
+        // them before the general NSControl gate so a focused filmstrip button or Look list cannot
+        // NSBeep after the navigation already succeeded — or instead of it. Option/Control/Command
+        // arrows still belong to AppKit and the menu bar.
+        if !KeyMonitorPolicy.hasSystemModifier(mods),
+           KeyMonitorPolicy.isArrowKey(event.keyCode) {
+            return handleArrow(
+                event, viewModel: vm, firstResponder: firstResponder, modifiers: mods
+            )
+        }
+
         if !KeyMonitorPolicy.globalShortcutsOwnKeyboard(firstResponder) {
             return event
         }
-
-        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // Command-A is the one grid command handled here; other Command-modified events belong to
         // the menu bar.
         if mods.contains(.command) {
@@ -215,7 +341,7 @@ final class KeyMonitor {
         if KeyMonitorPolicy.hasSystemModifier(mods) { return event }
 
         // Hardware key codes (US layout independent for arrows/space).
-        // ↑/↓ audition Looks; ←/→ step through the source files.
+        // Arrow keys are handled above, before the NSControl ownership gate.
         switch event.keyCode {
         case 53: // Escape — cancel a mask gesture first, then leave the masking workspace/tool.
             guard isDown else { return event }
@@ -244,58 +370,6 @@ final class KeyMonitor {
             // a split presentation.
             guard vm.isComparisonAvailable && !vm.isSideBySide else { return event }
             _ = vm.showOriginal(isDown)
-            return nil
-        case 126: // Up arrow — previous Look
-            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
-                vm.nudgeSelectedMask(dx: 0, dy: -1, accelerated: mods.contains(.shift)) {
-                return nil
-            }
-            if isDown { vm.selectPreviousLook() }
-            return nil
-        case 125: // Down arrow — next Look
-            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
-                vm.nudgeSelectedMask(dx: 0, dy: 1, accelerated: mods.contains(.shift)) {
-                return nil
-            }
-            if isDown { vm.selectNextLook() }
-            return nil
-        case 123: // Left arrow — previous image
-            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
-                vm.nudgeSelectedMask(dx: -1, dy: 0, accelerated: mods.contains(.shift)) {
-                return nil
-            }
-            guard KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-                keyCode: event.keyCode,
-                eventType: event.type,
-                collectionIsActive: vm.collection.isActive,
-                responder: firstResponder
-            ) else { return event }
-            if isDown {
-                if vm.navigation.isGrid {
-                    vm.collection.selectPrevious()
-                } else {
-                    vm.selectPreviousImage()
-                }
-            }
-            return nil
-        case 124: // Right arrow — next image
-            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
-                vm.nudgeSelectedMask(dx: 1, dy: 0, accelerated: mods.contains(.shift)) {
-                return nil
-            }
-            guard KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-                keyCode: event.keyCode,
-                eventType: event.type,
-                collectionIsActive: vm.collection.isActive,
-                responder: firstResponder
-            ) else { return event }
-            if isDown {
-                if vm.navigation.isGrid {
-                    vm.collection.selectNext()
-                } else {
-                    vm.selectNextImage()
-                }
-            }
             return nil
         case 36: // Return — open the active grid item in Edit
             if isDown, vm.navigation.isGrid {
@@ -398,6 +472,73 @@ final class KeyMonitor {
                 vm.collection.selectNext()
             } else {
                 vm.selectNextImage()
+            }
+            return nil
+        default:
+            return event
+        }
+    }
+
+    /// Consume Left/Right (photos) and Up/Down (Looks) unless a value-editing control owns them.
+    /// Returning `nil` is what keeps AppKit from playing the error beep for a handled gesture.
+    private func handleArrow(
+        _ event: NSEvent,
+        viewModel vm: AppViewModel,
+        firstResponder: NSResponder?,
+        modifiers mods: NSEvent.ModifierFlags
+    ) -> NSEvent? {
+        let isDown = event.type == .keyDown
+        switch event.keyCode {
+        case 126: // Up arrow — previous Look
+            guard KeyMonitorPolicy.lookNavigationOwnsKeyboard(
+                keyCode: event.keyCode, eventType: event.type, responder: firstResponder
+            ) else { return event }
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 0, dy: -1, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            if isDown { vm.selectPreviousLook() }
+            return nil
+        case 125: // Down arrow — next Look
+            guard KeyMonitorPolicy.lookNavigationOwnsKeyboard(
+                keyCode: event.keyCode, eventType: event.type, responder: firstResponder
+            ) else { return event }
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 0, dy: 1, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            if isDown { vm.selectNextLook() }
+            return nil
+        case 123: // Left arrow — previous image
+            guard KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: event.keyCode, eventType: event.type, responder: firstResponder
+            ) else { return event }
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: -1, dy: 0, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            if isDown, vm.collection.isActive {
+                if vm.navigation.isGrid {
+                    vm.collection.selectPrevious()
+                } else {
+                    vm.selectPreviousImage()
+                }
+            }
+            return nil
+        case 124: // Right arrow — next image
+            guard KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: event.keyCode, eventType: event.type, responder: firstResponder
+            ) else { return event }
+            if isDown, vm.inspectorState.isMaskingWorkspacePresented,
+                vm.nudgeSelectedMask(dx: 1, dy: 0, accelerated: mods.contains(.shift)) {
+                return nil
+            }
+            if isDown, vm.collection.isActive {
+                if vm.navigation.isGrid {
+                    vm.collection.selectNext()
+                } else {
+                    vm.selectNextImage()
+                }
             }
             return nil
         default:

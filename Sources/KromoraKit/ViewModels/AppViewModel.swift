@@ -3151,20 +3151,28 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     func selectPreviousLook() {
-        guard let current = selectedLook,
-              let idx = library.allLUTs.firstIndex(of: current),
-              idx > 0 else { return }
-        selectLook(library.allLUTs[idx - 1])
+        applyLookNavigation(.previous)
     }
 
     func selectNextLook() {
-        guard let current = selectedLook else {
-            if let first = library.allLUTs.first { selectLook(first) }
-            return
+        applyLookNavigation(.next)
+    }
+
+    /// Audition the adjacent Look, treating the inspector's explicit None row as the slot before
+    /// the first library Look so Up from the first Look can clear the grade.
+    private func applyLookNavigation(_ direction: LookNavigation.Direction) {
+        let looks = library.allLUTs
+        let currentIndex = selectedLook.flatMap { current in looks.firstIndex(of: current) }
+        let nextIndex = LookNavigation.adjacentIndex(
+            currentIndex: currentIndex,
+            count: looks.count,
+            direction: direction
+        )
+        if let nextIndex {
+            selectLook(looks[nextIndex])
+        } else if selectedLookID != nil {
+            selectLook(nil)
         }
-        guard let idx = library.allLUTs.firstIndex(of: current),
-              idx < library.allLUTs.count - 1 else { return }
-        selectLook(library.allLUTs[idx + 1])
     }
 
     func selectPreviousLUT() { selectPreviousLook() }
