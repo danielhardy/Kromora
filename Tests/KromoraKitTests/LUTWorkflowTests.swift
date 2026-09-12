@@ -142,6 +142,16 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.selectedLookID, second.lutID)
         viewModel.selectPreviousLook()
         XCTAssertEqual(viewModel.selectedLookID, first.lutID)
+        viewModel.selectPreviousLook()
+        XCTAssertNil(viewModel.selectedLookID, "Up from the first Look must return to None")
+        XCTAssertTrue(viewModel.isLookNoneSelected)
+        viewModel.selectPreviousLook()
+        XCTAssertNil(viewModel.selectedLookID, "Up from None is a no-op")
+        viewModel.selectNextLook()
+        XCTAssertEqual(viewModel.selectedLookID, first.lutID, "Down from None should select the first Look")
+        viewModel.selectNextLook()
+        viewModel.selectNextLook()
+        XCTAssertEqual(viewModel.selectedLookID, second.lutID, "Down at the last Look is a no-op")
     }
 
     func testExternalImportCanBeSelectedByIDAndSendsItThroughPreviewRequest() async throws {

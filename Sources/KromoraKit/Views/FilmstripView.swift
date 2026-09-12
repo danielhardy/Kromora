@@ -28,18 +28,26 @@ struct FilmstripView: View {
                                 )
                             }
                             .buttonStyle(.plain)
+                            // Thumbnails must remain VoiceOver buttons, but they must not take
+                            // keyboard focus. A focused NSButton interprets leftover arrows as
+                            // `noop:` and plays the system error beep even after `.onKeyPress`
+                            // returns `.handled`.
+                            .focusable(false)
                             // A focused thumbnail owns the arrow gesture. Consume every phase so
                             // AppKit's native button responder never sees a successful navigation,
                             // a boundary no-op, or the key-up after SwiftUI replaces the selected
                             // cell. The button's normal activation and accessibility behavior are
                             // otherwise left intact.
                             .onKeyPress(
-                                keys: [.leftArrow, .rightArrow],
+                                keys: [.leftArrow, .rightArrow, .upArrow, .downArrow],
                                 phases: .all
                             ) { press in
                                 let result = FilmstripNavigation.keyPressResult(for: press.phase)
                                 guard result == .handled else { return result }
                                 guard press.phase != .up else { return result }
+                                guard press.key == .leftArrow || press.key == .rightArrow else {
+                                    return result
+                                }
                                 let direction: FilmstripNavigation.Direction =
                                     press.key == .leftArrow ? .previous : .next
                                 guard let adjacentIndex = FilmstripNavigation.adjacentIndex(

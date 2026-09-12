@@ -229,6 +229,7 @@ public struct ContentView: View {
         .pickerStyle(.segmented)
         .labelsHidden()
         .frame(width: 142)
+        .focusable(false)
         .help("Library (G) or Edit (E)")
 
         CanvasToolbarControls(

@@ -122,25 +122,55 @@ final class KeyMonitorTests: TempDirectoryTestCase {
     func testImageNavigationOwnershipConsumesDownAndUpIncludingBoundaries() {
         for keyCode in [UInt16(123), UInt16(124)] {
             XCTAssertTrue(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-                keyCode: keyCode, eventType: .keyDown, collectionIsActive: true, responder: nil
+                keyCode: keyCode, eventType: .keyDown, responder: nil
             ))
             XCTAssertTrue(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-                keyCode: keyCode, eventType: .keyUp, collectionIsActive: true, responder: NSView()
+                keyCode: keyCode, eventType: .keyUp, responder: NSView()
+            ))
+            XCTAssertTrue(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyDown, responder: NSButton()
+            ))
+            XCTAssertTrue(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyUp, responder: NSTableView()
             ))
         }
 
         XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-            keyCode: 123, eventType: .keyDown, collectionIsActive: false, responder: nil
+            keyCode: 36, eventType: .keyDown, responder: nil
         ))
         XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-            keyCode: 36, eventType: .keyDown, collectionIsActive: true, responder: nil
+            keyCode: 123, eventType: .keyDown, responder: NSSlider()
         ))
         XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-            keyCode: 123, eventType: .keyDown, collectionIsActive: true, responder: NSSlider()
+            keyCode: 124, eventType: .keyUp, responder: NSTextField()
         ))
-        XCTAssertFalse(KeyMonitorPolicy.imageNavigationOwnsKeyboard(
-            keyCode: 124, eventType: .keyUp, collectionIsActive: true, responder: NSTextField()
+    }
+
+    func testLookNavigationOwnershipConsumesListAndButtonFocus() {
+        for keyCode in [UInt16(125), UInt16(126)] {
+            XCTAssertTrue(KeyMonitorPolicy.lookNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyDown, responder: nil
+            ))
+            XCTAssertTrue(KeyMonitorPolicy.lookNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyUp, responder: NSButton()
+            ))
+            XCTAssertTrue(KeyMonitorPolicy.lookNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyDown, responder: NSTableView()
+            ))
+            XCTAssertFalse(KeyMonitorPolicy.lookNavigationOwnsKeyboard(
+                keyCode: keyCode, eventType: .keyDown, responder: NSSlider()
+            ))
+        }
+        XCTAssertFalse(KeyMonitorPolicy.lookNavigationOwnsKeyboard(
+            keyCode: 123, eventType: .keyDown, responder: nil
         ))
+        XCTAssertTrue(KeyMonitorPolicy.isArrowKey(126))
+        XCTAssertFalse(KeyMonitorPolicy.isArrowKey(36))
+        XCTAssertTrue(KeyMonitorPolicy.valueEditingControlOwnsArrows(NSSlider()))
+        XCTAssertFalse(KeyMonitorPolicy.valueEditingControlOwnsArrows(NSButton()))
+        XCTAssertFalse(KeyMonitorPolicy.valueEditingControlOwnsArrows(NSTableView()))
+        XCTAssertFalse(KeyMonitorPolicy.valueEditingControlOwnsArrows(NSSegmentedControl()))
+        XCTAssertFalse(KeyMonitorPolicy.valueEditingControlOwnsArrows(NSPopUpButton()))
     }
 
     func testArrowNavigationConsumesKeyDownAndKeyUpAtMiddleAndCollectionBoundaries() async throws {
@@ -186,6 +216,86 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         let event = try keyEvent(.keyDown, keyCode: 123)
         XCTAssertNotNil(monitor.handle(event), "a focused slider owns Left and must receive it")
         XCTAssertEqual(viewModel.collection.selectedIndex, 0)
+    }
+
+    func testArrowNavigationConsumesEventsWhenWorkspacePickerHasFocus() async throws {
+        for name in ["first.png", "second.png"] {
+            try Fixtures.writeGradientPNG(width: 8, height: 8, named: name, in: tempDirectory)
+        }
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        viewModel.collection.setSelection(at: 0)
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+
+        let picker = NSSegmentedControl(
+            labels: ["Library", "Edit"], trackingMode: .selectOne, target: nil, action: nil
+        )
+        let monitor = KeyMonitor(
+            viewModel: viewModel,
+            firstResponderProvider: { _ in picker }
+        )
+        defer { monitor.stop() }
+
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 124)))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 1)
+        XCTAssertNil(monitor.handle(try keyEvent(.keyUp, keyCode: 124)))
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 125)))
+        XCTAssertNil(monitor.handle(try keyEvent(.keyUp, keyCode: 125)))
+    }
+
+    func testArrowNavigationConsumesEventsWhenAButtonOrListHasFocus() async throws {
+        for name in ["first.png", "second.png"] {
+            try Fixtures.writeGradientPNG(width: 8, height: 8, named: name, in: tempDirectory)
+        }
+        let lookFolder = tempDirectory.appendingPathComponent("audition-looks")
+        try FileManager.default.createDirectory(at: lookFolder, withIntermediateDirectories: true)
+        let firstLookURL = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "01 First.cube", in: lookFolder
+        )
+        let secondLookURL = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "02 Second.cube", in: lookFolder
+        )
+        let firstLook = try CubeLUT(url: firstLookURL)
+        let secondLook = try CubeLUT(url: secondLookURL)
+
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        viewModel.collection.setSelection(at: 0)
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        viewModel.library.setFolder(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        let button = NSButton(title: "thumb", target: nil, action: nil)
+        let buttonMonitor = KeyMonitor(
+            viewModel: viewModel,
+            firstResponderProvider: { _ in button }
+        )
+        defer { buttonMonitor.stop() }
+
+        XCTAssertNil(buttonMonitor.handle(try keyEvent(.keyDown, keyCode: 124)))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 1)
+        XCTAssertNil(buttonMonitor.handle(try keyEvent(.keyUp, keyCode: 124)))
+
+        let table = NSTableView()
+        let listMonitor = KeyMonitor(
+            viewModel: viewModel,
+            firstResponderProvider: { _ in table }
+        )
+        defer { listMonitor.stop() }
+
+        XCTAssertNil(viewModel.selectedLookID)
+        XCTAssertNil(listMonitor.handle(try keyEvent(.keyDown, keyCode: 125)))
+        XCTAssertEqual(viewModel.selectedLookID, firstLook.lutID)
+        XCTAssertNil(listMonitor.handle(try keyEvent(.keyDown, keyCode: 125)))
+        XCTAssertEqual(viewModel.selectedLookID, secondLook.lutID)
+        XCTAssertNil(listMonitor.handle(try keyEvent(.keyDown, keyCode: 126)))
+        XCTAssertEqual(viewModel.selectedLookID, firstLook.lutID)
+        XCTAssertNil(listMonitor.handle(try keyEvent(.keyDown, keyCode: 126)))
+        XCTAssertNil(viewModel.selectedLookID, "Up from the first Look must land on None")
+        XCTAssertNil(listMonitor.handle(try keyEvent(.keyUp, keyCode: 126)))
+        XCTAssertTrue(viewModel.isLookNoneSelected)
     }
 
     func testCommandBackslashIsTheOnlyOriginalShortcut() {
