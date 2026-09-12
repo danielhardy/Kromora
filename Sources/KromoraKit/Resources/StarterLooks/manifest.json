@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "acknowledgement": "Starter Looks are original Kromora assets, distributed under the Kromora MIT License. No third-party attribution is required.",
+  "acknowledgement": "Starter Looks are original Kromora assets, distributed under the Kromora MIT License. They are read-only and require no third-party attribution. Film and manufacturer references are descriptive inspiration only; no official profiles or commercial emulation data are bundled.",
   "looks": [
     {
       "id": "kromora.starter.soft-mono",
@@ -72,6 +72,222 @@
         "reviewer": "Kromora maintainers",
         "approvedAt": "2026-09-03",
         "notes": "Original warm/high-saturation transform; name is descriptive and not a stock reference."
+      }
+    },
+    {
+      "id": "kromora.starter.silver-noir",
+      "name": "Silver Noir",
+      "category": "Monochrome",
+      "resource": "silver-noir.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. High-contrast neutral monochrome with deep blacks and bright silver highlights.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.paper-grain",
+      "name": "Paper Grain",
+      "category": "Monochrome",
+      "resource": "paper-grain.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Lifted, low-contrast neutral monochrome with a soft paper-like tonal curve.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.blueprint-mono",
+      "name": "Blueprint Mono",
+      "category": "Monochrome",
+      "resource": "blueprint-mono.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Open-shadow neutral monochrome with a gently compressed blue-hour-style tonal response.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.infrared-mono",
+      "name": "Infrared Mono",
+      "category": "Monochrome",
+      "resource": "infrared-mono.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Green-sensitive neutral monochrome with emphatic luminance separation; descriptive only.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.ember-cyan",
+      "name": "Ember & Cyan",
+      "category": "Cinematic",
+      "resource": "ember-cyan.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Orange-and-teal cinematic separation with warm highlights and cyan shadows.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.neon-dusk",
+      "name": "Neon Dusk",
+      "category": "Cinematic",
+      "resource": "neon-dusk.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Cool twilight contrast with restrained magenta-blue color separation.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.honey-negative",
+      "name": "Honey Negative",
+      "category": "Film-inspired",
+      "resource": "honey-negative.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Warm, natural, gently lifted negative-film-inspired color rendering; not a commercial stock profile.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.pastel-wash",
+      "name": "Pastel Wash",
+      "category": "Pastel",
+      "resource": "pastel-wash.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Soft, low-saturation pastel color with lifted shadows and compressed highlights.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.bleached-daylight",
+      "name": "Bleached Daylight",
+      "category": "Faded",
+      "resource": "bleached-daylight.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Faded daylight palette with reduced saturation and a restrained matte curve.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.hard-light",
+      "name": "Hard Light",
+      "category": "High-contrast",
+      "resource": "hard-light.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Hard, graphic contrast that deepens shadows and brightens highlights.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.midnight-slate",
+      "name": "Midnight Slate",
+      "category": "Cool-toned",
+      "resource": "midnight-slate.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Desaturated cool-toned treatment with slate-blue shadows and quiet highlights.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
+      }
+    },
+    {
+      "id": "kromora.starter.forest-shadow",
+      "name": "Forest Shadow",
+      "category": "Moody",
+      "resource": "forest-shadow.cube",
+      "sourceAuthor": "Kromora project contributors",
+      "source": "Original in-house procedural asset; authored for Kromora. Moody green-leaning shadows with subdued warmth and dense midtones.",
+      "license": "MIT License (Kromora project license)",
+      "attribution": "No third-party attribution required; retain the Kromora MIT notice.",
+      "redistribution": "Redistributable with Kromora; descriptive name does not imply manufacturer endorsement or official film/manufacturer affiliation.",
+      "approval": {
+        "status": "approved",
+        "recordID": "LUMO-372-STARTER-2026-09-12",
+        "reviewer": "Kromora maintainers",
+        "approvedAt": "2026-09-12",
+        "notes": "Original procedural 3D LUT; no ripped commercial emulation data, camera profile, or official manufacturer asset used."
       }
     }
   ]
