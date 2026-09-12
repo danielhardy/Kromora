@@ -57,12 +57,35 @@ provider version. A missing or invalid sidecar is a cache miss; it must never in
 mask recipe. Local masks use the same resolved definition for preview, overlay, histogram,
 comparison, copy/paste, and full-resolution export.
 
+## Inspector controls
+
+Every inspector slider is `NeutralOriginSlider`, not `SwiftUI.Slider`. It wraps `NSSlider` and
+overrides only `NSSliderCell.drawBar(inside:flipped:)`, so the knob, hit-testing, drag tracking,
+keyboard handling, and the native accessibility element stay AppKit's. What it changes is where the
+active fill starts: at the control's own neutral rather than at the left edge, so a bipolar row at
+neutral shows an empty track and a drag fills only the side between neutral and the thumb.
+
+A new row must pass its baseline through `neutral:`, and that baseline belongs to the control model
+(`LightControl.neutral`, `VignetteControl.neutral`, `LocalAdjustments.neutral[keyPath:]`, the
+decoder default from `developNeutral(for:)`) rather than being derived from the range. Neither the
+range's midpoint nor zero is reliable: `AdjustmentControl.highlights` is neutral at its *maximum*,
+`ColorGradingGlobalControl.blending` is neutral at 50 within an unsigned 0…100, and a genuinely
+unipolar control passes `range.lowerBound` to get the ordinary left-origin fill from the same path.
+Controls in slider space must map the neutral the same way the binding does — see the temperature
+row in `AdjustInspectorView`.
+
+The split between `SliderFill` (pure, deterministic lane) and the cell (AppKit, serial lane) is
+deliberate: `NeutralOriginSliderTests.testTheCellsBarDrawingIsReachedWhenTheControlDraws` is the
+canary for an SDK that stops routing the bar through `drawBar`, which would otherwise revert every
+slider to a left-origin fill with the arithmetic still passing.
+
 ## Change checklist
 
 - Keep the macOS 14 deployment target, Swift 6 language mode, and Apple-only dependency policy.
 - Keep non-Sendable image/GPU objects behind the render actor; do not add concurrency escape hatches.
 - Preserve source/document/revision checks at every asynchronous publication boundary.
 - Keep neutral documents and unsupported optional capabilities as no-ops.
+- Give every new inspector slider its control's own neutral; see "Inspector controls" above.
 - Add deterministic value or fake-engine coverage for new behavior; use opt-in RAW/UI/hardware lanes
   for framework or performance claims.
 - Run `swift build`, the relevant `swift test` filter, `scripts/ci-tests.sh fast` or `serial` as

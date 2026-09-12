@@ -54,9 +54,16 @@ struct AdjustInspectorView: View {
                     .accessibilityHidden(true)
             }
 
-            Slider(
+            NeutralOriginSlider(
                 value: viewModel.adjustmentBinding(for: control),
                 in: control.range,
+                // Slider space, like the binding either side of it: the temperature row is
+                // reflected about D65, and 6500 K happens to be the fixed point, but reading the
+                // neutral through `sliderMapped` is what keeps that a coincidence rather than a
+                // dependency.
+                neutral: control.sliderMapped(control.neutral),
+                accessibilityTitle: control.title,
+                accessibilityReadout: readout(for: control),
                 onEditingChanged: { editing in
                     if editing {
                         viewModel.beginPreviewInteraction()

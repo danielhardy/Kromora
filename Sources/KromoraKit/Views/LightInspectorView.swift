@@ -70,9 +70,12 @@ struct LightInspectorView: View {
                     .accessibilityHidden(true)
             }
 
-            Slider(
+            NeutralOriginSlider(
                 value: viewModel.lightBinding(for: control),
                 in: control.range,
+                neutral: control.neutral,
+                accessibilityTitle: control.title,
+                accessibilityReadout: readout(for: control),
                 onEditingChanged: { editing in
                     if editing { viewModel.beginPreviewInteraction() }
                     else { viewModel.endPreviewInteraction() }

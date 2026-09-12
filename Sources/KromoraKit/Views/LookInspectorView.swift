@@ -483,12 +483,17 @@ struct LookInspectorView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Slider(
+            NeutralOriginSlider(
                 value: Binding(
                     get: { viewModel.lookIntensity },
                     set: { viewModel.setLookIntensity($0) }
                 ),
                 in: 0...1,
+                // Unipolar: intensity is an amount, so 0 is both its neutral and its floor and the
+                // fill runs from the left as it always did.
+                neutral: 0,
+                accessibilityTitle: "Look intensity",
+                accessibilityReadout: "\(Int((viewModel.lookIntensity * 100).rounded())) percent",
                 onEditingChanged: { editing in
                     if editing {
                         viewModel.beginPreviewInteraction()

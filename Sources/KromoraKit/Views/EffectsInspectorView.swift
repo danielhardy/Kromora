@@ -52,6 +52,7 @@ struct EffectsInspectorView: View {
                         title: control.title,
                         value: viewModel.effectsBinding(for: control),
                         range: control.range,
+                        neutral: control.neutral,
                         readout: signedWholeReadout,
                         reset: { viewModel.resetEffects(control) }
                     )
@@ -74,6 +75,10 @@ struct EffectsInspectorView: View {
                         title: control.title,
                         value: viewModel.vignetteBinding(for: control),
                         range: control.range,
+                        // Midpoint and Feather default to 50 in 0…100, so their fill is centred
+                        // even though their ranges are unsigned. `VignetteControl.neutral` is the
+                        // authority — the same value `resetVignette(_:)` writes.
+                        neutral: control.neutral,
                         readout: control == .amount || control == .roundness
                             ? signedWholeReadout : unsignedWholeReadout,
                         reset: { viewModel.resetVignette(control) }
@@ -97,6 +102,7 @@ struct EffectsInspectorView: View {
                         title: control.title,
                         value: viewModel.grainBinding(for: control),
                         range: control.range,
+                        neutral: control.neutral,
                         readout: unsignedWholeReadout,
                         reset: { viewModel.resetGrain(control) }
                     )
@@ -110,6 +116,7 @@ struct EffectsInspectorView: View {
         title: String,
         value: Binding<Double>,
         range: ClosedRange<Double>,
+        neutral: Double,
         readout: @escaping (Double) -> String,
         reset: @escaping () -> Void
     ) -> some View {
@@ -117,6 +124,7 @@ struct EffectsInspectorView: View {
             title: title,
             value: value,
             range: range,
+            neutral: neutral,
             readout: readout,
             reset: reset,
             beginInteraction: viewModel.beginPreviewInteraction,
@@ -150,6 +158,8 @@ private struct EffectsValueRow: View {
     let title: String
     @Binding var value: Double
     let range: ClosedRange<Double>
+    /// Where this row's fill is anchored — see `SliderFill`.
+    let neutral: Double
     let readout: (Double) -> String
     let reset: () -> Void
     let beginInteraction: () -> Void
@@ -170,9 +180,12 @@ private struct EffectsValueRow: View {
                     .accessibilitySortPriority(1)
             }
 
-            Slider(
+            NeutralOriginSlider(
                 value: $value,
                 in: range,
+                neutral: neutral,
+                accessibilityTitle: title,
+                accessibilityReadout: readout(value),
                 onEditingChanged: { editing in
                     if editing { beginInteraction() }
                     else { endInteraction() }

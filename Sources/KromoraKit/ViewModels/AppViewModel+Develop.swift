@@ -59,8 +59,26 @@ extension AppViewModel {
     /// that genuinely reports 6500 K. Every seeded control now falls back the same way, so the
     /// fallback is legible as "no answer" wherever it surfaces.
     func developValue(for control: DevelopControl) -> Double {
-        let develop = document.rawDevelop
-        let seed = rawCapabilities
+        Self.developValue(for: control, in: document.rawDevelop, seed: rawCapabilities)
+    }
+
+    /// What this control would read if nothing had been stored for it — the decoder default, which
+    /// is where `resetDevelop(_:)` puts it back to and what the slider's fill is anchored at.
+    ///
+    /// It is `developValue(for:)` against `RAWDevelopSettings.neutral` rather than a second table of
+    /// literals, because a second table is a second thing to keep in step. Note that this is
+    /// per-image for most rows: the as-shot white balance on the Leica in `realworldtest/` is
+    /// 5842.2 K, so its slider's baseline is 5842.2 K and not the middle of 2000…50000.
+    func developNeutral(for control: DevelopControl) -> Double {
+        Self.developValue(for: control, in: .neutral, seed: rawCapabilities)
+    }
+
+    /// The tint half's decoder default. See `developTintBinding()` — one row, two sliders.
+    var developTintNeutral: Double { rawCapabilities?.asShotTint ?? 0 }
+
+    private static func developValue(
+        for control: DevelopControl, in develop: RAWDevelopSettings, seed: RAWCapabilities?
+    ) -> Double {
         switch control {
         case .exposure: return develop.exposure ?? 0
         case .baselineExposure: return develop.baselineExposure ?? seed?.baselineExposure ?? 0
