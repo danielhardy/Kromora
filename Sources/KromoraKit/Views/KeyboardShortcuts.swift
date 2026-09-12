@@ -343,6 +343,11 @@ final class KeyMonitor {
         // Hardware key codes (US layout independent for arrows/space).
         // Arrow keys are handled above, before the NSControl ownership gate.
         switch event.keyCode {
+        case 51, 117: // Delete / Forward Delete
+            // Remove the Library selection after confirmation.
+            guard isDown, vm.navigation.isGrid else { return event }
+            vm.requestDeleteSelectedLibraryItems()
+            return nil
         case 53: // Escape — cancel a mask gesture first, then leave the masking workspace/tool.
             guard isDown else { return event }
             if vm.maskInteractionState.hasDraft {

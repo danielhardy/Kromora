@@ -376,6 +376,40 @@ actor EditDocumentStore {
         try await save(document, for: EditSourceReference(assetID: assetID, url: url))
     }
 
+    /// Remove every record that identifies the source. The path match matters for a source that
+    /// was relinked before it was deleted: the current asset ID is normally enough, but keeping
+    /// the locator cleanup here prevents an old moved-source record from surviving the action.
+    func delete(for source: EditSourceReference) throws {
+        markIO()
+        do {
+            var records: [EditRecord] = []
+            if let direct = try fetchRecord(assetID: source.assetID.description) {
+                records.append(direct)
+            }
+            if let url = source.url,
+               let located = try fetchRecord(sourcePath: sourcePath(for: url)),
+               !records.contains(where: { $0 === located }) {
+                records.append(located)
+            }
+            guard !records.isEmpty else {
+                status = .ready
+                return
+            }
+
+            records.forEach(modelContext.delete)
+            try persist()
+            status = .ready
+        } catch {
+            modelContext.rollback()
+            status = .writeFailure(error.localizedDescription)
+            throw error
+        }
+    }
+
+    func delete(for assetID: PhotoAssetID, url: URL? = nil) throws {
+        try delete(for: EditSourceReference(assetID: assetID, url: url))
+    }
+
     private func fetchRecord(assetID: String) throws -> EditRecord? {
         var descriptor = FetchDescriptor<EditRecord>(
             predicate: #Predicate { $0.assetID == assetID })

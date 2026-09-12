@@ -107,12 +107,20 @@ protocol RenderEngining: Sendable {
     /// cache keeps serving the first cube and the second save silently does nothing on screen.
     func invalidateLUTCache() async
 
+    /// Drop in-memory render resources after a source is deleted from the library.
+    func invalidateRenderCaches() async
+
     /// What this source's RAW decoder can do, and where its own defaults sit. `nil` for a non-RAW.
     ///
     /// On the protocol because the develop inspector needs it and cannot reach a `CIRAWFilter`:
     /// the flags live on a non-`Sendable` type confined to the actor (§4.5). Returning a value is
     /// the only way the panel can be gated on what the decoder actually supports.
     func rawCapabilities(for source: ImageSource) async -> RAWCapabilities?
+}
+
+extension RenderEngining {
+    /// Compatibility default for lightweight render test doubles and integrations.
+    func invalidateRenderCaches() async {}
 }
 
 /// Actor-local counters used by performance captures to separate RAW configuration, decoder output
@@ -1268,7 +1276,7 @@ actor RenderEngine: RenderEngining {
     }
 
     /// Explicit invalidation for a source-folder refresh or a caller that knows a source changed.
-    func invalidateRenderCaches() {
+    func invalidateRenderCaches() async {
         cancelAllSemanticMaskResolutions()
         cancelProcessingPrefixFlights()
         resources.invalidateAll()

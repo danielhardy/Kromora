@@ -41,7 +41,9 @@ final class PhotoAnalysisCacheTests: TempDirectoryTestCase {
     func testCancelledWriteLeavesNoPartialEntry() async throws {
         let cache = PhotoAnalysisCache(directory: tempDirectory)
         let key = makeKey(version: .current)
-        let analysis = PhotoAnalysis(globalTone: .neutral, colorStatistics: .neutral, quality: .globalOnly)
+        let analysis = PhotoAnalysis(
+            globalTone: .neutral, colorStatistics: .neutral, quality: .globalOnly
+        )
         let task = Task {
             try await cache.store(analysis, for: key)
         }
@@ -54,6 +56,29 @@ final class PhotoAnalysisCacheTests: TempDirectoryTestCase {
         }
         let restored = try await cache.analysis(for: key)
         XCTAssertNil(restored)
+    }
+
+    func testRemoveOnlyDeletesOneAssetAndLeavesUnrelatedAnalysisIntact() async throws {
+        let cache = PhotoAnalysisCache(directory: tempDirectory)
+        let first = makeKey(version: .current)
+        let other = AnalysisCacheKey(
+            assetID: PhotoAssetID.data(Data("other-asset".utf8)),
+            sourceFingerprint: PhotoSourceFingerprint.data(Data("other-source".utf8)),
+            analysisVersion: .current
+        )
+        let analysis = PhotoAnalysis(
+            version: .current, globalTone: .neutral, colorStatistics: .neutral,
+            quality: .globalOnly
+        )
+        try await cache.store(analysis, for: first)
+        try await cache.store(analysis, for: other)
+
+        try await cache.remove(for: first.assetID)
+
+        let firstAfterRemoval = try await cache.analysis(for: first)
+        let otherAfterRemoval = try await cache.analysis(for: other)
+        XCTAssertNil(firstAfterRemoval)
+        XCTAssertEqual(otherAfterRemoval, analysis)
     }
 
     private func makeKey(version: AnalysisVersion) -> AnalysisCacheKey {
