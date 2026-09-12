@@ -1,6 +1,6 @@
 # CLAUDE.md — project guidance for AI agents
 
-Kromora is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**): it develops RAW through `CIRAWFilter`, applies tone/colour adjustments and `.cube` LUTs through one Metal-backed render pipeline, and can derive a `.cube` LUT from a (RAW, JPG) pair.
+Kromora is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**): it develops RAW through `CIRAWFilter`, applies tone/colour adjustments, local masks, and `.cube` LUTs through one Metal-backed render pipeline, and can derive a `.cube` LUT from a (RAW, JPG) pair. The current product is the folder-backed Library/Edit workflow with culling, deletion, content-aware Auto, comparison, and full-resolution export. See [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for the current coordinator boundaries and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for the explicitly future portable-library work.
 
 ## Build / run / test
 
@@ -29,8 +29,7 @@ If CI ever needs to move back to an older image, that reference is the thing tha
 ## Swift 6 language mode is on, for every target
 
 `Package.swift` is a 6.0 tools version and declares `.swiftLanguageMode(.v6)` on `KromoraKit`, `Kromora`
-and `KromoraKitTests`. Data-race safety is **errors, not warnings** — Phase 2 Step 8 turned it on after
-Steps 4–7 removed the last shared mutable state, and the module compiles with **zero** diagnostics
+and `KromoraKitTests`. Data-race safety is **errors, not warnings**, and the module compiles with **zero** diagnostics
 and **zero** escape hatches: no `@unchecked Sendable`, no `nonisolated(unsafe)`, no
 `@preconcurrency`. `PackageSettingsTests` fails if any of that changes, because none of it is
 observable at runtime.
@@ -53,7 +52,10 @@ Practical consequences when writing code here:
 
 The package is split so the app's code is testable (`@testable` can't import an executable target):
 
-- `Sources/KromoraKit/` — everything of substance (Models, ViewModels, Views). Only `ContentView` and
+- `Sources/KromoraKit/` — everything of substance (Models, ViewModels, Views). `AppViewModel` remains
+  the composition root; `EditorDocumentCoordinator`, `PhotosImportCoordinator`, `PreviewCoordinator`,
+  `EditPersistenceCoordinator`, `ExportCoordinator`, `DeriveCoordinator`, Look coordinators, and
+  `PhotoAnalysisCoordinator` own focused workflows. Only `ContentView` and
   `KromoraCommands` are `public`; keep the rest internal.
 - `Sources/Kromora/` — the `@main` entry point, `AppDelegate`, and the asset catalog. Nothing else belongs here.
 - `Tests/KromoraKitTests/` — XCTest. **Fixtures are generated, never committed** (`Fixtures.swift` builds
@@ -93,4 +95,6 @@ scripts/agent-worktree.sh remove "$DIR"   # clean up when done
 - Default branch `main`; commit messages end with the `Co-Authored-By: Claude …` trailer.
 - Build artifacts (`.build/`, ~hundreds of MB), `.DS_Store`, and `.claude/` are gitignored. `.claude/` is ignored, so **shared agent guidance belongs here in `CLAUDE.md`**, not under `.claude/`.
 - `docs/ENGINEERING_GUIDE.md` records the current architecture, render/resource boundaries, persistence, masking, and contributor invariants. It is durable guidance, not an implementation plan; per-change transcripts belong in the PR or DispatchGraph issue.
+- `docs/APP_ARCHITECTURE.md` records the current application ownership boundaries and coordinator extraction.
+- `docs/AUTO_EXPOSURE_POLICY.md`, `docs/AUTO_PERFORMANCE.md`, and `docs/COMPARISON_MODE.md` record the current Auto and comparison contracts; performance numbers in the Auto guide are dated baseline evidence, not universal product claims.
 - `docs/LOOKS.md`, `docs/PACKAGING.md`, and `docs/TESTING.md` are the current workflow guides for Looks/LUTs, release packaging, and verification/profiling.

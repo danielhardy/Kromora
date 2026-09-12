@@ -1,6 +1,7 @@
 # Portable library package — implementation plan
 
-**Status:** plan, not yet implemented. Time-bound.
+**Status:** future design input; no package-format or portable-identity implementation has landed.
+Tracked by KRMA-384 (ready). Time-bound.
 **Scope:** local-only. iCloud sync is explicitly out of scope (see [Deliberately out of scope](#deliberately-out-of-scope)).
 **Target scale:** 100,000 assets on a single Mac.
 
@@ -8,6 +9,12 @@ This document is a sequenced implementation plan. Unlike [`ENGINEERING_GUIDE.md`
 which records durable architecture, this file describes work that has not happened yet. As each phase
 lands, the invariants it establishes move into the engineering guide and the corresponding section
 here is reduced to a pointer. When all five phases are done, this file is deleted.
+
+The current product still uses referenced source folders and a local SwiftData `EditStore.store`
+for per-photo edit records. Do not describe the package layout, opaque UUID identity, copy-on-import
+semantics, or index design below as shipped behavior. Approval, dependency sequencing, migration,
+and verification lanes remain open work; implementing this plan must not silently migrate or delete
+current library data.
 
 ---
 

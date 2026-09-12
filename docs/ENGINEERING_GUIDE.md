@@ -6,18 +6,20 @@ change must preserve.
 
 ## Application boundaries
 
-`AppViewModel` is the composition root. It routes commands and owns the selected source, active
-`EditDocument`, navigation policy, history, and user-facing status. Focused collaborators own the
-work that would otherwise make the composition root a resource owner:
+`AppViewModel` is the composition root and façade for the main window. It routes commands and owns
+the selected source, active published `EditDocument`, navigation policy, and user-facing status.
+Focused collaborators own the value-state, asynchronous work, and resource lifecycles that would
+otherwise make the composition root a resource owner:
 
 | Concern | Current owner | Contract |
 | --- | --- | --- |
-| Library scanning and projections | `ImageCollection` | Scanning mutates the collection; selection, filtering, and ordering are deterministic projections. |
-| Preview scheduling and presentation | `PreviewCoordinator` and `PreviewSurface` | Only a completion matching the current source and document revision may become visible. |
-| Persistence | `EditPersistenceCoordinator` and `EditDocumentStore` | Dirty snapshots are coalesced per asset, serialized, atomically replaced, and flushed on termination. |
+| Library scanning and projections | `ImageCollection` and `PhotosImportCoordinator` | Scanning/membership mutates the collection; Photos provider interaction, transfer, progress, and failures stay in the coordinator. Selection, filtering, and ordering are deterministic projections. |
+| Editor document and history | `AppViewModel` and `EditorDocumentCoordinator` | AppViewModel publishes the active document; the coordinator owns per-photo sessions, history, revisions, and clipboard values. |
+| Preview scheduling and presentation | `PreviewCoordinator`, `PreviewSurface`, and `ComparisonFramePolicy` | Only a completion matching the current source and document revision may become visible; pure comparison-baseline rules stay outside the renderer. |
+| Persistence | `EditPersistenceCoordinator` and `EditDocumentStore` | Dirty snapshots are coalesced per asset, serialized through the SwiftData actor, and flushed on termination. |
 | Export and Look derivation | `ExportCoordinator` and `DeriveCoordinator` | Export and derivation use value snapshots and never mutate the active document. |
 | Look previews and saves | `LookPreviewCoordinator` and `LookSaveCoordinator` | Sheet-specific task and result state stays out of the editor. |
-| Photo analysis and masks | `PhotoAnalysisCoordinator` and `MaskStore` | Analysis is cancellable and source-keyed; durable mask pixels are disposable sidecar data. |
+| Photo analysis, Auto, and masks | `PhotoAnalysisCoordinator`, `ContentAwareAutoEngine`, and `MaskStore` | Analysis and Auto are cancellable and source-keyed; Auto returns a value-only result and durable mask pixels remain disposable sidecar data. |
 
 High-frequency presentation state belongs to the narrowest observable object available. Canvas
 navigation and crop drafts live in `CanvasInteractionState`; inspector chrome lives in
@@ -44,11 +46,27 @@ post-crop composition effects. The exact order and cache invalidation version li
 Sendable request values and rendered values cross `RenderEngining`. New work should use the existing
 request funnel and injected protocol seams rather than adding a second renderer or context.
 
+## Auto and photo analysis
+
+`PhotoAnalysisCoordinator` owns Vision-backed analysis, semantic-mask generation, caching, and
+cancellation. `ContentAwareAutoEngine` consumes that evidence, measures the current rendered edit,
+generates bounded native and Apple-reference candidates, evaluates them through the same renderer
+used by preview/export, and can plan at most the bounded Auto-owned regional corrections. Its
+`AutoEnhancementResult` is value-only and is applied atomically through the normal document/history/
+persistence path. Manual edits convert touched Auto-owned layers to user-owned state; repeated runs
+use the persisted fingerprint for a safe no-op when nothing has changed. See
+[`AUTO_EXPOSURE_POLICY.md`](AUTO_EXPOSURE_POLICY.md) and [`AUTO_PERFORMANCE.md`](AUTO_PERFORMANCE.md)
+for the behavior and dated diagnostic baseline.
+
 ## Persistence and masks
 
-The edit catalog is versioned JSON under the user's Application Support directory. Writes are
-serialized, coalesced, atomically replaced, and backed up. Per-photo history stores value documents;
-copy/paste, reset, navigation, and export must preserve the active photo's identity and revision.
+The local edit store is a SwiftData `EditStore.store` container under the user's Application Support
+directory. Each `EditRecord` stores one versioned JSON-encoded `EditDocument` plus source locator
+fields; `EditPersistenceCoordinator` serializes and coalesces writes and flushes them on
+termination. Per-photo history is in-memory and bounded to 100 undo and redo snapshots; copy/paste,
+reset, navigation, and export must preserve the active photo's identity and revision. This is the
+current local store, not the future portable package described in
+[`LIBRARY_PACKAGE_PLAN.md`](LIBRARY_PACKAGE_PLAN.md).
 
 Mask definitions are part of the edit document, while generated mask pixels are a separate cache
 under `~/Library/Application Support/Kromora/Masks/`. Metadata is JSON and pixels are raw Float32

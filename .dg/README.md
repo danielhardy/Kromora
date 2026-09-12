@@ -10,7 +10,7 @@ source of truth; local runtime data lives under `.project/` and can be regenerat
 ```bash
 dg board
 dg issue create "Describe the first change"
-dg issue prepare LUMO-001
+dg issue prepare KRMA-001
 dg ready --next
 ```
 

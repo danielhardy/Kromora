@@ -1,5 +1,12 @@
 # Native RAW Photo Editor MVP — Implementation Plan
 
+> Historical product brief from the pre-Kromora fork. This file is retained as project provenance,
+> not as an implementation plan. Its target tree, milestone sequence, MVP exclusions, and commands
+> are superseded by the current source, tests, `README.md`, and the durable guides in `docs/`.
+> In particular, masking, Auto/photo analysis, comparison, culling/deletion, coordinator-based
+> application ownership, RAW develop, and the current SwiftData edit store are already implemented;
+> the portable-library design is tracked separately in [`docs/LIBRARY_PACKAGE_PLAN.md`](../docs/LIBRARY_PACKAGE_PLAN.md).
+
 ## Product Goal
 
 Build a **very high-performance native macOS RAW photo editor** starting from the existing LUTzy codebase.
