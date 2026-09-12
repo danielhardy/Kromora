@@ -6,6 +6,8 @@ import SwiftUI
 struct CropOverlayView: View {
     typealias Handle = CropHandle
 
+    private let handleHitTargetSize: CGFloat = 44
+
     let normalizedRect: CGRect
     let imageSize: CGSize
     let aspectRatio: CropAspectRatio
@@ -47,10 +49,22 @@ struct CropOverlayView: View {
                         .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
                         .frame(width: 18, height: 18)
                         .position(handlePosition(handle, in: cropRect))
-                        .contentShape(Circle().scale(2))
+                        .allowsHitTesting(false)
+                }
+
+                // Keep the hit target inside the image when a crop corner is on the overlay
+                // boundary. In particular, the top-left handle otherwise has most of its hit
+                // area outside the GeometryReader and can also sit beneath the top controls.
+                ForEach(Handle.allCases, id: \.self) { handle in
+                    Rectangle()
+                        .fill(.clear)
+                        .frame(width: handleHitTargetSize, height: handleHitTargetSize)
+                        .position(handleHitPosition(handle, in: cropRect))
+                        .contentShape(Rectangle())
                         .gesture(handleGesture(handle, imageRect: imageRect))
                         .accessibilityLabel("Crop \(handle.label) handle")
                         .accessibilityHint("Drag to resize the crop")
+                        .zIndex(1)
                 }
 
                 HStack(spacing: 8) {
@@ -76,10 +90,13 @@ struct CropOverlayView: View {
                             }
                         }
                     } label: {
-                        Label(aspectRatio.selectionLabel(for: orientation), systemImage: "aspectratio")
+                        Label(
+                            aspectRatio.selectionLabel(for: orientation), systemImage: "aspectratio"
+                        )
                     }
                     .accessibilityLabel("Crop aspect ratio")
-                    .accessibilityHint("Choose a square, freeform, landscape, or portrait crop ratio")
+                    .accessibilityHint(
+                        "Choose a square, freeform, landscape, or portrait crop ratio")
                     Spacer()
                     Button("Reset", action: onReset)
                     Button("Cancel", action: onCancel)
@@ -94,7 +111,9 @@ struct CropOverlayView: View {
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Crop, \(aspectRatio.label)")
-            .accessibilityHint("Choose an aspect ratio, then drag the crop frame or handles within the image bounds")
+            .accessibilityHint(
+                "Choose an aspect ratio, then drag the crop frame or handles within the image bounds"
+            )
             .onExitCommand(perform: onCancel)
         }
     }
@@ -116,7 +135,8 @@ struct CropOverlayView: View {
 
     private func fittedImageRect(in viewport: CGSize) -> CGRect {
         guard imageSize.width > 0, imageSize.height > 0,
-              viewport.width > 0, viewport.height > 0 else { return .zero }
+            viewport.width > 0, viewport.height > 0
+        else { return .zero }
         let scale = min(viewport.width / imageSize.width, viewport.height / imageSize.height)
         let size = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
         return CGRect(
@@ -175,14 +195,25 @@ struct CropOverlayView: View {
         }
     }
 
+    private func handleHitPosition(_ handle: Handle, in rect: CGRect) -> CGPoint {
+        let inset = min(handleHitTargetSize / 2, min(rect.width, rect.height) / 2)
+        switch handle {
+        case .topLeading: return CGPoint(x: rect.minX + inset, y: rect.minY + inset)
+        case .topTrailing: return CGPoint(x: rect.maxX - inset, y: rect.minY + inset)
+        case .bottomLeading: return CGPoint(x: rect.minX + inset, y: rect.maxY - inset)
+        case .bottomTrailing: return CGPoint(x: rect.maxX - inset, y: rect.maxY - inset)
+        }
+    }
+
     private func moveGesture(imageRect: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 let start = moveStart ?? normalizedRect
                 moveStart = start
-                onChange(CropOverlayInteraction.translated(
-                    start, delta: value.translation, imageRect: imageRect
-                ))
+                onChange(
+                    CropOverlayInteraction.translated(
+                        start, delta: value.translation, imageRect: imageRect
+                    ))
             }
             .onEnded { _ in moveStart = nil }
     }
@@ -192,17 +223,18 @@ struct CropOverlayView: View {
             .onChanged { value in
                 let start = handleStarts[handle] ?? normalizedRect
                 handleStarts[handle] = start
-                onChange(CropOverlayInteraction.resized(
-                    start, handle: handle, delta: value.translation, imageRect: imageRect,
-                    aspectRatio: aspectRatio, orientation: orientation, imageSize: imageSize
-                ))
+                onChange(
+                    CropOverlayInteraction.resized(
+                        start, handle: handle, delta: value.translation, imageRect: imageRect,
+                        aspectRatio: aspectRatio, orientation: orientation, imageSize: imageSize
+                    ))
             }
             .onEnded { _ in handleStarts[handle] = nil }
     }
 }
 
-private extension CropHandle {
-    var label: String {
+extension CropHandle {
+    fileprivate var label: String {
         switch self {
         case .topLeading: return "top left"
         case .topTrailing: return "top right"
