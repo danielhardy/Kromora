@@ -46,8 +46,16 @@ final class PreviewSurface: ObservableObject {
     private var lastValidPresentationImageExtent: CGRect?
     private var lastValidCoversPresentationExtent = false
     private var lastValidSpace: WorkingSpace = .current
-    private var lastValidDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
-    private var currentDetail: (identity: PreviewFrameIdentity, factor: CGFloat)?
+    /// The detail level of a published frame, plus whether that frame is the complete photo.
+    /// Coverage is part of the record because a partial ROI frame is not interchangeable with a
+    /// whole-photo frame of the same source and document, however sharp it is.
+    private struct PublishedDetail {
+        let identity: PreviewFrameIdentity
+        let factor: CGFloat
+        let coversPresentationExtent: Bool
+    }
+    private var lastValidDetail: PublishedDetail?
+    private var currentDetail: PublishedDetail?
     private var pendingPresentationMaterializationRevision: UInt64?
     private var pendingPresentationMaterialization: (texture: MTLTexture, extent: CGRect)?
     private var pendingDisplayID: UInt64?
@@ -120,7 +128,11 @@ final class PreviewSurface: ObservableObject {
         if let detailIdentity, let detailFactor, detailFactor.isFinite,
            let current = currentDetail,
            current.identity == detailIdentity,
-           detailFactor + 0.000001 < current.factor {
+           detailFactor + 0.000001 < current.factor,
+           // A retained ROI frame only holds pixels for the region the user was zoomed into, so
+           // refusing the complete photo for being less detailed would leave the rest of the
+           // canvas showing that fragment — which is what made zooming back out look stuck.
+           !(coversPresentationExtent && !current.coversPresentationExtent) {
             // Navigation can legitimately request a cheaper interactive level, but it must not
             // replace an already valid sharper frame for the same source/document. The settled
             // request will still be accepted when it reaches the coordinator.
@@ -140,7 +152,10 @@ final class PreviewSurface: ObservableObject {
         presentationTextureExtent = nil
         pendingPresentationMaterialization = nil
         if let detailIdentity, let detailFactor, detailFactor.isFinite {
-            currentDetail = (detailIdentity, detailFactor)
+            currentDetail = PublishedDetail(
+                identity: detailIdentity, factor: detailFactor,
+                coversPresentationExtent: coversPresentationExtent
+            )
         } else {
             currentDetail = nil
         }
