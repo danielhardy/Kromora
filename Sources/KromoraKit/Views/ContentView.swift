@@ -1,6 +1,5 @@
 import SwiftUI
 import PhotosUI
-import Photos
 import AppKit
 
 /// Main window layout: sidebar + preview + toolbar.
@@ -9,13 +8,16 @@ import AppKit
 /// `KromoraCommands`); everything else in the module stays internal.
 public struct ContentView: View {
     @StateObject private var viewModel: AppViewModel
+    @StateObject private var photosImportCoordinator: PhotosImportCoordinator
     @ObservedObject private var inspectorState: AppViewModel.InspectorState
     @State private var photosSelection: [PhotosPickerItem] = []
-    @State private var photosImportTask: Task<Void, Never>?
 
     public init() {
         let viewModel = AppViewModel(includeBundledLooks: true)
         _viewModel = StateObject(wrappedValue: viewModel)
+        _photosImportCoordinator = StateObject(
+            wrappedValue: PhotosImportCoordinator(viewModel: viewModel)
+        )
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
     }
 
@@ -23,6 +25,9 @@ public struct ContentView: View {
     /// termination can flush the same edit catalog the window has been using.
     public init(viewModel: AppViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        _photosImportCoordinator = StateObject(
+            wrappedValue: PhotosImportCoordinator(viewModel: viewModel)
+        )
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
     }
 
@@ -42,6 +47,11 @@ public struct ContentView: View {
             )
             .onChange(of: photosSelection) { _, newSelection in
                 handlePhotosSelection(newSelection)
+            }
+            .onChange(of: photosImportCoordinator.progress) { _, newProgress in
+                if newProgress == nil {
+                    photosSelection = []
+                }
             }
             .sheet(isPresented: Binding(
                 get: { viewModel.derive.isSheetPresented },
@@ -104,81 +114,16 @@ public struct ContentView: View {
 
     private func handlePhotosSelection(_ selection: [PhotosPickerItem]) {
         guard !selection.isEmpty else { return }
-        photosImportTask?.cancel()
-        viewModel.beginPhotosImport(totalCount: selection.count)
-
-        // Keep only the current transfer in this task. `ImageCollection` owns each successful
-        // original after append, while the picker/provider remains cancellable between items.
-        photosImportTask = Task { @MainActor in
-            var wasCancelled = false
-            for (ordinal, item) in selection.enumerated() {
-                if Task.isCancelled {
-                    wasCancelled = true
-                    break
-                }
-
-                let name = Self.originalPhotoName(for: item) ?? "Photo \(ordinal + 1)"
-                viewModel.updatePhotosImportPhase(.transferring, name: name)
-                var transferInterval = KromoraSignpostInterval(
-                    .photoTransfer,
-                    context: KromoraTraceContext(
-                        sourceFingerprint: item.itemIdentifier ?? "ordinal:\(ordinal)",
-                        quality: "photosImport"
-                    )
-                )
-                do {
-                    guard let data = try await item.loadTransferable(type: Data.self) else {
-                        transferInterval.end()
-                        viewModel.recordPhotosImportFailure(name: name, ordinal: ordinal)
-                        continue
-                    }
-                    transferInterval.end()
-                    guard !Task.isCancelled else {
-                        wasCancelled = true
-                        break
-                    }
-                    // Hash the one transferred payload off the main actor. The digest is then
-                    // carried through the asset, thumbnail, and first-render paths, so this is
-                    // the only full-buffer hash performed for this Photos item.
-                    let contentDigest = await Task.detached(priority: .utility) {
-                        PhotoAssetID.contentDigest(data)
-                    }.value
-                    guard !Task.isCancelled else {
-                        wasCancelled = true
-                        break
-                    }
-                    let payload = ImageCollection.PhotoImportItem(
-                        name: name, data: data, localIdentifier: item.itemIdentifier,
-                        contentDigest: contentDigest
-                    )
-                    viewModel.appendPhotosImport(payload, ordinal: ordinal)
-                } catch is CancellationError {
-                    transferInterval.end()
-                    wasCancelled = true
-                    break
-                } catch {
-                    transferInterval.end()
-                    // A provider failure is local to this item. Continue so already imported
-                    // originals remain usable and later selections still get a chance to arrive.
-                    viewModel.recordPhotosImportFailure(name: name, ordinal: ordinal)
-                }
-            }
-            wasCancelled = wasCancelled || Task.isCancelled
-            viewModel.finishPhotosImport(cancelled: wasCancelled)
-            photosSelection = []
-        }
+        photosImportCoordinator.start(
+            selections: selection.enumerated().map {
+                PhotosImportSelection(ordinal: $0.offset, localIdentifier: $0.element.itemIdentifier)
+            },
+            provider: PhotosPickerImportProvider(items: selection)
+        )
     }
 
     private func cancelPhotosImport() {
-        photosImportTask?.cancel()
-    }
-
-    private static func originalPhotoName(for item: PhotosPickerItem) -> String? {
-        guard let identifier = item.itemIdentifier else { return nil }
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil)
-        guard let asset = result.firstObject else { return nil }
-        return PHAssetResource.assetResources(for: asset)
-            .first(where: { $0.type == .photo && !$0.originalFilename.isEmpty })?.originalFilename
+        photosImportCoordinator.cancel()
     }
 
     private var mainContent: some View {
@@ -201,7 +146,8 @@ public struct ContentView: View {
                         viewModel: viewModel,
                         onOpen: viewModel.openLibraryImageForEditing
                     )
-                    StatusBar(viewModel: viewModel, onCancelImport: cancelPhotosImport,
+                    StatusBar(viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
+                              onCancelImport: cancelPhotosImport,
                               onCancelExport: viewModel.cancelExport,
                               onCancelAuto: viewModel.cancelAutoAdjustment)
                 }
@@ -228,7 +174,8 @@ public struct ContentView: View {
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
 
-                            StatusBar(viewModel: viewModel, onCancelImport: cancelPhotosImport,
+                            StatusBar(viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
+                                      onCancelImport: cancelPhotosImport,
                                       onCancelExport: viewModel.cancelExport,
                                       onCancelAuto: viewModel.cancelAutoAdjustment)
                     }
@@ -352,7 +299,7 @@ public struct ContentView: View {
                     viewModel.refreshSource()
                 }
             }
-            if viewModel.photosImportProgress != nil {
+            if photosImportCoordinator.progress != nil {
                 Divider()
                 Button("Cancel Photos Import") {
                     cancelPhotosImport()
