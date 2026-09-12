@@ -132,8 +132,8 @@ struct RecipeExtractor {
         // 2. JPG → CIImage. CIImage interprets the embedded color space, and
         //    `orientedLoadOptions` bakes in the EXIF orientation so a portrait
         //    JPG isn't compared sideways against the RAW render — `developRAWNeutral`
-        //    bakes the same tag through `applyingEXIFOrientation`, since
-        //    `CIRAWFilter.outputImage` is sensor-native.
+        //    uses the same display-oriented `CIRAWFilter` output, without baking
+        //    the tag a second time.
         guard let jpgImage = CIImage(contentsOf: jpgURL, options: ImageDecoder.orientedLoadOptions) else {
             throw ExtractorError.cannotLoadJPG(jpgURL.lastPathComponent)
         }

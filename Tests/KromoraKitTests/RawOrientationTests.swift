@@ -4,10 +4,10 @@ import CoreGraphics
 import ImageIO
 @testable import KromoraKit
 
-/// RAW orientation was baked nowhere: `CIRAWFilter.outputImage` is sensor-native, so an
-/// orientation-3 ARW rendered upside-down on the canvas while its ImageIO filmstrip thumbnail
-/// (transform baked) stood upright. These pin the shared helpers every RAW decode now goes
-/// through, without needing a camera RAW fixture in the checkout.
+/// `CIRAWFilter` orients `outputImage` itself; `nativeSize` stays sensor-native. Re-baking
+/// the ImageIO tag therefore turns a portrait RAW (EXIF 5–8) back into landscape. These pin
+/// the shared helpers every RAW decode action goes through, without needing a camera RAW in
+/// the checkout. An opt-in local-file case covers a real quarter-turned ARW when present.
 final class RawOrientationTests: TempDirectoryTestCase {
 
     /// The ImageIO reader must report the tag the camera wrote, for both file and bytes
@@ -88,5 +88,93 @@ final class RawOrientationTests: TempDirectoryTestCase {
         let after = try Pixels.bytes(of: flipped)
         XCTAssertLessThan(after[0], 128, "after a 180° turn the first pixel should be blue")
         XCTAssertGreaterThan(after[2], 128)
+    }
+
+    /// `CIRAWFilter` already returns display-oriented pixels for tags 5–8. Re-baking that
+    /// tag swaps the axes a second time and the canvas shows a portrait RAW as landscape.
+    func testAlreadyOrientedPortraitOutputIsNotBakedAgain() {
+        let alreadyPortrait = CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 60, height: 80))
+        let sensor = CGSize(width: 80, height: 60)
+        for orientation: CGImagePropertyOrientation in [.left, .right] {
+            let result = ImageDecoder.displayOrientedRAWOutput(
+                alreadyPortrait, sensorSize: sensor, orientation: orientation
+            )
+            XCTAssertEqual(
+                result.extent.integral.size, CGSize(width: 60, height: 80),
+                "\(orientation) must keep an already-portrait RAW output"
+            )
+            XCTAssertTrue(
+                result.extent == alreadyPortrait.extent,
+                "\(orientation) must not insert a second orientation node"
+            )
+        }
+    }
+
+    /// A decoder that still emits sensor-native pixels must be baked once so the canvas
+    /// matches the filmstrip.
+    func testSensorNativePortraitOutputIsBakedOnce() {
+        let sensorNative = CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 80, height: 60))
+        let sensor = CGSize(width: 80, height: 60)
+        for orientation: CGImagePropertyOrientation in [.left, .right] {
+            let result = ImageDecoder.displayOrientedRAWOutput(
+                sensorNative, sensorSize: sensor, orientation: orientation
+            )
+            XCTAssertEqual(
+                result.extent.integral.size, CGSize(width: 60, height: 80),
+                "\(orientation) must bake a sensor-native RAW output to portrait"
+            )
+        }
+    }
+
+    /// Landscape tags do not swap axes, so an already-display-oriented output is left alone.
+    func testNonSwappingOutputIsNotBakedAgain() {
+        let landscape = CIImage(color: CIColor(red: 0, green: 1, blue: 0, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: 80, height: 60))
+        let result = ImageDecoder.displayOrientedRAWOutput(
+            landscape, sensorSize: CGSize(width: 80, height: 60), orientation: .down
+        )
+        XCTAssertEqual(result.extent, landscape.extent)
+    }
+
+    /// A real quarter-turned ARW must stay portrait after develop, matching its ImageIO thumbnail.
+    func testLocalPortraitRAWDevelopMatchesThumbnailAxes() throws {
+        let portrait = Fixtures.localRAWURLs.first { url in
+            switch ImageDecoder.exifOrientation(at: url) {
+            case .left, .leftMirrored, .right, .rightMirrored: return true
+            default: return false
+            }
+        }
+        guard let url = portrait else {
+            throw XCTSkip("no quarter-turned local RAW; set KROMORA_RAW_FIXTURE_DIR")
+        }
+        let orientation = ImageDecoder.exifOrientation(at: url)
+
+        let filter = try XCTUnwrap(CIRAWFilter(imageURL: url))
+        filter.scaleFactor = 0.05
+        let developed = try XCTUnwrap(
+            ImageDecoder.developedImage(from: filter, orientation: orientation)
+        )
+        XCTAssertGreaterThan(
+            developed.extent.height, developed.extent.width,
+            "\(url.lastPathComponent) must develop as portrait"
+        )
+
+        let pipeline = try XCTUnwrap(RenderPipeline.developedSource(
+            ImageSource(url: url, nativeExtent: .zero),
+            rawDevelop: .neutral,
+            scale: .preview(maxSize: CGSize(width: 400, height: 400))
+        ))
+        XCTAssertGreaterThan(
+            pipeline.extent.height, pipeline.extent.width,
+            "pipeline preview develop must keep \(url.lastPathComponent) portrait"
+        )
+
+        let thumbnail = try XCTUnwrap(Thumbnails.generate(from: url, maxPixelSize: 200))
+        XCTAssertGreaterThan(
+            thumbnail.size.height, thumbnail.size.width,
+            "filmstrip thumbnail for \(url.lastPathComponent) is the portrait reference"
+        )
     }
 }

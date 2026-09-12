@@ -40,7 +40,9 @@ enum RenderPipeline {
     /// sensor-native, so an orientation-3 ARW rendered upside-down while its ImageIO thumbnail
     /// (transform baked) stood upright.
     /// v24 adds the durable quarter-turn image rotation stage.
-    static let cacheVersion = 24
+    /// v25 stops re-baking that tag: `CIRAWFilter` already orients `outputImage`, and a second
+    /// bake turned portrait RAWs (EXIF 5–8) back into landscape.
+    static let cacheVersion = 25
 
     /// Build the graph for `document` over `source`.
     ///
@@ -364,18 +366,17 @@ enum RenderPipeline {
             guard let filter = rawFilter(for: source.backing) else { return nil }
             rawDevelop.apply(to: filter)
 
-            // `CIRAWFilter.outputImage` is sensor-native: it ignores the EXIF orientation tag
-            // that ImageIO thumbnails and `orientedLoadOptions` both bake. Read the tag and
-            // apply it so the canvas agrees with the filmstrip (orientation 3 arrived
-            // upside-down; quarter-turns additionally swap the axes).
+            // `nativeSize` is sensor-native; `outputImage` is already display-oriented via
+            // `CIRAWFilter.orientation`. Display geometry still swaps axes for tags 5–8 so
+            // the preview scale matches the filmstrip. Do not re-bake the tag onto pixels —
+            // that turns a portrait RAW back into landscape.
             let orientation = rawOrientation(for: source.backing)
             let orientedSize = ImageDecoder.orientedDimensions(filter.nativeSize, for: orientation)
             let factor = scale.factor(for: rotation.orientedExtent(orientedSize))
             if factor < 1 {
                 filter.scaleFactor = Float(factor)
             }
-            guard let output = filter.outputImage else { return nil }
-            return ImageDecoder.applyingEXIFOrientation(orientation, to: output)
+            return ImageDecoder.developedImage(from: filter, orientation: orientation)
 
         case .standard:
             // ImageIO can ask the codec for a reduced-resolution decode, which avoids allocating

@@ -2377,6 +2377,9 @@ actor RenderEngine: RenderEngining {
             // so the interactive tick never pays for it. The file fingerprint owns
             // invalidation if the tag changes underneath us.
             self.orientation = RenderPipeline.rawOrientation(for: source.backing)
+            if filter.orientation != self.orientation {
+                filter.orientation = self.orientation
+            }
         }
 
         func capabilities() -> RAWCapabilities {
@@ -2425,8 +2428,8 @@ actor RenderEngine: RenderEngining {
             materialize: (CIImage) -> CIImage?
         ) -> OutputResult {
             // The scale factor is computed from the display size so a quarter-turned sensor
-            // fits the preview box the same way the settled path does; the decoder output
-            // below is then baked upright so the canvas agrees with the filmstrip.
+            // fits the preview box the same way the settled path does. The filter already
+            // orients `outputImage`; a second bake would turn portrait RAWs back to landscape.
             let orientedSize = rotation.orientedExtent(
                 ImageDecoder.orientedDimensions(filter.nativeSize, for: orientation)
             )
@@ -2452,7 +2455,9 @@ actor RenderEngine: RenderEngining {
             guard let rawOutput = filter.outputImage else {
                 return OutputResult(image: nil, propertyWrites: propertyWrites, requestedOutput: true)
             }
-            let output = ImageDecoder.applyingEXIFOrientation(orientation, to: rawOutput)
+            let output = ImageDecoder.displayOrientedRAWOutput(
+                rawOutput, sensorSize: filter.nativeSize, orientation: orientation
+            )
             guard let completed = materialize(output) else {
                 // The mutable filter remains correctly configured, but do not retain its lazy
                 // output: a later property write could otherwise change the image behind the cache.

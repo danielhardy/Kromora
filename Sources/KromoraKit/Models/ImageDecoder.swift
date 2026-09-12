@@ -129,10 +129,12 @@ enum ImageDecoder {
         defer { interval.end() }
 
         if ImageSource.kind(forData: data) == .raw {
-            guard let raw = CIRAWFilter(imageData: data, identifierHint: nil)?.outputImage else {
+            guard let filter = CIRAWFilter(imageData: data, identifierHint: nil),
+                  let output = developedImage(from: filter, orientation: exifOrientation(of: data))
+            else {
                 throw ImageError.cannotLoad(name)
             }
-            return applyingEXIFOrientation(exifOrientation(of: data), to: raw)
+            return output
         } else {
             guard let image = CIImage(data: data, options: orientedLoadOptions) else {
                 throw ImageError.cannotLoad(name)
@@ -144,13 +146,14 @@ enum ImageDecoder {
     /// Decode options that bake a file's EXIF orientation into the returned
     /// image's geometry.
     ///
-    /// `CIImage` does **not** honor the orientation tag by default, and neither does
-    /// `CIRAWFilter` — its `outputImage` is sensor-native. The thumbnail path bakes it via
-    /// (`kCGImageSourceCreateThumbnailWithTransform`). Without this a portrait
-    /// JPEG/HEIC previewed *and exported* on its side while its filmstrip
-    /// thumbnail stood upright. Every non-RAW decode in the app goes through
-    /// these options so all three paths agree; every RAW decode goes through
-    /// `applyingEXIFOrientation` below for the same reason.
+    /// `CIImage` does **not** honor the orientation tag by default. `CIRAWFilter` does:
+    /// it copies the file tag onto `orientation` and bakes it into `outputImage`, while
+    /// `nativeSize` stays sensor-native. The thumbnail path bakes the same tag via
+    /// `kCGImageSourceCreateThumbnailWithTransform`. Without `orientedLoadOptions` a
+    /// portrait JPEG/HEIC previewed *and exported* on its side while its filmstrip
+    /// thumbnail stood upright. Every non-RAW decode goes through these options; every
+    /// RAW decode goes through `developedImage(from:orientation:)` so the filter's own
+    /// bake is not applied a second time.
     ///
     /// Computed rather than stored: a `static let` of `[CIImageOption: Any]` is shared mutable state
     /// as far as the compiler is concerned (`Any` is not `Sendable`), which is an error under Swift
@@ -166,8 +169,8 @@ enum ImageDecoder {
     /// the render path and stays independent of any user-adjustable develop
     /// path. Returns `nil` if the file can't be decoded.
     static func developRAWNeutral(at url: URL) -> CIImage? {
-        guard let raw = CIRAWFilter(imageURL: url)?.outputImage else { return nil }
-        return applyingEXIFOrientation(exifOrientation(at: url), to: raw)
+        guard let filter = CIRAWFilter(imageURL: url) else { return nil }
+        return developedImage(from: filter, orientation: exifOrientation(at: url))
     }
 
     // MARK: - EXIF orientation for RAW decoding
@@ -175,9 +178,11 @@ enum ImageDecoder {
     /// The display orientation recorded for a file-backed source. `.up` when the tag is
     /// absent or the properties cannot be read — the same fallback `orientedExtent` uses.
     ///
-    /// `CIRAWFilter.outputImage` is sensor-native and ignores this tag, so every RAW decode
-    /// reads it via ImageIO and bakes it with `applyingEXIFOrientation`. Standard images
-    /// bake it instead through `orientedLoadOptions`; both spellings agree by construction.
+    /// `CIRAWFilter.nativeSize` is sensor-native and ignores this tag, so display geometry
+    /// still comes from ImageIO plus `orientedDimensions`. Pixel output is a different
+    /// contract: the filter bakes `orientation` itself, and `developedImage` only re-bakes
+    /// when a decoder still emits sensor-native axes. Standard images bake through
+    /// `orientedLoadOptions`; both spellings agree by construction.
     static func exifOrientation(at url: URL) -> CGImagePropertyOrientation {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               CGImageSourceGetCount(source) > 0,
@@ -205,6 +210,45 @@ enum ImageDecoder {
     ) -> CIImage {
         guard orientation != .up else { return image }
         return image.oriented(orientation)
+    }
+
+    /// Display-oriented pixels from a configured `CIRAWFilter`.
+    ///
+    /// The filter already applies its `orientation` property to `outputImage`. Re-baking
+    /// the ImageIO tag on top of that turns a portrait RAW (EXIF 5–8) back into landscape.
+    /// `nativeSize` remains sensor-native and is *not* a substitute for the output extent.
+    static func developedImage(
+        from filter: CIRAWFilter,
+        orientation: CGImagePropertyOrientation
+    ) -> CIImage? {
+        if filter.orientation != orientation {
+            filter.orientation = orientation
+        }
+        guard let output = filter.outputImage else { return nil }
+        return displayOrientedRAWOutput(
+            output, sensorSize: filter.nativeSize, orientation: orientation
+        )
+    }
+
+    /// Skip a second bake when `output` is already on the display axes. Internal for tests
+    /// so the axis rule can be pinned without a camera RAW in the checkout.
+    static func displayOrientedRAWOutput(
+        _ output: CIImage,
+        sensorSize: CGSize,
+        orientation: CGImagePropertyOrientation
+    ) -> CIImage {
+        let display = orientedDimensions(sensorSize, for: orientation)
+        let displaySwapsAxes =
+            display.width != sensorSize.width || display.height != sensorSize.height
+        guard displaySwapsAxes else { return output }
+        if isLandscape(output.extent.size) == isLandscape(display) {
+            return output
+        }
+        return applyingEXIFOrientation(orientation, to: output)
+    }
+
+    private static func isLandscape(_ size: CGSize) -> Bool {
+        size.width >= size.height
     }
 
     /// The display dimensions of a stored pixel size. Quarter-turn orientations (5–8)
