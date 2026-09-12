@@ -763,6 +763,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
     private let embeddedFirstFrameProvider: @Sendable (URL) async -> NSImage?
+    private let fileDialog: any FileDialogProviding
+    private let fileDropActionPolicy: FileDropActionPolicy
     private var embeddedFirstFrameTask: Task<NSImage?, Never>?
     private var prefetchDelayTask: Task<Void, Never>?
     private var previewDebounceTask: Task<Void, Never>?
@@ -829,7 +831,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
-        }
+        },
+        fileDialog: any FileDialogProviding = AppKitFileDialog(),
+        fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy()
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -869,6 +873,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             capBytes: previewDiskCacheCapBytes
         )
         self.embeddedFirstFrameProvider = embeddedFirstFrameProvider
+        self.fileDialog = fileDialog
+        self.fileDropActionPolicy = fileDropActionPolicy
         self.mediaVolumeProvider = mediaVolumeProvider
         self.mediaVolumeNotificationCenter = mediaVolumeNotificationCenter
         self.applicationNotificationCenter = applicationNotificationCenter
@@ -2118,15 +2124,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     func openImageDialog() {
-        let panel = NSOpenPanel()
-        panel.title = "Open Image"
-        panel.allowedContentTypes = ImageDecoder.supportedTypes
-        panel.allowsMultipleSelection = true
-        panel.directoryURL = settings.defaultSourceFolderURL
-
-        if panel.runModal() == .OK {
-            openImages(urls: panel.urls)
+        guard let urls = fileDialog.chooseImages(startingAt: settings.defaultSourceFolderURL) else {
+            return
         }
+        openImages(urls: urls)
     }
 
     /// Replace the one-off library with the selected files and open the first item. Keeping this
@@ -2522,16 +2523,26 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// Choose a folder to use as the persistent image source, scan it (incl.
     /// subfolders), reveal the file browser, and open the first image.
     func chooseSourceFolder() {
-        let panel = NSOpenPanel()
-        panel.title = "Choose Source Folder"
-        panel.prompt = "Use Folder"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = settings.defaultSourceFolderURL
-
-        if panel.runModal() == .OK, let url = panel.url {
+        if let url = fileDialog.chooseFolder(
+            title: "Choose Source Folder",
+            prompt: "Use Folder",
+            startingAt: settings.defaultSourceFolderURL,
+            canCreateDirectories: false
+        ) {
             openSourceFolder(url: url)
+        }
+    }
+
+    /// Classify a dropped URL at the application boundary, then dispatch through the existing
+    /// value-based open seams. Invalid or cancelled drops leave the current edit untouched.
+    func handleDroppedURL(_ url: URL) {
+        switch fileDropActionPolicy.action(for: url) {
+        case .openImage(let imageURL):
+            openImage(url: imageURL)
+        case .openFolder(let folderURL):
+            openSourceFolder(url: folderURL)
+        case .invalid:
+            return
         }
     }
 

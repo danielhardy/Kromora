@@ -1,25 +1,32 @@
 import SwiftUI
-import AppKit
 
 /// The app-wide Settings surface. Folder defaults are intentionally separate from the currently
 /// open source/Look folders: changing one changes where a future panel starts, not existing files.
 public struct KromoraSettingsView: View {
     @ObservedObject private var settings: KromoraSettings
     private let editDatabaseFileURL: URL?
+    private let fileDialog: any FileDialogProviding
+    private let workspace: any WorkspaceRevealing
     @State private var sourceTestMessage = ""
     @State private var exportTestMessage = ""
     @State private var editDatabaseURL: URL?
 
-    public init(settings: KromoraSettings, editDatabaseURL: URL?) {
+    public init(
+        settings: KromoraSettings,
+        editDatabaseURL: URL?,
+        fileDialog: any FileDialogProviding = AppKitFileDialog(),
+        workspace: any WorkspaceRevealing = AppKitWorkspaceRevealer()
+    ) {
         _settings = ObservedObject(wrappedValue: settings)
         self.editDatabaseFileURL = editDatabaseURL
+        self.fileDialog = fileDialog
+        self.workspace = workspace
     }
 
     /// SwiftData may not create the persistent store file until the first successful save.
     /// A requested on-disk URL is therefore only revealable once the file exists.
     static func revealableEditDatabaseURL(for url: URL?) -> URL? {
-        guard let url, FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return url
+        KromoraSettings.revealableEditDatabaseURL(for: url)
     }
 
     public var body: some View {
@@ -77,7 +84,7 @@ public struct KromoraSettingsView: View {
                             .lineLimit(1)
                     }
                     Button("Reveal Edit Database in Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([editDatabaseURL])
+                        workspace.reveal([editDatabaseURL])
                     }
                     .accessibilityLabel("Reveal Edit Database in Finder")
                     .accessibilityHint("Open Finder with Kromora's edit database selected")
@@ -165,14 +172,13 @@ public struct KromoraSettingsView: View {
     }
 
     private func chooseFolder(_ kind: KromoraFolderKind) {
-        let panel = NSOpenPanel()
-        panel.title = "Choose " + kind.title
-        panel.prompt = "Use Folder"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.canCreateDirectories = kind == .export
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let url = fileDialog.chooseFolder(
+            title: "Choose " + kind.title,
+            prompt: "Use Folder",
+            startingAt: settings.status(for: kind).url,
+            canCreateDirectories: kind == .export
+        )
+        guard let url else { return }
         guard settings.setDefaultFolder(url, for: kind) else {
             let message = "Kromora could not save access to " + url.lastPathComponent
                 + ". Choose the folder again to grant permission."
