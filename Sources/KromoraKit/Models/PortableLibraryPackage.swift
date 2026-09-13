@@ -342,6 +342,23 @@ struct PortableLibraryPackage {
     }
 
     static func open(at rootURL: URL) throws -> Self {
+        let package = try openForQuery(at: rootURL)
+        for shard in Self.allShards {
+            let membership = try package.readMembershipShard(shard)
+            for entry in membership.entries where !entry.isTombstone {
+                _ = try package.readAssetRecord(for: entry.assetID)
+            }
+        }
+        return package
+    }
+
+    /// Opens the package boundary needed by the library query path.
+    ///
+    /// This intentionally reads only `manifest.json`. A warm launch must be able to obtain its
+    /// first page from the local index without enumerating package directories, opening asset
+    /// records, parsing XMP, or reading originals. Callers that need the canonical records should
+    /// use `open(at:)`, which retains the format-validation behavior of the package layer.
+    static func openForQuery(at rootURL: URL) throws -> Self {
         let manifestURL = rootURL.appendingPathComponent("manifest.json")
         let data = try Data(contentsOf: manifestURL)
         let manifest = try PortablePackageJSON.decode(PortablePackageManifest.self, from: data)
@@ -350,15 +367,6 @@ struct PortableLibraryPackage {
         loaded.unknownJSONFields = PortablePackageJSON.unknownFields(in: data, excluding: PortablePackageManifest.knownJSONKeys)
         package.manifest = loaded
         try package.validateManifest(loaded)
-        for shard in Self.allShards {
-            guard FileManager.default.fileExists(atPath: package.membershipURL(for: shard).path) else {
-                throw PortablePackageError.missingShard(shard)
-            }
-            let membership = try package.readMembershipShard(shard)
-            for entry in membership.entries where !entry.isTombstone {
-                _ = try package.readAssetRecord(for: entry.assetID)
-            }
-        }
         return package
     }
 
