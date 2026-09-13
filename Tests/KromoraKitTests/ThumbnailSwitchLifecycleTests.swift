@@ -564,6 +564,68 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.canRunAutoAdjustment)
     }
 
+    func testDelayedThumbnailCompletionCannotPublishAnObsoleteDocument() async throws {
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "thumbnail-fence.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeClarityPNG(
+            width: 16, height: 12, named: "thumbnail-fence-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
+        let viewModel = makeAppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: image, second: second)
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the thumbnail-fence photo") {
+            viewModel.sourceURL == image && viewModel.previewState == .ready
+        }
+
+        await engine.gateThumbnails()
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.25)] }
+        let firstAssetID = viewModel.collection.items[0].id
+        _ = try await TestSynchronization.nextEvent(
+            from: reader, "the first edited-thumbnail request"
+        ) {
+            if case .thumbnailRequested(let request) = $0 {
+                return request.assetID == firstAssetID
+                    && request.document.adjustments == [.exposure(ev: 0.25)]
+            }
+            return false
+        } diagnostics: {
+            "thumbnail requests=\(await engine.thumbnailRequests.count), "
+                + "asset=\(firstAssetID.raw)"
+        }
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.75)] }
+        await engine.releaseThumbnails()
+        _ = try await TestSynchronization.nextEvent(
+            from: reader, "the obsolete thumbnail completion"
+        ) {
+            if case .thumbnailCompleted(let request) = $0 {
+                return request.document.adjustments == [.exposure(ev: 0.25)]
+            }
+            return false
+        } diagnostics: {
+            "thumbnail requests=\(await engine.thumbnailRequests.count), "
+                + "revisions=\(await engine.thumbnailRequests.map(\.requestRevision))"
+        }
+        await Task.yield()
+        XCTAssertNil(
+            viewModel.collection.items[0].editedThumbnailRevision,
+            "a late thumbnail must not publish after the document revision changes"
+        )
+
+        try await waitUntil("the trailing current-document thumbnail") {
+            viewModel.collection.items[0].editedThumbnailRevision != nil
+        }
+        let thumbnailRequests = await engine.thumbnailRequests
+        XCTAssertEqual(
+            thumbnailRequests.last?.document.adjustments,
+            [.exposure(ev: 0.75)],
+            "the trailing thumbnail must use the current document"
+        )
+    }
+
     func testLibraryGridHandoffPresentsTheSelectedPhotoWithoutTabSwitching() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "first.png", in: tempDirectory
