@@ -2,7 +2,7 @@
 id: KRMA-384
 title: Track the portable library package implementation plan
 type: task
-status: backlog
+status: blocked
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,9 +13,12 @@ labels:
   - architecture
   - documentation
 created: 2026-09-12T15:25:59.782Z
-updated: 2026-09-12T15:25:59.782Z
-order: zzq
+updated: 2026-09-12T19:23:20.577Z
+order: a0
 board: product
+blocked_reason: The package plan requires human approval of the current EditStore data disposition and the local-only package and compatibility policy before identity or persistence implementation can begin.
+blocked_action: Approve ADR-001, or specify the migration/disposition for current library data and any changes to the local-only compatibility boundary; then resume KRMA-384.
+blocked_from_status: claimed
 ---
 
 ## Objective
@@ -43,6 +46,10 @@ sequenced implementation effort.
 - Source plan: `docs/LIBRARY_PACKAGE_PLAN.md`.
 - iCloud sync and current-user-data migration are explicitly out of scope in the plan and require
   separate decisions before implementation.
+
+### Comment — codex @ 2026-09-12T19:23:16.543Z
+
+Reviewed docs/LIBRARY_PACKAGE_PLAN.md and recorded ADR-001. Created the phased implementation issues KRMA-389 through KRMA-393 with explicit dependencies, acceptance criteria, and verification lanes. Updated the plan tracking line. No source, deletion behavior, or current library data was changed.
 
 ## Agent log
 

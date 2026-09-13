@@ -2,14 +2,14 @@
 id: KRMA-133
 title: Give feedback when a clicked Look row fails to resolve
 type: bug
-status: review
+status: done
 priority: low
 labels:
   - verification
 created: 2026-09-02T14:42:15.755Z
-updated: 2026-09-10T12:53:41.934Z
+updated: 2026-09-12T18:23:16.760Z
 parent: KRMA-128
-order: a0
+order: zzzh
 board: product
 ---
 
