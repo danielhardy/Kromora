@@ -60,12 +60,16 @@ for the behavior and dated diagnostic baseline.
 
 ## Persistence and masks
 
-The local edit store is a SwiftData `EditStore.store` container under the user's Application Support
-directory. Each `EditRecord` stores one versioned JSON-encoded `EditDocument` plus source locator
-fields; `EditPersistenceCoordinator` serializes and coalesces writes and flushes them on
-termination. Per-photo history is in-memory and bounded to 100 undo and redo snapshots; copy/paste,
-reset, navigation, and export must preserve the active photo's identity and revision. This is the
-current local store, not the future portable package described in
+The local edit store is a SwiftData `EditStore.v2.store` container under the user's Application
+Support directory. Each `EditRecord` stores one versioned JSON-encoded `EditDocument` and uses an
+opaque `PortablePhotoAssetID` UUID as its only persistence key; source locator fields are only
+operational hints for referenced-folder relinking. `EditPersistenceCoordinator` serializes and
+coalesces writes and flushes them on termination. Per-photo history is in-memory and bounded to 100
+undo and redo snapshots; copy/paste, reset, navigation, and export must preserve the active photo's
+identity and revision. The old development `EditStore.store` is intentionally left untouched under
+the approved clean-slate disposition; see
+[`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md). This is the current
+local store, not the future portable package described in
 [`LIBRARY_PACKAGE_PLAN.md`](LIBRARY_PACKAGE_PLAN.md).
 
 Mask definitions are part of the edit document, while generated mask pixels are a separate cache

@@ -77,6 +77,16 @@ struct PhotosImportFailure: Equatable, Sendable {
     let reason: String
 }
 
+/// Application-side sink for the Photos import workflow. It admits durable payloads and owns the
+/// source-load side effect; it does not own transfer progress or provider errors.
+@MainActor
+protocol PhotosImportDestination: AnyObject {
+    func preparePhotosImport(totalCount: Int)
+    func insertPhotosImport(_ item: ImageCollection.PhotoImportItem, ordinal: Int)
+    func recordPhotosImportFailureDestination(name: String, ordinal: Int?)
+    func finishPhotosImportDestination(cancelled: Bool)
+}
+
 /// Coordinates Photos provider interaction and the streamed durable import boundary. The view only
 /// creates selections, supplies a provider, and forwards cancellation; all asynchronous item
 /// iteration, hashing, progress, and failure handling lives here.
@@ -86,12 +96,25 @@ final class PhotosImportCoordinator: ObservableObject {
     @Published private(set) var failures: [PhotosImportFailure] = []
     @Published private(set) var wasCancelled = false
 
-    private weak var viewModel: AppViewModel?
+    weak var destination: (any PhotosImportDestination)?
     private var task: Task<Void, Never>?
     private var operationID = UUID()
+    var onStatus: ((String) -> Void)?
+    var onProgress: ((PhotosImportProgress?) -> Void)?
 
-    init(viewModel: AppViewModel) {
-        self.viewModel = viewModel
+    init(destination: (any PhotosImportDestination)? = nil) {
+        self.destination = destination
+    }
+
+    /// Source compatibility for integrations created before the destination protocol became the
+    /// public seam. New composition-root code injects `PhotosImportDestination` directly.
+    @available(*, deprecated, message: "Inject PhotosImportDestination instead")
+    convenience init(viewModel: AppViewModel) {
+        self.init(destination: viewModel)
+        onStatus = { [weak viewModel] message in viewModel?.statusMessage = message }
+        onProgress = { [weak viewModel] progress in
+            viewModel?.photosImportCoordinator.setProgressForCompatibility(progress)
+        }
     }
 
     func start(
@@ -104,12 +127,10 @@ final class PhotosImportCoordinator: ObservableObject {
         failures = []
         wasCancelled = false
 
-        guard let viewModel else { return }
-        viewModel.beginPhotosImport(totalCount: selections.count)
-        syncProgress(from: viewModel)
+        begin(totalCount: selections.count)
 
-        task = Task { @MainActor [weak self, weak viewModel] in
-            guard let self, let viewModel else { return }
+        task = Task { @MainActor [weak self] in
+            guard let self else { return }
             var wasCancelled = false
 
             for selection in selections {
@@ -121,8 +142,7 @@ final class PhotosImportCoordinator: ObservableObject {
 
                 let name = provider.originalFilename(for: selection)
                     ?? "Photo \(selection.ordinal + 1)"
-                viewModel.updatePhotosImportPhase(.transferring, name: name)
-                self.syncProgress(from: viewModel)
+                self.updatePhase(.transferring, name: name)
 
                 var transferInterval = KromoraSignpostInterval(
                     .photoTransfer,
@@ -137,7 +157,7 @@ final class PhotosImportCoordinator: ObservableObject {
                         transferInterval.end()
                         self.recordFailure(
                             name: name, ordinal: selection.ordinal,
-                            reason: "Photos returned no transferable data.", viewModel: viewModel
+                            reason: "Photos returned no transferable data."
                         )
                         continue
                     }
@@ -159,7 +179,7 @@ final class PhotosImportCoordinator: ObservableObject {
                         break
                     }
 
-                    viewModel.appendPhotosImport(
+                    self.append(
                         ImageCollection.PhotoImportItem(
                             name: name,
                             data: data,
@@ -168,7 +188,6 @@ final class PhotosImportCoordinator: ObservableObject {
                         ),
                         ordinal: selection.ordinal
                     )
-                    self.syncProgress(from: viewModel)
                 } catch is CancellationError {
                     transferInterval.end()
                     wasCancelled = true
@@ -178,42 +197,101 @@ final class PhotosImportCoordinator: ObservableObject {
                     self.recordFailure(
                         name: name,
                         ordinal: selection.ordinal,
-                        reason: error.localizedDescription,
-                        viewModel: viewModel
+                        reason: error.localizedDescription
                     )
                 }
             }
 
             guard self.isCurrent(currentOperationID) else { return }
             wasCancelled = wasCancelled || Task.isCancelled
-            viewModel.finishPhotosImport(cancelled: wasCancelled)
+            self.finish(cancelled: wasCancelled)
             self.wasCancelled = wasCancelled
-            self.syncProgress(from: viewModel)
             self.task = nil
         }
+    }
+
+    func begin(totalCount: Int) {
+        destination?.preparePhotosImport(totalCount: totalCount)
+        progress = PhotosImportProgress(
+            total: max(0, totalCount), processed: 0, imported: 0, failed: 0,
+            currentName: nil, phase: .transferring
+        )
+        onProgress?(progress)
+        if let progress { onStatus?("Importing Photos 0/\(progress.total)…") }
+    }
+
+    func updatePhase(_ phase: PhotosImportProgress.Phase, name: String) {
+        guard var progress else { return }
+        progress.phase = phase
+        progress.currentName = name
+        self.progress = progress
+        onProgress?(progress)
+        onStatus?("\(phase.label) \(name)  \(progress.processed)/\(progress.total)…")
+    }
+
+    func append(_ item: ImageCollection.PhotoImportItem, ordinal: Int) {
+        guard var progress else { return }
+        updatePhase(.inserting, name: item.name)
+        destination?.insertPhotosImport(item, ordinal: ordinal)
+        progress = self.progress ?? progress
+        progress.processed += 1
+        progress.imported += 1
+        progress.currentName = item.name
+        progress.phase = .transferring
+        self.progress = progress
+        onProgress?(progress)
+        onStatus?("Imported \(progress.processed)/\(progress.total)  \(item.name)…")
+    }
+
+    func recordFailure(name: String, ordinal: Int? = nil, reason: String) {
+        guard var progress else { return }
+        failures.append(PhotosImportFailure(ordinal: ordinal ?? progress.processed, name: name, reason: reason))
+        destination?.recordPhotosImportFailureDestination(name: name, ordinal: ordinal)
+        progress.processed += 1
+        progress.failed += 1
+        progress.currentName = name
+        progress.phase = .transferring
+        self.progress = progress
+        onProgress?(progress)
+        onStatus?("Skipped \(name)  \(progress.processed)/\(progress.total)…")
+    }
+
+    func finish(cancelled: Bool) {
+        guard let progress else {
+            destination?.finishPhotosImportDestination(cancelled: cancelled)
+            return
+        }
+        destination?.finishPhotosImportDestination(cancelled: cancelled)
+        let suffix = progress.failed == 0 ? "" : ", \(progress.failed) skipped"
+        onStatus?(
+            cancelled
+                ? "Photos import cancelled — \(progress.imported) imported\(suffix)"
+                : "Photos import complete — \(progress.imported) imported\(suffix)"
+        )
+        self.progress = nil
+        onProgress?(nil)
     }
 
     func cancel() {
         task?.cancel()
     }
 
+    func shutdown() async {
+        let current = task
+        current?.cancel()
+        if let current { await current.value }
+        task = nil
+        destination = nil
+        progress = nil
+        onProgress?(nil)
+    }
+
     private func isCurrent(_ id: UUID) -> Bool {
         operationID == id
     }
 
-    private func syncProgress(from viewModel: AppViewModel) {
-        progress = viewModel.photosImportProgress
+    fileprivate func setProgressForCompatibility(_ progress: PhotosImportProgress?) {
+        self.progress = progress
     }
 
-    private func recordFailure(
-        name: String,
-        ordinal: Int,
-        reason: String,
-        viewModel: AppViewModel
-    ) {
-        guard !Task.isCancelled else { return }
-        failures.append(PhotosImportFailure(ordinal: ordinal, name: name, reason: reason))
-        viewModel.recordPhotosImportFailure(name: name, ordinal: ordinal)
-        syncProgress(from: viewModel)
-    }
 }

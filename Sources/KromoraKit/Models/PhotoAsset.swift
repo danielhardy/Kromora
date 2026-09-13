@@ -321,7 +321,8 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
             geometry: existing?.sourceFingerprint.geometry
         )
         return PortablePhotoIdentity(
-            assetID: existing?.assetID ?? PortablePhotoAssetID.compatibility(from: assetID),
+            assetID: existing?.assetID
+                ?? PortablePhotoAssetID.compatibility(from: fingerprint),
             sourceFingerprint: fingerprint
         )
     }

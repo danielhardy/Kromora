@@ -162,4 +162,50 @@ final class PortableCacheIdentityTests: TempDirectoryTestCase {
         XCTAssertNotEqual(moved.cacheKey, replaced.cacheKey)
         XCTAssertEqual(moved.cacheIdentity.assetID, replaced.cacheIdentity.assetID)
     }
+
+    func testLegacySourceConstructionUsesPortableFingerprintAcrossRelocation() throws {
+        let originalURL = tempDirectory.appendingPathComponent("legacy-before.png")
+        try Data("relocation-stable-source".utf8).write(to: originalURL)
+
+        let before = PhotoAssetSource(url: originalURL)
+        let movedURL = tempDirectory.appendingPathComponent("new-volume/legacy-after.png")
+        try FileManager.default.createDirectory(
+            at: movedURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try FileManager.default.moveItem(at: originalURL, to: movedURL)
+
+        let after = PhotoAssetSource(url: movedURL)
+
+        XCTAssertEqual(before.cacheIdentity, after.cacheIdentity)
+        XCTAssertEqual(before.cacheKey, after.cacheKey)
+        XCTAssertFalse(after.cacheKey.contains("legacy-before"))
+        XCTAssertFalse(after.cacheKey.contains("legacy-after"))
+    }
+
+    func testThumbnailCacheUsesPortableIdentityAfterRelocation() throws {
+        let originalURL = try Fixtures.writeGradientPNG(
+            width: 24, height: 16, named: "thumbnail-before.png", in: tempDirectory
+        )
+        let identity = PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID(),
+            sourceFingerprint: try PortablePhotoSourceFingerprint.file(
+                at: originalURL, decoderVersion: "imageio-standard-v1",
+                geometry: PhotoPixelDimensions(width: 24, height: 16)
+            )
+        )
+        Thumbnails.invalidateCache()
+        _ = Thumbnails.generate(from: originalURL, portableIdentity: identity)
+        let before = Thumbnails.cacheStatistics()
+
+        let movedURL = tempDirectory.appendingPathComponent("new-volume/thumbnail-after.png")
+        try FileManager.default.createDirectory(
+            at: movedURL.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try FileManager.default.moveItem(at: originalURL, to: movedURL)
+        _ = Thumbnails.generate(from: movedURL, portableIdentity: identity)
+        let after = Thumbnails.cacheStatistics()
+
+        XCTAssertEqual(after.hits, before.hits + 1)
+        XCTAssertEqual(after.misses, before.misses)
+    }
 }

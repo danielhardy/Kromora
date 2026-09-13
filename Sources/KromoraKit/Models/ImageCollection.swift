@@ -1587,10 +1587,19 @@ final class ImageCollectionPresentationModel: ObservableObject {
         ) { [weak self] in
             let thumbnail: NSImage?
             if let url {
-                thumbnail = await Task.detached { PlatformThumbnailProvider.generate(from: url) }.value
-            } else if let data {
+                let portableIdentity = item.asset.source.portableIdentity
                 thumbnail = await Task.detached {
-                    PlatformThumbnailProvider.generate(from: data, dataFingerprint: dataFingerprint)
+                    PlatformThumbnailProvider.generate(
+                        from: url, portableIdentity: portableIdentity
+                    )
+                }.value
+            } else if let data {
+                let portableIdentity = item.asset.source.portableIdentity
+                thumbnail = await Task.detached {
+                    PlatformThumbnailProvider.generate(
+                        from: data, dataFingerprint: dataFingerprint,
+                        portableIdentity: portableIdentity
+                    )
                 }.value
             } else {
                 thumbnail = nil

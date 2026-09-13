@@ -38,6 +38,26 @@ final class PhotoAnalysisCacheTests: TempDirectoryTestCase {
         XCTAssertEqual(first, second)
     }
 
+    func testPortableIdentityKeyRoundTripsWithoutAPathComponent() async throws {
+        let bytes = Data("relocatable-analysis".utf8)
+        let identity = PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID(
+                uuid: UUID(uuidString: "6A4E5D1B-1D55-4C43-9AE5-6E7F7C2B55AA")!
+            ),
+            sourceFingerprint: .data(
+                bytes, sourceRevision: 3, decoderVersion: "analysis-decoder-v2",
+                geometry: PhotoPixelDimensions(width: 40, height: 30)
+            )
+        )
+        let key = AnalysisCacheKey(identity: identity, analysisVersion: .current)
+        let encoded = try JSONEncoder().encode(key)
+
+        XCTAssertFalse(String(decoding: encoded, as: UTF8.self).contains("/"))
+        let decoded = try JSONDecoder().decode(AnalysisCacheKey.self, from: encoded)
+        XCTAssertEqual(decoded, key)
+        XCTAssertEqual(decoded.identity, identity)
+    }
+
     func testCancelledWriteLeavesNoPartialEntry() async throws {
         let cache = PhotoAnalysisCache(directory: tempDirectory)
         let key = makeKey(version: .current)

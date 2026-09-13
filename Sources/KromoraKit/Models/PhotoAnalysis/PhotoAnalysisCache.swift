@@ -7,9 +7,88 @@ import Foundation
 /// so changing Light, Color, a LUT, or any other EditDocument field must not create a new entry or
 /// cause Auto to analyze its own output.
 struct AnalysisCacheKey: Sendable, Codable, Hashable, Equatable {
-    let assetID: PhotoAssetID
-    let sourceFingerprint: PhotoSourceFingerprint
+    /// The only identity written to a new analysis entry. Legacy projections below exist for
+    /// source-compatible callers and are excluded from equality, hashing, and encoding.
+    let identity: PortablePhotoIdentity
     let analysisVersion: AnalysisVersion
+
+    private var legacyAssetID: PhotoAssetID?
+    private var legacySourceFingerprint: PhotoSourceFingerprint?
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.identity == rhs.identity && lhs.analysisVersion == rhs.analysisVersion
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(identity)
+        hasher.combine(analysisVersion)
+    }
+
+    var assetID: PhotoAssetID {
+        legacyAssetID ?? PhotoAssetID(rawValue: "portable:\(identity.assetID.raw)")
+    }
+
+    var sourceFingerprint: PhotoSourceFingerprint {
+        legacySourceFingerprint ?? PhotoSourceFingerprint.data(
+            Data(identity.sourceFingerprint.contentHash.utf8),
+            digest: identity.sourceFingerprint.contentHash
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case identity, assetID, sourceFingerprint, analysisVersion
+    }
+
+    init(
+        identity: PortablePhotoIdentity,
+        analysisVersion: AnalysisVersion
+    ) {
+        self.identity = identity
+        self.analysisVersion = analysisVersion
+        self.legacyAssetID = nil
+        self.legacySourceFingerprint = nil
+    }
+
+    init(
+        assetID: PhotoAssetID,
+        sourceFingerprint: PhotoSourceFingerprint,
+        analysisVersion: AnalysisVersion
+    ) {
+        self.identity = PortablePhotoIdentity.compatibility(
+            assetID: assetID, sourceFingerprint: sourceFingerprint
+        )
+        self.analysisVersion = analysisVersion
+        self.legacyAssetID = assetID
+        self.legacySourceFingerprint = sourceFingerprint
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let identity = try container.decodeIfPresent(
+            PortablePhotoIdentity.self, forKey: .identity
+        ) {
+            self.identity = identity
+            self.legacyAssetID = nil
+            self.legacySourceFingerprint = nil
+        } else {
+            let assetID = try container.decode(PhotoAssetID.self, forKey: .assetID)
+            let sourceFingerprint = try container.decode(
+                PhotoSourceFingerprint.self, forKey: .sourceFingerprint
+            )
+            self.identity = PortablePhotoIdentity.compatibility(
+                assetID: assetID, sourceFingerprint: sourceFingerprint
+            )
+            self.legacyAssetID = nil
+            self.legacySourceFingerprint = nil
+        }
+        self.analysisVersion = try container.decode(AnalysisVersion.self, forKey: .analysisVersion)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(identity, forKey: .identity)
+        try container.encode(analysisVersion, forKey: .analysisVersion)
+    }
 }
 
 enum PhotoAnalysisCacheError: Error, Sendable, Equatable {
@@ -73,7 +152,23 @@ actor PhotoAnalysisCache {
         for url in files where url.pathExtension.lowercased() == "json" {
             guard let data = try? Data(contentsOf: url),
                   let persisted = try? JSONDecoder().decode(PersistedAnalysis.self, from: data),
-                  persisted.key.assetID == assetID else { continue }
+                  (persisted.key.assetID == assetID
+                    || persisted.key.identity.assetID
+                        == PortablePhotoAssetID.compatibility(from: assetID)) else { continue }
+            try Task.checkCancellation()
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    func remove(for assetID: PortablePhotoAssetID) throws {
+        try Task.checkCancellation()
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )
+        for url in files where url.pathExtension.lowercased() == "json" {
+            guard let data = try? Data(contentsOf: url),
+                  let persisted = try? JSONDecoder().decode(PersistedAnalysis.self, from: data),
+                  persisted.key.identity.assetID == assetID else { continue }
             try Task.checkCancellation()
             try FileManager.default.removeItem(at: url)
         }
@@ -84,7 +179,7 @@ actor PhotoAnalysisCache {
     }
 
     private static func filename(for key: AnalysisCacheKey) -> String {
-        let identity = "\(key.assetID.raw)|\(key.sourceFingerprint.cacheKey)|\(key.analysisVersion.rawValue)"
+        let identity = "\(key.identity.cacheKey)|\(key.analysisVersion.rawValue)"
         let digest = SHA256.hash(data: Data(identity.utf8))
             .map { String(format: "%02x", $0) }.joined()
         return "analysis-\(digest).json"
