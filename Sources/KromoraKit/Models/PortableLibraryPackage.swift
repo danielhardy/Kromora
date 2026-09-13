@@ -466,7 +466,9 @@ struct PortableLibraryPackage {
         try writeJSON(manifest, to: rootURL.appendingPathComponent("manifest.json"))
     }
 
-    private func membershipURL(for shard: String) -> URL {
+    // internal (not private): LibraryQueryControllerTests corrupts a specific shard file on disk
+    // to exercise the rebuild-failure path.
+    func membershipURL(for shard: String) -> URL {
         rootURL.appendingPathComponent("Catalog/Membership/\(shard).json")
     }
 

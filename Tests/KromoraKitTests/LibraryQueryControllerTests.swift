@@ -175,6 +175,28 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         XCTAssertEqual(rebuilt, expected)
     }
 
+    func testFailedRebuildClearsIsRebuilding() async throws {
+        // 1,200 entries publish a first page well before the last shard is read, so the session
+        // opens successfully; corrupting the last shard fails the background rebuild afterward.
+        let package = try packageWithMembership(count: 1_200)
+        let indexURL = tempDirectory.appendingPathComponent("Indexes/LibraryIndex.store")
+        let lastShard = PortableLibraryPackage.allShards.last!
+        try Data("not json".utf8).write(to: package.membershipURL(for: lastShard))
+
+        let session = try await LibraryIndexSession.open(
+            package: try PortableLibraryPackage.openForQuery(at: package.rootURL),
+            indexURL: indexURL
+        )
+        do {
+            _ = try await session.waitForRebuild()
+            XCTFail("expected the rebuild to throw for a corrupt membership shard")
+        } catch {
+            // expected
+        }
+        let stillRebuilding = await session.isRebuilding
+        XCTAssertFalse(stillRebuilding)
+    }
+
     func testRebuildProgressPublishesACompletePageBeforeCompletion() async throws {
         let package = try packageWithMembership(count: 1_200)
         let indexURL = tempDirectory.appendingPathComponent("Indexes/LibraryIndex.store")
