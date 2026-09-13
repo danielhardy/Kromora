@@ -81,6 +81,7 @@ actor EditDocumentStore {
         case ready
         case relinked
         case corrupt(String)
+        case packageFailure(String)
         case writeFailure(String)
 
         var message: String? {
@@ -91,6 +92,8 @@ actor EditDocumentStore {
                 return "Restored edits after the source photo moved."
             case .corrupt(let detail):
                 return "Could not read edit record (\(detail)); using neutral edits until the record is repaired."
+            case .packageFailure(let detail):
+                return "Could not read the library package (\(detail)); edits were not replaced."
             case .writeFailure(let detail):
                 return "Could not save edit records: \(detail)"
             }
@@ -100,7 +103,7 @@ actor EditDocumentStore {
             switch self {
             case .ready:
                 return false
-            case .relinked, .corrupt, .writeFailure:
+            case .relinked, .corrupt, .packageFailure, .writeFailure:
                 return true
             }
         }
@@ -110,7 +113,8 @@ actor EditDocumentStore {
             case .ready: return 0
             case .relinked: return 1
             case .corrupt: return 2
-            case .writeFailure: return 3
+            case .packageFailure: return 3
+            case .writeFailure: return 4
             }
         }
     }
@@ -138,6 +142,11 @@ actor EditDocumentStore {
     private var writeStartSignal: AsyncStream<Void>.Continuation? = nil
     private var failuresRemaining: Int = 0
     private var persistenceUnavailable = false
+    /// When present, the package sidecars are canonical and SwiftData is only a local projection.
+    /// Keeping the URL and lease rather than a mutable package value means every operation opens
+    /// the current manifest/asset record and cannot accidentally write through stale metadata.
+    private var canonicalPackageRoot: URL? = nil
+    private var packageLease: PortablePackageLease? = nil
     /// The outcome of the most recent store operation. Load callers must use their
     /// `EditDocumentLoadResult.status` instead of treating this as a load-wide diagnostic.
     private(set) var status: Status = .ready
@@ -151,6 +160,9 @@ actor EditDocumentStore {
     /// running in memory because its on-disk container could not be opened (or because a test
     /// supplied an in-memory container).
     var onDiskFileURL: URL? { persistentFileURL }
+
+    /// The package backing this store, when the store is operating in projection mode.
+    var canonicalPackageURL: URL? { canonicalPackageRoot }
 
     /// The legacy development store path, retained for support and disposition tests.
     static var defaultFileURL: URL {
@@ -248,6 +260,8 @@ actor EditDocumentStore {
             initialStatus: initialStatus,
             persistenceUnavailable: persistenceUnavailable,
             persistentFileURL: persistenceUnavailable ? nil : fileURL,
+            canonicalPackageRoot: nil,
+            packageLease: nil,
             artificialWriteDelay: artificialWriteDelay,
             failuresBeforeSuccess: failuresBeforeSuccess,
             writeStartSignal: writeStartSignal
@@ -260,6 +274,8 @@ actor EditDocumentStore {
         initialStatus: Status = .ready,
         persistenceUnavailable: Bool = false,
         persistentFileURL: URL? = nil,
+        canonicalPackageRoot: URL? = nil,
+        packageLease: PortablePackageLease? = nil,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
         writeStartSignal: AsyncStream<Void>.Continuation? = nil
@@ -271,13 +287,56 @@ actor EditDocumentStore {
         self.failuresRemaining = failuresBeforeSuccess
         self.persistenceUnavailable = persistenceUnavailable
         self.persistentFileURL = persistentFileURL
+        self.canonicalPackageRoot = canonicalPackageRoot
+        self.packageLease = packageLease
         self.writeStartSignal = writeStartSignal
         self.status = initialStatus
         self.worstActionableStatus = initialStatus.isActionable ? initialStatus : nil
     }
 
+    /// Creates a projection-backed store for an already opened package. The lease is held by the
+    /// package session and must remain alive for the lifetime of this store. Package commits happen
+    /// before the local SwiftData projection is updated, so a projection failure cannot lose the
+    /// user's edit and a deleted cache can always be rebuilt from the package.
+    init(
+        package: PortableLibraryPackage,
+        lease: PortablePackageLease,
+        modelContainer: ModelContainer? = nil,
+        artificialWriteDelay: Duration = .zero,
+        failuresBeforeSuccess: Int = 0,
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+    ) {
+        self.init(
+            modelContainer: modelContainer ?? Self.makeInMemoryContainer(),
+            canonicalPackageRoot: package.rootURL,
+            packageLease: lease,
+            artificialWriteDelay: artificialWriteDelay,
+            failuresBeforeSuccess: failuresBeforeSuccess,
+            writeStartSignal: writeStartSignal
+        )
+    }
+
+    /// Convenience form for callers that keep only the package URL at their integration boundary.
+    init(
+        packageRoot: URL,
+        lease: PortablePackageLease,
+        modelContainer: ModelContainer? = nil,
+        artificialWriteDelay: Duration = .zero,
+        failuresBeforeSuccess: Int = 0,
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+    ) throws {
+        try self.init(
+            package: PortableLibraryPackage.openForQuery(at: packageRoot), lease: lease,
+            modelContainer: modelContainer, artificialWriteDelay: artificialWriteDelay,
+            failuresBeforeSuccess: failuresBeforeSuccess, writeStartSignal: writeStartSignal
+        )
+    }
+
     func load(for source: EditSourceReference) -> EditDocumentLoadResult {
         markIO()
+        if canonicalPackageRoot != nil {
+            return loadFromCanonicalPackage(for: source)
+        }
         let key = source.portableAssetID.uuid
 
         do {
@@ -393,6 +452,10 @@ actor EditDocumentStore {
 
     func save(_ document: EditDocument, for source: EditSourceReference) async throws {
         markIO()
+        if canonicalPackageRoot != nil {
+            try await saveToCanonicalPackage(document, for: source)
+            return
+        }
         do {
             guard !persistenceUnavailable else {
                 throw StoreError.cannotWrite(
@@ -438,6 +501,13 @@ actor EditDocumentStore {
     /// the locator cleanup here prevents an old moved-source record from surviving the action.
     func delete(for source: EditSourceReference) throws {
         markIO()
+        if canonicalPackageRoot != nil {
+            // Deleting a projection row must not delete the package's immutable revision. A later
+            // load or an explicit rebuild repopulates the row from the canonical sidecar.
+            try deleteProjection(for: source)
+            status = .ready
+            return
+        }
         do {
             var records: [EditRecord] = []
             if let direct = try fetchRecord(assetID: source.portableAssetID.uuid) {
@@ -465,6 +535,170 @@ actor EditDocumentStore {
 
     func delete(for assetID: PhotoAssetID, url: URL? = nil) throws {
         try delete(for: EditSourceReference(assetID: assetID, url: url))
+    }
+
+    /// Rebuilds the local SwiftData projection from every current package edit sidecar.
+    ///
+    /// The package is read completely before the local model is changed. A malformed sidecar or
+    /// missing asset therefore leaves the old projection intact and reports the failure to the
+    /// caller. Assets with no edit revision intentionally have no local row because the neutral
+    /// document is implicit in both representations.
+    @discardableResult
+    func rebuildProjectionFromPackage() throws -> Int {
+        markIO()
+        guard let packageRoot = canonicalPackageRoot else {
+            return try rebuildProjectionFromLocalStore()
+        }
+
+        do {
+            let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+            var documents: [(PortablePhotoAssetID, EditDocument)] = []
+            for shard in PortableLibraryPackage.allShards {
+                let membership = try package.readMembershipShard(shard)
+                for entry in membership.entries where !entry.isTombstone {
+                    let record = try package.readAssetRecord(for: entry.assetID)
+                    guard record.currentRevision > 0 else { continue }
+                    let sidecar = try package.readEditSidecar(for: entry.assetID)
+                    documents.append((entry.assetID, sidecar.native.document))
+                }
+            }
+
+            let existing = try modelContext.fetch(FetchDescriptor<EditRecord>())
+            let desired = Set(documents.map { $0.0.uuid })
+            for record in existing where !desired.contains(record.assetID) {
+                modelContext.delete(record)
+            }
+            for (assetID, document) in documents {
+                let record = try fetchRecord(assetID: assetID.uuid)
+                    ?? EditRecord(assetID: assetID, document: document)
+                record.documentData = try JSONEncoder().encode(document)
+                if record.modelContext == nil { modelContext.insert(record) }
+            }
+            try modelContext.save()
+            status = .ready
+            return documents.count
+        } catch {
+            modelContext.rollback()
+            let failure = Status.packageFailure(error.localizedDescription)
+            status = failure
+            retainWorstActionableStatus(failure)
+            throw error
+        }
+    }
+
+    /// Short alias used by package-open/rebuild callers.
+    @discardableResult
+    func rebuildFromPackage() throws -> Int {
+        try rebuildProjectionFromPackage()
+    }
+
+    private func loadFromCanonicalPackage(for source: EditSourceReference)
+        -> EditDocumentLoadResult
+    {
+        guard let packageRoot = canonicalPackageRoot else {
+            return finishLoad(document: EditDocument(), found: false, status: .ready)
+        }
+        do {
+            let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+            let record = try package.readAssetRecord(for: source.portableAssetID)
+            guard record.currentRevision > 0 else {
+                return finishLoad(document: EditDocument(), found: false, status: .ready)
+            }
+            let sidecar = try package.readEditSidecar(for: source.portableAssetID)
+            let document = sidecar.native.document
+
+            // This write is deliberately best-effort. It is a projection refresh, not part of the
+            // durable edit commit, and losing it must never turn a valid package edit into a blank
+            // document on the next open.
+            try? cacheProjection(document, encoded: try JSONEncoder().encode(document), for: source)
+            return finishLoad(document: document, found: true, status: .ready)
+        } catch {
+            let failure = Status.packageFailure(error.localizedDescription)
+            return finishLoad(document: EditDocument(), found: false, status: failure)
+        }
+    }
+
+    private func saveToCanonicalPackage(
+        _ document: EditDocument,
+        for source: EditSourceReference,
+        lookBytes: [Data] = []
+    ) async throws {
+        guard let packageRoot = canonicalPackageRoot, let packageLease else {
+            throw StoreError.cannotWrite("the canonical edit package is unavailable")
+        }
+
+        // Match the legacy store's contract: invalid documents fail before an I/O attempt and do
+        // not create an empty projection row.
+        let encodedDocument = try JSONEncoder().encode(document)
+        saveAttemptCount += 1
+        do {
+            if failuresRemaining > 0 {
+                failuresRemaining -= 1
+                throw StoreError.cannotWrite("injected persistence failure")
+            }
+            let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+            _ = try package.appendEditRevision(
+                for: source.portableAssetID, document: document, lookBytes: lookBytes,
+                lease: packageLease
+            )
+            // The package commit is complete before this projection update begins. If the local
+            // cache cannot be updated, the canonical sidecar remains the source of truth.
+            try? cacheProjection(document, encoded: encodedDocument, for: source)
+            writeCount += 1
+            status = .ready
+            writeStartSignal?.yield(())
+            if artificialWriteDelay > .zero {
+                let delay = artificialWriteDelay
+                await Task.detached {
+                    try? await Task.sleep(for: delay)
+                }.value
+            }
+        } catch {
+            status = .writeFailure(error.localizedDescription)
+            throw error
+        }
+    }
+
+    private func cacheProjection(
+        _ document: EditDocument,
+        encoded: Data,
+        for source: EditSourceReference
+    ) throws {
+        let record = try fetchRecord(assetID: source.portableAssetID.uuid)
+            ?? EditRecord(assetID: source.portableAssetID, documentData: encoded)
+        record.documentData = encoded
+        if record.modelContext == nil { modelContext.insert(record) }
+        updateLocator(on: record, for: source.url)
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private func deleteProjection(for source: EditSourceReference) throws {
+        var records: [EditRecord] = []
+        if let direct = try fetchRecord(assetID: source.portableAssetID.uuid) {
+            records.append(direct)
+        }
+        if let url = source.url,
+           let located = try fetchRecord(sourcePath: sourcePath(for: url)),
+           !records.contains(where: { $0 === located }) {
+            records.append(located)
+        }
+        guard !records.isEmpty else { return }
+        records.forEach(modelContext.delete)
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private func rebuildProjectionFromLocalStore() throws -> Int {
+        try modelContext.fetch(FetchDescriptor<EditRecord>()).count
     }
 
     private func fetchRecord(assetID: UUID) throws -> EditRecord? {

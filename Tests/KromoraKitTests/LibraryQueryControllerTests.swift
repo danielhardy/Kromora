@@ -91,6 +91,37 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         XCTAssertTrue(selectedPage.items.contains { $0.assetID == selectedID && $0.isSelected })
     }
 
+    func testIndexProjectionExcludesTombstonesAndKeepsSelectionUUIDBased() throws {
+        let packageURL = tempDirectory.appendingPathComponent("DeletionProjection.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let liveID = PortablePhotoAssetID(uuid: UUID(uuidString: "00000001-0000-4000-8000-000000000001")!)
+        let deletedID = PortablePhotoAssetID(uuid: UUID(uuidString: "00000002-0000-4000-8000-000000000002")!)
+        var membership = try package.readMembershipShard("00")
+        membership.entries = [
+            .init(
+                assetID: liveID,
+                recordPath: "Assets/00/\(liveID.raw)/asset.json",
+                summary: .init(displayName: "live.jpg")
+            ),
+            .init(
+                assetID: deletedID,
+                recordPath: "Assets/00/\(deletedID.raw)/asset.json",
+                deletedRevision: 4,
+                isTombstone: true,
+                summary: .init(displayName: "deleted.jpg")
+            ),
+        ]
+        try package.writeMembershipShard(membership)
+
+        let projection = try LibraryIndexProjection(package: package)
+        var controller = LibraryQueryController(index: projection, pageSize: 60)
+        controller.select(deletedID)
+        XCTAssertEqual(projection.count, 1)
+        XCTAssertFalse(controller.contains(deletedID))
+        XCTAssertTrue(controller.selectedIDs.isEmpty)
+        XCTAssertEqual(controller.page(at: 0).items.map(\.assetID), [liveID])
+    }
+
     func testProjectionRoundTripsAsARebuildableLocalIndex() throws {
         let assetID = PortablePhotoAssetID()
         let entry = LibraryIndexEntry(from: .init(
