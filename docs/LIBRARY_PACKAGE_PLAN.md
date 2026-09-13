@@ -402,6 +402,13 @@ from resurrecting deleted photos.
 
 No other code path may delete an original. Recovery quarantines; it does not delete (§6.3).
 
+This package-native lifecycle is intentionally distinct from KRMA-371. KRMA-371 remains the
+current folder-backed Library deletion workflow and its behavior is unchanged. Package APIs operate
+only inside a `.kromoralibrary` package: embedded originals are moved to
+`Recovery/Quarantine/<assetID>` and can be restored, while referenced records are tombstoned
+without touching the external source. Only an explicitly confirmed package reclaim transaction may
+permanently remove a quarantined directory.
+
 ---
 
 ## 5. Transactions

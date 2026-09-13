@@ -234,6 +234,8 @@ struct PortablePackageEditHistoryPointers: Codable, Equatable, Sendable {
 struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     let identity: PortablePhotoIdentity
     var source: PortablePackageSourceReference
+    /// A quarantined record remains durable so the package can restore it before reclaim.
+    var isRemoved: Bool
     var currentRevision: UInt64
     var editHistory: PortablePackageEditHistoryPointers
     var unknownJSONFields: [String: Data] = [:]
@@ -241,23 +243,27 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     init(
         identity: PortablePhotoIdentity,
         source: PortablePackageSourceReference,
+        isRemoved: Bool = false,
         currentRevision: UInt64 = 0,
         editHistory: PortablePackageEditHistoryPointers = .init()
     ) {
         self.identity = identity
         self.source = source
+        self.isRemoved = isRemoved
         self.currentRevision = currentRevision
         self.editHistory = editHistory
     }
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case identity, source, currentRevision, editHistory
+        case identity, source, isRemoved, currentRevision, editHistory
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         identity = try c.decode(PortablePhotoIdentity.self, forKey: .identity)
         source = try c.decode(PortablePackageSourceReference.self, forKey: .source)
+        // Added with package-native trash; old package records are active by default.
+        isRemoved = try c.decodeIfPresent(Bool.self, forKey: .isRemoved) ?? false
         currentRevision = try c.decode(UInt64.self, forKey: .currentRevision)
         editHistory = try c.decode(PortablePackageEditHistoryPointers.self, forKey: .editHistory)
     }
@@ -266,6 +272,7 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(identity, forKey: .identity)
         try c.encode(source, forKey: .source)
+        try c.encode(isRemoved, forKey: .isRemoved)
         try c.encode(currentRevision, forKey: .currentRevision)
         try c.encode(editHistory, forKey: .editHistory)
     }
@@ -473,6 +480,29 @@ struct PortableLibraryPackage {
 
     private func assetRecordURL(for assetID: PortablePhotoAssetID) -> URL {
         rootURL.appendingPathComponent("Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json")
+    }
+
+    // Internal package-native trash helpers. The active asset directory is moved as one unit so
+    // originals and their edit sidecars have one recoverable location.
+    func assetDirectoryURL(for assetID: PortablePhotoAssetID) -> URL {
+        rootURL.appendingPathComponent("Assets/\(Self.shard(for: assetID))/\(assetID.raw)")
+    }
+
+    func quarantineDirectoryURL(for assetID: PortablePhotoAssetID) -> URL {
+        rootURL.appendingPathComponent("Recovery/Quarantine/\(assetID.raw)")
+    }
+
+    func readAssetRecord(atRelativePath relativePath: String) throws -> PortablePackageAssetRecord {
+        guard Self.isSafeRelativePath(relativePath) else {
+            throw PortablePackageError.invalidRelativePath(relativePath)
+        }
+        let data = try Data(contentsOf: rootURL.appendingPathComponent(relativePath))
+        var record = try PortablePackageJSON.decode(PortablePackageAssetRecord.self, from: data)
+        record.unknownJSONFields = PortablePackageJSON.unknownFields(
+            in: data, excluding: PortablePackageAssetRecord.knownJSONKeys
+        )
+        try validate(record)
+        return record
     }
 
     private func validateManifest(_ manifest: PortablePackageManifest) throws {
