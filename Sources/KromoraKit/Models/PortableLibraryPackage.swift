@@ -354,6 +354,10 @@ struct PortableLibraryPackage {
             guard FileManager.default.fileExists(atPath: package.membershipURL(for: shard).path) else {
                 throw PortablePackageError.missingShard(shard)
             }
+            let membership = try package.readMembershipShard(shard)
+            for entry in membership.entries where !entry.isTombstone {
+                _ = try package.readAssetRecord(for: entry.assetID)
+            }
         }
         return package
     }

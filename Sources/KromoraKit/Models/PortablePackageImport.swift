@@ -108,7 +108,8 @@ struct PortablePackageImporter: Sendable {
         options: PortablePackageImportOptions = .init(),
         isCancelled: @Sendable () -> Bool = { false },
         progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in },
-        sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in }
+        sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
+        faultInjector: PortablePackageFaultInjector? = nil
     ) throws -> PortablePackageImportResult {
         var progressValue = PortablePackageImportProgress(
             total: sources.count,
@@ -157,7 +158,7 @@ struct PortablePackageImporter: Sendable {
             let recordPath = "Assets/\(shardName)/\(assetID.raw)/asset.json"
             var transaction: PortablePackageTransaction
             do {
-                transaction = try package.beginTransaction(lease: lease)
+                transaction = try package.beginTransaction(lease: lease, faultInjector: faultInjector)
             } catch {
                 if error is CancellationError || isCancelled() {
                     cancelled = true
@@ -265,22 +266,27 @@ struct PortablePackageImporter: Sendable {
     func importAsync(
         sources: [PortablePackageImportSource],
         options: PortablePackageImportOptions = .init(),
-        progress: @Sendable @escaping (PortablePackageImportProgress) -> Void = { _ in }
+        progress: @Sendable @escaping (PortablePackageImportProgress) -> Void = { _ in },
+        faultInjector: PortablePackageFaultInjector? = nil
     ) async throws -> PortablePackageImportResult {
         try `import`(
             sources: sources,
             options: options,
             isCancelled: { Task.isCancelled },
-            progress: progress
+            progress: progress,
+            faultInjector: faultInjector
         )
     }
 
     func `import`(
         sources: [PortablePackageImportSource],
         options: PortablePackageImportOptions = .init(),
-        progress: @Sendable @escaping (PortablePackageImportProgress) -> Void = { _ in }
+        progress: @Sendable @escaping (PortablePackageImportProgress) -> Void = { _ in },
+        faultInjector: PortablePackageFaultInjector? = nil
     ) async throws -> PortablePackageImportResult {
-        try await importAsync(sources: sources, options: options, progress: progress)
+        try await importAsync(
+            sources: sources, options: options, progress: progress, faultInjector: faultInjector
+        )
     }
 
     private static func totalBytes(for sources: [PortablePackageImportSource]) -> UInt64? {
@@ -336,14 +342,16 @@ extension PortableLibraryPackage {
         options: PortablePackageImportOptions = .init(),
         isCancelled: @Sendable () -> Bool = { false },
         progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in },
-        sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in }
+        sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
+        faultInjector: PortablePackageFaultInjector? = nil
     ) throws -> PortablePackageImportResult {
         try PortablePackageImporter(package: self, lease: lease).`import`(
             sources: sources,
             options: options,
             isCancelled: isCancelled,
             progress: progress,
-            sourceReadObserver: sourceReadObserver
+            sourceReadObserver: sourceReadObserver,
+            faultInjector: faultInjector
         )
     }
 }
