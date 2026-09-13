@@ -1,6 +1,7 @@
 import CryptoKit
 import Darwin
 import Foundation
+import os.lock
 
 /// The points at which a package commit can be interrupted in tests or by a process crash.
 enum PortablePackageTransactionBoundary: String, CaseIterable, Codable, Sendable {
@@ -48,33 +49,25 @@ enum PortablePackageTransactionError: Error, Equatable, CustomStringConvertible 
 }
 
 /// A deterministic, test-only fault injector. Production callers use the default instance.
-final class PortablePackageFaultInjector: @unchecked Sendable {
-    private let lock = NSLock()
-    private var remaining: [PortablePackageTransactionBoundary: Int]
+final class PortablePackageFaultInjector: Sendable {
+    private let remaining: OSAllocatedUnfairLock<[PortablePackageTransactionBoundary: Int]>
 
     init(failingAt boundary: PortablePackageTransactionBoundary, times: Int = 1) {
-        remaining = [boundary: max(times, 0)]
+        remaining = OSAllocatedUnfairLock(initialState: [boundary: max(times, 0)])
     }
 
     init(failingAt boundaries: Set<PortablePackageTransactionBoundary>) {
-        remaining = Dictionary(uniqueKeysWithValues: boundaries.map { ($0, 1) })
+        remaining = OSAllocatedUnfairLock(
+            initialState: Dictionary(uniqueKeysWithValues: boundaries.map { ($0, 1) }))
     }
 
     func check(_ boundary: PortablePackageTransactionBoundary) throws {
-        let shouldFail = lock.withLock {
+        let shouldFail = remaining.withLock { remaining -> Bool in
             guard let count = remaining[boundary], count > 0 else { return false }
             remaining[boundary] = count - 1
             return true
         }
         if shouldFail { throw PortablePackageTransactionError.injectedFailure(boundary) }
-    }
-}
-
-extension NSLock {
-    fileprivate func withLock<T>(_ body: () throws -> T) rethrows -> T {
-        lock()
-        defer { unlock() }
-        return try body()
     }
 }
 
@@ -113,20 +106,26 @@ enum PortablePackageLeaseError: Error, Equatable, CustomStringConvertible {
 /// Acquisition uses O_EXCL, so two processes cannot both become the owner. Expired leases are
 /// reported rather than silently broken; callers must explicitly call `breakExpired` after any
 /// transaction recovery and, normally, user confirmation.
-final class PortablePackageLease: @unchecked Sendable {
+final class PortablePackageLease: Sendable {
     static let defaultDuration: TimeInterval = 180
+
+    private struct State: Sendable {
+        var info: PortablePackageLeaseInfo
+        var released = false
+    }
 
     let packageRoot: URL
     let ownerID: UUID
-    private(set) var info: PortablePackageLeaseInfo
     private let duration: TimeInterval
-    private var released = false
+    private let state: OSAllocatedUnfairLock<State>
+
+    var info: PortablePackageLeaseInfo { state.withLock { $0.info } }
 
     private init(packageRoot: URL, info: PortablePackageLeaseInfo, duration: TimeInterval) {
         self.packageRoot = packageRoot
         ownerID = info.ownerID
-        self.info = info
         self.duration = duration
+        state = OSAllocatedUnfairLock(initialState: State(info: info))
     }
 
     deinit {
@@ -190,9 +189,11 @@ final class PortablePackageLease: @unchecked Sendable {
     ) throws {
         try faultInjector?.check(.leaseRenewal)
         try assertOwnership(at: now)
-        info.heartbeatAt = now
-        info.expiresAt = now.addingTimeInterval(duration)
-        let data = try Self.encode(info)
+        let data = try state.withLock { state -> Data in
+            state.info.heartbeatAt = now
+            state.info.expiresAt = now.addingTimeInterval(duration)
+            return try Self.encode(state.info)
+        }
         guard FileManager.default.fileExists(atPath: lockURL.path) else {
             throw PortablePackageLeaseError.missing
         }
@@ -204,7 +205,7 @@ final class PortablePackageLease: @unchecked Sendable {
         faultInjector: PortablePackageFaultInjector? = nil
     ) throws {
         try faultInjector?.check(.leaseLoss)
-        guard !released else { throw PortablePackageLeaseError.notOwner }
+        guard !state.withLock({ $0.released }) else { throw PortablePackageLeaseError.notOwner }
         guard let current = try? Self.readInfo(at: lockURL) else {
             throw PortablePackageLeaseError.missing
         }
@@ -213,14 +214,14 @@ final class PortablePackageLease: @unchecked Sendable {
     }
 
     func release() throws {
-        guard !released else { return }
+        guard !state.withLock({ $0.released }) else { return }
         guard let current = try? Self.readInfo(at: lockURL) else {
-            released = true
+            state.withLock { $0.released = true }
             return
         }
         guard current.ownerID == ownerID else { throw PortablePackageLeaseError.notOwner }
         try FileManager.default.removeItem(at: lockURL)
-        released = true
+        state.withLock { $0.released = true }
     }
 
     private var lockURL: URL { packageRoot.appendingPathComponent("manifest.lock") }
