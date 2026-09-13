@@ -5,6 +5,20 @@ import XCTest
 
 final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
 
+    private actor Gate {
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func releaseAll() {
+            let parked = waiters
+            waiters.removeAll()
+            for waiter in parked { waiter.resume() }
+        }
+    }
+
     func testPackedThumbnailCompactionReclaimsStaleBytesAndKeepsLiveOffsets() throws {
         let packageURL = tempDirectory.appendingPathComponent("PackedMaintenance.kromoralibrary")
         _ = try PortableLibraryPackage.create(at: packageURL)
@@ -116,6 +130,22 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
         XCTAssertEqual(try retried.lookup("00-live"), .found(Data(repeating: 0x6b, count: 53)))
     }
 
+    func testMaintenanceSweepsOrphanedQuarantineDirectoryFromAnInterruptedPass() throws {
+        let packageURL = tempDirectory.appendingPathComponent("OrphanMaintenance.kromoralibrary")
+        _ = try PortableLibraryPackage.create(at: packageURL)
+        let orphanURL = packageURL.appendingPathComponent(
+            "Recovery/Quarantine/Maintenance/interrupted-pass", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: orphanURL, withIntermediateDirectories: true)
+        try Data("orphaned sidecar".utf8).write(
+            to: orphanURL.appendingPathComponent("stale.json")
+        )
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: orphanURL.path))
+        _ = try PortablePackageMaintenance.run(at: packageURL)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphanURL.path))
+    }
+
     @MainActor
     func testMaintenanceCoordinatorRetriesFailureOnTheMaintenanceLane() async throws {
         let packageURL = tempDirectory.appendingPathComponent("ScheduledMaintenance.kromoralibrary")
@@ -148,6 +178,44 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
             scheduler.admissionLog.filter { $0.lane == .packageIO && $0.priority == .background }.count,
             2
         )
+    }
+
+    @MainActor
+    func testMaintenanceCoordinatorRetriesSchedulerRejectionAfterQueueDrains() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("RejectedMaintenance.kromoralibrary")
+        _ = try PortableLibraryPackage.create(at: packageURL)
+        let scheduler = ImageWorkScheduler(configuration: .init(
+            maxConcurrentThumbnails: 1,
+            maxQueuedThumbnails: 1,
+            maxConcurrentPackageIO: 1,
+            maxQueuedPackageIO: 0
+        ))
+        let gate = Gate()
+        scheduler.enqueuePackageIO(
+            id: .init("package-blocker"), lane: .importCopyHash,
+            operation: { await gate.wait() }
+        )
+        try await waitUntil("package blocker", timeout: 10) {
+            scheduler.runningPackageIOCount == 1
+        }
+
+        let maintenance = PortablePackageMaintenance(scheduler: scheduler)
+        let outcomes = OutcomeProbe()
+        XCTAssertFalse(
+            maintenance.enqueue(packageURL: packageURL, retryLimit: 1) { result in
+                switch result {
+                case .success: outcomes.record("success")
+                case .failure: outcomes.record("failure")
+                }
+            }
+        )
+        XCTAssertEqual(outcomes.events, ["failure"])
+        XCTAssertEqual(maintenance.failureLog.count, 1)
+
+        await gate.releaseAll()
+        try await waitUntil("rejected maintenance retry", timeout: 10) {
+            scheduler.isIdle && outcomes.events == ["failure", "success"]
+        }
     }
 
     private final class OutcomeProbe: @unchecked Sendable {

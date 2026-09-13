@@ -17,6 +17,12 @@ enum KromoraStorage {
         return root(in: base, fileManager: fileManager)
     }
 
+    /// The package location used by the running app's background maintenance trigger. Package
+    /// opening is still a separate workflow; when this path is absent, the trigger is a no-op.
+    static var defaultPortableLibraryPackageURL: URL {
+        applicationSupportRoot().appendingPathComponent("Library.kromoralibrary", isDirectory: true)
+    }
+
     static func root(in base: URL, fileManager: FileManager = .default) -> URL {
         let current = base.appendingPathComponent(productDirectoryName, isDirectory: true)
         let legacy = base.appendingPathComponent(legacyDirectoryName, isDirectory: true)
