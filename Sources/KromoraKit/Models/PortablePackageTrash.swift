@@ -108,26 +108,6 @@ extension PortableLibraryPackage {
         )
     }
 
-    func removeFromLibrary(
-        for assetID: PortablePhotoAssetID,
-        lease: PortablePackageLease,
-        now: Date = Date(),
-        faultInjector: PortablePackageFaultInjector? = nil
-    ) throws -> PortablePackageRemovalResult {
-        try removeFromLibrary(
-            assetID, lease: lease, now: now, faultInjector: faultInjector)
-    }
-
-    func removeFromLibrary(
-        assetID: PortablePhotoAssetID,
-        lease: PortablePackageLease,
-        now: Date = Date(),
-        faultInjector: PortablePackageFaultInjector? = nil
-    ) throws -> PortablePackageRemovalResult {
-        try removeFromLibrary(
-            assetID, lease: lease, now: now, faultInjector: faultInjector)
-    }
-
     /// Restores a tombstoned asset before reclaim. The original package directory is moved back
     /// atomically; the external source of a referenced asset is never opened or modified.
     func restoreFromQuarantine(
@@ -200,26 +180,6 @@ extension PortableLibraryPackage {
         return PortablePackageRestoreResult(assetID: assetID, wasReferenced: referenced)
     }
 
-    func restoreFromTrash(
-        _ assetID: PortablePhotoAssetID,
-        lease: PortablePackageLease,
-        now: Date = Date(),
-        faultInjector: PortablePackageFaultInjector? = nil
-    ) throws -> PortablePackageRestoreResult {
-        try restoreFromQuarantine(
-            assetID, lease: lease, now: now, faultInjector: faultInjector)
-    }
-
-    func restoreFromQuarantine(
-        assetID: PortablePhotoAssetID,
-        lease: PortablePackageLease,
-        now: Date = Date(),
-        faultInjector: PortablePackageFaultInjector? = nil
-    ) throws -> PortablePackageRestoreResult {
-        try restoreFromQuarantine(
-            assetID, lease: lease, now: now, faultInjector: faultInjector)
-    }
-
     /// Permanently reclaims only package-owned quarantine directories. `confirmed` is required at
     /// the API boundary; no automatic recovery, open, edit, or ordinary remove operation calls
     /// this method. Tombstones remain in membership so an older backup cannot resurrect an asset.
@@ -283,26 +243,6 @@ extension PortableLibraryPackage {
             skippedReferencedAssetIDs: referenced.sorted { $0.raw < $1.raw },
             bytesReclaimed: bytes
         )
-    }
-
-    func reclaimQuarantinedSpace(
-        confirmed: Bool,
-        lease: PortablePackageLease,
-        now: Date = Date(),
-        faultInjector: PortablePackageFaultInjector? = nil
-    ) throws -> PortablePackageReclaimResult {
-        try reclaimSpace(
-            confirmed: confirmed, lease: lease, now: now, faultInjector: faultInjector)
-    }
-
-    func emptyTrash(
-        confirmed: Bool,
-        lease: PortablePackageLease,
-        now: Date = Date(),
-        faultInjector: PortablePackageFaultInjector? = nil
-    ) throws -> PortablePackageReclaimResult {
-        try reclaimSpace(
-            confirmed: confirmed, lease: lease, now: now, faultInjector: faultInjector)
     }
 
     private func recordPath(for assetID: PortablePhotoAssetID) -> String {
