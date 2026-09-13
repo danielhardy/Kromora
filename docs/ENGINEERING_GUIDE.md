@@ -79,6 +79,14 @@ provider version. A missing or invalid sidecar is a cache miss; it must never in
 mask recipe. Local masks use the same resolved definition for preview, overlay, histogram,
 comparison, copy/paste, and full-resolution export.
 
+`PortableLibraryValidation` is the reusable read-only scrub boundary for package backup and restore.
+It walks the manifest, all membership shards, reachable asset records, originals, edit revisions,
+XMP companions, and embedded Look blobs, verifying structure and the checksums stored in portable
+identity/reference values. These findings are reported in `criticalFailures`. Package `Derived/`
+artifacts and explicitly supplied local index, mask, and analysis-cache locations are inspected as
+`rebuildableGaps`; a missing or stale cache can never make a package invalid. Validation never
+deletes, quarantines, rebuilds, or writes any package or cache file.
+
 ## Inspector controls
 
 Every inspector slider is `NeutralOriginSlider`, not `SwiftUI.Slider`. It wraps `NSSlider` and
