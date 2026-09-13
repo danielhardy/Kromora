@@ -1,9 +1,6 @@
 {
   "fill" : {
-    "linear-gradient" : [
-      "extended-srgb:1.00000,0.21961,0.23529,1.00000",
-      "srgb:0.34118,0.05098,0.97255,1.00000"
-    ],
+    "automatic-gradient" : "srgb:0.34118,0.05098,0.97255,1.00000",
     "orientation" : {
       "start" : {
         "x" : 0.5,
@@ -19,9 +16,34 @@
     {
       "layers" : [
         {
+          "fill" : {
+            "solid" : "srgb:0.96948,0.96948,0.96948,1.00000"
+          },
           "glass" : false,
-          "image-name" : "kroma.svg",
-          "name" : "kroma"
+          "image-name" : "Image 2.svg",
+          "name" : "Image 2",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              236.9879065464172,
+              176.44949999999994
+            ]
+          }
+        },
+        {
+          "fill" : {
+            "solid" : "srgb:0.96948,0.96948,0.96948,1.00000"
+          },
+          "glass" : false,
+          "image-name" : "Image.svg",
+          "name" : "Image",
+          "position" : {
+            "scale" : 1,
+            "translation-in-points" : [
+              -66.07609345358287,
+              0
+            ]
+          }
         }
       ],
       "shadow" : {
