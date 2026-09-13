@@ -12,6 +12,7 @@ edit sidecars, and catalog canonicalisation are separate phases.
   Assets/<first-two-uuid-hex>/<asset-uuid>/Edits/<revision>.json
   Assets/<first-two-uuid-hex>/<asset-uuid>/Metadata/<revision>.xmp
   Looks/<sha256>.cube
+  Recovery/Quarantine/<asset-uuid>/          # package-owned removed assets
 ```
 
 All JSON objects are UTF-8. Writers emit sorted known keys. Unknown top-level members are retained
@@ -37,10 +38,12 @@ display name, and the current asset revision. It is sufficient for membership, r
 and filter work without opening `asset.json`.
 
 An `asset.json` record contains `identity` (the KRMA-390 opaque UUID plus immutable source
-fingerprint), `source` (embedded relative path or reserved referenced bookmark), `currentRevision`,
-and `editHistory` pointers. Each edit pointer has a revisioned Kromora JSON path and an optional
-XMP path. Paths are locators only. They are resolved against the package root at the render boundary
-and never enter portable identity or cache keys.
+fingerprint), `source` (embedded relative path or reserved referenced bookmark), `isRemoved`,
+`currentRevision`, and `editHistory` pointers. `isRemoved` is false for active records and true for
+records retained in package-native quarantine (older records without the field decode as false).
+Each edit pointer has a revisioned Kromora JSON path and an optional XMP path. Paths are locators
+only. They are resolved against the package root at the render boundary and never enter portable
+identity or cache keys.
 
 ## Edit revisions and Looks
 
@@ -64,3 +67,25 @@ copy-on-import remains the only product workflow.
 
 The format creates all 256 shard files, including empty shards. Asset and shard writes validate UUID
 shard placement and reject absolute paths, backslashes, empty path components, and `..` traversal.
+
+## Package-native trash
+
+Package-native trash is separate from KRMA-371's existing folder-backed Library deletion workflow.
+KRMA-371 continues to manage the current referenced-folder/managed-copy library, including its
+existing macOS Trash behavior; this package lifecycle does not call that workflow or change it.
+
+For a package-owned embedded asset, **Remove from library** atomically tombstones the membership
+entry, marks the asset record removed, and moves the complete `Assets/<shard>/<assetID>/` directory
+to `Recovery/Quarantine/<assetID>/`. The original and edit sidecars remain recoverable until the
+user restores the asset or explicitly confirms **Reclaim space**. Restore reverses the move and
+clears the tombstone. The tombstone remains in the membership shard after reclaim so an older backup
+cannot resurrect the asset.
+
+Referenced assets are never moved, opened, or deleted by these operations. Remove marks only the
+package record and membership entry; reclaim reports the referenced asset as skipped. The external
+file lifecycle remains with its owner.
+
+Reclaim stages each quarantined directory into the transaction journal's same-volume staging area
+and deletes it only when the explicitly confirmed reclaim transaction commits. No ordinary package
+write, recovery rollback, edit operation, or automatic maintenance path may permanently delete an
+original.

@@ -28,6 +28,9 @@ enum PortablePackageTransactionError: Error, Equatable, CustomStringConvertible 
     case journalCorrupt(String)
     case cannotPublishDirectory(String)
     case sourceIsNotARegularFile(String)
+    case moveSourceMissing(String)
+    case moveDestinationExists(String)
+    case invalidRemovalPath(String)
 
     var description: String {
         switch self {
@@ -49,6 +52,11 @@ enum PortablePackageTransactionError: Error, Equatable, CustomStringConvertible 
             return "Cannot atomically publish directory '\(path)'"
         case .sourceIsNotARegularFile(let path):
             return "Import source is not a regular file: '\(path)'"
+        case .moveSourceMissing(let path): return "Transaction move source is missing: '\(path)'"
+        case .moveDestinationExists(let path):
+            return "Transaction move destination already exists: '\(path)'"
+        case .invalidRemovalPath(let path):
+            return "Only quarantined package paths may be permanently removed: '\(path)'"
         }
     }
 }
@@ -281,6 +289,30 @@ struct PortablePackageTransactionFile: Codable, Equatable, Sendable {
     var publicationState: PublicationState
 }
 
+struct PortablePackageTransactionMove: Codable, Equatable, Sendable {
+    enum PublicationState: String, Codable, Sendable {
+        case staged
+        case started
+        case published
+    }
+
+    let sourcePath: String
+    let targetPath: String
+    var publicationState: PublicationState
+}
+
+struct PortablePackageTransactionRemoval: Codable, Equatable, Sendable {
+    enum PublicationState: String, Codable, Sendable {
+        case staged
+        case started
+        case published
+    }
+
+    let relativePath: String
+    var backupPath: String?
+    var publicationState: PublicationState
+}
+
 struct PortablePackageTransactionJournal: Codable, Equatable, Sendable {
     enum State: String, Codable, Sendable {
         case prepared
@@ -295,7 +327,59 @@ struct PortablePackageTransactionJournal: Codable, Equatable, Sendable {
     let createdAt: Date
     let stagingDirectory: String
     var files: [PortablePackageTransactionFile]
+    var moves: [PortablePackageTransactionMove]
+    var removals: [PortablePackageTransactionRemoval]
     var state: State
+
+    init(
+        transactionID: UUID,
+        packageID: UUID?,
+        createdAt: Date,
+        stagingDirectory: String,
+        files: [PortablePackageTransactionFile],
+        moves: [PortablePackageTransactionMove] = [],
+        removals: [PortablePackageTransactionRemoval] = [],
+        state: State
+    ) {
+        self.transactionID = transactionID
+        self.packageID = packageID
+        self.createdAt = createdAt
+        self.stagingDirectory = stagingDirectory
+        self.files = files
+        self.moves = moves
+        self.removals = removals
+        self.state = state
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case transactionID, packageID, createdAt, stagingDirectory, files, moves, removals, state
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        transactionID = try c.decode(UUID.self, forKey: .transactionID)
+        packageID = try c.decodeIfPresent(UUID.self, forKey: .packageID)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        stagingDirectory = try c.decode(String.self, forKey: .stagingDirectory)
+        files = try c.decode([PortablePackageTransactionFile].self, forKey: .files)
+        // These fields were added for package-native quarantine/reclaim. Missing means an older
+        // file-only transaction journal, which remains fully recoverable.
+        moves = try c.decodeIfPresent([PortablePackageTransactionMove].self, forKey: .moves) ?? []
+        removals = try c.decodeIfPresent([PortablePackageTransactionRemoval].self, forKey: .removals) ?? []
+        state = try c.decode(State.self, forKey: .state)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(transactionID, forKey: .transactionID)
+        try c.encodeIfPresent(packageID, forKey: .packageID)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encode(stagingDirectory, forKey: .stagingDirectory)
+        try c.encode(files, forKey: .files)
+        try c.encode(moves, forKey: .moves)
+        try c.encode(removals, forKey: .removals)
+        try c.encode(state, forKey: .state)
+    }
 }
 
 struct PortablePackageRecoveryReport: Equatable, Sendable {
@@ -405,6 +489,53 @@ struct PortablePackageTransaction {
             byteCount: UInt64(data.count), stagedChecksum: checksum, publicationState: .staged
         )
         journal.files.append(file)
+        try persistJournal()
+        try faultInjector?.check(.stage)
+    }
+
+    /// Journals a same-volume move. Unlike a copy, this preserves the package's single original
+    /// and can be reversed by recovery if publication stops between the two directory entries.
+    mutating func stageMove(from sourcePath: String, to targetPath: String) throws {
+        try validateMovePath(sourcePath)
+        try validateMovePath(targetPath)
+        guard !journal.moves.contains(where: {
+            $0.sourcePath == sourcePath || $0.targetPath == targetPath
+                || $0.sourcePath == targetPath || $0.targetPath == sourcePath
+        }) else {
+            throw PortablePackageTransactionError.duplicateStagedPath(targetPath)
+        }
+        let source = packageRoot.appendingPathComponent(sourcePath)
+        let target = packageRoot.appendingPathComponent(targetPath)
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            throw PortablePackageTransactionError.moveSourceMissing(sourcePath)
+        }
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            throw PortablePackageTransactionError.moveDestinationExists(targetPath)
+        }
+        journal.moves.append(.init(
+            sourcePath: sourcePath, targetPath: targetPath, publicationState: .staged
+        ))
+        try persistJournal()
+        try faultInjector?.check(.stage)
+    }
+
+    /// Stages the only destructive primitive exposed by the transaction layer. The quarantined
+    /// directory is first moved into journal staging; commit cleanup is what finally destroys it.
+    mutating func stageRemoval(at relativePath: String) throws {
+        guard relativePath.hasPrefix("Recovery/Quarantine/") else {
+            throw PortablePackageTransactionError.invalidRemovalPath(relativePath)
+        }
+        try validateMovePath(relativePath)
+        guard !journal.removals.contains(where: { $0.relativePath == relativePath }) else {
+            throw PortablePackageTransactionError.duplicateStagedPath(relativePath)
+        }
+        let source = packageRoot.appendingPathComponent(relativePath)
+        guard FileManager.default.fileExists(atPath: source.path) else {
+            throw PortablePackageTransactionError.moveSourceMissing(relativePath)
+        }
+        journal.removals.append(.init(
+            relativePath: relativePath, backupPath: nil, publicationState: .staged
+        ))
         try persistJournal()
         try faultInjector?.check(.stage)
     }
@@ -551,8 +682,63 @@ struct PortablePackageTransaction {
             }
             return prepared
         }
+        journal.removals = journal.removals.enumerated().map { index, removal in
+            var prepared = removal
+            prepared.backupPath = packageRoot.standardizedFileURL
+                .appendingPathComponent(Self.relativePath(
+                    from: packageRoot,
+                    to: stagingURL.appendingPathComponent("Backups/Removals/\(index)")
+                )).path
+            return prepared
+        }
         journal.state = .publishing
         try persistJournal()
+
+        for index in journal.removals.indices {
+            if isCancelled() { throw CancellationError() }
+            try lease.assertOwnership(at: now, faultInjector: faultInjector)
+            journal.removals[index].publicationState = .started
+            try persistJournal()
+            let target = packageRoot.appendingPathComponent(journal.removals[index].relativePath)
+            let backup = URL(fileURLWithPath: journal.removals[index].backupPath!)
+            try FileManager.default.createDirectory(
+                at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+            guard FileManager.default.fileExists(atPath: target.path) else {
+                throw PortablePackageTransactionError.moveSourceMissing(
+                    journal.removals[index].relativePath)
+            }
+            try FileManager.default.moveItem(at: target, to: backup)
+            try fullSyncDirectory(target.deletingLastPathComponent())
+            try fullSyncDirectory(backup.deletingLastPathComponent())
+            journal.removals[index].publicationState = .published
+            try persistJournal()
+            try faultInjector?.check(.publish)
+        }
+
+        for index in journal.moves.indices {
+            if isCancelled() { throw CancellationError() }
+            try lease.assertOwnership(at: now, faultInjector: faultInjector)
+            journal.moves[index].publicationState = .started
+            try persistJournal()
+            let source = packageRoot.appendingPathComponent(journal.moves[index].sourcePath)
+            let target = packageRoot.appendingPathComponent(journal.moves[index].targetPath)
+            guard FileManager.default.fileExists(atPath: source.path) else {
+                throw PortablePackageTransactionError.moveSourceMissing(
+                    journal.moves[index].sourcePath)
+            }
+            guard !FileManager.default.fileExists(atPath: target.path) else {
+                throw PortablePackageTransactionError.moveDestinationExists(
+                    journal.moves[index].targetPath)
+            }
+            try FileManager.default.createDirectory(
+                at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.moveItem(at: source, to: target)
+            try fullSyncDirectory(source.deletingLastPathComponent())
+            try fullSyncDirectory(target.deletingLastPathComponent())
+            journal.moves[index].publicationState = .published
+            try persistJournal()
+            try faultInjector?.check(.publish)
+        }
 
         let ordered = journal.files.sorted {
             Self.publishRank($0.relativePath) < Self.publishRank($1.relativePath)
@@ -584,6 +770,18 @@ struct PortablePackageTransaction {
                 if directory.boolValue {
                     throw PortablePackageTransactionError.cannotPublishDirectory(item.relativePath)
                 }
+                // A prior journalled move may have created this target after backup planning
+                // (for example, the moved quarantine directory still contains asset.json). Move
+                // it into the transaction backup before publishing the replacement.
+                let backup = stagingURL.appendingPathComponent(
+                    "Backups/Dynamic/\(currentIndex)/\(target.lastPathComponent)")
+                try FileManager.default.createDirectory(
+                    at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: target, to: backup)
+                journal.files[currentIndex].backupPath = packageRoot.standardizedFileURL
+                    .appendingPathComponent(Self.relativePath(from: packageRoot, to: backup)).path
+                try fullSyncDirectory(target.deletingLastPathComponent())
+                try persistJournal()
             }
             try FileManager.default.createDirectory(
                 at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -682,6 +880,30 @@ struct PortablePackageTransaction {
             }
             if !fm.fileExists(atPath: staged.path) { continue }
         }
+        for removal in journal.removals.reversed() {
+            guard let backupPath = removal.backupPath else { continue }
+            let backup = URL(fileURLWithPath: backupPath)
+            let target = packageRoot.appendingPathComponent(removal.relativePath)
+            if fm.fileExists(atPath: backup.path) {
+                if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
+                try fm.createDirectory(
+                    at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.moveItem(at: backup, to: target)
+                try fullSyncDirectory(target.deletingLastPathComponent())
+            }
+        }
+        for move in journal.moves.reversed() {
+            let source = packageRoot.appendingPathComponent(move.sourcePath)
+            let target = packageRoot.appendingPathComponent(move.targetPath)
+            // If the process stopped after rename but before the journal state was flushed, the
+            // filesystem is the source of truth: target exists and source does not.
+            if fm.fileExists(atPath: target.path) && !fm.fileExists(atPath: source.path) {
+                try fm.createDirectory(
+                    at: source.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.moveItem(at: target, to: source)
+                try fullSyncDirectory(source.deletingLastPathComponent())
+            }
+        }
     }
 
     private static func decodeJournal(from data: Data) throws -> PortablePackageTransactionJournal {
@@ -695,13 +917,30 @@ struct PortablePackageTransaction {
             throw PortablePackageTransactionError.invalidRelativePath(path)
         }
         let components = path.split(separator: "/", omittingEmptySubsequences: false)
-        guard !components.contains(".."), !components.contains(""), !path.hasPrefix("Recovery/")
+        guard !components.contains(".."), !components.contains(""),
+              !path.hasPrefix("Recovery/") || path.hasPrefix("Recovery/Quarantine/")
         else {
             throw PortablePackageTransactionError.invalidRelativePath(path)
         }
     }
 
     private func validateRelativePath(_ path: String) throws { try Self.validateRelativePath(path) }
+
+    private static func validateMovePath(_ path: String) throws {
+        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\") else {
+            throw PortablePackageTransactionError.invalidRelativePath(path)
+        }
+        let components = path.split(separator: "/", omittingEmptySubsequences: false)
+        guard !components.contains(".."), !components.contains("") else {
+            throw PortablePackageTransactionError.invalidRelativePath(path)
+        }
+        guard !path.hasPrefix("Recovery/Transactions/"), !path.hasPrefix("Recovery/Staging/")
+        else {
+            throw PortablePackageTransactionError.invalidRelativePath(path)
+        }
+    }
+
+    private func validateMovePath(_ path: String) throws { try Self.validateMovePath(path) }
 
     private static func publishRank(_ path: String) -> Int {
         if path.hasSuffix("/asset.json") { return 2 }
