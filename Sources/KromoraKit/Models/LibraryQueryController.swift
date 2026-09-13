@@ -96,14 +96,56 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
 
     /// Rebuild the projection from the package's membership summaries only.
     init(package: PortableLibraryPackage) throws {
+        try self.init(libraryID: package.manifest.libraryID, entries: Self.readEntries(from: package))
+    }
+
+    /// Rebuilds the local projection from membership shards and atomically publishes it.
+    ///
+    /// The first progress callback is emitted once a complete page of summaries is available.
+    /// That page is intentionally a usable partial projection; the final callback contains the
+    /// complete projection after it has been written. No asset record, original, thumbnail, or
+    /// XMP file is opened by this operation.
+    static func rebuild(
+        from package: PortableLibraryPackage,
+        to indexURL: URL,
+        pageSize: Int = 500,
+        progress: (@Sendable (LibraryIndexRebuildProgress) async -> Void)? = nil
+    ) async throws -> Self {
+        let effectivePageSize = max(1, pageSize)
         var entries: [LibraryIndexEntry] = []
-        for shard in PortableLibraryPackage.allShards {
+        var publishedFirstPage = false
+
+        for (offset, shard) in PortableLibraryPackage.allShards.enumerated() {
+            try Task.checkCancellation()
             let membership = try package.readMembershipShard(shard)
             entries.append(contentsOf: membership.entries
                 .filter { !$0.isTombstone }
                 .map(LibraryIndexEntry.init(from:)))
+
+            guard !publishedFirstPage, entries.count >= effectivePageSize else { continue }
+            let partial = try Self(libraryID: package.manifest.libraryID, entries: entries)
+            let controller = LibraryQueryController(index: partial, pageSize: effectivePageSize)
+            await progress?(.init(
+                projection: partial,
+                page: controller.page(at: 0),
+                shardsRead: offset + 1,
+                totalShards: PortableLibraryPackage.allShards.count,
+                isComplete: false
+            ))
+            publishedFirstPage = true
         }
-        try self.init(libraryID: package.manifest.libraryID, entries: entries)
+
+        let projection = try Self(libraryID: package.manifest.libraryID, entries: entries)
+        try projection.write(to: indexURL)
+        let controller = LibraryQueryController(index: projection, pageSize: effectivePageSize)
+        await progress?(.init(
+            projection: projection,
+            page: controller.page(at: 0),
+            shardsRead: PortableLibraryPackage.allShards.count,
+            totalShards: PortableLibraryPackage.allShards.count,
+            isComplete: true
+        ))
+        return projection
     }
 
     var count: Int { entries.count }
@@ -133,6 +175,24 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         return try Self(libraryID: value.libraryID, entries: value.entries)
     }
 
+    func validated(for package: PortableLibraryPackage) throws -> Self {
+        guard libraryID == package.manifest.libraryID else {
+            throw LibraryQueryError.invalidIndex("library ID does not match the package")
+        }
+        return try Self(libraryID: libraryID, entries: entries)
+    }
+
+    private static func readEntries(from package: PortableLibraryPackage) throws -> [LibraryIndexEntry] {
+        var entries: [LibraryIndexEntry] = []
+        for shard in PortableLibraryPackage.allShards {
+            let membership = try package.readMembershipShard(shard)
+            entries.append(contentsOf: membership.entries
+                .filter { !$0.isTombstone }
+                .map(LibraryIndexEntry.init(from:)))
+        }
+        return entries
+    }
+
     private static func validated(_ entries: [LibraryIndexEntry]) throws -> [LibraryIndexEntry] {
         var ids = Set<PortablePhotoAssetID>()
         for entry in entries {
@@ -157,6 +217,171 @@ enum LibraryQueryError: Error, Equatable, CustomStringConvertible {
         case .invalidIndex(let message): "Invalid library index: \(message)"
         case .duplicateAsset(let assetID): "Library index contains duplicate asset \(assetID)"
         }
+    }
+}
+
+/// A snapshot published during a cold index rebuild. The first snapshot is deliberately allowed
+/// to be partial so a caller can paint the first page while the remaining membership shards are
+/// still being read.
+struct LibraryIndexRebuildProgress: Sendable {
+    let projection: LibraryIndexProjection
+    let page: LibraryQueryPage
+    let shardsRead: Int
+    let totalShards: Int
+    let isComplete: Bool
+}
+
+/// The source selected while opening a query session. A rebuilt session publishes its first page
+/// as soon as the first page of membership summaries has been collected.
+enum LibraryIndexOpenSource: Sendable, Equatable {
+    case warm
+    case rebuilt
+}
+
+/// The query-facing lifecycle for a package index.
+///
+/// A warm session reads one local index file and never touches package contents. A cold session
+/// starts a shard-only rebuild, publishes its first page through `firstPage()`, and updates the
+/// session to the complete projection when `waitForRebuild()` finishes. The actor keeps the
+/// controller and its UUID selection state coherent while those updates arrive.
+actor LibraryIndexSession {
+    private var controller: LibraryQueryController
+    private let indexURL: URL
+    private let initialQuery: LibraryQuery
+    private(set) var source: LibraryIndexOpenSource
+    private var rebuildTask: Task<LibraryIndexProjection, Error>?
+    private var firstPublishedPage: LibraryQueryPage?
+    private var firstPageWaiters: [CheckedContinuation<LibraryQueryPage, Error>] = []
+    private var rebuildError: Error?
+
+    private init(
+        controller: LibraryQueryController,
+        indexURL: URL,
+        query: LibraryQuery,
+        source: LibraryIndexOpenSource,
+        initialPage: LibraryQueryPage? = nil
+    ) {
+        self.controller = controller
+        self.indexURL = indexURL
+        self.initialQuery = query
+        self.source = source
+        self.firstPublishedPage = initialPage
+    }
+
+    /// Opens the local index when valid, otherwise starts an automatic shard-only rebuild.
+    ///
+    /// The method waits only until the first page is available on the cold path. The rebuild task
+    /// remains owned by this session and can be awaited explicitly, or can continue while the UI
+    /// uses `page(at:query:)`.
+    static func open(
+        package: PortableLibraryPackage,
+        indexURL: URL,
+        pageSize: Int = 500,
+        query: LibraryQuery = .all
+    ) async throws -> Self {
+        if let loaded = try? LibraryIndexProjection.load(from: indexURL),
+           let valid = try? loaded.validated(for: package) {
+            let controller = LibraryQueryController(index: valid, pageSize: pageSize)
+            return Self(
+                controller: controller,
+                indexURL: indexURL,
+                query: query,
+                source: .warm,
+                initialPage: controller.page(at: 0, query: query)
+            )
+        }
+
+        let empty = try LibraryIndexProjection(libraryID: package.manifest.libraryID, entries: [])
+        let session = Self(
+            controller: LibraryQueryController(index: empty, pageSize: pageSize),
+            indexURL: indexURL,
+            query: query,
+            source: .rebuilt
+        )
+        let task = Task { [session] in
+            do {
+                return try await LibraryIndexProjection.rebuild(
+                    from: package,
+                    to: indexURL,
+                    pageSize: pageSize,
+                    progress: { progress in await session.apply(progress) }
+                )
+            } catch {
+                await session.failRebuild(error)
+                throw error
+            }
+        }
+        await session.install(task)
+        _ = try await session.waitForFirstPage()
+        return session
+    }
+
+    /// The default local index location used by the application-support projection.
+    static func defaultIndexURL(for libraryID: UUID, applicationSupportURL: URL? = nil) -> URL {
+        let baseURL = applicationSupportURL
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return baseURL
+            .appendingPathComponent("Kromora/Indexes", isDirectory: true)
+            .appendingPathComponent(libraryID.uuidString.lowercased(), isDirectory: true)
+            .appendingPathComponent("LibraryIndex.store")
+    }
+
+    var isRebuilding: Bool { rebuildTask != nil }
+
+    func page(at pageIndex: Int, query: LibraryQuery = .all) -> LibraryQueryPage {
+        controller.page(at: pageIndex, query: query)
+    }
+
+    func firstPage() async throws -> LibraryQueryPage {
+        try await waitForFirstPage()
+    }
+
+    /// Waits for the final projection, preserving any first page already visible to the caller.
+    @discardableResult
+    func waitForRebuild() async throws -> LibraryIndexProjection {
+        guard let rebuildTask else { return controller.index }
+        return try await rebuildTask.value
+    }
+
+    func currentController() -> LibraryQueryController {
+        controller
+    }
+
+    private func install(_ task: Task<LibraryIndexProjection, Error>) {
+        rebuildTask = task
+    }
+
+    private func waitForFirstPage() async throws -> LibraryQueryPage {
+        if let firstPublishedPage { return firstPublishedPage }
+        if let rebuildError { throw rebuildError }
+        return try await withCheckedThrowingContinuation { continuation in
+            firstPageWaiters.append(continuation)
+        }
+    }
+
+    private func apply(_ progress: LibraryIndexRebuildProgress) {
+        let selectedIDs = controller.selectedIDs
+        let activeID = controller.activeID
+        controller = LibraryQueryController(
+            index: progress.projection,
+            pageSize: controller.pageSize,
+            selectedAssetIDs: selectedIDs,
+            activeAssetID: activeID
+        )
+        if firstPublishedPage == nil {
+            firstPublishedPage = controller.page(at: 0, query: initialQuery)
+            let waiters = firstPageWaiters
+            firstPageWaiters.removeAll()
+            waiters.forEach { $0.resume(returning: firstPublishedPage!) }
+        }
+        if progress.isComplete { rebuildTask = nil }
+    }
+
+    private func failRebuild(_ error: Error) {
+        rebuildError = error
+        let waiters = firstPageWaiters
+        firstPageWaiters.removeAll()
+        waiters.forEach { $0.resume(throwing: error) }
     }
 }
 
