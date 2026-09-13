@@ -1509,6 +1509,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.cancel()
     }
 
+    /// Invalidate an edited-thumbnail operation without removing a bitmap that has already been
+    /// published for the item. Cancellation is cooperative — a renderer may still be returning
+    /// from a framework call — so the generation bump is the durable fence for that late result.
+    private func invalidateEditedThumbnailWork(for assetID: PhotoAssetID?) {
+        guard let assetID else { return }
+        editedThumbnailGenerations[assetID] = (editedThumbnailGenerations[assetID] ?? 0) &+ 1
+        editedThumbnailDebounceTasks[assetID]?.cancel()
+        editedThumbnailDebounceTasks[assetID] = nil
+        workScheduler.cancel(
+            id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw), pump: false
+        )
+    }
+
     /// Stop cache-only work before any user-visible operation gets a chance to enter the editor
     /// lane. The scheduler's background job may already be inside one Core Image call; cancellation
     /// bounds that unavoidable tail to the current item and the generation guards the result.
@@ -1567,13 +1580,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelHistogram(clear: true, pump: false)
         let sourceRevision = self.sourceRevision
         previewCoordinator.cancel()
-        cancelEditedThumbnailDebounce(for: previousActiveAssetID)
-        if let previousActiveAssetID {
-            workScheduler.cancel(
-                id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + previousActiveAssetID.raw),
-                pump: false
-            )
-        }
+        invalidateEditedThumbnailWork(for: previousActiveAssetID)
         pendingEditedThumbnailAssetID = nil
         previewSurface.clear()
         originalPreviewSurface.clear()
@@ -2892,13 +2899,27 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let sourceReference = EditSourceReference(
             assetID: assetID, portableIdentity: persistencePortableIdentity(for: item), url: item.url
         )
+        // Active thumbnails need a navigation fence as well as the per-asset generation: A → B → A
+        // can otherwise let a cancelled A request publish into the second A session. Non-active
+        // thumbnails remain useful across navigation, so their session revision is the document
+        // fence and they are not tied to the active source generation.
+        let thumbnailSourceRevision: UInt64? = assetID == activeAssetID ? self.sourceRevision : nil
+        let thumbnailDocumentRevision = assetID == activeAssetID
+            ? self.documentRevision : editorDocument.revision(for: assetID)
+        let thumbnailSourceIdentity = source.cacheIdentity
         let engine = self.engine
         let editStore = self.editStore
         workScheduler.enqueue(
             id: jobID, lane: .thumbnail, priority: priority
-        ) { [weak self, engine, editStore, source, sourceReference, assetID, generation] in
+        ) { [weak self, engine, editStore, source, sourceReference, assetID, generation,
+              thumbnailSourceRevision, thumbnailDocumentRevision, thumbnailSourceIdentity] in
             guard let self, !self.isShuttingDown,
-                  self.editedThumbnailGenerations[assetID] == generation else { return }
+                  self.isCurrentEditedThumbnailRequest(
+                    assetID: assetID, generation: generation,
+                    sourceRevision: thumbnailSourceRevision,
+                    documentRevision: thumbnailDocumentRevision,
+                    sourceIdentity: thumbnailSourceIdentity
+                  ) else { return }
 
             let document: EditDocument
             if let inMemoryDocument {
@@ -2907,7 +2928,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 document = await editStore.load(for: sourceReference).document
             }
             guard !Task.isCancelled, !self.isShuttingDown,
-                  self.editedThumbnailGenerations[assetID] == generation else { return }
+                  self.isCurrentEditedThumbnailRequest(
+                    assetID: assetID, generation: generation,
+                    sourceRevision: thumbnailSourceRevision,
+                    documentRevision: thumbnailDocumentRevision,
+                    sourceIdentity: thumbnailSourceIdentity
+                  ) else { return }
 
             let lut = self.resolvedLUT(document.lut.lutID)
             let revision = self.editedThumbnailRevision(document: document, lut: lut)
@@ -2928,17 +2954,61 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 targetSize: CGSize(width: Thumbnails.defaultMaxPixelSize,
                                    height: Thumbnails.defaultMaxPixelSize),
                 quality: .thumbnail,
-                output: .raster,
-                space: .current
+                output: .raster, space: .current
             )
             let image: NSImage?
             if let cgImage = await engine.makeThumbnailCGImage(request) {
                 image = NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
             } else { image = nil }
             guard !Task.isCancelled, !self.isShuttingDown,
-                  self.editedThumbnailGenerations[assetID] == generation else { return }
+                  self.isCurrentEditedThumbnailRequest(
+                    assetID: assetID, generation: generation,
+                    sourceRevision: thumbnailSourceRevision,
+                    documentRevision: thumbnailDocumentRevision,
+                    sourceIdentity: thumbnailSourceIdentity
+                  ) else { return }
             self.collection.applyEditedThumbnail(image, for: assetID, revision: revision)
         }
+    }
+
+    /// Validate every value that can make an edited thumbnail stale. The collection item is checked
+    /// again because a file-backed source can be replaced in place while a thumbnail is rendering.
+    private func isCurrentEditedThumbnailRequest(
+        assetID: PhotoAssetID,
+        generation: UInt64,
+        sourceRevision: UInt64?,
+        documentRevision: UInt64,
+        sourceIdentity: PortablePhotoIdentity
+    ) -> Bool {
+        guard !isShuttingDown,
+              editedThumbnailGenerations[assetID] == generation,
+              let item = collection.items.first(where: { $0.id == assetID }) else { return false }
+
+        let currentSource: ImageSource?
+        if let url = item.url {
+            currentSource = ImageSource(
+                url: url, nativeExtent: item.thumbnailNativeExtent,
+                portableIdentity: item.asset.source.portableIdentity
+            )
+        } else if let data = item.imageData {
+            currentSource = ImageSource(
+                data: data, nativeExtent: item.thumbnailNativeExtent,
+                dataFingerprint: item.dataFingerprint,
+                portableIdentity: item.asset.source.portableIdentity
+            )
+        } else {
+            currentSource = nil
+        }
+        guard currentSource?.cacheIdentity == sourceIdentity else { return false }
+
+        if let sourceRevision {
+            guard activeAssetID == assetID,
+                  self.sourceRevision == sourceRevision,
+                  self.documentRevision == documentRevision else { return false }
+        } else {
+            guard editorDocument.revision(for: assetID) == documentRevision else { return false }
+        }
+        return true
     }
 
     private func editedThumbnailRevision(document: EditDocument, lut: CubeLUT?) -> String {

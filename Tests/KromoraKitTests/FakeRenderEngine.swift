@@ -62,6 +62,8 @@ actor FakeRenderEngine: RenderEngining {
         case textureRequested(Request)
         case previewRequested(Request)
         case previewCompleted(Request)
+        case thumbnailRequested(Request)
+        case thumbnailCompleted(Request)
         case histogramRequested(Request)
         case histogramCompleted(Request, HistogramData?)
         case encodeRequested(Request)
@@ -97,6 +99,8 @@ actor FakeRenderEngine: RenderEngining {
     private var shouldFailHistogram = false
     private var previewIsGated = false
     private var parkedPreviews: [CheckedContinuation<Void, Never>] = []
+    private var thumbnailIsGated = false
+    private var parkedThumbnails: [CheckedContinuation<Void, Never>] = []
     private var eventContinuation: AsyncStream<Event>.Continuation?
 
     struct Request: Sendable, Equatable {
@@ -247,10 +251,16 @@ actor FakeRenderEngine: RenderEngining {
     func renderThumbnail(_ request: RenderRequest) async throws -> RenderResult {
         try Task.checkCancellation()
         thumbnailRequests.append(request)
+        let record = Request(request: request)
+        emit(.thumbnailRequested(record))
+        if thumbnailIsGated {
+            await withCheckedContinuation { parkedThumbnails.append($0) }
+        }
         guard request.output == .raster,
               let image = previewResult ?? Self.solidImage(),
               let data = Self.pngData(for: image)
         else { throw ImageError.processingFailed }
+        emit(.thumbnailCompleted(record))
         return RenderResult(
             data: data, extent: CGSize(width: image.width, height: image.height),
             colorSpace: request.space, quality: request.quality, output: request.output
@@ -341,6 +351,18 @@ actor FakeRenderEngine: RenderEngining {
         previewIsGated = false
         let parked = parkedPreviews
         parkedPreviews.removeAll()
+        parked.forEach { $0.resume() }
+    }
+
+    /// Hold edited-thumbnail responses so a test can advance the document or source before the
+    /// renderer returns. The fake deliberately resumes cancelled calls too; the caller's
+    /// asset/revision fence, rather than cooperative cancellation alone, must reject them.
+    func gateThumbnails() { thumbnailIsGated = true }
+
+    func releaseThumbnails() {
+        thumbnailIsGated = false
+        let parked = parkedThumbnails
+        parkedThumbnails.removeAll()
         parked.forEach { $0.resume() }
     }
 
