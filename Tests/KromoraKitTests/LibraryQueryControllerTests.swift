@@ -4,6 +4,95 @@ import XCTest
 
 final class LibraryQueryControllerTests: TempDirectoryTestCase {
 
+    func testGeneratedPackageQueriesAtOneAndTenThousandNeverOpenAssetRecordCanaries() async throws {
+        for scale in [SyntheticLibraryGenerator.Scale.oneThousand, .tenThousand] {
+            let generated = try await SyntheticLibraryGenerator.generate(
+                scale: scale,
+                seed: SyntheticLibraryGenerator.defaultSeed,
+                in: tempDirectory,
+                yieldEvery: 256
+            )
+            defer { try? generated.cleanup() }
+
+            let fixture = try generated.makePortableLibraryPackage(
+                at: tempDirectory.appendingPathComponent(
+                    "QueryScale-\(scale.assetCount).kromoralibrary"
+                ),
+                addAssetRecordCanaries: true
+            )
+            XCTAssertEqual(fixture.assetIDs.count, scale.assetCount)
+            XCTAssertEqual(fixture.assetRecordCanaryURLs.count, scale.assetCount)
+            XCTAssertTrue(fixture.assetRecordCanaryURLs.allSatisfy {
+                FileManager.default.fileExists(atPath: $0.path)
+            })
+
+            let projection = try LibraryIndexProjection(package: fixture.package)
+            XCTAssertEqual(projection.count, scale.assetCount)
+            let indexURL = tempDirectory.appendingPathComponent(
+                "QueryScale-\(scale.assetCount)-index/LibraryIndex.store"
+            )
+            try projection.write(to: indexURL)
+
+            // The canaries are deliberately not valid asset records. Opening any one of them
+            // would throw, so a successful package-backed query is an executable no-record-read
+            // assertion rather than a source inspection or an object-count estimate.
+            let package = try PortableLibraryPackage.openForQuery(at: fixture.package.rootURL)
+            let session = try await LibraryIndexSession.open(
+                package: package,
+                indexURL: indexURL,
+                pageSize: 500,
+                query: .init(sort: .init(key: .assetID, direction: .ascending))
+            )
+            let source = await session.source
+            XCTAssertEqual(source, .warm)
+
+            let firstPage = try await session.firstPage()
+            XCTAssertEqual(firstPage.items.count, 500)
+            XCTAssertEqual(firstPage.totalCount, scale.assetCount)
+
+            let query = LibraryQuery(
+                filter: .init(flag: .picks, rating: .minimum(3)),
+                searchText: "photo",
+                sort: .init(key: .rating, direction: .descending)
+            )
+            let filteredPage = await session.page(at: 0, query: query)
+            let nextFilteredPage = await session.page(at: 1, query: query)
+            XCTAssertEqual(
+                filteredPage.totalCount,
+                (0..<scale.assetCount).filter { $0.isMultiple(of: 3) && $0 % 6 >= 3 }.count
+            )
+            XCTAssertEqual(filteredPage.items.count, min(500, filteredPage.totalCount))
+            if !nextFilteredPage.items.isEmpty {
+                XCTAssertTrue(
+                    Set(filteredPage.items.map(\.assetID))
+                        .intersection(nextFilteredPage.items.map(\.assetID)).isEmpty
+                )
+            }
+            let nextPage = await session.page(at: 1)
+            XCTAssertEqual(nextPage.items.count, 500)
+            XCTAssertTrue(
+                Set(firstPage.items.map(\.assetID)).intersection(nextPage.items.map(\.assetID)).isEmpty
+            )
+            XCTAssertTrue(
+                zip(filteredPage.items, filteredPage.items.dropFirst()).allSatisfy {
+                    ($0.summary.rating ?? 0) >= ($1.summary.rating ?? 0)
+                }
+            )
+
+            var controller = await session.currentController()
+            controller.selectAll(query: query)
+            XCTAssertEqual(controller.selectedIDs.count, filteredPage.totalCount)
+            XCTAssertTrue(controller.selectedIDs.isSubset(of: Set(fixture.assetIDs)))
+
+            // Reaching this point means filtering, sorting, paging, and select-all all ran while
+            // every full-record path was an invalid canary. Originals are likewise never needed:
+            // the query projection contains only the generated membership summaries.
+            XCTAssertTrue(fixture.assetRecordCanaryURLs.allSatisfy {
+                (try? Data(contentsOf: $0)) == Data("asset-record-canary".utf8)
+            })
+        }
+    }
+
     func testProjectionReadsMembershipSummariesWithoutAssetRecordsAndPagesAt500() throws {
         let packageURL = tempDirectory.appendingPathComponent("IndexOnly.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)

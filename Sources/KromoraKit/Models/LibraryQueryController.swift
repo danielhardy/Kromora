@@ -483,7 +483,10 @@ struct LibraryQueryController: Sendable {
         query: LibraryQuery = .all
     ) -> LibraryQueryPage {
         let safePageIndex = max(0, pageIndex)
-        let matching = index.entries.filter { matches($0, query: query) }
+        let foldedSearchText = query.searchText?.foldedForLibrarySearch
+        let matching = index.entries.filter {
+            matches($0, query: query, foldedSearchText: foldedSearchText)
+        }
         let ordered = matching.sorted { precedes($0, $1, by: query.sort) }
         let start = min(ordered.count, safePageIndex * pageSize)
         let end = min(ordered.count, start + pageSize)
@@ -533,9 +536,10 @@ struct LibraryQueryController: Sendable {
     }
 
     mutating func selectAll(query: LibraryQuery = .all) {
-        let matching = index.entries
-            .filter { matches($0, query: query) }
-            .sorted { precedes($0, $1, by: query.sort) }
+        let foldedSearchText = query.searchText?.foldedForLibrarySearch
+        let matching = index.entries.filter {
+            matches($0, query: query, foldedSearchText: foldedSearchText)
+        }
         selectedAssetIDs = Set(matching.map(\.assetID))
         activeAssetID = matching.first?.assetID
     }
@@ -557,16 +561,20 @@ struct LibraryQueryController: Sendable {
         }
     }
 
-    private func matches(_ entry: LibraryIndexEntry, query: LibraryQuery) -> Bool {
+    private func matches(
+        _ entry: LibraryIndexEntry,
+        query: LibraryQuery,
+        foldedSearchText: String?
+    ) -> Bool {
         let summary = entry.summary
         let flag = PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
         guard query.filter.matches(flag: flag, rating: summary.rating ?? 0) else { return false }
-        guard let searchText = query.searchText, !searchText.isEmpty else { return true }
+        guard let foldedSearchText, !foldedSearchText.isEmpty else { return true }
         let haystack = [
             summary.displayName, summary.label, summary.cameraMake, summary.cameraModel,
             summary.lens, summary.captureDate,
         ].compactMap { $0 }.joined(separator: " ").foldedForLibrarySearch
-        return haystack.contains(searchText.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current))
+        return haystack.contains(foldedSearchText)
     }
 
     private func precedes(

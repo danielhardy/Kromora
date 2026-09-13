@@ -109,6 +109,13 @@ enum SyntheticLibraryGenerator {
 
     static let defaultSeed: UInt64 = 0x4B52_4D41_3339_34
 
+    static func assetID(for index: Int) -> PortablePhotoAssetID? {
+        guard let uuid = UUID(uuidString: String(
+            format: "%08x-0000-4000-8000-%012x", index, index
+        )) else { return nil }
+        return PortablePhotoAssetID(uuid: uuid)
+    }
+
     /// Generate one of the supported scales in a unique child directory of `parentDirectory`.
     /// When no parent is supplied, the system temporary directory is used.
     ///
@@ -371,5 +378,87 @@ enum SyntheticLibraryGenerator {
             throw Fixtures.FixtureError.cannotWriteImage
         }
         return data as Data
+    }
+}
+
+/// A package-shaped view of a generated folder library. Membership summaries are copied into the
+/// package, while asset records remain absent by default so query tests can prove that the index
+/// path does not materialise them.
+struct SyntheticPortableLibraryPackage {
+    let package: PortableLibraryPackage
+    let assetIDs: [PortablePhotoAssetID]
+    let urlsByName: [String: URL]
+    let assetRecordCanaryURLs: [URL]
+}
+
+extension SyntheticLibraryGenerator.GeneratedLibrary {
+    func makePortableLibraryPackage(
+        at packageURL: URL,
+        addAssetRecordCanaries: Bool = false
+    ) throws -> SyntheticPortableLibraryPackage {
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        var entriesByShard = Dictionary(
+            uniqueKeysWithValues: PortableLibraryPackage.allShards.map {
+                ($0, [PortablePackageMembershipEntry]())
+            }
+        )
+        var assetIDs: [PortablePhotoAssetID] = []
+        assetIDs.reserveCapacity(assets.count)
+        var urlsByName: [String: URL] = [:]
+        urlsByName.reserveCapacity(assets.count)
+        var canaryURLs: [URL] = []
+        canaryURLs.reserveCapacity(addAssetRecordCanaries ? assets.count : 0)
+
+        for asset in assets {
+            guard let assetID = SyntheticLibraryGenerator.assetID(for: asset.index) else {
+                throw NSError(domain: "SyntheticLibraryGenerator", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "could not create asset ID for index \(asset.index)"
+                ])
+            }
+            assetIDs.append(assetID)
+            urlsByName[asset.filename] = asset.url
+            let shard = PortableLibraryPackage.shard(for: assetID)
+            let recordPath = "Assets/\(shard)/\(assetID.raw)/asset.json"
+            entriesByShard[shard, default: []].append(.init(
+                assetID: assetID,
+                recordPath: recordPath,
+                summary: .init(
+                    captureDate: asset.metadata.captureDate,
+                    rating: asset.index % 6,
+                    flag: asset.index.isMultiple(of: 3)
+                        ? PhotoFlag.pick.rawValue : PhotoFlag.none.rawValue,
+                    cameraMake: asset.metadata.cameraMake,
+                    cameraModel: asset.metadata.cameraModel,
+                    lens: asset.metadata.lens,
+                    dimensions: asset.metadata.dimensions,
+                    aspectRatio: Double(asset.metadata.dimensions.width)
+                        / Double(asset.metadata.dimensions.height),
+                    displayName: asset.filename,
+                    assetRevision: UInt64(asset.index)
+                )
+            ))
+
+            if addAssetRecordCanaries {
+                let canaryURL = package.rootURL.appendingPathComponent(recordPath)
+                try FileManager.default.createDirectory(
+                    at: canaryURL.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
+                try Data("asset-record-canary".utf8).write(to: canaryURL)
+                canaryURLs.append(canaryURL)
+            }
+        }
+
+        for shard in PortableLibraryPackage.allShards {
+            var membership = try package.readMembershipShard(shard)
+            membership.entries = entriesByShard[shard, default: []]
+            try package.writeMembershipShard(membership)
+        }
+
+        return SyntheticPortableLibraryPackage(
+            package: package,
+            assetIDs: assetIDs,
+            urlsByName: urlsByName,
+            assetRecordCanaryURLs: canaryURLs
+        )
     }
 }

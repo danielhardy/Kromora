@@ -201,43 +201,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             let packageURL = tempDirectory.appendingPathComponent(
                 "Scale-\(scale.assetCount).kromoralibrary"
             )
-            let package = try PortableLibraryPackage.create(at: packageURL)
-            var entriesByShard = Dictionary(
-                uniqueKeysWithValues: PortableLibraryPackage.allShards.map { ($0, [PortablePackageMembershipEntry]()) }
-            )
-            var assetIDs: [PortablePhotoAssetID] = []
-            assetIDs.reserveCapacity(generated.assets.count)
-            var urlsByName: [String: URL] = [:]
-            urlsByName.reserveCapacity(generated.assets.count)
-            for asset in generated.assets {
-                let assetID = try XCTUnwrap(Self.assetID(for: asset.index))
-                assetIDs.append(assetID)
-                urlsByName[asset.filename] = asset.url
-                let shard = PortableLibraryPackage.shard(for: assetID)
-                entriesByShard[shard, default: []].append(.init(
-                    assetID: assetID,
-                    recordPath: "Assets/\(shard)/\(assetID.raw)/asset.json",
-                    summary: .init(
-                        captureDate: asset.metadata.captureDate,
-                        rating: asset.index % 6,
-                        flag: asset.index.isMultiple(of: 3)
-                            ? PhotoFlag.pick.rawValue : PhotoFlag.none.rawValue,
-                        cameraMake: asset.metadata.cameraMake,
-                        cameraModel: asset.metadata.cameraModel,
-                        lens: asset.metadata.lens,
-                        dimensions: asset.metadata.dimensions,
-                        aspectRatio: Double(asset.metadata.dimensions.width)
-                            / Double(asset.metadata.dimensions.height),
-                        displayName: asset.filename,
-                        assetRevision: UInt64(asset.index)
-                    )
-                ))
-            }
-            for shard in PortableLibraryPackage.allShards {
-                var membership = try package.readMembershipShard(shard)
-                membership.entries = entriesByShard[shard, default: []]
-                try package.writeMembershipShard(membership)
-            }
+            let fixture = try generated.makePortableLibraryPackage(at: packageURL)
+            let package = fixture.package
             let projection = try LibraryIndexProjection(package: package)
             let indexURL = tempDirectory.appendingPathComponent(
                 "Scale-\(scale.assetCount)-index/LibraryIndex.store"
@@ -245,7 +210,7 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             try projection.write(to: indexURL)
             return ScaleFixture(
                 generated: generated, package: package, indexURL: indexURL,
-                assetIDs: assetIDs, urlsByName: urlsByName
+                assetIDs: fixture.assetIDs, urlsByName: fixture.urlsByName
             )
         } catch {
             try? generated.cleanup()
@@ -513,13 +478,6 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             }
             try await Task.sleep(for: .milliseconds(1))
         }
-    }
-
-    private static func assetID(for index: Int) -> PortablePhotoAssetID? {
-        guard let uuid = UUID(uuidString: String(
-            format: "%08x-0000-4000-8000-%012x", index, index
-        )) else { return nil }
-        return PortablePhotoAssetID(uuid: uuid)
     }
 
     private static func metric(_ values: [Double], unit: String) -> Metric {
