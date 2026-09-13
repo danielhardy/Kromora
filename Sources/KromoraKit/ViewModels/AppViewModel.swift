@@ -1132,7 +1132,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // editor is ready for an immediate Enter/double-click handoff.
             self.load(
                 name: first.displayName, url: fileURL, data: nil, assetID: first.id,
-                portableIdentity: first.asset.source.portableIdentity
+                portableIdentity: persistencePortableIdentity(for: first)
             )
         }
     }

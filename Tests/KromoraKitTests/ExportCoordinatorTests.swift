@@ -452,10 +452,110 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2))
         let requests = await fake.encodeRequests
         XCTAssertEqual(requests.count, 2)
-        XCTAssertTrue(requests.allSatisfy { $0.scale == .full })
-        XCTAssertTrue(requests.contains { $0.document == documents[0] })
-        XCTAssertTrue(requests.contains { $0.document == documents[2] })
-        XCTAssertFalse(requests.contains { $0.document == documents[1] })
+        let diagnostics = requests.map(Self.exportRequestDiagnostics).joined(separator: ", ")
+        XCTAssertTrue(requests.allSatisfy { $0.scale == .full }, diagnostics)
+        XCTAssertTrue(
+            requests.contains { $0.document == documents[0] },
+            "missing first selected document; requests=\(diagnostics)"
+        )
+        XCTAssertTrue(
+            requests.contains { $0.document == documents[2] },
+            "missing third selected document; requests=\(diagnostics)"
+        )
+        XCTAssertFalse(
+            requests.contains { $0.document == documents[1] },
+            "unselected middle document was exported; requests=\(diagnostics)"
+        )
+
+        let expectedIDs = Set(request.items.compactMap(\.assetID))
+        let exportedIDs = Set(requests.compactMap { request -> PhotoAssetID? in
+            guard case .url(let url)? = request.source?.backing else { return nil }
+            return PhotoAssetID.file(url)
+        })
+        XCTAssertEqual(
+            exportedIDs, expectedIDs,
+            "exported asset IDs differ from the selection; requests=\(diagnostics)"
+        )
+        let exportedURLs = Set(requests.compactMap { request -> URL? in
+            guard case .url(let url)? = request.source?.backing else { return nil }
+            return url
+        })
+        XCTAssertEqual(
+            exportedURLs,
+            Set(request.items.compactMap(\.url)),
+            "exported sources differ from the original selected paths; requests=\(diagnostics)"
+        )
+    }
+
+    func testSelectedExportSnapshotsMembershipBeforeSelectionChangesInFlight() async throws {
+        let libraryFolder = tempDirectory.appendingPathComponent("selection-snapshot")
+        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+        let urls = try ["one", "two", "three"].map {
+            try Fixtures.writeGradientPNG(width: 40, height: 24, named: "\($0).png", in: libraryFolder)
+        }
+        let fake = FakeRenderEngine()
+        await fake.gateEncodeAfterFirst()
+        let viewModel = makeAppViewModel(engine: fake)
+        viewModel.collection.setSourceFolder(libraryFolder)
+        try await waitUntil { viewModel.collection.items.count == urls.count }
+
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == urls[0] })
+        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == urls[1] })
+        let thirdIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == urls[2] })
+        viewModel.collection.select(at: firstIndex)
+        viewModel.collection.select(at: thirdIndex, modifiers: [.command])
+        let request = viewModel.selectedBatchExportRequest
+        let destination = try destinationFolder()
+
+        let task = Task {
+            await viewModel.export.performBatchExport(
+                request.items, document: request.document, lut: request.lut,
+                format: .png, to: destination
+            )
+        }
+        try await waitUntil {
+            viewModel.export.batchCurrentItem == urls[2].deletingPathExtension().lastPathComponent
+        }
+
+        // The second encode is gated. Changing the live selection here must not add `two` to the
+        // already-started operation or remove `three` from it.
+        viewModel.collection.select(at: secondIndex)
+        await fake.releaseEncode()
+        let outcome = await task.value
+
+        XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2))
+        let requests = await fake.encodeRequests
+        let diagnostics = requests.map(Self.exportRequestDiagnostics).joined(separator: ", ")
+        XCTAssertEqual(requests.count, 2, "selection changed the batch membership; requests=\(diagnostics)")
+        let exportedURLs = Set(requests.compactMap { request -> URL? in
+            guard case .url(let url)? = request.source?.backing else { return nil }
+            return url
+        })
+        XCTAssertEqual(
+            exportedURLs,
+            Set([urls[0], urls[2]]),
+            "an in-flight selection change redirected export sources; requests=\(diagnostics)"
+        )
+        XCTAssertFalse(
+            requests.contains { $0.source?.backing == .url(urls[1]) },
+            "the newly selected asset was exported; requests=\(diagnostics)"
+        )
+    }
+
+    private static func exportRequestDiagnostics(_ request: FakeRenderEngine.Request) -> String {
+        let asset: String
+        if case .url(let url)? = request.source?.backing {
+            asset = PhotoAssetID.file(url).raw
+        } else {
+            asset = "missing-asset"
+        }
+        let source: String
+        switch request.source?.backing {
+        case .url(let url): source = url.path
+        case .data(let data): source = "data:\(data.count)-bytes"
+        case nil: source = "missing-source"
+        }
+        return "asset=\(asset),source=\(source),document=\(request.document.editHash),scale=\(request.scale)"
     }
 
     // MARK: - Summary text
