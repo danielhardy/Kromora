@@ -121,7 +121,7 @@ Findings:
 Fixes:
 - None
 Verification commits:
-- None
+- 9c1fd08
 Actor: codex
 Resolved model: gpt-5.6-luna
 Pickup session: 01MTZM8RCM74EG7HJ4
