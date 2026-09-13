@@ -1453,12 +1453,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return
         }
         selectCollectionItem(id: assetID)
-        let durableURL = collection.items.first(where: { $0.id == assetID })?.url
+        let item = collection.items.first(where: { $0.id == assetID })
+        let durableURL = item?.url
         // Keep the one-off editor's source label compatible with the URL picker and with
         // source-folder opens; the collection item itself uses the extension-free display name.
         load(
             name: url.lastPathComponent, url: durableURL ?? url, data: nil, assetID: assetID,
-            portableIdentity: collection.items.first(where: { $0.id == assetID })?.asset.source.portableIdentity
+            portableIdentity: item.flatMap { persistencePortableIdentity(for: $0) }
         )
     }
 
@@ -1466,7 +1467,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelPendingPreviewDebounce()
         navigation.move(to: .edit)
         focusCollectionItem(id: assetID)
-        let itemName = collection.items.first(where: { $0.id == assetID })?.displayName
+        let item = collection.items.first(where: { $0.id == assetID })
+        let itemName = item?.displayName
         let name = itemName.map { displayName in
             guard !url.pathExtension.isEmpty,
                   !displayName.lowercased().hasSuffix(".\(url.pathExtension.lowercased())") else {
@@ -1476,8 +1478,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         } ?? url.lastPathComponent
         load(
             name: name, url: url, data: nil, assetID: assetID,
-            portableIdentity: collection.items.first(where: { $0.id == assetID })?.asset.source.portableIdentity
+            portableIdentity: item.flatMap { persistencePortableIdentity(for: $0) }
         )
+    }
+
+    /// Referenced-folder files keep their file-backed legacy identity so two distinct files with
+    /// identical bytes cannot alias one another's edit record. Managed imports carry the opaque
+    /// UUID assigned when they entered the library and remain relocation-safe.
+    private func persistencePortableIdentity(for item: ImageCollection.Item) -> PortablePhotoIdentity? {
+        guard collection.sourceKind(for: item) == .managed else { return nil }
+        return item.asset.source.portableIdentity
     }
 
     private func selectCollectionItem(id: PhotoAssetID) {
@@ -1891,7 +1901,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     source: source,
                     inMemoryDocument: editorDocument.session(for: item.id)?.document,
                     reference: EditSourceReference(
-                        assetID: item.id, portableIdentity: item.asset.source.portableIdentity,
+                        assetID: item.id, portableIdentity: persistencePortableIdentity(for: item),
                         url: item.url
                     )
                 )
@@ -2003,7 +2013,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     index: index, source: source,
                     inMemoryDocument: editorDocument.session(for: item.id)?.document,
                     reference: EditSourceReference(
-                        assetID: item.id, portableIdentity: item.asset.source.portableIdentity,
+                        assetID: item.id, portableIdentity: persistencePortableIdentity(for: item),
                         url: item.url
                     )
                 )
@@ -2680,12 +2690,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         var failures: [String] = []
         for candidate in candidates {
             guard let item = collection.items.first(where: { $0.id == candidate.id }) else { continue }
-            let portableIdentity = item.asset.source.portableIdentity
+            let analysisPortableIdentity = item.asset.source.portableIdentity
+            let persistenceIdentity = persistencePortableIdentity(for: item)
 
             // A stale analysis entry is worse than a missing one if this source is imported again,
             // so fail closed before changing the source or its edit record.
             do {
-                try await photoAnalysisCoordinator.removeCaches(for: portableIdentity.assetID)
+                try await photoAnalysisCoordinator.removeCaches(for: analysisPortableIdentity.assetID)
             } catch {
                 failures.append(
                     "Could not clear cached analysis for \(candidate.displayName): "
@@ -2701,7 +2712,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 }
                 try await editStore.delete(
                     for: EditSourceReference(
-                        assetID: candidate.id, portableIdentity: portableIdentity, url: candidate.url
+                        assetID: candidate.id, portableIdentity: persistenceIdentity, url: candidate.url
                     )
                 )
                 deletedIDs.append(candidate.id)
@@ -2879,7 +2890,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return
         }
         let sourceReference = EditSourceReference(
-            assetID: assetID, portableIdentity: item.asset.source.portableIdentity, url: item.url
+            assetID: assetID, portableIdentity: persistencePortableIdentity(for: item), url: item.url
         )
         let engine = self.engine
         let editStore = self.editStore
@@ -3042,7 +3053,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 queuePersistence(
                     updated,
                     for: EditSourceReference(
-                        assetID: assetID, portableIdentity: item.asset.source.portableIdentity,
+                        assetID: assetID, portableIdentity: persistencePortableIdentity(for: item),
                         url: item.url
                     ),
                     reportsStatus: false,
@@ -4308,6 +4319,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let sourceRevision = self.sourceRevision
         let comparisonRevision = self.comparisonRevision
         let assetID = self.activeAssetID
+        let sourceReference = self.activeSourceReference
         comparisonPreviewScheduledRevision = comparisonRevision
 
         let accepted = workScheduler.enqueue(
@@ -4316,6 +4328,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 guard outcome != .completed,
                       let self,
                       assetID == self.activeAssetID,
+                      sourceReference == self.activeSourceReference,
                       sourceRevision == self.sourceRevision,
                       comparisonRevision == self.comparisonRevision,
                       self.comparisonPreviewScheduledRevision == comparisonRevision else { return }
@@ -4331,6 +4344,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // the engine, otherwise an obsolete baseline still consumes a render and looks like a
             // cross-photo comparison request even though its eventual publication is discarded.
             guard assetID == self.activeAssetID,
+                  sourceReference == self.activeSourceReference,
                   sourceRevision == self.sourceRevision,
                   comparisonRevision == self.comparisonRevision,
                   self.imageSource == imageSource else { return }
@@ -4345,6 +4359,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             if let gpuImage {
                 guard !Task.isCancelled,
                       assetID == self.activeAssetID,
+                      sourceReference == self.activeSourceReference,
                       sourceRevision == self.sourceRevision,
                       comparisonRevision == self.comparisonRevision,
                       self.imageSource == imageSource else { return }
@@ -4356,6 +4371,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     coversPresentationExtent: request.sourceROI == nil
                 ) || hadValidOriginal else {
                     self.comparisonPreviewDidFail(
+                        sourceReference: sourceReference,
                         sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
                     )
                     return
@@ -4365,6 +4381,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             let cgImage = await engine.makeCGImage(request)
             guard !Task.isCancelled,
                   assetID == self.activeAssetID,
+                  sourceReference == self.activeSourceReference,
                   sourceRevision == self.sourceRevision,
                   comparisonRevision == self.comparisonRevision,
                   self.imageSource == imageSource,
@@ -4377,6 +4394,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 coversPresentationExtent: request.sourceROI == nil
             ) || hadValidOriginal else {
                 self.comparisonPreviewDidFail(
+                    sourceReference: sourceReference,
                     sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
                 )
                 return
@@ -4388,9 +4406,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func comparisonPreviewDidFail(
+        sourceReference: EditSourceReference?,
         sourceRevision: UInt64, comparisonRevision: UInt64
     ) {
         guard activeAssetID != nil,
+              sourceReference == activeSourceReference,
               sourceRevision == self.sourceRevision,
               comparisonRevision == self.comparisonRevision,
               isSideBySideVisible,
@@ -4404,6 +4424,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         comparisonPreviewRetryTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(25))
             guard !Task.isCancelled, let self,
+                  sourceReference == self.activeSourceReference,
                   sourceRevision == self.sourceRevision,
                   comparisonRevision == self.comparisonRevision,
                   self.isSideBySideVisible,
@@ -4734,7 +4755,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 data: item.imageData,
                 name: item.displayName,
                 assetID: item.id,
-                portableIdentity: item.asset.source.portableIdentity,
+                portableIdentity: persistencePortableIdentity(for: item),
                 bookmarkData: item.asset.bookmarkData,
                 document: itemDocument,
                 lut: itemLUT

@@ -93,6 +93,59 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         }
     }
 
+    func testLUTDoesNotCrossReferenceIdenticalReferencedPhotos() async throws {
+        let (first, second) = try makePhotoFolder()
+        let (lookFolder, lut) = try makeLUTFolder()
+        let container = makeInMemoryEditContainer()
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(
+            engine: fake,
+            editStore: EditDocumentStore(modelContainer: container)
+        )
+
+        viewModel.collection.loadFromFolder(first.deletingLastPathComponent())
+        await viewModel.collection.scanCompletion()
+        viewModel.library.setFolder(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        viewModel.openImage(url: first)
+        try await waitUntil("the first referenced photo") { viewModel.sourceName == "one.png" }
+        viewModel.selectLook(lut)
+        viewModel.setLookIntensity(0.35)
+        try await waitForLUTRequest(fake, id: lut.lutID, intensity: 0.35)
+
+        viewModel.openImage(url: second)
+        try await waitUntil("the second referenced photo") { viewModel.sourceName == "two.png" }
+        XCTAssertTrue(
+            viewModel.document.lut.isIdentity,
+            "a referenced photo with identical bytes inherited the first photo's Look"
+        )
+
+        await viewModel.flushPendingWrites()
+        let relaunched = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: EditDocumentStore(modelContainer: container)
+        )
+        relaunched.collection.loadFromFolder(first.deletingLastPathComponent())
+        await relaunched.collection.scanCompletion()
+        relaunched.library.setFolder(lookFolder)
+        while relaunched.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+        relaunched.openImage(url: first)
+        try await waitUntil("the persisted first referenced photo") {
+            relaunched.sourceName == "one.png"
+                && relaunched.document.lut.lutID == lut.lutID
+                && relaunched.document.lut.intensity == 0.35
+        }
+        relaunched.openImage(url: second)
+        try await waitUntil("the persisted second referenced photo") {
+            relaunched.sourceName == "two.png"
+        }
+        XCTAssertTrue(
+            relaunched.document.lut.isIdentity,
+            "relaunch restored the first photo's Look onto the second photo"
+        )
+    }
+
     func testCanonicalLookStateDistinguishesMissingReferenceFromExplicitNone() async throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let source = try Fixtures.writeGradientPNG(
@@ -259,6 +312,20 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         // The destinations have never been opened. Their queued records must still be present in a
         // fresh model, otherwise a quit immediately after multi-paste silently loses the Look.
         await viewModel.flushPendingWrites()
+        let secondItem = try XCTUnwrap(
+            viewModel.collection.items.first(where: { $0.url == second })
+        )
+        let persistedDestination = await viewModel.editStore.load(
+            for: EditSourceReference(
+                assetID: secondItem.id,
+                url: secondItem.url
+            )
+        )
+        XCTAssertEqual(
+            persistedDestination.document.lut,
+            LUTSettings(lutID: lut.lutID, intensity: 0.6),
+            "pasted destination was not durable before relaunch"
+        )
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
@@ -268,11 +335,23 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         relaunched.library.setFolder(lookFolder)
         while relaunched.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
         relaunched.openImage(url: second)
-        try await waitUntil("the persisted pasted Look") {
+        let relaunchedDeadline = Date().addingTimeInterval(5)
+        while Date() < relaunchedDeadline
+            && !(relaunched.sourceName == "two.png"
+                && relaunched.document.lut.lutID == lut.lutID
+                && relaunched.document.lut.intensity == 0.6) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(
             relaunched.sourceName == "two.png"
                 && relaunched.document.lut.lutID == lut.lutID
-                && relaunched.document.lut.intensity == 0.6
-        }
+                && relaunched.document.lut.intensity == 0.6,
+            "persisted pasted Look did not become active: source=\(relaunched.sourceName), "
+                + "asset=\(relaunched.collection.selectedItem?.id.raw ?? "nil"), "
+                + "look=\(relaunched.document.lut.lutID?.raw ?? "nil"), "
+                + "intensity=\(relaunched.document.lut.intensity), "
+                + "storeStatus=\(relaunched.editStoreStatus ?? "nil")"
+        )
 
         for url in [second, third] {
             let name = url.lastPathComponent
