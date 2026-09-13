@@ -8,7 +8,8 @@ cd "$project_root"
 # deterministic model assertions and real-RAW methods, so the latter are listed by method below.
 # The verify mode treats optional methods as optional before assigning an overlapping method to the
 # serialized render/UI lane.
-serial_filter='(AnalysisDebugPanelTests|BundledLookTests|ColorGradingTests|ColorMixerTests|ColorPipelineTests|CollectionProjectionPerformanceTests|CropPipelineTests|EffectsPipelineTests|HistogramTests|ImageLoadingTests|InfoSemanticMaskRenderingTests|KeyMonitorTests|LocalMaskRenderingTests|LookInspectorViewTests|LookLUTExportTests|LookPreviewTests|KromoraWindowAppearanceControllerTests|MenuCommandTests|NeutralOriginSliderTests|PersonSignalWarmingTests|PhotoIntelligenceCorpusTests|PhotosDeliveryTests|PhotosImportTests|PreviewCutoverTests|PreviewSurfaceTests|RenderCacheTests|RenderEngineInteractivePrecisionTests|RenderEngineTests|RenderPipelineTests|RenderStackTests|ThumbnailTests|VisionSemanticMaskProviderTests|WorkingSpaceTests)'
+serial_filter='(AnalysisDebugPanelTests|BundledLookTests|ColorGradingTests|ColorMixerTests|ColorPipelineTests|CollectionProjectionPerformanceTests|CropPipelineTests|EffectsPipelineTests|HistogramTests|IdentityRegressionGateTests|ImageLoadingTests|InfoSemanticMaskRenderingTests|KeyMonitorTests|LocalMaskRenderingTests|LookInspectorViewTests|LookLUTExportTests|LookPreviewTests|KromoraWindowAppearanceControllerTests|MenuCommandTests|NeutralOriginSliderTests|PersonSignalWarmingTests|PhotoIntelligenceCorpusTests|PhotosDeliveryTests|PhotosImportTests|PreviewCutoverTests|PreviewSurfaceTests|RenderCacheTests|RenderEngineInteractivePrecisionTests|RenderEngineTests|RenderPipelineTests|RenderStackTests|ThumbnailTests|VisionSemanticMaskProviderTests|WorkingSpaceTests)'
+identity_filter='IdentityRegressionGateTests'
 
 # These tests need a licensed external RAW/JPG, a logged-in display, or deliberately opt-in
 # benchmark settings. They are not part of the required CI gate. Keep the method-level entries
@@ -16,10 +17,11 @@ serial_filter='(AnalysisDebugPanelTests|BundledLookTests|ColorGradingTests|Color
 optional_filter='(ConcurrentExportEditingBenchmark|DeriveInvarianceTests|LibraryScanPerformanceTests|LibraryFolderBaselinePerformanceTests|SyntheticLibraryGeneratorPerformanceTests|PackedThumbnailPerformanceTests|MaskOverlayPerformanceBenchmark|MaskResamplingPerformanceTests|MetalPresentationBenchmark|PhotoAnalysisPerformanceTests|PhotosImportPerformanceTests|PreviewCostBenchmark|TracingOverheadBenchmark|AutoPerformanceDiagnosticsTests/testAutoEndToEndBenchmark|LocalMaskRenderingTests/testSemanticPreviewMaskWorkingResolutionBenchmark|PreviewCoordinatorTests/testLargePreviewInteractiveLatencyBenchmark|RAWCapabilitiesTests/(testProbingARealRAWReportsItsDecodersFlags|testProbingARealRAWReportsItsDecodersSeeds|testEveryPerImageSeedLandsStrictlyInsideItsSliderRange|testWritingTheAsShotValuesMatchesLeavingThemUnset|testAValueWrittenToAnUnsupportedAdjustmentChangesNothing|testRaisingNeutralTemperatureWarmsTheImage)|RAWDevelopSettingsTests/(testApplyPushesEverySupportedKnobOntoARealFilter|testApplyingNeutralChangesNothingOnARealFilter)|ImageLoadingTests/testLoadingARAWGoesThroughCIRAWFilter|ImageSourceTests/testRAWBytesAreDetectedWithoutAFilename|DevelopInspectorTests/(testARAWStaysOnProbingUntilTheProbeAnswers|testAsShotRestoresTheActualRAWDecoderSeed)|RenderCacheTests/testAboveBudgetRAWSessionDoesNotMaterializeOnEveryEdit|RenderPipelineTests/(testRAWDevelopAndScaleReachTheDecoder|testNeutralRAWMatchesTheExistingNeutralBaseline)|RenderEngineTests/(testCompletedRAWPreviewReflectsDevelopSettings|testInteractiveSessionDoesNotLeakSettingsAcrossTicks|testInteractiveRAWDownstreamEditsReuseTheCompletedOutput)|PreviewCutoverTests/testRAWDevelopReachesThePreview)'
 
 usage() {
-    print -u2 "Usage: $0 {verify|fast|serial|optional}"
+    print -u2 "Usage: $0 {verify|fast|serial|identity|optional}"
     print -u2 "  verify    audit that every discovered test belongs to exactly one lane"
     print -u2 "  fast      run required deterministic/model/fake-engine tests in parallel"
     print -u2 "  serial    run required Core Image/render/AppKit/UI tests serially"
+    print -u2 "  identity  run the standing Phase 1 relocation/collision/stale-completion gate"
     print -u2 "  optional  run RAW-fixture and benchmark tests (set their documented env vars)"
 }
 
@@ -85,6 +87,13 @@ case "${1:-}" in
             "swift test --no-parallel --filter '$serial_filter' --skip '$optional_filter'" \
             env KROMORA_TEST_ISOLATION=1 \
             swift test --no-parallel --filter "$serial_filter" --skip "$optional_filter"
+        ;;
+    identity)
+        audit_lanes
+        run_lane "identity-relocation-gate" \
+            "swift test --no-parallel --filter '$identity_filter'" \
+            env KROMORA_TEST_ISOLATION=1 \
+            swift test --no-parallel --filter "$identity_filter"
         ;;
     optional)
         audit_lanes
