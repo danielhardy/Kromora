@@ -350,14 +350,44 @@ struct PortableLibraryBackup {
     }
 
     static func isVerifiedBackup(at destinationURL: URL) -> Bool {
-        guard let metadata = try? readMetadata(at: destinationURL),
-              metadata.version == PortableLibraryBackupMetadata.currentVersion,
-              metadata.files.allSatisfy({
-                  $0.rebuildable || regularFileExists(at: destinationURL.appendingPathComponent($0.relativePath))
-              }) else { return false }
+        (try? validateVerifiedBackup(at: destinationURL)) != nil
+    }
+
+    /// Throws the first actionable checksum/metadata error instead of collapsing it into the
+    /// boolean convenience used by backup callers.
+    static func validateVerifiedBackup(at destinationURL: URL) throws {
+        let metadata: PortableLibraryBackupMetadata
+        do {
+            metadata = try readMetadata(at: destinationURL)
+        } catch {
+            throw PortableLibraryBackupError.backupMetadataCorrupt(
+                "missing or unreadable Recovery/Backup/manifest.json"
+            )
+        }
+        guard metadata.version == PortableLibraryBackupMetadata.currentVersion else {
+            throw PortableLibraryBackupError.backupMetadataCorrupt(
+                "unsupported metadata version \(metadata.version)"
+            )
+        }
         let marker = destinationURL.appendingPathComponent("\(recoveryDirectory)/\(completeName)")
-        guard (try? JSONDecoder.backup.decode(PortableLibraryBackupMetadata.self, from: Data(contentsOf: marker))) == metadata else { return false }
-        return metadata.files.allSatisfy { file in (try? verify(file, at: destinationURL.appendingPathComponent(file.relativePath))) != nil }
+        let completed: PortableLibraryBackupMetadata
+        do {
+            completed = try JSONDecoder.backup.decode(
+                PortableLibraryBackupMetadata.self, from: Data(contentsOf: marker)
+            )
+        } catch {
+            throw PortableLibraryBackupError.backupMetadataCorrupt(
+                "missing or unreadable Recovery/Backup/complete.json"
+            )
+        }
+        guard completed == metadata else {
+            throw PortableLibraryBackupError.backupMetadataCorrupt(
+                "completion marker does not match the backup manifest"
+            )
+        }
+        for file in metadata.files {
+            try verify(file, at: destinationURL.appendingPathComponent(file.relativePath))
+        }
     }
 
     private struct SourceFile {
@@ -393,7 +423,10 @@ struct PortableLibraryBackup {
         return result.sorted { $0.relativePath < $1.relativePath }
     }
 
-    private static func validateCanonicalReferences(in package: PortableLibraryPackage) throws {
+    /// Validates all durable references that are not expressible by a single file checksum.
+    /// Restore uses the same gate as backup so a package can never be promoted merely because its
+    /// files happen to be present.
+    static func validateCanonicalReferences(in package: PortableLibraryPackage) throws {
         for shardName in PortableLibraryPackage.allShards {
             let shard: PortablePackageMembershipShard
             do { shard = try package.readMembershipShard(shardName) }
