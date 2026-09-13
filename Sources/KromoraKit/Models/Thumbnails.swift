@@ -51,16 +51,15 @@ enum PlatformThumbnailProvider {
     static func invalidateCache() { cache.removeAll(countAsEviction: false) }
 
     /// Generate a thumbnail from a file, using the embedded preview where there is one.
-    static func generate(from url: URL, maxPixelSize: Int = defaultMaxPixelSize) -> NSImage? {
+    static func generate(
+        from url: URL,
+        maxPixelSize: Int = defaultMaxPixelSize,
+        portableIdentity: PortablePhotoIdentity? = nil
+    ) -> NSImage? {
         guard maxPixelSize > 0 else { return nil }
-        // Nanosecond-precision stat fields, not file content: a full read here would force every
-        // thumbnail request — cache hits included — to load the whole RAW into memory, which is
-        // exactly the cost the embedded-preview path above exists to avoid.
-        let fingerprint = statFingerprint(for: url)
-        let key = cacheKey(
-            source: "url:\(url.standardizedFileURL.path):\(fingerprint)",
-            maxPixelSize: maxPixelSize
-        )
+        let identity = portableIdentity
+            ?? ImageSource(url: url, nativeExtent: .zero).cacheIdentity
+        let key = cacheKey(identity: identity, maxPixelSize: maxPixelSize)
         if let image = cache.value(for: key) {
             KromoraObservability.event(.cacheHit, quality: .thumbnail, detail: "layer=thumbnail")
             return nsImage(from: image)
@@ -78,7 +77,8 @@ enum PlatformThumbnailProvider {
     static func generate(
         from data: Data,
         maxPixelSize: Int = defaultMaxPixelSize,
-        dataFingerprint: String? = nil
+        dataFingerprint: String? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
     ) -> NSImage? {
         var interval = KromoraSignpostInterval(
             .photoThumbnail,
@@ -90,10 +90,13 @@ enum PlatformThumbnailProvider {
         // full payload again. The zero extent is intentional: thumbnails do not depend on the
         // source's full pixel dimensions.
         let sourceIdentity = ImageSource(
-            data: data, nativeExtent: .zero, dataFingerprint: dataFingerprint
+            data: data, nativeExtent: .zero, dataFingerprint: dataFingerprint,
+            portableIdentity: portableIdentity
         )
-        let sourceKey = RenderSourceFingerprint(sourceIdentity).value
-        let key = cacheKey(source: sourceKey, maxPixelSize: maxPixelSize)
+        let key = cacheKey(
+            identity: portableIdentity ?? sourceIdentity.cacheIdentity,
+            maxPixelSize: maxPixelSize
+        )
         if let image = cache.value(for: key) {
             KromoraObservability.event(.cacheHit, quality: .thumbnail, detail: "layer=thumbnail")
             return nsImage(from: image)
@@ -123,24 +126,10 @@ enum PlatformThumbnailProvider {
         return nsImage(from: cgImage)
     }
 
-    /// A cheap identity for a URL-backed file: device/inode/size/mtime/ctime, mirroring
-    /// `ImageSource.cacheFingerprint`'s POSIX fingerprint. No content read, so it stays fast for the
-    /// large RAWs this cache exists to make cheap to revisit.
-    private static func statFingerprint(for url: URL) -> String {
-        var info = stat()
-        let result = url.withUnsafeFileSystemRepresentation { path in
-            path.map { lstat($0, &info) } ?? -1
-        }
-        guard result == 0 else { return "missing" }
-        return [
-            String(info.st_dev), String(info.st_ino), String(info.st_size),
-            String(info.st_mtimespec.tv_sec), String(info.st_mtimespec.tv_nsec),
-            String(info.st_ctimespec.tv_sec), String(info.st_ctimespec.tv_nsec),
-        ].joined(separator: ":")
-    }
-
-    private static func cacheKey(source: String, maxPixelSize: Int) -> String {
-        "thumbnail-v\(RenderPipeline.cacheVersion):\(source):\(maxPixelSize)"
+    private static func cacheKey(
+        identity: PortablePhotoIdentity, maxPixelSize: Int
+    ) -> String {
+        "thumbnail-v\(RenderPipeline.cacheVersion):\(identity.cacheKey):\(maxPixelSize)"
     }
 
     private static func nsImage(from image: CGImage) -> NSImage {

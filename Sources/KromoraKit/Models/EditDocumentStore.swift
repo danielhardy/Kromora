@@ -3,11 +3,51 @@ import SwiftData
 
 /// The source information persisted alongside an edit document.
 struct EditSourceReference: Codable, Sendable, Equatable {
+    private enum CodingKeys: String, CodingKey {
+        case assetID, portableAssetID, url
+    }
+
     let assetID: PhotoAssetID
+    /// The opaque identity used by `EditRecord`. The legacy `assetID` is retained at this API
+    /// boundary so editor/import callers can migrate independently of the store schema.
+    let portableAssetID: PortablePhotoAssetID
     let url: URL?
 
-    init(assetID: PhotoAssetID, url: URL? = nil) {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let assetID = try container.decode(PhotoAssetID.self, forKey: .assetID)
         self.assetID = assetID
+        self.portableAssetID =
+            try container.decodeIfPresent(PortablePhotoAssetID.self, forKey: .portableAssetID)
+            ?? PortablePhotoAssetID.compatibility(from: assetID)
+        self.url = try container.decodeIfPresent(URL.self, forKey: .url)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(assetID, forKey: .assetID)
+        try container.encode(portableAssetID, forKey: .portableAssetID)
+        try container.encodeIfPresent(url, forKey: .url)
+    }
+
+    init(
+        assetID: PhotoAssetID,
+        portableIdentity: PortablePhotoIdentity? = nil,
+        url: URL? = nil
+    ) {
+        self.assetID = assetID
+        self.portableAssetID =
+            portableIdentity?.assetID ?? PortablePhotoAssetID.compatibility(from: assetID)
+        self.url = url
+    }
+
+    init(
+        portableIdentity: PortablePhotoIdentity,
+        assetID: PhotoAssetID? = nil,
+        url: URL? = nil
+    ) {
+        self.assetID = assetID ?? PhotoAssetID(rawValue: "portable:\(portableIdentity.assetID.raw)")
+        self.portableAssetID = portableIdentity.assetID
         self.url = url
     }
 }
@@ -30,8 +70,10 @@ struct EditDocumentLoadResult: Sendable, Equatable {
 /// Actor-isolated SwiftData persistence for per-photo edit documents.
 ///
 /// Each photo is an `EditRecord`, so saving one edit only saves the changed SwiftData row. The
-/// store deliberately has no migration path from the former JSON catalog: the product has not
-/// shipped, so old local edits may be orphaned when this schema is first opened.
+/// v2 store deliberately has no record migration from the former path-keyed SwiftData store:
+/// the product has not shipped, and ADR-001 approved a clean-slate disposition. The old file is
+/// left untouched and the app opens a separate v2 container, so a mistaken premise cannot turn
+/// into silent deletion.
 @ModelActor
 actor EditDocumentStore {
 
@@ -110,11 +152,19 @@ actor EditDocumentStore {
     /// supplied an in-memory container).
     var onDiskFileURL: URL? { persistentFileURL }
 
-    /// The production store lives beside the other Kromora application-support data.
+    /// The legacy development store path, retained for support and disposition tests.
     static var defaultFileURL: URL {
         return
             KromoraStorage.applicationSupportRoot()
             .appendingPathComponent("EditStore.store")
+    }
+
+    /// The v2 container used by the shipped app after the opaque-identity cutover. Keeping the
+    /// legacy path named above makes support tooling and tests able to identify old data without
+    /// accidentally opening it as the new schema.
+    static var portableStoreFileURL: URL {
+        KromoraStorage.applicationSupportRoot()
+            .appendingPathComponent("EditStore.v2.store")
     }
 
     /// Builds a local-only SwiftData container. CloudKit is explicitly disabled for this store.
@@ -123,7 +173,7 @@ actor EditDocumentStore {
         let directory = url.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let configuration = ModelConfiguration(
-            "EditStore",
+            "EditStorePortableIdentityV2",
             schema: schema,
             url: url,
             cloudKitDatabase: .none
@@ -145,7 +195,7 @@ actor EditDocumentStore {
     private static func makeInMemoryContainer() -> ModelContainer {
         let schema = Schema([EditRecord.self])
         let configuration = ModelConfiguration(
-            "EditStore",
+            "EditStorePortableIdentityV2",
             schema: schema,
             isStoredInMemoryOnly: true,
             cloudKitDatabase: .none
@@ -159,7 +209,10 @@ actor EditDocumentStore {
     /// to the app through the store's actionable status.
     static func makeDefaultStore() -> EditDocumentStore {
         do {
-            return try makePersistentStore(fileURL: defaultFileURL)
+            // ADR-001 approved a clean slate. The old path-keyed store is intentionally not
+            // opened, migrated, deleted, or overwritten; it remains available for support or a
+            // future explicitly approved migration.
+            return try makePersistentStore(fileURL: portableStoreFileURL)
         } catch {
             return EditDocumentStore(
                 modelContainer: makeInMemoryContainer(),
@@ -225,7 +278,7 @@ actor EditDocumentStore {
 
     func load(for source: EditSourceReference) -> EditDocumentLoadResult {
         markIO()
-        let key = source.assetID.description
+        let key = source.portableAssetID.uuid
 
         do {
             if let record = try fetchRecord(assetID: key) {
@@ -234,6 +287,7 @@ actor EditDocumentStore {
                 // `relink` below applies the same keep-newest policy as the normal relink path.
                 if let url = source.url,
                     sourcePath(for: url) != record.sourcePath,
+                    usesLegacyIdentityBridge(for: source),
                     let relinkedRecord = try fetchRecordsForRelinking().first(where: {
                         $0 !== record && matches($0, url: url)
                     })
@@ -265,7 +319,10 @@ actor EditDocumentStore {
                         status: .corrupt(error.localizedDescription)
                     )
                 }
-                if let url = source.url, sourcePath(for: url) != record.sourcePath {
+                if let url = source.url,
+                    sourcePath(for: url) != record.sourcePath,
+                    usesLegacyIdentityBridge(for: source)
+                {
                     return relink(
                         record,
                         document: document,
@@ -347,9 +404,9 @@ actor EditDocumentStore {
             // empty row or partially update an existing one.
             let encodedDocument = try JSONEncoder().encode(document)
             let record =
-                try fetchRecord(assetID: source.assetID.description)
+                try fetchRecord(assetID: source.portableAssetID.uuid)
                 ?? EditRecord(
-                    assetID: source.assetID.description,
+                    assetID: source.portableAssetID,
                     documentData: encodedDocument
                 )
             record.documentData = encodedDocument
@@ -383,7 +440,7 @@ actor EditDocumentStore {
         markIO()
         do {
             var records: [EditRecord] = []
-            if let direct = try fetchRecord(assetID: source.assetID.description) {
+            if let direct = try fetchRecord(assetID: source.portableAssetID.uuid) {
                 records.append(direct)
             }
             if let url = source.url,
@@ -410,7 +467,7 @@ actor EditDocumentStore {
         try delete(for: EditSourceReference(assetID: assetID, url: url))
     }
 
-    private func fetchRecord(assetID: String) throws -> EditRecord? {
+    private func fetchRecord(assetID: UUID) throws -> EditRecord? {
         var descriptor = FetchDescriptor<EditRecord>(
             predicate: #Predicate { $0.assetID == assetID })
         descriptor.fetchLimit = 1
@@ -461,7 +518,7 @@ actor EditDocumentStore {
     private func relink(
         _ record: EditRecord,
         document: EditDocument,
-        to key: String,
+        to key: UUID,
         for url: URL,
         replacing occupiedRecord: EditRecord?
     ) -> EditDocumentLoadResult {
@@ -518,6 +575,12 @@ actor EditDocumentStore {
 
     private func sourcePath(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    /// Explicit portable identities are already relocation-stable. Only the compatibility API
+    /// needs the old locator-based relink behavior while callers finish adopting the new value.
+    private func usesLegacyIdentityBridge(for source: EditSourceReference) -> Bool {
+        source.portableAssetID == PortablePhotoAssetID.compatibility(from: source.assetID)
     }
 
     private func updateLocator(on record: EditRecord, for url: URL?) {

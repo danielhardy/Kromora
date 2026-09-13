@@ -506,6 +506,9 @@ struct CurrentEditMeasurement: Codable, Sendable, Equatable {
     static let version = 1
 
     let version: Int
+    /// Portable source identity persisted with the measurement. The legacy fingerprint below is
+    /// retained as an in-process compatibility projection for existing analyzers.
+    let sourceIdentity: PortablePhotoIdentity
     let sourceFingerprint: PhotoSourceFingerprint
     /// Hash of the document the caller asked to measure.
     let documentHash: String
@@ -532,6 +535,7 @@ struct CurrentEditMeasurement: Codable, Sendable, Equatable {
 
     init(
         sourceFingerprint: PhotoSourceFingerprint,
+        sourceIdentity: PortablePhotoIdentity? = nil,
         documentHash: String,
         effectiveDocumentHash: String,
         configurationFingerprint: String,
@@ -549,6 +553,12 @@ struct CurrentEditMeasurement: Codable, Sendable, Equatable {
         globalConfidence: Float = 1
     ) {
         self.version = Self.version
+        self.sourceIdentity = sourceIdentity ?? PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID.compatibility(
+                from: PortablePhotoSourceFingerprint.compatibility(from: sourceFingerprint)
+            ),
+            sourceFingerprint: PortablePhotoSourceFingerprint.compatibility(from: sourceFingerprint)
+        )
         self.sourceFingerprint = sourceFingerprint
         self.documentHash = documentHash
         self.effectiveDocumentHash = effectiveDocumentHash
@@ -567,6 +577,97 @@ struct CurrentEditMeasurement: Codable, Sendable, Equatable {
         self.globalConfidence = Self.unit(globalConfidence)
     }
 
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.version == rhs.version
+            && lhs.sourceIdentity == rhs.sourceIdentity
+            && lhs.documentHash == rhs.documentHash
+            && lhs.effectiveDocumentHash == rhs.effectiveDocumentHash
+            && lhs.configurationFingerprint == rhs.configurationFingerprint
+            && lhs.space == rhs.space
+            && lhs.isAnalysisView == rhs.isAnalysisView
+            && lhs.isBaseline == rhs.isBaseline
+            && lhs.globalTone == rhs.globalTone
+            && lhs.color == rhs.color
+            && lhs.highlightHeadroom == rhs.highlightHeadroom
+            && lhs.localContrast == rhs.localContrast
+            && lhs.localContrastConfidence == rhs.localContrastConfidence
+            && lhs.regions == rhs.regions
+            && lhs.failedMaskCount == rhs.failedMaskCount
+            && lhs.detail == rhs.detail
+            && lhs.globalConfidence == rhs.globalConfidence
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case version, sourceIdentity, sourceFingerprint, documentHash, effectiveDocumentHash
+        case configurationFingerprint, space, isAnalysisView, isBaseline, globalTone, color
+        case highlightHeadroom, localContrast, localContrastConfidence, regions, failedMaskCount
+        case detail, globalConfidence
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.version = try container.decode(Int.self, forKey: .version)
+        if let sourceIdentity = try container.decodeIfPresent(
+            PortablePhotoIdentity.self, forKey: .sourceIdentity
+        ) {
+            self.sourceIdentity = sourceIdentity
+            self.sourceFingerprint = PhotoSourceFingerprint.data(
+                Data(sourceIdentity.sourceFingerprint.contentHash.utf8),
+                digest: sourceIdentity.sourceFingerprint.contentHash
+            )
+        } else {
+            let legacy = try container.decode(PhotoSourceFingerprint.self, forKey: .sourceFingerprint)
+            let portableFingerprint = PortablePhotoSourceFingerprint.compatibility(from: legacy)
+            self.sourceIdentity = PortablePhotoIdentity(
+                assetID: PortablePhotoAssetID.compatibility(from: portableFingerprint),
+                sourceFingerprint: portableFingerprint
+            )
+            self.sourceFingerprint = legacy
+        }
+        self.documentHash = try container.decode(String.self, forKey: .documentHash)
+        self.effectiveDocumentHash = try container.decode(String.self, forKey: .effectiveDocumentHash)
+        self.configurationFingerprint = try container.decode(
+            String.self, forKey: .configurationFingerprint
+        )
+        self.space = try container.decode(WorkingSpace.self, forKey: .space)
+        self.isAnalysisView = try container.decode(Bool.self, forKey: .isAnalysisView)
+        self.isBaseline = try container.decode(Bool.self, forKey: .isBaseline)
+        self.globalTone = try container.decode(LuminanceDistribution.self, forKey: .globalTone)
+        self.color = try container.decode(PixelCorrelatedColor.self, forKey: .color)
+        self.highlightHeadroom = try container.decode(
+            HighlightHeadroom.self, forKey: .highlightHeadroom
+        )
+        self.localContrast = try container.decode(Float.self, forKey: .localContrast)
+        self.localContrastConfidence = try container.decode(
+            Float.self, forKey: .localContrastConfidence
+        )
+        self.regions = try container.decode([AnalyzedRegion].self, forKey: .regions)
+        self.failedMaskCount = try container.decode(Int.self, forKey: .failedMaskCount)
+        self.detail = try container.decode(NativeDetailMeasurement.self, forKey: .detail)
+        self.globalConfidence = try container.decode(Float.self, forKey: .globalConfidence)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(version, forKey: .version)
+        try container.encode(sourceIdentity, forKey: .sourceIdentity)
+        try container.encode(documentHash, forKey: .documentHash)
+        try container.encode(effectiveDocumentHash, forKey: .effectiveDocumentHash)
+        try container.encode(configurationFingerprint, forKey: .configurationFingerprint)
+        try container.encode(space, forKey: .space)
+        try container.encode(isAnalysisView, forKey: .isAnalysisView)
+        try container.encode(isBaseline, forKey: .isBaseline)
+        try container.encode(globalTone, forKey: .globalTone)
+        try container.encode(color, forKey: .color)
+        try container.encode(highlightHeadroom, forKey: .highlightHeadroom)
+        try container.encode(localContrast, forKey: .localContrast)
+        try container.encode(localContrastConfidence, forKey: .localContrastConfidence)
+        try container.encode(regions, forKey: .regions)
+        try container.encode(failedMaskCount, forKey: .failedMaskCount)
+        try container.encode(detail, forKey: .detail)
+        try container.encode(globalConfidence, forKey: .globalConfidence)
+    }
+
     private static func unit(_ value: Float) -> Float {
         guard value.isFinite else { return 0 }
         return min(max(value, 0), 1)
@@ -577,18 +678,132 @@ struct CurrentEditMeasurement: Codable, Sendable, Equatable {
 /// render revision (space + measurement schema) are all part of the key: changing the Light
 /// panel must not read back facts measured under an older edit.
 struct CurrentEditMeasurementKey: Sendable, Codable, Hashable, Equatable {
-    let assetID: PhotoAssetID
-    let sourceFingerprint: PhotoSourceFingerprint
+    /// Portable source identity is the sole source/cache identity. The legacy projections are
+    /// retained only for callers that still inspect the historical key fields.
+    let identity: PortablePhotoIdentity
     let effectiveDocumentHash: String
     let completeDocumentHash: String
     let configurationFingerprint: String
     let space: WorkingSpace
     let measurementVersion: Int
 
+    private var legacyAssetID: PhotoAssetID?
+    private var legacySourceFingerprint: PhotoSourceFingerprint?
+
+    var assetID: PhotoAssetID {
+        legacyAssetID ?? PhotoAssetID(rawValue: "portable:\(identity.assetID.raw)")
+    }
+
+    var sourceFingerprint: PhotoSourceFingerprint {
+        legacySourceFingerprint ?? PhotoSourceFingerprint.data(
+            Data(identity.sourceFingerprint.contentHash.utf8),
+            digest: identity.sourceFingerprint.contentHash
+        )
+    }
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.identity == rhs.identity
+            && lhs.effectiveDocumentHash == rhs.effectiveDocumentHash
+            && lhs.completeDocumentHash == rhs.completeDocumentHash
+            && lhs.configurationFingerprint == rhs.configurationFingerprint
+            && lhs.space == rhs.space
+            && lhs.measurementVersion == rhs.measurementVersion
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(identity)
+        hasher.combine(effectiveDocumentHash)
+        hasher.combine(completeDocumentHash)
+        hasher.combine(configurationFingerprint)
+        hasher.combine(space)
+        hasher.combine(measurementVersion)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case identity, assetID, sourceFingerprint, effectiveDocumentHash, completeDocumentHash
+        case configurationFingerprint, space, measurementVersion
+    }
+
+    init(
+        identity: PortablePhotoIdentity,
+        effectiveDocumentHash: String,
+        completeDocumentHash: String,
+        configurationFingerprint: String,
+        space: WorkingSpace,
+        measurementVersion: Int
+    ) {
+        self.identity = identity
+        self.effectiveDocumentHash = effectiveDocumentHash
+        self.completeDocumentHash = completeDocumentHash
+        self.configurationFingerprint = configurationFingerprint
+        self.space = space
+        self.measurementVersion = measurementVersion
+        self.legacyAssetID = nil
+        self.legacySourceFingerprint = nil
+    }
+
+    init(
+        assetID: PhotoAssetID,
+        sourceFingerprint: PhotoSourceFingerprint,
+        effectiveDocumentHash: String,
+        completeDocumentHash: String,
+        configurationFingerprint: String,
+        space: WorkingSpace,
+        measurementVersion: Int
+    ) {
+        self.init(
+            identity: PortablePhotoIdentity.compatibility(
+                assetID: assetID, sourceFingerprint: sourceFingerprint
+            ),
+            effectiveDocumentHash: effectiveDocumentHash,
+            completeDocumentHash: completeDocumentHash,
+            configurationFingerprint: configurationFingerprint,
+            space: space,
+            measurementVersion: measurementVersion
+        )
+        self.legacyAssetID = assetID
+        self.legacySourceFingerprint = sourceFingerprint
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let identity = try container.decodeIfPresent(
+            PortablePhotoIdentity.self, forKey: .identity
+        ) {
+            self.identity = identity
+        } else {
+            let assetID = try container.decode(PhotoAssetID.self, forKey: .assetID)
+            let sourceFingerprint = try container.decode(
+                PhotoSourceFingerprint.self, forKey: .sourceFingerprint
+            )
+            self.identity = PortablePhotoIdentity.compatibility(
+                assetID: assetID, sourceFingerprint: sourceFingerprint
+            )
+        }
+        self.effectiveDocumentHash = try container.decode(String.self, forKey: .effectiveDocumentHash)
+        self.completeDocumentHash = try container.decode(String.self, forKey: .completeDocumentHash)
+        self.configurationFingerprint = try container.decode(
+            String.self, forKey: .configurationFingerprint
+        )
+        self.space = try container.decode(WorkingSpace.self, forKey: .space)
+        self.measurementVersion = try container.decode(Int.self, forKey: .measurementVersion)
+        self.legacyAssetID = nil
+        self.legacySourceFingerprint = nil
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(identity, forKey: .identity)
+        try container.encode(effectiveDocumentHash, forKey: .effectiveDocumentHash)
+        try container.encode(completeDocumentHash, forKey: .completeDocumentHash)
+        try container.encode(configurationFingerprint, forKey: .configurationFingerprint)
+        try container.encode(space, forKey: .space)
+        try container.encode(measurementVersion, forKey: .measurementVersion)
+    }
+
     var cacheKey: String {
         [
-            assetID.raw,
-            sourceFingerprint.cacheKey,
+            identity.cacheKey,
             effectiveDocumentHash,
             completeDocumentHash,
             configurationFingerprint,
@@ -1069,6 +1284,7 @@ struct CurrentEditMeasurer: Sendable {
 
         return CurrentEditMeasurement(
             sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: source),
+            sourceIdentity: source.cacheIdentity,
             documentHash: document.editHash,
             effectiveDocumentHash: effectiveDocument.editHash,
             configurationFingerprint: configuration.fingerprint,
@@ -1099,8 +1315,7 @@ struct CurrentEditMeasurer: Sendable {
             ? AutoCandidateEvaluation.analysisDocument(from: document)
             : document
         return CurrentEditMeasurementKey(
-            assetID: assetID,
-            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: source),
+            identity: source.cacheIdentity,
             effectiveDocumentHash: effective.editHash,
             completeDocumentHash: document.editHash,
             configurationFingerprint: configuration.fingerprint,

@@ -83,7 +83,7 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 
 /// Central state for the Kromora app.
 @MainActor
-public final class AppViewModel: ObservableObject, LookPreviewProviding {
+public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination {
 
     /// Inspector presentation state has its own observation boundary. The editor model still
     /// owns histogram scheduling and tab validity, but changing the inspector chrome does not
@@ -165,9 +165,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     /// The last copied value-state payload. It contains no image or rendered data, so it remains
     /// safe to apply to several destinations and keeps future selective-copy UI on one stable seam.
-    @Published private(set) var editClipboard: EditClipboardPayload?
+    /// Compatibility projection for the editor coordinator's value-only clipboard. The
+    /// coordinator is the single owner; AppViewModel only exposes the historical API to views and
+    /// commands.
+    var editClipboard: EditClipboardPayload? { editorDocument.clipboard }
 
-    var canPasteEdits: Bool { editClipboard != nil }
+    var canPasteEdits: Bool { editorDocument.canPaste }
 
     /// The most recent persistence warning. A damaged edit catalog must not prevent the source
     /// image from opening, but it should remain visible to the user.
@@ -304,13 +307,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     private var capabilitiesTask: Task<Void, Never>?
 
-    private var editSessions: [PhotoAssetID: PhotoEditSession] = [:]
-    /// Changes made while a source is being prepared. A late edit-store result may fill a missing
-    /// session, but it must never replace this newer in-memory state.
-    private var editSessionRevisions: [PhotoAssetID: UInt64] = [:]
-    private var nextEditSessionRevision: UInt64 = 0
     private var activeAssetID: PhotoAssetID?
-    private var activeHistory = EditHistory()
     private var activeSourceReference: EditSourceReference?
     /// Source generation prevents delayed work from a previous navigation selection from publishing
     /// into the new image, even if the source values happen to compare equal.
@@ -619,10 +616,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     @Published var isMaskingPanelPresented = false
 
     @Published var isPhotosPickerPresented: Bool = false
-    /// Non-nil while the Photos picker task is transferring payloads. The collection itself keeps
-    /// successful originals visible as soon as they arrive; this state only describes the picker
-    /// operation and is cleared once the provider has finished or cancellation was requested.
-    @Published private(set) var photosImportProgress: PhotosImportProgress?
+    /// Compatibility projection for the import coordinator's operation state. The coordinator is
+    /// the single owner so the picker and status bar cannot observe competing progress values.
+    var photosImportProgress: PhotosImportProgress? { photosImportCoordinator.progress }
     /// Presentation is a property of the import operation, not of each item. This prevents a
     /// later streamed arrival (or a second load triggered by metadata work) from reopening or
     /// retargeting the inspector after the first accepted item has established the active photo.
@@ -654,6 +650,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
     let editStore: EditDocumentStore
+    /// Value-only editor sessions, history, and clipboard. The published document remains owned by
+    /// AppViewModel so render scheduling has one presentation-state owner.
+    let editorDocument: EditorDocumentCoordinator
+    /// Provider interaction and progress belong to the application composition root, while this
+    /// model remains the narrow destination for durable collection admission and source loading.
+    let photosImportCoordinator: PhotosImportCoordinator
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
     /// file I/O remains inside `EditDocumentStore`.
     let persistence: EditPersistenceCoordinator
@@ -843,6 +845,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
         self.editStore = editStore
+        self.editorDocument = EditorDocumentCoordinator()
+        self.photosImportCoordinator = PhotosImportCoordinator()
         self.settings = KromoraSettings(
             preferences: preferences,
             userLookFolderURL: userLookFolderURL
@@ -878,6 +882,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         self.mediaVolumeProvider = mediaVolumeProvider
         self.mediaVolumeNotificationCenter = mediaVolumeNotificationCenter
         self.applicationNotificationCenter = applicationNotificationCenter
+        self.photosImportCoordinator.destination = self
+        self.photosImportCoordinator.onStatus = { [weak self] message in
+            self?.statusMessage = message
+        }
 
         collection.onThumbnailDemand = { [weak self] assetID, priority in
             self?.requestEditedThumbnail(for: assetID, priority: priority)
@@ -924,6 +932,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             settings.objectWillChange.eraseToAnyPublisher(),
             library.objectWillChange.eraseToAnyPublisher(),
             collection.objectWillChange.eraseToAnyPublisher(),
+            editorDocument.objectWillChange.eraseToAnyPublisher(),
+            photosImportCoordinator.objectWillChange.eraseToAnyPublisher(),
             export.objectWillChange.eraseToAnyPublisher(),
             derive.objectWillChange.eraseToAnyPublisher(),
             lookSave.objectWillChange.eraseToAnyPublisher(),
@@ -1117,7 +1127,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             guard let first = collection.items.first, let fileURL = first.url else { return }
             // Folder open starts in Library even though the first image is also loaded so the
             // editor is ready for an immediate Enter/double-click handoff.
-            self.load(name: first.displayName, url: fileURL, data: nil, assetID: first.id)
+            self.load(
+                name: first.displayName, url: fileURL, data: nil, assetID: first.id,
+                portableIdentity: first.asset.source.portableIdentity
+            )
         }
     }
 
@@ -1512,10 +1525,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         activeAssetID = assetID
         let sourceReference = importPlan.sourceReference
         activeSourceReference = sourceReference
-        let session = editSessions[assetID]
+        let session = editorDocument.session(for: assetID)
         document = session?.document ?? EditDocument()
         comparisonBaselineDocument = document.comparisonBaseline
-        activeHistory = session?.history ?? EditHistory()
+        editorDocument.activate(session: session)
         lastReportedMissingLUT = nil
         lutResolutionStatus = nil
         refreshLUTResolutionStatus()
@@ -1585,7 +1598,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             name: importPlan.name, source: importPlan.source,
             sourceReference: sourceReference, assetID: assetID,
             sourceRevision: sourceRevision,
-            editSessionRevision: editSessionRevisions[assetID] ?? 0,
+            editSessionRevision: editorDocument.revision(for: assetID),
             hadInMemorySession: session != nil,
             traceQuality: importPlan.traceQuality
         )
@@ -1778,16 +1791,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     ) {
         // A pre-existing session or a mutation made while preparation was in flight owns the
         // current document. Only a still-pristine, never-seen session may adopt disk state.
-        let changedInMemory = (editSessionRevisions[request.assetID] ?? 0) != request.editSessionRevision
+        let changedInMemory = editorDocument.revision(for: request.assetID) != request.editSessionRevision
         let shouldAdopt = !request.hadInMemorySession && !changedInMemory
         var documentChanged = false
         if shouldAdopt {
-            activeHistory = EditHistory()
             documentChanged = document != stored.document
             document = stored.document
             sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
             comparisonBaselineDocument = document.comparisonBaseline
-            editSessions[request.assetID] = PhotoEditSession(document: document, history: activeHistory)
+            editorDocument.adoptStoredDocument(document, for: request.assetID)
             restoreMaskSelection()
             refreshLUTResolutionStatus()
             if documentChanged {
@@ -1860,8 +1872,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 }
                 return AdjacentPreviewCandidate(
                     source: source,
-                    inMemoryDocument: editSessions[item.id]?.document,
-                    reference: EditSourceReference(assetID: item.id, url: item.url)
+                    inMemoryDocument: editorDocument.session(for: item.id)?.document,
+                    reference: EditSourceReference(
+                        assetID: item.id, portableIdentity: item.asset.source.portableIdentity,
+                        url: item.url
+                    )
                 )
             }
         guard !candidates.isEmpty else { return }
@@ -1975,8 +1990,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 }
                 return IdlePreviewCandidate(
                     index: index, source: source,
-                    inMemoryDocument: editSessions[item.id]?.document,
-                    reference: EditSourceReference(assetID: item.id, url: item.url)
+                    inMemoryDocument: editorDocument.session(for: item.id)?.document,
+                    reference: EditSourceReference(
+                        assetID: item.id, portableIdentity: item.asset.source.portableIdentity,
+                        url: item.url
+                    )
                 )
             }
         guard !candidates.isEmpty else { return }
@@ -2166,22 +2184,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     func beginPhotosImport(totalCount: Int) {
-        cancelIdlePreviewBuild(resetCursor: true)
-        didPresentInspectorForPhotosImport = false
-        collection.beginDataImport(reservedCount: max(0, totalCount))
-        photosImportProgress = PhotosImportProgress(
-            total: max(0, totalCount), processed: 0, imported: 0, failed: 0,
-            currentName: nil, phase: .transferring
-        )
-        statusMessage = "Importing Photos 0/\(max(0, totalCount))…"
+        photosImportCoordinator.begin(totalCount: totalCount)
     }
 
     func updatePhotosImportPhase(_ phase: PhotosImportProgress.Phase, name: String) {
-        guard var progress = photosImportProgress else { return }
-        progress.phase = phase
-        progress.currentName = name
-        photosImportProgress = progress
-        statusMessage = "\(phase.label) \(name)  \(progress.processed)/\(progress.total)…"
+        photosImportCoordinator.updatePhase(phase, name: name)
     }
 
     /// Append one transferred item and open the first successful item immediately. The payload is
@@ -2189,16 +2196,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     func appendPhotosImport(
         _ item: ImageCollection.PhotoImportItem, ordinal: Int
     ) {
-        guard var progress = photosImportProgress else { return }
-        updatePhotosImportPhase(.inserting, name: item.name)
-        let assetID = collection.appendDataImport(item, ordinal: ordinal)
-        progress.processed += 1
-        progress.imported += 1
-        progress.currentName = item.name
-        progress.phase = .transferring
-        photosImportProgress = progress
-        statusMessage = "Imported \(progress.processed)/\(progress.total)  \(item.name)…"
+        photosImportCoordinator.append(item, ordinal: ordinal)
+    }
 
+    func preparePhotosImport(totalCount: Int) {
+        cancelIdlePreviewBuild(resetCursor: true)
+        didPresentInspectorForPhotosImport = false
+        collection.beginDataImport(reservedCount: max(0, totalCount))
+    }
+
+    func insertPhotosImport(_ item: ImageCollection.PhotoImportItem, ordinal: Int) {
+        let assetID = collection.appendDataImport(item, ordinal: ordinal)
         if collection.currentDataImportCount == 1 {
             selectCollectionItem(id: assetID)
             let durableURL = collection.items.first(where: { $0.id == assetID })?.url
@@ -2222,28 +2230,23 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     func recordPhotosImportFailure(name: String, ordinal: Int? = nil) {
-        guard var progress = photosImportProgress else { return }
+        photosImportCoordinator.recordFailure(name: name, ordinal: ordinal, reason: "Photos returned no transferable data.")
+    }
+
+    func finishPhotosImport(cancelled: Bool) {
+        photosImportCoordinator.finish(cancelled: cancelled)
+    }
+
+    func recordPhotosImportFailureDestination(name: String, ordinal: Int?) {
         if let ordinal {
             collection.recordDataImportFailure(ordinal: ordinal, name: name)
         } else {
             collection.recordDataImportFailure(name: name)
         }
-        progress.processed += 1
-        progress.failed += 1
-        progress.currentName = name
-        progress.phase = .transferring
-        photosImportProgress = progress
-        statusMessage = "Skipped \(name)  \(progress.processed)/\(progress.total)…"
     }
 
-    func finishPhotosImport(cancelled: Bool) {
+    func finishPhotosImportDestination(cancelled: Bool) {
         collection.finishDataImport()
-        guard let progress = photosImportProgress else { return }
-        let suffix = progress.failed == 0 ? "" : ", \(progress.failed) skipped"
-        statusMessage = cancelled
-            ? "Photos import cancelled — \(progress.imported) imported\(suffix)"
-            : "Photos import complete — \(progress.imported) imported\(suffix)"
-        photosImportProgress = nil
     }
 
     func importPhotosData(_ items: [(name: String, data: Data)]) {
@@ -2499,8 +2502,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             if let first = usable.first, let firstID = ids.first {
                 self.isSourceBrowserPresented = false
                 self.navigation.move(to: .grid)
-                self.load(name: first.filename, url: first.url, data: nil, assetID: firstID,
-                          traceQuality: "removableMediaImport")
+                self.load(
+                    name: first.filename, url: first.url, data: nil, assetID: firstID,
+                    traceQuality: "removableMediaImport",
+                    portableIdentity: self.collection.items.first(where: { $0.id == firstID })?
+                        .asset.source.portableIdentity
+                )
             }
             let progress = self.removableMediaImportProgress
             self.statusMessage = "Imported \(progress?.imported ?? 0) image\(progress?.imported == 1 ? "" : "s") from \(volume.name)"
@@ -2661,12 +2668,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         var deletedIDs: [PhotoAssetID] = []
         var failures: [String] = []
         for candidate in candidates {
-            guard collection.items.contains(where: { $0.id == candidate.id }) else { continue }
+            guard let item = collection.items.first(where: { $0.id == candidate.id }) else { continue }
+            let portableIdentity = item.asset.source.portableIdentity
 
             // A stale analysis entry is worse than a missing one if this source is imported again,
             // so fail closed before changing the source or its edit record.
             do {
-                try await photoAnalysisCoordinator.removeCaches(for: candidate.id)
+                try await photoAnalysisCoordinator.removeCaches(for: portableIdentity.assetID)
             } catch {
                 failures.append(
                     "Could not clear cached analysis for \(candidate.displayName): "
@@ -2681,7 +2689,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                     try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
                 }
                 try await editStore.delete(
-                    for: EditSourceReference(assetID: candidate.id, url: candidate.url)
+                    for: EditSourceReference(
+                        assetID: candidate.id, portableIdentity: portableIdentity, url: candidate.url
+                    )
                 )
                 deletedIDs.append(candidate.id)
             } catch {
@@ -2700,8 +2710,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 editedThumbnailDebounceTasks[id]?.cancel()
                 editedThumbnailDebounceTasks.removeValue(forKey: id)
                 editedThumbnailGenerations.removeValue(forKey: id)
-                editSessions.removeValue(forKey: id)
-                editSessionRevisions.removeValue(forKey: id)
+                editorDocument.removeSession(for: id)
                 workScheduler.cancel(
                     id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
                 )
@@ -2755,7 +2764,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         sourceSize = .zero
         activeAssetID = nil
         activeSourceReference = nil
-        activeHistory = EditHistory()
+        editorDocument.clearActiveHistory()
         document = EditDocument()
         metadata = ImageMetadata()
         histogram = nil
@@ -2852,13 +2861,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         }
         guard let source else { return }
 
-        let inMemoryDocument = editSessions[assetID]?.document
+        let inMemoryDocument = editorDocument.session(for: assetID)?.document
         if let inMemoryDocument, inMemoryDocument.isIdentity {
             let revision = editedThumbnailRevision(document: inMemoryDocument, lut: nil)
             collection.applyEditedThumbnail(nil, for: assetID, revision: revision)
             return
         }
-        let sourceReference = EditSourceReference(assetID: assetID, url: item.url)
+        let sourceReference = EditSourceReference(
+            assetID: assetID, portableIdentity: item.asset.source.portableIdentity, url: item.url
+        )
         let engine = self.engine
         let editStore = self.editStore
         workScheduler.enqueue(
@@ -2965,7 +2976,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             statusMessage = "Open an image first"
             return
         }
-        editClipboard = EditClipboardPayload(document: document)
+        editorDocument.copy(document: document)
         statusMessage = "Copied all edits from \(sourceName)"
     }
 
@@ -3011,19 +3022,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 )
                 updateDocument { $0 = updated }
             } else {
-                var session = editSessions[assetID] ?? PhotoEditSession()
                 let updated = clipboard.applying(
-                    to: session.document, destinationIsRAW: destinationIsRAW
+                    to: editorDocument.session(for: assetID)?.document ?? EditDocument(),
+                    destinationIsRAW: destinationIsRAW
                 )
-                guard updated != session.document else { continue }
-                session.history.endGrouping(document: session.document)
-                session.history.recordChange(from: session.document, to: updated)
-                session.document = updated
-                editSessions[assetID] = session
+                guard editorDocument.apply(updated, to: assetID) else { continue }
                 requestEditedThumbnail(for: assetID, priority: .visibleGrid, force: true)
                 queuePersistence(
                     updated,
-                    for: EditSourceReference(assetID: assetID, url: item.url),
+                    for: EditSourceReference(
+                        assetID: assetID, portableIdentity: item.asset.source.portableIdentity,
+                        url: item.url
+                    ),
                     reportsStatus: false,
                     force: true
                 )
@@ -3212,22 +3222,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     /// `scheduleOriginalPreview` as well as `schedulePreview`. White-balance Temperature/Tint are
     /// the exception: they are evaluated against, rather than incorporated into, the comparison
     /// frame.
-    private static func rawDevelopChangedComparisonFrame(
-        from old: RAWDevelopSettings, to new: RAWDevelopSettings
-    ) -> Bool {
-        // White-balance Temperature and Tint are edits evaluated against the current developed
-        // source. They must not move the before pane while the user is evaluating them. Keep the
-        // other RAW develop controls in the documented baseline semantics: changing one
-        // intentionally establishes a new developed-source comparison frame.
-        var oldFrame = old
-        var newFrame = new
-        oldFrame.neutralTemperature = nil
-        newFrame.neutralTemperature = nil
-        oldFrame.neutralTint = nil
-        newFrame.neutralTint = nil
-        return oldFrame != newFrame
-    }
-
     func updateDocument(debounced: Bool, _ transform: (inout EditDocument) -> Void) {
         updateDocument(debounced: debounced, invalidatesComparisonBaseline: false, preservingAutoResult: false, transform)
     }
@@ -3260,17 +3254,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         }
         guard updated != document else { return }
 
-        let developChanged = Self.rawDevelopChangedComparisonFrame(
-            from: document.rawDevelop, to: updated.rawDevelop
+        let comparisonChanged = ComparisonFramePolicy.changesBaseline(
+            from: document, to: updated, explicitlyInvalidated: invalidatesComparisonBaseline
         )
-        let cropChanged = updated.crop != document.crop
-        let localAdjustmentsChanged = updated.localAdjustments != document.localAdjustments
         let rotationChanged = updated.rotation != document.rotation
-        let frameChanged = invalidatesComparisonBaseline || developChanged
-        let comparisonChanged = frameChanged || cropChanged || localAdjustmentsChanged || rotationChanged
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
-        activeHistory.recordChange(from: document, to: updated)
+        editorDocument.recordChange(from: document, to: updated)
         document = updated
         if rotationChanged {
             sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
@@ -3413,7 +3403,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         if !document.hasVisibleLookEdits {
             isShowingOriginal = false
         }
-        activeHistory.recordChange(from: oldDocument, to: document)
+        editorDocument.recordChange(from: oldDocument, to: document)
         saveActiveDocument()
         documentRevision &+= 1
         if isPreviewInteractionActive {
@@ -4011,31 +4001,30 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     /// Start one history entry for a continuous slider gesture.
     func beginUndoGrouping() {
-        activeHistory.beginGrouping(document: document)
+        editorDocument.beginGrouping(document: document)
     }
 
     /// Finish a continuous gesture. A gesture that did not change the document is not recorded.
     func endUndoGrouping() {
-        let wasGrouping = activeHistory.isGrouping
-        activeHistory.endGrouping(document: document)
+        let wasGrouping = editorDocument.endGrouping(document: document)
         if wasGrouping { saveActiveDocument(force: true) }
     }
 
-    var canUndo: Bool { activeHistory.canUndo }
-    var canRedo: Bool { activeHistory.canRedo }
-    var undoDepth: Int { activeHistory.undoCount }
+    var canUndo: Bool { editorDocument.canUndo }
+    var canRedo: Bool { editorDocument.canRedo }
+    var undoDepth: Int { editorDocument.undoDepth }
 
     func undo() {
         cancelAutoAdjustment()
         endUndoGrouping()
-        guard let restored = activeHistory.undo(current: document) else { return }
+        guard let restored = editorDocument.undo(current: document) else { return }
         applyHistoryDocument(restored)
     }
 
     func redo() {
         cancelAutoAdjustment()
         endUndoGrouping()
-        guard let restored = activeHistory.redo(current: document) else { return }
+        guard let restored = editorDocument.redo(current: document) else { return }
         applyHistoryDocument(restored)
     }
 
@@ -4086,11 +4075,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
     }
 
     private func applyHistoryDocument(_ restored: EditDocument) {
-        let developChanged = Self.rawDevelopChangedComparisonFrame(
-            from: document.rawDevelop, to: restored.rawDevelop
+        let comparisonChanged = ComparisonFramePolicy.changesBaseline(
+            from: document, to: restored
         )
-        let comparisonChanged = developChanged || restored.crop != document.crop ||
-            restored.rotation != document.rotation || restored.localAdjustments != document.localAdjustments
         displayRevision &+= 1
         cancelHistogram(clear: false, pump: false)
         document = restored
@@ -4727,7 +4714,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
             if item.id == activeAssetID {
                 itemDocument = document
             } else {
-                itemDocument = editSessions[item.id]?.document
+                itemDocument = editorDocument.session(for: item.id)?.document
             }
             let itemLUT = itemDocument.flatMap { resolvedLUT($0.lut.lutID) }
             return ExportCoordinator.BatchItem(
@@ -4735,6 +4722,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
                 data: item.imageData,
                 name: item.displayName,
                 assetID: item.id,
+                portableIdentity: item.asset.source.portableIdentity,
                 bookmarkData: item.asset.bookmarkData,
                 document: itemDocument,
                 lut: itemLUT
@@ -4834,9 +4822,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
     private func saveActiveDocument(force: Bool = false) {
         guard let activeAssetID, let activeSourceReference else { return }
-        editSessions[activeAssetID] = PhotoEditSession(document: document, history: activeHistory)
-        nextEditSessionRevision &+= 1
-        editSessionRevisions[activeAssetID] = nextEditSessionRevision
+        editorDocument.commit(document: document, for: activeAssetID)
 
         queuePersistence(document, for: activeSourceReference, reportsStatus: true, force: force)
     }
@@ -4911,6 +4897,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
         lookSave.onSaved = nil
         persistence.onStatusChange = nil
         persistence.onFailure = nil
+        photosImportCoordinator.onStatus = nil
+        photosImportCoordinator.destination = nil
         cancellables.removeAll()
 
         for observer in mediaVolumeObservers {
@@ -4963,6 +4951,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding {
 
         await library.shutdown()
         await export.shutdown()
+        await photosImportCoordinator.shutdown()
         await derive.shutdown()
         await lookSave.shutdown()
         await photoAnalysisCoordinator.shutdown()

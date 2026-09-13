@@ -8,16 +8,14 @@ import AppKit
 /// `KromoraCommands`); everything else in the module stays internal.
 public struct ContentView: View {
     @StateObject private var viewModel: AppViewModel
-    @StateObject private var photosImportCoordinator: PhotosImportCoordinator
+    @ObservedObject private var photosImportCoordinator: PhotosImportCoordinator
     @ObservedObject private var inspectorState: AppViewModel.InspectorState
     @State private var photosSelection: [PhotosPickerItem] = []
 
     public init() {
         let viewModel = AppViewModel(includeBundledLooks: true)
         _viewModel = StateObject(wrappedValue: viewModel)
-        _photosImportCoordinator = StateObject(
-            wrappedValue: PhotosImportCoordinator(viewModel: viewModel)
-        )
+        _photosImportCoordinator = ObservedObject(wrappedValue: viewModel.photosImportCoordinator)
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
     }
 
@@ -25,9 +23,7 @@ public struct ContentView: View {
     /// termination can flush the same edit catalog the window has been using.
     public init(viewModel: AppViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
-        _photosImportCoordinator = StateObject(
-            wrappedValue: PhotosImportCoordinator(viewModel: viewModel)
-        )
+        _photosImportCoordinator = ObservedObject(wrappedValue: viewModel.photosImportCoordinator)
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
     }
 

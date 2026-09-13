@@ -26,8 +26,8 @@ struct SourceImportPlan: Sendable, Equatable {
         self.name = name
         self.url = url
         self.data = data
-        self.assetID = assetID
-            ?? url.map(PhotoAssetID.file)
+        self.assetID =
+            assetID ?? url.map(PhotoAssetID.file)
             ?? data.map(PhotoAssetID.data)
             ?? .data(Data())
         self.portableIdentity = portableIdentity
@@ -36,7 +36,9 @@ struct SourceImportPlan: Sendable, Equatable {
     }
 
     var sourceReference: EditSourceReference {
-        EditSourceReference(assetID: assetID, url: url)
+        EditSourceReference(
+            assetID: assetID, portableIdentity: portableIdentity, url: url
+        )
     }
 
     var source: ImageSource {

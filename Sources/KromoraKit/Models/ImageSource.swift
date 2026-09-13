@@ -219,7 +219,14 @@ struct ImageSource: Sendable, Equatable {
         } else {
             switch backing {
             case .url(let url):
-                fallbackAssetID = PortablePhotoAssetID.compatibility(from: PhotoAssetID.file(url))
+                let fallbackFingerprint = (try? PortablePhotoSourceFingerprint.file(
+                    at: url, decoderVersion: "imageio-\(kind)-v1", geometry: geometry
+                )) ?? PortablePhotoSourceFingerprint(
+                    contentHash: PortablePhotoSourceFingerprint.contentHash(
+                        of: Data("unavailable".utf8)
+                    ), decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
+                )
+                fallbackAssetID = PortablePhotoAssetID.compatibility(from: fallbackFingerprint)
             case .data(let data):
                 fallbackAssetID = PortablePhotoAssetID.compatibility(from: PhotoAssetID.data(data))
             }

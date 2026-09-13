@@ -101,6 +101,9 @@ final class ExportCoordinator: ObservableObject {
         /// original panel-free API remains source-compatible for callers that only have a URL/data
         /// pair.
         let assetID: PhotoAssetID?
+        /// Opaque identity carried by the library source when available. The legacy `assetID` is
+        /// retained for source compatibility, but it is never used as the persistence key.
+        let portableIdentity: PortablePhotoIdentity?
         /// A source bookmark can outlive the folder scope that was active when the item was scanned.
         /// It is kept as data, never as an open security scope.
         let bookmarkData: Data?
@@ -114,6 +117,7 @@ final class ExportCoordinator: ObservableObject {
         init(
             url: URL?, data: Data?, name: String,
             assetID: PhotoAssetID? = nil,
+            portableIdentity: PortablePhotoIdentity? = nil,
             bookmarkData: Data? = nil,
             document: EditDocument? = nil,
             lut: CubeLUT? = nil
@@ -122,6 +126,7 @@ final class ExportCoordinator: ObservableObject {
             self.data = data
             self.name = name
             self.assetID = assetID ?? url.map(PhotoAssetID.file) ?? data.map(PhotoAssetID.data)
+            self.portableIdentity = portableIdentity
             self.bookmarkData = bookmarkData
             self.document = document
             self.lut = lut
@@ -648,7 +653,11 @@ final class ExportCoordinator: ObservableObject {
     ) async -> (document: EditDocument, isPerAsset: Bool) {
         if let document = item.document { return (document, true) }
         guard let editStore, let assetID = item.assetID else { return (fallback, false) }
-        let result = await editStore.load(for: EditSourceReference(assetID: assetID, url: item.url))
+        let result = await editStore.load(
+            for: EditSourceReference(
+                assetID: assetID, portableIdentity: item.portableIdentity, url: item.url
+            )
+        )
         return result.found ? (result.document, true) : (fallback, false)
     }
 

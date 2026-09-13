@@ -75,4 +75,55 @@ final class CoordinatorBoundaryTests: TempDirectoryTestCase {
         let writeCount = await store.writeCount
         XCTAssertEqual(writeCount, 1)
     }
+
+    func testEditorDocumentCoordinatorOwnsHistoryAndClipboardWithoutAppViewModel() {
+        let coordinator = EditorDocumentCoordinator()
+        let original = EditDocument()
+        var edited = original
+        edited.adjustments = [.exposure(ev: 0.6)]
+
+        coordinator.recordChange(from: original, to: edited)
+        XCTAssertTrue(coordinator.canUndo)
+        XCTAssertEqual(coordinator.undo(current: edited), original)
+        XCTAssertTrue(coordinator.canRedo)
+        XCTAssertEqual(coordinator.redo(current: original), edited)
+
+        coordinator.copy(document: edited)
+        XCTAssertEqual(
+            coordinator.clipboard?.applying(to: original, destinationIsRAW: false), edited
+        )
+        XCTAssertTrue(coordinator.canPaste)
+    }
+
+    func testEditorDocumentCoordinatorKeepsPerPhotoSessionAndRevisionBoundaries() {
+        let coordinator = EditorDocumentCoordinator()
+        let assetID = PhotoAssetID.file(tempDirectory.appendingPathComponent("editor.png"))
+        var document = EditDocument()
+        document.adjustments = [.exposure(ev: 0.25)]
+
+        let firstRevision = coordinator.commit(document: document, for: assetID)
+        XCTAssertEqual(coordinator.session(for: assetID)?.document, document)
+        XCTAssertEqual(coordinator.revision(for: assetID), firstRevision)
+
+        var pasted = document
+        pasted.adjustments = [.exposure(ev: 0.9)]
+        XCTAssertTrue(coordinator.apply(pasted, to: assetID))
+        XCTAssertEqual(coordinator.session(for: assetID)?.document, pasted)
+        XCTAssertGreaterThan(coordinator.revision(for: assetID), firstRevision)
+
+        coordinator.removeSession(for: assetID)
+        XCTAssertNil(coordinator.session(for: assetID))
+        XCTAssertEqual(coordinator.revision(for: assetID), 0)
+    }
+
+    func testComparisonFramePolicyKeepsWhiteBalanceOnTheCurrentBaseline() {
+        var whiteBalanceOnly = EditDocument()
+        whiteBalanceOnly.rawDevelop.neutralTemperature = 5600
+        whiteBalanceOnly.rawDevelop.neutralTint = 8
+        XCTAssertFalse(ComparisonFramePolicy.changesBaseline(from: EditDocument(), to: whiteBalanceOnly))
+
+        var developChanged = whiteBalanceOnly
+        developChanged.rawDevelop.exposure = 0.5
+        XCTAssertTrue(ComparisonFramePolicy.changesBaseline(from: whiteBalanceOnly, to: developChanged))
+    }
 }

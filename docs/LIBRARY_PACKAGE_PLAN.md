@@ -1,7 +1,10 @@
 # Portable library package — implementation plan
 
-**Status:** future design input; no package-format or portable-identity implementation has landed.
-Tracked by KRMA-384 (ready). Time-bound.
+**Status:** future package-format design input; Phase 0 and the Phase 1 identity foundation have
+landed. The sequenced implementation issues are KRMA-389
+(phase 0), KRMA-390 (phase 1), KRMA-391 (phase 2), KRMA-392 (phase 3), and KRMA-393 (phase 4).
+The sequencing and safety boundaries are recorded in [ADR-001](../.dg/decisions/ADR-001-portable-library-package-sequencing-and-safety-b.md).
+Time-bound.
 **Scope:** local-only. iCloud sync is explicitly out of scope (see [Deliberately out of scope](#deliberately-out-of-scope)).
 **Target scale:** 100,000 assets on a single Mac.
 
@@ -10,11 +13,12 @@ which records durable architecture, this file describes work that has not happen
 lands, the invariants it establishes move into the engineering guide and the corresponding section
 here is reduced to a pointer. When all five phases are done, this file is deleted.
 
-The current product still uses referenced source folders and a local SwiftData `EditStore.store`
-for per-photo edit records. Do not describe the package layout, opaque UUID identity, copy-on-import
-semantics, or index design below as shipped behavior. Approval, dependency sequencing, migration,
-and verification lanes remain open work; implementing this plan must not silently migrate or delete
-current library data.
+The current product still uses referenced source folders and a local SwiftData `EditStore.v2.store`
+for per-photo edit records. The edit store now keys records by opaque UUID, but the package layout,
+copy-on-import semantics, and index design below are not shipped behavior. The approved current-data
+disposition is documented in
+[`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md); implementing later
+package phases must not silently migrate or delete current library data.
 
 ---
 

@@ -56,6 +56,57 @@ final class EditDocumentStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(writeCount, 3)
     }
 
+    func testPersistenceUsesOpaqueUUIDAcrossDifferentLegacySourceKeys() async throws {
+        let store = makeStore()
+        let firstURL = tempDirectory.appendingPathComponent("first-location.jpg")
+        let secondURL = tempDirectory.appendingPathComponent("second-location.jpg")
+        let identity = PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID(),
+            sourceFingerprint: .data(
+                Data("same photo bytes".utf8), decoderVersion: "imageio-jpeg-v1"
+            )
+        )
+        let saved = EditSourceReference(
+            assetID: .file(firstURL), portableIdentity: identity, url: firstURL
+        )
+        let reopened = EditSourceReference(
+            assetID: .photos(localIdentifier: "a-different-provider-key"),
+            portableIdentity: identity,
+            url: secondURL
+        )
+
+        try await store.save(editedDocument, for: saved)
+        let result = await store.load(for: reopened)
+
+        XCTAssertTrue(result.found)
+        XCTAssertEqual(result.document, editedDocument)
+        XCTAssertEqual(result.status, .ready)
+    }
+
+    func testEditRecordStoresThePortableUUIDAndNotAPathKey() throws {
+        let identity = PortablePhotoAssetID()
+        let record = try EditRecord(
+            assetID: identity,
+            document: editedDocument,
+            sourcePath: "/synthetic/fixture/photo.jpg"
+        )
+
+        XCTAssertEqual(record.assetID, identity.uuid)
+        XCTAssertEqual(record.portableAssetID, identity)
+        XCTAssertFalse(record.assetID.uuidString.contains("/"))
+    }
+
+    func testPortableStoreUsesExplicitCleanSlateFileBoundary() {
+        XCTAssertNotEqual(
+            EditDocumentStore.defaultFileURL,
+            EditDocumentStore.portableStoreFileURL
+        )
+        XCTAssertEqual(EditDocumentStore.defaultFileURL.lastPathComponent, "EditStore.store")
+        XCTAssertEqual(
+            EditDocumentStore.portableStoreFileURL.lastPathComponent, "EditStore.v2.store"
+        )
+    }
+
     func testMovedFileRelinksByBookmarkAndRekeysTheRecord() async throws {
         let container = makeInMemoryEditContainer()
         let store = EditDocumentStore(modelContainer: container)

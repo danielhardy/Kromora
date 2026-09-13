@@ -29,14 +29,12 @@ struct PhotoAnalysisStage: Sendable, Equatable, Hashable {
 /// not create a `PhotoAnalysis` or pay for unrelated analysis stages.
 actor PhotoAnalysisCoordinator {
     private struct AnalysisRequestKey: Hashable, Sendable {
-        let assetID: PhotoAssetID
-        let sourceFingerprint: PhotoSourceFingerprint
+        let identity: PortablePhotoIdentity
         let level: PhotoAnalysisLevel
     }
 
     private struct MaskRequestKey: Hashable, Sendable {
-        let assetID: PhotoAssetID
-        let sourceFingerprint: PhotoSourceFingerprint
+        let identity: PortablePhotoIdentity
         let kind: SemanticMaskKind
         let quality: MaskQuality
     }
@@ -115,14 +113,12 @@ actor PhotoAnalysisCoordinator {
         guard !isShutdown else { throw CancellationError() }
         try Task.checkCancellation()
         let key = AnalysisRequestKey(
-            assetID: assetID,
-            sourceFingerprint: Self.fingerprint(for: source),
+            identity: source.cacheIdentity,
             level: level
         )
 
         let cacheKey = AnalysisCacheKey(
-            assetID: key.assetID,
-            sourceFingerprint: key.sourceFingerprint,
+            identity: key.identity,
             analysisVersion: .current
         )
         do {
@@ -181,8 +177,7 @@ actor PhotoAnalysisCoordinator {
         guard !isShutdown else { throw CancellationError() }
         try Task.checkCancellation()
         let key = MaskRequestKey(
-            assetID: assetID,
-            sourceFingerprint: Self.fingerprint(for: source),
+            identity: source.cacheIdentity,
             kind: kind,
             quality: quality
         )
@@ -222,6 +217,10 @@ actor PhotoAnalysisCoordinator {
 
     /// Delete durable analysis artifacts for a source after the library has accepted its removal.
     func removeCaches(for assetID: PhotoAssetID) async throws {
+        try await removeCaches(for: PortablePhotoAssetID.compatibility(from: assetID))
+    }
+
+    func removeCaches(for assetID: PortablePhotoAssetID) async throws {
         try await cache.remove(for: assetID)
         try await maskStore.remove(for: assetID)
     }

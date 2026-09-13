@@ -119,6 +119,10 @@ actor MaskStore {
     /// A missing or malformed cache entry is harmless and is left for the normal cache hygiene
     /// path; valid entries are removed atomically one file at a time.
     func remove(for assetID: PhotoAssetID) throws {
+        try remove(for: PortablePhotoAssetID.compatibility(from: assetID))
+    }
+
+    func remove(for assetID: PortablePhotoAssetID) throws {
         try Task.checkCancellation()
         let files = try FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
@@ -126,8 +130,7 @@ actor MaskStore {
         for url in files where url.pathExtension.lowercased() == "json" {
             guard let data = try? Data(contentsOf: url),
                   let persisted = try? JSONDecoder().decode(PersistedMask.self, from: data),
-                  persisted.key.identity.assetID
-                    == PortablePhotoAssetID.compatibility(from: assetID) else { continue }
+                  persisted.key.identity.assetID == assetID else { continue }
             try Task.checkCancellation()
             try FileManager.default.removeItem(at: url)
             let sidecar = url.deletingPathExtension().appendingPathExtension("bin")

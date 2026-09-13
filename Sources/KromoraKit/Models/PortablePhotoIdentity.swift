@@ -177,6 +177,15 @@ extension PortablePhotoAssetID {
     static func compatibility(from legacy: PhotoAssetID) -> Self {
         Self(uuid: UUID.deterministic(from: Data(("asset:" + legacy.raw).utf8)))
     }
+
+    /// Stable bridge for a legacy source record that has no persisted UUID yet. The bridge is
+    /// deliberately based on the immutable source fingerprint, never on the URL or filesystem
+    /// metadata. New package records should allocate and persist a random UUID instead; this
+    /// compatibility path exists only so a folder-backed record can be reopened after relocation
+    /// before the package catalog has taken ownership of its UUID.
+    static func compatibility(from fingerprint: PortablePhotoSourceFingerprint) -> Self {
+        Self(uuid: UUID.deterministic(from: Data(("source:" + fingerprint.cacheKey).utf8)))
+    }
 }
 
 extension PortablePhotoSourceFingerprint {
