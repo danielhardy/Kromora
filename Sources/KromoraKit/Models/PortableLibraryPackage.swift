@@ -84,7 +84,7 @@ struct PortablePackageManifest: Codable, Equatable, Sendable {
 }
 
 /// The denormalised fields available without opening an asset record.
-struct PortablePackageAssetSummary: Codable, Equatable, Sendable {
+struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
     var captureDate: String?
     var rating: Int?
     var flag: String?
