@@ -815,8 +815,6 @@ struct PortableLibraryValidation {
     }
 }
 
-typealias PortableLibraryValidator = PortableLibraryValidation
-
 extension PortableLibraryPackage {
     @discardableResult
     func validate(
