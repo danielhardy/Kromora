@@ -535,9 +535,21 @@ final class PortablePackageMaintenance {
                     try? transaction.abort()
                     throw error
                 }
-                try? FileManager.default.removeItem(
-                    at: package.rootURL.appendingPathComponent(quarantinePrefix)
+                // The quarantine directory only exists on disk once the move above has published,
+                // so its permanent removal is staged as its own follow-up transaction — the same
+                // journaled `stageRemoval` primitive `PortablePackageTrash.reclaimSpace` uses. That
+                // keeps cleanup crash-safe and idempotent instead of a best-effort delete that could
+                // leak an orphaned quarantine directory if the process stops right after `commit`.
+                var removalTransaction = try package.beginTransaction(
+                    lease: lease, now: now, faultInjector: faultInjector
                 )
+                do {
+                    try removalTransaction.stageRemoval(at: quarantinePrefix)
+                    try removalTransaction.commit(now: now, isCancelled: isCancelled)
+                } catch {
+                    try? removalTransaction.abort()
+                    throw error
+                }
                 after += updated.editHistory.edits.count
                 removed += stale.count
             }
