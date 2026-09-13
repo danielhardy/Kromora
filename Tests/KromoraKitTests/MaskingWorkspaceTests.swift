@@ -9,11 +9,18 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
     private func waitUntil(
         _ description: String,
         timeout: TimeInterval = 5,
-        _ condition: @MainActor () -> Bool
+        _ condition: @MainActor () -> Bool,
+        diagnostics: @MainActor () -> String = { "" }
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
-            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            if Date() > deadline {
+                let detail = diagnostics()
+                return XCTFail(
+                    "timed out waiting for \(description)"
+                        + (detail.isEmpty ? "" : "; \(detail)")
+                )
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -861,13 +868,13 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
     }
 
     func testInfoAnalysisMaskCreatesAndReusesTheDemonstratedSemanticMask() async throws {
-        let directory = try Fixtures.makeTempDirectory("InfoSemanticMask")
-        defer { try? FileManager.default.removeItem(at: directory) }
+        let directory = tempDirectory!
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "info.png", in: directory)
+        let editContainer = makeInMemoryEditContainer()
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json"))
+            editStore: EditDocumentStore(modelContainer: editContainer)
         )
 
         viewModel.openImage(url: imageURL)
@@ -903,10 +910,10 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.maskingState.selectedLayerID, firstLayer.id)
         XCTAssertEqual(viewModel.maskingState.selectedComponentID, firstComponent.id)
 
-        await viewModel.flushPendingWrites()
+        _ = await viewModel.flushPendingWrites()
         let reopened = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json"))
+            editStore: EditDocumentStore(modelContainer: editContainer)
         )
         reopened.openImage(url: imageURL)
         try await waitUntil("the persisted mask to reopen") {
@@ -919,15 +926,47 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
 
         let secondURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "other.png", in: directory)
+        let firstSourceRevision = viewModel.maskingSourceRevision
         viewModel.openImage(url: secondURL)
-        try await waitUntil("the second source to load") {
+        try await waitUntil("the second source to publish") {
             viewModel.maskingSource != nil
                 && viewModel.maskingSource?.cacheFingerprint != source.cacheFingerprint
+                && viewModel.sourceImage != nil
+                && viewModel.sourceName == secondURL.lastPathComponent
+                && viewModel.maskingSourceRevision > firstSourceRevision
+        } diagnostics: {
+            "sourceName=\(viewModel.sourceName), sourceRevision=\(viewModel.maskingSourceRevision), "
+                + "hasSource=\(viewModel.maskingSource != nil), hasImage=\(viewModel.sourceImage != nil), "
+                + "editStoreStatus=\(viewModel.editStoreStatus ?? "nil"), status=\(viewModel.statusMessage)"
         }
         XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+
+        let secondSource = try XCTUnwrap(viewModel.maskingSource)
+        let secondAssetID = try XCTUnwrap(viewModel.maskingAssetID)
+        let secondKey = MaskCacheKey(
+            assetID: secondAssetID,
+            sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: secondSource),
+            kind: .subject, quality: .preview, providerVersion: "info-test-1"
+        )
+        let secondResult = RegionMask(
+            kind: .subject,
+            bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1),
+            quality: .preview,
+            reference: RegionMaskReference(cacheKey: secondKey, size: size),
+            confidence: 1,
+            coverage: pixels.coverage
+        )
+        viewModel.useInfoAnalysisMask(.subject, demonstrated: secondResult, pixels: pixels)
+        XCTAssertEqual(
+            viewModel.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
+            .subject
+        )
+
         viewModel.openImage(url: imageURL)
         try await waitUntil("the first source mask to restore") {
-            viewModel.document.localAdjustments.count == 1
+            viewModel.sourceName == imageURL.lastPathComponent
+                && viewModel.maskingSource?.cacheFingerprint == source.cacheFingerprint
+                && viewModel.document.localAdjustments.count == 1
         }
         XCTAssertEqual(
             viewModel.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
