@@ -162,7 +162,10 @@ struct PortableLibraryBackup {
         let resumedState = try? readProgressState(at: staging)
         let resumed = resumedState != nil
             && resumedState?.sourceLibraryID == sourcePackage.manifest.libraryID
-        let snapshotID = resumedState?.snapshotID ?? UUID()
+        // Only inherit a staging snapshot's identity when it belongs to this same source library;
+        // a staging directory left over from a different library backed up to the same destination
+        // path must start a fresh snapshot rather than borrowing an unrelated one.
+        let snapshotID = resumed ? (resumedState?.snapshotID ?? UUID()) : UUID()
 
         try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
         var state = PortableLibraryBackupProgressState(
@@ -349,7 +352,9 @@ struct PortableLibraryBackup {
     static func isVerifiedBackup(at destinationURL: URL) -> Bool {
         guard let metadata = try? readMetadata(at: destinationURL),
               metadata.version == PortableLibraryBackupMetadata.currentVersion,
-              metadata.files.allSatisfy({ regularFileExists(at: destinationURL.appendingPathComponent($0.relativePath)) }) else { return false }
+              metadata.files.allSatisfy({
+                  $0.rebuildable || regularFileExists(at: destinationURL.appendingPathComponent($0.relativePath))
+              }) else { return false }
         let marker = destinationURL.appendingPathComponent("\(recoveryDirectory)/\(completeName)")
         guard (try? JSONDecoder.backup.decode(PortableLibraryBackupMetadata.self, from: Data(contentsOf: marker))) == metadata else { return false }
         return metadata.files.allSatisfy { file in (try? verify(file, at: destinationURL.appendingPathComponent(file.relativePath))) != nil }
