@@ -427,34 +427,11 @@ struct PortableLibraryBackup {
     /// Restore uses the same gate as backup so a package can never be promoted merely because its
     /// files happen to be present.
     static func validateCanonicalReferences(in package: PortableLibraryPackage) throws {
-        for shardName in PortableLibraryPackage.allShards {
-            let shard: PortablePackageMembershipShard
-            do { shard = try package.readMembershipShard(shardName) }
-            catch { throw PortableLibraryBackupError.missingCanonicalComponent("Catalog/Membership/\(shardName).json") }
-            for entry in shard.entries where !entry.isTombstone {
-                let record: PortablePackageAssetRecord
-                do { record = try package.readAssetRecord(for: entry.assetID) }
-                catch {
-                    throw PortableLibraryBackupError.missingCanonicalComponent(entry.recordPath)
-                }
-                if record.source.storage == .embedded,
-                   let sourcePath = record.source.relativePath,
-                   !regularFileExists(at: package.rootURL.appendingPathComponent(sourcePath)) {
-                    throw PortableLibraryBackupError.missingCanonicalComponent(sourcePath)
-                }
-                for pointer in record.editHistory.edits {
-                    let nativeURL = package.rootURL.appendingPathComponent(pointer.relativePath)
-                    guard regularFileExists(at: nativeURL) else {
-                        throw PortableLibraryBackupError.missingCanonicalComponent(pointer.relativePath)
-                    }
-                    do { _ = try package.readEditRevision(for: entry.assetID, revision: pointer.revision) }
-                    catch { throw PortableLibraryBackupError.missingCanonicalComponent(pointer.relativePath) }
-                    if let xmpPath = pointer.xmpRelativePath,
-                       !regularFileExists(at: package.rootURL.appendingPathComponent(xmpPath)) {
-                        throw PortableLibraryBackupError.missingCanonicalComponent(xmpPath)
-                    }
-                }
-            }
+        let report = try PortableLibraryValidation.run(
+            package: package, options: .criticalOnly
+        )
+        if let failure = report.criticalFailures.first {
+            throw PortableLibraryBackupError.missingCanonicalComponent(failure.path)
         }
     }
 
