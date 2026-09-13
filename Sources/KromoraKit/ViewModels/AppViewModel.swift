@@ -1931,20 +1931,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     document = stored.document
                 }
                 requests.append(
-                    RenderRequest(
+                    self.makeSettledPreviewRequest(
                         source: candidate.source,
+                        assetID: candidate.reference.assetID,
                         document: document,
                         lut: self.resolvedLUT(document.lut.lutID),
-                        // Navigation resets the main planner before the selected preview is
-                        // submitted. Use the same initial planner state here so hysteresis from
-                        // the currently visible photo cannot make this neighbor warm a different
-                        // pyramid level than the preview it will use after selection.
-                        targetSize: self.adjacentPreviewRenderTargetSize(
+                        plan: self.adjacentPreviewPlan(
                             for: document, nativeExtent: candidate.source.nativeExtent
-                        ),
-                        quality: .preview,
-                        output: .raster,
-                        space: .current
+                        )
                     )
                 )
             }
@@ -3449,13 +3443,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var histogramResolutionPlanner = ResolutionPlanner()
     private static let intensityDebounceMs = 60
 
-    /// Plan an adjacent photo as if it were the next navigation target. The selected photo's
-    /// planner is intentionally not used: it carries hysteresis from the current source, while
-    /// `openImage` resets the planner before the subsequent selected-preview request.
-    private func adjacentPreviewRenderTargetSize(
+    /// Build the same fit-state plan that a newly selected source receives after navigation resets
+    /// the canvas. Keeping the ROI and presentation extent with the warm request is important:
+    /// RenderEngine's preview cache includes the ROI, so a prefetch that only matches the pyramid
+    /// level still forces the selected photo through the graph a second time.
+    private func adjacentPreviewPlan(
         for document: EditDocument,
         nativeExtent: CGSize
-    ) -> CGSize {
+    ) -> ResolutionPlan {
         var planner = ResolutionPlanner()
         return planner.plan(
             nativeExtent: document.rotation.orientedExtent(nativeExtent),
@@ -3465,7 +3460,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // that source's preview. Match that fit-state input instead of borrowing the current
             // photo's zoom/pan.
             navigation: CanvasNavigation()
-        ).sourceSize
+        )
     }
 
     /// Plan source detail for one logical rendering surface.

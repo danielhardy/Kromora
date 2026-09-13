@@ -108,6 +108,7 @@ actor FakeRenderEngine: RenderEngining {
         let format: ExportFormat?
         let sourceROI: CGRect?
         let presentationImageExtent: CGRect?
+        let assetID: PhotoAssetID?
         /// The `ImageSource` the call named. Recorded so a test can tell *which* image was asked
         /// for — a batch export issues one request per file and they differ only here.
         var source: ImageSource?
@@ -121,7 +122,8 @@ actor FakeRenderEngine: RenderEngining {
             source: ImageSource?,
             maskResolution: MaskResolutionPolicy,
             sourceROI: CGRect? = nil,
-            presentationImageExtent: CGRect? = nil
+            presentationImageExtent: CGRect? = nil,
+            assetID: PhotoAssetID? = nil
         ) {
             self.document = document
             self.lutID = lutID
@@ -131,6 +133,7 @@ actor FakeRenderEngine: RenderEngining {
             self.format = format
             self.sourceROI = sourceROI
             self.presentationImageExtent = presentationImageExtent
+            self.assetID = assetID
             self.source = source
         }
 
@@ -149,6 +152,7 @@ actor FakeRenderEngine: RenderEngining {
             source = request.source
             sourceROI = request.sourceROI
             presentationImageExtent = request.presentationImageExtent
+            assetID = request.assetID
         }
     }
 

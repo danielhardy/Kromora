@@ -220,7 +220,9 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         let first = try Fixtures.writeGradientPNG(
             width: 3_000, height: 2_000, named: "scale-first.png", in: tempDirectory
         )
-        let second = try Fixtures.writeGradientPNG(
+        // Use distinct pixels so the first photo's canonical disk preview cannot satisfy the
+        // second photo's request before the fake renderer admission we inspect below.
+        let second = try Fixtures.writeClarityPNG(
             width: 3_000, height: 2_000, named: "scale-second.png", in: tempDirectory
         )
 
@@ -238,18 +240,26 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
                 return request.source?.backing == .url(first)
             }
             return false
-        } diagnostics: { "previews=\(await engine.previewRequests.count)" }
+        } diagnostics: {
+            let requests = await engine.previewRequests
+            return "previews=\(requests.count), requests=\(requests.map(Self.requestDiagnostic).joined(separator: ","))"
+        }
 
         let prefetch = try await TestSynchronization.nextEvent(from: reader, "the scale-matched prefetch") {
             if case .textureRequested(let request) = $0 {
                 return request.source?.backing == .url(second)
             }
             return false
-        } diagnostics: { "textures=\(await engine.textureRequests.count)" }
+        } diagnostics: {
+            let requests = await engine.textureRequests
+            return "textures=\(requests.count), request=\(requests.last.map(Self.requestDiagnostic) ?? "none")"
+        }
         guard case .textureRequested(let prefetchRequest) = prefetch,
               let prefetchSource = prefetchRequest.source else {
             return XCTFail("expected a texture prefetch request")
         }
+        let selectedAssetID = viewModel.collection.items[secondIndex].id
+        XCTAssertEqual(prefetchRequest.assetID, selectedAssetID)
 
         viewModel.selectCollectionImage(at: secondIndex)
         let selected = try await TestSynchronization.nextEvent(from: reader, "the selected neighbor preview") {
@@ -257,14 +267,31 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
                 return request.source?.backing == .url(second)
             }
             return false
-        } diagnostics: { "previews=\(await engine.previewRequests.count)" }
+        } diagnostics: {
+            let requests = await engine.previewRequests
+            return "previews=\(requests.count), requests=\(requests.map(Self.requestDiagnostic).joined(separator: ","))"
+        }
         guard case .previewCompleted(let selectedRequest) = selected else {
             return XCTFail("expected the selected neighbor preview")
         }
+        XCTAssertEqual(selectedRequest.assetID, selectedAssetID)
+        XCTAssertEqual(prefetchRequest.document, selectedRequest.document)
+        XCTAssertEqual(prefetchRequest.sourceROI, selectedRequest.sourceROI)
+        XCTAssertEqual(prefetchRequest.presentationImageExtent, selectedRequest.presentationImageExtent)
 
         XCTAssertEqual(
             RenderScaleKey(prefetchRequest.scale, nativeExtent: prefetchSource.nativeExtent),
             RenderScaleKey(selectedRequest.scale, nativeExtent: prefetchSource.nativeExtent)
         )
+    }
+
+    nonisolated private static func requestDiagnostic(_ request: FakeRenderEngine.Request) -> String {
+        let source: String
+        switch request.source?.backing {
+        case .url(let url): source = url.lastPathComponent
+        case .data(let data): source = "data:\(data.count)"
+        case nil: source = "missing-source"
+        }
+        return "\(source):asset=\(request.assetID?.raw ?? "nil"):revision=\(request.requestRevision):scale=\(String(describing: request.scale))"
     }
 }
