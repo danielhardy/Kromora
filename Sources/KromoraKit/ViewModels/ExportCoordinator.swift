@@ -447,7 +447,11 @@ final class ExportCoordinator: ObservableObject {
         batchTotal = items.count
         batchCurrentItem = nil
         batchCancellationRequested = false
-        let total = items.count
+        // Copy the value-only work list before any async suspension. The caller may continue
+        // changing its live library selection while the panel-free operation is running, but that
+        // must never add, remove, or reorder work in this batch.
+        let operationItems = Array(items)
+        let total = operationItems.count
         onStatus?("Exporting 0 of \(total)…")
 
         var exported = 0
@@ -465,7 +469,7 @@ final class ExportCoordinator: ObservableObject {
             if hasDestinationScope { folder.stopAccessingSecurityScopedResource() }
         }
 
-        for item in items {
+        for item in operationItems {
             guard !Task.isCancelled, !batchCancellationRequested else {
                 cancelled = true
                 break
