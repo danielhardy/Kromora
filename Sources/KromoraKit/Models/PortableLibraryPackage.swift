@@ -343,11 +343,10 @@ struct PortableLibraryPackage {
 
     static func open(at rootURL: URL) throws -> Self {
         let package = try openForQuery(at: rootURL)
+        // Membership shards are the eager structural boundary. Asset records remain lazy so a
+        // normal open does not turn into a full record scrub; reads validate their own record.
         for shard in Self.allShards {
-            let membership = try package.readMembershipShard(shard)
-            for entry in membership.entries where !entry.isTombstone {
-                _ = try package.readAssetRecord(for: entry.assetID)
-            }
+            _ = try package.readMembershipShard(shard)
         }
         return package
     }
@@ -356,8 +355,8 @@ struct PortableLibraryPackage {
     ///
     /// This intentionally reads only `manifest.json`. A warm launch must be able to obtain its
     /// first page from the local index without enumerating package directories, opening asset
-    /// records, parsing XMP, or reading originals. Callers that need the canonical records should
-    /// use `open(at:)`, which retains the format-validation behavior of the package layer.
+    /// records, parsing XMP, or reading originals. Callers that need eager membership validation
+    /// should use `open(at:)`; asset records are validated when their records are read.
     static func openForQuery(at rootURL: URL) throws -> Self {
         let manifestURL = rootURL.appendingPathComponent("manifest.json")
         let data = try Data(contentsOf: manifestURL)

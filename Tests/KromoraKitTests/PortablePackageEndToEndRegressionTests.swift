@@ -156,7 +156,7 @@ final class PortablePackageEndToEndRegressionTests: TempDirectoryTestCase {
         )
     }
 
-    func testCorruptShardAndRecordAreDiscoveredWhenOpeningThePackage() throws {
+    func testCorruptShardIsDiscoveredOnOpenAndCorruptRecordOnRead() throws {
         let shardPackageURL = tempDirectory.appendingPathComponent("CorruptShard.kromoralibrary")
         _ = try PortableLibraryPackage.create(at: shardPackageURL)
         let shard = "00"
@@ -172,7 +172,8 @@ final class PortablePackageEndToEndRegressionTests: TempDirectoryTestCase {
             "Assets/\(PortableLibraryPackage.shard(for: assetID))/\(assetID.raw)/asset.json"
         )
         try Data("{\"identity\": null}".utf8).write(to: recordURL)
-        XCTAssertThrowsError(try PortableLibraryPackage.open(at: recordPackageURL))
+        let reopened = try PortableLibraryPackage.open(at: recordPackageURL)
+        XCTAssertThrowsError(try reopened.readAssetRecord(for: assetID))
     }
 
     func testConcurrentImportAttemptIsRejectedByThePackageLeaseThenSucceedsAfterRelease() throws {
