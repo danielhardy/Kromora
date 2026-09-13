@@ -54,6 +54,36 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertEqual(editDatabaseURL, storeURL)
     }
 
+    func testAppActivationTriggersConfiguredPortableMaintenance() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("AppMaintenance.kromoralibrary")
+        _ = try PortableLibraryPackage.create(at: packageURL)
+        let orphanURL = packageURL.appendingPathComponent(
+            "Recovery/Quarantine/Maintenance/from-previous-launch", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: orphanURL, withIntermediateDirectories: true)
+        try Data("orphan".utf8).write(to: orphanURL.appendingPathComponent("stale.json"))
+
+        let notificationCenter = NotificationCenter()
+        let viewModel = makeAppViewModel(
+            applicationNotificationCenter: notificationCenter,
+            portablePackageURL: packageURL,
+            portableMaintenanceIdleDelay: .milliseconds(1)
+        )
+        notificationCenter.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+
+        let deadline = Date().addingTimeInterval(10)
+        while FileManager.default.fileExists(atPath: orphanURL.path) {
+            XCTAssertLessThan(Date(), deadline, "portable maintenance was not triggered")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        while !viewModel.workScheduler.isIdle {
+            XCTAssertLessThan(Date(), deadline, "portable maintenance did not finish")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(viewModel.workScheduler.isIdle)
+        XCTAssertEqual(viewModel.portablePackageMaintenance.failureLog, [])
+    }
+
     func testExportStatusReachesTheStatusBar() {
         let viewModel = makeAppViewModel()
         viewModel.export.onStatus?("Exported: photo.jpg")

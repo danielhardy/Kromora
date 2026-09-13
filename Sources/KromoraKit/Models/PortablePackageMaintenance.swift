@@ -41,6 +41,17 @@ struct PortablePackageMaintenanceOptions: Sendable, Equatable {
     }
 }
 
+enum PortablePackageMaintenanceError: Error, Equatable, Sendable, CustomStringConvertible {
+    case schedulerRejected
+
+    var description: String {
+        switch self {
+        case .schedulerRejected:
+            return "Portable package maintenance was rejected because the package-I/O scheduler is full"
+        }
+    }
+}
+
 struct PortablePackageRevisionCompactionResult: Equatable, Sendable {
     let assetsScanned: Int
     let revisionsBefore: Int
@@ -368,6 +379,8 @@ final class PortablePackageMaintenance {
 
     private let scheduler: ImageWorkScheduler
     private var retryCounts: [ImageWorkScheduler.JobID: Int] = [:]
+    private var retryTasks: [ImageWorkScheduler.JobID: Task<Void, Never>] = [:]
+    private var isShuttingDown = false
     private(set) var failureLog: [String] = []
 
     init(scheduler: ImageWorkScheduler) {
@@ -382,12 +395,51 @@ final class PortablePackageMaintenance {
         retryLimit: Int = 3,
         completion: @escaping Completion = { _ in }
     ) -> Bool {
+        guard !isShuttingDown else { return false }
         let root = packageURL.standardizedFileURL
         let limit = max(0, retryLimit)
+        retryTasks[id]?.cancel()
+        retryTasks.removeValue(forKey: id)
+        retryCounts[id] = 0
+        return enqueueAttempt(
+            packageURL: root, options: options, id: id, retryLimit: limit,
+            completion: completion
+        )
+    }
+
+    /// Stops delayed scheduler-rejection retries before the owning application tears down its
+    /// shared scheduler. A cancelled admitted job is also prevented from creating a new retry.
+    func shutdown() {
+        isShuttingDown = true
+        for task in retryTasks.values { task.cancel() }
+        retryTasks.removeAll()
+        retryCounts.removeAll()
+    }
+
+    @discardableResult
+    private func enqueueAttempt(
+        packageURL root: URL,
+        options: PortablePackageMaintenanceOptions,
+        id: ImageWorkScheduler.JobID,
+        retryLimit: Int,
+        completion: @escaping Completion
+    ) -> Bool {
+        guard !isShuttingDown else { return false }
         let admitted = scheduler.enqueuePackageIO(
             id: id, lane: .maintenance,
             onTerminal: { [weak self] outcome in
-                guard let self, outcome == .completed || outcome == .cancelled else { return }
+                guard let self else { return }
+                if outcome == .rejected {
+                    let failure = PortablePackageMaintenanceError.schedulerRejected
+                    self.failureLog.append(String(describing: failure))
+                    self.scheduleRetry(
+                        packageURL: root, options: options, id: id, retryLimit: retryLimit,
+                        completion: completion
+                    )
+                    completion(.failure(failure))
+                    return
+                }
+                guard outcome == .completed || outcome == .cancelled else { return }
                 // The detached operation reports its result before the scheduler terminal event.
                 // A failed pass is operationally non-critical and is retried through this same
                 // lane, with the scheduler remaining free to admit editor work first.
@@ -404,16 +456,10 @@ final class PortablePackageMaintenance {
                     return
                 }
                 self.failureLog.append(String(describing: failure))
-                let attempt = self.retryCounts[id, default: 0]
-                if attempt < limit {
-                    self.retryCounts[id] = attempt + 1
-                    _ = self.enqueue(
-                        packageURL: root, options: options, id: id, retryLimit: limit,
-                        completion: completion
-                    )
-                } else {
-                    self.retryCounts.removeValue(forKey: id)
-                }
+                self.scheduleRetry(
+                    packageURL: root, options: options, id: id, retryLimit: retryLimit,
+                    completion: completion
+                )
                 completion(.failure(failure))
             },
             operation: { [root, options] in
@@ -425,8 +471,40 @@ final class PortablePackageMaintenance {
                 }
             }
         )
-        if !admitted { retryCounts.removeValue(forKey: id) }
         return admitted
+    }
+
+    private func scheduleRetry(
+        packageURL root: URL,
+        options: PortablePackageMaintenanceOptions,
+        id: ImageWorkScheduler.JobID,
+        retryLimit: Int,
+        completion: @escaping Completion
+    ) {
+        let attempt = retryCounts[id, default: 0]
+        guard attempt < retryLimit, !isShuttingDown else {
+            retryCounts.removeValue(forKey: id)
+            return
+        }
+        retryCounts[id] = attempt + 1
+
+        // A rejection means another package-I/O job is occupying the admission window. Let the
+        // scheduler drain before trying again; immediate recursion would exhaust retryLimit while
+        // the queue is still full and would turn contention into a permanent no-op.
+        retryTasks[id]?.cancel()
+        retryTasks[id] = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return
+            }
+            guard let self, !self.isShuttingDown else { return }
+            self.retryTasks.removeValue(forKey: id)
+            _ = self.enqueueAttempt(
+                packageURL: root, options: options, id: id, retryLimit: retryLimit,
+                completion: completion
+            )
+        }
     }
 
     private static var pendingFailures: [ImageWorkScheduler.JobID: Error] = [:]
@@ -445,6 +523,10 @@ final class PortablePackageMaintenance {
         let lease = try PortablePackageLease.acquire(at: root)
         defer { try? lease.release() }
         _ = try PortablePackageTransaction.recover(at: root)
+        try sweepOrphanedMaintenanceQuarantine(
+            at: root, lease: lease, now: now, faultInjector: options.faultInjector,
+            isCancelled: isCancelled
+        )
         let package = try PortableLibraryPackage.open(at: root)
         let revisions = try compactRevisions(
             in: package, lease: lease, policy: options.policy,
@@ -468,6 +550,45 @@ final class PortablePackageMaintenance {
                 staleEntriesRemoved: thumbnailResult.staleEntriesRemoved
             )
         )
+    }
+
+    /// Removes quarantine directories left by a process that stopped after the revision move
+    /// committed but before its journaled cleanup transaction completed. This runs before the
+    /// current pass creates a fresh UUID, so an interrupted run cannot accumulate one directory
+    /// per launch forever.
+    private nonisolated static func sweepOrphanedMaintenanceQuarantine(
+        at root: URL,
+        lease: PortablePackageLease,
+        now: Date,
+        faultInjector: PortablePackageFaultInjector?,
+        isCancelled: @Sendable () -> Bool
+    ) throws {
+        let maintenanceRoot = root.appendingPathComponent(
+            "Recovery/Quarantine/Maintenance", isDirectory: true
+        )
+        guard FileManager.default.fileExists(atPath: maintenanceRoot.path) else { return }
+        let directories = try FileManager.default.contentsOfDirectory(
+            at: maintenanceRoot, includingPropertiesForKeys: [.isDirectoryKey]
+        ).filter {
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
+        guard !directories.isEmpty else { return }
+
+        var transaction = try PortablePackageTransaction.begin(
+            at: root, lease: lease, now: now, faultInjector: faultInjector
+        )
+        do {
+            for directory in directories {
+                try checkCancellation(isCancelled)
+                try transaction.stageRemoval(
+                    at: "Recovery/Quarantine/Maintenance/\(directory.lastPathComponent)"
+                )
+            }
+            try transaction.commit(now: now, isCancelled: isCancelled)
+        } catch {
+            try? transaction.abort()
+            throw error
+        }
     }
 
     private nonisolated static func compactRevisions(

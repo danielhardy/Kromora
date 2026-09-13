@@ -297,6 +297,48 @@ final class ImageWorkSchedulerTests: XCTestCase {
         try await waitUntil("the scheduler to drain") { scheduler.isIdle }
     }
 
+    func testQueuedMaintenanceYieldsToEditorArrivingWhilePackageIOIsBusy() async throws {
+        let scheduler = ImageWorkScheduler(configuration: .init(
+            maxConcurrentThumbnails: 1,
+            maxQueuedThumbnails: 1,
+            maxQueuedEditorJobs: 2,
+            maxConcurrentPackageIO: 1,
+            maxQueuedPackageIO: 2
+        ))
+        let packageGate = Gate()
+        let probe = Probe()
+
+        scheduler.enqueuePackageIO(
+            id: .init("package-blocker"), lane: .importCopyHash,
+            operation: {
+                await probe.record("blocker-started")
+                await packageGate.wait()
+            }
+        )
+        try await waitUntilAsync("the package blocker to start") {
+            await probe.contains("blocker-started")
+        }
+        scheduler.enqueuePackageIO(
+            id: .init("maintenance"), lane: .maintenance,
+            operation: { await probe.record("maintenance") }
+        )
+        scheduler.enqueue(
+            id: .init("editor"), lane: .editor, priority: .activeEditor,
+            operation: { await probe.record("editor") }
+        )
+
+        await packageGate.releaseAll()
+        try await waitUntilAsync("editor and maintenance to run") {
+            let editorRan = await probe.contains("editor")
+            let maintenanceRan = await probe.contains("maintenance")
+            return editorRan && maintenanceRan
+        }
+        let events = await probe.events
+        XCTAssertEqual(Array(events.prefix(3)), ["blocker-started", "editor", "maintenance"])
+        XCTAssertGreaterThan(scheduler.yieldedPackageIOCount, 0)
+        try await waitUntil("the scheduler to drain") { scheduler.isIdle }
+    }
+
     func testActiveThumbnailAlsoPreventsBackgroundPackageIOFromStarting() async throws {
         let scheduler = ImageWorkScheduler(configuration: .init(
             maxConcurrentThumbnails: 1,

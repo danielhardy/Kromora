@@ -576,6 +576,8 @@ class TempDirectoryTestCase: XCTestCase {
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
         previewDiskCacheDirectory: URL? = nil,
         previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
+        portablePackageURL: URL? = nil,
+        portableMaintenanceIdleDelay: Duration = .seconds(2),
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
@@ -605,6 +607,8 @@ class TempDirectoryTestCase: XCTestCase {
             previewDiskCacheDirectory: previewDiskCacheDirectory
                 ?? tempDirectory.appendingPathComponent("developed-previews", isDirectory: true),
             previewDiskCacheCapBytes: previewDiskCacheCapBytes,
+            portablePackageURL: portablePackageURL,
+            portableMaintenanceIdleDelay: portableMaintenanceIdleDelay,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider,
             fileDialog: fileDialog,
             fileDropActionPolicy: fileDropActionPolicy

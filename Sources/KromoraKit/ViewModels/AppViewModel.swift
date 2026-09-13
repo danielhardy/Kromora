@@ -662,6 +662,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
     /// file I/O remains inside `EditDocumentStore`.
     let persistence: EditPersistenceCoordinator
+    /// Background compaction shares the scheduler with editor work but uses its detached
+    /// package-I/O lane, so a foreground edit can take the admission window back immediately.
+    let portablePackageMaintenance: PortablePackageMaintenance
     /// Writing images to disk — the single export, the batch run, and naming. Production exports
     /// use an isolated RenderEngine lane while preserving the same render request funnel.
     let export: ExportCoordinator
@@ -787,6 +790,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private let applicationNotificationCenter: NotificationCenter
     private var mediaVolumeObservers: [NSObjectProtocol] = []
     private var applicationLifecycleObservers: [NSObjectProtocol] = []
+    private let portablePackageURL: URL?
+    private let portableMaintenanceIdleDelay: Duration
+    private let portableMaintenanceJobID = ImageWorkScheduler.JobID("portable-package-maintenance")
+    private var portableMaintenanceTriggerTask: Task<Void, Never>?
     private var mediaVolumeDiscoveryTask: Task<Void, Never>?
     private var mediaVolumeRefreshTask: Task<Void, Never>?
     private var mediaVolumeScanTask: Task<Void, Never>?
@@ -807,7 +814,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.init(
             engine: RenderEngine.shared,
             editStore: EditDocumentStore.makeDefaultStore(),
-            includeBundledLooks: false
+            includeBundledLooks: false,
+            portablePackageURL: KromoraStorage.defaultPortableLibraryPackageURL
         )
     }
 
@@ -817,7 +825,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.init(
             engine: RenderEngine.shared,
             editStore: EditDocumentStore.makeDefaultStore(),
-            includeBundledLooks: includeBundledLooks
+            includeBundledLooks: includeBundledLooks,
+            portablePackageURL: KromoraStorage.defaultPortableLibraryPackageURL
         )
     }
 
@@ -834,6 +843,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
         previewDiskCacheDirectory: URL? = nil,
         previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
+        portablePackageURL: URL? = nil,
+        portableMaintenanceIdleDelay: Duration = .seconds(2),
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
@@ -856,6 +867,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
         self.workScheduler = ImageWorkScheduler()
         self.persistence = EditPersistenceCoordinator(store: editStore)
+        self.portablePackageMaintenance = PortablePackageMaintenance(scheduler: workScheduler)
+        self.portablePackageURL = portablePackageURL?.standardizedFileURL
+        self.portableMaintenanceIdleDelay = portableMaintenanceIdleDelay
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane
         // would let a burst of filmstrip/grid work evict a row's continuation before it can return.
         self.lookPreviewCoordinator = LookPreviewCoordinator(
@@ -2316,9 +2330,38 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
                     self?.scheduleRemovableMediaRefresh()
+                    self?.schedulePortablePackageMaintenance()
                 }
             }
         )
+    }
+
+    /// Run rebuildable package maintenance after the app has been active and idle briefly. The
+    /// package is checked before admission because the current app can still be using its legacy
+    /// folder library; a future package-open flow can provide the same URL to this coordinator.
+    private func schedulePortablePackageMaintenance() {
+        guard !isShuttingDown,
+              let packageURL = portablePackageURL,
+              FileManager.default.fileExists(
+                atPath: packageURL.appendingPathComponent("manifest.json").path
+              ),
+              !workScheduler.contains(portableMaintenanceJobID)
+        else { return }
+
+        portableMaintenanceTriggerTask?.cancel()
+        portableMaintenanceTriggerTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(for: self.portableMaintenanceIdleDelay)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, !self.isShuttingDown,
+                  let packageURL = self.portablePackageURL,
+                  !self.workScheduler.contains(self.portableMaintenanceJobID)
+            else { return }
+            _ = self.portablePackageMaintenance.enqueue(packageURL: packageURL)
+        }
     }
 
     private func scheduleRemovableMediaRefresh() {
@@ -5003,6 +5046,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         photosImportCoordinator.onStatus = nil
         photosImportCoordinator.destination = nil
         cancellables.removeAll()
+        portableMaintenanceTriggerTask?.cancel()
+        portableMaintenanceTriggerTask = nil
+        portablePackageMaintenance.shutdown()
 
         for observer in mediaVolumeObservers {
             mediaVolumeNotificationCenter.removeObserver(observer)
