@@ -116,6 +116,14 @@ enum PortablePackageXMPCodec {
     /// neutral edit document.
     static func decode(_ data: Data) throws -> PortablePackageXMPRepresentation {
         guard !data.isEmpty else { throw PortablePackageError.malformedXMP("packet is empty") }
+        // `shouldResolveExternalEntities = false` only blocks fetching externally-referenced
+        // entities; libxml2 still expands internal <!ENTITY> definitions declared in a packet's own
+        // DOCTYPE, which lets a corrupt/malicious sidecar exhaust memory (a "billion laughs" bomb)
+        // before a single kromora: attribute is ever read. Valid packets from `encode` never carry a
+        // DOCTYPE, so rejecting one here is a detection, not a compatibility loss.
+        guard !data.containsDOCTYPE else {
+            throw PortablePackageError.malformedXMP("packet declares a DOCTYPE, which is not permitted")
+        }
         let probe = XMPProbe()
         let parser = XMLParser(data: data)
         parser.shouldResolveExternalEntities = false
@@ -399,4 +407,10 @@ private extension PortablePackageEditRevision {
 
 private extension SHA256.Digest {
     var portableHexString: String { map { String(format: "%02x", $0) }.joined() }
+}
+
+private extension Data {
+    var containsDOCTYPE: Bool {
+        range(of: Data("<!DOCTYPE".utf8)) != nil
+    }
 }
