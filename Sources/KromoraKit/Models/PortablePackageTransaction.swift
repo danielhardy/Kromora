@@ -5,6 +5,8 @@ import os.lock
 
 /// The points at which a package commit can be interrupted in tests or by a process crash.
 enum PortablePackageTransactionBoundary: String, CaseIterable, Codable, Sendable {
+    /// Simulates an exhausted destination volume before a staged file is written.
+    case diskFull
     case stage
     case flush
     case checksum
@@ -378,6 +380,7 @@ struct PortablePackageTransaction {
         guard !journal.files.contains(where: { $0.relativePath == relativePath }) else {
             throw PortablePackageTransactionError.duplicateStagedPath(relativePath)
         }
+        try faultInjector?.check(.diskFull)
         let stagingPath = "\(journal.stagingDirectory)/\(relativePath)"
         let destination = packageRoot.appendingPathComponent(stagingPath)
         try FileManager.default.createDirectory(
@@ -412,6 +415,7 @@ struct PortablePackageTransaction {
         let destination = packageRoot.appendingPathComponent(stagingPath)
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try faultInjector?.check(.diskFull)
 
         guard Self.isRegularFile(at: sourceURL) else {
             throw PortablePackageTransactionError.sourceIsNotARegularFile(sourceURL.path)

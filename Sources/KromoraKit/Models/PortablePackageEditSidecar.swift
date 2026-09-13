@@ -203,7 +203,9 @@ extension PortableLibraryPackage {
         document: EditDocument,
         lookBytes: [Data] = [],
         lease: PortablePackageLease,
-        now: Date = Date()
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false },
+        faultInjector: PortablePackageFaultInjector? = nil
     ) throws -> PortablePackageEditSidecar {
         var record = try readAssetRecord(for: assetID)
         let nextRevision = max(
@@ -254,7 +256,9 @@ extension PortableLibraryPackage {
             throw PortablePackageError.malformedXMP("writer produced a mismatched packet")
         }
 
-        var transaction = try beginTransaction(lease: lease, now: now)
+        var transaction = try beginTransaction(
+            lease: lease, now: now, faultInjector: faultInjector
+        )
         do {
             var stagedLookHashes = Set<String>()
             for bytes in lookBytes {
@@ -268,7 +272,9 @@ extension PortableLibraryPackage {
                 }
             }
             try transaction.stage(data: nativeData, at: nativePath)
+            if isCancelled() { throw CancellationError() }
             try transaction.stage(data: xmpData, at: xmpPath)
+            if isCancelled() { throw CancellationError() }
 
             record.currentRevision = max(record.currentRevision + 1, nextRevision)
             record.editHistory.currentRevision = nextRevision
@@ -276,7 +282,7 @@ extension PortableLibraryPackage {
                 .init(revision: nextRevision, relativePath: nativePath, xmpRelativePath: xmpPath)
             )
             try transaction.stage(data: try encodedAssetRecord(record), at: assetRecordPath(for: assetID))
-            try transaction.commit(now: now)
+            try transaction.commit(now: now, isCancelled: isCancelled)
         } catch {
             try? transaction.abort()
             throw error
