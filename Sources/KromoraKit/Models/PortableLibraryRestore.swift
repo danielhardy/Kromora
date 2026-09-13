@@ -220,15 +220,23 @@ struct PortableLibraryRestore {
                 } catch {
                     throw PortableLibraryRestoreError.cannotPublish(String(describing: error))
                 }
-                defer { try? candidateLease.release() }
 
                 progress(.init(
                     phase: .publishing, relativePath: nil,
                     completedFiles: files.count, totalFiles: files.count,
                     copiedBytes: copiedBytes, totalBytes: totalBytes
                 ))
-                try publish(staging: staging, active: active, previous: previous)
+                do {
+                    try publish(staging: staging, active: active, previous: previous)
+                } catch {
+                    try? candidateLease.release()
+                    throw error
+                }
                 published = true
+                // The candidate's lock file moved with the directory rename above; release it at
+                // its new location (see `release(movedTo:)`) rather than the now-nonexistent
+                // staging path, or the newly active package is left permanently leased.
+                try? candidateLease.release(movedTo: active)
                 try? FileManager.default.removeItem(at: previous)
                 progress(.init(
                     phase: .finished, relativePath: nil,

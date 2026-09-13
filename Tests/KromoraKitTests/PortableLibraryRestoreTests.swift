@@ -52,6 +52,11 @@ final class PortableLibraryRestoreTests: TempDirectoryTestCase {
                 atPath: profileURL.appendingPathComponent("LibraryIndex.json").path
             )
         )
+
+        // A successful restore must leave the newly active package writable: its lease must not
+        // be stranded under the staging directory's now-nonexistent path.
+        let postRestoreLease = try PortablePackageLease.acquire(at: activeURL)
+        try postRestoreLease.release()
     }
 
     func testFailedValidationLeavesActivePackageUntouchedAndReportsFailure() throws {
