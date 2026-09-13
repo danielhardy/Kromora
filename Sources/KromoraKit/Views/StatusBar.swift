@@ -41,8 +41,16 @@ struct StatusBar: View {
                     .font(.caption)
                     .padding(.leading, 8)
             } else if viewModel.isAutoAdjustmentInProgress {
-                ProgressView()
-                    .controlSize(.small)
+                Group {
+                    if let progress = viewModel.autoAdjustmentProgress {
+                        ProgressView(value: progress)
+                            .frame(width: 110)
+                            .controlSize(.small)
+                    } else {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
                 Text(viewModel.statusMessage)
                     .font(.caption)
                     .foregroundColor(.secondary)

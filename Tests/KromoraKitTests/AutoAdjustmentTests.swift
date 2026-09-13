@@ -3,6 +3,26 @@ import XCTest
 
 @MainActor
 final class AutoAdjustmentTests: TempDirectoryTestCase {
+    private struct NoopSceneClassifier: SceneClassifierProviding {
+        func classifications(for image: AnalysisImage) async -> [SceneClassificationObservation]? {
+            nil
+        }
+    }
+
+    /// Keep these editor integration tests on the legacy histogram path. The production content
+    /// aware path is covered by ContentAwareAutoEngineTests; this coordinator makes the milestone
+    /// under test independent of Vision availability and mask timing.
+    private func makeHistogramAutoViewModel(_ fake: FakeRenderEngine) -> AppViewModel {
+        let coordinator = PhotoAnalysisCoordinator(
+            engine: fake,
+            cache: PhotoAnalysisCache(
+                directory: tempDirectory.appendingPathComponent("auto-analysis-cache")
+            ),
+            sceneClassifier: NoopSceneClassifier(), stages: [:]
+        )
+        return makeAppViewModel(engine: fake, photoAnalysisCoordinator: coordinator)
+    }
+
     private func histogram(
         luma: [(Int, Int)],
         red: [(Int, Int)]? = nil,
@@ -205,41 +225,63 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testFailureLeavesAutoAndHistogramOutOfLoadingState() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = makeAppViewModel(engine: fake)
+        let viewModel = makeHistogramAutoViewModel(fake)
         try await openStandardImage(viewModel)
         await fake.setShouldFailHistogram(true)
+        let reader = FakeRenderEventReader(await fake.eventStream())
 
         viewModel.runAutoAdjustment()
-        let deadline = Date().addingTimeInterval(5)
-        while !viewModel.autoAdjustmentHelp.contains("could not analyze") {
-            if Date() > deadline { return XCTFail("timed out waiting for Auto failure") }
-            try await Task.sleep(for: .milliseconds(10))
+        XCTAssertEqual(viewModel.autoAdjustmentState, .analyzing)
+        XCTAssertEqual(viewModel.autoAdjustmentProgress, 0)
+        _ = try await TestSynchronization.nextEvent(from: reader, "Auto histogram request") {
+            if case .histogramRequested = $0 { return true }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests.count)"
         }
+        _ = try await TestSynchronization.nextEvent(from: reader, "Auto histogram failure") {
+            if case .histogramCompleted(_, nil) = $0 { return true }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests.count)"
+        }
+        await viewModel.waitForAutoAdjustmentCompletion()
+        XCTAssertTrue(viewModel.autoAdjustmentHelp.contains("could not analyze"))
         XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
+        XCTAssertNil(viewModel.autoAdjustmentProgress)
         XCTAssertFalse(viewModel.isHistogramLoading)
     }
 
     func testAnalysisShowsProgressWithoutBorrowingHistogramLoadingState() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = makeAppViewModel(engine: fake)
+        let viewModel = makeHistogramAutoViewModel(fake)
         try await openStandardImage(viewModel)
         await fake.gateHistogram()
+        let reader = FakeRenderEventReader(await fake.eventStream())
 
         viewModel.runAutoAdjustment()
-        let deadline = Date().addingTimeInterval(5)
-        while !viewModel.isAutoAdjustmentInProgress {
-            if Date() > deadline { return XCTFail("timed out waiting for Auto analysis state") }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        XCTAssertEqual(viewModel.autoAdjustmentState, .analyzing)
+        XCTAssertEqual(viewModel.autoAdjustmentProgress, 0)
         XCTAssertFalse(viewModel.isHistogramLoading)
         XCTAssertTrue(viewModel.autoAdjustmentHelp.contains("Analyzing"))
 
-        await fake.releaseHistograms()
-        while viewModel.isAutoAdjustmentInProgress {
-            if Date() > deadline { return XCTFail("timed out waiting for Auto completion") }
-            try await Task.sleep(for: .milliseconds(10))
+        _ = try await TestSynchronization.nextEvent(from: reader, "Auto histogram request") {
+            if case .histogramRequested = $0 { return true }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests.count)"
         }
+
+        await fake.releaseHistograms()
+        _ = try await TestSynchronization.nextEvent(from: reader, "Auto histogram completion") {
+            if case .histogramCompleted(_, let result) = $0 { return result != nil }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests.count)"
+        }
+        await viewModel.waitForAutoAdjustmentCompletion()
         XCTAssertTrue(viewModel.statusMessage.hasPrefix("Auto applied"))
+        XCTAssertNil(viewModel.autoAdjustmentProgress)
         let requests = await fake.histogramRequests
         XCTAssertEqual(requests.last?.lutID, nil)
         XCTAssertTrue(requests.last?.document.light.isIdentity == true)
@@ -249,23 +291,32 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
 
     func testCancellingAutoLeavesDocumentUntouchedAndClearsLoadingState() async throws {
         let fake = FakeRenderEngine()
-        let viewModel = makeAppViewModel(engine: fake)
+        let viewModel = makeHistogramAutoViewModel(fake)
         try await openStandardImage(viewModel)
         let before = viewModel.document
         await fake.gateHistogram()
+        let reader = FakeRenderEventReader(await fake.eventStream())
 
         viewModel.runAutoAdjustment()
-        let deadline = Date().addingTimeInterval(5)
-        while !viewModel.isAutoAdjustmentInProgress {
-            if Date() > deadline { return XCTFail("timed out waiting for Auto") }
-            try await Task.sleep(for: .milliseconds(10))
+        _ = try await TestSynchronization.nextEvent(from: reader, "Auto histogram request") {
+            if case .histogramRequested = $0 { return true }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests.count)"
         }
 
         viewModel.cancelAutoAdjustment()
         XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
         XCTAssertEqual(viewModel.autoAdjustmentState, .cancelled)
+        XCTAssertNil(viewModel.autoAdjustmentProgress)
         await fake.releaseHistograms()
-        try await Task.sleep(for: .milliseconds(50))
+        _ = try await TestSynchronization.nextEvent(from: reader, "cancelled Auto histogram completion") {
+            if case .histogramCompleted = $0 { return true }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests.count)"
+        }
+        await viewModel.waitForAutoAdjustmentCompletion()
 
         XCTAssertEqual(viewModel.document, before)
         XCTAssertEqual(viewModel.statusMessage, "Auto cancelled; nothing was changed.")
@@ -277,20 +328,13 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         try await openStandardImage(viewModel)
 
         viewModel.runAutoAdjustment()
-        let deadline = Date().addingTimeInterval(5)
-        while !viewModel.statusMessage.hasPrefix("Auto applied") {
-            if Date() > deadline { return XCTFail("timed out waiting for first Auto") }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await viewModel.waitForAutoAdjustmentCompletion()
+        XCTAssertTrue(viewModel.statusMessage.hasPrefix("Auto applied"))
         let first = viewModel.document
         let depth = viewModel.undoDepth
 
         viewModel.runAutoAdjustment()
-        while !viewModel.statusMessage.hasPrefix("Auto applied")
-            && viewModel.statusMessage != "No further improvement found" {
-            if Date() > deadline { return XCTFail("timed out waiting for repeated Auto") }
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        await viewModel.waitForAutoAdjustmentCompletion()
         XCTAssertEqual(viewModel.document, first)
         XCTAssertEqual(viewModel.undoDepth, depth)
     }

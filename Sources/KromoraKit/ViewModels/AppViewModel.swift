@@ -584,6 +584,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     @Published private(set) var autoAdjustmentState: AutoAdjustmentState = .unavailable(
         "Open a supported photo to enable Auto."
     )
+    /// Determinate progress for the Auto lifecycle. `nil` means Auto is settled; unlike the Info
+    /// histogram flag, this value belongs only to the active Auto invocation.
+    @Published private(set) var autoAdjustmentProgress: Double?
     private var autoAdjustmentTask: Task<Void, Never>?
     /// A second Auto invocation, a manual edit, or navigation invalidates the previous invocation
     /// even when the source and document values happen to compare equal. This closes the late
@@ -919,7 +922,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewSurface.onPresentationFailure = { [weak self] in
             guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
             self.previewState = .failed
-            self.autoAdjustmentState = .unavailable("Auto is unavailable because the photo preview failed.")
+            self.publishAutoAdjustmentState(.unavailable("Auto is unavailable because the photo preview failed."))
             self.statusMessage = "Could not display \(self.sourceName). Try Fit or reload the photo."
         }
         originalPreviewSurface.onPresentationFailure = { [weak self] in
@@ -967,7 +970,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             guard request.quality == .preview else { return }
             guard let self, request.source == self.imageSource else { return }
             self.previewState = .failed
-            self.autoAdjustmentState = .unavailable("Auto is unavailable because the photo preview failed.")
+            self.publishAutoAdjustmentState(.unavailable("Auto is unavailable because the photo preview failed."))
             if let message = self.semanticMaskFailureMessage(for: request.document) {
                 self.maskInteractionState.markMaskFailed(message)
                 self.statusMessage = message
@@ -1178,19 +1181,26 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         return "Auto is available when the photo preview is ready."
     }
 
+    private func publishAutoAdjustmentState(
+        _ state: AutoAdjustmentState, progress: Double? = nil
+    ) {
+        autoAdjustmentState = state
+        autoAdjustmentProgress = progress.map { min(max($0, 0), 1) }
+    }
+
     private func setAutoAdjustmentProgress(
         _ phase: AutoEnhancementPhase, invocationRevision: UInt64
     ) {
         guard self.autoInvocationRevision == invocationRevision else { return }
         switch phase {
         case .analyzing:
-            autoAdjustmentState = .analyzing
+            publishAutoAdjustmentState(.analyzing, progress: 0)
             statusMessage = "Analyzing \(sourceName) for Auto adjustments…"
         case .renderingCandidates:
-            autoAdjustmentState = .renderingCandidates
+            publishAutoAdjustmentState(.renderingCandidates, progress: 0.5)
             statusMessage = "Rendering Auto candidates…"
         case .validating:
-            autoAdjustmentState = .validating
+            publishAutoAdjustmentState(.validating, progress: 0.75)
             statusMessage = "Validating Auto candidates…"
         }
     }
@@ -1225,13 +1235,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         if let fingerprint = currentDocument.lastAutoRunFingerprint,
            fingerprint.matches(source: imageSource, document: currentDocument) {
-            autoAdjustmentState = .ready
+            publishAutoAdjustmentState(.ready)
             statusMessage = "No further improvement found"
             autoAdjustmentTask = nil
             return
         }
 
-        autoAdjustmentState = .analyzing
+        publishAutoAdjustmentState(.analyzing, progress: 0)
         statusMessage = "Analyzing \(sourceName) for Auto adjustments…"
         let onProgress: @MainActor @Sendable (AutoEnhancementPhase) -> Void = {
             [weak self] phase in
@@ -1262,37 +1272,37 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     && self.sourceRevision == sourceRevision
                     && self.imageSource == imageSource
                 guard isSamePhoto, self.documentRevision == documentRevision else {
-                    if isSamePhoto { self.autoAdjustmentState = .ready }
+                    if isSamePhoto { self.publishAutoAdjustmentState(.ready) }
                     return
                 }
                 switch result.status {
                 case .improved:
                     let applied = EditDocument.applyingAutoResult(result, to: self.document)
-                    self.autoAdjustmentState = .applying
+                    self.publishAutoAdjustmentState(.applying, progress: 0.9)
                     self.statusMessage = "Applying Auto adjustments…"
                     self.updateDocument(preservingAutoResult: true) { document in
                         document = applied
                     }
-                    self.autoAdjustmentState = .ready
+                    self.publishAutoAdjustmentState(.ready)
                     let count = result.changedControls.count
                     self.statusMessage = "Auto applied — \(count) coordinated control\(count == 1 ? "" : "s") (undo to restore previous edits)"
                 case .unchanged:
-                    self.autoAdjustmentState = .ready
+                    self.publishAutoAdjustmentState(.ready)
                     self.statusMessage = "No further improvement found"
                 case .noCandidate:
                     let message = result.reasons.first ?? "Auto found no acceptable improvement."
-                    self.autoAdjustmentState = .failed(message)
+                    self.publishAutoAdjustmentState(.failed(message))
                     self.statusMessage = message
                 case .cancelled:
-                    self.autoAdjustmentState = .ready
+                    self.publishAutoAdjustmentState(.ready)
                     self.statusMessage = "Auto cancelled; nothing was changed."
                 case .staleRevision:
-                    self.autoAdjustmentState = .ready
+                    self.publishAutoAdjustmentState(.ready)
                     self.statusMessage = "Auto was superseded; nothing was changed."
                 case .renderUnavailable:
                     // A renderer failure is recoverable and must not mutate the document. Keep
                     // the action available so a later retry can use a healthy render surface.
-                    self.autoAdjustmentState = .failed(result.reasons.first ?? "Auto could not render the current edit.")
+                    self.publishAutoAdjustmentState(.failed(result.reasons.first ?? "Auto could not render the current edit."))
                     self.statusMessage = self.autoAdjustmentState.message
                 }
                 return
@@ -1316,7 +1326,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 // A user edit can supersede an Auto request without changing the photo. Clear
                 // only that photo's in-progress state; a navigation completion must not make the
                 // newly selected photo look ready before its own preview is presented.
-                if isSamePhoto { self.autoAdjustmentState = .ready }
+                if isSamePhoto { self.publishAutoAdjustmentState(.ready) }
                 return
             }
 
@@ -1333,7 +1343,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 proposed.color.vibrance = result.color.vibrance
                 proposed.color.saturation = result.color.saturation
                 guard proposed.renderingHash != self.document.renderingHash else {
-                    self.autoAdjustmentState = .ready
+                    self.publishAutoAdjustmentState(.ready)
                     self.statusMessage = "No further improvement found"
                     return
                 }
@@ -1342,12 +1352,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     fingerprint: AutoRunFingerprint.make(source: imageSource, document: proposed)
                 )
                 let applied = EditDocument.applyingAutoResult(autoResult, to: self.document)
-                self.autoAdjustmentState = .applying
+                self.publishAutoAdjustmentState(.applying, progress: 0.9)
                 self.statusMessage = "Applying Auto adjustments…"
                 self.updateDocument(preservingAutoResult: true) { document in
                     document = applied
                 }
-                self.autoAdjustmentState = .ready
+                self.publishAutoAdjustmentState(.ready)
                 self.statusMessage = "Auto applied — subject-aware Light baseline (undo to restore previous edits)"
                 return
             }
@@ -1368,13 +1378,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 && self.sourceRevision == sourceRevision
                 && self.imageSource == imageSource
             guard isSamePhotoAfterAnalysis, self.documentRevision == documentRevision else {
-                if isSamePhotoAfterAnalysis { self.autoAdjustmentState = .ready }
+                if isSamePhotoAfterAnalysis { self.publishAutoAdjustmentState(.ready) }
                 return
             }
             guard let histogram,
                   let result = AutoAdjustmentAnalyzer.analyze(histogram: histogram) else {
                 let message = "Auto could not analyze \(self.sourceName). Try reloading the photo."
-                self.autoAdjustmentState = .failed(message)
+                self.publishAutoAdjustmentState(.failed(message))
                 self.statusMessage = message
                 return
             }
@@ -1385,7 +1395,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             proposed.color.vibrance = result.color.vibrance
             proposed.color.saturation = result.color.saturation
             guard proposed.renderingHash != self.document.renderingHash else {
-                self.autoAdjustmentState = .ready
+                self.publishAutoAdjustmentState(.ready)
                 self.statusMessage = "No further improvement found"
                 return
             }
@@ -1394,12 +1404,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 fingerprint: AutoRunFingerprint.make(source: imageSource, document: proposed)
             )
             let applied = EditDocument.applyingAutoResult(autoResult, to: self.document)
-            self.autoAdjustmentState = .applying
+            self.publishAutoAdjustmentState(.applying, progress: 0.9)
             self.statusMessage = "Applying Auto adjustments…"
             self.updateDocument(preservingAutoResult: true) { document in
                 document = applied
             }
-            self.autoAdjustmentState = .ready
+            self.publishAutoAdjustmentState(.ready)
             self.statusMessage = "Auto applied — Light and Color baseline (undo to restore previous edits)"
         }
     }
@@ -1411,15 +1421,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         autoInvocationRevision &+= 1
         autoAdjustmentTask?.cancel()
         autoAdjustmentTask = nil
-        autoAdjustmentState = .cancelled
+        publishAutoAdjustmentState(.cancelled)
         statusMessage = "Auto cancelled; nothing was changed."
+    }
+
+    /// Await the active Auto task in tests and lifecycle owners without polling published state.
+    /// The task is retained after completion until the next invocation so a caller can join a
+    /// completion that already crossed its final renderer milestone.
+    func waitForAutoAdjustmentCompletion() async {
+        await autoAdjustmentTask?.value
     }
 
     private func resetAutoAdjustmentForLifecycle() {
         autoInvocationRevision &+= 1
         autoAdjustmentTask?.cancel()
         autoAdjustmentTask = nil
-        autoAdjustmentState = .unavailable("Auto is available when the photo preview is ready.")
+        publishAutoAdjustmentState(.unavailable("Auto is available when the photo preview is ready."))
     }
 
     // MARK: - Image loading
@@ -4158,7 +4175,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard publication.gpuImage != nil || publication.image != nil else {
             if publication.phase == .settled {
                 previewState = .failed
-                autoAdjustmentState = .unavailable("Auto is unavailable because the photo preview failed.")
+                publishAutoAdjustmentState(.unavailable("Auto is unavailable because the photo preview failed."))
                 statusMessage = "Could not render \(sourceName)"
             }
             return
@@ -4230,7 +4247,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
            statusMessage == "Loading \(sourceName)..." {
             statusMessage = "\(sourceName)  \(Int(request.source.nativeExtent.width))\u{00D7}\(Int(request.source.nativeExtent.height))"
         }
-        if !isAutoAdjustmentInProgress { autoAdjustmentState = .ready }
+        if !isAutoAdjustmentInProgress { publishAutoAdjustmentState(.ready) }
         lastPresentedVisibleRequest = request
         lastPresentedVisibleImage = presentedImage
         let needsComparisonRefresh = pendingDevelopChange
