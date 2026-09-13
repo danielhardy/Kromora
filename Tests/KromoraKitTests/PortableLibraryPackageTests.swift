@@ -202,6 +202,26 @@ final class PortableLibraryPackageTests: TempDirectoryTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: xmpURL.path))
     }
 
+    func testXMPWithDOCTYPEEntityBombIsRejectedAsMalformedRatherThanExpanded() throws {
+        let bomb = """
+        <?xml version="1.0"?>
+        <!DOCTYPE lolz [
+         <!ENTITY lol "lol">
+         <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;">
+        ]>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+            <rdf:Description rdf:about="" xmlns:kromora="https://kromora.app/ns/1.0/" kromora:assetID="&lol2;" kromora:revision="1" kromora:editDocument="x"/>
+          </rdf:RDF>
+        </x:xmpmeta>
+        """
+        XCTAssertThrowsError(try PortablePackageXMPCodec.decode(Data(bomb.utf8))) { error in
+            guard case PortablePackageError.malformedXMP = error else {
+                return XCTFail("expected typed malformed-XMP error, got \(error)")
+            }
+        }
+    }
+
     func testReservedReferencedAssetFieldsRoundTripWithoutResolverBehavior() throws {
         let packageURL = tempDirectory.appendingPathComponent("Referenced.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)
