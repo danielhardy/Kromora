@@ -219,6 +219,19 @@ final class PortablePackageLease: Sendable {
     }
 
     func release() throws {
+        try release(at: lockURL)
+    }
+
+    /// Releases a lease whose lock file was relocated by an atomic directory rename after this
+    /// lease was acquired — e.g. restore renaming a validated staging directory into place as the
+    /// new active package. The ownership token is unchanged; only the on-disk path moved, so
+    /// releasing via the original `packageRoot` would silently no-op against a path that no longer
+    /// exists and leak the lock at its new location.
+    func release(movedTo newRoot: URL) throws {
+        try release(at: newRoot.appendingPathComponent("manifest.lock"))
+    }
+
+    private func release(at lockURL: URL) throws {
         guard !state.withLock({ $0.released }) else { return }
         guard let current = try? Self.readInfo(at: lockURL) else {
             state.withLock { $0.released = true }
