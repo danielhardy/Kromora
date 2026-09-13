@@ -493,7 +493,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "auto-first.png", in: tempDirectory
         )
-        let second = try Fixtures.writeGradientPNG(
+        // Keep the sources pixel-distinct so the first photo's canonical preview cannot bypass the
+        // gated renderer when the second photo is selected.
+        let second = try Fixtures.writeClarityPNG(
             width: 16, height: 12, named: "auto-second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
