@@ -2,8 +2,39 @@
 id: KRMA-366
 title: Primary canvas preview does not reflect local mask while edited thumbnail does
 type: bug
-status: backlog
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Visible local mask adjustment in primary canvas at fit and non-nil ROI
+      result: pass
+    - criterion: Mask coverage remains in oriented full-source coordinates for ROI previews
+      result: pass
+    - criterion: Primary preview and edited thumbnail masked pixels agree
+      result: pass
+    - criterion: Preview/export masked rendering remains consistent
+      result: pass
+    - criterion: Cancellation, cache, and two-phase semantic behavior preserved
+      result: pass
+    - criterion: Regression coverage uses strong semantic foreground adjustment and source-space ROI
+      result: pass
+  checks_run:
+    - swift test --filter LocalMaskRenderingTests/testSemanticMaskROIKeepsFullSourceCoverageAndMatchesThumbnail
+    - swift test --parallel --filter KromoraKitTests.(LocalMaskRenderingTests|PreviewCoordinatorTests|PreviewSurfaceTests) — 73 tests passed
+    - swift test --parallel — 1322 tests completed without reported failures
+    - swift build -c release — passed
+    - git diff --check — passed
+    - dg validate — passed with pre-existing unknown-model warnings
+  findings: []
+  fixes:
+    - Resolve local masks against fullFrameExtent and crop the resolved mask graph to upstream.extent before blending
+  verification_commits:
+    - 9b043c1
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-12T17:43:31.222Z
+  session: 01MTYO3A5B2SUV904I
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -14,9 +45,11 @@ labels:
   - editor
   - rendering
 created: 2026-09-11T23:35:23.407Z
-updated: 2026-09-11T23:35:48.189Z
-order: m
+updated: 2026-09-12T17:43:31.224Z
+order: y
 board: product
+commits:
+  - 9b043c1
 ---
 
 ## Objective
@@ -59,3 +92,32 @@ Make the primary editor canvas show the same local-mask result as the edited thu
 ## Implementation notes
 
 Investigate the source-space versus ROI-space contract at the RenderEngine.buildImage to resolvedLocalMasks boundary and the final ROI crop/remap. Preserve the existing normalized oriented-source mask contract. Keep the fix scoped to primary preview rendering and presentation; do not replace the independent edited-thumbnail path.
+
+## Agent log
+
+- 2026-09-12T17:43:31.222Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Visible local mask adjustment in primary canvas at fit and non-nil ROI (pass)
+- [x] Mask coverage remains in oriented full-source coordinates for ROI previews (pass)
+- [x] Primary preview and edited thumbnail masked pixels agree (pass)
+- [x] Preview/export masked rendering remains consistent (pass)
+- [x] Cancellation, cache, and two-phase semantic behavior preserved (pass)
+- [x] Regression coverage uses strong semantic foreground adjustment and source-space ROI (pass)
+Checks run:
+- swift test --filter LocalMaskRenderingTests/testSemanticMaskROIKeepsFullSourceCoverageAndMatchesThumbnail
+- swift test --parallel --filter KromoraKitTests.(LocalMaskRenderingTests|PreviewCoordinatorTests|PreviewSurfaceTests) — 73 tests passed
+- swift test --parallel — 1322 tests completed without reported failures
+- swift build -c release — passed
+- git diff --check — passed
+- dg validate — passed with pre-existing unknown-model warnings
+Findings:
+- None
+Fixes:
+- Resolve local masks against fullFrameExtent and crop the resolved mask graph to upstream.extent before blending
+Verification commits:
+- 9b043c1
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTYO3A5B2SUV904I
+Summary: Fixed ROI local-mask rendering by resolving masks in the complete scaled oriented-source frame and cropping coverage to the working ROI. Added semantic primary-preview/thumbnail parity regression coverage; bumped renderer and preview cache versions.
