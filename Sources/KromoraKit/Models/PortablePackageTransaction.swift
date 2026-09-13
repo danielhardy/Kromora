@@ -944,6 +944,7 @@ struct PortablePackageTransaction {
 
     private static func publishRank(_ path: String) -> Int {
         if path.hasSuffix("/asset.json") { return 2 }
+        if path == "Derived/Thumbnails/index.json" { return 3 }
         if path == "manifest.json" { return 3 }
         return 1
     }
