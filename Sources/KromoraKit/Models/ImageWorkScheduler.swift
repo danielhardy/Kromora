@@ -3,9 +3,11 @@ import Foundation
 /// Schedules work that competes for the user's attention.
 ///
 /// The scheduler owns policy, not the work itself. Editor work has its own lane and can therefore
-/// start while thumbnail workers are busy. Thumbnail work is deliberately capped and its pending
-/// queue is bounded; a fast folder scan cannot allocate one task per file and leave stale work
-/// waiting behind the current photo.
+/// start while thumbnail workers are busy. Package I/O uses the same admission policy, but its
+/// operation runs off the main actor so a copy, hash, rebuild, or validation cannot occupy the UI
+/// executor. Thumbnail and package-I/O queues are deliberately bounded; a fast folder scan or
+/// large-library rebuild cannot allocate one task per file and leave stale work waiting behind the
+/// current photo.
 @MainActor
 final class ImageWorkScheduler {
 
@@ -15,12 +17,30 @@ final class ImageWorkScheduler {
         case histogram = 2
         case adjacentFilmstrip = 3
         case visibleGrid = 4
-        case background = 5
+        /// Import copy/hash work is below visible grid demand but ahead of idle maintenance.
+        case packageIO = 5
+        case background = 6
     }
 
     enum Lane: Sendable, Equatable {
         case editor
         case thumbnail
+        /// All package reads and writes share this scheduler with rendering work.
+        case packageIO
+    }
+
+    enum PackageIOLane: Sendable, Equatable {
+        case importCopyHash
+        case indexRebuild
+        case validation
+        case maintenance
+
+        var defaultPriority: Priority {
+            switch self {
+            case .importCopyHash: return .packageIO
+            case .indexRebuild, .validation, .maintenance: return .background
+            }
+        }
     }
 
     /// The single terminal notification delivered for an admitted job.
@@ -49,6 +69,10 @@ final class ImageWorkScheduler {
         /// RenderEngine is actor-serialized. Keep only a small support backlog behind the newest
         /// visible request so inspector churn cannot accumulate actor messages.
         var maxQueuedEditorJobs: Int = 4
+        /// Package commits remain serialized by the package writer. Copy/hash callers can opt into
+        /// a larger value after measuring their volume, while maintenance defaults to one worker.
+        var maxConcurrentPackageIO: Int = 1
+        var maxQueuedPackageIO: Int = 32
 
         static let `default` = Configuration()
     }
@@ -60,19 +84,29 @@ final class ImageWorkScheduler {
     }
 
     typealias Operation = @MainActor @Sendable () async -> Void
+    /// Package work must not inherit the main actor: filesystem, hashing, and validation work are
+    /// explicitly outside the UI executor. The scheduler still delivers its terminal callback on
+    /// the main actor.
+    typealias PackageIOOperation = @Sendable () async -> Void
     typealias TerminalHandler = @MainActor @Sendable (TerminalOutcome) -> Void
+
+    private enum ScheduledOperation {
+        case mainActor(Operation)
+        case packageIO(PackageIOOperation)
+    }
 
     private struct Job {
         let id: JobID
         let lane: Lane
         var priority: Priority
         let sequence: UInt64
-        let operation: Operation
+        let operation: ScheduledOperation
         let onTerminal: TerminalHandler
     }
 
     private struct Running {
         let lane: Lane
+        let priority: Priority
         let token: UInt64
         let task: Task<Void, Never>
         let onTerminal: TerminalHandler
@@ -85,15 +119,22 @@ final class ImageWorkScheduler {
     private var nextToken: UInt64 = 0
 
     private(set) var droppedThumbnailCount = 0
+    private(set) var droppedPackageIOCount = 0
     private(set) var cancelledCount = 0
     private(set) var peakQueuedThumbnailCount = 0
+    private(set) var peakQueuedPackageIOCount = 0
+    /// Number of package jobs that were ready but deliberately held behind editor contention.
+    /// This is useful telemetry as well as a fairness-test seam.
+    private(set) var yieldedPackageIOCount = 0
     private(set) var admissionLog: [Admission] = []
 
     init(configuration: Configuration = .default) {
         self.configuration = Configuration(
             maxConcurrentThumbnails: max(0, configuration.maxConcurrentThumbnails),
             maxQueuedThumbnails: max(0, configuration.maxQueuedThumbnails),
-            maxQueuedEditorJobs: max(0, configuration.maxQueuedEditorJobs)
+            maxQueuedEditorJobs: max(0, configuration.maxQueuedEditorJobs),
+            maxConcurrentPackageIO: max(0, configuration.maxConcurrentPackageIO),
+            maxQueuedPackageIO: max(0, configuration.maxQueuedPackageIO)
         )
     }
 
@@ -107,15 +148,28 @@ final class ImageWorkScheduler {
         queued.values.filter { $0.lane == .editor }.count
     }
 
+    var pendingPackageIOCount: Int {
+        queued.values.filter { $0.lane == .packageIO }.count
+    }
+
     var runningCount: Int { running.count }
 
     var runningThumbnailCount: Int {
         running.values.filter { $0.lane == .thumbnail }.count
     }
 
+    var runningPackageIOCount: Int {
+        running.values.filter { $0.lane == .packageIO }.count
+    }
+
     var canQueueThumbnail: Bool {
         runningThumbnailCount < configuration.maxConcurrentThumbnails
             || pendingThumbnailCount < configuration.maxQueuedThumbnails
+    }
+
+    var canQueuePackageIO: Bool {
+        runningPackageIOCount < configuration.maxConcurrentPackageIO
+            || pendingPackageIOCount < configuration.maxQueuedPackageIO
     }
 
     var isIdle: Bool { queued.isEmpty && running.isEmpty }
@@ -133,8 +187,8 @@ final class ImageWorkScheduler {
 
         nextSequence &+= 1
         let job = Job(
-            id: id, lane: lane, priority: priority, sequence: nextSequence, operation: operation,
-            onTerminal: onTerminal
+            id: id, lane: lane, priority: priority, sequence: nextSequence,
+            operation: .mainActor(operation), onTerminal: onTerminal
         )
 
         if lane == .thumbnail {
@@ -164,6 +218,56 @@ final class ImageWorkScheduler {
         let admitted = queued[job.id] != nil
         if admitted || running[job.id] != nil {
             admissionLog.append(Admission(id: job.id, lane: lane, priority: priority))
+        }
+        updatePeakQueue()
+        pump()
+        return admitted || running[job.id] != nil
+    }
+
+    /// Admit package I/O through the shared scheduler.
+    ///
+    /// Import copy/hash work has a priority just below visible-grid work. Rebuild, validation, and
+    /// maintenance default to idle background priority. A caller may supply a different priority
+    /// for a narrowly-scoped user action, but package work can never use the editor lane by
+    /// accident because this API requires a non-main-actor operation.
+    @discardableResult
+    func enqueuePackageIO(
+        id: JobID,
+        lane packageIOLane: PackageIOLane,
+        priority: Priority? = nil,
+        onTerminal: @escaping TerminalHandler = { _ in },
+        operation: @escaping PackageIOOperation
+    ) -> Bool {
+        cancel(id: id, countAsCancellation: false)
+
+        nextSequence &+= 1
+        let job = Job(
+            id: id, lane: .packageIO,
+            priority: priority ?? packageIOLane.defaultPriority, sequence: nextSequence,
+            operation: .packageIO(operation), onTerminal: onTerminal
+        )
+
+        guard configuration.maxConcurrentPackageIO > 0 else {
+            droppedPackageIOCount += 1
+            onTerminal(.rejected)
+            return false
+        }
+        guard
+            configuration.maxQueuedPackageIO > 0
+                || runningPackageIOCount < configuration.maxConcurrentPackageIO
+        else {
+            droppedPackageIOCount += 1
+            onTerminal(.rejected)
+            return false
+        }
+        guard admitPackageIO(job) else {
+            onTerminal(.rejected)
+            return false
+        }
+
+        let admitted = queued[job.id] != nil
+        if admitted || running[job.id] != nil {
+            admissionLog.append(Admission(id: job.id, lane: .packageIO, priority: job.priority))
         }
         updatePeakQueue()
         pump()
@@ -256,9 +360,26 @@ final class ImageWorkScheduler {
         return true
     }
 
+    private func admitPackageIO(_ job: Job) -> Bool {
+        let pending = queued.values.filter { $0.lane == .packageIO }
+        if pending.count >= configuration.maxQueuedPackageIO,
+            let worst = pending.max(by: { precedes($0, $1) })
+        {
+            guard precedes(job, worst) else {
+                droppedPackageIOCount += 1
+                return false
+            }
+            queued.removeValue(forKey: worst.id)
+            droppedPackageIOCount += 1
+            worst.onTerminal(.evicted)
+        }
+        queued[job.id] = job
+        return true
+    }
+
     private(set) var droppedEditorCount = 0
 
-    private var runningEditorCount: Int {
+    var runningEditorCount: Int {
         running.values.filter { $0.lane == .editor }.count
     }
 
@@ -301,31 +422,70 @@ final class ImageWorkScheduler {
             queued.removeValue(forKey: next.id)
             nextToken &+= 1
             let token = nextToken
-            let task = Task { @MainActor [weak self, operation = next.operation] in
-                guard !Task.isCancelled else {
-                    self?.finished(id: next.id, token: token, outcome: .cancelled)
-                    return
+            let task: Task<Void, Never>
+            switch next.operation {
+            case .mainActor(let operation):
+                task = Task { @MainActor [weak self, operation] in
+                    guard !Task.isCancelled else {
+                        self?.finished(id: next.id, token: token, outcome: .cancelled)
+                        return
+                    }
+                    await operation()
+                    self?.finished(
+                        id: next.id, token: token,
+                        outcome: Task.isCancelled ? .cancelled : .completed
+                    )
                 }
-                await operation()
-                self?.finished(id: next.id, token: token, outcome: .completed)
+            case .packageIO(let operation):
+                task = Task.detached { [weak self, operation] in
+                    guard !Task.isCancelled else {
+                        await MainActor.run {
+                            self?.finished(id: next.id, token: token, outcome: .cancelled)
+                        }
+                        return
+                    }
+                    await operation()
+                    let outcome: TerminalOutcome = Task.isCancelled ? .cancelled : .completed
+                    await MainActor.run {
+                        self?.finished(id: next.id, token: token, outcome: outcome)
+                    }
+                }
             }
             running[next.id] = Running(
-                lane: next.lane, token: token, task: task, onTerminal: next.onTerminal
+                lane: next.lane, priority: next.priority, token: token, task: task,
+                onTerminal: next.onTerminal
             )
         }
     }
 
     private func nextAdmissibleJob() -> Job? {
-        queued.values
+        let candidates = queued.values
             .filter { job in
                 switch job.lane {
                 case .editor:
                     return !running.values.contains(where: { $0.lane == .editor })
                 case .thumbnail:
                     return runningThumbnailCount < configuration.maxConcurrentThumbnails
+                case .packageIO:
+                    return runningPackageIOCount < configuration.maxConcurrentPackageIO
+                        && !isEditorContended
                 }
             }
-            .min(by: precedes)
+        if candidates.isEmpty,
+            queued.values.contains(where: { $0.lane == .packageIO }),
+            isEditorContended
+        {
+            yieldedPackageIOCount += 1
+        }
+        return candidates.min(by: precedes)
+    }
+
+    /// A package worker yields to both editor-lane work and active thumbnails. The latter matters
+    /// for an edited badge or selected grid cell, which is intentionally scheduled as a thumbnail
+    /// job but still represents visible editor demand.
+    private var isEditorContended: Bool {
+        queued.values.contains { $0.lane == .editor || $0.priority == .activeEditor }
+            || running.values.contains { $0.lane == .editor || $0.priority == .activeEditor }
     }
 
     private func precedes(_ lhs: Job, _ rhs: Job) -> Bool {
@@ -335,6 +495,7 @@ final class ImageWorkScheduler {
 
     private func updatePeakQueue() {
         peakQueuedThumbnailCount = max(peakQueuedThumbnailCount, pendingThumbnailCount)
+        peakQueuedPackageIOCount = max(peakQueuedPackageIOCount, pendingPackageIOCount)
     }
 
     private func finished(id: JobID, token: UInt64, outcome: TerminalOutcome) {
