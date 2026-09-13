@@ -379,6 +379,7 @@ actor LibraryIndexSession {
 
     private func failRebuild(_ error: Error) {
         rebuildError = error
+        rebuildTask = nil
         let waiters = firstPageWaiters
         firstPageWaiters.removeAll()
         waiters.forEach { $0.resume(throwing: error) }
