@@ -25,6 +25,7 @@ enum PortablePackageTransactionError: Error, Equatable, CustomStringConvertible 
     case leaseLost
     case journalCorrupt(String)
     case cannotPublishDirectory(String)
+    case sourceIsNotARegularFile(String)
 
     var description: String {
         switch self {
@@ -44,6 +45,8 @@ enum PortablePackageTransactionError: Error, Equatable, CustomStringConvertible 
         case .journalCorrupt(let message): return "Corrupt package transaction journal: \(message)"
         case .cannotPublishDirectory(let path):
             return "Cannot atomically publish directory '\(path)'"
+        case .sourceIsNotARegularFile(let path):
+            return "Import source is not a regular file: '\(path)'"
         }
     }
 }
@@ -285,6 +288,17 @@ struct PortablePackageRecoveryReport: Equatable, Sendable {
     let removedOrphanedStagingDirectories: [String]
 }
 
+struct PortablePackageStagedFile: Equatable, Sendable {
+    let byteCount: UInt64
+    let checksum: String
+    let usedClonefile: Bool
+}
+
+enum PortablePackageFileCopyMode: Sendable, Equatable {
+    case automatic
+    case streamed
+}
+
 extension PortableLibraryPackage {
     func beginTransaction(
         lease: PortablePackageLease,
@@ -380,10 +394,17 @@ struct PortablePackageTransaction {
     }
 
     /// Streams a source file once into same-volume staging while computing its expected checksum.
-    mutating func stage(fileAt sourceURL: URL, to relativePath: String, chunkSize: Int = 1 << 20)
-        throws
-    {
+    @discardableResult
+    mutating func stage(
+        fileAt sourceURL: URL,
+        to relativePath: String,
+        chunkSize: Int = 1 << 20,
+        copyMode: PortablePackageFileCopyMode = .automatic,
+        isCancelled: @Sendable () -> Bool = { false },
+        sourceReadObserver: @Sendable () -> Void = {}
+    ) throws -> PortablePackageStagedFile {
         try validateRelativePath(relativePath)
+        let chunkSize = max(1, chunkSize)
         guard !journal.files.contains(where: { $0.relativePath == relativePath }) else {
             throw PortablePackageTransactionError.duplicateStagedPath(relativePath)
         }
@@ -391,12 +412,41 @@ struct PortablePackageTransaction {
         let destination = packageRoot.appendingPathComponent(stagingPath)
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        guard Self.isRegularFile(at: sourceURL) else {
+            throw PortablePackageTransactionError.sourceIsNotARegularFile(sourceURL.path)
+        }
+
+        // clonefile does not read the source data. It creates a CoW destination directory entry,
+        // after which the source is opened exactly once below for the digest. On other volumes or
+        // filesystems the fallback reads source -> staged output in one bounded pass.
+        if copyMode == .automatic,
+           Self.canClonefile(source: sourceURL, destination: destination),
+           clonefile(sourceURL.path, destination.path, 0) == 0 {
+            sourceReadObserver()
+            let digest = try Self.hashFile(
+                at: sourceURL, chunkSize: chunkSize, isCancelled: isCancelled)
+            let file = PortablePackageTransactionFile(
+                relativePath: relativePath, stagingPath: stagingPath, backupPath: nil,
+                byteCount: digest.byteCount, stagedChecksum: digest.checksum,
+                publicationState: .staged
+            )
+            journal.files.append(file)
+            try persistJournal()
+            try faultInjector?.check(.stage)
+            return PortablePackageStagedFile(
+                byteCount: digest.byteCount, checksum: digest.checksum, usedClonefile: true)
+        }
+
+        sourceReadObserver()
         let input = try FileHandle(forReadingFrom: sourceURL)
-        let output = try FileHandle(forWritingTo: Self.createEmptyFile(at: destination))
+        FileManager.default.createFile(atPath: destination.path, contents: nil)
+        let output = try FileHandle(forWritingTo: destination)
         var hasher = SHA256()
         var byteCount: UInt64 = 0
         do {
             while true {
+                if isCancelled() { throw CancellationError() }
                 let chunk = try input.read(upToCount: chunkSize) ?? Data()
                 if chunk.isEmpty { break }
                 try output.write(contentsOf: chunk)
@@ -420,16 +470,30 @@ struct PortablePackageTransaction {
         journal.files.append(file)
         try persistJournal()
         try faultInjector?.check(.stage)
+        return PortablePackageStagedFile(
+            byteCount: byteCount, checksum: file.stagedChecksum, usedClonefile: false)
     }
 
-    mutating func commit(now: Date = Date()) throws {
+    mutating func abort() throws {
         guard journal.state != .committed else {
             throw PortablePackageTransactionError.transactionAlreadyCommitted
         }
+        try Self.rollback(journal, packageRoot: packageRoot)
+        cleanupCommittedArtifacts()
+    }
+
+    mutating func commit(
+        now: Date = Date(), isCancelled: @Sendable () -> Bool = { false }
+    ) throws {
+        guard journal.state != .committed else {
+            throw PortablePackageTransactionError.transactionAlreadyCommitted
+        }
+        if isCancelled() { throw CancellationError() }
         try lease.assertOwnership(at: now, faultInjector: faultInjector)
         journal.state = .flushing
         try persistJournal()
         for file in journal.files {
+            if isCancelled() { throw CancellationError() }
             let url = packageRoot.appendingPathComponent(file.stagingPath)
             let handle = try FileHandle(forWritingTo: url)
             try handle.synchronize()
@@ -441,6 +505,7 @@ struct PortablePackageTransaction {
         journal.state = .checksumming
         try persistJournal()
         for file in journal.files {
+            if isCancelled() { throw CancellationError() }
             let url = packageRoot.appendingPathComponent(file.stagingPath)
             let data = try Data(contentsOf: url)
             let actual = Self.sha256(data)
@@ -476,6 +541,7 @@ struct PortablePackageTransaction {
             Self.publishRank($0.relativePath) < Self.publishRank($1.relativePath)
         }
         for item in ordered {
+            if isCancelled() { throw CancellationError() }
             try lease.assertOwnership(at: now, faultInjector: faultInjector)
             guard
                 let currentIndex = journal.files.firstIndex(where: {
@@ -628,10 +694,52 @@ struct PortablePackageTransaction {
 
     private static func sha256(_ data: Data) -> String { SHA256.hash(data: data).hexString }
 
-    private static func createEmptyFile(at url: URL) throws -> URL {
-        FileManager.default.createFile(atPath: url.path, contents: Data())
-        return url
+    private static func isRegularFile(at url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue
     }
+
+    private static func hashFile(
+        at url: URL, chunkSize: Int, isCancelled: @Sendable () -> Bool
+    ) throws -> (byteCount: UInt64, checksum: String) {
+        let input = try FileHandle(forReadingFrom: url)
+        var hasher = SHA256()
+        var byteCount: UInt64 = 0
+        do {
+            while true {
+                if isCancelled() { throw CancellationError() }
+                let chunk = try input.read(upToCount: chunkSize) ?? Data()
+                if chunk.isEmpty { break }
+                hasher.update(data: chunk)
+                byteCount += UInt64(chunk.count)
+            }
+            try input.close()
+        } catch {
+            try? input.close()
+            throw error
+        }
+        return (byteCount, hasher.finalize().hexString)
+    }
+
+    private static func canClonefile(source: URL, destination: URL) -> Bool {
+        #if os(macOS)
+            guard let sourceVolume = volumeIdentifier(for: source),
+                  let destinationVolume = volumeIdentifier(for: destination.deletingLastPathComponent())
+            else { return false }
+            return sourceVolume == destinationVolume
+        #else
+            return false
+        #endif
+    }
+
+    #if os(macOS)
+        private static func volumeIdentifier(for url: URL) -> String? {
+            let values = try? url.resourceValues(forKeys: [.volumeIdentifierKey])
+            return values?.volumeIdentifier.map { String(describing: $0) }
+        }
+    #endif
+
 
     private static func relativePath(from root: URL, to url: URL) -> String {
         let rootPath =
