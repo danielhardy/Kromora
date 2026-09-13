@@ -503,11 +503,23 @@ final class ComparisonModeTests: TempDirectoryTestCase {
                 && viewModel.originalPreviewSurface.image != nil
         }
         let requests = await fake.previewRequests
-        XCTAssertTrue(requests.contains { $0.source?.backing == .url(firstManagedURL) && $0.document == EditDocument() })
-        XCTAssertTrue(requests.contains { $0.source?.backing == .url(secondManagedURL) && $0.document == EditDocument() })
+        let diagnostics = requests.map { request in
+            let source = request.source?.backing == .url(secondManagedURL) ? "second" : "first"
+            let token = request.source?.traceToken ?? "missing-source"
+            let asset = request.source?.portableIdentity.assetID.raw ?? "missing-asset"
+            return "\(source):token=\(token):asset=\(asset):requestRevision=\(request.requestRevision):document=\(request.document.editHash)"
+        }.joined(separator: ",")
+        XCTAssertTrue(
+            requests.contains { $0.source?.backing == .url(firstManagedURL) && $0.document == EditDocument() },
+            "missing first-photo baseline; requests=\(diagnostics)"
+        )
+        XCTAssertTrue(
+            requests.contains { $0.source?.backing == .url(secondManagedURL) && $0.document == EditDocument() },
+            "missing second-photo baseline; requests=\(diagnostics)"
+        )
         XCTAssertTrue(requests.filter { $0.source?.backing == .url(secondManagedURL) }.allSatisfy {
             $0.document == EditDocument()
-        })
+        }, "second-photo request crossed an edit identity fence; requests=\(diagnostics)")
     }
 
     private func enableSideBySide(on viewModel: AppViewModel) {

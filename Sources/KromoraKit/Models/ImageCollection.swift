@@ -980,11 +980,28 @@ final class ImageCollectionPresentationModel: ObservableObject {
                 continue
             }
             let metadata = ImageMetadata.read(from: destinationURL)
+            let bookmarkData = PhotoAssetSource.bookmarkData(for: destinationURL)
+            // URL-backed library entries are logical photos, not content-addressed blobs. Two
+            // different files can contain identical bytes, and sharing the compatibility
+            // fingerprint identity would let one photo inherit the other's edit session. Keep
+            // the source fingerprint portable for cache invalidation, but allocate the durable
+            // asset UUID at this import boundary so each library item owns its edits.
+            let observedSource = PhotoAssetSource(
+                url: destinationURL, bookmarkData: bookmarkData
+            )
+            let importedIdentity = PortablePhotoIdentity(
+                assetID: PortablePhotoAssetID(),
+                sourceFingerprint: observedSource.portableIdentity.sourceFingerprint
+            )
             let asset = restoredCullingState(for: PhotoAsset(
-                url: destinationURL,
+                source: PhotoAssetSource(
+                    url: destinationURL,
+                    bookmarkData: bookmarkData,
+                    portableIdentity: importedIdentity
+                ),
                 filename: canonicalURL.deletingPathExtension().lastPathComponent,
-                metadata: PhotoAssetMetadata(imageMetadata: metadata),
-                bookmarkData: PhotoAssetSource.bookmarkData(for: destinationURL)
+                fileType: canonicalURL.pathExtension,
+                metadata: PhotoAssetMetadata(imageMetadata: metadata)
             ))
             if let existingItem = items.first(where: { $0.url?.standardizedFileURL == destinationURL }) {
                 importedIDs.append(existingItem.id)
