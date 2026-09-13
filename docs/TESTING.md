@@ -11,6 +11,7 @@ swift test
 swift build -c release
 scripts/ci-tests.sh fast
 scripts/ci-tests.sh serial
+scripts/ci-tests.sh identity
 git diff --check
 dg validate
 ```
@@ -19,6 +20,11 @@ dg validate
 Core Image, render, and AppKit/UI-sensitive tests. `scripts/ci-tests.sh optional` runs RAW-fixture,
 benchmark, and packaging checks when their inputs are available. Generated fixtures are created by
 the tests and are not committed.
+
+The standing Phase 1 identity gate is IdentityRegressionGateTests. It generates a disposable
+1,000-asset library and verifies full-library relocation, duplicate/collision handling, render and
+thumbnail mask supersession, preview publication supersession, and direct edit-store recovery. It
+is included in serial and can also be run directly with scripts/ci-tests.sh identity.
 
 The pre-package folder-backed library baseline is documented in
 [`LIBRARY_PACKAGE_BASELINE.md`](LIBRARY_PACKAGE_BASELINE.md). Its opt-in harness runs in the
