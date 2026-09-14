@@ -2,7 +2,7 @@
 id: KRMA-431
 title: Complete the durable-data and device-cache storage boundary
 type: feature
-status: ready
+status: claimed
 priority: high
 agent: codex
 model: gpt-5.6-luna
@@ -16,11 +16,17 @@ labels:
   - performance
   - backup
 created: 2026-09-14T03:06:23.473Z
-updated: 2026-09-14T03:54:21.700Z
+updated: 2026-09-14T09:21:58.423Z
 depends_on:
   - KRMA-430
 order: t
 board: product
+claim:
+  actor: codex
+  session: 01MU11AJYU2O6S4DQ2
+  claimed_at: 2026-09-14T09:21:58.422Z
+  expires_at: 2026-09-14T10:21:58.422Z
+  model: gpt-5.6-luna
 ---
 
 ## Objective
