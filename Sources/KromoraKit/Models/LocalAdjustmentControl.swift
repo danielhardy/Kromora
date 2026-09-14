@@ -108,7 +108,7 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         case .exposure:
             return String(format: "%+.2f EV", value)
         case .temperature:
-            return String(format: "%.0f K", value)
+            return ColorSettingFormatting.temperature(value)
         case .contrast, .highlights, .shadows, .whites, .blacks, .tint, .saturation, .vibrance,
             .texture, .clarity, .dehaze:
             return String(format: "%+.0f", value)

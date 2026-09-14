@@ -54,25 +54,47 @@ struct AdjustInspectorView: View {
                     .accessibilityHidden(true)
             }
 
-            NeutralOriginSlider(
-                value: viewModel.adjustmentBinding(for: control),
-                in: control.range,
-                // Slider space, like the binding either side of it: the temperature row is
-                // reflected about D65, and 6500 K happens to be the fixed point, but reading the
-                // neutral through `sliderMapped` is what keeps that a coincidence rather than a
-                // dependency.
-                neutral: control.sliderMapped(control.neutral),
-                trackStyle: control.trackStyle,
-                accessibilityTitle: control.title,
-                accessibilityReadout: readout(for: control),
-                onEditingChanged: { editing in
-                    if editing {
-                        viewModel.beginPreviewInteraction()
-                    } else {
-                        viewModel.endPreviewInteraction()
-                    }
+            Group {
+                if control == .temperature {
+                    TemperatureSlider(
+                        value: viewModel.adjustmentBinding(for: control),
+                        in: control.range,
+                        // The adjustment binding is already in photographer-facing slider space;
+                        // the temperature-specific view only normalizes its physical track.
+                        neutral: control.sliderMapped(control.neutral),
+                        trackStyle: control.trackStyle,
+                        accessibilityTitle: control.title,
+                        accessibilityReadout: readout(for: control),
+                        onEditingChanged: { editing in
+                            if editing {
+                                viewModel.beginPreviewInteraction()
+                            } else {
+                                viewModel.endPreviewInteraction()
+                            }
+                        }
+                    )
+                } else {
+                    NeutralOriginSlider(
+                        value: viewModel.adjustmentBinding(for: control),
+                        in: control.range,
+                        // Slider space, like the binding either side of it: the temperature row is
+                        // reflected about D65, and 6500 K happens to be the fixed point, but reading the
+                        // neutral through `sliderMapped` is what keeps that a coincidence rather than a
+                        // dependency.
+                        neutral: control.sliderMapped(control.neutral),
+                        trackStyle: control.trackStyle,
+                        accessibilityTitle: control.title,
+                        accessibilityReadout: readout(for: control),
+                        onEditingChanged: { editing in
+                            if editing {
+                                viewModel.beginPreviewInteraction()
+                            } else {
+                                viewModel.endPreviewInteraction()
+                            }
+                        }
+                    )
                 }
-            )
+            }
             .accessibilityLabel(control.title)
             .accessibilityValue(readout(for: control))
             .accessibilitySortPriority(sortPriority)
