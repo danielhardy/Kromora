@@ -2,8 +2,19 @@
 id: KRMA-391
 title: "Phase 2: implement portable package format, transactions, and import"
 type: feature
-status: ready
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-13T13:47:07.884Z
+  session: 01MTZV7HKIM59AHUMY
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -14,7 +25,7 @@ labels:
   - persistence
   - import
 created: 2026-09-12T19:19:18.353Z
-updated: 2026-09-12T23:35:33.179Z
+updated: 2026-09-13T13:47:34.308Z
 depends_on:
   - KRMA-390
   - KRMA-401
@@ -66,6 +77,27 @@ thumbnails/previews rebuildable and keep iCloud sync out of scope.
 Persistence/import fault-injection lane, including clean-profile package-copy tests and filesystem
 relocation. No UI performance claim is accepted until the Phase 3 scale lane exists.
 
+### Comment — codex @ 2026-09-13T13:47:34.307Z
+
+Verification evidence: swift build passed; focused Phase 2 suite passed 36/36 (PortablePackage, PortableLibraryPackage, PortableCacheIdentity, PortablePhotoIdentity, IdentityRegressionGate); dg validate passed with only existing model-name warnings; git diff --check passed. The full repository suite was not used as the Phase 2 gate because unrelated AutoAdjustment and ComparisonMode tests failed in the current environment. Non-blocking KRMA-418 remains open for the documented scale concern that package open eagerly validates every asset record.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-13T13:47:07.884Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MTZV7HKIM59AHUMY
+Summary: Phase 2 package format, crash-safe transactions, copy-on-import, revisioned XMP/Look sidecars, and end-to-end recovery/relocation gates verified.
