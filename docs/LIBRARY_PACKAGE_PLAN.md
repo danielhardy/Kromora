@@ -1,7 +1,7 @@
 # Portable library package — implementation plan
 
-**Status:** future package-format design input; Phase 0 and the Phase 1 identity foundation have
-landed. The sequenced implementation issues are KRMA-389
+**Status:** the Pictures-backed package and storage boundary are active. This remains design input
+for future scale/format work; the sequenced implementation issues began with KRMA-389
 (phase 0), KRMA-390 (phase 1), KRMA-391 (phase 2), KRMA-392 (phase 3), and KRMA-393 (phase 4).
 The sequencing and safety boundaries are recorded in [ADR-001](../.dg/decisions/ADR-001-portable-library-package-sequencing-and-safety-b.md).
 Time-bound.
@@ -13,10 +13,9 @@ which records durable architecture, this file describes work that has not happen
 lands, the invariants it establishes move into the engineering guide and the corresponding section
 here is reduced to a pointer. When all five phases are done, this file is deleted.
 
-The current product still uses referenced source folders and a local SwiftData `EditStore.v2.store`
-for per-photo edit records. The edit store now keys records by opaque UUID, but the package layout,
-copy-on-import semantics, and index design below are not shipped behavior. The approved current-data
-disposition is documented in
+The current product uses a Pictures-backed portable package for managed library data. The local
+index and device caches are projections, while package edit sidecars are canonical. The approved
+legacy-data disposition is documented in
 [`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md); implementing later
 package phases must not silently migrate or delete current library data.
 
@@ -240,8 +239,8 @@ miss; it must never invalidate the saved mask recipe."
 
 That holds here. Mask definitions are already inside the edit revision and therefore already
 canonical and already portable. **Float32 mask rasters and analysis results do not enter the
-package.** They stay in the device-local cache (`MaskStore`, Application Support), keyed by the new
-portable identity (§3.1).
+package.** They stay in the device-local cache (`MaskStore`, `~/Library/Caches/Kromora`), keyed by
+the new portable identity (§3.1). See [`STORAGE_POLICY.md`](STORAGE_POLICY.md) for the active matrix.
 
 Rationale beyond the invariant: mask rasters are megabytes each, fully derivable, and would dominate
 both package size and backup verification time for zero durability benefit.

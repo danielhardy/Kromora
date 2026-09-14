@@ -1,9 +1,9 @@
 import CryptoKit
 import Foundation
 
-/// Durable, actor-isolated storage for mask pixels. The directory is injectable so tests and
-/// previews can use a temporary location; the production default lives beside Kromora's other
-/// Application Support data. Each quality is a separate file by construction.
+/// Actor-isolated storage for rebuildable mask pixels. The directory is injectable so tests and
+/// previews can use a temporary location; the production default lives in Kromora's disposable
+/// cache boundary. Each quality is a separate file by construction.
 ///
 /// Pixel payloads live in a binary sidecar (raw native-endian Float32) next to a small JSON
 /// metadata file. An earlier revision JSON-encoded the floats inline, which turned a full-
@@ -203,7 +203,6 @@ actor MaskStore {
     }
 
     private static func defaultDirectory() -> URL {
-        KromoraStorage.applicationSupportRoot()
-            .appendingPathComponent("Masks", isDirectory: true)
+        KromoraStorage.cacheDirectory(named: "Masks")
     }
 }

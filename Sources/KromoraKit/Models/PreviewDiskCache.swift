@@ -162,8 +162,14 @@ struct PreviewDiskCache: Sendable {
     }
 
     static func defaultDirectory() -> URL {
-        KromoraStorage.applicationSupportRoot()
-            .appendingPathComponent("DevelopedPreviews", isDirectory: true)
+        KromoraStorage.cacheDirectory(named: "DevelopedPreviews")
+    }
+
+    /// Settled previews for a portable library are package-derived artifacts. They remain
+    /// optional and are excluded from canonical validation, but keeping them beside the package
+    /// makes Finder copies useful and lets a package relocation retain exact preview identities.
+    static func packageDirectory(for packageURL: URL) -> URL {
+        KromoraStorage.packageDerivedDirectory(named: "Previews", under: packageURL)
     }
 
     private static let versionFileName = "version"

@@ -14,6 +14,60 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         )
     }
 
+    func testStoragePolicyKeepsProjectionAndCachesOutsidePackage() {
+        let packageURL = tempDirectory.appendingPathComponent("Library.kromoralibrary")
+        let indexURL = KromoraStorage.indexURL(
+            for: UUID(uuidString: "D90B0CF5-85E5-4E5E-AD66-3E3B44F9B8B0")!
+        )
+        XCTAssertTrue(indexURL.path.contains("Application Support/Kromora/Indexes"))
+        XCTAssertFalse(indexURL.path.hasPrefix(packageURL.path))
+        XCTAssertTrue(
+            KromoraStorage.cacheDirectory(named: "Masks").path.contains("Caches/Kromora/Masks")
+        )
+        XCTAssertTrue(
+            PreviewDiskCache.packageDirectory(for: packageURL).path.hasPrefix(packageURL.path)
+        )
+        XCTAssertFalse(PreviewDiskCache.defaultDirectory().path.hasPrefix(packageURL.path))
+    }
+
+    func testPackageReopensAfterDisposableProjectionAndDerivedDataAreRemoved() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("Disposable.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("Index/LibraryIndex.store")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "source.jpg", in: tempDirectory
+        )
+        let session = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let result = try session.importURLs([sourceURL])
+        let assetID = try XCTUnwrap(result.imported.first?.assetID)
+        let materialized = try XCTUnwrap(session.materializedAssets().first)
+        let store = EditDocumentStore(package: session.package, lease: session.lease)
+        try await store.save(
+            EditDocument(adjustments: [.exposure(ev: 0.5)]),
+            for: EditSourceReference(
+                assetID: .file(try XCTUnwrap(materialized.url)),
+                portableIdentity: materialized.source.portableIdentity,
+                url: materialized.url
+            )
+        )
+        try session.lease.release()
+
+        try? FileManager.default.removeItem(at: packageURL.appendingPathComponent("Derived"))
+        try FileManager.default.removeItem(at: indexURL)
+
+        let reopened = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let restored = try XCTUnwrap(reopened.materializedAssets().first)
+        XCTAssertEqual(restored.source.portableIdentity.assetID, assetID)
+        let reopenedStore = EditDocumentStore(package: reopened.package, lease: reopened.lease)
+        let loaded = await reopenedStore.load(for: EditSourceReference(
+            assetID: .file(try XCTUnwrap(restored.url)),
+            portableIdentity: restored.source.portableIdentity,
+            url: restored.url
+        ))
+        XCTAssertEqual(loaded.document.adjustments, [.exposure(ev: 0.5)])
+        XCTAssertTrue(loaded.found)
+        try reopened.lease.release()
+    }
+
     func testFirstLaunchReopenAndPackageCopyPreserveImportedOriginals() async throws {
         let packageURL = tempDirectory.appendingPathComponent(
             KromoraStorage.portableLibraryPackageName

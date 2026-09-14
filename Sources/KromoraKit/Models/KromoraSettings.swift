@@ -135,12 +135,33 @@ public final class KromoraSettings: ObservableObject {
     }
 
     public static func defaultUserLookFolderURL(fileManager: FileManager = .default) -> URL {
-        return KromoraStorage.applicationSupportRoot(fileManager: fileManager)
-            .appendingPathComponent("Looks", isDirectory: true)
+        KromoraStorage.defaultUserLookDirectory(fileManager: fileManager)
     }
 
     public var defaultSourceFolderURL: URL? { sourceFolderStatus.url }
-    public var defaultExportFolderURL: URL? { exportFolderStatus.url }
+    /// An explicit export-folder bookmark wins. A clean profile gets a visible Pictures-based
+    /// destination rather than an implicit hidden Application Support location.
+    public var defaultExportFolderURL: URL? {
+        exportFolderStatus.url ?? KromoraStorage.defaultExportDirectory(fileManager: fileManager)
+    }
+
+    public var defaultExportDestinationURL: URL {
+        exportFolderStatus.url ?? KromoraStorage.defaultExportDirectory(fileManager: fileManager)
+    }
+
+    /// Prepare the clean-profile export destination immediately before a save panel opens. The
+    /// folder is visible in Pictures and is not created merely by reading Settings.
+    @discardableResult
+    public func ensureDefaultExportFolder() -> URL? {
+        guard !exportFolderStatus.isConfigured else { return exportFolderStatus.url }
+        let url = KromoraStorage.defaultExportDirectory(fileManager: fileManager)
+        do {
+            try fileManager.createDirectory(at: url, withIntermediateDirectories: true)
+            return fileManager.isWritableFile(atPath: url.path) ? url : nil
+        } catch {
+            return nil
+        }
+    }
 
     /// SwiftData may not create the persistent store file until the first successful save. A
     /// requested on-disk URL is therefore only revealable once the file exists.

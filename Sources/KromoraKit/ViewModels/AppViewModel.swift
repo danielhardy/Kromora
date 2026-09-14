@@ -847,13 +847,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     init(
         engine: any RenderEngining = RenderEngine.shared,
-        editStore: EditDocumentStore = EditDocumentStore.makeDefaultStore(),
+        editStore: EditDocumentStore? = nil,
         preferences: UserDefaults = .standard,
         mediaVolumeProvider: any MediaVolumeProviding = MountedMediaVolumeProvider(),
         mediaVolumeNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         applicationNotificationCenter: NotificationCenter = .default,
         includeBundledLooks: Bool = false,
-        libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL,
+        libraryFolderURL: URL? = nil,
         userLookFolderURL: URL? = nil,
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
         previewDiskCacheDirectory: URL? = nil,
@@ -893,14 +893,28 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 portableOpenError =
                     "Kromora could not open its library package at \(normalizedPortablePackageURL.path): "
                     + error.localizedDescription
-                effectiveEditStore = editStore
+                // A package-mode failure is an actionable empty state, not permission to open
+                // the old standalone edit database. Keep the composition root fail-closed and
+                // use only an in-memory projection until the user repairs the package.
+                effectiveEditStore = editStore ?? EditDocumentStore.makeInMemoryProjectionStore()
             }
         } else {
             openedPortableLibrary = nil
             portableOpenError = nil
-            effectiveEditStore = editStore
+            effectiveEditStore = editStore ?? EditDocumentStore.makeDefaultStore()
         }
-        let effectiveLibraryFolderURL = openedPortableLibrary?.rootURL ?? libraryFolderURL
+        let effectiveLibraryFolderURL: URL
+        if let openedPortableLibrary {
+            effectiveLibraryFolderURL = openedPortableLibrary.rootURL
+        } else if let libraryFolderURL {
+            effectiveLibraryFolderURL = libraryFolderURL
+        } else if let normalizedPortablePackageURL {
+            // Keep package-mode failures isolated from the legacy folder-backed library. This
+            // URL is never scanned because the error state returns before restoration below.
+            effectiveLibraryFolderURL = normalizedPortablePackageURL
+        } else {
+            effectiveLibraryFolderURL = ImageCollection.defaultLibraryFolderURL
+        }
         self.portableLibrary = openedPortableLibrary
         self.portableLibraryOpenError = portableOpenError
         self.editStore = effectiveEditStore
@@ -937,7 +951,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
         self.previewDiskCache = PreviewDiskCache(
-            directory: previewDiskCacheDirectory ?? PreviewDiskCache.defaultDirectory(),
+            directory: previewDiskCacheDirectory
+                ?? (openedPortableLibrary.map { PreviewDiskCache.packageDirectory(for: $0.rootURL) }
+                    ?? PreviewDiskCache.defaultDirectory()),
             capBytes: previewDiskCacheCapBytes
         )
         self.embeddedFirstFrameProvider = embeddedFirstFrameProvider
@@ -1142,7 +1158,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         export.onStatus = { [weak self] in self?.statusMessage = $0 }
         export.onError = { [weak self] in self?.presentError($0) }
-        export.defaultFolderURL = { [weak self] in self?.settings.defaultExportFolderURL }
+        export.defaultFolderURL = { [weak self] in self?.settings.ensureDefaultExportFolder() }
 
         derive.onStatus = { [weak self] in self?.statusMessage = $0 }
         derive.onError = { [weak self] in self?.presentError($0) }

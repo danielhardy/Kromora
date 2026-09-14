@@ -62,8 +62,9 @@ Kromora does not bundle official camera profiles or copied commercial emulation 
 acknowledgement shown in the Look inspector is sourced from that manifest.
 
 Bundled Looks are read-only and visually marked as Starter Looks. Imported and saved Looks remain
-user-owned and use the canonical folder
-`~/Library/Application Support/Kromora/Looks`, with security-scoped bookmarks for selected files.
+user-owned and use the visible default folder `~/Pictures/Kromora Looks` unless the user chooses
+another destination. Embedded Look bytes in a package edit revision remain the durable render
+dependency; the browser file is only a reusable user-facing copy.
 
 The selected Look is persisted by stable `LUTID`. A missing file leaves the edit reference intact
 and renders without the unresolved LUT until it can be resolved again.
