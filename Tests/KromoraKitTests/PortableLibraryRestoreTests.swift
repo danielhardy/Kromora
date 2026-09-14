@@ -59,6 +59,76 @@ final class PortableLibraryRestoreTests: TempDirectoryTestCase {
         try postRestoreLease.release()
     }
 
+    func testRestoreDoesNotServeStaleAnalysisForReplacedSourceIdentity() async throws {
+        let sourceURL = tempDirectory.appendingPathComponent("Source.kromoralibrary")
+        let source = try PortableLibraryPackage.create(at: sourceURL)
+        let originalURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "source.jpg", in: tempDirectory
+        )
+        let lease = try PortablePackageLease.acquire(at: sourceURL)
+        let imported = try source.importSources([.init(url: originalURL)], lease: lease)
+        try lease.release()
+        let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+        let record = try source.readAssetRecord(for: assetID)
+
+        let analysisDirectory = tempDirectory.appendingPathComponent("PhotoAnalysis")
+        let cache = PhotoAnalysisCache(directory: analysisDirectory)
+        let staleIdentity = PortablePhotoIdentity(
+            assetID: record.identity.assetID,
+            sourceFingerprint: .data(
+                Data("superseded source bytes".utf8),
+                decoderVersion: record.identity.sourceFingerprint.decoderVersion
+            )
+        )
+        let staleKey = AnalysisCacheKey(identity: staleIdentity, analysisVersion: .current)
+        let staleAnalysis = PhotoAnalysis(
+            version: .current,
+            globalTone: ToneStatistics(variant: .perceptual, mean: 0.99),
+            colorStatistics: .neutral,
+            quality: .globalOnly
+        )
+        try await cache.store(staleAnalysis, for: staleKey)
+
+        let backupURL = tempDirectory.appendingPathComponent("Backup.kromoralibrary")
+        _ = try source.backup(to: backupURL)
+        let activeURL = tempDirectory.appendingPathComponent("Active.kromoralibrary")
+        _ = try PortableLibraryPackage.create(at: activeURL)
+        _ = try await PortableLibraryRestore.run(from: backupURL, replacing: activeURL)
+
+        let restored = try PortableLibraryPackage.open(at: activeURL)
+        let restoredRecord = try restored.readAssetRecord(for: assetID)
+        let restoredSourceURL = try restored.embeddedSourceURL(for: restoredRecord)
+        let restoredSource = ImageSource(
+            url: restoredSourceURL,
+            nativeExtent: CGSize(width: 16, height: 12),
+            portableIdentity: restoredRecord.identity
+        )
+        let currentKey = AnalysisCacheKey(
+            identity: restoredSource.cacheIdentity, analysisVersion: .current
+        )
+
+        // The old entry survives in the device-local cache, but the restored source's content
+        // identity must not accidentally resolve it.
+        let survivingStaleAnalysis = try await cache.analysis(for: staleKey)
+        let currentAnalysis = try await cache.analysis(for: currentKey)
+        XCTAssertEqual(survivingStaleAnalysis, staleAnalysis)
+        XCTAssertNil(currentAnalysis)
+
+        let engine = FakeRenderEngine()
+        let coordinator = PhotoAnalysisCoordinator(
+            engine: engine, cache: cache, stages: [:]
+        )
+        let recomputed = try await coordinator.analyze(
+            assetID: PhotoAssetID(rawValue: "portable:\(assetID.raw)"),
+            source: restoredSource,
+            level: .fast
+        )
+
+        XCTAssertNotEqual(recomputed.globalTone.mean, staleAnalysis.globalTone.mean)
+        let histogramRequestCount = await engine.histogramRequests.count
+        XCTAssertEqual(histogramRequestCount, 1)
+    }
+
     func testFailedValidationLeavesActivePackageUntouchedAndReportsFailure() throws {
         let sourceURL = tempDirectory.appendingPathComponent("Source.kromoralibrary")
         let source = try PortableLibraryPackage.create(at: sourceURL)
