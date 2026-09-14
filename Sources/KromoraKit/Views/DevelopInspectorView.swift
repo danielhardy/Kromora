@@ -136,7 +136,7 @@ struct DevelopInspectorView: View {
                 )
                 Spacer()
                 if !control.isToggle {
-                    Text(String(format: "%.2f", viewModel.developValue(for: control)))
+                    Text(readout(for: control))
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
@@ -153,27 +153,45 @@ struct DevelopInspectorView: View {
                 .accessibilityValue(viewModel.developValue(for: control) != 0 ? "On" : "Off")
                 .accessibilitySortPriority(sortPriority)
             } else {
-                NeutralOriginSlider(
-                    value: viewModel.developBinding(for: control),
-                    in: control.range,
-                    // The decoder default, which for most of these rows is a per-image seed rather
-                    // than a constant — see `developNeutral(for:)`.
-                    neutral: viewModel.developNeutral(for: control),
-                    trackStyle: control == .whiteBalance ? .temperature : .neutral,
-                    accessibilityTitle: control == .whiteBalance
-                        ? "White Balance Temperature" : control.title,
-                    accessibilityReadout: String(
-                        format: "%.2f", viewModel.developValue(for: control)),
-                    onEditingChanged: { editing in
-                        if editing {
-                            viewModel.beginPreviewInteraction()
-                        } else {
-                            viewModel.endPreviewInteraction()
-                        }
+                Group {
+                    if control == .whiteBalance {
+                        TemperatureSlider(
+                            value: viewModel.developBinding(for: control),
+                            in: control.range,
+                            neutral: viewModel.developNeutral(for: control),
+                            trackStyle: .temperature,
+                            accessibilityTitle: "White Balance Temperature",
+                            accessibilityReadout: readout(for: control),
+                            onEditingChanged: { editing in
+                                if editing {
+                                    viewModel.beginPreviewInteraction()
+                                } else {
+                                    viewModel.endPreviewInteraction()
+                                }
+                            }
+                        )
+                    } else {
+                        NeutralOriginSlider(
+                            value: viewModel.developBinding(for: control),
+                            in: control.range,
+                            // The decoder default, which for most of these rows is a per-image seed rather
+                            // than a constant — see `developNeutral(for:)`.
+                            neutral: viewModel.developNeutral(for: control),
+                            trackStyle: .neutral,
+                            accessibilityTitle: control.title,
+                            accessibilityReadout: readout(for: control),
+                            onEditingChanged: { editing in
+                                if editing {
+                                    viewModel.beginPreviewInteraction()
+                                } else {
+                                    viewModel.endPreviewInteraction()
+                                }
+                            }
+                        )
                     }
-                )
+                }
                 .accessibilityLabel(control == .whiteBalance ? "White Balance Temperature" : control.title)
-                .accessibilityValue(String(format: "%.2f", viewModel.developValue(for: control)))
+                .accessibilityValue(readout(for: control))
                 .accessibilitySortPriority(sortPriority)
                 .accessibilityAction(named: Text(
                     control == .whiteBalance ? "Reset to As Shot" : "Reset to decoder default"
@@ -200,8 +218,7 @@ struct DevelopInspectorView: View {
                             neutral: viewModel.developTintNeutral,
                             trackStyle: .tint,
                             accessibilityTitle: "White Balance Tint",
-                            accessibilityReadout: String(
-                                format: "%.2f", viewModel.developTintBinding().wrappedValue),
+                            accessibilityReadout: tintReadout(viewModel.developTintBinding().wrappedValue),
                             onEditingChanged: { editing in
                                 if editing {
                                     viewModel.beginPreviewInteraction()
@@ -211,7 +228,7 @@ struct DevelopInspectorView: View {
                             }
                         )
                         .accessibilityLabel("White Balance Tint")
-                        .accessibilityValue(String(format: "%.2f", viewModel.developTintBinding().wrappedValue))
+                        .accessibilityValue(tintReadout(viewModel.developTintBinding().wrappedValue))
                         .accessibilitySortPriority(sortPriority - 0.5)
                     }
                 }
@@ -220,5 +237,16 @@ struct DevelopInspectorView: View {
         .opacity(enabled ? 1 : 0.55)
         .disabled(!enabled)
         .help(enabled ? "" : "Not supported by this RAW decoder")
+    }
+
+    private func readout(for control: DevelopControl) -> String {
+        if control == .whiteBalance {
+            return ColorSettingFormatting.temperature(viewModel.developValue(for: control))
+        }
+        return String(format: "%.2f", viewModel.developValue(for: control))
+    }
+
+    private func tintReadout(_ value: Double) -> String {
+        ColorSettingFormatting.tint(value)
     }
 }

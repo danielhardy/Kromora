@@ -824,18 +824,35 @@ private struct LocalAdjustmentValueRow: View {
                     .accessibilitySortPriority(1)
             }
 
-            NeutralOriginSlider(
-                value: $value,
-                in: control.range,
-                neutral: control.neutral,
-                trackStyle: control.trackStyle,
-                accessibilityTitle: control.title,
-                accessibilityReadout: control.readout(value),
-                onEditingChanged: { editing in
-                    if editing { beginInteraction() }
-                    else { endInteraction() }
+            Group {
+                if control == .temperature {
+                    TemperatureSlider(
+                        value: $value,
+                        in: control.range,
+                        neutral: control.neutral,
+                        trackStyle: control.trackStyle,
+                        accessibilityTitle: control.title,
+                        accessibilityReadout: control.readout(value),
+                        onEditingChanged: { editing in
+                            if editing { beginInteraction() }
+                            else { endInteraction() }
+                        }
+                    )
+                } else {
+                    NeutralOriginSlider(
+                        value: $value,
+                        in: control.range,
+                        neutral: control.neutral,
+                        trackStyle: control.trackStyle,
+                        accessibilityTitle: control.title,
+                        accessibilityReadout: control.readout(value),
+                        onEditingChanged: { editing in
+                            if editing { beginInteraction() }
+                            else { endInteraction() }
+                        }
+                    )
                 }
-            )
+            }
             .accessibilityLabel(control.title)
             .accessibilityValue(control.readout(value))
             .accessibilitySortPriority(0)

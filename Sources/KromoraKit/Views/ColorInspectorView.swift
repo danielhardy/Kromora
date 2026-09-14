@@ -76,7 +76,8 @@ struct ColorInspectorView: View {
                         readout: temperatureReadout,
                         reset: { viewModel.resetWhiteBalance(.temperature) },
                         resetActionTitle: viewModel.sourceIsRAW ? "Reset to As Shot" : "Reset to neutral",
-                        disabled: viewModel.sourceIsRAW && viewModel.rawCapabilities == nil
+                        disabled: viewModel.sourceIsRAW && viewModel.rawCapabilities == nil,
+                        usesTemperatureSlider: true
                     )
                     valueRow(
                         title: "Tint",
@@ -245,7 +246,8 @@ struct ColorInspectorView: View {
         readout: @escaping (Double) -> String,
         reset: @escaping () -> Void,
         resetActionTitle: String = "Reset to neutral",
-        disabled: Bool = false
+        disabled: Bool = false,
+        usesTemperatureSlider: Bool = false
     ) -> some View {
         ColorValueRow(
             title: title,
@@ -257,17 +259,18 @@ struct ColorInspectorView: View {
             reset: reset,
             resetActionTitle: resetActionTitle,
             beginInteraction: viewModel.beginPreviewInteraction,
-            endInteraction: viewModel.endPreviewInteraction
+            endInteraction: viewModel.endPreviewInteraction,
+            usesTemperatureSlider: usesTemperatureSlider
         )
         .disabled(disabled)
     }
 
     private var temperatureReadout: (Double) -> String {
-        { value in String(format: "%.0f K", value) }
+        ColorSettingFormatting.temperature
     }
 
     private var tintReadout: (Double) -> String {
-        { value in String(format: "%+.0f", value) }
+        ColorSettingFormatting.tint
     }
 
     private var signedWholeReadout: (Double) -> String {
@@ -317,6 +320,7 @@ private struct ColorValueRow: View {
     let resetActionTitle: String
     let beginInteraction: () -> Void
     let endInteraction: () -> Void
+    let usesTemperatureSlider: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -337,18 +341,35 @@ private struct ColorValueRow: View {
                     .accessibilitySortPriority(1)
             }
 
-            NeutralOriginSlider(
-                value: $value,
-                in: range,
-                neutral: neutral,
-                trackStyle: trackStyle,
-                accessibilityTitle: title,
-                accessibilityReadout: readout(value),
-                onEditingChanged: { editing in
-                    if editing { beginInteraction() }
-                    else { endInteraction() }
+            Group {
+                if usesTemperatureSlider {
+                    TemperatureSlider(
+                        value: $value,
+                        in: range,
+                        neutral: neutral,
+                        trackStyle: trackStyle,
+                        accessibilityTitle: title,
+                        accessibilityReadout: readout(value),
+                        onEditingChanged: { editing in
+                            if editing { beginInteraction() }
+                            else { endInteraction() }
+                        }
+                    )
+                } else {
+                    NeutralOriginSlider(
+                        value: $value,
+                        in: range,
+                        neutral: neutral,
+                        trackStyle: trackStyle,
+                        accessibilityTitle: title,
+                        accessibilityReadout: readout(value),
+                        onEditingChanged: { editing in
+                            if editing { beginInteraction() }
+                            else { endInteraction() }
+                        }
+                    )
                 }
-            )
+            }
             .accessibilityLabel(title)
             .accessibilityValue(readout(value))
             .accessibilitySortPriority(0)
