@@ -70,6 +70,84 @@ final class PhotosImportTests: TempDirectoryTestCase {
         XCTAssertTrue(coordinator.failures.isEmpty)
     }
 
+    func testPortablePhotosBatchDefersProjectionAndMaterializationUntilFinish() throws {
+        let packageURL = tempDirectory.appendingPathComponent("Batch.kromoralibrary")
+        let existingURLs = try (0..<3).map { index in
+            try Fixtures.writeJPEG(
+                width: 16 + index, height: 12, orientation: 1,
+                named: "existing-\(index).jpg", in: tempDirectory
+            )
+        }
+        let packageSession = try PortableLibrarySession(at: packageURL)
+        _ = try packageSession.importURLs(existingURLs)
+        try packageSession.lease.release()
+
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), portablePackageURL: packageURL
+        )
+        XCTAssertEqual(viewModel.portableLibrary?.assetCount, 3)
+        XCTAssertEqual(viewModel.collection.items.count, 3)
+
+        let batchData = try (0..<2).map { index in
+            let url = try Fixtures.writeJPEG(
+                width: 40 + index, height: 18, orientation: 1,
+                named: "batch-\(index).jpg", in: tempDirectory
+            )
+            return try Data(contentsOf: url)
+        }
+        viewModel.beginPhotosImport(totalCount: batchData.count)
+        for (index, data) in batchData.enumerated() {
+            viewModel.appendPhotosImport(
+                ImageCollection.PhotoImportItem(
+                    name: "Batch \(index).jpg", data: data,
+                    localIdentifier: "photos.batch.\(index)"
+                ),
+                ordinal: index
+            )
+            XCTAssertEqual(
+                viewModel.portableLibrary?.assetCount, 3,
+                "the portable projection must remain stable during the streamed batch"
+            )
+            XCTAssertEqual(
+                viewModel.collection.items.count, 3,
+                "the presentation bridge must not materialize the full library per item"
+            )
+        }
+
+        viewModel.finishPhotosImport(cancelled: false)
+
+        XCTAssertEqual(viewModel.portableLibrary?.assetCount, 5)
+        XCTAssertEqual(viewModel.collection.items.count, 5)
+        XCTAssertEqual(viewModel.photosImportProgress, nil)
+    }
+
+    func testPortablePhotosFirstBatchItemIsSelectedAfterDeferredRefresh() throws {
+        let packageURL = tempDirectory.appendingPathComponent("FirstBatch.kromoralibrary")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "first-batch.jpg", in: tempDirectory
+        )
+        let data = try Data(contentsOf: sourceURL)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), portablePackageURL: packageURL
+        )
+
+        viewModel.beginPhotosImport(totalCount: 1)
+        viewModel.appendPhotosImport(
+            ImageCollection.PhotoImportItem(
+                name: "First Batch.jpg", data: data, localIdentifier: "photos.first-batch"
+            ),
+            ordinal: 0
+        )
+        XCTAssertTrue(viewModel.collection.items.isEmpty)
+        XCTAssertFalse(viewModel.isInspectorPresented)
+
+        viewModel.finishPhotosImport(cancelled: false)
+
+        XCTAssertEqual(viewModel.collection.items.count, 1)
+        XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[0].id)
+        XCTAssertTrue(viewModel.isInspectorPresented)
+    }
+
     func testCoordinatorRecordsPartialFailureAndKeepsSuccessfulItems() async throws {
         let data = try Data(contentsOf: Fixtures.writeJPEG(
             width: 32, height: 24, orientation: 1, named: "partial.jpg", in: tempDirectory

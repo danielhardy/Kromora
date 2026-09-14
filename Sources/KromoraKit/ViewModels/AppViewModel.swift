@@ -632,6 +632,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// later streamed arrival (or a second load triggered by metadata work) from reopening or
     /// retargeting the inspector after the first accepted item has established the active photo.
     private var didPresentInspectorForPhotosImport = false
+    /// Portable Photos imports commit each item's package transaction immediately, but defer the
+    /// disposable index/collection refresh until the streamed batch finishes.
+    private var isPortablePhotosImportActive = false
+    private var portablePhotosImportNeedsRefresh = false
+    private var portablePhotosImportWasEmpty = false
+    private var portablePhotosImportFirstAssetID: PortablePhotoAssetID?
 
     /// Removable volumes are discovered independently of the selector so the Import menu can name
     /// mounted volumes that contain supported images, or offer a permission-recovery path when
@@ -2402,21 +2408,38 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func preparePhotosImport(totalCount: Int) {
         cancelIdlePreviewBuild(resetCursor: true)
         didPresentInspectorForPhotosImport = false
-        if portableLibrary != nil { return }
+        if portableLibrary != nil {
+            isPortablePhotosImportActive = true
+            portablePhotosImportNeedsRefresh = false
+            portablePhotosImportWasEmpty = collection.items.isEmpty
+            portablePhotosImportFirstAssetID = nil
+            return
+        }
         collection.beginDataImport(reservedCount: max(0, totalCount))
     }
 
     func insertPhotosImport(_ item: ImageCollection.PhotoImportItem, ordinal: Int) {
         if let portableLibrary {
             do {
-                let result = try portableLibrary.importData(item.data, name: item.name)
-                try reloadPortableCollection()
-                if collection.items.count == 1,
-                   let assetID = result.imported.first?.assetID
-                        ?? result.duplicates.first?.existingAssetID
-                {
-                    openPortableAsset(assetID)
-                    presentInspectorForFirstPhotosImportItem()
+                let result = try portableLibrary.importData(
+                    item.data,
+                    name: item.name,
+                    rebuildIndex: !isPortablePhotosImportActive
+                )
+                let assetID = result.imported.first?.assetID
+                    ?? result.duplicates.first?.existingAssetID
+                if isPortablePhotosImportActive {
+                    if let assetID, portablePhotosImportFirstAssetID == nil {
+                        portablePhotosImportFirstAssetID = assetID
+                    }
+                    portablePhotosImportNeedsRefresh =
+                        portablePhotosImportNeedsRefresh || !result.imported.isEmpty
+                } else {
+                    try reloadPortableCollection()
+                    if collection.items.count == 1, let assetID {
+                        openPortableAsset(assetID)
+                        presentInspectorForFirstPhotosImportItem()
+                    }
                 }
             } catch {
                 recordPhotosImportFailureDestination(
@@ -2466,7 +2489,33 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func finishPhotosImportDestination(cancelled: Bool) {
-        if portableLibrary != nil { return }
+        if let portableLibrary {
+            guard isPortablePhotosImportActive else { return }
+            defer {
+                portableLibrary.finishImportBatch()
+                isPortablePhotosImportActive = false
+                portablePhotosImportNeedsRefresh = false
+                portablePhotosImportWasEmpty = false
+                portablePhotosImportFirstAssetID = nil
+            }
+            guard portablePhotosImportNeedsRefresh else { return }
+            do {
+                try portableLibrary.refreshIndex()
+                try reloadPortableCollection()
+                if portablePhotosImportWasEmpty,
+                   let assetID = portablePhotosImportFirstAssetID
+                {
+                    openPortableAsset(assetID)
+                    presentInspectorForFirstPhotosImportItem()
+                }
+            } catch {
+                presentError(
+                    "Kromora could not refresh the library after Photos import: "
+                        + error.localizedDescription
+                )
+            }
+            return
+        }
         collection.finishDataImport()
     }
 

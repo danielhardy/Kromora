@@ -82,6 +82,31 @@ struct PortablePackageImportResult: Equatable, Sendable {
     let cancelled: Bool
 }
 
+/// Duplicate detection state that can be reused across streamed single-source imports.
+///
+/// A Photos import commits one package transaction per item so a failed transfer or write does not
+/// discard earlier successes. Keeping the catalog alive across those transactions avoids rereading
+/// every membership shard and asset record for each item in the batch.
+final class PortablePackageImportCatalog {
+    var shards: [String: PortablePackageMembershipShard]
+    var existingHashes: [String: PortablePhotoAssetID]
+
+    init(package: PortableLibraryPackage) throws {
+        var shards: [String: PortablePackageMembershipShard] = [:]
+        var existingHashes: [String: PortablePhotoAssetID] = [:]
+        for shardName in PortableLibraryPackage.allShards {
+            let shard = try package.readMembershipShard(shardName)
+            shards[shardName] = shard
+            for entry in shard.entries where !entry.isTombstone {
+                let record = try package.readAssetRecord(for: entry.assetID)
+                existingHashes[record.identity.sourceFingerprint.contentHash] = entry.assetID
+            }
+        }
+        self.shards = shards
+        self.existingHashes = existingHashes
+    }
+}
+
 /// Copies originals into a portable package without taking ownership of the source URLs.
 ///
 /// Each source gets its own package transaction. That makes progressive publication possible while
@@ -111,6 +136,27 @@ struct PortablePackageImporter: Sendable {
         sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
         faultInjector: PortablePackageFaultInjector? = nil
     ) throws -> PortablePackageImportResult {
+        let catalog = try PortablePackageImportCatalog(package: package)
+        return try self.`import`(
+            sources: sources,
+            options: options,
+            isCancelled: isCancelled,
+            progress: progress,
+            sourceReadObserver: sourceReadObserver,
+            faultInjector: faultInjector,
+            catalog: catalog
+        )
+    }
+
+    func `import`(
+        sources: [PortablePackageImportSource],
+        options: PortablePackageImportOptions = .init(),
+        isCancelled: @Sendable () -> Bool = { false },
+        progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in },
+        sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
+        faultInjector: PortablePackageFaultInjector? = nil,
+        catalog: PortablePackageImportCatalog
+    ) throws -> PortablePackageImportResult {
         var progressValue = PortablePackageImportProgress(
             total: sources.count,
             processed: 0,
@@ -129,16 +175,6 @@ struct PortablePackageImporter: Sendable {
         var failures: [PortablePackageImportFailure] = []
         var cancelled = false
 
-        var shards: [String: PortablePackageMembershipShard] = [:]
-        var existingHashes: [String: PortablePhotoAssetID] = [:]
-        for shardName in PortableLibraryPackage.allShards {
-            let shard = try package.readMembershipShard(shardName)
-            shards[shardName] = shard
-            for entry in shard.entries where !entry.isTombstone {
-                let record = try package.readAssetRecord(for: entry.assetID)
-                existingHashes[record.identity.sourceFingerprint.contentHash] = entry.assetID
-            }
-        }
         var hashesSeenThisImport: [String: PortablePhotoAssetID] = [:]
 
         for source in sources {
@@ -182,7 +218,7 @@ struct PortablePackageImporter: Sendable {
                 )
                 progressValue.bytesRead += staged.byteCount
 
-                let duplicateAssetID = existingHashes[staged.checksum]
+                let duplicateAssetID = catalog.existingHashes[staged.checksum]
                     ?? hashesSeenThisImport[staged.checksum]
                 if let duplicateAssetID {
                     let importAnyway = options.duplicatePolicy == .importAnyway
@@ -215,7 +251,7 @@ struct PortablePackageImporter: Sendable {
                 )
                 try transaction.stage(data: try Self.encode(record), at: recordPath)
 
-                var shard = try Self.requireShard(shardName, from: shards)
+                var shard = try Self.requireShard(shardName, from: catalog.shards)
                 shard.entries.append(.init(
                     assetID: assetID,
                     recordPath: recordPath,
@@ -230,7 +266,8 @@ struct PortablePackageImporter: Sendable {
                 progress(progressValue)
                 try transaction.commit(now: Date(), isCancelled: isCancelled)
 
-                shards[shardName] = shard
+                catalog.shards[shardName] = shard
+                catalog.existingHashes[staged.checksum] = assetID
                 hashesSeenThisImport[staged.checksum] = assetID
                 imported.append(.init(
                     source: source,
@@ -352,6 +389,27 @@ extension PortableLibraryPackage {
             progress: progress,
             sourceReadObserver: sourceReadObserver,
             faultInjector: faultInjector
+        )
+    }
+
+    func importSources(
+        _ sources: [PortablePackageImportSource],
+        lease: PortablePackageLease,
+        options: PortablePackageImportOptions = .init(),
+        isCancelled: @Sendable () -> Bool = { false },
+        progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in },
+        sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
+        faultInjector: PortablePackageFaultInjector? = nil,
+        catalog: PortablePackageImportCatalog
+    ) throws -> PortablePackageImportResult {
+        try PortablePackageImporter(package: self, lease: lease).`import`(
+            sources: sources,
+            options: options,
+            isCancelled: isCancelled,
+            progress: progress,
+            sourceReadObserver: sourceReadObserver,
+            faultInjector: faultInjector,
+            catalog: catalog
         )
     }
 }
