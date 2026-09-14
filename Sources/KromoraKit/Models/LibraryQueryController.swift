@@ -318,12 +318,13 @@ actor LibraryIndexSession {
 
     /// The default local index location used by the application-support projection.
     static func defaultIndexURL(for libraryID: UUID, applicationSupportURL: URL? = nil) -> URL {
-        let baseURL = applicationSupportURL
-            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        return baseURL
-            .appendingPathComponent("Kromora/Indexes", isDirectory: true)
-            .appendingPathComponent(libraryID.uuidString.lowercased(), isDirectory: true)
-            .appendingPathComponent("LibraryIndex.store")
+        if let applicationSupportURL {
+            return applicationSupportURL
+                .appendingPathComponent("Kromora/Indexes", isDirectory: true)
+                .appendingPathComponent(libraryID.uuidString.lowercased(), isDirectory: true)
+                .appendingPathComponent("LibraryIndex.store")
+        }
+        return KromoraStorage.indexURL(for: libraryID)
     }
 
     var isRebuilding: Bool { rebuildTask != nil }

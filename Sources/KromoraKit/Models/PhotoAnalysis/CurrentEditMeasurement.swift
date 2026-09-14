@@ -1379,7 +1379,6 @@ actor CurrentEditMeasurementCache {
     }
 
     private static func defaultDirectory() -> URL {
-        KromoraStorage.applicationSupportRoot()
-            .appendingPathComponent("CurrentEditMeasurement", isDirectory: true)
+        KromoraStorage.cacheDirectory(named: "CurrentEditMeasurement")
     }
 }

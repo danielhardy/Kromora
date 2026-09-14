@@ -121,7 +121,9 @@ public struct KromoraSettingsView: View {
             HStack {
                 Label(kind.title, systemImage: "folder")
                 Spacer()
-                Text(statusLabel(status))
+                Text(kind == .export && !status.isConfigured
+                     ? "Pictures/\(KromoraStorage.defaultExportDirectoryName)"
+                     : statusLabel(status))
                     .foregroundStyle(status.isAvailable ? Color.secondary : Color.orange)
                     .lineLimit(1)
             }
@@ -158,7 +160,7 @@ public struct KromoraSettingsView: View {
         } footer: {
             Text(kind == .source
                  ? "Used as the starting location for future image and source-folder panels. It does not change the open source folder."
-                 : "Used as the starting location for future exports. It does not move or rewrite existing files.")
+                 : "Exports default to Pictures/\(KromoraStorage.defaultExportDirectoryName) unless you choose another folder. This does not move or rewrite existing files.")
         }
     }
 
@@ -175,7 +177,8 @@ public struct KromoraSettingsView: View {
         let url = fileDialog.chooseFolder(
             title: "Choose " + kind.title,
             prompt: "Use Folder",
-            startingAt: settings.status(for: kind).url,
+            startingAt: settings.status(for: kind).url
+                ?? (kind == .export ? KromoraStorage.defaultExportDirectory() : nil),
             canCreateDirectories: kind == .export
         )
         guard let url else { return }

@@ -108,6 +108,17 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
         XCTAssertNil(settings.sourceFolderStatus.url)
     }
 
+    func testCleanProfileUsesVisiblePicturesDestinations() {
+        let settings = KromoraSettings(preferences: makeDefaults())
+
+        XCTAssertEqual(settings.userLookFolderURL, KromoraStorage.defaultUserLookDirectory())
+        XCTAssertEqual(settings.defaultExportFolderURL, KromoraStorage.defaultExportDirectory())
+        XCTAssertTrue(settings.userLookFolderURL.path.contains("Pictures/"))
+        XCTAssertTrue(settings.defaultExportDestinationURL.path.contains("Pictures/"))
+        XCTAssertFalse(settings.userLookFolderURL.path.contains("Application Support"))
+        XCTAssertFalse(settings.defaultExportDestinationURL.path.contains("Application Support"))
+    }
+
     func testEditDatabaseURLIsRevealableOnlyAfterStoreFileExists() throws {
         let storeURL = tempDirectory.appendingPathComponent("EditStore.store")
 

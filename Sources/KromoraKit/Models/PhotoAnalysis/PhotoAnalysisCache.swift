@@ -186,7 +186,6 @@ actor PhotoAnalysisCache {
     }
 
     private static func defaultDirectory() -> URL {
-        KromoraStorage.applicationSupportRoot()
-            .appendingPathComponent("PhotoAnalysis", isDirectory: true)
+        KromoraStorage.cacheDirectory(named: "PhotoAnalysis")
     }
 }

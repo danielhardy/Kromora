@@ -60,25 +60,25 @@ for the behavior and dated diagnostic baseline.
 
 ## Persistence and masks
 
-The local edit store is a SwiftData `EditStore.v2.store` container under the user's Application
-Support directory. Each `EditRecord` stores one versioned JSON-encoded `EditDocument` and uses an
-opaque `PortablePhotoAssetID` UUID as its only persistence key; source locator fields are only
-operational hints for referenced-folder relinking. `EditPersistenceCoordinator` serializes and
-coalesces writes and flushes them on termination. Per-photo history is in-memory and bounded to 100
-undo and redo snapshots; copy/paste, reset, navigation, and export must preserve the active photo's
-identity and revision. The old development `EditStore.store` is intentionally left untouched under
-the approved clean-slate disposition; see
-[`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md). This is the current
-local store, not the future portable package described in
-[`LIBRARY_PACKAGE_PLAN.md`](LIBRARY_PACKAGE_PLAN.md).
+In portable-library mode, package edit sidecars are canonical and `EditDocumentStore` is an in-memory
+SwiftData projection. Each package revision stores one versioned JSON-encoded `EditDocument` and
+uses an opaque `PortablePhotoAssetID` UUID as its persistence key; resolved Look bytes are embedded
+with the revision. `EditPersistenceCoordinator` serializes and coalesces writes and flushes them on
+termination. Per-photo history is in-memory and bounded to 100 undo and redo snapshots; copy/paste,
+reset, navigation, and export preserve the active photo's identity and revision. The old development
+`EditStore.store` and standalone v2 store remain untouched for support/disposition and are not opened
+as a second authority when a package session is active; see
+[`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md).
 
 Mask definitions are part of the edit document, while generated mask pixels are a separate cache
-under `~/Library/Application Support/Kromora/Masks/`. Metadata is JSON and pixels are raw Float32
+under `~/Library/Caches/Kromora/Masks/`. Metadata is JSON and pixels are raw Float32
 sidecars. Cache keys include source identity, source fingerprint, semantic kind, quality, and
 provider version. A missing or invalid sidecar is a cache miss; it must never invalidate the saved
 mask recipe. Local masks use the same resolved definition for preview, overlay, histogram,
 comparison, copy/paste, and full-resolution export.
 
+[`STORAGE_POLICY.md`](STORAGE_POLICY.md) is the source-of-truth matrix for the durable package,
+the Application Support projection, device caches, and user-visible output destinations.
 `PortableLibraryValidation` is the reusable read-only scrub boundary for package backup and restore.
 It walks the manifest, all membership shards, reachable asset records, originals, edit revisions,
 XMP companions, and embedded Look blobs, verifying structure and the checksums stored in portable

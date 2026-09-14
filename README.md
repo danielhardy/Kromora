@@ -33,12 +33,11 @@ Kromora is a native macOS RAW editor organised around a real photo workflow:
 Every edit is stored as data, never as a baked preview bitmap. Preview and export use the same
 pipeline, so the image on screen and the image written to disk follow the same edit order.
 
-The current product is the folder-backed Library/Edit workflow: source folders remain external to
-the app's local edit store, while Photos and one-off imports are copied into the managed
-Application Support Library folder. The shipped workflow includes culling, deletion, RAW develop,
-content-aware Auto, local masking, Looks, comparison, and full-resolution export. A portable
-self-contained library package is a documented future project, not part of the current storage
-format; see [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md).
+The shipped product uses one portable, Pictures-backed library package for managed originals,
+catalog metadata, edit revisions, embedded Looks, and recovery. The local index and device caches
+are disposable projections; user-visible exports and reusable Looks default to visible Pictures
+folders. The package, backup, restore, and storage-boundary contract is documented in
+[`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md).
 
 Kromora is also an agent-driven software project. Agents plan, claim, implement, verify, and advance
 work through [DispatchGraph](.dg/README.md), making the development process part of the experiment.
