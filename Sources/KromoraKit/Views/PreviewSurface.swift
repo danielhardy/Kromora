@@ -28,9 +28,13 @@ final class PreviewSurface: ObservableObject {
     private(set) var image: CIImage?
     private(set) var presentationImageExtent: CGRect?
     /// When true, a smaller texture is a stand-in for the whole `presentationImageExtent`
-    /// (the camera JPEG first frame). Fit/Fill then fill the canvas instead of treating
-    /// the JPEG as a top-left ROI of the native RAW. Settled ROI previews leave this false.
+    /// (a camera JPEG first frame, or a cropped fit preview whose ROI is the committed crop).
+    /// Fit/Fill then fill the canvas instead of treating the texture as a top-left ROI of a
+    /// larger virtual frame. Viewport-fragment ROI previews leave this false.
     private(set) var coversPresentationExtent = false
+    /// Planner-space rectangle for an uncovered ROI fragment. Interactive frames can decode
+    /// below the planner `targetSize`, so this is not always `image.extent`.
+    private(set) var layoutImageExtent: CGRect?
     private(set) var space: WorkingSpace = .current
     /// The last image known to have made it through the presentation command buffer. Production
     /// frames are already completed texture-backed images; the confirmation still matters because
@@ -44,6 +48,7 @@ final class PreviewSurface: ObservableObject {
     private var lastValidPresentationTexture: MTLTexture?
     private var lastValidPresentationTextureExtent: CGRect?
     private var lastValidPresentationImageExtent: CGRect?
+    private var lastValidLayoutImageExtent: CGRect?
     private var lastValidCoversPresentationExtent = false
     private var lastValidSpace: WorkingSpace = .current
     /// The detail level of a published frame, plus whether that frame is the complete photo.
@@ -117,6 +122,7 @@ final class PreviewSurface: ObservableObject {
         detailFactor: CGFloat? = nil,
         presentationImageExtent: CGRect? = nil,
         coversPresentationExtent: Bool = false,
+        layoutImageExtent: CGRect? = nil,
         onPresented: (() -> Void)? = nil
     ) -> Bool {
         guard let image,
@@ -148,6 +154,7 @@ final class PreviewSurface: ObservableObject {
             covers: coversPresentationExtent
         )
         self.coversPresentationExtent = coversPresentationExtent
+        self.layoutImageExtent = layoutImageExtent
         self.space = space
         // The new publication must not sample the previous frame's texture. Until the async
         // materialization completes, draw() intentionally takes the CI fallback path for this
@@ -233,23 +240,37 @@ final class PreviewSurface: ObservableObject {
     func pendingDisplayRevision() -> UInt64? { pendingDisplayID }
 
     /// The quad/layout rectangle for the current texture. A first-frame JPEG is mapped onto
-    /// the native presentation extent; an ROI preview keeps its source-space texture rectangle.
+    /// the native presentation extent; an ROI preview keeps its source-space texture rectangle
+    /// unless the request supplied a planner-space layout (interactive frames can decode smaller
+    /// than that planner size).
     fileprivate func layoutExtent(forTextureExtent textureExtent: CGRect) -> CGRect {
         if coversPresentationExtent, let presentationImageExtent,
             presentationImageExtent.width > 0, presentationImageExtent.height > 0
         {
             return presentationImageExtent
         }
+        if let layoutImageExtent,
+            layoutImageExtent.width > 0, layoutImageExtent.height > 0,
+            layoutImageExtent.width.isFinite, layoutImageExtent.height.isFinite
+        {
+            return layoutImageExtent
+        }
         return textureExtent
     }
 
     fileprivate func mappedImageForPresentation(_ image: CIImage) -> CIImage {
-        guard coversPresentationExtent, let presentationImageExtent,
+        if coversPresentationExtent, let presentationImageExtent,
             presentationImageExtent.width > 0, presentationImageExtent.height > 0
-        else {
-            return image
+        {
+            return Self.imageMapped(image, onto: presentationImageExtent)
         }
-        return Self.imageMapped(image, onto: presentationImageExtent)
+        if let layoutImageExtent,
+            layoutImageExtent.width > 0, layoutImageExtent.height > 0,
+            layoutImageExtent.width.isFinite, layoutImageExtent.height.isFinite
+        {
+            return Self.imageMapped(image, onto: layoutImageExtent)
+        }
+        return image
     }
 
     fileprivate static func imageMapped(_ image: CIImage, onto target: CGRect) -> CIImage {
@@ -282,6 +303,7 @@ final class PreviewSurface: ObservableObject {
         lastValidPresentationTexture = presentationTexture
         lastValidPresentationTextureExtent = presentationTextureExtent
         lastValidPresentationImageExtent = presentationImageExtent
+        lastValidLayoutImageExtent = layoutImageExtent
         lastValidCoversPresentationExtent = coversPresentationExtent
         lastValidSpace = space
         lastValidDetail = currentDetail
@@ -295,6 +317,7 @@ final class PreviewSurface: ObservableObject {
         presentationTexture = lastValidPresentationTexture
         presentationTextureExtent = lastValidPresentationTextureExtent
         presentationImageExtent = lastValidPresentationImageExtent
+        layoutImageExtent = lastValidLayoutImageExtent
         coversPresentationExtent = lastValidCoversPresentationExtent
         space = lastValidSpace
         currentDetail = lastValidDetail
@@ -470,6 +493,7 @@ final class PreviewSurface: ObservableObject {
         image = nil
         presentationImageExtent = nil
         coversPresentationExtent = false
+        layoutImageExtent = nil
         space = .current
         lastValidImage = nil
         presentationTexture = nil
@@ -478,6 +502,7 @@ final class PreviewSurface: ObservableObject {
         lastValidPresentationTexture = nil
         lastValidPresentationTextureExtent = nil
         lastValidPresentationImageExtent = nil
+        lastValidLayoutImageExtent = nil
         lastValidCoversPresentationExtent = false
         lastValidSpace = .current
         lastValidDetail = nil

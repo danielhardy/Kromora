@@ -48,14 +48,39 @@ struct ResolutionPlan: Equatable, Sendable {
     /// the common fit case and keeps the full-image preview path a true no-op.
     func previewSourceROI(nativeExtent: CGSize) -> CGRect? {
         let full = CGRect(origin: .zero, size: nativeExtent)
-        let epsilon: CGFloat = 0.0001
-        guard abs(visibleSourceRect.minX - full.minX) > epsilon
-                || abs(visibleSourceRect.minY - full.minY) > epsilon
-                || abs(visibleSourceRect.width - full.width) > epsilon
-                || abs(visibleSourceRect.height - full.height) > epsilon else {
-            return nil
-        }
+        guard !Self.rect(visibleSourceRect, matches: full) else { return nil }
         return visibleSourceRect
+    }
+
+    /// Whether the current visible rectangle is the complete presented photo. A fit cropped
+    /// preview still has a source ROI so the renderer can skip discarded pixels, but that ROI
+    /// *is* the photo on screen and must fill the canvas like an uncropped fit frame.
+    func coversPresentedPhoto(nativeExtent: CGSize) -> Bool {
+        Self.roi(visibleSourceRect, coversCrop: cropRect, nativeExtent: nativeExtent)
+    }
+
+    static func roi(_ roi: CGRect, coversCrop cropRect: CGRect, nativeExtent: CGSize) -> Bool {
+        guard nativeExtent.width.isFinite, nativeExtent.height.isFinite,
+            nativeExtent.width > 0, nativeExtent.height > 0
+        else { return false }
+        let presented = CGRect(
+            x: cropRect.minX * nativeExtent.width,
+            y: cropRect.minY * nativeExtent.height,
+            width: cropRect.width * nativeExtent.width,
+            height: cropRect.height * nativeExtent.height
+        )
+        return rect(roi, matches: presented)
+    }
+
+    private static func rect(_ lhs: CGRect, matches rhs: CGRect) -> Bool {
+        let epsilon = max(
+            0.5,
+            0.0001 * max(max(lhs.width, lhs.height), max(rhs.width, rhs.height))
+        )
+        return abs(lhs.minX - rhs.minX) <= epsilon
+            && abs(lhs.minY - rhs.minY) <= epsilon
+            && abs(lhs.width - rhs.width) <= epsilon
+            && abs(lhs.height - rhs.height) <= epsilon
     }
 }
 
@@ -95,8 +120,9 @@ struct ResolutionPlanner: Equatable, Sendable {
             transform = navigation.transform(
                 imageExtent: CGRect(origin: .zero, size: cropSize), viewportSize: viewportSize
             )
-            fitScale = min(viewportSize.width / cropSize.width,
-                           viewportSize.height / cropSize.height)
+            fitScale = min(
+                viewportSize.width / cropSize.width,
+                viewportSize.height / cropSize.height)
         } else {
             transform = CanvasTransform(scale: 1, origin: .zero, imageSize: cropSize)
             fitScale = 1
@@ -110,8 +136,10 @@ struct ResolutionPlanner: Equatable, Sendable {
         selectedLevel = level
         let scale = Self.detailScales[level]
         let sourceSize = CGSize(
-            width: max(1, min(native.width, (native.width * scale).rounded(.toNearestOrAwayFromZero))),
-            height: max(1, min(native.height, (native.height * scale).rounded(.toNearestOrAwayFromZero)))
+            width: max(
+                1, min(native.width, (native.width * scale).rounded(.toNearestOrAwayFromZero))),
+            height: max(
+                1, min(native.height, (native.height * scale).rounded(.toNearestOrAwayFromZero)))
         )
 
         return ResolutionPlan(
@@ -149,7 +177,8 @@ struct ResolutionPlanner: Equatable, Sendable {
         viewportSize: CGSize
     ) -> CGRect {
         guard isValidSize(nativeExtent), isValidSize(cropSize), isValidSize(viewportSize),
-              transform.scale.isFinite, transform.scale > 0 else {
+            transform.scale.isFinite, transform.scale > 0
+        else {
             return CGRect(origin: .zero, size: nativeExtent)
         }
 
@@ -163,8 +192,10 @@ struct ResolutionPlanner: Equatable, Sendable {
             return CGRect(origin: .zero, size: nativeExtent)
         }
         return CGRect(
-            x: cropRect.minX * nativeExtent.width + visible.minX / cropSize.width * cropRect.width * nativeExtent.width,
-            y: cropRect.minY * nativeExtent.height + visible.minY / cropSize.height * cropRect.height * nativeExtent.height,
+            x: cropRect.minX * nativeExtent.width + visible.minX / cropSize.width * cropRect.width
+                * nativeExtent.width,
+            y: cropRect.minY * nativeExtent.height + visible.minY / cropSize.height
+                * cropRect.height * nativeExtent.height,
             width: visible.width / cropSize.width * cropRect.width * nativeExtent.width,
             height: visible.height / cropSize.height * cropRect.height * nativeExtent.height
         )
