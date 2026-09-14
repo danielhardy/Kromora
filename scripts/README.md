@@ -15,6 +15,7 @@ measurements. Current requirements and verification limits are summarized in
 | Active | `smoke-macos-app.sh` | Exercise launch, Open, Settings, and Export through the packaged app | Built `.build/Kromora.app`, macOS UI session, accessible WindowServer; exits 2 when hosted UI is unavailable |
 | Active | `verify-app-icon.sh` | Verify Icon Composer inputs and packaged icon/resource outputs | Built `.build/Kromora.app`, Icon Composer asset, Python 3 |
 | Active | `verify-app-signature.sh` | Verify the app signature and expected entitlements | Built `.build/Kromora.app`, `codesign`, Python 3 |
+| Active | `verify-library-package-metadata.sh` | Verify the `.kromoralibrary` document/UTI declaration and Pictures entitlement | Source plist files, Python 3 |
 
 The capture wrapper replaces the former issue-specific wrappers. Use explicit benchmark modes so the
 benchmark filter and environment are visible at the call site:

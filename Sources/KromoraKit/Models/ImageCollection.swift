@@ -225,6 +225,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
     }
 
     private let defaults: UserDefaults
+    private let persistsLegacyLibraryState: Bool
     private var persistedCullingStates: [String: PersistedCullingState]
     private var deletedAssetIDs: Set<String>
     private struct CullingChange {
@@ -233,6 +234,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
         let activeIDBefore: PhotoAssetID?
     }
     private var cullingUndoStack: [CullingChange] = []
+    private(set) var lastCullingAssetID: PhotoAssetID?
     private var scanTask: Task<Void, Never>?
     private var scanGeneration: UInt64 = 0
     /// Finishes the current discovery stream when a scan is cancelled. Cancelling the consumer
@@ -276,7 +278,8 @@ final class ImageCollectionPresentationModel: ObservableObject {
     init(
         scheduler: ImageWorkScheduler = ImageWorkScheduler(),
         defaults: UserDefaults = .standard,
-        libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL
+        libraryFolderURL: URL = ImageCollection.defaultLibraryFolderURL,
+        persistsLegacyLibraryState: Bool = true
     ) {
         let standardizedLibraryFolderURL = libraryFolderURL.standardizedFileURL
         let standardizedDefaultLibraryFolderURL = Self.defaultLibraryFolderURL.standardizedFileURL
@@ -289,6 +292,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
         }
         self.scheduler = scheduler
         self.defaults = defaults
+        self.persistsLegacyLibraryState = persistsLegacyLibraryState
         self.libraryFolderURL = standardizedLibraryFolderURL
         if let data = defaults.data(forKey: Self.cullingStateKey),
            let states = try? JSONDecoder().decode([String: PersistedCullingState].self, from: data) {
@@ -401,6 +405,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
             return false
         }
         recordCullingChange(itemID: itemID, oldState: oldState)
+        lastCullingAssetID = itemID
         invalidateCollectionProjection(notify: true)
         items[index].asset.flag = flag
         persistCullingState(for: items[index].asset)
@@ -418,6 +423,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
         let oldState = items[index].asset.libraryState
         guard oldState.rating != clamped else { return false }
         recordCullingChange(itemID: itemID, oldState: oldState)
+        lastCullingAssetID = itemID
         invalidateCollectionProjection(notify: true)
         items[index].asset.rating = clamped
         persistCullingState(for: items[index].asset)
@@ -431,6 +437,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
     func undoLastCullingChange() -> Bool {
         guard let change = cullingUndoStack.popLast(),
               let index = items.firstIndex(where: { $0.id == change.itemID }) else { return false }
+        lastCullingAssetID = change.itemID
         items[index].asset.libraryState = change.oldState
         invalidateCollectionProjection(notify: true)
         persistCullingState(for: items[index].asset)
@@ -502,6 +509,39 @@ final class ImageCollectionPresentationModel: ObservableObject {
         sourceFolderURL = nil
         loadFromFolder(libraryFolderURL)
         return true
+    }
+
+    /// Publish the bounded page selected by the package query session. The package remains the
+    /// source of truth; these `Item` objects are only the existing presentation/materialisation
+    /// bridge needed by the current grid and editor views.
+    func loadPortableAssets(_ assets: [PhotoAsset]) {
+        scanGeneration &+= 1
+        scanTask?.cancel()
+        scanTask = nil
+        stopMetadataLoading()
+        cancelThumbnailWork()
+        // Package summaries are canonical. Do not reapply the legacy Application Support culling
+        // projection while activating a portable library.
+        items = assets.map { Item(asset: $0) }
+        sourceFolderURL = nil
+        pendingImportSlots.removeAll()
+        dataImportOrdinals.removeAll()
+        dataImportOverflowItemIDs.removeAll()
+        dataImportItemIndices.removeAll()
+        selectedIndex = 0
+        selection.clear()
+        thumbnailDemandIDs.removeAll()
+        thumbnailDemandPriorities.removeAll()
+        preparedThumbnailIDs.removeAll()
+        scanWarnings = []
+        invalidateCollectionProjection()
+        isScanning = false
+        isActive = !items.isEmpty
+        startMetadataLoading()
+        for item in items {
+            enqueueMetadata(for: item, generation: scanGeneration)
+        }
+        enqueueThumbnails()
     }
 
     @discardableResult
@@ -1760,6 +1800,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
     }
 
     private func persistCullingState(for asset: PhotoAsset) {
+        guard persistsLegacyLibraryState else { return }
         persistedCullingStates[asset.id.raw] = PersistedCullingState(
             rating: asset.rating,
             flag: asset.flag
@@ -1773,6 +1814,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
     }
 
     private func persistDeletedAssetIDs() {
+        guard persistsLegacyLibraryState else { return }
         guard let data = try? JSONEncoder().encode(Array(deletedAssetIDs).sorted()) else { return }
         defaults.set(data, forKey: Self.deletedAssetIDsKey)
     }

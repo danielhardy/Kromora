@@ -391,6 +391,7 @@ final class PortablePackageMaintenance {
     func enqueue(
         packageURL: URL,
         options: PortablePackageMaintenanceOptions = .init(),
+        lease: PortablePackageLease? = nil,
         id: ImageWorkScheduler.JobID = .init("portable-package-maintenance"),
         retryLimit: Int = 3,
         completion: @escaping Completion = { _ in }
@@ -402,7 +403,7 @@ final class PortablePackageMaintenance {
         retryTasks.removeValue(forKey: id)
         retryCounts[id] = 0
         return enqueueAttempt(
-            packageURL: root, options: options, id: id, retryLimit: limit,
+            packageURL: root, options: options, lease: lease, id: id, retryLimit: limit,
             completion: completion
         )
     }
@@ -420,6 +421,7 @@ final class PortablePackageMaintenance {
     private func enqueueAttempt(
         packageURL root: URL,
         options: PortablePackageMaintenanceOptions,
+        lease: PortablePackageLease?,
         id: ImageWorkScheduler.JobID,
         retryLimit: Int,
         completion: @escaping Completion
@@ -433,7 +435,7 @@ final class PortablePackageMaintenance {
                     let failure = PortablePackageMaintenanceError.schedulerRejected
                     self.failureLog.append(String(describing: failure))
                     self.scheduleRetry(
-                        packageURL: root, options: options, id: id, retryLimit: retryLimit,
+                        packageURL: root, options: options, lease: lease, id: id, retryLimit: retryLimit,
                         completion: completion
                     )
                     completion(.failure(failure))
@@ -457,14 +459,14 @@ final class PortablePackageMaintenance {
                 }
                 self.failureLog.append(String(describing: failure))
                 self.scheduleRetry(
-                    packageURL: root, options: options, id: id, retryLimit: retryLimit,
+                    packageURL: root, options: options, lease: lease, id: id, retryLimit: retryLimit,
                     completion: completion
                 )
                 completion(.failure(failure))
             },
-            operation: { [root, options] in
+            operation: { [root, options, lease] in
                 do {
-                    let result = try Self.run(at: root, options: options)
+                    let result = try Self.run(at: root, options: options, lease: lease)
                     await MainActor.run { completion(.success(result)) }
                 } catch {
                     await MainActor.run { Self.pendingFailures[id] = error }
@@ -477,6 +479,7 @@ final class PortablePackageMaintenance {
     private func scheduleRetry(
         packageURL root: URL,
         options: PortablePackageMaintenanceOptions,
+        lease: PortablePackageLease?,
         id: ImageWorkScheduler.JobID,
         retryLimit: Int,
         completion: @escaping Completion
@@ -501,7 +504,7 @@ final class PortablePackageMaintenance {
             guard let self, !self.isShuttingDown else { return }
             self.retryTasks.removeValue(forKey: id)
             _ = self.enqueueAttempt(
-                packageURL: root, options: options, id: id, retryLimit: retryLimit,
+                packageURL: root, options: options, lease: lease, id: id, retryLimit: retryLimit,
                 completion: completion
             )
         }
@@ -516,20 +519,24 @@ final class PortablePackageMaintenance {
         at packageURL: URL,
         options: PortablePackageMaintenanceOptions = .init(),
         now: Date = Date(),
+        lease: PortablePackageLease? = nil,
         isCancelled: @Sendable () -> Bool = { false }
     ) throws -> PortablePackageMaintenanceResult {
         try checkCancellation(isCancelled)
         let root = packageURL.standardizedFileURL
-        let lease = try PortablePackageLease.acquire(at: root)
-        defer { try? lease.release() }
+        let activeLease = try lease ?? PortablePackageLease.acquire(at: root)
+        let ownsLease = lease == nil
+        defer {
+            if ownsLease { try? activeLease.release() }
+        }
         _ = try PortablePackageTransaction.recover(at: root)
         try sweepOrphanedMaintenanceQuarantine(
-            at: root, lease: lease, now: now, faultInjector: options.faultInjector,
+            at: root, lease: activeLease, now: now, faultInjector: options.faultInjector,
             isCancelled: isCancelled
         )
         let package = try PortableLibraryPackage.open(at: root)
         let revisions = try compactRevisions(
-            in: package, lease: lease, policy: options.policy,
+            in: package, lease: activeLease, policy: options.policy,
             now: now, isCancelled: isCancelled, faultInjector: options.faultInjector
         )
         try checkCancellation(isCancelled)
@@ -537,7 +544,7 @@ final class PortablePackageMaintenance {
             at: root.appendingPathComponent("Derived/Thumbnails", isDirectory: true)
         )
         let thumbnailResult = try thumbnailStore.compact(
-            package: package, lease: lease, now: now,
+            package: package, lease: activeLease, now: now,
             isCancelled: isCancelled, faultInjector: options.faultInjector
         )
         return PortablePackageMaintenanceResult(
