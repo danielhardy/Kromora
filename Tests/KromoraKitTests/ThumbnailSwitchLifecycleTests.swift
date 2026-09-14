@@ -1,8 +1,27 @@
 import XCTest
+import AppKit
+import CoreGraphics
 @testable import KromoraKit
 
 @MainActor
 final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
+
+    private func cgImage(from image: NSImage) throws -> CGImage {
+        var proposedRect = CGRect(origin: .zero, size: image.size)
+        return try XCTUnwrap(
+            image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        )
+    }
+
+    private func publishedThumbnail(
+        for assetID: PhotoAssetID, in viewModel: AppViewModel
+    ) throws -> NSImage {
+        let entry = try XCTUnwrap(
+            viewModel.collection.thumbnailEntries.first { $0.id == assetID }
+        )
+        let resolved = try XCTUnwrap(viewModel.collection.resolvedItem(for: entry))
+        return try XCTUnwrap(resolved.item.thumbnail)
+    }
 
     private func waitUntil(
         _ description: String,
@@ -83,6 +102,75 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
     }
 
+    /// The filmstrip and library grid both render `ThumbnailEntry`'s resolved Item. Exercise that
+    /// shared projection with the real renderer so a committed crop is checked at the publication
+    /// boundary, not only in RenderRequest/RenderEngine unit tests. The long edge is the displayed
+    /// budget for both crop shapes; the old fixed full-image decode produced a shorter raster that
+    /// the browsing surface had to enlarge.
+    func testFilmstripAndGridPublishCropAwareSettledThumbnails() async throws {
+        let source = try Fixtures.writeClarityPNG(
+            width: 2_400, height: 1_600, named: "crop-aware-source.png", in: tempDirectory
+        )
+        let peer = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "crop-aware-peer.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: RenderEngine())
+        try await loadCollection(viewModel, first: peer, second: source)
+        viewModel.collection.beginThumbnailDemand()
+
+        let sourceIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == source })
+        viewModel.selectCollectionImage(at: sourceIndex)
+        try await waitUntil("the crop-aware source and original thumbnail") {
+            viewModel.sourceURL == source
+                && viewModel.previewState == .ready
+                && viewModel.collection.items[sourceIndex].thumbnail != nil
+        }
+
+        let assetID = viewModel.collection.items[sourceIndex].id
+        let original = try publishedThumbnail(for: assetID, in: viewModel)
+        let originalImage = try cgImage(from: original)
+        let originalLongEdge = max(originalImage.width, originalImage.height)
+
+        let crops: [(String, CGRect, CGSize)] = [
+            (
+                "small",
+                CGRect(x: 0.25, y: 0.25, width: 0.25, height: 0.25),
+                CGSize(width: 240, height: 160)
+            ),
+            (
+                "aspect-ratio-changing",
+                CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.3),
+                CGSize(width: 240, height: 60)
+            ),
+        ]
+
+        var previousRevision: String?
+        for (name, rect, expectedSize) in crops {
+            viewModel.updateDocument {
+                $0.crop = CropAdjustments(normalizedRect: rect)
+            }
+
+            try await waitUntil("the settled \(name) crop thumbnail") {
+                let item = viewModel.collection.items[sourceIndex]
+                return item.editedThumbnailRevision != nil
+                    && item.editedThumbnailRevision != previousRevision
+                    && item.thumbnail != nil
+            }
+            let settled = try publishedThumbnail(for: assetID, in: viewModel)
+            let settledImage = try cgImage(from: settled)
+
+            XCTAssertEqual(
+                CGSize(width: settledImage.width, height: settledImage.height), expectedSize,
+                "the \(name) crop should retain the requested pixel budget"
+            )
+            XCTAssertEqual(
+                max(settledImage.width, settledImage.height), originalLongEdge,
+                "the \(name) crop must not be softer than the original at the displayed long edge"
+            )
+            previousRevision = viewModel.collection.items[sourceIndex].editedThumbnailRevision
+        }
+    }
+
     func testDebouncedEditBurstCoalescesToOneTrailingThumbnail() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "burst.png", in: tempDirectory
@@ -121,6 +209,80 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "a ten-tick edit burst should submit one trailing thumbnail render"
         )
         XCTAssertEqual(thumbnails.last?.document.adjustments, [.exposure(ev: 1.0)])
+    }
+
+    /// A very small crop deliberately asks for a source box larger than a large RAW's native
+    /// extent. Verify the request clamps to native detail and that the same settled-thumbnail
+    /// debounce still admits one trailing render for a burst of crop changes.
+    func testExtremeCropUsesNativeDetailWithoutAnUnboundedThumbnailBurst() async throws {
+        let raw = try Fixtures.writeGradientPNG(
+            width: 64, height: 48, named: "extreme-crop.raw", in: tempDirectory
+        )
+        let peer = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "extreme-crop-peer.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: raw, second: peer)
+
+        // The bytes are a tiny deterministic stand-in, while the metadata models the geometry of
+        // a large RAW. The URL extension still routes ImageSource through the RAW branch, and the
+        // fake source-preparation seam supplies the same native extent a CIRAWFilter would report.
+        let rawIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == raw })
+        let largeRAWAsset = PhotoAsset(
+            url: raw,
+            metadata: PhotoAssetMetadata(
+                dimensions: PhotoPixelDimensions(width: 6_000, height: 4_000)
+            )
+        )
+        viewModel.collection.items[rawIndex].asset = largeRAWAsset
+        viewModel.collection.beginThumbnailDemand()
+        viewModel.selectCollectionImage(at: rawIndex)
+        try await waitUntil("the synthetic large RAW") {
+            viewModel.sourceURL == raw && viewModel.previewState == .ready
+        }
+
+        let assetID = viewModel.collection.items[rawIndex].id
+        let initialCount = await engine.thumbnailRequests.filter { $0.assetID == assetID }.count
+        let initialPreviewCount = await engine.previewRequests.count
+        await engine.gateThumbnails()
+        let finalCrop = CGRect(x: 0.49, y: 0.49, width: 0.02, height: 0.02)
+        for fraction in [0.20, 0.15, 0.10, 0.02] {
+            viewModel.updateDocument(debounced: true) {
+                $0.crop = CropAdjustments(normalizedRect: CGRect(
+                    x: (1 - fraction) / 2, y: (1 - fraction) / 2,
+                    width: fraction, height: fraction
+                ))
+            }
+        }
+
+        try await waitUntil("the trailing extreme-crop thumbnail") {
+            await engine.thumbnailRequests.contains { $0.assetID == assetID }
+        }
+        let previewCount = await engine.previewRequests.count
+        XCTAssertGreaterThan(
+            previewCount, initialPreviewCount,
+            "the interactive preview lane must continue while native-detail thumbnail work is held"
+        )
+        await engine.releaseThumbnails()
+        // Let any incorrectly admitted earlier trailing task surface before checking the bound.
+        try await Task.sleep(for: .milliseconds(50))
+        let requests = await engine.thumbnailRequests.filter { $0.assetID == assetID }
+        XCTAssertEqual(
+            requests.count - initialCount, 1,
+            "a crop burst must remain within the existing one-trailing-thumbnail throttle"
+        )
+        let request = try XCTUnwrap(requests.last)
+        let requestedCrop = try XCTUnwrap(request.document.crop.normalizedRect)
+        XCTAssertEqual(requestedCrop.minX, finalCrop.minX, accuracy: 0.000_001)
+        XCTAssertEqual(requestedCrop.minY, finalCrop.minY, accuracy: 0.000_001)
+        XCTAssertEqual(requestedCrop.width, finalCrop.width, accuracy: 0.000_001)
+        XCTAssertEqual(requestedCrop.height, finalCrop.height, accuracy: 0.000_001)
+        XCTAssertEqual(request.source.kind, .raw)
+        XCTAssertEqual(
+            request.renderScale.factor(for: CGSize(width: 6_000, height: 4_000)), 1.0,
+            "the 2% crop must clamp its oversized source box to full native RAW detail"
+        )
     }
 
     func testEditedThumbnailSkipsPreviewInteractionAndRunsOnceAfterItEnds() async throws {
