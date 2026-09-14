@@ -113,7 +113,7 @@ final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
     }
 
     private func makeCoordinator() -> PreviewPresentationCoordinator {
-        let directory = tempDirectory.appendingPathComponent("preview-cache-(UUID().uuidString)")
+        let directory = tempDirectory.appendingPathComponent("preview-cache-\(UUID().uuidString)")
         return PreviewPresentationCoordinator(
             cache: PreviewDiskCache(directory: directory, capBytes: 10_000_000)
         )
