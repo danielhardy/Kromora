@@ -136,6 +136,58 @@ final class RenderEngineTests: TempDirectoryTestCase {
         XCTAssertLessThan(lowResolution.height, cropped.height)
     }
 
+    /// A local camera RAW exercises the decoder branch that the synthetic PNG regression cannot.
+    /// The embedded preview is checked separately because it is the provisional browsing image;
+    /// the settled crop must still be planned from the sensor-native extent.
+    func testLocalRAWEmbeddedPreviewUsesCropAwareThumbnailSizing() async throws {
+        guard let rawURL = Fixtures.localRAWURL else {
+            throw XCTSkip(
+                "no local RAW fixture; set KROMORA_RAW_FIXTURE_DIR to cover RAW and embedded-preview decoding"
+            )
+        }
+        guard MTLCreateSystemDefaultDevice() != nil else {
+            throw XCTSkip("Metal is unavailable on this host")
+        }
+        guard let embeddedPreview = Thumbnails.generate(
+            from: rawURL, maxPixelSize: Thumbnails.defaultMaxPixelSize
+        ) else {
+            throw XCTSkip("the local RAW has no ImageIO-readable embedded preview")
+        }
+        guard let filter = CIRAWFilter(imageURL: rawURL) else {
+            throw XCTSkip("the current decoder cannot open the local RAW")
+        }
+
+        let nativeExtent = ImageDecoder.orientedDimensions(
+            filter.nativeSize, for: ImageDecoder.exifOrientation(at: rawURL)
+        )
+        let source = ImageSource(url: rawURL, nativeExtent: nativeExtent)
+        let crop = CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.3)
+        let request = RenderRequest(
+            source: source,
+            document: EditDocument(crop: CropAdjustments(normalizedRect: crop)),
+            targetSize: CGSize(width: 240, height: 240),
+            quality: .thumbnail,
+            output: .raster
+        )
+
+        XCTAssertEqual(
+            request.renderScale,
+            .preview(maxSize: CGSize(width: 300, height: 800)),
+            "RAW thumbnails must reserve source pixels for both crop dimensions"
+        )
+        let expectedFactor = min(
+            300 / nativeExtent.width, 800 / nativeExtent.height, 1
+        )
+        XCTAssertEqual(
+            request.renderScale.factor(for: nativeExtent), expectedFactor,
+            "RAW scale must be computed from the crop-expanded source box"
+        )
+        XCTAssertGreaterThan(max(embeddedPreview.size.width, embeddedPreview.size.height), 0)
+
+        let settled = await RenderEngine().makeThumbnailCGImage(request)
+        XCTAssertNotNil(settled, "the real RAW crop path must settle after the embedded preview")
+    }
+
     /// A nonzero vignette must remain one frame-wide field after the completed texture is handed
     /// to the presentation context. This intentionally uses a large source and crosses the same
     /// fit/zoom transitions that move the production planner between preview detail levels.
