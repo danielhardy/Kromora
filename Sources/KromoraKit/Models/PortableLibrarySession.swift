@@ -14,6 +14,7 @@ final class PortableLibrarySession {
     let indexURL: URL
 
     private(set) var queryController: LibraryQueryController
+    private var importCatalog: PortablePackageImportCatalog?
 
     init(
         at rootURL: URL,
@@ -85,6 +86,7 @@ final class PortableLibrarySession {
             selectedAssetIDs: queryController.selectedIDs,
             activeAssetID: queryController.activeID
         )
+        importCatalog = nil
         return projection
     }
 
@@ -114,19 +116,38 @@ final class PortableLibrarySession {
     func importData(
         _ data: Data,
         name: String,
-        duplicatePolicy: PortablePackageDuplicatePolicy = .skip
+        duplicatePolicy: PortablePackageDuplicatePolicy = .skip,
+        rebuildIndex: Bool = true
     ) throws -> PortablePackageImportResult {
         let temporaryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("Kromora-import-\(UUID().uuidString)-\(safeFilename(name))")
         try data.write(to: temporaryURL, options: .atomic)
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
-        let result = try package.importSources(
-            [.init(url: temporaryURL, name: name)],
-            lease: lease,
-            options: .init(duplicatePolicy: duplicatePolicy)
-        )
-        try refreshIndex()
+        let result: PortablePackageImportResult
+        if rebuildIndex {
+            result = try package.importSources(
+                [.init(url: temporaryURL, name: name)],
+                lease: lease,
+                options: .init(duplicatePolicy: duplicatePolicy)
+            )
+        } else {
+            let catalog = try importCatalog ?? PortablePackageImportCatalog(package: package)
+            result = try package.importSources(
+                [.init(url: temporaryURL, name: name)],
+                lease: lease,
+                options: .init(duplicatePolicy: duplicatePolicy),
+                catalog: catalog
+            )
+            importCatalog = catalog
+        }
+        if rebuildIndex {
+            try refreshIndex()
+        }
         return result
+    }
+
+    func finishImportBatch() {
+        importCatalog = nil
     }
 
     func materializedAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
