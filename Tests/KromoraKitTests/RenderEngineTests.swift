@@ -96,6 +96,46 @@ final class RenderEngineTests: TempDirectoryTestCase {
         )
     }
 
+    func testCroppedThumbnailRetainsTheOriginalDisplayedPixelBudget() async throws {
+        let url = try Fixtures.writeClarityPNG(
+            width: 2_400, height: 1_600, named: "cropped-thumbnail-detail.png", in: tempDirectory
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 2_400, height: 1_600))
+        let document = EditDocument(crop: CropAdjustments(normalizedRect: CGRect(
+            x: 0.25, y: 0.25, width: 0.25, height: 0.25
+        )))
+        let engine = RenderEngine()
+        let request = RenderRequest(
+            source: source, document: document,
+            targetSize: CGSize(width: 240, height: 240), quality: .thumbnail, output: .raster
+        )
+        let croppedCandidate = await engine.makeThumbnailCGImage(request)
+        let cropped = try XCTUnwrap(croppedCandidate)
+
+        let uncroppedCandidate = await engine.makeThumbnailCGImage(RenderRequest(
+            source: source, document: EditDocument(),
+            targetSize: CGSize(width: 240, height: 240), quality: .thumbnail, output: .raster
+        ))
+        let uncropped = try XCTUnwrap(uncroppedCandidate)
+
+        XCTAssertEqual(cropped.width, uncropped.width,
+                       "a settled crop must retain the source thumbnail width")
+        XCTAssertEqual(cropped.height, uncropped.height,
+                       "a settled crop must retain the source thumbnail height")
+        XCTAssertEqual(cropped.width, 240)
+        XCTAssertEqual(cropped.height, 160)
+
+        // The old fixed full-image scale produced a 60×40 crop. Upsampling that result cannot
+        // contain the fine alternating detail retained by the crop-aware render.
+        let lowResolutionCandidate = await engine.makeThumbnailCGImage(RenderRequest(
+            source: source, document: document,
+            targetSize: CGSize(width: 60, height: 60), quality: .thumbnail, output: .raster
+        ))
+        let lowResolution = try XCTUnwrap(lowResolutionCandidate)
+        XCTAssertLessThan(lowResolution.width, cropped.width)
+        XCTAssertLessThan(lowResolution.height, cropped.height)
+    }
+
     /// A nonzero vignette must remain one frame-wide field after the completed texture is handed
     /// to the presentation context. This intentionally uses a large source and crosses the same
     /// fit/zoom transitions that move the production planner between preview detail levels.
