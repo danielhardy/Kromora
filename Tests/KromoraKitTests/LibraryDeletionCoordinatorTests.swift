@@ -190,11 +190,11 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         PhotoAnalysisCoordinator(
             engine: FakeRenderEngine(),
             maskStore: MaskStore(
-                directory: tempDirectory.appendingPathComponent("masks-(UUID().uuidString)")
+                directory: tempDirectory.appendingPathComponent("masks-\(UUID().uuidString)")
             ),
             cache: PhotoAnalysisCache(
                 directory: cacheDirectory
-                    ?? tempDirectory.appendingPathComponent("analysis-(UUID().uuidString)")
+                    ?? tempDirectory.appendingPathComponent("analysis-\(UUID().uuidString)")
             )
         )
     }
