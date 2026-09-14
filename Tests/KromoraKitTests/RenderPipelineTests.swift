@@ -1,7 +1,8 @@
-import XCTest
 import AppKit
-import CoreImage
 import CoreGraphics
+import CoreImage
+import XCTest
+
 @testable import KromoraKit
 
 /// Phase 2 Step 3. `RenderPipeline.buildImage` is the function preview and export will both call, so
@@ -18,7 +19,8 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        sourceURL = try Fixtures.writeGradientPNG(width: 96, height: 64, named: "src.png", in: tempDirectory)
+        sourceURL = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "src.png", in: tempDirectory)
         source = ImageSource(url: sourceURL, nativeExtent: CGSize(width: 96, height: 64))
     }
 
@@ -34,9 +36,11 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         space: WorkingSpace = .current,
         cache: LUTFilterCache? = nil
     ) throws -> CIImage {
-        try XCTUnwrap(RenderPipeline.buildImage(
-            source: source, document: document, lut: lut, scale: scale, space: space, lutCache: cache
-        ))
+        try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: source, document: document, lut: lut, scale: scale, space: space,
+                lutCache: cache
+            ))
     }
 
     /// A linear-light ramp kept in floating point so the EV property is measured before 8-bit
@@ -51,13 +55,14 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             pixels[x * 4 + 3] = 1
         }
         let data = pixels.withUnsafeBytes { Data($0) }
-        return try XCTUnwrap(CIImage(
-            bitmapData: data,
-            bytesPerRow: width * 4 * MemoryLayout<Float>.size,
-            size: CGSize(width: width, height: 1),
-            format: .RGBAf,
-            colorSpace: nil
-        ))
+        return try XCTUnwrap(
+            CIImage(
+                bitmapData: data,
+                bytesPerRow: width * 4 * MemoryLayout<Float>.size,
+                size: CGSize(width: width, height: 1),
+                format: .RGBAf,
+                colorSpace: nil
+            ))
     }
 
     private func linearSamples(of image: CIImage, width: Int = 256) throws -> [Float] {
@@ -78,9 +83,10 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
     private func ciImage(from thumbnail: NSImage) throws -> CIImage {
         var proposedRect = NSRect(origin: .zero, size: thumbnail.size)
-        let cgImage = try XCTUnwrap(thumbnail.cgImage(
-            forProposedRect: &proposedRect, context: nil, hints: nil
-        ))
+        let cgImage = try XCTUnwrap(
+            thumbnail.cgImage(
+                forProposedRect: &proposedRect, context: nil, hints: nil
+            ))
         return CIImage(cgImage: cgImage)
     }
 
@@ -93,16 +99,18 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         let expected = try decodedSource()
 
         XCTAssertEqual(built.extent, expected.extent, "the identity must not resize")
-        assertPixelsEqual(try Pixels.bytes(of: built), try Pixels.bytes(of: expected),
-                          "an empty document must render the source unchanged")
+        assertPixelsEqual(
+            try Pixels.bytes(of: built), try Pixels.bytes(of: expected),
+            "an empty document must render the source unchanged")
     }
 
     func testNeutralLightIsTheIdentity() throws {
         let built = try build(EditDocument(light: .neutral))
         let expected = try decodedSource()
 
-        assertPixelsEqual(try Pixels.bytes(of: built), try Pixels.bytes(of: expected),
-                          "neutral Light must leave the existing render untouched")
+        assertPixelsEqual(
+            try Pixels.bytes(of: built), try Pixels.bytes(of: expected),
+            "neutral Light must leave the existing render untouched")
     }
 
     func testMasterToneCurveChangesAllRGBChannelsAndRemainsMonotonic() throws {
@@ -112,18 +120,42 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             LightCurvePoint(input: 0.5, output: 0.7),
             LightCurvePoint(input: 0.75, output: 0.8),
         ])
-        let samples = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(toneCurve: curve), to: source
-        ))
+        let samples = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(toneCurve: curve), to: source
+            ))
 
         XCTAssertLessThan(samples[64], 0.2, "the lower control point should darken the ramp")
         XCTAssertGreaterThan(samples[128], 0.6, "the middle control point should lift the ramp")
         XCTAssertGreaterThan(samples[192], 0.7, "the upper control point should reach the ramp")
         for index in 1..<samples.count {
-            XCTAssertGreaterThanOrEqual(samples[index], samples[index - 1] - 0.002,
-                                        "a monotonic master curve must not reverse at sample "
-                                        + String(index))
+            XCTAssertGreaterThanOrEqual(
+                samples[index], samples[index - 1] - 0.002,
+                "a monotonic master curve must not reverse at sample "
+                    + String(index))
         }
+    }
+
+    func testMasterToneCurveDoesNotBlackOutANonZeroOriginSource() throws {
+        let source = try linearRamp(width: 64)
+        let curve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.5, output: 0.65)
+        ])
+        let expected = RenderPipeline.applyLight(LightAdjustments(toneCurve: curve), to: source)
+        let offset = CGAffineTransform(translationX: 240, y: 160)
+        let shifted = source.transformed(by: offset)
+        XCTAssertGreaterThan(shifted.extent.minX, 1)
+        XCTAssertGreaterThan(shifted.extent.minY, 1)
+
+        let curved = RenderPipeline.applyLight(LightAdjustments(toneCurve: curve), to: shifted)
+        XCTAssertEqual(curved.extent.minX, shifted.extent.minX, accuracy: 0.001)
+        XCTAssertEqual(curved.extent.minY, shifted.extent.minY, accuracy: 0.001)
+
+        let aligned = curved.transformed(by: offset.inverted())
+        assertPixelsEqual(
+            try Pixels.bytes(of: aligned), try Pixels.bytes(of: expected),
+            "tone curve must sample a cropped ROI, not an empty origin-zero tile"
+        )
     }
 
     func testToneCurveRenderIsUnchangedAtItsIdentity() throws {
@@ -133,8 +165,9 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             LightAdjustments(toneCurve: .identity), to: source
         )
 
-        assertPixelsEqual(try Pixels.bytes(of: rendered), expected,
-                          "the diagonal master curve must be an exact no-op")
+        assertPixelsEqual(
+            try Pixels.bytes(of: rendered), expected,
+            "the diagonal master curve must be an exact no-op")
     }
 
     // MARK: - Photographic Light properties
@@ -142,25 +175,29 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     func testOneStopExposureDoublesLinearMidtone() throws {
         let source = try linearRamp()
         let base = try linearSamples(of: source)
-        let exposed = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(exposure: 1), to: source
-        ))
+        let exposed = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(exposure: 1), to: source
+            ))
 
         for index in [32, 64, 96, 128] {
-            XCTAssertEqual(exposed[index], min(base[index] * 2, 1), accuracy: 0.015,
-                           "+1 EV should approximately double linear sample \(index)")
+            XCTAssertEqual(
+                exposed[index], min(base[index] * 2, 1), accuracy: 0.015,
+                "+1 EV should approximately double linear sample \(index)")
         }
     }
 
     func testHighlightsAndShadowsAreTonalInverses() throws {
         let source = try linearRamp()
         let base = try linearSamples(of: source)
-        let highlights = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(highlights: 60), to: source
-        ))
-        let shadows = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(shadows: 60), to: source
-        ))
+        let highlights = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(highlights: 60), to: source
+            ))
+        let shadows = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(shadows: 60), to: source
+            ))
 
         let low = 32
         let high = 224
@@ -171,19 +208,23 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     func testWhitesAndBlacksTargetOppositeEndsWithAUsefulRolloff() throws {
         let source = try linearRamp()
         let base = try linearSamples(of: source)
-        let whites = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(whites: 60), to: source
-        ))
-        let blacks = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(blacks: 60), to: source
-        ))
+        let whites = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(whites: 60), to: source
+            ))
+        let blacks = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(blacks: 60), to: source
+            ))
 
         let low = 32
         let high = 224
-        XCTAssertGreaterThan(abs(whites[high] - base[high]), abs(whites[low] - base[low]),
-                             "Whites should be concentrated in the high end")
-        XCTAssertGreaterThan(abs(blacks[low] - base[low]), abs(blacks[high] - base[high]),
-                             "Blacks should be concentrated in the low end")
+        XCTAssertGreaterThan(
+            abs(whites[high] - base[high]), abs(whites[low] - base[low]),
+            "Whites should be concentrated in the high end")
+        XCTAssertGreaterThan(
+            abs(blacks[low] - base[low]), abs(blacks[high] - base[high]),
+            "Blacks should be concentrated in the low end")
         XCTAssertGreaterThan(whites[high], base[high], "positive Whites should lift the high end")
         XCTAssertGreaterThan(blacks[low], base[low], "positive Blacks should lift the low end")
     }
@@ -195,52 +236,65 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         for light in [LightAdjustments(whites: 0), LightAdjustments(blacks: 0), .neutral] {
             let rendered = RenderPipeline.applyLight(light, to: source)
             XCTAssertEqual(rendered.extent, source.extent)
-            assertPixelsEqual(try Pixels.bytes(of: rendered), expected,
-                              "neutral endpoint controls must be exact no-ops")
+            assertPixelsEqual(
+                try Pixels.bytes(of: rendered), expected,
+                "neutral endpoint controls must be exact no-ops")
         }
     }
 
     func testEndpointExtremesRemainFiniteMonotonicAndClipAtRasterBoundary() throws {
         let source = try linearRamp()
-        let lifted = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(whites: 100), to: source
-        ))
-        let crushed = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(blacks: -100), to: source
-        ))
+        let lifted = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(whites: 100), to: source
+            ))
+        let crushed = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(blacks: -100), to: source
+            ))
 
         for samples in [lifted, crushed] {
-            XCTAssertTrue(samples.allSatisfy(\.isFinite), "endpoint stages must not produce NaN or infinity")
+            XCTAssertTrue(
+                samples.allSatisfy(\.isFinite), "endpoint stages must not produce NaN or infinity")
             for index in 1..<samples.count {
-                XCTAssertGreaterThanOrEqual(samples[index], samples[index - 1] - 0.002,
-                                            "endpoint rolloff must not invert the gradient")
+                XCTAssertGreaterThanOrEqual(
+                    samples[index], samples[index - 1] - 0.002,
+                    "endpoint rolloff must not invert the gradient")
             }
         }
 
-        XCTAssertGreaterThan(lifted[224], 0.9, "strong positive Whites should reach the highlight boundary")
+        XCTAssertGreaterThan(
+            lifted[224], 0.9, "strong positive Whites should reach the highlight boundary")
         XCTAssertLessThan(crushed[32], 0.1, "strong negative endpoints should crush the low end")
 
-        let liftedBytes = try Pixels.bytes(of: RenderPipeline.applyLight(
-            LightAdjustments(whites: 100), to: source
-        ))
-        let crushedBytes = try Pixels.bytes(of: RenderPipeline.applyLight(
-            LightAdjustments(blacks: -100), to: source
-        ))
-        XCTAssertEqual(liftedBytes[(224 * 4)], 255, "positive Whites should clip only at output encoding")
-        XCTAssertEqual(crushedBytes[(0 * 4)], 0, "negative Blacks should clip at the black output boundary")
+        let liftedBytes = try Pixels.bytes(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(whites: 100), to: source
+            ))
+        let crushedBytes = try Pixels.bytes(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(blacks: -100), to: source
+            ))
+        XCTAssertEqual(
+            liftedBytes[(224 * 4)], 255, "positive Whites should clip only at output encoding")
+        XCTAssertEqual(
+            crushedBytes[(0 * 4)], 0, "negative Blacks should clip at the black output boundary")
     }
 
     func testModerateContrastKeepsUsableEndpoints() throws {
         let source = try linearRamp()
         let base = try linearSamples(of: source)
-        let contrasted = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(contrast: 50), to: source
-        ))
+        let contrasted = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(contrast: 50), to: source
+            ))
 
         XCTAssertEqual(contrasted[0], base[0], accuracy: 0.01)
         XCTAssertEqual(contrasted[255], base[255], accuracy: 0.01)
-        XCTAssertLessThan(contrasted[64], base[64], "positive contrast should deepen the lower midtones")
-        XCTAssertGreaterThan(contrasted[192], base[192], "positive contrast should lift the upper midtones")
+        XCTAssertLessThan(
+            contrasted[64], base[64], "positive contrast should deepen the lower midtones")
+        XCTAssertGreaterThan(
+            contrasted[192], base[192], "positive contrast should lift the upper midtones")
     }
 
     /// Contrast, Highlights, and Shadows share one tone curve, so opposing values (e.g. negative
@@ -251,9 +305,10 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     /// combination that reproduces the crossing (contrast -100, highlights -100, shadows +100).
     func testCombinedLightControlsStayMonotonic() throws {
         let source = try linearRamp()
-        let samples = try linearSamples(of: RenderPipeline.applyLight(
-            LightAdjustments(contrast: -100, highlights: -100, shadows: 100), to: source
-        ))
+        let samples = try linearSamples(
+            of: RenderPipeline.applyLight(
+                LightAdjustments(contrast: -100, highlights: -100, shadows: 100), to: source
+            ))
 
         for index in stride(from: 1, to: samples.count, by: 1) {
             XCTAssertGreaterThanOrEqual(
@@ -276,9 +331,11 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
         for (name, light) in samples {
             let rendered = RenderPipeline.applyLight(light, to: source)
-            guard let data = Pixels.context.pngRepresentation(
-                of: rendered, format: .RGBA8, colorSpace: WorkingSpace.current.cgColorSpace
-            ) else {
+            guard
+                let data = Pixels.context.pngRepresentation(
+                    of: rendered, format: .RGBA8, colorSpace: WorkingSpace.current.cgColorSpace
+                )
+            else {
                 XCTFail("could not render visual sample \(name)")
                 continue
             }
@@ -337,7 +394,7 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         assertPixelsEqual(
             try Pixels.bytes(of: developed), try Pixels.bytes(of: neutral),
             "rawDevelop reached a standard image's render — the develop panel is withheld for these "
-            + "files on the grounds that there is nothing for it to drive"
+                + "files on the grounds that there is nothing for it to drive"
         )
     }
 
@@ -346,22 +403,27 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     /// pixel-for-pixel the same.
     func testNeutralNodesAndAnIdentityCubeAreStillTheIdentity() throws {
         let document = EditDocument(
-            adjustments: [.neutralExposure, .neutralColorControls, .neutralHighlightShadow,
-                          .neutralTemperatureTint, .neutralVibrance],
+            adjustments: [
+                .neutralExposure, .neutralColorControls, .neutralHighlightShadow,
+                .neutralTemperatureTint, .neutralVibrance,
+            ],
             lut: LUTSettings(lutID: LUTID(raw: "identity"), intensity: 1)
         )
         let built = try build(document, lut: TestImages.identityLUT())
 
-        assertPixelsEqual(try Pixels.bytes(of: built), try Pixels.bytes(of: try decodedSource()),
-                          "neutral nodes plus an identity cube is still a no-op")
+        assertPixelsEqual(
+            try Pixels.bytes(of: built), try Pixels.bytes(of: try decodedSource()),
+            "neutral nodes plus an identity cube is still a no-op")
     }
 
     /// Skipping identity nodes is an optimization, so it has to be invisible. If any of the five
     /// filters were not a true pass-through at its default values, this is where that would show.
     func testSkippingIdentityNodesChangesNothing() throws {
-        let neutral: [AdjustmentNode] = [.neutralExposure, .neutralColorControls,
-                                         .neutralHighlightShadow, .neutralTemperatureTint,
-                                         .neutralVibrance]
+        let neutral: [AdjustmentNode] = [
+            .neutralExposure, .neutralColorControls,
+            .neutralHighlightShadow, .neutralTemperatureTint,
+            .neutralVibrance,
+        ]
         let base = try decodedSource()
 
         for node in neutral {
@@ -370,8 +432,9 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             // … versus actually building the filter, which is what a non-identity value would do.
             let applied = try XCTUnwrap(forcedFilter(for: node, input: base))
 
-            assertPixelsEqual(try Pixels.bytes(of: skipped), try Pixels.bytes(of: applied),
-                              "\(node) is advertised as an identity but the filter changes pixels")
+            assertPixelsEqual(
+                try Pixels.bytes(of: skipped), try Pixels.bytes(of: applied),
+                "\(node) is advertised as an identity but the filter changes pixels")
         }
     }
 
@@ -382,18 +445,24 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         case .exposure(let ev):
             return input.applyingFilter("CIExposureAdjust", parameters: ["inputEV": ev])
         case .colorControls(let b, let c, let s):
-            return input.applyingFilter("CIColorControls", parameters: [
-                "inputBrightness": b, "inputContrast": c, "inputSaturation": s,
-            ])
+            return input.applyingFilter(
+                "CIColorControls",
+                parameters: [
+                    "inputBrightness": b, "inputContrast": c, "inputSaturation": s,
+                ])
         case .highlightShadow(let h, let s):
-            return input.applyingFilter("CIHighlightShadowAdjust", parameters: [
-                "inputHighlightAmount": h, "inputShadowAmount": s,
-            ])
+            return input.applyingFilter(
+                "CIHighlightShadowAdjust",
+                parameters: [
+                    "inputHighlightAmount": h, "inputShadowAmount": s,
+                ])
         case .temperatureTint(let t, let tint):
-            return input.applyingFilter("CITemperatureAndTint", parameters: [
-                "inputNeutral": CIVector(x: 6500, y: 0),
-                "inputTargetNeutral": CIVector(x: t, y: tint),
-            ])
+            return input.applyingFilter(
+                "CITemperatureAndTint",
+                parameters: [
+                    "inputNeutral": CIVector(x: 6500, y: 0),
+                    "inputTargetNeutral": CIVector(x: t, y: tint),
+                ])
         case .vibrance(let amount):
             return input.applyingFilter("CIVibrance", parameters: ["inputAmount": amount])
         }
@@ -407,16 +476,19 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     func testIntensityEndpointsAreExact() throws {
         let lut = TestImages.warmLUT()
         let ungraded = try Pixels.bytes(of: try build(EditDocument()))
-        let fullyGraded = try Pixels.bytes(of: try XCTUnwrap(
-            lut.apply(to: try decodedSource(), intensity: 1)
-        ))
+        let fullyGraded = try Pixels.bytes(
+            of: try XCTUnwrap(
+                lut.apply(to: try decodedSource(), intensity: 1)
+            ))
 
-        let atZero = try Pixels.bytes(of: try build(
-            EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 0)), lut: lut
-        ))
-        let atOne = try Pixels.bytes(of: try build(
-            EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 1)), lut: lut
-        ))
+        let atZero = try Pixels.bytes(
+            of: try build(
+                EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 0)), lut: lut
+            ))
+        let atOne = try Pixels.bytes(
+            of: try build(
+                EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 1)), lut: lut
+            ))
 
         assertPixelsEqual(atZero, ungraded, "intensity 0 must be the untouched image")
         assertPixelsEqual(atOne, fullyGraded, "intensity 1 must be the fully graded image")
@@ -429,9 +501,10 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     func testIntermediateIntensityLandsBetweenTheEndpoints() throws {
         let lut = TestImages.warmLUT()
         func render(_ intensity: Double) throws -> [UInt8] {
-            try Pixels.bytes(of: try build(
-                EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: intensity)), lut: lut
-            ))
+            try Pixels.bytes(
+                of: try build(
+                    EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: intensity)), lut: lut
+                ))
         }
         let atZero = try render(0)
         let atHalf = try render(0.5)
@@ -451,30 +524,36 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     /// gap in the test.
     func testIntensityIsClamped() throws {
         let lut = TestImages.warmLUT()
-        let atOne = try Pixels.bytes(of: try build(
-            EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 1)), lut: lut
-        ))
-        let aboveOne = try Pixels.bytes(of: try build(
-            EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 5)), lut: lut
-        ))
-        let belowZero = try Pixels.bytes(of: try build(
-            EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: -3)), lut: lut
-        ))
+        let atOne = try Pixels.bytes(
+            of: try build(
+                EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 1)), lut: lut
+            ))
+        let aboveOne = try Pixels.bytes(
+            of: try build(
+                EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 5)), lut: lut
+            ))
+        let belowZero = try Pixels.bytes(
+            of: try build(
+                EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: -3)), lut: lut
+            ))
 
         assertPixelsEqual(aboveOne, atOne, "intensity above 1 should clamp to the full LUT")
-        assertPixelsEqual(belowZero, try Pixels.bytes(of: try build(EditDocument())),
-                          "negative intensity should clamp to no LUT")
+        assertPixelsEqual(
+            belowZero, try Pixels.bytes(of: try build(EditDocument())),
+            "negative intensity should clamp to no LUT")
     }
 
     /// A document that names a LUT the caller could not resolve renders *without* it rather than
     /// failing. Blanking the preview because a file moved would turn a missing look into a broken app;
     /// reporting belongs at load, once, not per frame.
     func testUnresolvedLUTRendersUngradedRatherThanFailing() throws {
-        let document = EditDocument(lut: LUTSettings(lutID: LUTID(raw: "/gone/missing.cube"), intensity: 1))
+        let document = EditDocument(
+            lut: LUTSettings(lutID: LUTID(raw: "/gone/missing.cube"), intensity: 1))
         let built = try build(document, lut: nil)
 
-        assertPixelsEqual(try Pixels.bytes(of: built), try Pixels.bytes(of: try decodedSource()),
-                          "an unresolvable LUT should leave the image ungraded, not nil")
+        assertPixelsEqual(
+            try Pixels.bytes(of: built), try Pixels.bytes(of: try decodedSource()),
+            "an unresolvable LUT should leave the image ungraded, not nil")
     }
 
     // MARK: - Ordering
@@ -501,13 +580,17 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         // which against a graph built by hand in the document's order. (A reversing mutation
         // survived the weaker version of this test.)
         let base = try decodedSource()
-        let expected = base
+        let expected =
+            base
             .applyingFilter("CIExposureAdjust", parameters: ["inputEV": 1.0])
-            .applyingFilter("CIColorControls", parameters: [
-                "inputBrightness": 0.3, "inputContrast": 1.0, "inputSaturation": 1.0,
-            ])
-        assertPixelsEqual(forwards, try Pixels.bytes(of: expected),
-                          "the graph must run the nodes in the order the document lists them")
+            .applyingFilter(
+                "CIColorControls",
+                parameters: [
+                    "inputBrightness": 0.3, "inputContrast": 1.0, "inputSaturation": 1.0,
+                ])
+        assertPixelsEqual(
+            forwards, try Pixels.bytes(of: expected),
+            "the graph must run the nodes in the order the document lists them")
     }
 
     /// The direction of `temperatureTint`, pinned deliberately.
@@ -523,7 +606,8 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
 
         func channels(_ temp: Double) throws -> (r: Int, g: Int, b: Int) {
-            let out = RenderPipeline.applyAdjustments([.temperatureTint(temp: temp, tint: 0)], to: flat)
+            let out = RenderPipeline.applyAdjustments(
+                [.temperatureTint(temp: temp, tint: 0)], to: flat)
             let bytes = try Pixels.bytes(of: out)
             return (Int(bytes[0]), Int(bytes[1]), Int(bytes[2]))
         }
@@ -578,10 +662,12 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
     func testDuplicateNodesStack() throws {
         let once = try Pixels.bytes(of: try build(EditDocument(adjustments: [.exposure(ev: 0.5)])))
-        let twice = try Pixels.bytes(of: try build(
-            EditDocument(adjustments: [.exposure(ev: 0.5), .exposure(ev: 0.5)])
-        ))
-        let combined = try Pixels.bytes(of: try build(EditDocument(adjustments: [.exposure(ev: 1.0)])))
+        let twice = try Pixels.bytes(
+            of: try build(
+                EditDocument(adjustments: [.exposure(ev: 0.5), .exposure(ev: 0.5)])
+            ))
+        let combined = try Pixels.bytes(
+            of: try build(EditDocument(adjustments: [.exposure(ev: 1.0)])))
 
         assertPixelsDiffer(once, twice, "two exposure nodes must not collapse into one")
         assertPixelsEqual(twice, combined, "stacking +0.5 EV twice should equal +1.0 EV")
@@ -601,7 +687,8 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
         for node in nodes {
             let rendered = try Pixels.bytes(of: try build(EditDocument(adjustments: [node])))
-            assertPixelsDiffer(rendered, base, "\(node) should reach a CIFilter and change the image")
+            assertPixelsDiffer(
+                rendered, base, "\(node) should reach a CIFilter and change the image")
         }
     }
 
@@ -614,7 +701,8 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         XCTAssertEqual(full.extent.width, 96)
         XCTAssertEqual(full.extent.height, 64)
 
-        let preview = try build(EditDocument(), scale: .preview(maxSize: CGSize(width: 32, height: 32)))
+        let preview = try build(
+            EditDocument(), scale: .preview(maxSize: CGSize(width: 32, height: 32)))
         XCTAssertLessThanOrEqual(preview.extent.width, 32)
         XCTAssertLessThanOrEqual(preview.extent.height, 32)
         XCTAssertGreaterThan(preview.extent.width, 0)
@@ -626,7 +714,8 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     /// A preview box larger than the image must not magnify it — that would cost pixels for no
     /// detail and push an upscaled image through the LUT.
     func testPreviewLargerThanTheSourceDoesNotUpscale() throws {
-        let preview = try build(EditDocument(), scale: .preview(maxSize: CGSize(width: 4096, height: 4096)))
+        let preview = try build(
+            EditDocument(), scale: .preview(maxSize: CGSize(width: 4096, height: 4096)))
         XCTAssertEqual(preview.extent.width, 96)
         XCTAssertEqual(preview.extent.height, 64)
     }
@@ -640,21 +729,27 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     /// curve does not commute with that mixing.
     func testTheDownscaleHappensBeforeTheAdjustments() throws {
         let box = CGSize(width: 24, height: 24)
-        let document = EditDocument(adjustments: [.colorControls(brightness: 0, contrast: 2.5, saturation: 1)])
+        let document = EditDocument(adjustments: [
+            .colorControls(brightness: 0, contrast: 2.5, saturation: 1)
+        ])
 
         let pipeline = try build(document, scale: .preview(maxSize: box))
 
         // Grade first at full resolution, then downscale — the order the pipeline must NOT use.
         let full = try build(document, scale: .full)
         let factor = RenderScale.preview(maxSize: box).factor(for: CGSize(width: 96, height: 64))
-        let gradedThenScaled = full.applyingFilter("CILanczosScaleTransform", parameters: [
-            "inputScale": factor, "inputAspectRatio": 1.0,
-        ])
+        let gradedThenScaled = full.applyingFilter(
+            "CILanczosScaleTransform",
+            parameters: [
+                "inputScale": factor, "inputAspectRatio": 1.0,
+            ])
 
-        XCTAssertEqual(pipeline.extent.integral, gradedThenScaled.extent.integral,
-                       "both orders should land on the same extent, so only the pixels differ")
-        assertPixelsDiffer(try Pixels.bytes(of: pipeline), try Pixels.bytes(of: gradedThenScaled),
-                           "scaling after grading would mean the downscale is not early")
+        XCTAssertEqual(
+            pipeline.extent.integral, gradedThenScaled.extent.integral,
+            "both orders should land on the same extent, so only the pixels differ")
+        assertPixelsDiffer(
+            try Pixels.bytes(of: pipeline), try Pixels.bytes(of: gradedThenScaled),
+            "scaling after grading would mean the downscale is not early")
     }
 
     func testPreviewDecodeExtentMatchesPlannerAndFullRemainsNative() throws {
@@ -665,25 +760,29 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         let source = ImageSource(url: url, nativeExtent: nativeExtent)
         let scale = RenderScale.preview(maxSize: CGSize(width: 120, height: 120))
 
-        let preview = try XCTUnwrap(RenderPipeline.developedSource(
-            source, rawDevelop: RAWDevelopSettings(), scale: scale
-        ))
+        let preview = try XCTUnwrap(
+            RenderPipeline.developedSource(
+                source, rawDevelop: RAWDevelopSettings(), scale: scale
+            ))
         XCTAssertEqual(preview.extent.width, 120, accuracy: 2)
         XCTAssertEqual(preview.extent.height, 80, accuracy: 2)
 
         let fromData = ImageSource(data: try Data(contentsOf: url), nativeExtent: nativeExtent)
-        let dataPreview = try XCTUnwrap(RenderPipeline.developedSource(
-            fromData, rawDevelop: RAWDevelopSettings(), scale: scale
-        ))
+        let dataPreview = try XCTUnwrap(
+            RenderPipeline.developedSource(
+                fromData, rawDevelop: RAWDevelopSettings(), scale: scale
+            ))
         XCTAssertEqual(dataPreview.extent.width, preview.extent.width, accuracy: 2)
         XCTAssertEqual(dataPreview.extent.height, preview.extent.height, accuracy: 2)
 
-        let full = try XCTUnwrap(RenderPipeline.developedSource(
-            source, rawDevelop: RAWDevelopSettings(), scale: .full
-        ))
+        let full = try XCTUnwrap(
+            RenderPipeline.developedSource(
+                source, rawDevelop: RAWDevelopSettings(), scale: .full
+            ))
         let preChangeReference = try XCTUnwrap(CIImage(contentsOf: url))
-        XCTAssertEqual(full.extent.size, preChangeReference.extent.size,
-                       "full resolution must stay on the native decode path")
+        XCTAssertEqual(
+            full.extent.size, preChangeReference.extent.size,
+            "full resolution must stay on the native decode path")
         assertPixelsEqual(
             try Pixels.bytes(of: full), try Pixels.bytes(of: preChangeReference), tolerance: 0,
             "full resolution must remain pixel-identical to the pre-change CIImage decode"
@@ -712,20 +811,23 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         }
 
         for (url, orientation) in cases {
-            let displayedSize = [5, 6, 7, 8].contains(orientation)
+            let displayedSize =
+                [5, 6, 7, 8].contains(orientation)
                 ? CGSize(width: 60, height: 80)
                 : CGSize(width: 80, height: 60)
             let source = ImageSource(url: url, nativeExtent: displayedSize)
-            let preview = try XCTUnwrap(RenderPipeline.developedSource(
-                source, rawDevelop: RAWDevelopSettings(),
-                scale: .preview(maxSize: CGSize(width: 40, height: 40))
-            ))
+            let preview = try XCTUnwrap(
+                RenderPipeline.developedSource(
+                    source, rawDevelop: RAWDevelopSettings(),
+                    scale: .preview(maxSize: CGSize(width: 40, height: 40))
+                ))
             let thumbnail = try XCTUnwrap(Thumbnails.generate(from: url, maxPixelSize: 40))
             let thumbnailImage = try ciImage(from: thumbnail)
             let commonSize = preview.extent.integral.size
 
-            XCTAssertEqual(thumbnailImage.extent.size, commonSize,
-                           "orientation \(orientation) thumbnail geometry should match preview")
+            XCTAssertEqual(
+                thumbnailImage.extent.size, commonSize,
+                "orientation \(orientation) thumbnail geometry should match preview")
             assertPixelsEqual(
                 try Pixels.bytes(of: RenderPipeline.resized(preview, to: commonSize)),
                 try Pixels.bytes(of: RenderPipeline.resized(thumbnailImage, to: commonSize)),
@@ -744,18 +846,20 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
         // A zero native extent disables the thumbnail fast path, but a valid source must still use
         // the established CIImage fallback and downscale successfully.
-        XCTAssertNotNil(RenderPipeline.developedSource(
-            validSource, rawDevelop: RAWDevelopSettings(), scale: previewScale
-        ))
+        XCTAssertNotNil(
+            RenderPipeline.developedSource(
+                validSource, rawDevelop: RAWDevelopSettings(), scale: previewScale
+            ))
 
         // The same fallback must retain the old corrupt-input behavior instead of turning the
         // thumbnail guard into a successful-looking empty render.
         let corruptSource = ImageSource(
             backing: .data(Data("not an image".utf8)), kind: .standard, nativeExtent: .zero
         )
-        XCTAssertNil(RenderPipeline.developedSource(
-            corruptSource, rawDevelop: RAWDevelopSettings(), scale: previewScale
-        ))
+        XCTAssertNil(
+            RenderPipeline.developedSource(
+                corruptSource, rawDevelop: RAWDevelopSettings(), scale: previewScale
+            ))
     }
 
     // MARK: - Colour space
@@ -768,7 +872,8 @@ final class RenderPipelineTests: TempDirectoryTestCase {
 
         // Rasterize both through the SAME space, so only the interpolation differs.
         let inSRGB = try Pixels.bytes(of: try build(document, lut: lut, space: .sRGB), space: .sRGB)
-        let inP3 = try Pixels.bytes(of: try build(document, lut: lut, space: .displayP3), space: .sRGB)
+        let inP3 = try Pixels.bytes(
+            of: try build(document, lut: lut, space: .displayP3), space: .sRGB)
 
         assertPixelsDiffer(inSRGB, inP3, "the cube's interpolation space should change the result")
     }
@@ -786,15 +891,18 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             lut: LUTSettings(lutID: lut.lutID, intensity: 0.7)
         )
 
-        let viaURL = try XCTUnwrap(RenderPipeline.buildImage(
-            source: source, document: document, lut: lut, scale: .full
-        ))
-        let viaData = try XCTUnwrap(RenderPipeline.buildImage(
-            source: fromData, document: document, lut: lut, scale: .full
-        ))
+        let viaURL = try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: source, document: document, lut: lut, scale: .full
+            ))
+        let viaData = try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: fromData, document: document, lut: lut, scale: .full
+            ))
 
-        assertPixelsEqual(try Pixels.bytes(of: viaURL), try Pixels.bytes(of: viaData),
-                          "the same image should render the same whether it arrived as a file or bytes")
+        assertPixelsEqual(
+            try Pixels.bytes(of: viaURL), try Pixels.bytes(of: viaData),
+            "the same image should render the same whether it arrived as a file or bytes")
     }
 
     /// B1, the worst bug this app has had, was `CIImage` ignoring the EXIF orientation tag: portrait
@@ -805,36 +913,44 @@ final class RenderPipelineTests: TempDirectoryTestCase {
     func testOrientationIsBakedLikeTheOldPath() throws {
         // An 80×40 landscape buffer tagged "rotate 90° CW to display" — what a camera writes when it
         // was held on end. It must come out 40×80.
-        let url = try Fixtures.writeJPEG(width: 80, height: 40, orientation: 6,
-                                         named: "portrait.jpg", in: tempDirectory)
+        let url = try Fixtures.writeJPEG(
+            width: 80, height: 40, orientation: 6,
+            named: "portrait.jpg", in: tempDirectory)
         let tagged = ImageSource(url: url, nativeExtent: CGSize(width: 40, height: 80))
 
-        let built = try XCTUnwrap(RenderPipeline.buildImage(
-            source: tagged, document: EditDocument(), lut: nil, scale: .full
-        ))
+        let built = try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: tagged, document: EditDocument(), lut: nil, scale: .full
+            ))
         XCTAssertEqual(built.extent.width, 40, "the pipeline must honour the orientation tag")
         XCTAssertEqual(built.extent.height, 80)
 
         // The bytes path has to agree — a Photos import of the same file is the same picture.
-        let fromData = ImageSource(data: try Data(contentsOf: url),
-                                   nativeExtent: CGSize(width: 40, height: 80))
-        let viaData = try XCTUnwrap(RenderPipeline.buildImage(
-            source: fromData, document: EditDocument(), lut: nil, scale: .full
-        ))
+        let fromData = ImageSource(
+            data: try Data(contentsOf: url),
+            nativeExtent: CGSize(width: 40, height: 80))
+        let viaData = try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: fromData, document: EditDocument(), lut: nil, scale: .full
+            ))
         XCTAssertEqual(viaData.extent, built.extent, "bytes and file must agree on orientation")
     }
 
     func testUndecodableSourceReturnsNil() throws {
-        let junk = ImageSource(backing: .data(Data("not an image".utf8)), kind: .standard, nativeExtent: .zero)
-        XCTAssertNil(RenderPipeline.buildImage(
-            source: junk, document: EditDocument(), lut: nil, scale: .full
-        ))
+        let junk = ImageSource(
+            backing: .data(Data("not an image".utf8)), kind: .standard, nativeExtent: .zero)
+        XCTAssertNil(
+            RenderPipeline.buildImage(
+                source: junk, document: EditDocument(), lut: nil, scale: .full
+            ))
 
-        let missing = ImageSource(url: tempDirectory.appendingPathComponent("nope.png"),
-                                  nativeExtent: CGSize(width: 10, height: 10))
-        XCTAssertNil(RenderPipeline.buildImage(
-            source: missing, document: EditDocument(), lut: nil, scale: .full
-        ))
+        let missing = ImageSource(
+            url: tempDirectory.appendingPathComponent("nope.png"),
+            nativeExtent: CGSize(width: 10, height: 10))
+        XCTAssertNil(
+            RenderPipeline.buildImage(
+                source: missing, document: EditDocument(), lut: nil, scale: .full
+            ))
     }
 
     // MARK: - Cache equivalence
@@ -866,19 +982,22 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         let rawSource = ImageSource(url: rawURL, nativeExtent: .zero)
         XCTAssertEqual(rawSource.kind, .raw)
 
-        let neutral = try XCTUnwrap(RenderPipeline.buildImage(
-            source: rawSource, document: EditDocument(),
-            lut: nil, scale: .preview(maxSize: CGSize(width: 400, height: 400))
-        ))
-        let brightened = try XCTUnwrap(RenderPipeline.buildImage(
-            source: rawSource,
-            document: EditDocument(rawDevelop: RAWDevelopSettings(exposure: 1.5)),
-            lut: nil, scale: .preview(maxSize: CGSize(width: 400, height: 400))
-        ))
+        let neutral = try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: rawSource, document: EditDocument(),
+                lut: nil, scale: .preview(maxSize: CGSize(width: 400, height: 400))
+            ))
+        let brightened = try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: rawSource,
+                document: EditDocument(rawDevelop: RAWDevelopSettings(exposure: 1.5)),
+                lut: nil, scale: .preview(maxSize: CGSize(width: 400, height: 400))
+            ))
 
         XCTAssertEqual(neutral.extent, brightened.extent, "develop must not change geometry")
-        assertPixelsDiffer(try Pixels.bytes(of: neutral), try Pixels.bytes(of: brightened),
-                           "rawDevelop.exposure must reach CIRAWFilter through the pipeline")
+        assertPixelsDiffer(
+            try Pixels.bytes(of: neutral), try Pixels.bytes(of: brightened),
+            "rawDevelop.exposure must reach CIRAWFilter through the pipeline")
 
         // And the scale really shrank the decode: `nativeExtent` was passed as .zero above, so this
         // can only have come from the decoder's own nativeSize.
@@ -896,13 +1015,15 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         let rawSource = ImageSource(url: rawURL, nativeExtent: .zero)
 
         // Interleaved, not sequential: Core Image is not bit-reproducible across time-separated runs.
-        let viaPipeline = try XCTUnwrap(RenderPipeline.buildImage(
-            source: rawSource, document: EditDocument(), lut: nil, scale: .full
-        ))
+        let viaPipeline = try XCTUnwrap(
+            RenderPipeline.buildImage(
+                source: rawSource, document: EditDocument(), lut: nil, scale: .full
+            ))
         let viaProcessor = try XCTUnwrap(ImageDecoder.developRAWNeutral(at: rawURL))
 
         XCTAssertEqual(viaPipeline.extent, viaProcessor.extent)
-        assertPixelsEqual(try Pixels.bytes(of: viaPipeline), try Pixels.bytes(of: viaProcessor),
-                          "a neutral document must reproduce today's neutral RAW render")
+        assertPixelsEqual(
+            try Pixels.bytes(of: viaPipeline), try Pixels.bytes(of: viaProcessor),
+            "a neutral document must reproduce today's neutral RAW render")
     }
 }

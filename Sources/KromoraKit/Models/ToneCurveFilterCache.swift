@@ -1,5 +1,5 @@
-import Foundation
 import CoreImage
+import Foundation
 
 /// Actor-confined Core Image resource for the separable master RGB curve.
 ///
@@ -8,20 +8,21 @@ import CoreImage
 /// the owning `RenderEngine` actor serializes access to this cache.
 final class ToneCurveFilterCache {
     private static let sampleCount = 256
-    private static let kernel = CIKernel(source: """
-    kernel vec4 applyToneCurve(sampler image, sampler curve) {
-        vec4 pixel = sample(image, samplerCoord(image));
-        if (pixel.a <= 0.00001) { return pixel; }
+    private static let kernel = CIKernel(
+        source: """
+            kernel vec4 applyToneCurve(sampler image, sampler curve) {
+                vec4 pixel = sample(image, samplerCoord(image));
+                if (pixel.a <= 0.00001) { return pixel; }
 
-        // +0.5 lands on the texel center (texel i spans [i, i+1)); without it every lookup
-        // interpolates between the wrong neighbouring pair, biasing output by up to half a texel.
+                // +0.5 lands on the texel center (texel i spans [i, i+1)); without it every lookup
+                // interpolates between the wrong neighbouring pair, biasing output by up to half a texel.
 
-        float red = sample(curve, vec2(clamp(pixel.r / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
-        float green = sample(curve, vec2(clamp(pixel.g / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
-        float blue = sample(curve, vec2(clamp(pixel.b / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
-        return vec4(vec3(red, green, blue) * pixel.a, pixel.a);
-    }
-    """)
+                float red = sample(curve, vec2(clamp(pixel.r / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
+                float green = sample(curve, vec2(clamp(pixel.g / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
+                float blue = sample(curve, vec2(clamp(pixel.b / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
+                return vec4(vec3(red, green, blue) * pixel.a, pixel.a);
+            }
+            """)
 
     private var curve: LightToneCurve?
     private var sampledData: Data?
@@ -42,16 +43,38 @@ final class ToneCurveFilterCache {
             }
             sampledData = samples.withUnsafeBytes { Data($0) }
             sampledImage = sampledData.flatMap {
-                CIImage(bitmapData: $0, bytesPerRow: Self.sampleCount * 4 * MemoryLayout<Float>.size,
-                        size: CGSize(width: Self.sampleCount, height: 1), format: .RGBAf,
-                        colorSpace: nil)
+                CIImage(
+                    bitmapData: $0, bytesPerRow: Self.sampleCount * 4 * MemoryLayout<Float>.size,
+                    size: CGSize(width: Self.sampleCount, height: 1), format: .RGBAf,
+                    colorSpace: nil)
             }
             curve = nextCurve
         }
 
         guard let kernel = Self.kernel, let sampledImage else { return image }
-        return kernel.apply(extent: image.extent, roiCallback: { _, rect in rect },
-                            arguments: [image, sampledImage]) ?? image
+
+        // `samplerCoord(image)` is in the sampler's local space. A committed crop (or any ROI)
+        // leaves a non-zero CIImage origin; sampling that origin as if it were (0,0) reads empty
+        // tiles and the preview goes black. Run the kernel on an origin-zero copy, then put the
+        // extent back so later crop/presentation math still matches.
+        let origin = image.extent.origin
+        let working: CIImage
+        if origin.x == 0, origin.y == 0 {
+            working = image
+        } else {
+            working = image.transformed(
+                by: CGAffineTransform(translationX: -origin.x, y: -origin.y))
+        }
+        let curved =
+            kernel.apply(
+                extent: working.extent, roiCallback: { _, rect in rect },
+                arguments: [working, sampledImage]
+            ) ?? working
+        if origin.x == 0, origin.y == 0 {
+            return curved
+        }
+        return curved.transformed(
+            by: CGAffineTransform(translationX: origin.x, y: origin.y))
     }
 
     /// Explicitly drops the texture when the source or working-space boundary is invalidated.

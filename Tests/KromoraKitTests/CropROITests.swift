@@ -1,5 +1,6 @@
 import CoreGraphics
 import XCTest
+
 @testable import KromoraKit
 
 final class CropROITests: TempDirectoryTestCase {
@@ -9,19 +10,26 @@ final class CropROITests: TempDirectoryTestCase {
         var planner = ResolutionPlanner()
         let plan = planner.plan(
             nativeExtent: native,
-            crop: CropAdjustments(normalizedRect: CGRect(x: 0.375, y: 0.375, width: 0.25, height: 0.25)),
+            crop: CropAdjustments(
+                normalizedRect: CGRect(x: 0.375, y: 0.375, width: 0.25, height: 0.25)),
             viewportSize: CGSize(width: 1_600, height: 1_200)
         )
 
         let idealROI = plan.visibleSourceRect.width * plan.visibleSourceRect.height
         let developedROI = CGFloat(
             Int((plan.visibleSourceRect.width * plan.scale).rounded(.toNearestOrAwayFromZero))
-                * Int((plan.visibleSourceRect.height * plan.scale).rounded(.toNearestOrAwayFromZero))
+                * Int(
+                    (plan.visibleSourceRect.height * plan.scale).rounded(.toNearestOrAwayFromZero))
         )
 
-        XCTAssertEqual(plan.visibleSourceRect, CGRect(x: 2_250, y: 1_500, width: 1_500, height: 1_000))
+        XCTAssertEqual(
+            plan.visibleSourceRect, CGRect(x: 2_250, y: 1_500, width: 1_500, height: 1_000))
         XCTAssertLessThanOrEqual(developedROI, idealROI * 1.5)
         XCTAssertLessThan(developedROI, CGFloat(Int(native.width * native.height)) / 4)
+        XCTAssertTrue(
+            plan.coversPresentedPhoto(nativeExtent: native),
+            "a fit crop's visible rectangle is the complete presented photo"
+        )
     }
 
     func testResolutionPlannerFullImageFitIsANoOpROI() {
@@ -40,24 +48,113 @@ final class CropROITests: TempDirectoryTestCase {
         navigation.setZoom(8)
         let plan = planner.plan(
             nativeExtent: native,
-            crop: CropAdjustments(normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)),
+            crop: CropAdjustments(
+                normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)),
             viewportSize: CGSize(width: 800, height: 600),
             navigation: navigation
         )
 
         XCTAssertTrue(plan.isNativeResolution)
         XCTAssertEqual(plan.sourceSize, native)
-        XCTAssertLessThan(plan.visibleSourceRect.width * plan.visibleSourceRect.height,
-                          native.width * native.height / 16)
+        XCTAssertLessThan(
+            plan.visibleSourceRect.width * plan.visibleSourceRect.height,
+            native.width * native.height / 16)
         XCTAssertGreaterThan(plan.visibleSourceRect.minX, 0)
     }
 
+    func testFitCropCoversThePresentedPhotoAndZoomedCropDoesNot() {
+        var planner = ResolutionPlanner()
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5))
+        let fit = planner.plan(
+            nativeExtent: native,
+            crop: crop,
+            viewportSize: CGSize(width: 1_600, height: 1_200)
+        )
+        XCTAssertNotNil(
+            fit.previewSourceROI(nativeExtent: native),
+            "a cropped fit still has a source ROI so discarded pixels are skipped")
+        XCTAssertTrue(
+            fit.coversPresentedPhoto(nativeExtent: native),
+            "that ROI is the complete cropped photo and must fill the canvas")
+
+        var navigation = CanvasNavigation()
+        navigation.setZoom(8)
+        let zoomed = planner.plan(
+            nativeExtent: native,
+            crop: crop,
+            viewportSize: CGSize(width: 800, height: 600),
+            navigation: navigation
+        )
+        XCTAssertFalse(
+            zoomed.coversPresentedPhoto(nativeExtent: native),
+            "a viewport fragment of the crop must stay an ROI on the virtual canvas")
+    }
+
+    func testCroppedFitRequestCoversPresentationExtentWhileAZoomFragmentDoesNot() throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "roi-cover.png", in: tempDirectory)
+        let native = CGSize(width: 96, height: 64)
+        let source = ImageSource(url: url, nativeExtent: native)
+        let document = EditDocument(
+            crop: CropAdjustments(
+                normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+            ))
+        let cropNative = CGRect(x: 24, y: 16, width: 48, height: 32)
+        let fit = RenderRequest(
+            source: source, document: document, targetSize: native,
+            sourceROI: cropNative, quality: .preview, output: .raster
+        )
+        XCTAssertTrue(fit.coversPresentationExtent)
+
+        let fragment = RenderRequest(
+            source: source, document: document, targetSize: native,
+            sourceROI: CGRect(x: 30, y: 20, width: 20, height: 16),
+            quality: .preview, output: .raster
+        )
+        XCTAssertFalse(fragment.coversPresentationExtent)
+        XCTAssertEqual(
+            fragment.presentationLayoutExtent,
+            CGRect(x: 30, y: 20, width: 20, height: 16),
+            "a same-scale fragment's layout is the ROI in planner pixels"
+        )
+        XCTAssertNil(
+            fit.presentationLayoutExtent,
+            "a covering crop ROI is stretched onto the presentation extent; it has no fragment layout"
+        )
+    }
+
+    func testInteractiveZoomFragmentLayoutStaysInPlannerSpace() {
+        let native = CGSize(width: 3_000, height: 2_000)
+        let source = ImageSource(
+            url: URL(fileURLWithPath: "/tmp/layout-roi.png"), nativeExtent: native)
+        let roi = CGRect(x: 600, y: 400, width: 1_200, height: 800)
+        let plannerSize = CGSize(width: 2_400, height: 1_600)
+        let request = RenderRequest(
+            source: source, document: EditDocument(), targetSize: plannerSize,
+            sourceROI: roi, quality: .interactive, output: .raster
+        )
+
+        XCTAssertFalse(request.coversPresentationExtent)
+        XCTAssertEqual(
+            request.renderScale.factor(for: native) * native.width, 1_500, accuracy: 0.5,
+            "the 1.5 MP interactive budget must actually decode below the planner size"
+        )
+        XCTAssertEqual(
+            request.presentationLayoutExtent,
+            CGRect(x: 480, y: 320, width: 960, height: 640),
+            "layout must use planner pixels, not the reduced interactive decode origin"
+        )
+    }
+
     func testPanCacheHitTestRepeatedROIRenderDoesNotRedevelopTheSource() async throws {
-        let url = try Fixtures.writeGradientPNG(width: 96, height: 64, named: "roi-cache.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "roi-cache.png", in: tempDirectory)
         let source = ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
-        let document = EditDocument(crop: CropAdjustments(
-            normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
-        ))
+        let document = EditDocument(
+            crop: CropAdjustments(
+                normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5)
+            ))
         let request = RenderRequest(
             source: source,
             document: document,
@@ -77,7 +174,8 @@ final class CropROITests: TempDirectoryTestCase {
     }
 
     func testCropExportParityTestVisibleROIMatchesFullExportCrop() async throws {
-        let url = try Fixtures.writeGradientPNG(width: 96, height: 64, named: "roi-parity.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "roi-parity.png", in: tempDirectory)
         let source = ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
         let document = EditDocument(
             effects: EffectsAdjustments(
@@ -91,17 +189,20 @@ final class CropROITests: TempDirectoryTestCase {
         )
         let roi = CGRect(x: 24, y: 16, width: 48, height: 32)
         let engine = RenderEngine()
-        let preview = try await engine.render(RenderRequest(
-            source: source, document: document, targetSize: source.nativeExtent,
-            sourceROI: roi, quality: .preview, output: .raster
-        ))
-        let export = try await engine.render(RenderRequest(
-            source: source, document: document, quality: .export, output: .raster
-        ))
+        let preview = try await engine.render(
+            RenderRequest(
+                source: source, document: document, targetSize: source.nativeExtent,
+                sourceROI: roi, quality: .preview, output: .raster
+            ))
+        let export = try await engine.render(
+            RenderRequest(
+                source: source, document: document, quality: .export, output: .raster
+            ))
 
         XCTAssertEqual(preview.extent, export.extent)
-        assertPixelsEqual(try Pixels.bytes(of: try Pixels.decode(preview.data)),
-                          try Pixels.bytes(of: try Pixels.decode(export.data)), tolerance: 2,
-                          "the committed-crop ROI must match the same visible export crop")
+        assertPixelsEqual(
+            try Pixels.bytes(of: try Pixels.decode(preview.data)),
+            try Pixels.bytes(of: try Pixels.decode(export.data)), tolerance: 2,
+            "the committed-crop ROI must match the same visible export crop")
     }
 }

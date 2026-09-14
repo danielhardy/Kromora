@@ -1,5 +1,5 @@
-import Foundation
 import CoreGraphics
+import Foundation
 
 /// The work a renderer should perform.
 ///
@@ -121,12 +121,47 @@ struct RenderRequest: Sendable, Equatable {
         }
     }
 
+    /// True when `sourceROI` is the complete presented photo (nil, or the committed crop in
+    /// native space). False when it is a viewport fragment. The presentation surface uses this
+    /// to fill the canvas instead of treating a cropped fit frame as a postage-stamp ROI.
+    var coversPresentationExtent: Bool {
+        guard let sourceROI else { return true }
+        let native = document.rotation.orientedExtent(source.nativeExtent)
+        let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
+        return ResolutionPlan.roi(sourceROI, coversCrop: crop, nativeExtent: native)
+    }
+
+    /// Where an uncovered ROI texture sits in `presentationImageExtent`'s coordinate system.
+    ///
+    /// Interactive quality may decode below `targetSize` (the 1.5 MP frame budget), so the GPU
+    /// image's own extent is in that smaller space. Placing it with that origin on the planner-sized
+    /// virtual crop puts the fragment in the wrong corner of a zoomed canvas — the viewport goes
+    /// empty until the settled frame, which shares `targetSize`, arrives.
+    var presentationLayoutExtent: CGRect? {
+        guard let sourceROI, let targetSize,
+            targetSize.width > 0, targetSize.height > 0,
+            targetSize.width.isFinite, targetSize.height.isFinite,
+            !coversPresentationExtent
+        else { return nil }
+        let native = document.rotation.orientedExtent(source.nativeExtent)
+        guard native.width > 0, native.height > 0,
+            native.width.isFinite, native.height.isFinite
+        else { return nil }
+        return CGRect(
+            x: sourceROI.minX / native.width * targetSize.width,
+            y: sourceROI.minY / native.height * targetSize.height,
+            width: sourceROI.width / native.width * targetSize.width,
+            height: sourceROI.height / native.height * targetSize.height
+        )
+    }
+
     /// The durable pixel contract for a sized export. The renderer applies this after the shared
     /// graph has been evaluated because `RenderScale` intentionally describes a scale factor, not
     /// an independently rounded pixel box.
     var exportOutputSize: CGSize? {
         guard quality == .export, let options = exportOptions,
-              options.sizing.longEdge != nil else { return nil }
+            options.sizing.longEdge != nil
+        else { return nil }
         return options.outputSize(for: document.rotation.orientedExtent(source.nativeExtent))
     }
 }
