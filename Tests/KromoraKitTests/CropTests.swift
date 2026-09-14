@@ -588,11 +588,7 @@ final class CropOverlayViewTests: XCTestCase {
             imageSize: CGSize(width: 400, height: 300),
             aspectRatio: .freeform,
             orientation: .automatic,
-            onChange: { _ in },
-            onAspectRatioChange: { _, _ in },
-            onApply: {},
-            onReset: {},
-            onCancel: {}
+            onChange: { _ in }
         )
     }
 
@@ -634,5 +630,50 @@ final class CropOverlayViewTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(point.y, rect.minY)
             XCTAssertLessThanOrEqual(point.y, rect.maxY)
         }
+    }
+
+    // A press on the visible top-left handle of a full-image crop must resize, not translate.
+    // Translation of a unit crop is clamped, so a stolen move gesture looks like a dead handle.
+    func testPressOnTopLeftCornerOfFullImageCropResizesRatherThanMoves() {
+        let bounds = CGRect(x: 0, y: 0, width: 800, height: 500)
+        XCTAssertEqual(
+            CropOverlayInteraction.hit(at: .zero, cropRect: bounds, bounds: bounds),
+            .resize(.topLeading)
+        )
+        XCTAssertEqual(
+            CropOverlayInteraction.hit(at: CGPoint(x: 8, y: 6), cropRect: bounds, bounds: bounds),
+            .resize(.topLeading)
+        )
+    }
+
+    func testPressInCropInteriorMoves() {
+        let bounds = CGRect(x: 0, y: 0, width: 800, height: 500)
+        let crop = CGRect(x: 40, y: 30, width: 400, height: 300)
+        XCTAssertEqual(
+            CropOverlayInteraction.hit(
+                at: CGPoint(x: crop.midX, y: crop.midY), cropRect: crop, bounds: bounds),
+            .move
+        )
+    }
+
+    func testPressOutsideCropAndHandlesIsIgnored() {
+        let bounds = CGRect(x: 0, y: 0, width: 800, height: 500)
+        let crop = CGRect(x: 200, y: 150, width: 200, height: 150)
+        XCTAssertNil(
+            CropOverlayInteraction.hit(at: CGPoint(x: 10, y: 10), cropRect: crop, bounds: bounds)
+        )
+    }
+
+    func testTopLeftHandleHitRectStaysInsideOverlayAndCoversTheVisibleCorner() {
+        let bounds = CGRect(x: 0, y: 0, width: 800, height: 500)
+        let crop = bounds
+        let rect = CropOverlayInteraction.handleHitRect(
+            .topLeading, cropRect: crop, bounds: bounds)
+        XCTAssertTrue(bounds.contains(rect))
+        XCTAssertTrue(
+            rect.minX <= crop.minX && rect.maxX >= crop.minX
+                && rect.minY <= crop.minY && rect.maxY >= crop.minY)
+        XCTAssertEqual(rect.width, CropOverlayInteraction.handleHitTargetSize)
+        XCTAssertEqual(rect.height, CropOverlayInteraction.handleHitTargetSize)
     }
 }

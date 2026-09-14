@@ -1,118 +1,63 @@
 import CoreGraphics
 import SwiftUI
 
-/// Coordinates are converted to the normalized bottom-left model space before they reach
-/// AppViewModel. Ratio geometry lives in `CropOverlayInteraction` so it is shared with model tests.
-struct CropOverlayView: View {
-    typealias Handle = CropHandle
-
-    // Internal (not private) so CropOverlayViewTests can verify the hit-target geometry that
-    // fixed KRMA-387 without a UI test harness.
-    let handleHitTargetSize: CGFloat = 44
-
-    let normalizedRect: CGRect
-    let imageSize: CGSize
+/// Crop Apply/Reset/Cancel chrome. Lives above the canvas in `PreviewView` so it reserves
+/// height and cannot cover the top handles or steal their hits.
+struct CropToolbarView: View {
     let aspectRatio: CropAspectRatio
     let orientation: CropAspectRatioOrientation
-    let onChange: (CGRect) -> Void
     let onAspectRatioChange: (CropAspectRatio, CropAspectRatioOrientation) -> Void
     let onApply: () -> Void
     let onReset: () -> Void
     let onCancel: () -> Void
 
-    @State private var moveStart: CGRect?
-    @State private var handleStarts: [Handle: CGRect] = [:]
-
     var body: some View {
-        GeometryReader { geometry in
-            let imageRect = fittedImageRect(in: geometry.size)
-            let cropRect = screenRect(for: normalizedRect, in: imageRect)
-
-            ZStack(alignment: .top) {
-                dimmedOutside(cropRect: cropRect, in: geometry.size)
-
-                cropGuides(cropRect: cropRect)
-                    // The rendered crop frame is the interior move surface. Keeping the gesture
-                    // on this view makes the crop area draggable even when the underlying preview
-                    // is a Metal view or a transparent hit-test surface.
-                    .contentShape(Rectangle())
-                    .gesture(moveGesture(imageRect: imageRect))
-                    .accessibilityLabel("Crop frame")
-                    .accessibilityHint("Drag to move the crop frame without changing its size")
-
-                ForEach(Handle.allCases, id: \.self) { handle in
-                    Circle()
-                        .fill(Color.white)
-                        .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
-                        .frame(width: 18, height: 18)
-                        .position(handlePosition(handle, in: cropRect))
-                        .allowsHitTesting(false)
-                }
-
-                // Keep the hit target inside the image when a crop corner is on the overlay
-                // boundary. In particular, the top-left handle otherwise has most of its hit
-                // area outside the GeometryReader and can also sit beneath the top controls.
-                ForEach(Handle.allCases, id: \.self) { handle in
-                    Rectangle()
-                        .fill(.clear)
-                        .frame(width: handleHitTargetSize, height: handleHitTargetSize)
-                        .position(handleHitPosition(handle, in: cropRect))
-                        .contentShape(Rectangle())
-                        .gesture(handleGesture(handle, imageRect: imageRect))
-                        .accessibilityLabel("Crop \(handle.label) handle")
-                        .accessibilityHint("Drag to resize the crop")
-                        .zIndex(1)
-                }
-
-                HStack(spacing: 8) {
-                    Text("Crop")
-                        .font(.headline)
-                    Menu {
-                        ForEach(CropAspectRatio.allCases, id: \.self) { ratio in
-                            if ratio.supportsOrientationSelection {
-                                Menu(ratio.label) {
-                                    ratioButton(ratio, orientation: .landscape)
-                                    ratioButton(ratio, orientation: .portrait)
-                                }
+        HStack(spacing: 8) {
+            Text("Crop")
+                .font(.headline)
+            Menu {
+                ForEach(CropAspectRatio.allCases, id: \.self) { ratio in
+                    if ratio.supportsOrientationSelection {
+                        Menu(ratio.label) {
+                            ratioButton(ratio, orientation: .landscape)
+                            ratioButton(ratio, orientation: .portrait)
+                        }
+                    } else {
+                        Button {
+                            onAspectRatioChange(ratio, .automatic)
+                        } label: {
+                            if ratio == aspectRatio && orientation == .automatic {
+                                Label(ratio.label, systemImage: "checkmark")
                             } else {
-                                Button {
-                                    onAspectRatioChange(ratio, .automatic)
-                                } label: {
-                                    if ratio == aspectRatio && orientation == .automatic {
-                                        Label(ratio.label, systemImage: "checkmark")
-                                    } else {
-                                        Text(ratio.label)
-                                    }
-                                }
+                                Text(ratio.label)
                             }
                         }
-                    } label: {
-                        Label(
-                            aspectRatio.selectionLabel(for: orientation), systemImage: "aspectratio"
-                        )
                     }
-                    .accessibilityLabel("Crop aspect ratio")
-                    .accessibilityHint(
-                        "Choose a square, freeform, landscape, or portrait crop ratio")
-                    Spacer()
-                    Button("Reset", action: onReset)
-                    Button("Cancel", action: onCancel)
-                    Button("Apply", action: onApply)
-                        .keyboardShortcut(.defaultAction)
-                        .buttonStyle(.borderedProminent)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                .padding(12)
+            } label: {
+                Label(
+                    aspectRatio.selectionLabel(for: orientation), systemImage: "aspectratio"
+                )
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Crop, \(aspectRatio.label)")
+            .accessibilityLabel("Crop aspect ratio")
             .accessibilityHint(
-                "Choose an aspect ratio, then drag the crop frame or handles within the image bounds"
-            )
-            .onExitCommand(perform: onCancel)
+                "Choose a square, freeform, landscape, or portrait crop ratio")
+            Spacer()
+            Button("Reset", action: onReset)
+            Button("Cancel", action: onCancel)
+            Button("Apply", action: onApply)
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Crop, \(aspectRatio.label)")
+        .accessibilityHint(
+            "Choose an aspect ratio, then drag the crop frame or handles within the image bounds"
+        )
+        .onExitCommand(perform: onCancel)
     }
 
     @ViewBuilder
@@ -128,6 +73,109 @@ struct CropOverlayView: View {
                 Text(ratio.selectionLabel(for: orientation))
             }
         }
+    }
+}
+
+/// Coordinates are converted to the normalized bottom-left model space before they reach
+/// AppViewModel. Ratio geometry lives in `CropOverlayInteraction` so it is shared with model tests.
+/// Crop chrome is `CropToolbarView` in `PreviewView`, not this overlay, so the top handles stay
+/// reachable when the crop is the full image.
+struct CropOverlayView: View {
+    typealias Handle = CropHandle
+
+    // Internal (not private) so CropOverlayViewTests can verify the hit-target geometry that
+    // fixed KRMA-387 without a UI test harness.
+    let handleHitTargetSize: CGFloat = CropOverlayInteraction.handleHitTargetSize
+
+    let normalizedRect: CGRect
+    let imageSize: CGSize
+    let aspectRatio: CropAspectRatio
+    let orientation: CropAspectRatioOrientation
+    let onChange: (CGRect) -> Void
+
+    @State private var dragSession: DragSession?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let bounds = CGRect(origin: .zero, size: geometry.size)
+            let imageRect = fittedImageRect(in: geometry.size)
+            let cropRect = screenRect(for: normalizedRect, in: imageRect)
+
+            ZStack {
+                dimmedOutside(cropRect: cropRect, in: geometry.size)
+
+                cropGuides(cropRect: cropRect)
+                    .accessibilityLabel("Crop frame")
+                    .accessibilityHint("Drag to move the crop frame without changing its size")
+
+                ForEach(Handle.allCases, id: \.self) { handle in
+                    Circle()
+                        .fill(Color.white)
+                        .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
+                        .frame(width: 18, height: 18)
+                        .position(handlePosition(handle, in: cropRect))
+                        .allowsHitTesting(false)
+                        .accessibilityLabel("Crop \(handle.label) handle")
+                        .accessibilityHint("Drag to resize the crop")
+                }
+
+                // One overlay-wide gesture classifies the press. Separate handle views using
+                // `.position()` at the overlay origin do not reliably receive macOS hits, and the
+                // interior move gesture then wins. For a full-image crop that move is clamped, so
+                // the top-left handle appears dead.
+                Rectangle()
+                    .fill(Color.primary.opacity(0.001))
+                    .contentShape(Rectangle())
+                    .highPriorityGesture(
+                        pointerGesture(
+                            imageRect: imageRect, cropRect: cropRect, bounds: bounds)
+                    )
+                    .accessibilityHidden(true)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Crop overlay")
+        }
+    }
+
+    private struct DragSession {
+        var hit: CropOverlayHit
+        var startRect: CGRect
+    }
+
+    private func pointerGesture(
+        imageRect: CGRect, cropRect: CGRect, bounds: CGRect
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let session: DragSession
+                if let dragSession {
+                    session = dragSession
+                } else if let hit = CropOverlayInteraction.hit(
+                    at: value.startLocation, cropRect: cropRect, bounds: bounds
+                ) {
+                    session = DragSession(hit: hit, startRect: normalizedRect)
+                    dragSession = session
+                } else {
+                    return
+                }
+
+                switch session.hit {
+                case .move:
+                    onChange(
+                        CropOverlayInteraction.translated(
+                            session.startRect, delta: value.translation, imageRect: imageRect
+                        ))
+                case .resize(let handle):
+                    onChange(
+                        CropOverlayInteraction.resized(
+                            session.startRect, handle: handle, delta: value.translation,
+                            imageRect: imageRect, aspectRatio: aspectRatio,
+                            orientation: orientation, imageSize: imageSize
+                        ))
+                }
+            }
+            .onEnded { _ in dragSession = nil }
     }
 
     private func fittedImageRect(in viewport: CGSize) -> CGRect {
@@ -202,33 +250,6 @@ struct CropOverlayView: View {
         case .bottomLeading: return CGPoint(x: rect.minX + inset, y: rect.maxY - inset)
         case .bottomTrailing: return CGPoint(x: rect.maxX - inset, y: rect.maxY - inset)
         }
-    }
-
-    private func moveGesture(imageRect: CGRect) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                let start = moveStart ?? normalizedRect
-                moveStart = start
-                onChange(
-                    CropOverlayInteraction.translated(
-                        start, delta: value.translation, imageRect: imageRect
-                    ))
-            }
-            .onEnded { _ in moveStart = nil }
-    }
-
-    private func handleGesture(_ handle: Handle, imageRect: CGRect) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                let start = handleStarts[handle] ?? normalizedRect
-                handleStarts[handle] = start
-                onChange(
-                    CropOverlayInteraction.resized(
-                        start, handle: handle, delta: value.translation, imageRect: imageRect,
-                        aspectRatio: aspectRatio, orientation: orientation, imageSize: imageSize
-                    ))
-            }
-            .onEnded { _ in handleStarts[handle] = nil }
     }
 }
 
