@@ -313,22 +313,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
     }
 
-    private var capabilitiesTask: Task<Void, Never>?
-
     private var activeAssetID: PhotoAssetID?
     private var activeSourceReference: EditSourceReference?
     /// Source generation prevents delayed work from a previous navigation selection from publishing
     /// into the new image, even if the source values happen to compare equal.
-    private var sourceRevision: UInt64 = 0
+    var sourceRevision: UInt64 { sourceSession.sourceRevision }
     /// Document generation guards the primary visible render and histogram publications.
     private var documentRevision: UInt64 = 0
     /// Display generation guards histogram work against a newer request, including comparison
     /// mode and render-scale changes that do not change the edit document.
-    private var displayRevision: UInt64 = 0
+    var displayRevision: UInt64 { previewPresentation.displayRevision }
     /// Baseline generation changes when the source or a comparison-frame stage (develop/crop)
     /// changes. Look-stage edits and RAW white-balance Temperature/Tint must not invalidate an
     /// in-flight baseline that is still correct.
-    private var comparisonRevision: UInt64 = 0
+    var comparisonRevision: UInt64 { previewPresentation.comparisonRevision }
     /// Presentation-only snapshot of the before image. `EditDocument.originalForComparison` is a
     /// useful value projection, but it is derived from the live document; RAW Temperature/Tint are
     /// part of `rawDevelop` and would therefore mutate that projection during a slider gesture.
@@ -638,14 +636,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Removable volumes are discovered independently of the selector so the Import menu can name
     /// mounted volumes that contain supported images, or offer a permission-recovery path when
     /// the sandbox cannot inspect a volume until the user selects it.
-    @Published private(set) var removableMediaVolumes: [MediaVolume] = []
-    @Published var isRemovableMediaSelectorPresented = false
-    @Published private(set) var removableMediaVolume: MediaVolume?
-    @Published private(set) var removableMediaFiles: [MediaVolumeFile] = []
-    @Published private(set) var removableMediaWarnings: [String] = []
-    @Published private(set) var isRemovableMediaScanning = false
-    @Published private(set) var removableMediaSelection = MediaVolumeSelectionModel()
-    @Published private(set) var removableMediaImportProgress: MediaVolumeImportProgress?
+    var removableMediaVolumes: [MediaVolume] { libraryMediaWorkflow.removableMediaVolumes }
+    var isRemovableMediaSelectorPresented: Bool {
+        get { libraryMediaWorkflow.isRemovableMediaSelectorPresented }
+        set { libraryMediaWorkflow.isRemovableMediaSelectorPresented = newValue }
+    }
+    var removableMediaVolume: MediaVolume? { libraryMediaWorkflow.removableMediaVolume }
+    var removableMediaFiles: [MediaVolumeFile] { libraryMediaWorkflow.removableMediaFiles }
+    var removableMediaWarnings: [String] { libraryMediaWorkflow.removableMediaWarnings }
+    var isRemovableMediaScanning: Bool { libraryMediaWorkflow.isRemovableMediaScanning }
+    var removableMediaSelection: MediaVolumeSelectionModel {
+        libraryMediaWorkflow.removableMediaSelection
+    }
+    var removableMediaImportProgress: MediaVolumeImportProgress? {
+        libraryMediaWorkflow.removableMediaImportProgress
+    }
 
     // MARK: - Owned state
 
@@ -675,7 +680,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let portableLibrary: PortableLibrarySession?
     /// Background compaction shares the scheduler with editor work but uses its detached
     /// package-I/O lane, so a foreground edit can take the admission window back immediately.
-    let portablePackageMaintenance: PortablePackageMaintenance
     /// Writing images to disk — the single export, the batch run, and naming. Production exports
     /// use an isolated RenderEngine lane while preserving the same render request funnel.
     let export: ExportCoordinator
@@ -684,6 +688,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// The active-document global Look export flow. It snapshots edits and never mutates them while
     /// the user reviews omissions or chooses a destination.
     let lookSave = LookSaveCoordinator()
+    let libraryMediaWorkflow: LibraryMediaWorkflowCoordinator
+    private let libraryDeletionCoordinator: LibraryDeletionCoordinator
+    private let applicationShell: ApplicationShellCoordinator
+    /// Compatibility façade for diagnostics and package-maintenance tests. Lifecycle ownership
+    /// remains in `ApplicationShellCoordinator`.
+    var portablePackageMaintenance: PortablePackageMaintenance { applicationShell.maintenance }
 
     /// The persistent edit database location, when the store has an on-disk backing file.
     ///
@@ -723,23 +733,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var maskingSource: ImageSource? { isShuttingDown ? nil : imageSource }
     private let preferences: UserDefaults
     private let previewCoordinator: PreviewCoordinator
-    private let previewDiskCache: PreviewDiskCache
-    private var previewDiskCacheLookupTask: Task<Void, Never>?
+    private let previewPresentation: PreviewPresentationCoordinator
     private var pendingPreviewCacheLookup:
         (
             request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
             displayRevision: UInt64
         )?
-    private struct SourceLoadRequest: Sendable {
-        let name: String
-        let source: ImageSource
-        let sourceReference: EditSourceReference
-        let assetID: PhotoAssetID
-        let sourceRevision: UInt64
-        let editSessionRevision: UInt64
-        let hadInMemorySession: Bool
-        let traceQuality: String
-    }
     private struct AdjacentPreviewCandidate: Sendable {
         let source: ImageSource
         let inMemoryDocument: EditDocument?
@@ -757,8 +756,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     /// One non-cancellable source preparation is allowed to run. New navigation replaces this one
     /// pending value, so a burst cannot build a queue of obsolete RAW decoder operations.
-    private var pendingSourceLoad: SourceLoadRequest?
-    private var loadTask: Task<Void, Never>?
     /// Idle preview building is deliberately separate from adjacent prefetch. The neighbour wave
     /// warms the renderer's in-memory sources; this slower wave owns cache-fill cancellation and
     /// must never cancel or be cancelled by that existing two-item prefetch.
@@ -778,39 +775,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private let adjacentPreviewPrefetchJobID = ImageWorkScheduler.JobID("adjacent-preview-prefetch")
     private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
     private let histogramJobID = ImageWorkScheduler.JobID("histogram")
-    private var metadataTask: Task<Void, Never>?
     /// The embedded camera JPEG is a presentation-only first frame. It never enters the render
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
-    private let embeddedFirstFrameProvider: @Sendable (URL) async -> NSImage?
     private let fileDialog: any FileDialogProviding
-    private let fileDropActionPolicy: FileDropActionPolicy
-    private var embeddedFirstFrameTask: Task<NSImage?, Never>?
     private var prefetchDelayTask: Task<Void, Never>?
     private var previewDebounceTask: Task<Void, Never>?
     private var previewDebounceGeneration: UInt64 = 0
     private var sourceFolderOpenTask: Task<Void, Never>?
-    private var storedEditLoadTask: Task<EditDocumentLoadResult, Never>?
+    private let sourceSession: SourceSessionCoordinator
     // Internal so the masking extension can register its retry warm-up with lifecycle shutdown.
     var personSignalWarmingTask: Task<Void, Never>?
     private var lutCacheInvalidationTask: Task<Void, Never>?
     private var semanticCoordinatorInstallTask: Task<Void, Never>?
     private var isShuttingDown = false
     private var cancellables: [AnyCancellable] = []
-    private let mediaVolumeProvider: any MediaVolumeProviding
-    private let mediaVolumeNotificationCenter: NotificationCenter
-    private let applicationNotificationCenter: NotificationCenter
-    private var mediaVolumeObservers: [NSObjectProtocol] = []
-    private var applicationLifecycleObservers: [NSObjectProtocol] = []
-    private let portablePackageURL: URL?
     private let portableLibraryOpenError: String?
-    private let portableMaintenanceIdleDelay: Duration
-    private let portableMaintenanceJobID = ImageWorkScheduler.JobID("portable-package-maintenance")
-    private var portableMaintenanceTriggerTask: Task<Void, Never>?
-    private var mediaVolumeDiscoveryTask: Task<Void, Never>?
-    private var mediaVolumeRefreshTask: Task<Void, Never>?
-    private var mediaVolumeScanTask: Task<Void, Never>?
-    private var mediaVolumeImportTask: Task<Void, Never>?
 
     /// Changes whenever a Look thumbnail's source or edit recipe can change. Look rows use this as
     /// their task identity so a source switch or restored per-photo document refreshes thumbnails
@@ -926,9 +906,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
         self.workScheduler = ImageWorkScheduler()
         self.persistence = EditPersistenceCoordinator(store: effectiveEditStore)
-        self.portablePackageMaintenance = PortablePackageMaintenance(scheduler: workScheduler)
-        self.portablePackageURL = normalizedPortablePackageURL
-        self.portableMaintenanceIdleDelay = portableMaintenanceIdleDelay
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane
         // would let a burst of filmstrip/grid work evict a row's continuation before it can return.
         self.lookPreviewCoordinator = LookPreviewCoordinator(
@@ -950,18 +927,43 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             editStore: effectiveEditStore
         )
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
-        self.previewDiskCache = PreviewDiskCache(
+        let previewCache = PreviewDiskCache(
             directory: previewDiskCacheDirectory
                 ?? (openedPortableLibrary.map { PreviewDiskCache.packageDirectory(for: $0.rootURL) }
                     ?? PreviewDiskCache.defaultDirectory()),
             capBytes: previewDiskCacheCapBytes
         )
-        self.embeddedFirstFrameProvider = embeddedFirstFrameProvider
+        self.previewPresentation = PreviewPresentationCoordinator(cache: previewCache)
+        self.sourceSession = SourceSessionCoordinator(
+            engine: engine, editStore: effectiveEditStore,
+            embeddedFirstFrameProvider: embeddedFirstFrameProvider
+        )
         self.fileDialog = fileDialog
-        self.fileDropActionPolicy = fileDropActionPolicy
-        self.mediaVolumeProvider = mediaVolumeProvider
-        self.mediaVolumeNotificationCenter = mediaVolumeNotificationCenter
-        self.applicationNotificationCenter = applicationNotificationCenter
+        self.libraryMediaWorkflow = LibraryMediaWorkflowCoordinator(
+            provider: mediaVolumeProvider, fileDialog: fileDialog,
+            fileDropActionPolicy: fileDropActionPolicy
+        )
+        self.applicationShell = ApplicationShellCoordinator(
+            mediaNotificationCenter: mediaVolumeNotificationCenter,
+            applicationNotificationCenter: applicationNotificationCenter,
+            scheduler: workScheduler,
+            maintenance: PortablePackageMaintenance(scheduler: workScheduler),
+            packageURL: normalizedPortablePackageURL,
+            packageLease: openedPortableLibrary?.lease,
+            idleDelay: portableMaintenanceIdleDelay
+        )
+        let deletionCollection = self.collection
+        self.libraryDeletionCoordinator = LibraryDeletionCoordinator(
+            collection: self.collection,
+            persistence: self.persistence,
+            editStore: self.editStore,
+            photoAnalysis: self.photoAnalysisCoordinator,
+            portableLibrary: self.portableLibrary,
+            persistenceIdentity: { item in
+                guard deletionCollection.sourceKind(for: item) == .managed else { return nil }
+                return item.asset.source.portableIdentity
+            }
+        )
         self.photosImportCoordinator.destination = self
         self.photosImportCoordinator.onStatus = { [weak self] message in
             self?.statusMessage = message
@@ -984,7 +986,25 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self?.statusMessage = message
         }
 
-        startRemovableMediaMonitoring()
+        libraryMediaWorkflow.onStatus = { [weak self] message in
+            self?.statusMessage = message
+        }
+        libraryMediaWorkflow.onError = { [weak self] message in
+            self?.presentError(message)
+        }
+        libraryMediaWorkflow.onSourceFolder = { [weak self] url in
+            self?.openSourceFolder(url: url)
+        }
+        libraryMediaWorkflow.onImageURL = { [weak self] url in
+            self?.openImage(url: url)
+        }
+        libraryMediaWorkflow.onImportRequest = { [weak self] request in
+            self?.importRemovableMedia(request)
+        }
+        applicationShell.onMediaChanged = { [weak self] in
+            self?.libraryMediaWorkflow.refreshRemovableMedia()
+        }
+        applicationShell.start()
 
         // A missing value is the first-launch state: single-photo editing is the primary surface.
         // Read this after all stored properties are initialized because the published property's
@@ -1010,11 +1030,46 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 "Could not display the comparison preview. Try Fit or reload the photo."
         }
 
+        sourceSession.onPreparation = { [weak self] publication in
+            guard let self, !self.isShuttingDown else { return }
+            self.install(preparation: publication.preparation, request: publication.request)
+            if self.previewScheduledSourceRevision != self.sourceRevision {
+                self.schedulePreview()
+            }
+        }
+        sourceSession.onStoredDocument = { [weak self] publication in
+            guard let self, !self.isShuttingDown else { return }
+            self.adoptStoredEdits(publication.result, for: publication.request)
+        }
+        sourceSession.onMetadata = { [weak self] publication in
+            guard let self, !self.isShuttingDown else { return }
+            self.metadata = publication.metadata
+        }
+        sourceSession.onCapabilities = { [weak self] publication in
+            guard let self, !self.isShuttingDown else { return }
+            self.rawCapabilities = publication.capabilities
+            self.capabilitiesProbeCompleted = true
+            self.keepInspectorTabValid()
+        }
+        sourceSession.onFirstFrame = { [weak self] publication in
+            guard let self, !self.isShuttingDown else { return }
+            self.presentEmbeddedFirstFrame(publication)
+        }
+        sourceSession.onFailure = { [weak self] request, message in
+            guard let self, !self.isShuttingDown,
+                request.sourceRevision == self.sourceRevision,
+                request.assetID == self.activeAssetID else { return }
+            self.isLoading = false
+            self.previewState = .failed
+            self.presentError(message)
+        }
+
         // Forward nested ObservableObject changes so SwiftUI views update.
         for child in [
             settings.objectWillChange.eraseToAnyPublisher(),
             library.objectWillChange.eraseToAnyPublisher(),
             collection.objectWillChange.eraseToAnyPublisher(),
+            libraryMediaWorkflow.objectWillChange.eraseToAnyPublisher(),
             editorDocument.objectWillChange.eraseToAnyPublisher(),
             photosImportCoordinator.objectWillChange.eraseToAnyPublisher(),
             export.objectWillChange.eraseToAnyPublisher(),
@@ -1685,8 +1740,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewDebounceGeneration &+= 1
         previewDebounceTask?.cancel()
         previewDebounceTask = nil
-        previewDiskCacheLookupTask?.cancel()
-        previewDiskCacheLookupTask = nil
+        previewPresentation.cancelCacheLookup()
         pendingPreviewCacheLookup = nil
         previewCoordinator.cancel()
     }
@@ -1727,8 +1781,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // A real open always wins over cache-only work. Keep this adjacent to the existing
         // prefetch cancellation: the two jobs have separate identities and separate lifecycles.
         cancelIdlePreviewBuild(resetCursor: true)
-        embeddedFirstFrameTask?.cancel()
-        embeddedFirstFrameTask = nil
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
             portableIdentity: portableIdentity, dataFingerprint: dataFingerprint,
@@ -1755,12 +1807,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         lutResolutionStatus = nil
         refreshLUTResolutionStatus()
 
-        sourceRevision &+= 1
-        comparisonRevision &+= 1
-        displayRevision &+= 1
+        previewPresentation.resetForSource()
         storedEditsResolvedSourceRevision = nil
         cancelHistogram(clear: true, pump: false)
-        let sourceRevision = self.sourceRevision
         previewCoordinator.cancel()
         invalidateEditedThumbnailWork(for: previousActiveAssetID)
         pendingEditedThumbnailAssetID = nil
@@ -1786,7 +1835,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Space comparison is transient and belongs to the source being left. The user's
         // single-vs-side-by-side preference intentionally remains intact across photo switches.
         isShowingOriginal = false
-        metadataTask?.cancel()
         metadata = ImageMetadata()
         cancelComparisonPreview(pump: false)
         comparisonPreviewRetryTask?.cancel()
@@ -1796,7 +1844,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         prefetchDelayTask?.cancel()
         prefetchDelayTask = nil
         cancelPendingPreviewDebounce()
-        capabilitiesTask?.cancel()
         rawCapabilities = nil
         capabilitiesProbeCompleted = false
         // A pending develop flag describes the image being left; it must not survive onto whatever
@@ -1810,98 +1857,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         isLoading = true
         statusMessage = "Loading \(name)..."
 
-        pendingSourceLoad = SourceLoadRequest(
-            name: importPlan.name, source: importPlan.source,
-            sourceReference: sourceReference, assetID: assetID,
-            sourceRevision: sourceRevision,
+        sourceSession.begin(
+            plan: importPlan,
             editSessionRevision: editorDocument.revision(for: assetID),
-            hadInMemorySession: session != nil,
-            traceQuality: importPlan.traceQuality
+            hadInMemorySession: session != nil
         )
-        startSourceLoadWorkerIfNeeded()
-    }
-
-    private func startSourceLoadWorkerIfNeeded() {
-        guard !isShuttingDown, loadTask == nil else { return }
-        loadTask = Task { [weak self] in
-            while let self, !self.isShuttingDown, let request = self.pendingSourceLoad {
-                self.pendingSourceLoad = nil
-                await self.prepareAndInstall(request)
-            }
-            self?.loadTask = nil
-        }
-    }
-
-    private func prepareAndInstall(
-        _ request: SourceLoadRequest
-    ) async {
-        var interval = KromoraSignpostInterval(
-            .photoSwitch,
-            context: KromoraTraceContext(
-                sourceFingerprint: request.name, quality: request.traceQuality)
-        )
-        defer { interval.end() }
-
-        guard !isShuttingDown else { return }
-
-        // The edit lookup is independent of source preparation. Starting it first lets its actor
-        // work overlap a RAW geometry/session probe without putting it on the source-critical path.
-        let editStore = self.editStore
-        let storedTask = Task { await editStore.load(for: request.sourceReference) }
-        storedEditLoadTask = storedTask
-        let preparation = await engine.prepareSource(request.source)
-
-        guard !isShuttingDown,
-            request.sourceRevision == sourceRevision,
-            request.assetID == activeAssetID
-        else {
-            // Do not publish an obsolete source or its error. The worker will consume only the
-            // newest pending request after this single in-flight preparation completes.
-            storedTask.cancel()
-            _ = await storedTask.value
-            storedEditLoadTask = nil
-            return
-        }
-
-        guard let preparation else {
-            isLoading = false
-            previewState = .failed
-            presentError("Error: Cannot load \(request.name)")
-            storedTask.cancel()
-            _ = await storedTask.value
-            storedEditLoadTask = nil
-            return
-        }
-
-        install(preparation: preparation, request: request)
-
-        // The source is drawable now, so admit the best document we have without waiting for
-        // persistence. A cold open speculates with the identity document; an in-memory session
-        // already contains the document the user expects to see. The store result below may
-        // replace that speculation, but it must not hold back the first pixels.
-        if previewScheduledSourceRevision != sourceRevision {
-            schedulePreview()
-        }
-
-        let stored = await storedTask.value
-        storedEditLoadTask = nil
-        guard request.sourceRevision == sourceRevision,
-            request.assetID == activeAssetID
-        else { return }
-        adoptStoredEdits(stored, for: request)
     }
 
     private func install(
-        preparation: ImageSourcePreparation, request: SourceLoadRequest
+        preparation: ImageSourcePreparation, request: SourceSessionCoordinator.Request
     ) {
         imageSource = preparation.source
         previewScheduledSourceRevision = nil
-        if case .url(let url) = request.source.backing {
+        if case .url(let url) = request.plan.source.backing {
             sourceURL = url
         } else {
             sourceURL = nil
         }
-        sourceName = request.name
+        sourceName = request.plan.name
         sourceSize = preparation.nativeExtent
         // This marker is availability state only. It is never sent to RenderEngine, histogram, or
         // detail assessment; the authoritative color-managed pixels come from the edited render.
@@ -1909,52 +1882,28 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             to: CGRect(origin: .zero, size: preparation.nativeExtent)
         )
         previewState = .loading
-        if request.source.kind != .raw {
+        if request.plan.source.kind != .raw {
             statusMessage =
-                "\(request.name)  \(Int(preparation.nativeExtent.width))\u{00D7}\(Int(preparation.nativeExtent.height))"
+                "\(request.plan.name)  \(Int(preparation.nativeExtent.width))\u{00D7}\(Int(preparation.nativeExtent.height))"
         }
-        presentEmbeddedFirstFrameIfRAW(preparation: preparation, request: request)
         isLoading = false
         keepInspectorTabValid()
-        switch request.source.backing {
-        case .url(let url): refreshMetadata(url: url, data: nil)
-        case .data(let data): refreshMetadata(url: nil, data: data)
-        }
-        refreshCapabilities()
         scheduleAdjacentPreviewPrefetch()
     }
 
-    /// Put the camera's embedded JPEG on the presentation surface while the neutral RAW develop
-    /// is still rendering. This is deliberately outside `PreviewCoordinator`: the provisional
-    /// image is not a render publication and must not participate in settled revision ownership
-    /// or its presentation-confirmation lifecycle.
-    private func presentEmbeddedFirstFrameIfRAW(
-        preparation: ImageSourcePreparation, request: SourceLoadRequest
+    /// Present the source-session's optional camera JPEG while the RAW render is loading. The
+    /// provisional frame is deliberately not a `PreviewCoordinator` publication and therefore
+    /// cannot admit histogram, comparison, or cache work.
+    private func presentEmbeddedFirstFrame(
+        _ publication: SourceSessionCoordinator.FirstFramePublication
     ) {
-        guard request.source.kind == .raw,
-            case .url(let url) = preparation.source.backing
-        else {
-            return
-        }
-
-        let sourceRevision = self.sourceRevision
-        let assetID = self.activeAssetID
-        let provider = embeddedFirstFrameProvider
-        let extractionTask = Task.detached(priority: .userInitiated) {
-            await provider(url)
-        }
-        embeddedFirstFrameTask = extractionTask
-
-        Task { @MainActor [weak self, extractionTask, sourceRevision, assetID, preparation] in
-            let image = await extractionTask.value
-            guard let self, !extractionTask.isCancelled, !self.isShuttingDown,
-                self.sourceRevision == sourceRevision,
-                self.activeAssetID == assetID,
-                self.previewState == .loading,
-                self.lastPublishedVisibleRequest == nil,
-                let image,
-                let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-            else { return }
+        guard publication.request.sourceRevision == sourceRevision,
+            publication.request.assetID == activeAssetID,
+            previewState == .loading,
+            lastPublishedVisibleRequest == nil,
+            let cgImage = publication.image.cgImage(
+                forProposedRect: nil, context: nil, hints: nil
+            ) else { return }
 
             // The camera JPEG is a stand-in for the whole photo. Do not rasterize it at
             // native RAW size — that is a 24–60MP GPU upload on every filmstrip click and
@@ -1962,7 +1911,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // the surface to stretch them across the native Fit/Fill frame. If the preview
             // is still sensor-landscape while native display size is portrait, rotate first
             // so the stretch cannot look like a 90° error.
-            let native = preparation.nativeExtent
+            let native = publication.preparation.nativeExtent
             let provisional = Self.alignedEmbeddedFirstFrame(
                 CIImage(cgImage: cgImage), to: native
             )
@@ -1970,17 +1919,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // The settled preview is submitted through the coordinator and always publishes at a
             // newer surface revision. The guards above keep a late provisional JPEG from ever
             // replacing that settled frame, so no explicit clear is needed here.
-            self.previewSurface.present(
+            previewSurface.present(
                 provisional, space: .current,
-                revision: self.displayRevision,
-                source: preparation.source,
+                revision: displayRevision,
+                source: publication.preparation.source,
                 quality: .preview,
                 presentationImageExtent: CGRect(origin: .zero, size: native),
                 coversPresentationExtent: true,
                 onPresented: nil
             )
-            self.embeddedFirstFrameTask = nil
-        }
     }
 
     /// Camera previews are often still sensor-landscape when the RAW's display size is portrait.
@@ -2009,7 +1956,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func adoptStoredEdits(
-        _ stored: EditDocumentLoadResult, for request: SourceLoadRequest
+        _ stored: EditDocumentLoadResult, for request: SourceSessionCoordinator.Request
     ) {
         // A pre-existing session or a mutation made while preparation was in flight owns the
         // current document. Only a still-pristine, never-seen session may adopt disk state.
@@ -2027,7 +1974,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             refreshLUTResolutionStatus()
             if documentChanged {
                 documentRevision &+= 1
-                comparisonRevision &+= 1
+                previewPresentation.advanceComparisonRevision()
                 scheduleAdjacentPreviewPrefetch()
             }
         }
@@ -2185,10 +2132,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelIdlePreviewBuild()
         guard collection.isActive,
             !collection.isScanning,
-            pendingSourceLoad == nil,
+            !sourceSession.isBusy,
             previewDebounceTask == nil,
             !isPreviewInteractionActive,
-            loadTask == nil,
+            !sourceSession.isBusy,
             NSApplication.shared.isActive
         else { return }
 
@@ -2238,10 +2185,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 self.activeAssetID == selectedAssetID,
                 self.collection.isActive,
                 !self.collection.isScanning,
-                self.pendingSourceLoad == nil,
+                !self.sourceSession.isBusy,
                 self.previewDebounceTask == nil,
                 !self.isPreviewInteractionActive,
-                self.loadTask == nil,
+                !self.sourceSession.isBusy,
                 NSApplication.shared.isActive
             else {
                 if let self, self.idleBuildGeneration == generation {
@@ -2318,7 +2265,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             workItems.append(
                 IdlePreviewWorkItem(
                     cursor: cursor,
-                    request: previewDiskCache.contains(previewDiskCacheKey(for: request))
+                    request: previewPresentation.cache.contains(previewDiskCacheKey(for: request))
                         ? nil : request
                 )
             )
@@ -2326,7 +2273,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         guard !workItems.isEmpty, !Task.isCancelled else { return }
         let engine = self.engine
-        let cache = self.previewDiskCache
+        let cache = self.previewPresentation.cache
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             workScheduler.enqueue(
                 id: idlePreviewBuildJobID, lane: .editor, priority: .background,
@@ -2348,7 +2295,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         self.idleBuildCursor = item.cursor + 1
                         continue
                     }
-                    let key = self.previewDiskCacheKey(for: request)
+                    let key = self.previewPresentation.cacheKey(for: request)
                     guard !cache.contains(key) else {
                         self.idleBuildCursor = item.cursor + 1
                         continue
@@ -2359,16 +2306,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         self.sourceRevision == sourceRevision,
                         self.activeAssetID == selectedAssetID
                     else { return }
-                    if let image {
-                        Task.detached(priority: .background) {
-                            guard !Task.isCancelled,
-                                let raster = PreviewDiskCache.canonicalRaster(
-                                    from: image, space: request.space
-                                )
-                            else { return }
-                            cache.write(raster, for: key)
-                        }
-                    }
+                    if let image { self.previewPresentation.writeCanonical(image, for: request) }
                     self.idleBuildCursor = item.cursor + 1
                 }
             }
@@ -2563,353 +2501,95 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Removable media import
 
-    /// Keep the Import menu synchronized with hardware changes while retaining the explicit
-    /// refresh action as a user-controlled fallback. Mount notifications can arrive in bursts
-    /// while macOS finishes preparing a card, so discovery is coalesced behind a short debounce.
-    private func startRemovableMediaMonitoring() {
-        let workspaceCenter = mediaVolumeNotificationCenter
-        for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification] {
-            mediaVolumeObservers.append(
-                workspaceCenter.addObserver(forName: name, object: nil, queue: .main) {
-                    [weak self] _ in
-                    Task { @MainActor [weak self] in
-                        self?.scheduleRemovableMediaRefresh()
-                    }
-                }
-            )
-        }
-
-        applicationLifecycleObservers.append(
-            applicationNotificationCenter.addObserver(
-                forName: NSApplication.didBecomeActiveNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.scheduleRemovableMediaRefresh()
-                    self?.schedulePortablePackageMaintenance()
-                }
-            }
-        )
-    }
-
-    /// Run rebuildable package maintenance after the app has been active and idle briefly. The
-    /// package is checked before admission because the current app can still be using its legacy
-    /// folder library; a future package-open flow can provide the same URL to this coordinator.
-    private func schedulePortablePackageMaintenance() {
-        guard !isShuttingDown,
-            let packageURL = portablePackageURL,
-            FileManager.default.fileExists(
-                atPath: packageURL.appendingPathComponent("manifest.json").path
-            ),
-            !workScheduler.contains(portableMaintenanceJobID)
-        else { return }
-
-        portableMaintenanceTriggerTask?.cancel()
-        portableMaintenanceTriggerTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                try await Task.sleep(for: self.portableMaintenanceIdleDelay)
-            } catch {
-                return
-            }
-            guard !Task.isCancelled, !self.isShuttingDown,
-                let packageURL = self.portablePackageURL,
-                !self.workScheduler.contains(self.portableMaintenanceJobID)
-            else { return }
-            _ = self.portablePackageMaintenance.enqueue(
-                packageURL: packageURL,
-                lease: self.portableLibrary?.lease
-            )
-        }
-    }
-
-    private func scheduleRemovableMediaRefresh() {
-        guard !isShuttingDown else { return }
-        mediaVolumeRefreshTask?.cancel()
-        mediaVolumeRefreshTask = Task { @MainActor [weak self] in
-            do {
-                try await Task.sleep(for: .milliseconds(200))
-            } catch {
-                return
-            }
-            guard let self, !Task.isCancelled, !self.isShuttingDown else { return }
-            self.refreshRemovableMedia()
-        }
-    }
-
     var selectedRemovableMediaFiles: [MediaVolumeFile] {
-        removableMediaFiles.filter { removableMediaSelection.contains($0) }
+        libraryMediaWorkflow.selectedRemovableMediaFiles
     }
 
-    /// Refresh the menu's volume names. Discovery is intentionally asynchronous: probing a slow
-    /// card must never block the editor window or make an empty menu look like a hardware failure.
     func refreshRemovableMedia() {
-        mediaVolumeDiscoveryTask?.cancel()
-        let provider = mediaVolumeProvider
-        mediaVolumeDiscoveryTask = Task { [weak self] in
-            let volumes = await provider.discover()
-            guard !Task.isCancelled, let self else { return }
-            self.removableMediaVolumes = volumes
-        }
+        libraryMediaWorkflow.refreshRemovableMedia()
     }
 
-    /// The File-menu action opens the first discovered volume. The toolbar Import menu exposes
-    /// every volume by name when more than one is mounted.
     func importFromRemovableMedia() {
-        mediaVolumeDiscoveryTask?.cancel()
-        let provider = mediaVolumeProvider
-        mediaVolumeDiscoveryTask = Task { [weak self] in
-            let volumes = await provider.discover()
-            guard !Task.isCancelled, let self else { return }
-            self.removableMediaVolumes = volumes
-            guard let volume = volumes.first else {
-                self.statusMessage = "No supported removable media is mounted"
-                return
-            }
-            self.openRemovableMedia(volume)
-        }
+        libraryMediaWorkflow.importFromRemovableMedia()
     }
 
     func openRemovableMedia(_ volume: MediaVolume) {
-        mediaVolumeScanTask?.cancel()
-        mediaVolumeImportTask?.cancel()
-        removableMediaVolume = volume
-        removableMediaFiles = []
-        removableMediaWarnings = []
-        removableMediaSelection.clear()
-        removableMediaImportProgress = nil
-        isRemovableMediaScanning = true
-        isRemovableMediaSelectorPresented = true
-
-        let provider = mediaVolumeProvider
-        mediaVolumeScanTask = Task { [weak self] in
-            do {
-                let result = try await provider.scan(volume)
-                guard !Task.isCancelled, let self else { return }
-                self.removableMediaFiles = result.files
-                self.removableMediaWarnings = result.warnings
-                self.removableMediaSelection.selectAll(in: result.files)
-                self.isRemovableMediaScanning = false
-                if result.files.isEmpty {
-                    self.removableMediaWarnings.append(
-                        "No supported images were found on this volume.")
-                }
-            } catch is CancellationError {
-                // Closing the sheet is a normal, recoverable cancellation.
-            } catch {
-                guard let self else { return }
-                if case .permissionDenied = error as? MediaVolumeError,
-                    provider.supportsInteractiveAccessGrant,
-                    let grantedVolume = self.requestRemovableMediaAccess(for: volume)
-                {
-                    self.removableMediaVolume = grantedVolume
-                    self.removableMediaVolumes = self.removableMediaVolumes.map { candidate in
-                        candidate.id == volume.id ? grantedVolume : candidate
-                    }
-                    do {
-                        let result = try await provider.scan(grantedVolume)
-                        guard !Task.isCancelled else { return }
-                        self.publishRemovableMediaScan(result)
-                        return
-                    } catch is CancellationError {
-                        return
-                    } catch {
-                        self.isRemovableMediaScanning = false
-                        self.removableMediaWarnings = [error.localizedDescription]
-                        return
-                    }
-                }
-                self.isRemovableMediaScanning = false
-                self.removableMediaWarnings = [error.localizedDescription]
-            }
-        }
-    }
-
-    /// Raw mounted-volume URLs are not security-scoped URLs. If the removable-media entitlement
-    /// is not enough for a particular volume class, an Open panel supplies the user grant and a
-    /// bookmark that the provider resolves for the scan and the later URL-backed import.
-    private func requestRemovableMediaAccess(for volume: MediaVolume) -> MediaVolume? {
-        let panel = NSOpenPanel()
-        panel.title = "Grant Access to \(volume.name)"
-        panel.message = "Select the root of \(volume.name) to let Kromora read its images."
-        panel.prompt = "Grant Access"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = false
-        panel.directoryURL = volume.url
-        guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        return MediaVolume(
-            id: volume.id,
-            name: volume.name,
-            url: url,
-            bookmarkData: PhotoAssetSource.bookmarkData(for: url)
-        )
-    }
-
-    private func publishRemovableMediaScan(_ result: MediaVolumeScanResult) {
-        removableMediaFiles = result.files
-        removableMediaWarnings = result.warnings
-        removableMediaSelection.selectAll(in: result.files)
-        isRemovableMediaScanning = false
-        if result.files.isEmpty {
-            removableMediaWarnings.append("No supported images were found on this volume.")
-        }
+        libraryMediaWorkflow.openRemovableMedia(volume)
     }
 
     func toggleRemovableMediaSelection(_ file: MediaVolumeFile) {
-        removableMediaSelection.toggle(file)
+        libraryMediaWorkflow.toggleRemovableMediaSelection(file)
     }
 
     func selectAllRemovableMedia() {
-        removableMediaSelection.selectAll(in: removableMediaFiles)
+        libraryMediaWorkflow.selectAllRemovableMedia()
     }
 
     func selectNoRemovableMedia() {
-        removableMediaSelection.clear()
+        libraryMediaWorkflow.selectNoRemovableMedia()
     }
 
     func cancelRemovableMediaImport() {
-        mediaVolumeScanTask?.cancel()
-        mediaVolumeImportTask?.cancel()
-        isRemovableMediaScanning = false
-        isRemovableMediaSelectorPresented = false
-        removableMediaImportProgress = nil
+        libraryMediaWorkflow.cancelRemovableMediaImport()
     }
 
-    /// Explicitly add the checked files to Kromora's library. The collection copies them into its
-    /// managed library, never deletes or modifies the source card, and retains the imported copies.
     func importSelectedRemovableMedia() {
-        guard let volume = removableMediaVolume else { return }
-        let selected = selectedRemovableMediaFiles
-        guard !selected.isEmpty else {
-            statusMessage = "Select at least one image to import"
+        libraryMediaWorkflow.importSelectedRemovableMedia()
+    }
+
+
+    private func importRemovableMedia(_ request: RemovableMediaImportRequest) {
+        let volume = request.volume
+        let files = request.files
+        if let portableLibrary {
+            do {
+                let result = try portableLibrary.importURLs(files.map(\.url))
+                try reloadPortableCollection()
+                if let assetID = result.imported.first?.assetID
+                    ?? result.duplicates.first?.existingAssetID
+                { openPortableAsset(assetID) }
+                libraryMediaWorkflow.finishImport(
+                    imported: result.imported.count, skipped: 0, cancelled: false,
+                    total: files.count
+                )
+            } catch {
+                presentError(
+                    "Kromora could not import removable-media photos: \(error.localizedDescription)"
+                )
+            }
+            isRemovableMediaSelectorPresented = false
             return
         }
 
-        mediaVolumeImportTask?.cancel()
-        removableMediaImportProgress = MediaVolumeImportProgress(
-            total: selected.count, processed: 0, imported: 0, skipped: 0,
-            currentName: nil, cancelled: false
-        )
-        let sourceFiles = selected
-        mediaVolumeImportTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            let accessURL = volume.resolvedAccessURL()
-            let hasScope = accessURL.startAccessingSecurityScopedResource()
-            defer { if hasScope { accessURL.stopAccessingSecurityScopedResource() } }
-            var usable: [MediaVolumeFile] = []
-            for file in sourceFiles {
-                guard !Task.isCancelled else {
-                    self.finishRemovableMediaImport(
-                        imported: 0, skipped: sourceFiles.count,
-                        cancelled: true, total: sourceFiles.count
-                    )
-                    return
-                }
-                var progress =
-                    self.removableMediaImportProgress
-                    ?? MediaVolumeImportProgress(
-                        total: sourceFiles.count, processed: 0, imported: 0, skipped: 0,
-                        currentName: nil, cancelled: false
-                    )
-                progress.currentName = file.filename
-                if FileManager.default.isReadableFile(atPath: file.url.path) {
-                    usable.append(file)
-                    progress.imported += 1
-                } else {
-                    progress.skipped += 1
-                    self.removableMediaWarnings.append(
-                        "Skipped \(file.filename): the volume was removed or became unreadable.")
-                }
-                progress.processed += 1
-                self.removableMediaImportProgress = progress
-                await Task.yield()
-            }
-
-            guard !usable.isEmpty else {
-                self.statusMessage = "No selected images could be read from \(volume.name)"
-                self.isRemovableMediaSelectorPresented = false
-                return
-            }
-
-            if let portableLibrary = self.portableLibrary {
-                var importedCount = 0
-                do {
-                    let result = try portableLibrary.importURLs(usable.map(\.url))
-                    importedCount = result.imported.count
-                    try self.reloadPortableCollection()
-                    if let assetID = result.imported.first?.assetID
-                        ?? result.duplicates.first?.existingAssetID
-                    { self.openPortableAsset(assetID) }
-                } catch {
-                    self.presentError(
-                        "Kromora could not import removable-media photos: \(error.localizedDescription)"
-                    )
-                }
-                self.statusMessage =
-                    "Imported \(importedCount) photo(s) from \(volume.name)"
-                self.isRemovableMediaSelectorPresented = false
-                return
-            }
-
-            guard !self.portableLibraryFailureIsActive else { return }
-            let ids = self.collection.addFromMediaVolume(volume, files: usable)
-            if let first = usable.first, let firstID = ids.first {
-                self.isSourceBrowserPresented = false
-                self.navigation.move(to: .grid)
-                self.load(
-                    name: first.filename, url: first.url, data: nil, assetID: firstID,
-                    traceQuality: "removableMediaImport",
-                    portableIdentity: self.collection.items.first(where: { $0.id == firstID })?
-                        .asset.source.portableIdentity
-                )
-            }
-            let progress = self.removableMediaImportProgress
-            self.statusMessage =
-                "Imported \(progress?.imported ?? 0) image\(progress?.imported == 1 ? "" : "s") from \(volume.name)"
-            self.isRemovableMediaSelectorPresented = false
+        guard !portableLibraryFailureIsActive else { return }
+        let ids = collection.addFromMediaVolume(volume, files: files)
+        if let first = files.first, let firstID = ids.first {
+            isSourceBrowserPresented = false
+            navigation.move(to: .grid)
+            load(
+                name: first.filename, url: first.url, data: nil, assetID: firstID,
+                traceQuality: "removableMediaImport",
+                portableIdentity: collection.items.first(where: { $0.id == firstID })?
+                    .asset.source.portableIdentity
+            )
         }
-    }
-
-    private func finishRemovableMediaImport(
-        imported: Int, skipped: Int, cancelled: Bool, total: Int
-    ) {
-        removableMediaImportProgress = MediaVolumeImportProgress(
-            total: total, processed: imported + skipped, imported: imported,
-            skipped: skipped, currentName: nil, cancelled: cancelled
+        libraryMediaWorkflow.finishImport(
+            imported: ids.count, skipped: files.count - ids.count, cancelled: false,
+            total: files.count
         )
-        statusMessage =
-            cancelled
-            ? "Removable media import cancelled — \(imported) imported, \(skipped) skipped"
-            : "Removable media import complete — \(imported) imported, \(skipped) skipped"
+        isRemovableMediaSelectorPresented = false
     }
 
     /// Choose a folder to use as the persistent image source, scan it (incl.
     /// subfolders), reveal the file browser, and open the first image.
     func chooseSourceFolder() {
-        if let url = fileDialog.chooseFolder(
-            title: "Choose Source Folder",
-            prompt: "Use Folder",
-            startingAt: settings.defaultSourceFolderURL,
-            canCreateDirectories: false
-        ) {
-            openSourceFolder(url: url)
-        }
+        libraryMediaWorkflow.chooseSourceFolder(startingAt: settings.defaultSourceFolderURL)
     }
 
     /// Classify a dropped URL at the application boundary, then dispatch through the existing
     /// value-based open seams. Invalid or cancelled drops leave the current edit untouched.
     func handleDroppedURL(_ url: URL) {
-        switch fileDropActionPolicy.action(for: url) {
-        case .openImage(let imageURL):
-            openImage(url: imageURL)
-        case .openFolder(let folderURL):
-            openSourceFolder(url: folderURL)
-        case .invalid:
-            return
-        }
+        libraryMediaWorkflow.handleDroppedURL(url)
     }
 
     /// Adopt `url` as the source folder (persisted), reveal the browser, and
@@ -3037,129 +2717,58 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func deleteLibraryItems(
         _ candidates: [ImageCollection.DeletionCandidate]
     ) async -> LibraryDeletionResult {
-        guard !candidates.isEmpty else {
-            return LibraryDeletionResult(deletedIDs: [], failures: [])
+        let result = await libraryDeletionCoordinator.delete(candidates)
+        guard !result.deletedIDs.isEmpty else {
+            if let message = result.failures.first { presentError(message) }
+            return result
         }
 
-        let flushResult = await persistence.flush()
-        guard flushResult.succeeded else {
-            let detail: String
-            if case .failure(let message) = flushResult {
-                detail = message
+        let deletedSet = Set(result.deletedIDs)
+        for id in deletedSet {
+            editedThumbnailDebounceTasks[id]?.cancel()
+            editedThumbnailDebounceTasks.removeValue(forKey: id)
+            editedThumbnailGenerations.removeValue(forKey: id)
+            editorDocument.removeSession(for: id)
+            workScheduler.cancel(
+                id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
+            )
+        }
+        if let pendingEditedThumbnailAssetID, deletedSet.contains(pendingEditedThumbnailAssetID) {
+            self.pendingEditedThumbnailAssetID = nil
+        }
+        _ = collection.removeItems(with: deletedSet)
+        previewPresentation.cache.invalidateAll()
+        Thumbnails.invalidateCache()
+        await engine.invalidateRenderCaches()
+
+        if let activeAssetID, deletedSet.contains(activeAssetID) {
+            if collection.selectedItem != nil {
+                openActiveCollectionImage(loadMode: false)
             } else {
-                detail = "pending edits were not saved"
-            }
-            let message =
-                "Could not remove photos because their edits could not be saved: " + detail
-            presentError(message)
-            return LibraryDeletionResult(deletedIDs: [], failures: [message])
-        }
-
-        var deletedIDs: [PhotoAssetID] = []
-        var failures: [String] = []
-        for candidate in candidates {
-            guard let item = collection.items.first(where: { $0.id == candidate.id }) else {
-                continue
-            }
-            let analysisPortableIdentity = item.asset.source.portableIdentity
-            let persistenceIdentity = persistencePortableIdentity(for: item)
-
-            // A stale analysis entry is worse than a missing one if this source is imported again,
-            // so fail closed before changing the source or its edit record.
-            do {
-                try await photoAnalysisCoordinator.removeCaches(
-                    for: analysisPortableIdentity.assetID)
-            } catch {
-                failures.append(
-                    "Could not clear cached analysis for \(candidate.displayName): "
-                        + error.localizedDescription
-                )
-                continue
-            }
-
-            var trashedURL: NSURL?
-            do {
-                if candidate.isManaged, let url = candidate.url {
-                    if let portableLibrary {
-                        try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
-                    } else {
-                        try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
-                    }
-                }
-                try await editStore.delete(
-                    for: EditSourceReference(
-                        assetID: candidate.id, portableIdentity: persistenceIdentity,
-                        url: candidate.url
-                    )
-                )
-                deletedIDs.append(candidate.id)
-            } catch {
-                if let trashedURL, let originalURL = candidate.url {
-                    try? FileManager.default.moveItem(at: trashedURL as URL, to: originalURL)
-                }
-                failures.append(
-                    "Could not remove \(candidate.displayName): " + error.localizedDescription
-                )
+                clearActiveSourceAfterLibraryDeletion()
             }
         }
 
-        if !deletedIDs.isEmpty {
-            let deletedSet = Set(deletedIDs)
-            for id in deletedSet {
-                editedThumbnailDebounceTasks[id]?.cancel()
-                editedThumbnailDebounceTasks.removeValue(forKey: id)
-                editedThumbnailGenerations.removeValue(forKey: id)
-                editorDocument.removeSession(for: id)
-                workScheduler.cancel(
-                    id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
-                )
-            }
-            if let pendingEditedThumbnailAssetID,
-                deletedSet.contains(pendingEditedThumbnailAssetID)
-            {
-                self.pendingEditedThumbnailAssetID = nil
-            }
-            _ = collection.removeItems(with: deletedSet)
-            previewDiskCache.invalidateAll()
-            Thumbnails.invalidateCache()
-            await engine.invalidateRenderCaches()
-
-            if let activeAssetID, deletedSet.contains(activeAssetID) {
-                if collection.selectedItem != nil {
-                    openActiveCollectionImage(loadMode: false)
-                } else {
-                    clearActiveSourceAfterLibraryDeletion()
-                }
-            }
+        if !result.failures.isEmpty {
+            presentError(
+                "Removed \(result.deletedIDs.count) photo(s), but some photos could not be removed: "
+                    + result.failures.joined(separator: " ")
+            )
+        } else {
+            statusMessage = result.deletedIDs.count == 1
+                ? "Photo removed from Library"
+                : "Removed \(result.deletedIDs.count) photos from Library"
         }
-
-        if !failures.isEmpty {
-            let prefix =
-                deletedIDs.isEmpty
-                ? "Could not remove the selected photos"
-                : "Removed \(deletedIDs.count) photo(s), but some photos could not be removed"
-            presentError(prefix + ": " + failures.joined(separator: " "))
-        } else if !deletedIDs.isEmpty {
-            statusMessage =
-                deletedIDs.count == 1
-                ? "Photo removed from Library" : "Removed \(deletedIDs.count) photos from Library"
-        }
-        return LibraryDeletionResult(deletedIDs: deletedIDs, failures: failures)
+        return result
     }
 
+
     private func clearActiveSourceAfterLibraryDeletion() {
-        sourceRevision &+= 1
+        sourceSession.cancel()
         documentRevision &+= 1
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelPendingPreviewDebounce()
         previewCoordinator.cancel()
-        capabilitiesTask?.cancel()
-        metadataTask?.cancel()
-        embeddedFirstFrameTask?.cancel()
-        embeddedFirstFrameTask = nil
-        loadTask?.cancel()
-        loadTask = nil
-        pendingSourceLoad = nil
         sourceImage = nil
         imageSource = nil
         sourceURL = nil
@@ -3630,7 +3239,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
             // A source preparation can be non-cancellable. Let the in-flight, revision-checked
             // request finish instead of enqueueing a duplicate while the user is navigating.
-            if loadTask != nil { return }
+            if sourceSession.isBusy { return }
         }
 
         if let url = item.url {
@@ -3767,7 +3376,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             from: document, to: updated, explicitlyInvalidated: invalidatesComparisonBaseline
         )
         let rotationChanged = updated.rotation != document.rotation
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         editorDocument.recordChange(from: document, to: updated)
         document = updated
@@ -3783,7 +3392,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // must invalidate that work; it will be queued again after the new visible result publishes.
         if comparisonChanged {
             comparisonBaselineDocument = updated.comparisonBaseline
-            comparisonRevision &+= 1
+            previewPresentation.advanceComparisonRevision()
             comparisonPreviewScheduledRevision = nil
             cancelComparisonPreview(pump: false)
             originalPreviewSurface.clear()
@@ -3906,7 +3515,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let clamped = max(0, min(1, value))
         guard clamped != document.lut.intensity else { return }
         let oldDocument = document
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         document.lut.intensity = clamped
         if !document.hasVisibleLookEdits {
@@ -3932,13 +3541,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Backing pixels of the visible canvas. PreviewView updates this from its live geometry;
     /// the fallback is only used before the first layout pass.
     private var previewBackingSize = CGSize(width: 1600, height: 1200)
-    /// Each logical rendering surface owns its hysteresis state. Main preview settled and
-    /// interactive requests share a planner because they describe the same canvas; supporting
-    /// surfaces remain independent so a future viewport/crop difference cannot leak detail choices
-    /// between them.
-    private var mainPreviewResolutionPlanner = ResolutionPlanner()
-    private var comparisonResolutionPlanner = ResolutionPlanner()
-    private var histogramResolutionPlanner = ResolutionPlanner()
     private static let intensityDebounceMs = 60
 
     /// Build the same fit-state plan that a newly selected source receives after navigation resets
@@ -3972,35 +3574,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         viewportSize: CGSize,
         surface: ResolutionPlannerSurface
     ) -> ResolutionPlan {
-        switch surface {
-        case .mainPreview:
-            return mainPreviewResolutionPlanner.plan(
-                nativeExtent: document.rotation.orientedExtent(nativeExtent),
-                crop: document.crop,
-                viewportSize: viewportSize,
-                navigation: canvasState.navigation
-            )
-        case .comparisonBaseline:
-            return comparisonResolutionPlanner.plan(
-                nativeExtent: document.rotation.orientedExtent(nativeExtent),
-                crop: document.crop,
-                viewportSize: viewportSize,
-                navigation: canvasState.navigation
-            )
-        case .histogram:
-            return histogramResolutionPlanner.plan(
-                nativeExtent: document.rotation.orientedExtent(nativeExtent),
-                crop: document.crop,
-                viewportSize: viewportSize,
-                navigation: canvasState.navigation
-            )
-        }
+        return previewPresentation.plan(
+            for: document, nativeExtent: nativeExtent, viewportSize: viewportSize,
+            surface: surface, navigation: canvasState.navigation
+        )
     }
 
     private func resetResolutionPlanners() {
-        mainPreviewResolutionPlanner.reset()
-        comparisonResolutionPlanner.reset()
-        histogramResolutionPlanner.reset()
+        previewPresentation.resetPlanners()
     }
 
     /// What the main preview panel should currently show, as a render request.
@@ -4092,7 +3673,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         let supersededLookup = pendingPreviewCacheLookup
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
 
         let (requested, look) = displayRequest
@@ -4108,8 +3689,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             plan: plan, cropInteractionActive: canvasState.isCropToolActive,
             requestRevision: displayRevision
         )
-        let cache = previewDiskCache
-        let cacheKey = previewDiskCacheKey(for: request)
+        let cacheKey = previewPresentation.cacheKey(for: request)
         let assetID = activeAssetID
         let sourceRevision = self.sourceRevision
         let displayRevision = self.displayRevision
@@ -4121,7 +3701,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // Stored-edit adoption intentionally preserves the speculative-first-frame contract.
             // If the miss lookup has not returned before the corrective request arrives, admit the
             // same speculative request now, then queue the corrective lookup behind it.
-            previewDiskCacheLookupTask?.cancel()
+            previewPresentation.cancelCacheLookup()
             previewCoordinator.submit(
                 supersededLookup.request, phase: .settled,
                 assetID: supersededLookup.assetID,
@@ -4136,8 +3716,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // and the retained frame would then refuse the correct render that follows. Reads have to
         // refuse the asymmetric case for exactly the reason writes already do.
         if request.sourceROI != nil {
-            previewDiskCacheLookupTask?.cancel()
-            previewDiskCacheLookupTask = nil
+            previewPresentation.cancelCacheLookup()
             pendingPreviewCacheLookup = nil
             if preemptsPredecessor {
                 previewCoordinator.submit(
@@ -4152,17 +3731,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
             return
         }
-        previewDiskCacheLookupTask?.cancel()
-        previewDiskCacheLookupTask = Task {
-            [
-                weak self, cache, cacheKey, request,
-                assetID, sourceRevision, displayRevision,
-                preemptsPredecessor
-            ] in
-            let cached = await Task.detached(priority: .utility) {
-                cache.read(for: cacheKey)
-            }.value
-            guard !Task.isCancelled, let self, !self.isShuttingDown,
+        previewPresentation.lookupCache(for: cacheKey) { [weak self] cached in
+            guard let self, !self.isShuttingDown,
                 self.sourceRevision == sourceRevision,
                 self.displayRevision == displayRevision,
                 self.activeAssetID == assetID,
@@ -4170,7 +3740,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 self.displayRequest.document == request.document
             else { return }
 
-            self.previewDiskCacheLookupTask = nil
             self.pendingPreviewCacheLookup = nil
             if let cached {
                 // A hit has no coordinator publication, so explicitly retire any speculative
@@ -4199,14 +3768,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func previewDiskCacheKey(for request: RenderRequest) -> PreviewDiskCache.Key {
-        return PreviewDiskCache.Key(
-            identity: request.source.cacheIdentity,
-            documentHash: request.document.editHash,
-            lookFingerprint: request.lut?.cacheFingerprint ?? "unresolved",
-            targetSizeBucket: String(PreviewDiskCache.canonicalLongEdge),
-            space: request.space,
-            pipelineVersion: RenderPipeline.cacheVersion
-        )
+        previewPresentation.cacheKey(for: request)
     }
 
     /// A viewport-sized interactive render. `PreviewCoordinator` drops superseded values and
@@ -4214,7 +3776,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func scheduleInteractivePreview() {
         cancelIdlePreviewBuild()
         guard let imageSource else { return }
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         let (requested, lut) = displayRequest
         let plan = resolutionPlan(
@@ -4472,7 +4034,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let oldValue = canvasState.navigation.zoom
         canvasState.setZoom(value)
         guard canvasState.navigation.zoom != oldValue else { return }
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         if isPreviewInteractionActive {
             scheduleInteractivePreview()
@@ -4564,7 +4126,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // document differed only by RAW Temperature, which is intentionally ignored by the normal
         // develop-frame comparison check.
         comparisonBaselineDocument = document.comparisonBaseline
-        comparisonRevision &+= 1
+        previewPresentation.advanceComparisonRevision()
         comparisonPreviewScheduledRevision = nil
         comparisonPreviewRetryTask?.cancel()
         comparisonPreviewRetryTask = nil
@@ -4603,7 +4165,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let comparisonChanged = ComparisonFramePolicy.changesBaseline(
             from: document, to: restored
         )
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         document = restored
         sourceSize = restored.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
@@ -4623,7 +4185,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
         }
         if comparisonChanged {
-            comparisonRevision &+= 1
+            previewPresentation.advanceComparisonRevision()
             comparisonPreviewScheduledRevision = nil
             cancelComparisonPreview(pump: false)
             originalPreviewSurface.clear()
@@ -4790,16 +4352,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             request.sourceROI == nil,
             let presentedImage
         else { return }
-        let cache = previewDiskCache
-        let key = previewDiskCacheKey(for: request)
-        Task.detached(priority: .background) {
-            guard !Task.isCancelled,
-                let raster = PreviewDiskCache.canonicalRaster(
-                    from: presentedImage, space: request.space
-                ), !Task.isCancelled
-            else { return }
-            cache.write(raster, for: key)
-        }
+        previewPresentation.writeCanonical(presentedImage, for: request)
     }
 
     /// Rasterize the comparison baseline for the side-by-side left panel. Only needs to re-run when
@@ -4981,7 +4534,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         guard show != isShowingOriginal else { return true }
         isShowingOriginal = show
-        displayRevision &+= 1
+        previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         schedulePreview()
         return true
@@ -4998,7 +4551,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         if isSideBySide {
             if isShowingOriginal {
                 isShowingOriginal = false
-                displayRevision &+= 1
+                previewPresentation.advanceDisplayRevision()
                 cancelHistogram(clear: false, pump: false)
                 schedulePreview()
             }
@@ -5117,58 +4670,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         if isHistogramLoading { isHistogramLoading = false }
         if histogramErrorMessage != nil { histogramErrorMessage = nil }
         if clear { histogram = nil }
-    }
-
-    /// Read EXIF/TIFF/GPS metadata off the main actor and publish it.
-    private func refreshMetadata(url: URL?, data: Data?) {
-        let revision = sourceRevision
-        let assetID = activeAssetID
-        metadataTask?.cancel()
-        metadataTask = Task { [weak self] in
-            let meta = await Task.detached {
-                if let url {
-                    return ImageMetadata.read(from: url)
-                }
-                if let data {
-                    return ImageMetadata.read(from: data)
-                }
-                return ImageMetadata()
-            }.value
-            guard !Task.isCancelled, let self, !self.isShuttingDown,
-                self.activeAssetID == assetID,
-                self.sourceRevision == revision
-            else { return }
-            self.metadata = meta
-        }
-    }
-
-    /// Ask the engine what this image's decoder supports.
-    ///
-    /// Runs alongside the preview render rather than in front of it: the panel can appear a frame
-    /// late, but first pixels should not wait on a capability question.
-    private func refreshCapabilities() {
-        capabilitiesTask?.cancel()
-        rawCapabilities = nil
-        capabilitiesProbeCompleted = false
-
-        guard let imageSource else {
-            capabilitiesProbeCompleted = true
-            keepInspectorTabValid()
-            return
-        }
-        let revision = sourceRevision
-        let assetID = activeAssetID
-        capabilitiesTask = Task { [engine] in
-            let capabilities = await engine.rawCapabilities(for: imageSource)
-            guard !Task.isCancelled, !self.isShuttingDown,
-                assetID == self.activeAssetID,
-                revision == self.sourceRevision,
-                self.imageSource == imageSource
-            else { return }
-            self.rawCapabilities = capabilities
-            self.capabilitiesProbeCompleted = true
-            self.keepInspectorTabValid()
-        }
     }
 
     /// Keep the Picker selection valid as source publication and capability probing change which
@@ -5444,13 +4945,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
-        sourceRevision &+= 1
+        sourceSession.cancel()
         documentRevision &+= 1
-        displayRevision &+= 1
-        comparisonRevision &+= 1
+        previewPresentation.resetForSource()
         autoInvocationRevision &+= 1
         previewDebounceGeneration &+= 1
-        pendingSourceLoad = nil
         comparisonPreviewRetryTask?.cancel()
         comparisonPreviewRetryTask = nil
 
@@ -5474,61 +4973,43 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         persistence.onFailure = nil
         photosImportCoordinator.onStatus = nil
         photosImportCoordinator.destination = nil
+        libraryMediaWorkflow.onStatus = nil
+        libraryMediaWorkflow.onError = nil
+        libraryMediaWorkflow.onSourceFolder = nil
+        libraryMediaWorkflow.onImageURL = nil
+        libraryMediaWorkflow.onImportRequest = nil
+        applicationShell.onMediaChanged = nil
+        applicationShell.onApplicationActivated = nil
         cancellables.removeAll()
-        portableMaintenanceTriggerTask?.cancel()
-        portableMaintenanceTriggerTask = nil
-        portablePackageMaintenance.shutdown()
-
-        for observer in mediaVolumeObservers {
-            mediaVolumeNotificationCenter.removeObserver(observer)
-        }
-        mediaVolumeObservers.removeAll()
-        for observer in applicationLifecycleObservers {
-            applicationNotificationCenter.removeObserver(observer)
-        }
-        applicationLifecycleObservers.removeAll()
+        await applicationShell.shutdown()
 
         // Collection shutdown ends its discovery stream before awaiting the consumer. This also
         // prevents a late scan batch from admitting another thumbnail job.
         await collection.shutdown()
 
-        let storedEditLoad = storedEditLoadTask
         let thumbnailDebounceTasks = editedThumbnailDebounceTasks.values.map(Optional.init)
         let idleBuild = idleBuildTask
         cancelIdlePreviewBuild(resetCursor: true)
-        embeddedFirstFrameTask?.cancel()
         let tasks: [Task<Void, Never>?] =
             [
-                capabilitiesTask, autoAdjustmentTask, smartMaskCreationTask, loadTask,
-                metadataTask, prefetchDelayTask, previewDebounceTask, sourceFolderOpenTask,
+                autoAdjustmentTask, smartMaskCreationTask, prefetchDelayTask, previewDebounceTask, sourceFolderOpenTask,
                 idleBuild, personSignalWarmingTask, lutCacheInvalidationTask,
                 semanticCoordinatorInstallTask,
-                mediaVolumeDiscoveryTask, mediaVolumeRefreshTask, mediaVolumeScanTask,
-                mediaVolumeImportTask,
             ] + thumbnailDebounceTasks
         for task in tasks { task?.cancel() }
-        storedEditLoad?.cancel()
-        capabilitiesTask = nil
         autoAdjustmentTask = nil
         smartMaskCreationTask = nil
-        loadTask = nil
-        metadataTask = nil
-        embeddedFirstFrameTask = nil
         prefetchDelayTask = nil
         previewDebounceTask = nil
         idleBuildTask = nil
         editedThumbnailDebounceTasks.removeAll()
         pendingEditedThumbnailAssetID = nil
         sourceFolderOpenTask = nil
-        storedEditLoadTask = nil
         personSignalWarmingTask = nil
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
-        mediaVolumeDiscoveryTask = nil
-        mediaVolumeRefreshTask = nil
-        mediaVolumeScanTask = nil
-        mediaVolumeImportTask = nil
-        if let storedEditLoad { _ = await storedEditLoad.value }
+        await libraryMediaWorkflow.shutdown()
+        await sourceSession.shutdown()
 
         await library.shutdown()
         await export.shutdown()
@@ -5536,6 +5017,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await derive.shutdown()
         await lookSave.shutdown()
         await photoAnalysisCoordinator.shutdown()
+        previewPresentation.shutdown()
         await previewCoordinator.shutdown()
         await lookPreviewCoordinator.shutdown()
         await workScheduler.cancelAllAndWait()
