@@ -82,4 +82,45 @@ final class ResolutionPlannerTests: TempDirectoryTestCase {
         )
         XCTAssertEqual(histogram.scale, 0.5)
     }
+
+    func testThumbnailScalePlansDetailForTheCroppedOutput() {
+        let source = ImageSource(data: Data(), nativeExtent: native)
+        let request = RenderRequest(
+            source: source,
+            document: EditDocument(crop: CropAdjustments(normalizedRect: CGRect(
+                x: 0.25, y: 0.25, width: 0.25, height: 0.25
+            ))),
+            targetSize: CGSize(width: 240, height: 240),
+            quality: .thumbnail,
+            output: .raster
+        )
+
+        XCTAssertEqual(
+            request.renderScale,
+            .preview(maxSize: CGSize(width: 960, height: 960)),
+            "thumbnail source planning must reserve pixels for the committed crop"
+        )
+    }
+
+    func testThumbnailScalePreservesChangingCropAspectRatio() {
+        let source = ImageSource(data: Data(), nativeExtent: native)
+        let request = RenderRequest(
+            source: source,
+            document: EditDocument(crop: CropAdjustments(normalizedRect: CGRect(
+                x: 0.1, y: 0.1, width: 0.8, height: 0.3
+            ))),
+            targetSize: CGSize(width: 240, height: 240),
+            quality: .thumbnail,
+            output: .raster
+        )
+
+        guard case .preview(let size) = request.renderScale else {
+            return XCTFail("thumbnail requests must use preview scaling")
+        }
+        XCTAssertEqual(size.width, 300, accuracy: 0.000_001)
+        XCTAssertEqual(
+            size.height, 800, accuracy: 0.000_001,
+            "the source box must account for both crop dimensions, not only its area"
+        )
+    }
 }

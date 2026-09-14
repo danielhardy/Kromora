@@ -101,7 +101,12 @@ struct RenderRequest: Sendable, Equatable {
     var renderScale: RenderScale {
         let nativeExtent = document.rotation.orientedExtent(source.nativeExtent)
         switch quality {
-        case .thumbnail, .preview:
+        case .thumbnail:
+            return .preview(maxSize: thumbnailSourceMaxSize(
+                targetSize: targetSize ?? nativeExtent,
+                crop: document.crop.normalizedRect
+            ))
+        case .preview:
             return .preview(maxSize: targetSize ?? nativeExtent)
         case .interactive:
             return .interactive(
@@ -119,6 +124,26 @@ struct RenderRequest: Sendable, Equatable {
             // and changes the factor before the renderer reaches the encoder.
             return .preview(maxSize: options.sizing.unroundedOutputSize(for: nativeExtent))
         }
+    }
+
+    /// Thumbnails are displayed after the committed crop has been applied. Planning the source
+    /// against the uncropped image's box would therefore decode, for example, a 240px source and
+    /// leave a quarter crop at only 60px before AppKit enlarges it in the browsing surface. Expand
+    /// the source target by the crop fractions so the cropped output, rather than the full source,
+    /// receives the requested pixel budget. `RenderScale` still caps the factor at 1, so this never
+    /// invents detail for a crop whose native pixels are already smaller than the display target.
+    private func thumbnailSourceMaxSize(targetSize: CGSize, crop: CGRect?) -> CGSize {
+        guard targetSize.width > 0, targetSize.height > 0,
+              targetSize.width.isFinite, targetSize.height.isFinite,
+              let crop,
+              crop.width > 0, crop.height > 0,
+              crop.width.isFinite, crop.height.isFinite else {
+            return targetSize
+        }
+        return CGSize(
+            width: targetSize.width / crop.width,
+            height: targetSize.height / crop.height
+        )
     }
 
     /// True when `sourceROI` is the complete presented photo (nil, or the committed crop in
