@@ -1,6 +1,6 @@
-import SwiftUI
 import CoreImage
 import MetalKit
+import SwiftUI
 
 /// GPU-owned presentation state for one preview. It is separate from AppViewModel so an
 /// interactive frame does not invalidate the application's broad observation graph.
@@ -109,30 +109,34 @@ final class PreviewSurface: ObservableObject {
     }
 
     @discardableResult
-    func present(_ image: CIImage?, space: WorkingSpace = .current, revision: UInt64? = nil,
-                 telemetry: LiveEditTelemetry? = nil, source: ImageSource? = nil,
-                 quality: RenderQuality = .interactive,
-                 detailIdentity: PreviewFrameIdentity? = nil,
-                 detailFactor: CGFloat? = nil,
-                 presentationImageExtent: CGRect? = nil,
-                 coversPresentationExtent: Bool = false,
-                 onPresented: (() -> Void)? = nil) -> Bool {
+    func present(
+        _ image: CIImage?, space: WorkingSpace = .current, revision: UInt64? = nil,
+        telemetry: LiveEditTelemetry? = nil, source: ImageSource? = nil,
+        quality: RenderQuality = .interactive,
+        detailIdentity: PreviewFrameIdentity? = nil,
+        detailFactor: CGFloat? = nil,
+        presentationImageExtent: CGRect? = nil,
+        coversPresentationExtent: Bool = false,
+        onPresented: (() -> Void)? = nil
+    ) -> Bool {
         guard let image,
-              image.extent.width > 0, image.extent.height > 0,
-              image.extent.width.isFinite, image.extent.height.isFinite else {
+            image.extent.width > 0, image.extent.height > 0,
+            image.extent.width.isFinite, image.extent.height.isFinite
+        else {
             // A failed render must not turn the surface into a blank candidate. The coordinator
             // reports the failure separately; retaining the current image keeps the drawable's
             // last confirmed frame available while that path recovers.
             return false
         }
         if let detailIdentity, let detailFactor, detailFactor.isFinite,
-           let current = currentDetail,
-           current.identity == detailIdentity,
-           detailFactor + 0.000001 < current.factor,
-           // A retained ROI frame only holds pixels for the region the user was zoomed into, so
-           // refusing the complete photo for being less detailed would leave the rest of the
-           // canvas showing that fragment — which is what made zooming back out look stuck.
-           !(coversPresentationExtent && !current.coversPresentationExtent) {
+            let current = currentDetail,
+            current.identity == detailIdentity,
+            detailFactor + 0.000001 < current.factor,
+            // A retained ROI frame only holds pixels for the region the user was zoomed into, so
+            // refusing the complete photo for being less detailed would leave the rest of the
+            // canvas showing that fragment — which is what made zooming back out look stuck.
+            !(coversPresentationExtent && !current.coversPresentationExtent)
+        {
             // Navigation can legitimately request a cheaper interactive level, but it must not
             // replace an already valid sharper frame for the same source/document. The settled
             // request will still be accepted when it reaches the coordinator.
@@ -165,7 +169,8 @@ final class PreviewSurface: ObservableObject {
             // A skipped publication has been submitted but never reached a visible drawable.
             // A newer publication supersedes it, so release its callback and diagnostic state.
             if let previous = pendingGPURevision,
-               skippedTelemetryRevisions.contains(previous) {
+                skippedTelemetryRevisions.contains(previous)
+            {
                 telemetryByRevision.removeValue(forKey: previous)
                 submittedTelemetryRevisions.remove(previous)
                 skippedTelemetryRevisions.remove(previous)
@@ -174,12 +179,14 @@ final class PreviewSurface: ObservableObject {
             // A pending value that has not reached a drawable is obsolete once a newer value is
             // presented. Submitted values remain until Metal reports their completion/display.
             if let previous = pendingGPURevision,
-               !submittedTelemetryRevisions.contains(previous) {
+                !submittedTelemetryRevisions.contains(previous)
+            {
                 telemetryByRevision.removeValue(forKey: previous)
             }
             pendingGPURevision = revision
-            telemetryByRevision[revision] = PendingTelemetry(telemetry: telemetry, source: source,
-                                                             quality: quality)
+            telemetryByRevision[revision] = PendingTelemetry(
+                telemetry: telemetry, source: source,
+                quality: quality)
             if let onPresented {
                 presentationConfirmations[revision] = onPresented
             }
@@ -207,10 +214,11 @@ final class PreviewSurface: ObservableObject {
         planned: CGRect?, pixels: CGRect, covers: Bool
     ) -> CGRect? {
         guard covers, let planned,
-              planned.width > 1, planned.height > 1,
-              pixels.width > 1, pixels.height > 1,
-              planned.width.isFinite, planned.height.isFinite,
-              pixels.width.isFinite, pixels.height.isFinite else {
+            planned.width > 1, planned.height > 1,
+            pixels.width > 1, pixels.height > 1,
+            planned.width.isFinite, planned.height.isFinite,
+            pixels.width.isFinite, pixels.height.isFinite
+        else {
             return planned
         }
         let plannedLandscape = planned.width >= planned.height
@@ -228,7 +236,8 @@ final class PreviewSurface: ObservableObject {
     /// the native presentation extent; an ROI preview keeps its source-space texture rectangle.
     fileprivate func layoutExtent(forTextureExtent textureExtent: CGRect) -> CGRect {
         if coversPresentationExtent, let presentationImageExtent,
-           presentationImageExtent.width > 0, presentationImageExtent.height > 0 {
+            presentationImageExtent.width > 0, presentationImageExtent.height > 0
+        {
             return presentationImageExtent
         }
         return textureExtent
@@ -236,7 +245,8 @@ final class PreviewSurface: ObservableObject {
 
     fileprivate func mappedImageForPresentation(_ image: CIImage) -> CIImage {
         guard coversPresentationExtent, let presentationImageExtent,
-              presentationImageExtent.width > 0, presentationImageExtent.height > 0 else {
+            presentationImageExtent.width > 0, presentationImageExtent.height > 0
+        else {
             return image
         }
         return Self.imageMapped(image, onto: presentationImageExtent)
@@ -245,9 +255,10 @@ final class PreviewSurface: ObservableObject {
     fileprivate static func imageMapped(_ image: CIImage, onto target: CGRect) -> CIImage {
         let src = image.extent
         guard src.width > 0, src.height > 0,
-              target.width > 0, target.height > 0,
-              src.width.isFinite, src.height.isFinite,
-              target.width.isFinite, target.height.isFinite else {
+            target.width > 0, target.height > 0,
+            src.width.isFinite, src.height.isFinite,
+            target.width.isFinite, target.height.isFinite
+        else {
             return image
         }
         let scale = min(target.width / src.width, target.height / src.height)
@@ -257,11 +268,12 @@ final class PreviewSurface: ObservableObject {
             x: target.minX + (target.width - fitted.width) / 2,
             y: target.minY + (target.height - fitted.height) / 2
         )
-        return image.transformed(by: CGAffineTransform(
-            a: scale, b: 0, c: 0, d: scale,
-            tx: origin.x - src.minX * scale,
-            ty: origin.y - src.minY * scale
-        ))
+        return image.transformed(
+            by: CGAffineTransform(
+                a: scale, b: 0, c: 0, d: scale,
+                tx: origin.x - src.minX * scale,
+                ty: origin.y - src.minY * scale
+            ))
     }
 
     func markPresentationSucceeded(displayRevision: UInt64) {
@@ -300,11 +312,14 @@ final class PreviewSurface: ObservableObject {
     }
 
     fileprivate func setEffectiveDimensions(revision: UInt64, width: Int, height: Int) {
-        telemetryByRevision[revision]?.telemetry.setEffectiveDimensions(revision, width: width, height: height)
+        telemetryByRevision[revision]?.telemetry.setEffectiveDimensions(
+            revision, width: width, height: height)
     }
 
-    fileprivate func markPresentationEncoded(revision: UInt64, drawableAcquisitionMS: Double,
-                                             presentationEncodingMS: Double) {
+    fileprivate func markPresentationEncoded(
+        revision: UInt64, drawableAcquisitionMS: Double,
+        presentationEncodingMS: Double
+    ) {
         telemetryByRevision[revision]?.telemetry.markPresentationTimings(
             revision, drawableAcquisitionMS: drawableAcquisitionMS,
             presentationEncodingMS: presentationEncodingMS
@@ -366,7 +381,8 @@ final class PreviewSurface: ObservableObject {
             }
         }
         guard pendingPresentationMaterializationRevision == surfaceRevision,
-              revision == surfaceRevision else { return }
+            revision == surfaceRevision
+        else { return }
         pendingPresentationMaterializationRevision = nil
         let materialization = pendingPresentationMaterialization
         pendingPresentationMaterialization = nil
@@ -387,7 +403,9 @@ final class PreviewSurface: ObservableObject {
     private func trimTelemetry() {
         guard telemetryByRevision.count > LiveEditTelemetry.maximumRetainedSamples else { return }
         let revisions = telemetryByRevision.keys.sorted()
-        for revision in revisions.prefix(telemetryByRevision.count - LiveEditTelemetry.maximumRetainedSamples) {
+        for revision in revisions.prefix(
+            telemetryByRevision.count - LiveEditTelemetry.maximumRetainedSamples)
+        {
             telemetryByRevision.removeValue(forKey: revision)
             submittedTelemetryRevisions.remove(revision)
             skippedTelemetryRevisions.remove(revision)
@@ -398,8 +416,9 @@ final class PreviewSurface: ObservableObject {
         guard let pending = telemetryByRevision[revision] else { return }
         pending.telemetry.mark(revision, gpuCompletion: time)
         if let source = pending.source {
-            KromoraObservability.liveEdit(.gpuComplete, source: source, quality: pending.quality,
-                                       revision: revision)
+            KromoraObservability.liveEdit(
+                .gpuComplete, source: source, quality: pending.quality,
+                revision: revision)
         }
     }
 
@@ -436,8 +455,9 @@ final class PreviewSurface: ObservableObject {
             return true
         }
         if let source = pending.source {
-            KromoraObservability.liveEdit(.drawablePresented, source: source, quality: pending.quality,
-                                       revision: revision, detail: "displayed")
+            KromoraObservability.liveEdit(
+                .drawablePresented, source: source, quality: pending.quality,
+                revision: revision, detail: "displayed")
         }
         telemetryByRevision.removeValue(forKey: revision)
         submittedTelemetryRevisions.remove(revision)
@@ -490,23 +510,26 @@ final class PreviewSurface: ObservableObject {
     ) -> MaterializationSubmission? {
         let extent = image.extent.integral
         guard extent.width > 0, extent.height > 0,
-              extent.width.isFinite, extent.height.isFinite,
-              extent.width <= CGFloat(Int32.max), extent.height <= CGFloat(Int32.max),
-              let width = Int(exactly: extent.width), let height = Int(exactly: extent.height),
-              width > 0, height > 0 else { return nil }
+            extent.width.isFinite, extent.height.isFinite,
+            extent.width <= CGFloat(Int32.max), extent.height <= CGFloat(Int32.max),
+            let width = Int(exactly: extent.width), let height = Int(exactly: extent.height),
+            width > 0, height > 0
+        else { return nil }
 
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false
         )
         descriptor.usage = [.shaderRead, .shaderWrite, .renderTarget]
         descriptor.storageMode = .private
-        guard let texture = RenderEngine.presentationDevice.makeTexture(descriptor: descriptor) else {
+        guard let texture = RenderEngine.presentationDevice.makeTexture(descriptor: descriptor)
+        else {
             return nil
         }
 
-        let translated = image.transformed(by: CGAffineTransform(
-            translationX: -extent.minX, y: -extent.minY
-        ))
+        let translated = image.transformed(
+            by: CGAffineTransform(
+                translationX: -extent.minX, y: -extent.minY
+            ))
         guard let commandBuffer = RenderEngine.presentationQueue.makeCommandBuffer() else {
             return nil
         }
@@ -516,8 +539,9 @@ final class PreviewSurface: ObservableObject {
             colorSpace: space.cgColorSpace
         )
         Self.notePresentationCoreImageEvaluation()
-        return MaterializationSubmission(texture: texture, extent: extent,
-                                         commandBuffer: commandBuffer)
+        return MaterializationSubmission(
+            texture: texture, extent: extent,
+            commandBuffer: commandBuffer)
     }
 }
 
@@ -530,6 +554,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
     /// The drawable reports backing pixels, which is the only reliable size across mixed-DPI
     /// windows and side-by-side panels. SwiftUI point geometry is not sufficient here.
     var onDrawableSizeChange: ((CGSize) -> Void)?
+    /// When true, the MTKView declines AppKit hit testing so an overlay (crop) can own pointer
+    /// input. SwiftUI `allowsHitTesting(false)` is not enough on its own because the representable
+    /// still participates in the NSView hit-test walk.
+    var ignoresHits: Bool = false
 
     func makeNSView(context: Context) -> MTKView {
         let view = PreviewMTKView(frame: .zero, device: context.coordinator.device)
@@ -540,6 +568,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
         view.onScrollZoom = onScrollZoom
         view.onDoubleClick = onDoubleClick
+        view.ignoresHits = ignoresHits
         view.delegate = context.coordinator
         view.enableSetNeedsDisplay = true
         view.isPaused = true
@@ -564,6 +593,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         if let view = view as? PreviewMTKView {
             view.onScrollZoom = onScrollZoom
             view.onDoubleClick = onDoubleClick
+            view.ignoresHits = ignoresHits
         }
         // SwiftUI may call updateNSView before the MTKView has a drawable (notably while a
         // NavigationSplitView is replacing the selected image). The delegate will retry when the
@@ -627,9 +657,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         override init() {
             let library: MTLLibrary?
-            if let url = KromoraKitResourceBundle.bundle.url(forResource: "PreviewSurface", withExtension: "metal"),
-               let source = try? String(contentsOf: url, encoding: .utf8) {
-                library = try? RenderEngine.presentationDevice.makeLibrary(source: source, options: nil)
+            if let url = KromoraKitResourceBundle.bundle.url(
+                forResource: "PreviewSurface", withExtension: "metal"),
+                let source = try? String(contentsOf: url, encoding: .utf8)
+            {
+                library = try? RenderEngine.presentationDevice.makeLibrary(
+                    source: source, options: nil)
             } else {
                 library = RenderEngine.presentationDevice.makeDefaultLibrary()
             }
@@ -643,14 +676,16 @@ struct PreviewSurfaceView: NSViewRepresentable {
             descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
             descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
             descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            pipeline = try? RenderEngine.presentationDevice.makeRenderPipelineState(descriptor: descriptor)
+            pipeline = try? RenderEngine.presentationDevice.makeRenderPipelineState(
+                descriptor: descriptor)
 
             let samplerDescriptor = MTLSamplerDescriptor()
             samplerDescriptor.minFilter = .linear
             samplerDescriptor.magFilter = .linear
             samplerDescriptor.sAddressMode = .clampToEdge
             samplerDescriptor.tAddressMode = .clampToEdge
-            samplerState = RenderEngine.presentationDevice.makeSamplerState(descriptor: samplerDescriptor)
+            samplerState = RenderEngine.presentationDevice.makeSamplerState(
+                descriptor: samplerDescriptor)
             super.init()
         }
 
@@ -665,7 +700,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 NSWindow.didChangeBackingPropertiesNotification,
                 NSApplication.didChangeScreenParametersNotification,
                 NSWindow.didChangeOcclusionStateNotification,
-                NSWindow.didBecomeKeyNotification
+                NSWindow.didBecomeKeyNotification,
             ]
             displayNotificationTokens = names.map { name in
                 center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
@@ -708,7 +743,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             guard let surface, let image = surface.image else { return }
             let drawableAcquisitionStart = LiveEditTelemetryClock.now
             guard let drawable = view.currentDrawable,
-                  let commandBuffer = commandQueue.makeCommandBuffer()
+                let commandBuffer = commandQueue.makeCommandBuffer()
             else { return }
 
             let drawableAcquisitionMS = max(
@@ -717,15 +752,19 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
             let drawableSize = (drawable.texture.width, drawable.texture.height)
             onDrawableSizeChange?(CGSize(width: drawableSize.0, height: drawableSize.1))
-            let sameDrawableSize = lastDrawableSize?.width == drawableSize.0 &&
-                lastDrawableSize?.height == drawableSize.1
-            let sameTextureGeneration = lastDrawnTextureGeneration == surface.presentationTextureGeneration
+            let sameDrawableSize =
+                lastDrawableSize?.width == drawableSize.0
+                && lastDrawableSize?.height == drawableSize.1
+            let sameTextureGeneration =
+                lastDrawnTextureGeneration == surface.presentationTextureGeneration
             // A pan/zoom/fit change does not bump `surface.revision` — it is presentation-only
             // and deliberately does not wait for a new render — so it must independently trigger
             // a redraw here, or dragging the image would have no visible effect until some other
             // change (an edit, a settled render) happened to bump the revision.
-            guard surface.revision != lastDrawnRevision || !sameDrawableSize
-                    || navigation != lastDrawnNavigation || !sameTextureGeneration else {
+            guard
+                surface.revision != lastDrawnRevision || !sameDrawableSize
+                    || navigation != lastDrawnNavigation || !sameTextureGeneration
+            else {
                 return
             }
 
@@ -735,13 +774,15 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 height: CGFloat(drawable.texture.height)
             )
             guard destination.width > 0, destination.height > 0,
-                  image.extent.width > 0, image.extent.height > 0,
-                  image.extent.width.isFinite, image.extent.height.isFinite else { return }
+                image.extent.width > 0, image.extent.height > 0,
+                image.extent.width.isFinite, image.extent.height.isFinite
+            else { return }
 
             let presentationRevision = surface.pendingPresentationRevision()
             if let presentationRevision {
-                surface.setEffectiveDimensions(revision: presentationRevision,
-                                               width: drawableSize.0, height: drawableSize.1)
+                surface.setEffectiveDimensions(
+                    revision: presentationRevision,
+                    width: drawableSize.0, height: drawableSize.1)
             }
             let displayRevision = surface.pendingDisplayRevision()
             let drawRevision = surface.revision
@@ -757,28 +798,34 @@ struct PreviewSurfaceView: NSViewRepresentable {
             renderPass?.colorAttachments[0].storeAction = .store
 
             if let texture = surface.presentationTexture,
-               let textureExtent = surface.presentationTextureExtent,
-               let pipeline, let samplerState,
-               var geometry = Self.quadGeometry(
-                   imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
-                   navigation: navigation,
-                   destination: destination, virtualExtent: surface.presentationImageExtent
-               ),
-               let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
-                   device.makeBuffer(bytes: rawBuffer.baseAddress!,
-                                     length: rawBuffer.count, options: .storageModeShared)
-               }),
-               let uniformBuffer = device.makeBuffer(bytes: &geometry.uniforms,
-                                                      length: MemoryLayout<Uniforms>.stride,
-                                                      options: .storageModeShared),
-               let encoder = renderPass.flatMap({ commandBuffer.makeRenderCommandEncoder(descriptor: $0) }) {
+                let textureExtent = surface.presentationTextureExtent,
+                let pipeline, let samplerState,
+                var geometry = Self.quadGeometry(
+                    imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
+                    navigation: navigation,
+                    destination: destination, virtualExtent: surface.presentationImageExtent
+                ),
+                let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
+                    device.makeBuffer(
+                        bytes: rawBuffer.baseAddress!,
+                        length: rawBuffer.count, options: .storageModeShared)
+                }),
+                let uniformBuffer = device.makeBuffer(
+                    bytes: &geometry.uniforms,
+                    length: MemoryLayout<Uniforms>.stride,
+                    options: .storageModeShared),
+                let encoder = renderPass.flatMap({
+                    commandBuffer.makeRenderCommandEncoder(descriptor: $0)
+                })
+            {
                 encoder.setRenderPipelineState(pipeline)
                 encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
                 encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
                 encoder.setFragmentTexture(texture, index: 0)
                 encoder.setFragmentSamplerState(samplerState, index: 0)
-                encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0,
-                                       vertexCount: geometry.vertices.count)
+                encoder.drawPrimitives(
+                    type: .triangleStrip, vertexStart: 0,
+                    vertexCount: geometry.vertices.count)
                 encoder.endEncoding()
             } else if let output = Self.presentationImage(
                 surface.mappedImageForPresentation(image), navigation: navigation,
@@ -788,8 +835,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
             ) {
                 // Compatibility seam for a host without a usable Metal texture/pipeline. The
                 // production path above never evaluates this graph on presentation-only redraws.
-                context.render(output, to: drawable.texture, commandBuffer: commandBuffer,
-                               bounds: destination, colorSpace: surface.space.cgColorSpace)
+                context.render(
+                    output, to: drawable.texture, commandBuffer: commandBuffer,
+                    bounds: destination, colorSpace: surface.space.cgColorSpace)
                 PreviewSurface.notePresentationCoreImageEvaluation()
             } else {
                 isDrawing = false
@@ -811,7 +859,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             }
             commandBuffer.addCompletedHandler { [weak self, weak surface] commandBuffer in
                 let succeeded = commandBuffer.status == .completed
-                let gpuCompletion = commandBuffer.gpuEndTime > 0
+                let gpuCompletion =
+                    commandBuffer.gpuEndTime > 0
                     ? commandBuffer.gpuEndTime : LiveEditTelemetryClock.now
                 Task { @MainActor in
                     if let surface {
@@ -839,9 +888,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 drawable.addPresentedHandler { [weak self, weak surface] drawable in
                     let presentationTime = drawable.presentedTime
                     Task { @MainActor in
-                        let skipped = surface?.markDrawablePresented(
-                            revision: revision, time: presentationTime
-                        ) == true
+                        let skipped =
+                            surface?.markDrawablePresented(
+                                revision: revision, time: presentationTime
+                            ) == true
                         if skipped {
                             self?.handleSkippedDrawable(revision: revision)
                         }
@@ -867,18 +917,22 @@ struct PreviewSurfaceView: NSViewRepresentable {
             virtualExtent: CGRect? = nil, appearance: NSAppearance? = nil
         ) -> CIImage? {
             guard destination.width > 0, destination.height > 0,
-                  destination.width.isFinite, destination.height.isFinite,
-                  image.extent.width > 0, image.extent.height > 0,
-                  image.extent.width.isFinite, image.extent.height.isFinite else { return nil }
+                destination.width.isFinite, destination.height.isFinite,
+                image.extent.width > 0, image.extent.height > 0,
+                image.extent.width.isFinite, image.extent.height.isFinite
+            else { return nil }
 
             let extent = image.extent
             let transformExtent = virtualExtent ?? extent
-            let transform = navigation.transform(imageExtent: transformExtent, viewportSize: destination.size)
+            let transform = navigation.transform(
+                imageExtent: transformExtent, viewportSize: destination.size)
             guard transform.scale.isFinite, transform.scale > 0,
-                  transform.imageSize.width.isFinite, transform.imageSize.height.isFinite else {
+                transform.imageSize.width.isFinite, transform.imageSize.height.isFinite
+            else {
                 return nil
             }
-            let displayed = image
+            let displayed =
+                image
                 .transformed(by: transform.affineTransform(for: transformExtent))
                 .cropped(to: destination)
             // Resolve the dynamic AppKit color against the editor view's effective appearance.
@@ -886,23 +940,28 @@ struct PreviewSurfaceView: NSViewRepresentable {
             // boundary: a dark window can otherwise produce a light letterbox.
             let clear = windowBackgroundClearColor(for: appearance)
             let background = CIImage(
-                color: CIColor(red: CGFloat(clear.red), green: CGFloat(clear.green),
-                               blue: CGFloat(clear.blue), alpha: 1)
+                color: CIColor(
+                    red: CGFloat(clear.red), green: CGFloat(clear.green),
+                    blue: CGFloat(clear.blue), alpha: 1)
             ).cropped(to: destination)
             return displayed.composited(over: background).cropped(to: destination)
         }
 
-        static func windowBackgroundClearColor(for appearance: NSAppearance? = nil) -> MTLClearColor {
-            let effectiveAppearance = appearance ?? NSApp?.effectiveAppearance
+        static func windowBackgroundClearColor(for appearance: NSAppearance? = nil) -> MTLClearColor
+        {
+            let effectiveAppearance =
+                appearance ?? NSApp?.effectiveAppearance
                 ?? NSAppearance(named: .aqua)!
             var color = NSColor.windowBackgroundColor
             effectiveAppearance.performAsCurrentDrawingAppearance {
-                color = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
+                color =
+                    NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
                     ?? NSColor.windowBackgroundColor
             }
-            return MTLClearColor(red: Double(color.redComponent),
-                                 green: Double(color.greenComponent),
-                                 blue: Double(color.blueComponent), alpha: 1)
+            return MTLClearColor(
+                red: Double(color.redComponent),
+                green: Double(color.greenComponent),
+                blue: Double(color.blueComponent), alpha: 1)
         }
 
         private static func quadGeometry(
@@ -914,32 +973,37 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 imageExtent: transformExtent, viewportSize: destination.size
             )
             guard transform.scale.isFinite, transform.scale > 0,
-                  transform.origin.x.isFinite, transform.origin.y.isFinite,
-                  imageExtent.width > 0, imageExtent.height > 0,
-                  imageExtent.width.isFinite, imageExtent.height.isFinite,
-                  destination.width > 0, destination.height > 0,
-                  destination.width.isFinite, destination.height.isFinite else { return nil }
+                transform.origin.x.isFinite, transform.origin.y.isFinite,
+                imageExtent.width > 0, imageExtent.height > 0,
+                imageExtent.width.isFinite, imageExtent.height.isFinite,
+                destination.width > 0, destination.height > 0,
+                destination.width.isFinite, destination.height.isFinite
+            else { return nil }
 
             let origin = CGPoint(
                 x: transform.origin.x + (imageExtent.minX - transformExtent.minX) * transform.scale,
                 y: transform.origin.y + (imageExtent.minY - transformExtent.minY) * transform.scale
             )
-            let size = CGSize(width: imageExtent.width * transform.scale,
-                              height: imageExtent.height * transform.scale)
-            let values = [origin.x, origin.y, size.width, size.height,
-                          transform.scale, destination.width, destination.height]
+            let size = CGSize(
+                width: imageExtent.width * transform.scale,
+                height: imageExtent.height * transform.scale)
+            let values = [
+                origin.x, origin.y, size.width, size.height,
+                transform.scale, destination.width, destination.height,
+            ]
             guard values.allSatisfy({ $0.isFinite }) else { return nil }
             return (
                 vertices: [
                     Vertex(position: SIMD2(0, 0), texcoord: SIMD2(0, 0)),
                     Vertex(position: SIMD2(1, 0), texcoord: SIMD2(1, 0)),
                     Vertex(position: SIMD2(0, 1), texcoord: SIMD2(0, 1)),
-                    Vertex(position: SIMD2(1, 1), texcoord: SIMD2(1, 1))
+                    Vertex(position: SIMD2(1, 1), texcoord: SIMD2(1, 1)),
                 ],
                 uniforms: Uniforms(
                     transformOrigin: SIMD2(Float(transform.origin.x), Float(transform.origin.y)),
-                    imageOrigin: SIMD2(Float(imageExtent.minX - transformExtent.minX),
-                                       Float(imageExtent.minY - transformExtent.minY)),
+                    imageOrigin: SIMD2(
+                        Float(imageExtent.minX - transformExtent.minX),
+                        Float(imageExtent.minY - transformExtent.minY)),
                     imageSize: SIMD2(Float(imageExtent.width), Float(imageExtent.height)),
                     scale: Float(transform.scale),
                     viewportSize: SIMD2(Float(destination.width), Float(destination.height))
@@ -966,7 +1030,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 lastDrawnNavigation = nil
                 lastDrawnTextureGeneration = nil
                 lastDrawableSize = nil
-            } else if succeeded, let surface, surface.revision == drawRevision, surface.image != nil {
+            } else if succeeded, let surface, surface.revision == drawRevision, surface.image != nil
+            {
                 lastDrawnRevision = drawRevision
                 lastDrawnNavigation = navigation
                 lastDrawnTextureGeneration = textureGeneration
@@ -998,7 +1063,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             }
             consecutiveSkippedDraws += 1
             guard consecutiveSkippedDraws < Self.maximumConsecutiveSkippedDraws,
-                  !skippedDrawRetriesSuppressed else {
+                !skippedDrawRetriesSuppressed
+            else {
                 skippedDrawRetriesSuppressed = true
                 skippedDrawNeedsRetry = false
                 retryTask?.cancel()
@@ -1047,7 +1113,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
             lastDrawableSize = nil
-            onDrawableSizeChange?(CGSize(width: size.width.rounded(.down), height: size.height.rounded(.down)))
+            onDrawableSizeChange?(
+                CGSize(width: size.width.rounded(.down), height: size.height.rounded(.down)))
             view.setNeedsDisplay(view.bounds)
         }
 
@@ -1059,10 +1126,11 @@ struct PreviewSurfaceView: NSViewRepresentable {
             appearance: NSAppearance? = nil
         ) -> MTLTexture? {
             guard destinationSize.width > 0, destinationSize.height > 0,
-                  destinationSize.width.isFinite, destinationSize.height.isFinite,
-                  let texture = surface.presentationTexture,
-                  let textureExtent = surface.presentationTextureExtent,
-                  let pipeline, let samplerState else { return nil }
+                destinationSize.width.isFinite, destinationSize.height.isFinite,
+                let texture = surface.presentationTexture,
+                let textureExtent = surface.presentationTextureExtent,
+                let pipeline, let samplerState
+            else { return nil }
 
             let width = Int(destinationSize.width.rounded())
             let height = Int(destinationSize.height.rounded())
@@ -1073,29 +1141,33 @@ struct PreviewSurfaceView: NSViewRepresentable {
             descriptor.usage = [.shaderRead, .renderTarget]
             descriptor.storageMode = .shared
             guard let target = device.makeTexture(descriptor: descriptor),
-                  var geometry = Self.quadGeometry(
-                      imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
-                      navigation: navigation,
-                      destination: CGRect(x: 0, y: 0, width: width, height: height),
-                      virtualExtent: surface.presentationImageExtent
-                  ),
-                  let commandBuffer = commandQueue.makeCommandBuffer() else { return nil }
+                var geometry = Self.quadGeometry(
+                    imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
+                    navigation: navigation,
+                    destination: CGRect(x: 0, y: 0, width: width, height: height),
+                    virtualExtent: surface.presentationImageExtent
+                ),
+                let commandBuffer = commandQueue.makeCommandBuffer()
+            else { return nil }
 
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = target
             pass.colorAttachments[0].clearColor = Self.windowBackgroundClearColor(for: appearance)
             pass.colorAttachments[0].loadAction = .clear
             pass.colorAttachments[0].storeAction = .store
-            guard let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
-                      device.makeBuffer(bytes: rawBuffer.baseAddress!, length: rawBuffer.count,
-                                        options: .storageModeShared)
-                  }),
-                  let uniformBuffer = device.makeBuffer(
-                      bytes: &geometry.uniforms,
-                      length: MemoryLayout<Uniforms>.stride,
-                      options: .storageModeShared
-                  ),
-                  let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
+            guard
+                let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
+                    device.makeBuffer(
+                        bytes: rawBuffer.baseAddress!, length: rawBuffer.count,
+                        options: .storageModeShared)
+                }),
+                let uniformBuffer = device.makeBuffer(
+                    bytes: &geometry.uniforms,
+                    length: MemoryLayout<Uniforms>.stride,
+                    options: .storageModeShared
+                ),
+                let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass)
+            else {
                 return nil
             }
             encoder.setRenderPipelineState(pipeline)
@@ -1103,8 +1175,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
             encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
             encoder.setFragmentTexture(texture, index: 0)
             encoder.setFragmentSamplerState(samplerState, index: 0)
-            encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0,
-                                   vertexCount: geometry.vertices.count)
+            encoder.drawPrimitives(
+                type: .triangleStrip, vertexStart: 0,
+                vertexCount: geometry.vertices.count)
             encoder.endEncoding()
             commandBuffer.commit()
             commandBuffer.waitUntilCompleted()
@@ -1123,6 +1196,11 @@ private final class PreviewMTKView: MTKView {
     var onScrollZoom: ((CGFloat) -> Void)?
     var onDoubleClick: (() -> Void)?
     var onEffectiveAppearanceChange: ((NSAppearance) -> Void)?
+    var ignoresHits = false
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        ignoresHits ? nil : super.hitTest(point)
+    }
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {

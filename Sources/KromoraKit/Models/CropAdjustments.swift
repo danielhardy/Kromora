@@ -56,8 +56,8 @@ enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
         orientation: CropAspectRatioOrientation = .automatic
     ) -> CGFloat? {
         guard let landscapePixelRatio = landscapePixelRatio,
-              imageSize.width.isFinite, imageSize.height.isFinite,
-              imageSize.width > 0, imageSize.height > 0
+            imageSize.width.isFinite, imageSize.height.isFinite,
+            imageSize.width > 0, imageSize.height > 0
         else { return nil }
 
         let pixelRatio: CGFloat
@@ -67,7 +67,8 @@ enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
         case .portrait:
             pixelRatio = 1 / landscapePixelRatio
         case .automatic:
-            pixelRatio = imageSize.width < imageSize.height
+            pixelRatio =
+                imageSize.width < imageSize.height
                 ? 1 / landscapePixelRatio
                 : landscapePixelRatio
         }
@@ -126,17 +127,19 @@ struct CropAdjustments: Codable, Equatable, Sendable {
         normalizedRect = Self.normalized(
             try container.decodeIfPresent(CGRect.self, forKey: .normalizedRect)
         )
-        aspectRatio = try container.decodeIfPresent(CropAspectRatio.self, forKey: .aspectRatio) ?? .freeform
-        orientation = try container.decodeIfPresent(
-            CropAspectRatioOrientation.self, forKey: .orientation
-        ) ?? .automatic
+        aspectRatio =
+            try container.decodeIfPresent(CropAspectRatio.self, forKey: .aspectRatio) ?? .freeform
+        orientation =
+            try container.decodeIfPresent(
+                CropAspectRatioOrientation.self, forKey: .orientation
+            ) ?? .automatic
     }
 
     private static func normalized(_ rect: CGRect?) -> CGRect? {
         guard let rect,
-              rect.origin.x.isFinite, rect.origin.y.isFinite,
-              rect.size.width.isFinite, rect.size.height.isFinite,
-              rect.width > 0, rect.height > 0
+            rect.origin.x.isFinite, rect.origin.y.isFinite,
+            rect.size.width.isFinite, rect.size.height.isFinite,
+            rect.width > 0, rect.height > 0
         else { return nil }
 
         let clipped = rect.intersection(unitRect)
@@ -178,8 +181,9 @@ enum CropOverlayInteraction {
         to rect: CGRect,
         imageSize: CGSize
     ) -> CGRect {
-        guard let targetRatio = aspectRatio.normalizedRatio(for: imageSize, orientation: orientation),
-              let current = CropAdjustments(normalizedRect: rect).normalizedRect
+        guard
+            let targetRatio = aspectRatio.normalizedRatio(for: imageSize, orientation: orientation),
+            let current = CropAdjustments(normalizedRect: rect).normalizedRect
         else { return rect }
 
         // Preserve the current crop area and center wherever possible. Scaling both dimensions
@@ -215,9 +219,11 @@ enum CropOverlayInteraction {
         imageSize: CGSize = .zero
     ) -> CGRect {
         guard imageRect.width > 0, imageRect.height > 0 else { return rect }
-        guard let targetRatio = aspectRatio.normalizedRatio(
-            for: imageSize, orientation: orientation
-        ) else {
+        guard
+            let targetRatio = aspectRatio.normalizedRatio(
+                for: imageSize, orientation: orientation
+            )
+        else {
             return freeformResized(rect, handle: handle, delta: delta, imageRect: imageRect)
         }
 
@@ -306,7 +312,9 @@ enum CropOverlayInteraction {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    private static func centeredRect(width: CGFloat, height: CGFloat, around center: CGPoint) -> CGRect {
+    private static func centeredRect(width: CGFloat, height: CGFloat, around center: CGPoint)
+        -> CGRect
+    {
         CGRect(
             x: min(max(center.x - width / 2, 0), 1 - width),
             y: min(max(center.y - height / 2, 0), 1 - height),
@@ -320,6 +328,83 @@ enum CropHandle: CaseIterable, Hashable, Sendable {
     case topLeading, topTrailing, bottomLeading, bottomTrailing
 }
 
-private extension CGRect {
-    var center: CGPoint { CGPoint(x: midX, y: midY) }
+/// Result of mapping a pointer location onto the crop overlay. Handle hits win over the interior
+/// move surface so a grab on a corner resizes even when that corner sits on the overlay origin.
+enum CropOverlayHit: Equatable, Sendable {
+    case move
+    case resize(CropHandle)
+}
+
+extension CropOverlayInteraction {
+    static let handleHitTargetSize: CGFloat = 44
+
+    static func handleHitRect(
+        _ handle: CropHandle,
+        cropRect: CGRect,
+        bounds: CGRect,
+        hitSize: CGFloat = handleHitTargetSize
+    ) -> CGRect {
+        let half = hitSize / 2
+        let center = corner(handle, in: cropRect)
+        var rect = CGRect(
+            x: center.x - half, y: center.y - half, width: hitSize, height: hitSize)
+        if bounds.width >= hitSize {
+            rect.origin.x = min(max(rect.minX, bounds.minX), bounds.maxX - hitSize)
+        } else {
+            rect.origin.x = bounds.minX
+            rect.size.width = max(0, bounds.width)
+        }
+        if bounds.height >= hitSize {
+            rect.origin.y = min(max(rect.minY, bounds.minY), bounds.maxY - hitSize)
+        } else {
+            rect.origin.y = bounds.minY
+            rect.size.height = max(0, bounds.height)
+        }
+        return rect
+    }
+
+    static func hit(
+        at point: CGPoint,
+        cropRect: CGRect,
+        bounds: CGRect,
+        hitSize: CGFloat = handleHitTargetSize
+    ) -> CropOverlayHit? {
+        var best: (handle: CropHandle, distance: CGFloat)?
+        for handle in CropHandle.allCases {
+            let rect = handleHitRect(
+                handle, cropRect: cropRect, bounds: bounds, hitSize: hitSize)
+            guard containsInclusive(rect, point) else { continue }
+            let corner = corner(handle, in: cropRect)
+            let dx = point.x - corner.x
+            let dy = point.y - corner.y
+            let distance = dx * dx + dy * dy
+            if let current = best, distance >= current.distance { continue }
+            best = (handle, distance)
+        }
+        if let best {
+            return .resize(best.handle)
+        }
+        if containsInclusive(cropRect, point) {
+            return .move
+        }
+        return nil
+    }
+
+    private static func corner(_ handle: CropHandle, in rect: CGRect) -> CGPoint {
+        switch handle {
+        case .topLeading: return CGPoint(x: rect.minX, y: rect.minY)
+        case .topTrailing: return CGPoint(x: rect.maxX, y: rect.minY)
+        case .bottomLeading: return CGPoint(x: rect.minX, y: rect.maxY)
+        case .bottomTrailing: return CGPoint(x: rect.maxX, y: rect.maxY)
+        }
+    }
+
+    private static func containsInclusive(_ rect: CGRect, _ point: CGPoint) -> Bool {
+        point.x >= rect.minX && point.x <= rect.maxX && point.y >= rect.minY
+            && point.y <= rect.maxY
+    }
+}
+
+extension CGRect {
+    fileprivate var center: CGPoint { CGPoint(x: midX, y: midY) }
 }

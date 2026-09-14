@@ -58,7 +58,9 @@ struct PreviewView: View {
             }
 
             if previewSurface.image != nil,
-               viewModel.collection.selectedItem?.asset.flag == .reject {
+                !canvasState.isCropToolActive,
+                viewModel.collection.selectedItem?.asset.flag == .reject
+            {
                 VStack {
                     Label("Rejected", systemImage: "xmark.circle.fill")
                         .font(.headline)
@@ -155,57 +157,75 @@ struct PreviewView: View {
 
     private var singleView: some View {
         GeometryReader { geometry in
-            ZStack {
-                if previewSurface.image != nil {
-                    canvasSurface(previewSurface)
-                        .padding(8)
-                }
-
+            // Crop chrome is a sibling above the canvas, not an overlay on it. Overlaying the
+            // bar on the image covers the top handles and also wins (or loses) the hit-test race
+            // with those handles, so neither the buttons nor the top-left handle stay usable.
+            VStack(spacing: 0) {
                 if canvasState.isCropToolActive, viewModel.sourceSize != .zero {
-                    CropOverlayView(
-                        normalizedRect: canvasState.cropDraft ?? CropAdjustments.unitRect,
-                        imageSize: viewModel.sourceSize,
+                    CropToolbarView(
                         aspectRatio: canvasState.cropAspectRatio,
                         orientation: canvasState.cropOrientation,
-                        onChange: viewModel.updateCropDraft,
                         onAspectRatioChange: viewModel.selectCropAspectRatio,
                         onApply: viewModel.commitCrop,
                         onReset: viewModel.resetCrop,
                         onCancel: viewModel.cancelCrop
                     )
-                    .padding(8)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 4)
+                    .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                if previewSurface.image != nil {
-                    // Comparison badge
-                    if viewModel.isShowingOriginal && viewModel.isComparisonAvailable {
-                        VStack {
-                            HStack {
-                                ComparisonBadge(text: "Original")
-                                Spacer()
-                            }
-                            Spacer()
-                        }
-                        .padding(20)
+                ZStack {
+                    if previewSurface.image != nil {
+                        canvasSurface(previewSurface)
+                            .padding(8)
                     }
 
-                    // Look name badge
-                    if !viewModel.isShowingOriginal, let look = viewModel.selectedLook {
-                        VStack {
-                            HStack {
+                    if canvasState.isCropToolActive, viewModel.sourceSize != .zero {
+                        CropOverlayView(
+                            normalizedRect: canvasState.cropDraft ?? CropAdjustments.unitRect,
+                            imageSize: viewModel.sourceSize,
+                            aspectRatio: canvasState.cropAspectRatio,
+                            orientation: canvasState.cropOrientation,
+                            onChange: viewModel.updateCropDraft
+                        )
+                        .padding(8)
+                    }
+
+                    if previewSurface.image != nil, !canvasState.isCropToolActive {
+                        // Comparison badge
+                        if viewModel.isShowingOriginal && viewModel.isComparisonAvailable {
+                            VStack {
+                                HStack {
+                                    ComparisonBadge(text: "Original")
+                                    Spacer()
+                                }
                                 Spacer()
-                                ComparisonBadge(text: look.name)
                             }
-                            Spacer()
+                            .padding(20)
                         }
-                        .padding(20)
+
+                        // Look name badge
+                        if !viewModel.isShowingOriginal, let look = viewModel.selectedLook {
+                            VStack {
+                                HStack {
+                                    Spacer()
+                                    ComparisonBadge(text: look.name)
+                                }
+                                Spacer()
+                            }
+                            .padding(20)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(singleViewAccessibilityLabel)
+                .accessibilityHint("Presentation only; does not change edits or export")
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(singleViewAccessibilityLabel)
-            .accessibilityHint("Presentation only; does not change edits or export")
+            .animation(.easeInOut(duration: 0.2), value: canvasState.isCropToolActive)
         }
     }
 
@@ -229,9 +249,10 @@ struct PreviewView: View {
                 navigation: canvasState.navigation,
                 onScrollZoom: { factor in viewModel.zoomCanvas(by: factor) },
                 onDoubleClick: { viewModel.toggleCanvasZoom() },
-                onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) }
+                onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
+                ignoresHits: canvasState.isCropToolActive
             )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             ZStack {
                 if canvasState.isCropToolActive {
@@ -248,9 +269,10 @@ struct PreviewView: View {
                 }
 
                 if viewModel.isMaskingWorkspaceActive,
-                   maskingState.showOverlay, viewModel.sourceSize != .zero,
-                   (maskingState.selectedLayerID != nil || maskingState.hasDraft
-                    || maskingState.activeTool == .linear || maskingState.activeTool == .radial) {
+                    maskingState.showOverlay, viewModel.sourceSize != .zero,
+                    maskingState.selectedLayerID != nil || maskingState.hasDraft
+                        || maskingState.activeTool == .linear || maskingState.activeTool == .radial
+                {
                     MaskCanvasOverlay(
                         viewModel: viewModel,
                         maskingState: maskingState,
@@ -329,7 +351,8 @@ struct PreviewView: View {
         guard let provider = providers.first else { return false }
         provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
             guard let data = item as? Data,
-                  let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                let url = URL(dataRepresentation: data, relativeTo: nil)
+            else { return }
             Task { @MainActor in
                 viewModel.handleDroppedURL(url)
             }
