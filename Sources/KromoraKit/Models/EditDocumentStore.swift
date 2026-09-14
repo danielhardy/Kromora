@@ -147,6 +147,9 @@ actor EditDocumentStore {
     /// the current manifest/asset record and cannot accidentally write through stale metadata.
     private var canonicalPackageRoot: URL? = nil
     private var packageLease: PortablePackageLease? = nil
+    /// Resolved Look bytes are supplied by the application composition root. The document keeps
+    /// only the stable Look ID, while the package revision embeds the exact bytes used at save.
+    private var embeddedLookBytes: [String: Data] = [:]
     /// The outcome of the most recent store operation. Load callers must use their
     /// `EditDocumentLoadResult.status` instead of treating this as a load-wide diagnostic.
     private(set) var status: Status = .ready
@@ -163,6 +166,12 @@ actor EditDocumentStore {
 
     /// The package backing this store, when the store is operating in projection mode.
     var canonicalPackageURL: URL? { canonicalPackageRoot }
+
+    /// Update the in-memory Look resolver used only when a canonical package edit is committed.
+    /// Missing data is safe: the document remains durable and the next save can retry embedding it.
+    func setEmbeddedLookBytes(_ values: [String: Data]) {
+        embeddedLookBytes = values
+    }
 
     /// The legacy development store path, retained for support and disposition tests.
     static var defaultFileURL: URL {
@@ -233,6 +242,13 @@ actor EditDocumentStore {
                 persistentFileURL: nil
             )
         }
+    }
+
+    /// Creates the disposable local projection used while a canonical package is active. Keeping
+    /// this explicit prevents the production composition root from creating an unused standalone
+    /// Application Support store before the package session is opened.
+    static func makeInMemoryProjectionStore() -> EditDocumentStore {
+        EditDocumentStore(modelContainer: makeInMemoryContainer())
     }
 
     /// Creates a persistent store, degrading to an in-memory store if the URL cannot be opened.
@@ -637,8 +653,10 @@ actor EditDocumentStore {
                 throw StoreError.cannotWrite("injected persistence failure")
             }
             let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+            let resolvedLookBytes = document.lut.lutID.flatMap { embeddedLookBytes[$0.raw] }
             _ = try package.appendEditRevision(
-                for: source.portableAssetID, document: document, lookBytes: lookBytes,
+                for: source.portableAssetID, document: document,
+                lookBytes: lookBytes + (resolvedLookBytes.map { [$0] } ?? []),
                 lease: packageLease
             )
             // The package commit is complete before this projection update begins. If the local

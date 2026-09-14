@@ -28,6 +28,7 @@ expected = {
     "com.apple.security.files.user-selected.read-write": True,
     "com.apple.security.files.removable-media.read-only": True,
     "com.apple.security.files.bookmarks.app-scope": True,
+    "com.apple.security.assets.pictures.read-write": True,
 }
 for key, value in expected.items():
     if entitlements.get(key) != value:

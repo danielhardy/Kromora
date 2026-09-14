@@ -670,6 +670,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
     /// file I/O remains inside `EditDocumentStore`.
     let persistence: EditPersistenceCoordinator
+    /// The production library boundary. When present, package membership and originals are
+    /// canonical; the legacy ImageCollection remains only as a bounded presentation bridge.
+    let portableLibrary: PortableLibrarySession?
     /// Background compaction shares the scheduler with editor work but uses its detached
     /// package-I/O lane, so a foreground edit can take the admission window back immediately.
     let portablePackageMaintenance: PortablePackageMaintenance
@@ -800,6 +803,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var mediaVolumeObservers: [NSObjectProtocol] = []
     private var applicationLifecycleObservers: [NSObjectProtocol] = []
     private let portablePackageURL: URL?
+    private let portableLibraryOpenError: String?
     private let portableMaintenanceIdleDelay: Duration
     private let portableMaintenanceJobID = ImageWorkScheduler.JobID("portable-package-maintenance")
     private var portableMaintenanceTriggerTask: Task<Void, Never>?
@@ -820,22 +824,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     // MARK: - Init
 
     public convenience init() {
+        let packageURL = KromoraStorage.defaultPortableLibraryPackageURL
         self.init(
             engine: RenderEngine.shared,
-            editStore: EditDocumentStore.makeDefaultStore(),
+            editStore: EditDocumentStore.makeInMemoryProjectionStore(),
             includeBundledLooks: false,
-            portablePackageURL: KromoraStorage.defaultPortableLibraryPackageURL
+            portablePackageURL: packageURL
         )
     }
 
     /// Production entry points opt into the packaged starter library. The plain initializer stays
     /// bundle-free for headless/test clients that intentionally provide their own Look folder.
     public convenience init(includeBundledLooks: Bool) {
+        let packageURL = KromoraStorage.defaultPortableLibraryPackageURL
         self.init(
             engine: RenderEngine.shared,
-            editStore: EditDocumentStore.makeDefaultStore(),
+            editStore: EditDocumentStore.makeInMemoryProjectionStore(),
             includeBundledLooks: includeBundledLooks,
-            portablePackageURL: KromoraStorage.defaultPortableLibraryPackageURL
+            portablePackageURL: packageURL
         )
     }
 
@@ -868,7 +874,36 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
         self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
-        self.editStore = editStore
+        let normalizedPortablePackageURL = portablePackageURL?.standardizedFileURL
+        let openedPortableLibrary: PortableLibrarySession?
+        let portableOpenError: String?
+        let effectiveEditStore: EditDocumentStore
+        if let normalizedPortablePackageURL {
+            do {
+                let session = try PortableLibrarySession(at: normalizedPortablePackageURL)
+                openedPortableLibrary = session
+                portableOpenError = nil
+                // The package owns the edit sidecars. SwiftData is constructed as a disposable
+                // projection and is never allowed to become a fallback authority.
+                effectiveEditStore = EditDocumentStore(
+                    package: session.package, lease: session.lease
+                )
+            } catch {
+                openedPortableLibrary = nil
+                portableOpenError =
+                    "Kromora could not open its library package at \(normalizedPortablePackageURL.path): "
+                    + error.localizedDescription
+                effectiveEditStore = editStore
+            }
+        } else {
+            openedPortableLibrary = nil
+            portableOpenError = nil
+            effectiveEditStore = editStore
+        }
+        let effectiveLibraryFolderURL = openedPortableLibrary?.rootURL ?? libraryFolderURL
+        self.portableLibrary = openedPortableLibrary
+        self.portableLibraryOpenError = portableOpenError
+        self.editStore = effectiveEditStore
         self.editorDocument = EditorDocumentCoordinator()
         self.photosImportCoordinator = PhotosImportCoordinator()
         self.settings = KromoraSettings(
@@ -876,9 +911,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             userLookFolderURL: userLookFolderURL
         )
         self.workScheduler = ImageWorkScheduler()
-        self.persistence = EditPersistenceCoordinator(store: editStore)
+        self.persistence = EditPersistenceCoordinator(store: effectiveEditStore)
         self.portablePackageMaintenance = PortablePackageMaintenance(scheduler: workScheduler)
-        self.portablePackageURL = portablePackageURL?.standardizedFileURL
+        self.portablePackageURL = normalizedPortablePackageURL
         self.portableMaintenanceIdleDelay = portableMaintenanceIdleDelay
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane
         // would let a burst of filmstrip/grid work evict a row's continuation before it can return.
@@ -886,7 +921,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: engine, scheduler: ImageWorkScheduler()
         )
         self.collection = ImageCollection(
-            scheduler: workScheduler, defaults: preferences, libraryFolderURL: libraryFolderURL
+            scheduler: workScheduler, defaults: preferences,
+            libraryFolderURL: effectiveLibraryFolderURL,
+            persistsLegacyLibraryState: openedPortableLibrary == nil
         )
         self.library = LUTLibrary(
             preferences: preferences,
@@ -896,7 +933,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.export = ExportCoordinator(
             engine: engine,
             maskResolver: CoordinatorLocalMaskResolver(coordinator: analysisCoordinator),
-            editStore: editStore
+            editStore: effectiveEditStore
         )
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
         self.previewDiskCache = PreviewDiskCache(
@@ -1012,6 +1049,28 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         wireCoordinators()
         library.restoreFolder()
 
+        if let portableLibrary {
+            do {
+                collection.loadPortableAssets(try portableLibrary.materializedAssets())
+                navigation.move(to: .grid)
+                collection.beginThumbnailDemand()
+            } catch {
+                presentError(
+                    "Kromora could not read the library package: \(error.localizedDescription)"
+                )
+            }
+            configureEmbeddedLooks()
+            return
+        }
+
+        if let portableLibraryOpenError {
+            // A failed package open is an actionable empty state. In particular, do not restore a
+            // source folder or the old Application Support managed folder as a hidden second
+            // library.
+            presentError(portableLibraryOpenError)
+            return
+        }
+
         // Restore a previously-chosen source folder and open its first image.
         // Both the LUT scan above and this one run asynchronously, so the
         // window paints immediately and fills in as the scans land.
@@ -1070,6 +1129,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         library.onImported = { [weak self] lut in
+            self?.configureEmbeddedLooks()
             // Importing is also an audition action when an image is open. With no active image the
             // file still appears in the browser, but must not become a document default that could
             // accidentally leak into a later per-photo session.
@@ -1118,6 +1178,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // Registration is intentionally non-auditioning. Saving a Look must not add a new
             // edit or undo entry to the photo whose document was exported.
             self?.library.importLUT(from: destination, audition: false)
+        }
+
+        configureEmbeddedLooks()
+    }
+
+    /// Snapshot the bytes of every currently-resolvable Look for the package edit boundary. The
+    /// package sidecar remains self-contained even if a user later removes or relocates the
+    /// external browser file.
+    private func configureEmbeddedLooks() {
+        guard portableLibrary != nil else { return }
+        let values = library.allLUTs.reduce(into: [String: Data]()) { result, look in
+            if let data = try? Data(contentsOf: look.url) {
+                result[look.lutID.raw] = data
+            }
+        }
+        let store = editStore
+        Task {
+            await store.setEmbeddedLookBytes(values)
         }
     }
 
@@ -1490,8 +1568,42 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Image loading
 
+    private var portableLibraryFailureIsActive: Bool {
+        portableLibrary != nil || portableLibraryOpenError != nil
+    }
+
+    private func reloadPortableCollection() throws {
+        guard let portableLibrary else { return }
+        collection.loadPortableAssets(try portableLibrary.materializedAssets())
+        navigation.move(to: .grid)
+        collection.beginThumbnailDemand()
+    }
+
+    private func openPortableAsset(_ assetID: PortablePhotoAssetID) {
+        guard let item = collection.items.first(where: {
+            $0.asset.source.portableIdentity.assetID == assetID
+        }), let url = item.url else {
+            statusMessage = "The imported photo is not available in the package index."
+            return
+        }
+        openImage(url: url, assetID: item.id)
+    }
+
     func openImage(url: URL) {
         cancelPendingPreviewDebounce()
+        if let portableLibrary {
+            do {
+                let result = try portableLibrary.importURLs([url])
+                let assetID = result.imported.first?.assetID
+                    ?? result.duplicates.first?.existingAssetID
+                try reloadPortableCollection()
+                if let assetID { openPortableAsset(assetID) }
+            } catch {
+                presentError("Kromora could not import \(url.lastPathComponent): \(error.localizedDescription)")
+            }
+            return
+        }
+        guard !portableLibraryFailureIsActive else { return }
         let ids = collection.addFromURLs([url])
         navigation.move(to: .edit)
         guard let assetID = ids.first,
@@ -2259,6 +2371,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// ensures an empty/cancelled result does not disturb the current edit.
     func openImages(urls: [URL]) {
         guard !urls.isEmpty else { return }
+        if let portableLibrary {
+            do {
+                let result = try portableLibrary.importURLs(urls)
+                try reloadPortableCollection()
+                if let assetID = result.imported.first?.assetID
+                    ?? result.duplicates.first?.existingAssetID
+                { openPortableAsset(assetID) }
+            } catch {
+                presentError("Kromora could not import the selected photos: \(error.localizedDescription)")
+            }
+            return
+        }
+        guard !portableLibraryFailureIsActive else { return }
         let ids = collection.addFromURLs(urls)
         guard let firstID = ids.first,
             let firstItem = collection.items.first(where: { $0.id == firstID }),
@@ -2270,6 +2395,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     // MARK: - Photo import
 
     func openImage(data: Data, name: String) {
+        if let portableLibrary {
+            do {
+                let result = try portableLibrary.importData(data, name: name)
+                try reloadPortableCollection()
+                if let assetID = result.imported.first?.assetID
+                    ?? result.duplicates.first?.existingAssetID
+                { openPortableAsset(assetID) }
+            } catch {
+                presentError("Kromora could not import \(name): \(error.localizedDescription)")
+            }
+            return
+        }
+        guard !portableLibraryFailureIsActive else { return }
         let ids = collection.addFromData([(name: name, data: data)])
         navigation.move(to: .edit)
         guard let assetID = ids.first,
@@ -2310,10 +2448,29 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func preparePhotosImport(totalCount: Int) {
         cancelIdlePreviewBuild(resetCursor: true)
         didPresentInspectorForPhotosImport = false
+        if portableLibrary != nil { return }
         collection.beginDataImport(reservedCount: max(0, totalCount))
     }
 
     func insertPhotosImport(_ item: ImageCollection.PhotoImportItem, ordinal: Int) {
+        if let portableLibrary {
+            do {
+                let result = try portableLibrary.importData(item.data, name: item.name)
+                try reloadPortableCollection()
+                if collection.items.count == 1,
+                   let assetID = result.imported.first?.assetID
+                        ?? result.duplicates.first?.existingAssetID
+                {
+                    openPortableAsset(assetID)
+                    presentInspectorForFirstPhotosImportItem()
+                }
+            } catch {
+                recordPhotosImportFailureDestination(
+                    name: item.name, ordinal: ordinal
+                )
+            }
+            return
+        }
         let assetID = collection.appendDataImport(item, ordinal: ordinal)
         if collection.currentDataImportCount == 1 {
             selectCollectionItem(id: assetID)
@@ -2355,10 +2512,26 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func finishPhotosImportDestination(cancelled: Bool) {
+        if portableLibrary != nil { return }
         collection.finishDataImport()
     }
 
     func importPhotosData(_ items: [(name: String, data: Data)]) {
+        if let portableLibrary {
+            do {
+                var firstAssetID: PortablePhotoAssetID?
+                for item in items {
+                    let result = try portableLibrary.importData(item.data, name: item.name)
+                    firstAssetID = firstAssetID ?? result.imported.first?.assetID
+                        ?? result.duplicates.first?.existingAssetID
+                }
+                try reloadPortableCollection()
+                if let firstAssetID { openPortableAsset(firstAssetID) }
+            } catch {
+                presentError("Kromora could not import Photos data: \(error.localizedDescription)")
+            }
+            return
+        }
         let ids = collection.addFromData(items)
         if let first = items.first, let firstID = ids.first,
             let firstItem = collection.items.first(where: { $0.id == firstID })
@@ -2428,7 +2601,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 let packageURL = self.portablePackageURL,
                 !self.workScheduler.contains(self.portableMaintenanceJobID)
             else { return }
-            _ = self.portablePackageMaintenance.enqueue(packageURL: packageURL)
+            _ = self.portablePackageMaintenance.enqueue(
+                packageURL: packageURL,
+                lease: self.portableLibrary?.lease
+            )
         }
     }
 
@@ -2642,6 +2818,27 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 return
             }
 
+            if let portableLibrary = self.portableLibrary {
+                var importedCount = 0
+                do {
+                    let result = try portableLibrary.importURLs(usable.map(\.url))
+                    importedCount = result.imported.count
+                    try self.reloadPortableCollection()
+                    if let assetID = result.imported.first?.assetID
+                        ?? result.duplicates.first?.existingAssetID
+                    { self.openPortableAsset(assetID) }
+                } catch {
+                    self.presentError(
+                        "Kromora could not import removable-media photos: \(error.localizedDescription)"
+                    )
+                }
+                self.statusMessage =
+                    "Imported \(importedCount) photo(s) from \(volume.name)"
+                self.isRemovableMediaSelectorPresented = false
+                return
+            }
+
+            guard !self.portableLibraryFailureIsActive else { return }
             let ids = self.collection.addFromMediaVolume(volume, files: usable)
             if let first = usable.first, let firstID = ids.first {
                 self.isSourceBrowserPresented = false
@@ -2703,6 +2900,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// open its first image. Shared by the menu/toolbar action and folder drops.
     func openSourceFolder(url: URL) {
         cancelIdlePreviewBuild(resetCursor: true)
+        if let portableLibrary {
+            let files = supportedImageURLs(in: url)
+            guard !files.isEmpty else {
+                statusMessage = "No supported images were found in \(url.lastPathComponent)."
+                return
+            }
+            do {
+                let result = try portableLibrary.importURLs(files)
+                try reloadPortableCollection()
+                if let assetID = result.imported.first?.assetID
+                    ?? result.duplicates.first?.existingAssetID
+                { openPortableAsset(assetID) }
+            } catch {
+                presentError("Kromora could not import the folder: \(error.localizedDescription)")
+            }
+            return
+        }
+        guard !portableLibraryFailureIsActive else { return }
         let didPersistBookmark = collection.setSourceFolder(url)
         if !didPersistBookmark {
             presentError(
@@ -2714,6 +2929,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         navigation.move(to: .grid)
         collection.beginThumbnailDemand()
         openFirstImageWhenScanned()
+    }
+
+    private func supportedImageURLs(in folder: URL) -> [URL] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]
+        ) else { return [] }
+        return enumerator.compactMap { value in
+            guard let url = value as? URL,
+                  (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+                  ImageDecoder.supportedExtensions.contains(url.pathExtension.lowercased()),
+                  FileManager.default.isReadableFile(atPath: url.path) else { return nil }
+            return url
+        }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
     func toggleSourceBrowser() {
@@ -2836,7 +3064,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             var trashedURL: NSURL?
             do {
                 if candidate.isManaged, let url = candidate.url {
-                    try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+                    if let portableLibrary {
+                        try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
+                    } else {
+                        try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
+                    }
                 }
                 try await editStore.delete(
                     for: EditSourceReference(
@@ -3300,6 +3532,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let name = collection.selectedItem?.displayName
         let previousIndex = collection.selectedIndex
         let changed = collection.setFlag(flag, advance: advance)
+        if changed { persistPortableLibraryStateIfNeeded() }
         if changed, let name {
             statusMessage =
                 "\(name): \(flag == .pick ? "Picked" : flag == .reject ? "Rejected" : "Flag cleared")"
@@ -3316,6 +3549,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     @discardableResult
     func setFocusedRating(_ rating: Int) -> Bool {
         let changed = collection.setRating(rating)
+        if changed { persistPortableLibraryStateIfNeeded() }
         if changed, let item = collection.selectedItem {
             statusMessage =
                 "\(item.displayName): \(rating == 0 ? "Rating cleared" : "Rated \(rating) stars")"
@@ -3325,7 +3559,23 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     @discardableResult
     func undoCullingChange() -> Bool {
-        collection.undoLastCullingChange()
+        let changed = collection.undoLastCullingChange()
+        if changed { persistPortableLibraryStateIfNeeded() }
+        return changed
+    }
+
+    private func persistPortableLibraryStateIfNeeded() {
+        guard let portableLibrary, let assetID = collection.lastCullingAssetID,
+              let item = collection.items.first(where: { $0.id == assetID }) else { return }
+        do {
+            try portableLibrary.updateLibraryState(
+                for: item.asset.source.portableIdentity.assetID,
+                rating: item.asset.rating,
+                flag: item.asset.flag
+            )
+        } catch {
+            presentError("Kromora could not update the library catalog: \(error.localizedDescription)")
+        }
     }
 
     /// Enter the editor for the grid's active photo. Thumbnail availability is not a prerequisite;

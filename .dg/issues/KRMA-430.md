@@ -2,7 +2,7 @@
 id: KRMA-430
 title: Activate the Pictures-backed portable library as the production canonical store
 type: feature
-status: claimed
+status: verification
 priority: high
 agent: codex
 model: gpt-5.6-luna
@@ -16,15 +16,15 @@ labels:
   - architecture
   - import
 created: 2026-09-14T03:06:01.414Z
-updated: 2026-09-14T03:54:50.383Z
-order: n
+updated: 2026-09-14T09:16:15.609Z
+order: a0
 board: product
 claim:
-  actor: codex
-  session: 01MU0PLUVJRY43UURV
-  claimed_at: 2026-09-14T03:54:50.382Z
-  expires_at: 2026-09-14T04:54:50.382Z
-  model: gpt-5.6-luna
+  actor: claude
+  session: 01MU1137G81CRU0VQ7
+  claimed_at: 2026-09-14T09:16:15.608Z
+  expires_at: 2026-09-14T10:16:15.608Z
+  model: sonnet
 ---
 
 ## Objective
