@@ -132,7 +132,27 @@ struct ResolutionPlanner: Equatable, Sendable {
         // but it should not cause a previously useful source level to be discarded.
         let requestedScale = max(fitScale, transform.scale)
         let requiredScale = min(max(requestedScale.isFinite ? requestedScale : 1, 0), 1)
-        let level = Self.level(for: requiredScale, current: selectedLevel)
+        // A complete-photo viewport is a hard coverage boundary, not another point in the
+        // zoom gesture. After a deep zoom the hysteresis state may still be at native detail;
+        // carrying that level back into fit can make the full-frame render unnecessarily large.
+        // If that render fails, PreviewSurface quite correctly retains the last valid ROI frame,
+        // which then leaves the newly revealed edges blank under the fit transform. Re-enter the
+        // ordinary adequate level when the whole presented photo is visible and the current
+        // level is materially above it. A one-level resize still keeps the existing hysteresis;
+        // partial viewport pans/fills keep the existing cache reuse behavior.
+        let visibleSourceRect = Self.visibleSourceRect(
+            cropRect: rect, nativeExtent: native, cropSize: cropSize,
+            transform: transform, viewportSize: viewportSize
+        )
+        let completePresentedPhoto = Self.roi(
+            visibleSourceRect, coversCrop: rect, nativeExtent: native
+        )
+        let adequateLevel = Self.level(for: requiredScale, current: nil)
+        let recoveringCompleteFrame =
+            completePresentedPhoto && selectedLevel.map { $0 - adequateLevel >= 2 } == true
+        let level = Self.level(
+            for: requiredScale, current: recoveringCompleteFrame ? nil : selectedLevel
+        )
         selectedLevel = level
         let scale = Self.detailScales[level]
         let sourceSize = CGSize(
@@ -148,10 +168,7 @@ struct ResolutionPlanner: Equatable, Sendable {
             requiredScale: requiredScale,
             sourceSize: sourceSize,
             cropRect: rect,
-            visibleSourceRect: Self.visibleSourceRect(
-                cropRect: rect, nativeExtent: native, cropSize: cropSize,
-                transform: transform, viewportSize: viewportSize
-            ),
+            visibleSourceRect: visibleSourceRect,
             isNativeResolution: level == Self.detailScales.count - 1 || requiredScale >= 1
         )
     }

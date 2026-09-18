@@ -55,6 +55,49 @@ final class ResolutionPlannerTests: TempDirectoryTestCase {
         XCTAssertLessThan(deep.visibleSourceRect.width, native.width)
     }
 
+    func testZoomInThenFitReturnsToFreshCompletePhotoPlanAndCacheIdentity() {
+        let source = ImageSource(data: Data("zoom-round-trip".utf8), nativeExtent: native)
+        let document = EditDocument()
+        let viewport = CGSize(width: 1_600, height: 1_200)
+        var navigation = CanvasNavigation()
+        var planner = ResolutionPlanner()
+
+        navigation.setZoom(8)
+        let zoomed = planner.plan(
+            nativeExtent: native, viewportSize: viewport, navigation: navigation
+        )
+        let zoomedRequest = RenderRequest(
+            source: source, document: document, targetSize: zoomed.sourceSize,
+            sourceROI: zoomed.previewSourceROI(nativeExtent: native), quality: .preview
+        )
+        XCTAssertNotNil(zoomedRequest.sourceROI)
+
+        navigation.fit()
+        let zoomedOut = planner.plan(
+            nativeExtent: native, viewportSize: viewport, navigation: navigation
+        )
+        var freshPlanner = ResolutionPlanner()
+        let fresh = freshPlanner.plan(
+            nativeExtent: native, viewportSize: viewport, navigation: navigation
+        )
+        let zoomedOutRequest = RenderRequest(
+            source: source, document: document, targetSize: zoomedOut.sourceSize,
+            sourceROI: zoomedOut.previewSourceROI(nativeExtent: native), quality: .preview
+        )
+        let freshRequest = RenderRequest(
+            source: source, document: document, targetSize: fresh.sourceSize,
+            sourceROI: fresh.previewSourceROI(nativeExtent: native), quality: .preview
+        )
+
+        XCTAssertNil(zoomedOutRequest.sourceROI, "fit must request a complete source frame")
+        XCTAssertEqual(zoomedOut, fresh, "fit after deep zoom must match a fresh planner")
+        XCTAssertEqual(
+            Self.previewCacheKey(for: zoomedOutRequest),
+            Self.previewCacheKey(for: freshRequest),
+            "the recovered fit request must address the same cache entry as a fresh render"
+        )
+    }
+
     func testAppViewModelDoesNotShareHysteresisBetweenRenderingSurfaces() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let quarterCrop = EditDocument(crop: CropAdjustments(
@@ -99,6 +142,20 @@ final class ResolutionPlannerTests: TempDirectoryTestCase {
             request.renderScale,
             .preview(maxSize: CGSize(width: 960, height: 960)),
             "thumbnail source planning must reserve pixels for the committed crop"
+        )
+    }
+
+    private static func previewCacheKey(for request: RenderRequest) -> PreviewCacheKey {
+        PreviewCacheKey(
+            source: RenderSourceFingerprint(request.source),
+            documentHash: RenderCacheHash.digest(request.document),
+            lutFingerprint: request.lut?.cacheFingerprint ?? "none",
+            targetScale: RenderScaleKey(
+                request.renderScale, nativeExtent: request.source.nativeExtent),
+            sourceROI: request.sourceROI,
+            quality: request.quality,
+            space: request.space,
+            pipelineVersion: RenderPipeline.cacheVersion
         )
     }
 
