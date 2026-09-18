@@ -1,7 +1,7 @@
 # Looks and LUTs
 
 Kromora's Look workflow supports text-based 3D LUTs, derives Looks from a RAW/JPG pair, and ships
-16 read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,
+13 read-only starter Looks. The parser and renderer are implemented in `CubeLUT`, `LUTLibrary`,
 and `RenderPipeline`; this document records the supported interchange contract.
 
 ## File support
@@ -29,7 +29,7 @@ scratch Look until the user saves it.
 
 ## Starter library and storage
 
-The bundled library contains 16 original procedural cubes:
+The bundled library contains 13 original procedural cubes:
 
 | Category | Look |
 | --- | --- |
@@ -40,20 +40,16 @@ The bundled library contains 16 original procedural cubes:
 | Monochrome | Infrared Mono |
 | Cinematic | Evening Cinema |
 | Cinematic | Ember & Cyan |
-| Cinematic | Neon Dusk |
 | Film-inspired | Muted Film |
 | Film-inspired | Honey Negative |
 | Warm slide-inspired | Warm Slide |
 | Pastel | Pastel Wash |
 | Faded | Bleached Daylight |
 | High-contrast | Hard Light |
-| Cool-toned | Midnight Slate |
-| Moody | Forest Shadow |
 
 These are intentionally distinct starting points rather than minor intensity variants. The
 monochrome entries use different luminance curves, while the color entries cover cinematic
-orange-and-teal, warm natural negative-film-inspired, pastel, faded, high-contrast, cool, and
-moody directions.
+orange-and-teal, warm natural negative-film-inspired, pastel, faded, and high-contrast directions.
 
 Their machine-readable provenance, licensing, redistribution terms, and approval metadata live
 beside the assets in the bundled manifest; the package and tests fail closed for missing or
