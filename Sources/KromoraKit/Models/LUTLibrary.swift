@@ -43,7 +43,7 @@ final class LUTLibrary: ObservableObject {
         }
     }
 
-    static func starterCategoryPrecedes(_ left: String, _ right: String) -> Bool {
+    nonisolated static func starterCategoryPrecedes(_ left: String, _ right: String) -> Bool {
         if left == "Monochrome" { return right != "Monochrome" }
         if right == "Monochrome" { return false }
         return left.localizedStandardCompare(right) == .orderedAscending

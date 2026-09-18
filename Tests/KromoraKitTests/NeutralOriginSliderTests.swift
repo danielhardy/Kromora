@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SwiftUI
 @testable import KromoraKit
 
 /// That the numbers `SliderFill` produces actually reach pixels, through the AppKit drawing path
