@@ -348,9 +348,11 @@ final class KeyMonitor {
             guard isDown, vm.navigation.isGrid else { return event }
             vm.requestDeleteSelectedLibraryItems()
             return nil
-        case 53: // Escape — cancel a mask gesture first, then leave the masking workspace/tool.
+        case 53: // Escape — cancel crop first, then a mask gesture/workspace/tool.
             guard isDown else { return event }
-            if vm.maskInteractionState.hasDraft {
+            if vm.isCropToolActive {
+                vm.cancelCrop()
+            } else if vm.maskInteractionState.hasDraft {
                 vm.cancelMaskGesture()
             } else if vm.inspectorState.isMaskingWorkspacePresented,
                       vm.maskInteractionState.activeTool != .selection {
@@ -376,7 +378,11 @@ final class KeyMonitor {
             guard vm.isComparisonAvailable && !vm.isSideBySide else { return event }
             _ = vm.showOriginal(isDown)
             return nil
-        case 36: // Return — open the active grid item in Edit
+        case 36: // Return — apply crop, or open the active grid item in Edit.
+            if isDown, vm.isCropToolActive {
+                vm.commitCrop()
+                return nil
+            }
             if isDown, vm.navigation.isGrid {
                 vm.openLibraryImageForEditing()
                 return nil
