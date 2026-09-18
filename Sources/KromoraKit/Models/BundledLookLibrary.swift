@@ -42,7 +42,7 @@ struct BundledLookLibrary: Sendable {
 
     var categories: [LUTLibrary.Category] {
         let grouped = Dictionary(grouping: looks, by: \.category)
-        return grouped.keys.sorted().map { category in
+        return grouped.keys.sorted(by: LUTLibrary.starterCategoryPrecedes).map { category in
             LUTLibrary.Category(
                 id: "bundled:\(category)",
                 name: category,

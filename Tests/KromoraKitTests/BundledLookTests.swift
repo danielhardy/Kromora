@@ -15,11 +15,11 @@ final class BundledLookTests: TempDirectoryTestCase {
 
         XCTAssertEqual(manifest.schemaVersion, 1)
         XCTAssertFalse(manifest.acknowledgement.isEmpty)
-        XCTAssertEqual(manifest.looks.count, 16)
+        XCTAssertEqual(manifest.looks.count, 13)
         XCTAssertEqual(
             Set(manifest.looks.map(\.category)),
             ["Monochrome", "Cinematic", "Film-inspired", "Warm slide-inspired",
-             "Pastel", "Faded", "High-contrast", "Cool-toned", "Moody"]
+             "Pastel", "Faded", "High-contrast"]
         )
         XCTAssertEqual(Set(manifest.looks.map(\.id)).count, manifest.looks.count)
         XCTAssertEqual(Set(manifest.looks.map(\.resource)).count, manifest.looks.count)
@@ -31,26 +31,33 @@ final class BundledLookTests: TempDirectoryTestCase {
         XCTAssertTrue(manifest.looks.contains { $0.name == "Honey Negative" && $0.category == "Film-inspired" })
         XCTAssertTrue(manifest.looks.contains { $0.name == "Ember & Cyan" && $0.category == "Cinematic" })
         XCTAssertTrue(manifest.looks.contains { $0.name == "Pastel Wash" && $0.category == "Pastel" })
-        XCTAssertTrue(manifest.looks.contains { $0.name == "Midnight Slate" && $0.category == "Cool-toned" })
-        XCTAssertTrue(manifest.looks.contains { $0.name == "Forest Shadow" && $0.category == "Moody" })
+        XCTAssertFalse(manifest.looks.contains { $0.name == "Neon Dusk" })
+        XCTAssertFalse(manifest.looks.contains { $0.name == "Midnight Slate" })
+        XCTAssertFalse(manifest.looks.contains { $0.name == "Forest Shadow" })
         XCTAssertTrue(manifest.acknowledgement.contains("descriptive inspiration"))
         XCTAssertFalse(manifest.acknowledgement.localizedCaseInsensitiveContains("mit"))
     }
 
     func testApplicationLibrarySeparatesStarterLooksFromUserLooks() async throws {
         let library = makeLibrary()
-        XCTAssertEqual(library.allLUTs.count, 16)
+        XCTAssertEqual(library.allLUTs.count, 13)
         XCTAssertTrue(library.allLUTs.allSatisfy { $0.source == .bundled })
         XCTAssertEqual(library.lookCollections.map(\.title), ["Starter Looks", "My Looks"])
-        XCTAssertEqual(library.starterLooks.count, 16)
+        XCTAssertEqual(library.starterLooks.count, 13)
+        XCTAssertEqual(
+            library.starterCategories.map(\.name),
+            ["Monochrome", "Cinematic", "Faded", "Film-inspired", "High-contrast",
+             "Pastel", "Warm slide-inspired"]
+        )
+        XCTAssertEqual(Set(library.starterLooks.prefix(5).map(\.category)), ["Monochrome"])
         XCTAssertTrue(library.starterLooks.allSatisfy { $0.source == .bundled })
         XCTAssertTrue(library.myLooks.isEmpty, "the empty My Looks collection must remain visible")
         XCTAssertTrue(library.lookCollections[0].isReadOnly)
         XCTAssertFalse(library.lookCollections[1].isReadOnly)
         XCTAssertEqual(
             library.categories.map(\.name),
-            ["Cinematic", "Cool-toned", "Faded", "Film-inspired", "High-contrast",
-             "Monochrome", "Moody", "Pastel", "Warm slide-inspired"]
+            ["Monochrome", "Cinematic", "Faded", "Film-inspired", "High-contrast",
+             "Pastel", "Warm slide-inspired"]
         )
         XCTAssertTrue(library.categories.allSatisfy { $0.source == .bundled })
         XCTAssertTrue(library.bundledLoadWarnings.isEmpty)
@@ -61,13 +68,13 @@ final class BundledLookTests: TempDirectoryTestCase {
         library.importLUT(from: userURL)
         while library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
 
-        XCTAssertEqual(library.allLUTs.filter { $0.source == .bundled }.count, 16)
+        XCTAssertEqual(library.allLUTs.filter { $0.source == .bundled }.count, 13)
         XCTAssertEqual(library.allLUTs.filter { $0.source == .user }.map(\.name), ["my-look"])
         XCTAssertEqual(library.categories.filter { $0.source == .user }.map(\.name), ["Imported"])
-        XCTAssertEqual(library.starterLooks.count, 16)
+        XCTAssertEqual(library.starterLooks.count, 13)
         XCTAssertEqual(library.myLooks.map(\.name), ["my-look"])
         XCTAssertTrue(library.myLooks.allSatisfy { $0.source != .bundled })
-        XCTAssertEqual(library.lookCollections.map { $0.looks.count }, [16, 1])
+        XCTAssertEqual(library.lookCollections.map { $0.looks.count }, [13, 1])
     }
 
     func testLookCollectionsHaveDeterministicFlatOrderingAcrossCategories() async throws {
@@ -111,7 +118,7 @@ final class BundledLookTests: TempDirectoryTestCase {
             .filter { $0.source == .bundled }
             .map(\.cacheFingerprint)
 
-        XCTAssertEqual(fingerprints.count, 16)
+        XCTAssertEqual(fingerprints.count, 13)
         XCTAssertEqual(Set(fingerprints).count, fingerprints.count)
     }
 

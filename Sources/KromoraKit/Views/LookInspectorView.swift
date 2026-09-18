@@ -94,7 +94,20 @@ struct LookInspectorView: View {
     }
 
     private var filteredStarterLooks: [CubeLUT] {
-        filteredLooks(viewModel.library.starterLooks, collection: .starter)
+        filteredStarterLookCategories.flatMap(\.luts)
+    }
+
+    private var filteredStarterLookCategories: [LUTLibrary.Category] {
+        viewModel.library.starterCategories.compactMap { category in
+            let looks = filteredLooks(category.luts, collection: .starter)
+            guard !looks.isEmpty else { return nil }
+            return LUTLibrary.Category(
+                id: category.id,
+                name: category.name,
+                luts: looks,
+                source: category.source
+            )
+        }
     }
 
     private var filteredMyLooks: [CubeLUT] {
@@ -108,8 +121,8 @@ struct LookInspectorView: View {
         let query = searchText.lowercased()
         guard !collection.title.lowercased().contains(query) else { return looks }
 
-        // Folder/category searches continue to surface the full matching set even though folder
-        // headings are no longer rendered as separate, collapsible groups.
+        // Category searches continue to surface the full matching set while category headings
+        // remain visible as distinct, non-collapsible groups in the starter picker.
         let categoryLookIDs = Set(
             viewModel.library.categories
                 .filter { (collection.isReadOnly ? $0.source == .bundled : $0.source != .bundled)
@@ -312,17 +325,26 @@ struct LookInspectorView: View {
                 }
             }
 
-            Section {
-                if filteredStarterLooks.isEmpty {
+            if filteredStarterLookCategories.isEmpty {
+                Section {
                     collectionEmptyRow(
                         collection: .starter,
                         hasUnfilteredLooks: !viewModel.library.starterLooks.isEmpty
                     )
-                } else {
-                    lookRows(filteredStarterLooks)
+                } header: {
+                    collectionHeader(.starter, count: filteredStarterLooks.count)
                 }
-            } header: {
-                collectionHeader(.starter, count: filteredStarterLooks.count)
+            } else {
+                ForEach(filteredStarterLookCategories) { category in
+                    Section {
+                        lookRows(category.luts)
+                    } header: {
+                        starterCategoryHeader(
+                            category,
+                            includesCollectionLabel: category.id == filteredStarterLookCategories.first?.id
+                        )
+                    }
+                }
             }
 
             Section {
@@ -386,6 +408,44 @@ struct LookInspectorView: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(collection.isReadOnly ? "Starter Looks, read-only" : "My Looks")
         .accessibilityValue("\(count) \(count == 1 ? "Look" : "Looks")")
+    }
+
+    private func starterCategoryHeader(
+        _ category: LUTLibrary.Category,
+        includesCollectionLabel: Bool
+    ) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                if includesCollectionLabel {
+                    HStack(spacing: 5) {
+                        Text("Starter Looks")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text("Read-only")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    }
+                }
+                Text(category.name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer()
+            Text("\(category.luts.count)")
+                .font(.caption2)
+                .foregroundStyle(Color(nsColor: .tertiaryLabelColor))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            includesCollectionLabel
+                ? "Starter Looks, read-only, \(category.name)"
+                : "Starter Looks, \(category.name)"
+        )
+        .accessibilityValue("\(category.luts.count) \(category.luts.count == 1 ? "Look" : "Looks")")
     }
 
     @ViewBuilder

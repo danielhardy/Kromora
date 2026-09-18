@@ -43,6 +43,12 @@ final class LUTLibrary: ObservableObject {
         }
     }
 
+    static func starterCategoryPrecedes(_ left: String, _ right: String) -> Bool {
+        if left == "Monochrome" { return right != "Monochrome" }
+        if right == "Monochrome" { return false }
+        return left.localizedStandardCompare(right) == .orderedAscending
+    }
+
     @Published var categories: [Category] = []
     @Published var allLUTs: [CubeLUT] = []
     @Published var folderURL: URL?
@@ -58,8 +64,17 @@ final class LUTLibrary: ObservableObject {
 
     /// The two product-facing collections are projections of the canonical category browser.
     /// Keeping the folder categories underneath preserves folder scans and older integrations,
-    /// while the inspector gets one stable, flat collection for each provenance boundary.
-    var starterLooks: [CubeLUT] { sortedLooks(source: .bundled) }
+    /// while the inspector gets one stable collection for each provenance boundary.
+    ///
+    /// Starter Looks deliberately retain category ordering so the picker can present each
+    /// category as a contiguous group. Monochrome is the neutral starting point and appears first.
+    var starterCategories: [Category] {
+        categories
+            .filter { $0.source == .bundled }
+            .sorted { Self.starterCategoryPrecedes($0.name, $1.name) }
+    }
+
+    var starterLooks: [CubeLUT] { starterCategories.flatMap(\.luts) }
     var myLooks: [CubeLUT] { sortedLooks(excluding: .bundled) }
     var lookCollections: [LookCollection] {
         LookCollectionID.allCases.map { id in
@@ -341,6 +356,9 @@ final class LUTLibrary: ObservableObject {
             let left = byCategory[lhs]!
             let right = byCategory[rhs]!
             if left.source != right.source { return left.source == .bundled }
+            if left.source == .bundled {
+                return Self.starterCategoryPrecedes(left.name, right.name)
+            }
             return left.name.localizedStandardCompare(right.name) == .orderedAscending
         }.compactMap { key in
             guard let group = byCategory[key] else { return nil }
