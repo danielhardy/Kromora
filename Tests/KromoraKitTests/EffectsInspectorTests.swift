@@ -48,20 +48,64 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(effects.dehaze, 48)
     }
 
+    func testEffectsValuesRoundToWholeNumbersAtTheValueBoundary() throws {
+        let effects = EffectsAdjustments(
+            texture: 37.4,
+            clarity: -37.5,
+            dehaze: 99.6,
+            vignette: VignetteAdjustments(
+                amount: -12.4,
+                midpoint: 42.5,
+                roundness: 18.6,
+                feather: 67.4,
+                highlights: 8.5
+            ),
+            grain: GrainAdjustments(amount: 21.4, size: 54.5, roughness: 88.6)
+        )
+
+        XCTAssertEqual(effects.texture, 37)
+        XCTAssertEqual(effects.clarity, -38)
+        XCTAssertEqual(effects.dehaze, 100)
+        XCTAssertEqual(effects.vignette, VignetteAdjustments(
+            amount: -12, midpoint: 43, roundness: 19, feather: 67, highlights: 9
+        ))
+        XCTAssertEqual(effects.grain, GrainAdjustments(amount: 21, size: 55, roughness: 89))
+
+        let data = Data(#"""
+        {
+            "texture": 12.4,
+            "clarity": -18.6,
+            "dehaze": 31.5,
+            "vignette": {"amount": 10.4, "midpoint": 49.6, "roundness": -7.5, "feather": 62.4, "highlights": 3.5},
+            "grain": {"amount": 20.4, "size": 44.6, "roughness": 75.5}
+        }
+        """#.utf8)
+        let decoded = try JSONDecoder().decode(EffectsAdjustments.self, from: data)
+
+        XCTAssertEqual(decoded.texture, 12)
+        XCTAssertEqual(decoded.clarity, -19)
+        XCTAssertEqual(decoded.dehaze, 32)
+        XCTAssertEqual(decoded.vignette, VignetteAdjustments(
+            amount: 10, midpoint: 50, roundness: -8, feather: 62, highlights: 4
+        ))
+        XCTAssertEqual(decoded.grain, GrainAdjustments(amount: 20, size: 45, roughness: 76))
+    }
+
     func testBindingsRoundTripAndIndividualResetsPreserveOtherEffects() async throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
 
         viewModel.effectsBinding(for: .texture).wrappedValue = 72.5
-        viewModel.effectsBinding(for: .clarity).wrappedValue = -18
+        viewModel.effectsBinding(for: .clarity).wrappedValue = -18.4
         viewModel.vignetteBinding(for: .amount).wrappedValue = 65
-        viewModel.vignetteBinding(for: .midpoint).wrappedValue = 40
+        viewModel.vignetteBinding(for: .midpoint).wrappedValue = 40.6
         viewModel.grainBinding(for: .amount).wrappedValue = 55
-        viewModel.grainBinding(for: .size).wrappedValue = 24
+        viewModel.grainBinding(for: .size).wrappedValue = 24.4
 
-        XCTAssertEqual(viewModel.effectsValue(for: .texture), 72.5, accuracy: 1e-12)
+        XCTAssertEqual(viewModel.effectsValue(for: .texture), 73, accuracy: 1e-12)
         XCTAssertEqual(viewModel.effectsValue(for: .clarity), -18, accuracy: 1e-12)
         XCTAssertEqual(viewModel.vignetteValue(for: .amount), 65, accuracy: 1e-12)
+        XCTAssertEqual(viewModel.vignetteValue(for: .midpoint), 41, accuracy: 1e-12)
         XCTAssertEqual(viewModel.grainValue(for: .size), 24, accuracy: 1e-12)
         XCTAssertTrue(viewModel.hasEffects)
 
