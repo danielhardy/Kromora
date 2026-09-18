@@ -14,6 +14,7 @@ struct PreviewView: View {
     @State private var magnification: CGFloat = 1
     @State private var isDraggingCanvas = false
     @State private var isMagnifyingCanvas = false
+    @State private var isDropTargeted = false
     @ObservedObject private var maskingState: MaskInteractionState
     @ObservedObject private var inspectorState: AppViewModel.InspectorState
 
@@ -74,9 +75,10 @@ struct PreviewView: View {
                 .accessibilityHidden(true)
             }
         }
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
-            handleDrop(providers)
-        }
+        .onDrop(
+            of: ImageDrop.acceptedTypes,
+            delegate: ImageDropDelegate(viewModel: viewModel, isTargeted: $isDropTargeted)
+        )
     }
 
     private var failedState: some View {
@@ -344,20 +346,6 @@ struct PreviewView: View {
         }
     }
 
-    // MARK: - Drop
-
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first else { return false }
-        provider.loadItem(forTypeIdentifier: "public.file-url", options: nil) { item, _ in
-            guard let data = item as? Data,
-                let url = URL(dataRepresentation: data, relativeTo: nil)
-            else { return }
-            Task { @MainActor in
-                viewModel.handleDroppedURL(url)
-            }
-        }
-        return true
-    }
 }
 
 struct ComparisonBadge: View {

@@ -638,6 +638,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var portablePhotosImportNeedsRefresh = false
     private var portablePhotosImportWasEmpty = false
     private var portablePhotosImportFirstAssetID: PortablePhotoAssetID?
+    private var droppedPromiseTask: Task<Void, Never>?
 
     /// Removable volumes are discovered independently of the selector so the Import menu can name
     /// mounted volumes that contain supported images, or offer a permission-recovery path when
@@ -1003,6 +1004,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         libraryMediaWorkflow.onImageURL = { [weak self] url in
             self?.openImage(url: url)
+        }
+        libraryMediaWorkflow.onImageURLs = { [weak self] urls in
+            self?.openImages(urls: urls)
         }
         libraryMediaWorkflow.onImportRequest = { [weak self] request in
             self?.importRemovableMedia(request)
@@ -2338,6 +2342,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 if let assetID = result.imported.first?.assetID
                     ?? result.duplicates.first?.existingAssetID
                 { openPortableAsset(assetID) }
+                if !result.failures.isEmpty {
+                    statusMessage = "Imported \(result.imported.count) photo\(result.imported.count == 1 ? "" : "s"); "
+                        + "skipped \(result.failures.count): "
+                        + result.failures.map { $0.source.name }.joined(separator: ", ")
+                }
             } catch {
                 presentError("Kromora could not import the selected photos: \(error.localizedDescription)")
             }
@@ -2639,6 +2648,47 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// value-based open seams. Invalid or cancelled drops leave the current edit untouched.
     func handleDroppedURL(_ url: URL) {
         libraryMediaWorkflow.handleDroppedURL(url)
+    }
+
+    func handleDrop(_ payload: ImageDrop.Payload) {
+        switch payload {
+        case .urls(let urls):
+            libraryMediaWorkflow.handleDroppedURLs(urls)
+        case .image(let data, let name):
+            openImage(data: data, name: name)
+        case .promises(let receivers):
+            droppedPromiseTask?.cancel()
+            droppedPromiseTask = Task { @MainActor [weak self] in
+                guard let self, !self.isShuttingDown else { return }
+                ImageDrop.purgeDropDirectories()
+                let directory: URL
+                do {
+                    directory = try ImageDrop.makeDropDirectory()
+                } catch {
+                    self.presentError(
+                        "Kromora could not prepare the Photos drop: \(error.localizedDescription)"
+                    )
+                    return
+                }
+                defer { ImageDrop.purgeDropDirectories() }
+
+                let result = await ImageDrop.receive(receivers, into: directory)
+                if !result.urls.isEmpty {
+                    // Promise URLs are already known to be files. Use the same durable multi-file
+                    // path as other library imports rather than opening a Photos derivative URL.
+                    self.openImages(urls: result.urls)
+                }
+                if !result.failures.isEmpty {
+                    let prefix = result.urls.isEmpty ? "No Photos files imported" :
+                        "Imported \(result.urls.count) Photos file\(result.urls.count == 1 ? "" : "s")"
+                    self.statusMessage = "\(prefix); skipped \(result.failures.count): "
+                        + result.failures.joined(separator: "; ")
+                } else if result.urls.isEmpty {
+                    self.statusMessage = "No Photos files could be redeemed."
+                }
+                self.droppedPromiseTask = nil
+            }
+        }
     }
 
     /// Adopt `url` as the source folder (persisted), reveal the browser, and
@@ -5028,6 +5078,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryMediaWorkflow.onError = nil
         libraryMediaWorkflow.onSourceFolder = nil
         libraryMediaWorkflow.onImageURL = nil
+        libraryMediaWorkflow.onImageURLs = nil
         libraryMediaWorkflow.onImportRequest = nil
         applicationShell.onMediaChanged = nil
         applicationShell.onApplicationActivated = nil
@@ -5046,6 +5097,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 autoAdjustmentTask, smartMaskCreationTask, prefetchDelayTask, previewDebounceTask, sourceFolderOpenTask,
                 idleBuild, personSignalWarmingTask, lutCacheInvalidationTask,
                 semanticCoordinatorInstallTask,
+                droppedPromiseTask,
             ] + thumbnailDebounceTasks
         for task in tasks { task?.cancel() }
         autoAdjustmentTask = nil
@@ -5059,6 +5111,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         personSignalWarmingTask = nil
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
+        droppedPromiseTask = nil
         await libraryMediaWorkflow.shutdown()
         await sourceSession.shutdown()
 
