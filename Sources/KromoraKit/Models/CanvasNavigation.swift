@@ -264,7 +264,9 @@ struct CanvasNavigation: Equatable, Sendable {
 
 struct CanvasTransform: Equatable, Sendable {
     let scale: CGFloat
-    /// Origin of the displayed image in the drawable's Core Image (bottom-left) coordinate system.
+    /// Origin of the displayed image in pixel space, y-down (pixel y=0 is the top of the
+    /// view), matching `DragGesture.translation` and the vertex shader's `pixelPosition`
+    /// convention in PreviewSurface.metal — not Core Image's bottom-left convention.
     let origin: CGPoint
     let imageSize: CGSize
 
