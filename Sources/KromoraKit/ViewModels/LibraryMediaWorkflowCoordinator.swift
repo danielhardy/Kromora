@@ -39,6 +39,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     var onError: (@MainActor (String) -> Void)?
     var onSourceFolder: (@MainActor (URL) -> Void)?
     var onImageURL: (@MainActor (URL) -> Void)?
+    var onImageURLs: (@MainActor ([URL]) -> Void)?
     var onImportRequest: (@MainActor (RemovableMediaImportRequest) -> Void)?
 
     init(
@@ -68,6 +69,28 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         case .openImage(let imageURL): onImageURL?(imageURL)
         case .openFolder(let folderURL): onSourceFolder?(folderURL)
         case .invalid: break
+        }
+    }
+
+    /// Preserve the existing single-URL policy (including folder drops), while allowing a
+    /// materialized multi-file drag to enter the library as one incremental import.
+    func handleDroppedURLs(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        if urls.count == 1 {
+            handleDroppedURL(urls[0])
+            return
+        }
+
+        var imageURLs: [URL] = []
+        for url in urls {
+            switch fileDropActionPolicy.action(for: url) {
+            case .openImage(let imageURL): imageURLs.append(imageURL)
+            case .openFolder(let folderURL): onSourceFolder?(folderURL)
+            case .invalid: break
+            }
+        }
+        if !imageURLs.isEmpty {
+            onImageURLs?(imageURLs)
         }
     }
 
