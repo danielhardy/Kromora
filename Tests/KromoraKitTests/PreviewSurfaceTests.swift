@@ -424,12 +424,12 @@ final class PreviewSurfaceTests: XCTestCase {
             XCTAssertLessThanOrEqual(
                 worstDelta, 1,
                 "retained quad geometry for \(Int(size.width))x\(Int(size.height))")
-            let border = try XCTUnwrap(windowBackgroundBytes())
+            let border = try XCTUnwrap(canvasBackgroundBytes())
             for point in [(0, 0), (width - 1, height - 1)] {
                 if isLetterbox(point: point, imageExtent: image.extent, destination: destination) {
                     XCTAssertEqual(
                         rgba(fromBGRA: metalBytes, width: width, at: point), border,
-                        "letterbox pixel \(point) must equal KromoraTheme.windowBackground")
+                        "letterbox pixel \(point) must equal KromoraTheme.canvasBackground")
                 }
             }
 
@@ -481,11 +481,12 @@ final class PreviewSurfaceTests: XCTestCase {
             )
         )
 
-        let darkExpected = try windowBackgroundBytes(for: darkAppearance)
-        let lightExpected = try windowBackgroundBytes(for: lightAppearance)
+        let darkExpected = try canvasBackgroundBytes(for: darkAppearance)
+        let lightExpected = try canvasBackgroundBytes(for: lightAppearance)
         XCTAssertNotEqual(
             darkExpected, lightExpected,
             "the regression must exercise distinct light and dark resolutions")
+        XCTAssertLessThan(darkExpected[0], lightExpected[0], "dark canvas must be darker")
 
         let darkMetalPixel = try pixel(from: darkMetal, at: (1, 6))
         let lightMetalPixel = try pixel(from: lightMetal, at: (1, 6))
@@ -626,7 +627,7 @@ final class PreviewSurfaceTests: XCTestCase {
             top.0, bottom.0,
             "Fit must fill the canvas with the JPEG; the fixture's red half is the visual top"
         )
-        let border = try windowBackgroundBytes()
+        let border = try canvasBackgroundBytes()
         let center = rgba(fromBGRA: bytes, width: texture.width, at: (20, 15))
         XCTAssertGreaterThan(
             abs(Int(center[0]) - Int(border[0])) + abs(Int(center[1]) - Int(border[1])),
@@ -659,7 +660,7 @@ final class PreviewSurfaceTests: XCTestCase {
                 mipmapLevel: 0
             )
         }
-        let border = try windowBackgroundBytes()
+        let border = try canvasBackgroundBytes()
         let center = rgba(fromBGRA: bytes, width: texture.width, at: (20, 15))
         XCTAssertLessThanOrEqual(
             abs(Int(center[0]) - Int(border[0])), 2,
@@ -697,7 +698,7 @@ final class PreviewSurfaceTests: XCTestCase {
                 mipmapLevel: 0
             )
         }
-        let border = try windowBackgroundBytes()
+        let border = try canvasBackgroundBytes()
         let center = rgba(fromBGRA: bytes, width: texture.width, at: (20, 15))
         XCTAssertGreaterThan(
             abs(Int(center[0]) - Int(border[0])) + abs(Int(center[1]) - Int(border[1])),
@@ -736,7 +737,7 @@ final class PreviewSurfaceTests: XCTestCase {
                 mipmapLevel: 0
             )
         }
-        let border = try windowBackgroundBytes()
+        let border = try canvasBackgroundBytes()
         let center = rgba(fromBGRA: bytes, width: texture.width, at: (20, 15))
         XCTAssertGreaterThan(
             abs(Int(center[0]) - Int(border[0])) + abs(Int(center[1]) - Int(border[1])),
@@ -778,7 +779,7 @@ final class PreviewSurfaceTests: XCTestCase {
                 mipmapLevel: 0
             )
         }
-        let border = try windowBackgroundBytes()
+        let border = try canvasBackgroundBytes()
         let left = rgba(fromBGRA: bytes, width: texture.width, at: (1, 6))
         let center = rgba(fromBGRA: bytes, width: texture.width, at: (12, 6))
         XCTAssertLessThanOrEqual(
@@ -818,7 +819,7 @@ final class PreviewSurfaceTests: XCTestCase {
                 mipmapLevel: 0
             )
         }
-        let border = try windowBackgroundBytes()
+        let border = try canvasBackgroundBytes()
         let left = rgba(fromBGRA: bytes, width: texture.width, at: (1, 6))
         let right = rgba(fromBGRA: bytes, width: texture.width, at: (22, 6))
         XCTAssertGreaterThan(
@@ -962,16 +963,12 @@ final class PreviewSurfaceTests: XCTestCase {
             || CGFloat(point.1) >= transform.origin.y + transform.imageSize.height
     }
 
-    private func windowBackgroundBytes() throws -> [UInt8] {
-        try windowBackgroundBytes(for: NSApp?.effectiveAppearance ?? NSAppearance(named: .aqua)!)
+    private func canvasBackgroundBytes() throws -> [UInt8] {
+        try canvasBackgroundBytes(for: NSAppearance(named: .aqua)!)
     }
 
-    private func windowBackgroundBytes(for appearance: NSAppearance) throws -> [UInt8] {
-        var color: NSColor?
-        appearance.performAsCurrentDrawingAppearance {
-            color = NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
-        }
-        let resolvedColor = try XCTUnwrap(color)
+    private func canvasBackgroundBytes(for appearance: NSAppearance) throws -> [UInt8] {
+        let resolvedColor = KromoraTheme.resolvedCanvasBackgroundColor(for: appearance)
         return [
             UInt8((resolvedColor.redComponent * 255).rounded()),
             UInt8((resolvedColor.greenComponent * 255).rounded()),

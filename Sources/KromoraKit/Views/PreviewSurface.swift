@@ -817,7 +817,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let presentationEncodingStart = LiveEditTelemetryClock.now
             let renderPass = view.currentRenderPassDescriptor
             let appearance = view.effectiveAppearance
-            let clearColor = Self.windowBackgroundClearColor(for: appearance)
+            let clearColor = Self.canvasBackgroundClearColor(for: appearance)
             renderPass?.colorAttachments[0].clearColor = clearColor
             renderPass?.colorAttachments[0].loadAction = .clear
             renderPass?.colorAttachments[0].storeAction = .store
@@ -960,10 +960,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 image
                 .transformed(by: transform.affineTransform(for: transformExtent))
                 .cropped(to: destination)
-            // Resolve the dynamic AppKit color against the editor view's effective appearance.
+            // Resolve the dedicated canvas color against the editor view's effective appearance.
             // Resolving without that appearance is not reliable at the native presentation
             // boundary: a dark window can otherwise produce a light letterbox.
-            let clear = windowBackgroundClearColor(for: appearance)
+            let clear = canvasBackgroundClearColor(for: appearance)
             let background = CIImage(
                 color: CIColor(
                     red: CGFloat(clear.red), green: CGFloat(clear.green),
@@ -972,17 +972,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
             return displayed.composited(over: background).cropped(to: destination)
         }
 
-        static func windowBackgroundClearColor(for appearance: NSAppearance? = nil) -> MTLClearColor
+        static func canvasBackgroundClearColor(for appearance: NSAppearance? = nil) -> MTLClearColor
         {
-            let effectiveAppearance =
-                appearance ?? NSApp?.effectiveAppearance
-                ?? NSAppearance(named: .aqua)!
-            var color = NSColor.windowBackgroundColor
-            effectiveAppearance.performAsCurrentDrawingAppearance {
-                color =
-                    NSColor.windowBackgroundColor.usingColorSpace(.deviceRGB)
-                    ?? NSColor.windowBackgroundColor
-            }
+            let color = KromoraTheme.resolvedCanvasBackgroundColor(for: appearance)
             return MTLClearColor(
                 red: Double(color.redComponent),
                 green: Double(color.greenComponent),
@@ -1177,7 +1169,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
             let pass = MTLRenderPassDescriptor()
             pass.colorAttachments[0].texture = target
-            pass.colorAttachments[0].clearColor = Self.windowBackgroundClearColor(for: appearance)
+            pass.colorAttachments[0].clearColor = Self.canvasBackgroundClearColor(for: appearance)
             pass.colorAttachments[0].loadAction = .clear
             pass.colorAttachments[0].storeAction = .store
             guard

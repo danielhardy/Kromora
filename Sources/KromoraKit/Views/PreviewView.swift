@@ -30,10 +30,9 @@ struct PreviewView: View {
         NSScreen.main?.backingScaleFactor ?? 2
     }
 
-    /// The shell around the Metal image surface follows the window appearance. The Metal
-    /// surface's letterbox remains intentionally dark because it is part of image presentation,
-    /// not window chrome; see `PreviewSurfaceView`.
-    private var bgColor: Color { KromoraTheme.windowBackground }
+    /// The editor canvas is deliberately distinct from the source browser's `.bar` material.
+    /// The Metal surface resolves the same token for its letterbox; see `PreviewSurfaceView`.
+    private var bgColor: Color { KromoraTheme.canvasBackground }
 
     var body: some View {
         ZStack {
