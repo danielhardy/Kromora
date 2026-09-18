@@ -24,15 +24,6 @@ extension AppViewModel {
         }
     }
 
-    func resetAllDetailEffects() {
-        endUndoGrouping()
-        updateDocument { document in
-            document.effects.texture = 0
-            document.effects.clarity = 0
-            document.effects.dehaze = 0
-        }
-    }
-
     func vignetteValue(for control: VignetteControl) -> Double {
         control.value(in: document.effects.vignette)
     }
