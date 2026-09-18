@@ -144,7 +144,7 @@ struct ResolutionPlanner: Equatable, Sendable {
             cropRect: rect, nativeExtent: native, cropSize: cropSize,
             transform: transform, viewportSize: viewportSize
         )
-        let completePresentedPhoto = Self.roi(
+        let completePresentedPhoto = ResolutionPlan.roi(
             visibleSourceRect, coversCrop: rect, nativeExtent: native
         )
         let adequateLevel = Self.level(for: requiredScale, current: nil)

@@ -178,8 +178,8 @@ private struct EffectsValueRow: View {
             NeutralOriginSlider(
                 value: $value,
                 in: range,
-                step: 1,
                 neutral: neutral,
+                step: 1,
                 accessibilityTitle: title,
                 accessibilityReadout: readout(value),
                 onEditingChanged: { editing in
