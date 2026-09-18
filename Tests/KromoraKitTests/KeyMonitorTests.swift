@@ -391,4 +391,29 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: .option))
         XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: .control))
     }
+
+    func testCropEscapeCancelsAndReturnCommitsThroughKeyboardMonitor() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.sourceImage = CIImage(color: .gray).cropped(
+            to: CGRect(x: 0, y: 0, width: 8, height: 8)
+        )
+        let monitor = KeyMonitor(viewModel: viewModel)
+        defer { monitor.stop() }
+
+        viewModel.beginCrop()
+        viewModel.updateCropDraft(CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
+        XCTAssertTrue(viewModel.isCropToolActive)
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 53)))
+        XCTAssertFalse(viewModel.isCropToolActive)
+        XCTAssertTrue(viewModel.document.crop.isIdentity)
+
+        viewModel.beginCrop()
+        viewModel.updateCropDraft(CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
+        XCTAssertNil(monitor.handle(try keyEvent(.keyDown, keyCode: 36)))
+        XCTAssertFalse(viewModel.isCropToolActive)
+        XCTAssertEqual(
+            viewModel.document.crop,
+            CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6))
+        )
+    }
 }
