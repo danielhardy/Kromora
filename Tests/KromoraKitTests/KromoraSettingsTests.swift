@@ -29,11 +29,11 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
         let defaults = makeDefaults()
         let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
 
-        XCTAssertTrue(first.showPhotoNames)
-        first.showPhotoNames = false
+        XCTAssertFalse(first.showPhotoNames)
+        first.showPhotoNames = true
 
         let relaunched = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
-        XCTAssertFalse(relaunched.showPhotoNames)
+        XCTAssertTrue(relaunched.showPhotoNames)
     }
 
     func testSourceAndExportFoldersPersistIndependentlyAndReset() throws {

@@ -116,14 +116,16 @@ public final class KromoraSettings: ObservableObject {
         self.fileManager = fileManager
         self.userLookFolderURL = userLookFolderURL ?? Self.defaultUserLookFolderURL(fileManager: fileManager)
         self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
-        self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? true
+        // An absent key means the user has never chosen a value. Keep an explicit stored choice,
+        // including `true`, so changing the default does not override an opt-in.
+        self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
         self.sourceFolderStatus = .notConfigured(.source)
         self.exportFolderStatus = .notConfigured(.export)
 
         migrateIfNeeded()
         // Migration may have supplied the appearance value.
         self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
-        self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? true
+        self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
         loadRecords()
         refreshFolderStatus()
     }
