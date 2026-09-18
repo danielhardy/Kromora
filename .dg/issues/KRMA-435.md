@@ -2,7 +2,7 @@
 id: KRMA-435
 title: Photos batch import rebuilds the whole portable library index per item
 type: task
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: claude
@@ -13,11 +13,13 @@ labels:
   - library
   - performance
 created: 2026-09-14T09:20:26.016Z
-updated: 2026-09-14T09:20:28.058Z
+updated: 2026-09-14T13:37:20.543Z
 depends_on:
   - KRMA-430
-order: m
+order: a0
 board: product
+commits:
+  - 672b0ac
 ---
 
 Parent: KRMA-430 (verification finding, non-blocking)
@@ -67,3 +69,5 @@ the multi-photo Photos import path the ticket called out as a first-class import
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-14T13:37:20.541Z: Coalesced portable Photos batch imports: reuse duplicate-detection catalog across per-item commits, defer projection/collection refresh until batch completion, preserve first-item selection, and add regression coverage. Verification: swift test --filter PhotosImportTests (22 passed); swift test --filter PortablePackageImportTests (3 passed); swift build -c release passed. Full suite reached 1,469 tests with one unrelated pre-existing PortableLibraryRestoreTests lease-expiry failure.
