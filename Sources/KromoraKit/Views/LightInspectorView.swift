@@ -117,8 +117,6 @@ private struct ToneCurveEditor: View {
         }
     }
 
-    private let graphHeight: CGFloat = 190
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -156,7 +154,11 @@ private struct ToneCurveEditor: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("Master RGB tone curve")
             }
-            .frame(height: graphHeight)
+            // Keep the graph square while allowing it to shrink and grow with the inspector.
+            // GeometryReader receives the resulting square size, so the normalized coordinate
+            // mapping used by both the handles and drag gesture remains in one coordinate space.
+            .aspectRatio(1, contentMode: .fit)
+            .frame(maxWidth: .infinity, alignment: .center)
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
                 finishCurveDrag()
             }
