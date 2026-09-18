@@ -1,5 +1,15 @@
 import Foundation
 
+private func roundedClamped(
+    _ value: Double,
+    to range: ClosedRange<Double>,
+    default fallback: Double
+) -> Double {
+    guard value.isFinite else { return fallback }
+    return min(max(value, range.lowerBound), range.upperBound)
+        .rounded(.toNearestOrAwayFromZero)
+}
+
 /// Photographer-facing controls for the post-crop vignette.
 ///
 /// The renderer maps these normalized values to a mask over the image extent it receives. The
@@ -16,23 +26,23 @@ struct VignetteAdjustments: Codable, Equatable, Sendable {
 
     /// Negative values brighten the edges; positive values darken them.
     var amount: Double {
-        didSet { amount = Self.clamp(amount, to: Self.amountRange, default: 0) }
+        didSet { amount = roundedClamped(amount, to: Self.amountRange, default: 0) }
     }
     /// The normalized radius where the vignette starts. Lower values reach farther into the frame.
     var midpoint: Double {
-        didSet { midpoint = Self.clamp(midpoint, to: Self.midpointRange, default: 50) }
+        didSet { midpoint = roundedClamped(midpoint, to: Self.midpointRange, default: 50) }
     }
     /// Negative values are more rectangular; positive values are rounder.
     var roundness: Double {
-        didSet { roundness = Self.clamp(roundness, to: Self.roundnessRange, default: 0) }
+        didSet { roundness = roundedClamped(roundness, to: Self.roundnessRange, default: 0) }
     }
     /// Width of the transition from the midpoint to the frame edge.
     var feather: Double {
-        didSet { feather = Self.clamp(feather, to: Self.featherRange, default: 50) }
+        didSet { feather = roundedClamped(feather, to: Self.featherRange, default: 50) }
     }
     /// Reduces the vignette over bright pixels, preserving specular/highlight detail.
     var highlights: Double {
-        didSet { highlights = Self.clamp(highlights, to: Self.highlightsRange, default: 0) }
+        didSet { highlights = roundedClamped(highlights, to: Self.highlightsRange, default: 0) }
     }
 
     init(
@@ -42,11 +52,11 @@ struct VignetteAdjustments: Codable, Equatable, Sendable {
         feather: Double = 50,
         highlights: Double = 0
     ) {
-        self.amount = Self.clamp(amount, to: Self.amountRange, default: 0)
-        self.midpoint = Self.clamp(midpoint, to: Self.midpointRange, default: 50)
-        self.roundness = Self.clamp(roundness, to: Self.roundnessRange, default: 0)
-        self.feather = Self.clamp(feather, to: Self.featherRange, default: 50)
-        self.highlights = Self.clamp(highlights, to: Self.highlightsRange, default: 0)
+        self.amount = roundedClamped(amount, to: Self.amountRange, default: 0)
+        self.midpoint = roundedClamped(midpoint, to: Self.midpointRange, default: 50)
+        self.roundness = roundedClamped(roundness, to: Self.roundnessRange, default: 0)
+        self.feather = roundedClamped(feather, to: Self.featherRange, default: 50)
+        self.highlights = roundedClamped(highlights, to: Self.highlightsRange, default: 0)
     }
 
     /// Only Amount can turn the operation on. Subordinate values remain persisted at neutral
@@ -66,14 +76,6 @@ struct VignetteAdjustments: Codable, Equatable, Sendable {
         )
     }
 
-    private static func clamp(
-        _ value: Double,
-        to range: ClosedRange<Double>,
-        default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
 }
 
 /// Photographer-facing film grain controls.
@@ -89,21 +91,21 @@ struct GrainAdjustments: Codable, Equatable, Sendable {
     static let roughnessRange = 0.0...100.0
 
     var amount: Double {
-        didSet { amount = Self.clamp(amount, to: Self.amountRange, default: 0) }
+        didSet { amount = roundedClamped(amount, to: Self.amountRange, default: 0) }
     }
     /// Small values produce finer grain; large values produce larger photographic clumps.
     var size: Double {
-        didSet { size = Self.clamp(size, to: Self.sizeRange, default: 50) }
+        didSet { size = roundedClamped(size, to: Self.sizeRange, default: 50) }
     }
     /// Low values favor soft, clustered grain; high values add finer variation within each clump.
     var roughness: Double {
-        didSet { roughness = Self.clamp(roughness, to: Self.roughnessRange, default: 50) }
+        didSet { roughness = roundedClamped(roughness, to: Self.roughnessRange, default: 50) }
     }
 
     init(amount: Double = 0, size: Double = 50, roughness: Double = 50) {
-        self.amount = Self.clamp(amount, to: Self.amountRange, default: 0)
-        self.size = Self.clamp(size, to: Self.sizeRange, default: 50)
-        self.roughness = Self.clamp(roughness, to: Self.roughnessRange, default: 50)
+        self.amount = roundedClamped(amount, to: Self.amountRange, default: 0)
+        self.size = roundedClamped(size, to: Self.sizeRange, default: 50)
+        self.roughness = roundedClamped(roughness, to: Self.roughnessRange, default: 50)
     }
 
     var isIdentity: Bool { amount == 0 }
@@ -119,14 +121,6 @@ struct GrainAdjustments: Codable, Equatable, Sendable {
         )
     }
 
-    private static func clamp(
-        _ value: Double,
-        to range: ClosedRange<Double>,
-        default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
 }
 
 /// Photographer-facing global Effects controls.
@@ -145,13 +139,13 @@ struct EffectsAdjustments: Codable, Equatable, Sendable {
     static let dehazeRange = -100.0...100.0
 
     var texture: Double {
-        didSet { texture = Self.clamp(texture, to: Self.textureRange, default: 0) }
+        didSet { texture = roundedClamped(texture, to: Self.textureRange, default: 0) }
     }
     var clarity: Double {
-        didSet { clarity = Self.clamp(clarity, to: Self.clarityRange, default: 0) }
+        didSet { clarity = roundedClamped(clarity, to: Self.clarityRange, default: 0) }
     }
     var dehaze: Double {
-        didSet { dehaze = Self.clamp(dehaze, to: Self.dehazeRange, default: 0) }
+        didSet { dehaze = roundedClamped(dehaze, to: Self.dehazeRange, default: 0) }
     }
     var vignette: VignetteAdjustments
     /// Post-LUT film grain. Amount is the identity gate; Size and Roughness remain persisted while
@@ -165,9 +159,9 @@ struct EffectsAdjustments: Codable, Equatable, Sendable {
         vignette: VignetteAdjustments = .neutral,
         grain: GrainAdjustments = .neutral
     ) {
-        self.texture = Self.clamp(texture, to: Self.textureRange, default: 0)
-        self.clarity = Self.clamp(clarity, to: Self.clarityRange, default: 0)
-        self.dehaze = Self.clamp(dehaze, to: Self.dehazeRange, default: 0)
+        self.texture = roundedClamped(texture, to: Self.textureRange, default: 0)
+        self.clarity = roundedClamped(clarity, to: Self.clarityRange, default: 0)
+        self.dehaze = roundedClamped(dehaze, to: Self.dehazeRange, default: 0)
         self.vignette = vignette
         self.grain = grain
     }
@@ -193,12 +187,4 @@ struct EffectsAdjustments: Codable, Equatable, Sendable {
         )
     }
 
-    private static func clamp(
-        _ value: Double,
-        to range: ClosedRange<Double>,
-        default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
 }

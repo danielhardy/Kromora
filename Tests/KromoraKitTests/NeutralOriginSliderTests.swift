@@ -165,6 +165,25 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(ColorGradingControl.saturation.trackStyle, .saturation)
     }
 
+    func testConfiguredStepSnapsSliderActionsBeforeUpdatingTheBinding() {
+        var value = 0.0
+        let binding = Binding<Double>(get: { value }, set: { value = $0 })
+        let coordinator = NeutralOriginSlider.Coordinator(
+            value: binding,
+            step: 1,
+            onEditingChanged: { _ in }
+        )
+        let slider = NSSlider()
+        slider.minValue = -100
+        slider.maxValue = 100
+        slider.doubleValue = 37.4
+
+        coordinator.sliderMoved(slider)
+
+        XCTAssertEqual(value, 37)
+        XCTAssertEqual(slider.doubleValue, 37)
+    }
+
     // MARK: - Harness
 
     /// Rasterised geometry lands within a pixel or two of the arithmetic, and the fill's rounded

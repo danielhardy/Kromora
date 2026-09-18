@@ -20,6 +20,7 @@ import SwiftUI
 struct NeutralOriginSlider: NSViewRepresentable {
     @Binding private var value: Double
     private let range: ClosedRange<Double>
+    private let step: Double?
     private let neutral: Double
     private let trackStyle: SliderTrackStyle
     private let accessibilityTitle: String?
@@ -37,6 +38,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
         value: Binding<Double>,
         in range: ClosedRange<Double>,
         neutral: Double,
+        step: Double? = nil,
         trackStyle: SliderTrackStyle = .neutral,
         accessibilityTitle: String? = nil,
         accessibilityReadout: String? = nil,
@@ -44,6 +46,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
     ) {
         self._value = value
         self.range = range
+        self.step = step
         self.neutral = neutral
         self.trackStyle = trackStyle
         self.accessibilityTitle = accessibilityTitle
@@ -52,7 +55,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(value: $value, onEditingChanged: onEditingChanged)
+        Coordinator(value: $value, step: step, onEditingChanged: onEditingChanged)
     }
 
     func makeNSView(context: Context) -> NSSlider {
@@ -77,6 +80,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
 
     func updateNSView(_ slider: NSSlider, context: Context) {
         context.coordinator.value = $value
+        context.coordinator.step = step
         context.coordinator.onEditingChanged = onEditingChanged
         apply(to: slider, coordinator: context.coordinator)
     }
@@ -101,16 +105,38 @@ struct NeutralOriginSlider: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject {
         var value: Binding<Double>
+        var step: Double?
         var onEditingChanged: (Bool) -> Void
         private(set) var isTracking = false
 
-        init(value: Binding<Double>, onEditingChanged: @escaping (Bool) -> Void) {
+        init(
+            value: Binding<Double>,
+            step: Double?,
+            onEditingChanged: @escaping (Bool) -> Void
+        ) {
             self.value = value
+            self.step = step
             self.onEditingChanged = onEditingChanged
         }
 
         @objc func sliderMoved(_ sender: NSSlider) {
-            value.wrappedValue = sender.doubleValue
+            let snapped = Self.snapped(
+                sender.doubleValue,
+                step: step,
+                in: sender.minValue...sender.maxValue
+            )
+            if sender.doubleValue != snapped { sender.doubleValue = snapped }
+            value.wrappedValue = snapped
+        }
+
+        private static func snapped(
+            _ value: Double,
+            step: Double?,
+            in range: ClosedRange<Double>
+        ) -> Double {
+            guard let step, step.isFinite, step > 0 else { return value }
+            let offset = ((value - range.lowerBound) / step).rounded() * step
+            return min(max(range.lowerBound + offset, range.lowerBound), range.upperBound)
         }
 
         /// Balanced, because `onEditingChanged(false)` ends a preview interaction: an unpaired end
