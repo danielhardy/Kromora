@@ -42,11 +42,6 @@ struct EffectsInspectorView: View {
     private var detailSection: some View {
         InspectorDisclosure("Texture / Clarity / Dehaze", isExpanded: $detailExpanded) {
             VStack(alignment: .leading, spacing: 12) {
-                sectionResetButton(
-                    title: "Reset Texture / Clarity / Dehaze",
-                    disabled: !viewModel.hasDetailEffects,
-                    action: viewModel.resetAllDetailEffects
-                )
                 ForEach(EffectsControl.allCases, id: \.self) { control in
                     valueRow(
                         title: control.title,
