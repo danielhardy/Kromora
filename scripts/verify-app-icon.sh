@@ -40,8 +40,13 @@ if not (app_dir / "Contents/Resources/Assets.car").is_file():
 if not (app_dir / "Contents/Resources/Kromora.icns").is_file():
     raise SystemExit("compiled application is missing Contents/Resources/Kromora.icns")
 resource_bundle = app_dir / "Contents/Resources/Kromora_KromoraKit.bundle"
-if not (resource_bundle / "Resources/StarterLooks/manifest.json").is_file():
-    raise SystemExit("compiled application resource bundle is missing Resources/StarterLooks/manifest.json")
+resource_manifest_candidates = [
+    resource_bundle / "Resources/StarterLooks/manifest.json",
+    resource_bundle / "Contents/Resources/StarterLooks/manifest.json",
+    resource_bundle / "Contents/Resources/Resources/StarterLooks/manifest.json",
+]
+if not any(path.is_file() for path in resource_manifest_candidates):
+    raise SystemExit("compiled application resource bundle is missing StarterLooks/manifest.json")
 if not (app_dir / "Contents/MacOS/Kromora").is_file():
     raise SystemExit("compiled application is missing Contents/MacOS/Kromora")
 
