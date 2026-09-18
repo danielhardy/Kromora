@@ -74,6 +74,19 @@ final class CanvasNavigationTests: XCTestCase {
                        accuracy: 0.000_001)
     }
 
+    func testPanMovesTheImageInTheDirectionOfTheViewportDelta() {
+        var navigation = CanvasNavigation()
+        navigation.setZoom(4)
+        let before = navigation.transform(imageExtent: landscape, viewportSize: viewport)
+
+        let delta = CGSize(width: 24, height: 32)
+        navigation.pan(by: delta, imageExtent: landscape, viewportSize: viewport)
+        let after = navigation.transform(imageExtent: landscape, viewportSize: viewport)
+
+        XCTAssertEqual(after.origin.x, before.origin.x + delta.width, accuracy: 0.000_001)
+        XCTAssertEqual(after.origin.y, before.origin.y + delta.height, accuracy: 0.000_001)
+    }
+
     func testInvalidZoomValuesAreSafeAndClamped() {
         var navigation = CanvasNavigation()
         navigation.setZoom(.infinity)
@@ -307,6 +320,39 @@ final class CanvasNavigationTests: XCTestCase {
 
 @MainActor
 final class CanvasObservationTests: TempDirectoryTestCase {
+    func testPanCanvasPreservesPointerDirectionOnBothAxes() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 100, height: 80, named: "pan.png", in: tempDirectory
+        )
+        viewModel.openImage(url: imageURL)
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.sourceImage == nil {
+            if Date() > deadline {
+                XCTFail("timed out waiting for the image to load")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        viewModel.setCanvasZoom(4)
+
+        let viewport = CGSize(width: 80, height: 60)
+        let before = viewModel.canvasNavigation.transform(
+            imageExtent: CGRect(origin: .zero, size: viewModel.sourceSize),
+            viewportSize: viewport
+        )
+
+        let delta = CGSize(width: 10, height: 12)
+        viewModel.panCanvas(by: delta, viewportSize: viewport)
+        let after = viewModel.canvasNavigation.transform(
+            imageExtent: CGRect(origin: .zero, size: viewModel.sourceSize),
+            viewportSize: viewport
+        )
+
+        XCTAssertEqual(after.origin.x, before.origin.x + delta.width, accuracy: 0.000_001)
+        XCTAssertEqual(after.origin.y, before.origin.y + delta.height, accuracy: 0.000_001)
+    }
+
     func testHighFrequencyCanvasAndCropUpdatesBypassBroadModelPublisher() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray).cropped(
