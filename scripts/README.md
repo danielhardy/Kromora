@@ -8,6 +8,7 @@ measurements. Current requirements and verification limits are summarized in
 | --- | --- | --- | --- |
 | Active | `agent-worktree.sh` | Create or remove an isolated agent worktree | Git checkout; used by agent workflow documentation |
 | Active | `build-macos-app.sh` | Build and sign the distributable macOS app bundle | macOS 26 SDK, SwiftPM, `xcrun actool`, signing identity or ad-hoc signing |
+| Active | `release-dmg.sh` | Build a universal, signed, notarized, stapled DMG (or a local skip-notarize dry run) | macOS, SwiftPM, Developer ID identity, `notarytool` keychain profile for distribution |
 | Active | `check-swift-format.sh` | Check changed Swift files against `.swift-format` | macOS Swift toolchain; optional `SWIFT_FORMAT_BASE` |
 | Active | `ci-tests.sh` | Run the deterministic, serial render/UI, or optional test lane | macOS 26 SDK; optional lane needs the documented `KROMORA_*` fixtures/settings |
 | Opt-in | `photo-intelligence-report.sh` | Generate the photo-intelligence corpus report | Photo-intelligence test fixtures; optional `KROMORA_PHOTO_INTELLIGENCE_REPORT_PATH` |
