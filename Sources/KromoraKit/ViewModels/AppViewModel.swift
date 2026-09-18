@@ -4111,14 +4111,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.endInteraction()
     }
 
-    /// Pan is a presentation-only operation. It updates the Metal transform immediately and does
-    /// not wait for a new render; zoom is the operation that asks the coordinator for more detail.
+    /// Pan is a presentation-only operation. The caller supplies a viewport-space pointer delta,
+    /// so the image follows that delta on both axes. It updates the Metal transform immediately
+    /// and does not wait for a new render; zoom is the operation that asks the coordinator for more
+    /// detail.
     func panCanvas(by delta: CGSize, viewportSize: CGSize) {
         guard let imageSource else { return }
         let oriented = document.rotation.orientedExtent(imageSource.nativeExtent)
         let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
         canvasState.pan(
-            by: CGSize(width: delta.width, height: -delta.height),
+            by: delta,
             imageExtent: CGRect(
                 origin: .zero,
                 size: CGSize(
