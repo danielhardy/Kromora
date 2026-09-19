@@ -44,7 +44,29 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertEqual(LibraryGridLayout.normalizedAspectRatio(10), 3.0)
     }
 
-    func testMosaicCacheFreezesPlacedRowsWhenDeferredAspectRatioArrives() {
+    func testPresentedAspectRatioUsesCropPixelsAndKeepsIdentitySourceAspect() {
+        let sourceAspect = 3.0 / 2.0
+        let portraitCrop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.25, y: 0, width: 0.5, height: 1)
+        )
+
+        XCTAssertEqual(
+            LibraryGridLayout.presentedAspectRatio(
+                sourceAspectRatio: sourceAspect, crop: portraitCrop
+            ),
+            0.75,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            LibraryGridLayout.presentedAspectRatio(
+                sourceAspectRatio: sourceAspect, crop: .neutral
+            ),
+            sourceAspect,
+            accuracy: 0.000_001
+        )
+    }
+
+    func testMosaicCacheRebuildsWhenPresentedAspectRatioChanges() {
         let cache = LibraryMosaicLayoutCache()
         let layout = LibraryGridLayout()
         let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
@@ -63,8 +85,8 @@ final class LibraryGridTests: TempDirectoryTestCase {
             aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] }
         )
 
-        XCTAssertEqual(resolved, initial, "metadata must not move already-placed mosaic rows")
-        XCTAssertEqual(cache.recomputeCount, 1, "a metadata update must not redo full-collection row math")
+        XCTAssertNotEqual(resolved, initial, "a crop must update the placed cell geometry")
+        XCTAssertEqual(cache.recomputeCount, 2, "a presented-aspect change must rebuild the mosaic")
     }
 
     func testMosaicCacheRecomputesWhenOrderedItemIdentitiesChange() {

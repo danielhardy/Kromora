@@ -239,6 +239,25 @@ struct LibraryGridLayout: Sendable, Equatable {
         return min(max(ratio, 0.35), 3.0)
     }
 
+    /// Return the aspect ratio of the pixels presented by the library thumbnail. A crop rectangle
+    /// is normalized to the oriented source image, so its width/height must be multiplied by the
+    /// source pixel ratio before it can drive the mosaic geometry.
+    static func presentedAspectRatio(
+        sourceAspectRatio: Double,
+        crop: CropAdjustments
+    ) -> Double {
+        let sourceRatio = normalizedAspectRatio(sourceAspectRatio)
+        guard !crop.isIdentity,
+              let rect = crop.normalizedRect,
+              rect.width.isFinite, rect.height.isFinite,
+              rect.width > 0, rect.height > 0
+        else {
+            return sourceRatio
+        }
+
+        return normalizedAspectRatio(sourceRatio * Double(rect.width / rect.height))
+    }
+
     func visibleIndices(
         itemCount: Int,
         width: Double,
@@ -256,18 +275,15 @@ struct LibraryGridLayout: Sendable, Equatable {
     }
 }
 
-/// Retains mosaic geometry across item mutations that do not change the filtered collection.
-///
-/// Metadata arrives after discovery and changes an item's aspect ratio from the photographic
-/// fallback to its real value. Rebuilding rows for that mutation would move every later item in
-/// the collection. The cache therefore treats geometry as a snapshot of the current collection
-/// structure: rows are rebuilt only when the ordered item identities or viewport width changes,
-/// and metadata updates reuse the already-placed rows. The row snapshot is still value data, so
-/// the lazy stack keeps virtualizing the hosted cells as before.
+/// Retains mosaic geometry until the ordered items, viewport, or presented aspect changes.
+/// Crop edits intentionally invalidate the snapshot so a portrait crop can move into a portrait
+/// cell without requiring an application restart. The row snapshot remains value data, so the
+/// lazy stack keeps virtualizing the hosted cells as before.
 @MainActor
 final class LibraryMosaicLayoutCache {
     private var cachedItemIDs: [PhotoAssetID]?
     private var cachedWidth: Double?
+    private var cachedAspectRatios: [Double]?
     private var cachedRows: [LibraryGridLayout.MosaicRow] = []
 
     /// Exposed for regression tests and performance instrumentation.
@@ -279,14 +295,17 @@ final class LibraryMosaicLayoutCache {
         layout: LibraryGridLayout,
         aspectRatioAt: (Int) -> Double
     ) -> [LibraryGridLayout.MosaicRow] {
-        guard cachedItemIDs != itemIDs || cachedWidth != width else {
+        let aspectRatios = itemIDs.indices.map(aspectRatioAt)
+        guard cachedItemIDs != itemIDs
+            || cachedWidth != width
+            || cachedAspectRatios != aspectRatios else {
             return cachedRows
         }
 
-        let aspectRatios = itemIDs.indices.map(aspectRatioAt)
         cachedRows = layout.mosaicRows(aspectRatios: aspectRatios, width: width)
         cachedItemIDs = itemIDs
         cachedWidth = width
+        cachedAspectRatios = aspectRatios
         recomputeCount += 1
         return cachedRows
     }

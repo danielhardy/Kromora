@@ -248,7 +248,7 @@ private struct LibraryGridCell: View {
         if let thumbnail = item.thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+                .aspectRatio(contentMode: .fill)
         } else if item.asset.thumbnailState == .failed {
             Rectangle()
                 .fill(Color.secondary.opacity(0.12))
