@@ -2,8 +2,46 @@
 id: KRMA-454
 title: Fix MainActor isolation on LUTLibrary.starterCategoryPrecedes for BundledLookLibrary sort
 type: bug
-status: ready
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: BundledLookLibrary.categories compiles under Swift 6 without MainActor conversion errors when sorting category keys with starter ordering.
+      result: pass
+      notes: swift build succeeds; no diagnostic at BundledLookLibrary.swift:45.
+    - criterion: "Starter category order is unchanged: Monochrome precedes every other category name; remaining names use localizedStandardCompare ascending."
+      result: pass
+      notes: LUTLibrary.swift:46-50 body is unchanged from the pre-fix version; BundledLookTests assertions expect ["Monochrome", "Cinematic", "Faded", "Film-inspired", "High-contrast", "Pastel", "Warm slide-inspired"] (ordering logic verified by inspection since the suite currently can't execute past resource loading, see findings).
+    - criterion: No new Swift 6 isolation opt-outs (@unchecked Sendable, nonisolated(unsafe), @preconcurrency).
+      result: pass
+      notes: grep of LUTLibrary.swift and BundledLookLibrary.swift confirms none present.
+    - criterion: Prefer making the pure comparator nonisolated static.
+      result: pass
+      notes: LUTLibrary.swift:46 declares `nonisolated static func starterCategoryPrecedes`.
+    - criterion: swift build succeeds for this file/target path; previous error at BundledLookLibrary.swift:45 is gone.
+      result: pass
+      notes: swift build completed (Build complete!) with only pre-existing, out-of-scope CIKernel deprecation warnings.
+    - criterion: Extend/assert Monochrome-first in a cheap unit/model test if one already covers it.
+      result: pass
+      notes: BundledLookTests already asserts Monochrome-first ordering for both LUTLibrary.starterCategories and LUTLibrary.categories; no source change was needed to preserve this since the isolation-only fix does not touch comparison logic.
+    - criterion: Compiles cleanly under Swift 6 against macOS 26 and macOS 27 SDKs (or documents which was verified).
+      result: pass
+      notes: Verified against Xcode 27.0 / macOS 27 SDK (xcodebuild -version, xcrun --show-sdk-version) in this environment; macOS 26 SDK not installed here. Change has zero OS API surface (pure Swift isolation annotation), consistent with prior codex verification note in the issue history.
+  checks_run:
+    - swift build (clean pass, only pre-existing CIKernel deprecation warnings, unrelated to this change)
+    - grep for starterCategoryPrecedes call sites (LUTLibrary.swift:46,74,360; BundledLookLibrary.swift:45) — all consistent with a single shared nonisolated comparator
+    - grep for @unchecked Sendable / nonisolated(unsafe) / @preconcurrency in the two touched files — none found
+    - git diff --check — clean
+    - swift test --filter BundledLookTests — fails, but on a pre-existing, unrelated resource-bundling bug (see findings), not on isolation or ordering logic
+  findings:
+    - "[correctness] BundledLookLibrary's StarterLooks resource lookup is broken by a double-nested 'Resources/Resources/StarterLooks' path mismatch between Package.swift's resource copy rule and BundledLookLibrary.resourceSubdirectory, unrelated to the MainActor fix in this issue. File: Package.swift. Failure scenario: BundledLookLibrary.load() / .validate() throw missingResource(\"StarterLooks/manifest.json\") in every configuration checked (swift test, .build debug/release app bundles) because Package.swift copies the whole Resources/ directory (`resources: [.copy(\"Resources\")]`) but the code looks up subdirectory \"StarterLooks\" without the \"Resources/\" prefix; verified the same double-nesting exists inside .build/Kromora.app's packaged Kromora_KromoraKit.bundle, not just the test bundle, so the shipped Starter Looks feature likely loads zero bundled Looks silently. Verdict: CONFIRMED."
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-19T01:41:44.989Z
+  session: 01MU7PYFLPCICY18V9
 creation_provenance:
   runner: cursor
   model: unknown
@@ -14,8 +52,8 @@ labels:
   - looks
   - correctness
 created: 2026-09-18T22:41:00.336Z
-updated: 2026-09-18T22:41:29.030Z
-order: z
+updated: 2026-09-19T01:41:44.991Z
+order: a0
 board: product
 ---
 
@@ -102,6 +140,37 @@ Part of a three-issue Release compile unblock set from ./scripts/build-macos-app
 
 Compatibility clarified: this fix is Swift isolation only — must work on macOS 26 and 27 SDKs; no OS-version-gated APIs.
 
+### Comment — codex @ 2026-09-19T01:38:52.401Z
+
+Implementation verified in existing commit b26624f: LUTLibrary.starterCategoryPrecedes is nonisolated static with its body unchanged, and BundledLookLibrary.categories continues using the shared comparator. Verification: swift build passed cleanly under Xcode 27.0 / macOS 27 SDK (SDK 27.0); git diff --check passed. Existing BundledLookTests contain Monochrome-first ordering assertions, but the focused suite currently fails in unrelated bundled-resource loading because the test bundle places Resources/StarterLooks while KromoraKitResourceBundle looks for StarterLooks; no source change was made for that out-of-scope packaging issue. macOS 26 SDK was not installed in this environment; this change uses no SDK-specific API.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-19T01:41:44.989Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] BundledLookLibrary.categories compiles under Swift 6 without MainActor conversion errors when sorting category keys with starter ordering. (pass) — swift build succeeds; no diagnostic at BundledLookLibrary.swift:45.
+- [x] Starter category order is unchanged: Monochrome precedes every other category name; remaining names use localizedStandardCompare ascending. (pass) — LUTLibrary.swift:46-50 body is unchanged from the pre-fix version; BundledLookTests assertions expect ["Monochrome", "Cinematic", "Faded", "Film-inspired", "High-contrast", "Pastel", "Warm slide-inspired"] (ordering logic verified by inspection since the suite currently can't execute past resource loading, see findings).
+- [x] No new Swift 6 isolation opt-outs (@unchecked Sendable, nonisolated(unsafe), @preconcurrency). (pass) — grep of LUTLibrary.swift and BundledLookLibrary.swift confirms none present.
+- [x] Prefer making the pure comparator nonisolated static. (pass) — LUTLibrary.swift:46 declares `nonisolated static func starterCategoryPrecedes`.
+- [x] swift build succeeds for this file/target path; previous error at BundledLookLibrary.swift:45 is gone. (pass) — swift build completed (Build complete!) with only pre-existing, out-of-scope CIKernel deprecation warnings.
+- [x] Extend/assert Monochrome-first in a cheap unit/model test if one already covers it. (pass) — BundledLookTests already asserts Monochrome-first ordering for both LUTLibrary.starterCategories and LUTLibrary.categories; no source change was needed to preserve this since the isolation-only fix does not touch comparison logic.
+- [x] Compiles cleanly under Swift 6 against macOS 26 and macOS 27 SDKs (or documents which was verified). (pass) — Verified against Xcode 27.0 / macOS 27 SDK (xcodebuild -version, xcrun --show-sdk-version) in this environment; macOS 26 SDK not installed here. Change has zero OS API surface (pure Swift isolation annotation), consistent with prior codex verification note in the issue history.
+Checks run:
+- swift build (clean pass, only pre-existing CIKernel deprecation warnings, unrelated to this change)
+- grep for starterCategoryPrecedes call sites (LUTLibrary.swift:46,74,360; BundledLookLibrary.swift:45) — all consistent with a single shared nonisolated comparator
+- grep for @unchecked Sendable / nonisolated(unsafe) / @preconcurrency in the two touched files — none found
+- git diff --check — clean
+- swift test --filter BundledLookTests — fails, but on a pre-existing, unrelated resource-bundling bug (see findings), not on isolation or ordering logic
+Findings:
+- [correctness] BundledLookLibrary's StarterLooks resource lookup is broken by a double-nested 'Resources/Resources/StarterLooks' path mismatch between Package.swift's resource copy rule and BundledLookLibrary.resourceSubdirectory, unrelated to the MainActor fix in this issue. File: Package.swift. Failure scenario: BundledLookLibrary.load() / .validate() throw missingResource("StarterLooks/manifest.json") in every configuration checked (swift test, .build debug/release app bundles) because Package.swift copies the whole Resources/ directory (`resources: [.copy("Resources")]`) but the code looks up subdirectory "StarterLooks" without the "Resources/" prefix; verified the same double-nesting exists inside .build/Kromora.app's packaged Kromora_KromoraKit.bundle, not just the test bundle, so the shipped Starter Looks feature likely loads zero bundled Looks silently. Verdict: CONFIRMED.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MU7PYFLPCICY18V9
+Summary: MainActor isolation fix confirmed: nonisolated static starterCategoryPrecedes compiles cleanly under Swift 6 (macOS 27 SDK), preserves Monochrome-first ordering, introduces no isolation opt-outs. Filed KRMA-458 (parent KRMA-454) for an unrelated pre-existing StarterLooks resource-path bug found during verification (BundledLookTests currently fail on missingResource, not on this fix).
