@@ -110,11 +110,14 @@ final class ImageCollectionPresentationModel: ObservableObject {
         /// The upright display ratio is available from deferred metadata as soon as ImageIO has
         /// read it. Until then use a photographic 4:3 placeholder, which keeps the first layout
         /// deterministic and independent of thumbnail completion order.
+        private var presentedCrop = CropAdjustments.neutral
+
         var libraryAspectRatio: Double {
             guard let dimensions = asset.dimensions,
                   dimensions.width > 0, dimensions.height > 0 else { return 4.0 / 3.0 }
-            return LibraryGridLayout.normalizedAspectRatio(
-                Double(dimensions.width) / Double(dimensions.height)
+            return LibraryGridLayout.presentedAspectRatio(
+                sourceAspectRatio: Double(dimensions.width) / Double(dimensions.height),
+                crop: presentedCrop
             )
         }
 
@@ -151,6 +154,13 @@ final class ImageCollectionPresentationModel: ObservableObject {
             editedThumbnail = thumbnail
             editedThumbnailUsesFallback = thumbnail == nil
             self.thumbnail = thumbnail ?? originalThumbnail
+        }
+
+        @discardableResult
+        func setPresentedCrop(_ crop: CropAdjustments) -> Bool {
+            guard presentedCrop != crop else { return false }
+            presentedCrop = crop
+            return true
         }
 
         /// UI compatibility initializer. The durable record is built first; the AppKit thumbnail
@@ -1692,6 +1702,15 @@ final class ImageCollectionPresentationModel: ObservableObject {
     ) {
         guard let item = items.first(where: { $0.id == id }) else { return }
         item.applyEditedThumbnail(thumbnail, revision: revision)
+    }
+
+    /// Keep the grid's geometry aligned with the pixels produced by the edit-aware thumbnail
+    /// renderer. This is separate from `PhotoAsset` because crop edits are persisted in the edit
+    /// document, not in the source metadata record.
+    func setPresentedCrop(_ crop: CropAdjustments, for id: PhotoAssetID) {
+        guard let item = items.first(where: { $0.id == id }) else { return }
+        guard item.setPresentedCrop(crop) else { return }
+        invalidateCollectionProjection(notify: true)
     }
 
     /// Admit the next useful work after a worker finishes. The scan can discover thousands of files,

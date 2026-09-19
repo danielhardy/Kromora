@@ -1853,6 +1853,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         document = session?.document ?? EditDocument()
         comparisonBaselineDocument = document.comparisonBaseline
         editorDocument.activate(session: session)
+        collection.setPresentedCrop(document.crop, for: assetID)
         lastReportedMissingLUT = nil
         lutResolutionStatus = nil
         refreshLUTResolutionStatus()
@@ -2020,6 +2021,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
             comparisonBaselineDocument = document.comparisonBaseline
             editorDocument.adoptStoredDocument(document, for: request.assetID)
+            collection.setPresentedCrop(document.crop, for: request.assetID)
             restoreMaskSelection()
             refreshLUTResolutionStatus()
             if documentChanged {
@@ -3065,6 +3067,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 )
             else { return }
 
+            self.collection.setPresentedCrop(document.crop, for: assetID)
             let lut = self.resolvedLUT(document.lut.lutID)
             let revision = self.editedThumbnailRevision(document: document, lut: lut)
             guard !document.isIdentity else {
@@ -3519,6 +3522,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelHistogram(clear: false, pump: false)
         editorDocument.recordChange(from: document, to: updated)
         document = updated
+        if let activeAssetID {
+            collection.setPresentedCrop(document.crop, for: activeAssetID)
+        }
         if rotationChanged {
             sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
         }
@@ -4309,6 +4315,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         document = restored
+        if let activeAssetID {
+            collection.setPresentedCrop(document.crop, for: activeAssetID)
+        }
         sourceSize = restored.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
         if !document.hasVisibleLookEdits {
             // Space is a transient single-view state. Undoing/redoing to identity must not leave
