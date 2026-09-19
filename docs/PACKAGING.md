@@ -20,6 +20,18 @@ the build environment. App Sandbox remains enabled, with user-selected file acce
 read access, and app-scope bookmarks as declared in
 [`Sources/Kromora/Kromora.entitlements`](../Sources/Kromora/Kromora.entitlements).
 
+The zero-dependency updater contacts only
+`https://api.github.com/repos/danielhardy/Kromora/releases/latest` and the HTTPS URL of the
+selected release DMG. The network client entitlement is required for those outbound requests in a
+sandboxed app; no server-side update service or telemetry endpoint is used. Automatic checks run at
+most once every 24 hours and stay quiet for network failures. Manual checks report failures and can
+open the release page.
+
+Before an in-place install, the updater mounts the DMG read-only and verifies the embedded
+`Kromora.app` against the running app's Developer ID Team ID and bundle identifier with strict
+nested code-signature validation. Unsigned development builds cannot replace themselves and are
+offered the release page instead.
+
 For a distributable build, use Xcode 26 or newer with the macOS 26 SDK. The package still deploys to
 macOS 14; SDK availability guards are required for newer APIs.
 

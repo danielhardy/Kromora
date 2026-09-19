@@ -65,6 +65,7 @@ public final class KromoraSettings: ObservableObject {
         static let schemaVersion = "Kromora.settings.schemaVersion"
         static let alwaysDarkMode = "Kromora.settings.alwaysDarkMode"
         static let showPhotoNames = "Kromora.settings.showPhotoNames"
+        static let automaticUpdateChecks = "Kromora.settings.automaticUpdateChecks"
         static let sourceFolder = "Kromora.settings.defaultSourceFolder"
         static let exportFolder = "Kromora.settings.defaultExportFolder"
         static let legacyDarkMode = "Lumo.alwaysDarkMode"
@@ -87,6 +88,13 @@ public final class KromoraSettings: ObservableObject {
         didSet {
             guard showPhotoNames != oldValue else { return }
             preferences.set(showPhotoNames, forKey: Key.showPhotoNames)
+        }
+    }
+
+    @Published public var automaticUpdateChecks: Bool {
+        didSet {
+            guard automaticUpdateChecks != oldValue else { return }
+            preferences.set(automaticUpdateChecks, forKey: Key.automaticUpdateChecks)
         }
     }
 
@@ -119,6 +127,7 @@ public final class KromoraSettings: ObservableObject {
         // An absent key means the user has never chosen a value. Keep an explicit stored choice,
         // including `true`, so changing the default does not override an opt-in.
         self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
+        self.automaticUpdateChecks = preferences.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true
         self.sourceFolderStatus = .notConfigured(.source)
         self.exportFolderStatus = .notConfigured(.export)
 
@@ -126,6 +135,7 @@ public final class KromoraSettings: ObservableObject {
         // Migration may have supplied the appearance value.
         self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
         self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
+        self.automaticUpdateChecks = preferences.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true
         loadRecords()
         refreshFolderStatus()
     }

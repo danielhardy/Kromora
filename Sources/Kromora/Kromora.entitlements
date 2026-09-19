@@ -12,5 +12,8 @@
 	<true/>
 	<key>com.apple.security.assets.pictures.read-write</key>
 	<true/>
+	<!-- Minimum outbound client access for GitHub Releases API and release assets. -->
+	<key>com.apple.security.network.client</key>
+	<true/>
 </dict>
 </plist>
