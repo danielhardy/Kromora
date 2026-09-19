@@ -63,6 +63,10 @@ final class SourceSessionCoordinator {
     private var capabilitiesTask: Task<Void, Never>?
     private var firstFrameTask: Task<Void, Never>?
     private(set) var sourceRevision: UInt64 = 0
+    /// The request whose preparation was last published to the application model. A newer
+    /// request may be pending while this source is still on screen; probes belong to this request
+    /// until the replacement actually prepares successfully.
+    private var publishedRequest: Request?
     private(set) var activeRequest: Request?
     private var isShutdown = false
 
@@ -105,8 +109,6 @@ final class SourceSessionCoordinator {
         pendingRequest = request
         firstFrameTask?.cancel()
         firstFrameTask = nil
-        metadataTask?.cancel()
-        capabilitiesTask?.cancel()
         storedLoadTask?.cancel()
         if workerTask == nil { startWorker() }
         return sourceRevision
@@ -116,6 +118,7 @@ final class SourceSessionCoordinator {
     func cancel() {
         sourceRevision &+= 1
         activeRequest = nil
+        publishedRequest = nil
         pendingRequest = nil
         firstFrameTask?.cancel()
         firstFrameTask = nil
@@ -132,6 +135,7 @@ final class SourceSessionCoordinator {
         isShutdown = true
         sourceRevision &+= 1
         activeRequest = nil
+        publishedRequest = nil
         pendingRequest = nil
         firstFrameTask?.cancel()
         storedLoadTask?.cancel()
@@ -165,6 +169,10 @@ final class SourceSessionCoordinator {
     }
 
     private func isCurrent(_ request: Request) -> Bool {
+        !isShutdown && publishedRequest == request
+    }
+
+    private func isExpected(_ request: Request) -> Bool {
         !isShutdown && activeRequest == request && sourceRevision == request.sourceRevision
     }
 
@@ -172,10 +180,10 @@ final class SourceSessionCoordinator {
         let storedTask = Task { await editStore.load(for: request.sourceReference) }
         storedLoadTask = storedTask
         let preparation = await engine.prepareSource(request.plan.source)
-        guard isCurrent(request) else {
+        guard isExpected(request) else {
             storedTask.cancel()
             _ = await storedTask.value
-            storedLoadTask = nil
+            if storedLoadTask == storedTask { storedLoadTask = nil }
             return
         }
         guard let preparation else {
@@ -186,14 +194,24 @@ final class SourceSessionCoordinator {
             return
         }
 
+        // This is the refresh site: only now is there definitely a replacement source. A failed
+        // prepare leaves `publishedRequest` and its metadata/capability work untouched, so the
+        // source that remains on screen can finish describing itself.
+        metadataTask?.cancel()
+        metadataTask = nil
+        capabilitiesTask?.cancel()
+        capabilitiesTask = nil
+        publishedRequest = request
         onPreparation?(PreparationPublication(request: request, preparation: preparation))
         startMetadata(for: request)
         startCapabilities(for: request, source: preparation.source)
         startFirstFrameIfNeeded(for: request, preparation: preparation)
 
         let stored = await storedTask.value
-        storedLoadTask = nil
-        guard isCurrent(request) else { return }
+        if storedLoadTask == storedTask { storedLoadTask = nil }
+        // Stored edits belong to the request that admitted them. Unlike probes, they must not
+        // publish while a newer request is pending, even if that request later fails.
+        guard isCurrent(request), activeRequest == request else { return }
         onStoredDocument?(StoredDocumentPublication(request: request, result: stored))
     }
 
@@ -201,15 +219,25 @@ final class SourceSessionCoordinator {
         metadataTask?.cancel()
         let url = request.plan.url
         let data = request.plan.data
-        metadataTask = Task { [weak self] in
-            let metadata = await Task.detached {
-                if let url { return ImageMetadata.read(from: url) }
-                if let data { return ImageMetadata.read(from: data) }
-                return ImageMetadata()
-            }.value
-            guard let self, self.isCurrent(request), !Task.isCancelled else { return }
-            self.onMetadata?(MetadataPublication(request: request, metadata: metadata))
+        // Keep the read itself in the stored task. The detached work must not outlive an
+        // unstored handle and race a later source's Info panel.
+        metadataTask = Task.detached(priority: .utility) { [weak self] in
+            let metadata: ImageMetadata
+            if let url {
+                metadata = ImageMetadata.read(from: url)
+            } else if let data {
+                metadata = ImageMetadata.read(from: data)
+            } else {
+                metadata = ImageMetadata()
+            }
+            guard !Task.isCancelled else { return }
+            await self?.publishMetadata(metadata, for: request)
         }
+    }
+
+    private func publishMetadata(_ metadata: ImageMetadata, for request: Request) {
+        guard isCurrent(request), !Task.isCancelled else { return }
+        onMetadata?(MetadataPublication(request: request, metadata: metadata))
     }
 
     private func startCapabilities(for request: Request, source: ImageSource) {

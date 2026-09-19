@@ -1052,11 +1052,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self.adoptStoredEdits(publication.result, for: publication.request)
         }
         sourceSession.onMetadata = { [weak self] publication in
-            guard let self, !self.isShuttingDown else { return }
+            guard let self, !self.isShuttingDown,
+                publication.request.sourceRevision == self.sourceRevision,
+                publication.request.assetID == self.activeAssetID else { return }
             self.metadata = publication.metadata
         }
         sourceSession.onCapabilities = { [weak self] publication in
-            guard let self, !self.isShuttingDown else { return }
+            guard let self, !self.isShuttingDown,
+                publication.request.sourceRevision == self.sourceRevision,
+                publication.request.assetID == self.activeAssetID else { return }
             self.rawCapabilities = publication.capabilities
             self.capabilitiesProbeCompleted = true
             self.keepInspectorTabValid()

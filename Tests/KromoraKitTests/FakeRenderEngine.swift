@@ -446,7 +446,7 @@ actor FakeRenderEngine: RenderEngining {
     /// test racing it would be a flake either way it landed. Gating the probe makes that window last
     /// as long as the test needs.
     private var probeIsGated = false
-    private var parkedProbe: CheckedContinuation<Void, Never>?
+    private var parkedProbes: [CheckedContinuation<Void, Never>] = []
 
     func gateProbe() { probeIsGated = true }
 
@@ -454,19 +454,20 @@ actor FakeRenderEngine: RenderEngining {
     ///
     /// Ordering note for callers: wait until `capabilityProbeCount` has moved before releasing. The
     /// count is incremented and the continuation stored in the same actor-synchronous run as the
-    /// suspension, so an *external* read of the count that returns 1 can only have been serviced
-    /// after this actor reached that suspension point — the continuation is therefore already
-    /// stored, and `releaseProbe()` cannot no-op past a probe that has not parked yet.
+    /// suspension, so an *external* read of the count can only be serviced after the continuation
+    /// has been stored. Keeping all parked probes lets lifecycle tests hold both an old probe and a
+    /// replacement probe at the same time.
     func releaseProbe() {
         probeIsGated = false
-        parkedProbe?.resume()
-        parkedProbe = nil
+        let parked = parkedProbes
+        parkedProbes.removeAll()
+        parked.forEach { $0.resume() }
     }
 
     func rawCapabilities(for source: ImageSource) async -> RAWCapabilities? {
         capabilityProbeCount += 1
         if probeIsGated {
-            await withCheckedContinuation { parkedProbe = $0 }
+            await withCheckedContinuation { parkedProbes.append($0) }
         }
         return stubbedCapabilities
     }
