@@ -88,6 +88,17 @@ final class ImageLoadingTests: TempDirectoryTestCase {
         XCTAssertThrowsError(try ImageDecoder.load(from: missing))
     }
 
+    func testRawNamedGarbageFailsDecodeAndPreparation() async throws {
+        let url = tempDirectory.appendingPathComponent("not-really-raw.dng")
+        try Data("not a camera raw file".utf8).write(to: url)
+
+        XCTAssertThrowsError(try ImageDecoder.load(from: url))
+
+        let source = ImageSource(url: url, nativeExtent: .zero)
+        let preparation = await RenderEngine().prepareSource(source)
+        XCTAssertNil(preparation, "a non-rasterizable RAW output must fail at preparation")
+    }
+
     /// The heart of the bug: preview and thumbnail disagreed. They must agree
     /// on which way is up, or the filmstrip contradicts the canvas.
     func testPreviewAndThumbnailAgreeOnOrientation() throws {
@@ -166,7 +177,7 @@ final class ImageLoadingTests: TempDirectoryTestCase {
     /// taught the eager decode to apply develop settings.
     ///
     /// Skipped without a local RAW, like every other `CIRAWFilter` test here.
-    func testLoadingARAWGoesThroughCIRAWFilter() throws {
+    func testLoadingARAWGoesThroughCIRAWFilter() async throws {
         guard let rawURL = Fixtures.localRAWURL else {
             throw XCTSkip("no local RAW to decode; see Fixtures.localRAWURL")
         }
@@ -174,6 +185,10 @@ final class ImageLoadingTests: TempDirectoryTestCase {
         // time-separated runs, so the two renders are taken next to each other.
         let viaLoad = try ImageDecoder.load(from: rawURL)
         let viaNeutral = try XCTUnwrap(ImageDecoder.developRAWNeutral(at: rawURL))
+        let prepared = await RenderEngine().prepareSource(
+            ImageSource(url: rawURL, nativeExtent: .zero)
+        )
+        XCTAssertNotNil(prepared, "a known-good RAW must remain admissible")
 
         XCTAssertEqual(viaLoad.extent, viaNeutral.extent)
         assertPixelsEqual(try Pixels.bytes(of: viaLoad), try Pixels.bytes(of: viaNeutral),
