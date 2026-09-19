@@ -47,6 +47,71 @@ final class SourceSessionCoordinatorTests: XCTestCase {
         await coordinator.shutdown()
     }
 
+    func testFailedOpenKeepsPublishedSourceProbesAlive() async throws {
+        let fake = FakeRenderEngine()
+        await fake.gateProbe()
+        let coordinator = SourceSessionCoordinator(
+            engine: fake,
+            editStore: EditDocumentStore.makeInMemoryProjectionStore(),
+            embeddedFirstFrameProvider: { _ in nil }
+        )
+        var capabilities: [SourceSessionCoordinator.CapabilitiesPublication] = []
+        var failures: [String] = []
+        coordinator.onCapabilities = { capabilities.append($0) }
+        coordinator.onFailure = { _, message in failures.append(message) }
+
+        let good = SourceImportPlan(
+            name: "displayed.ARW", url: URL(fileURLWithPath: "/tmp/displayed.ARW"), data: nil
+        )
+        let failing = SourceImportPlan(
+            name: "unreadable.bin", url: nil, data: Data("not an image".utf8)
+        )
+        coordinator.begin(plan: good, editSessionRevision: 0, hadInMemorySession: false)
+        try await waitUntil("the displayed source probe") { await fake.capabilityProbeCount == 1 }
+
+        coordinator.begin(plan: failing, editSessionRevision: 0, hadInMemorySession: false)
+        try await waitUntil("the failed open") { failures.count == 1 }
+
+        await fake.releaseProbe()
+        try await waitUntil("the displayed source probe to publish") { capabilities.count == 1 }
+        XCTAssertEqual(capabilities.first?.request.plan.name, "displayed.ARW")
+
+        await coordinator.shutdown()
+    }
+
+    func testSuccessfulOpenSupersedesThePreviousProbe() async throws {
+        let fake = FakeRenderEngine()
+        await fake.gateProbe()
+        let coordinator = SourceSessionCoordinator(
+            engine: fake,
+            editStore: EditDocumentStore.makeInMemoryProjectionStore(),
+            embeddedFirstFrameProvider: { _ in nil }
+        )
+        var prepared: [SourceSessionCoordinator.PreparationPublication] = []
+        var capabilities: [SourceSessionCoordinator.CapabilitiesPublication] = []
+        coordinator.onPreparation = { prepared.append($0) }
+        coordinator.onCapabilities = { capabilities.append($0) }
+
+        let first = SourceImportPlan(
+            name: "first.ARW", url: URL(fileURLWithPath: "/tmp/first.ARW"), data: nil
+        )
+        let second = SourceImportPlan(
+            name: "second.ARW", url: URL(fileURLWithPath: "/tmp/second.ARW"), data: nil
+        )
+        coordinator.begin(plan: first, editSessionRevision: 0, hadInMemorySession: false)
+        try await waitUntil("the first source probe") { await fake.capabilityProbeCount == 1 }
+
+        coordinator.begin(plan: second, editSessionRevision: 0, hadInMemorySession: false)
+        try await waitUntil("the second source preparation") { prepared.count == 2 }
+        try await waitUntil("both probes to be admitted") { await fake.capabilityProbeCount == 2 }
+
+        await fake.releaseProbe()
+        try await waitUntil("the replacement probe to publish") { capabilities.count == 1 }
+        XCTAssertEqual(capabilities.first?.request.plan.name, "second.ARW")
+
+        await coordinator.shutdown()
+    }
+
     func testPreviewPresentationOwnsGenerationsAndCacheIdentity() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("KromoraPreviewPresentation-\(UUID().uuidString)")
