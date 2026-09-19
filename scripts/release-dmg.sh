@@ -113,6 +113,7 @@ trap cleanup EXIT INT TERM
 print "Building Kromora $version (build $build_number; identity: $signing_identity)"
 KROMORA_CODESIGN_IDENTITY="$signing_identity" \
 KROMORA_BUILD_ARCHS="arm64,x86_64" \
+KROMORA_DIRECT_DISTRIBUTION=1 \
   scripts/build-macos-app.sh
 
 [[ -x "$app_bundle/Contents/MacOS/Kromora" ]] || { print -u2 "missing app executable"; exit 1; }

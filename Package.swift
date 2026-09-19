@@ -2,6 +2,13 @@
 import PackageDescription
 import Foundation
 
+// Direct-download releases opt into the GitHub updater explicitly. Normal SwiftPM/Xcode builds
+// (including App Store archives) omit the updater from the binary entirely.
+private let distributionSwiftSettings: [SwiftSetting] =
+    ProcessInfo.processInfo.environment["KROMORA_DIRECT_DISTRIBUTION"] == "1"
+        ? [.define("KROMORA_DIRECT_DISTRIBUTION")]
+        : []
+
 private enum StarterLookPackageValidationError: Error, CustomStringConvertible {
     case invalid(String)
 
@@ -124,7 +131,7 @@ let package = Package(
         .target(
             name: "KromoraKit",
             resources: [.copy("Resources")],
-            swiftSettings: [.swiftLanguageMode(.v6)],
+            swiftSettings: distributionSwiftSettings + [.swiftLanguageMode(.v6)],
             linkerSettings: [
                 .linkedFramework("Accelerate"),
                 .linkedFramework("Photos"),
@@ -140,13 +147,13 @@ let package = Package(
             // not Swift source; scripts/build-macos-app.sh consumes the
             // entitlements explicitly when signing the completed bundle.
             exclude: ["Assets.xcassets", "Branding", "Info.plist", "Kromora.entitlements"],
-            swiftSettings: [.swiftLanguageMode(.v6)]
+            swiftSettings: distributionSwiftSettings + [.swiftLanguageMode(.v6)]
         ),
         .testTarget(
             name: "KromoraKitTests",
             dependencies: ["KromoraKit"],
             resources: [.copy("PerformanceBaselines")],
-            swiftSettings: [.swiftLanguageMode(.v6)]
+            swiftSettings: distributionSwiftSettings + [.swiftLanguageMode(.v6)]
         ),
     ]
 )

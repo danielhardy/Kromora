@@ -32,6 +32,11 @@ Before an in-place install, the updater mounts the DMG read-only and verifies th
 nested code-signature validation. Unsigned development builds cannot replace themselves and are
 offered the release page instead.
 
+The GitHub updater is compiled only for direct-download releases. `release-dmg.sh` sets
+`KROMORA_DIRECT_DISTRIBUTION=1` before invoking the app build; ordinary SwiftPM/Xcode builds omit
+that flag and therefore omit the updater, its menu/settings UI, and its DMG installer entirely.
+App Store archives should continue to use Xcode's App Store Connect distribution workflow.
+
 For a distributable build, use Xcode 26 or newer with the macOS 26 SDK. The package still deploys to
 macOS 14; SDK availability guards are required for newer APIs.
 

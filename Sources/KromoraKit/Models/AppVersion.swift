@@ -1,3 +1,4 @@
+#if KROMORA_DIRECT_DISTRIBUTION
 import Foundation
 
 /// A numeric release version used by Kromora's GitHub Releases updater.
@@ -45,3 +46,4 @@ public struct AppVersion: Sendable, Equatable, Comparable, Codable, CustomString
         return Self(value)
     }
 }
+#endif

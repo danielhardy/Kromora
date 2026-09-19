@@ -1,3 +1,4 @@
+#if KROMORA_DIRECT_DISTRIBUTION
 import SwiftUI
 
 /// The updater's compact presentation. It intentionally offers the release page whenever an
@@ -89,3 +90,4 @@ public struct UpdateSheet: View {
         coordinator.currentVersion.map { "You are running Kromora \($0)." } ?? "This development build has no packaged version."
     }
 }
+#endif
