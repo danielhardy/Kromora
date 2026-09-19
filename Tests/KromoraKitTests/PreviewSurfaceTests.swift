@@ -19,6 +19,21 @@ final class PreviewSurfaceTests: XCTestCase {
         }
     }
 
+    func testBundledMetalSourcesAreResolvable() {
+        XCTAssertNotNil(KromoraKitResourceBundle.url(forMetalSource: "PreviewSurface"))
+        XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
+        XCTAssertNotNil(KromoraKitResourceBundle.url(forMetalSource: "MaskOverlay"))
+        XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "MaskOverlay"))
+    }
+
+    func testCoordinatorBuildsAPresentationPipelineFromBundledMetalSource() {
+        let coordinator = PreviewSurfaceView.Coordinator()
+        XCTAssertTrue(
+            coordinator.hasPresentationPipeline,
+            "PreviewSurface.metal must compile into a render pipeline; a nil-function descriptor aborts Metal validation"
+        )
+    }
+
     func testPresentStoresTheWorkingSpaceForThePresentedImage() {
         let surface = PreviewSurface()
         let image = CIImage(color: CIColor(red: 0.5, green: 0.25, blue: 0.75))

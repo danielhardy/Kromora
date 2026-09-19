@@ -820,7 +820,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: RenderEngine.shared,
             editStore: EditDocumentStore.makeInMemoryProjectionStore(),
             includeBundledLooks: false,
-            portablePackageURL: packageURL
+            portablePackageURL: packageURL,
+            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer()
         )
     }
 
@@ -832,7 +833,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: RenderEngine.shared,
             editStore: EditDocumentStore.makeInMemoryProjectionStore(),
             includeBundledLooks: includeBundledLooks,
-            portablePackageURL: packageURL
+            portablePackageURL: packageURL,
+            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer()
         )
     }
 
@@ -855,7 +857,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
-        fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy()
+        fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
+        leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -871,7 +874,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let effectiveEditStore: EditDocumentStore
         if let normalizedPortablePackageURL {
             do {
-                let session = try PortableLibrarySession(at: normalizedPortablePackageURL)
+                let session = try Self.openPortableLibrarySession(
+                    at: normalizedPortablePackageURL,
+                    confirmer: leaseRecoveryConfirmer
+                )
                 openedPortableLibrary = session
                 portableOpenError = nil
                 // The package owns the edit sidecars. SwiftData is constructed as a disposable
@@ -1335,6 +1341,29 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 name: first.displayName, url: fileURL, data: nil, assetID: first.id,
                 portableIdentity: persistencePortableIdentity(for: first)
             )
+        }
+    }
+
+    private static func openPortableLibrarySession(
+        at url: URL,
+        confirmer: (any PortablePackageLeaseRecoveryConfirming)?
+    ) throws -> PortableLibrarySession {
+        do {
+            return try PortableLibrarySession(at: url)
+        } catch let error as PortablePackageLeaseError {
+            guard case .expired(let info) = error else { throw error }
+            let shouldRecover: Bool
+            if info.writerProcessIsGone {
+                // Ctrl+C / crash of `swift run` leaves an expired lock whose owner is dead. Do not
+                // block launch on an NSAlert that an unbundled process cannot show.
+                shouldRecover = true
+            } else {
+                shouldRecover =
+                    confirmer?.confirmBreakExpiredWriterLease(packageURL: url, info: info)
+                    == true
+            }
+            guard shouldRecover else { throw error }
+            return try PortableLibrarySession(at: url, recoverExpiredLease: true)
         }
     }
 

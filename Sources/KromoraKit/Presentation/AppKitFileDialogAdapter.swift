@@ -71,3 +71,33 @@ public final class AppKitFileDialog: FileDialogProviding {
         return panel.url
     }
 }
+
+/// Launch-time confirmation before breaking an expired portable-library writer lease.
+@MainActor
+protocol PortablePackageLeaseRecoveryConfirming {
+    func confirmBreakExpiredWriterLease(
+        packageURL: URL,
+        info: PortablePackageLeaseInfo
+    ) -> Bool
+}
+
+/// Production AppKit prompt used when a previous session left an expired `manifest.lock`.
+@MainActor
+struct AppKitPortablePackageLeaseRecoveryConfirmer: PortablePackageLeaseRecoveryConfirming {
+    func confirmBreakExpiredWriterLease(
+        packageURL: URL,
+        info: PortablePackageLeaseInfo
+    ) -> Bool {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Take over this library?"
+        alert.informativeText =
+            "The previous Kromora session on \(info.deviceName) did not close cleanly, so the writer lock expired.\n\n"
+            + "Kromora will recover any interrupted writes, then open \(packageURL.lastPathComponent)."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Take Over Library")
+        alert.addButton(withTitle: "Not Now")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+}

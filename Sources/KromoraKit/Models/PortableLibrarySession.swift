@@ -19,7 +19,9 @@ final class PortableLibrarySession {
     init(
         at rootURL: URL,
         indexURL: URL? = nil,
-        pageSize: Int = 500
+        pageSize: Int = 500,
+        now: Date = Date(),
+        recoverExpiredLease: Bool = false
     ) throws {
         let normalizedRoot = rootURL.standardizedFileURL
         let fileManager = FileManager.default
@@ -33,7 +35,9 @@ final class PortableLibrarySession {
             package = try PortableLibraryPackage.create(at: normalizedRoot)
         }
 
-        let lease = try PortablePackageLease.acquire(at: normalizedRoot)
+        let lease = try Self.acquireWriterLease(
+            at: normalizedRoot, now: now, recoverExpired: recoverExpiredLease
+        )
         do {
             self.package = package
             self.lease = lease
@@ -57,6 +61,20 @@ final class PortableLibrarySession {
         } catch {
             try? lease.release()
             throw error
+        }
+    }
+
+    private static func acquireWriterLease(
+        at packageRoot: URL,
+        now: Date,
+        recoverExpired: Bool
+    ) throws -> PortablePackageLease {
+        do {
+            return try PortablePackageLease.acquire(at: packageRoot, now: now)
+        } catch let error as PortablePackageLeaseError {
+            guard recoverExpired, case .expired = error else { throw error }
+            try PortablePackageLease.recoverExpiredWriter(at: packageRoot, now: now)
+            return try PortablePackageLease.acquire(at: packageRoot, now: now)
         }
     }
 

@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationFlushInProgress = false
 
     override init() {
+        // Unbundled `swift run` starts as a background process. AppViewModel init can present a
+        // lease-recovery NSAlert before applicationDidFinishLaunching, and that alert is otherwise
+        // invisible — the terminal prints "Build complete!" and appears hung.
+        NSApplication.shared.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
         let viewModel = AppViewModel(includeBundledLooks: true)
         self.viewModel = viewModel
         self.appearanceController = KromoraWindowAppearanceController(settings: viewModel.settings)

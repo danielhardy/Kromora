@@ -116,6 +116,31 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         try replacement.release()
     }
 
+    func testRecoverExpiredWriterRollsBackThenAllowsANewLease() throws {
+        let packageURL = try makePackage()
+        let stateURL = packageURL.appendingPathComponent("State/value.txt")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: stateURL)
+
+        let stale = try PortablePackageLease.acquire(
+            at: packageURL, now: now, duration: 10
+        )
+        let injector = PortablePackageFaultInjector(failingAt: .publish)
+        var transaction = try PortablePackageTransaction.begin(
+            at: packageURL, lease: stale, now: now, faultInjector: injector
+        )
+        try transaction.stage(data: Data("new".utf8), at: "State/value.txt")
+        XCTAssertThrowsError(try transaction.commit(now: now))
+
+        let later = now.addingTimeInterval(11)
+        try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later)
+        XCTAssertEqual(try String(contentsOf: stateURL), "old")
+        let replacement = try PortablePackageLease.acquire(at: packageURL, now: later)
+        try replacement.release()
+        _ = stale
+    }
+
     func testLeaseLossPreventsPublishAndRecoveryCanRollBack() throws {
         let packageURL = try makePackage()
         let lease = try PortablePackageLease.acquire(at: packageURL, now: now)

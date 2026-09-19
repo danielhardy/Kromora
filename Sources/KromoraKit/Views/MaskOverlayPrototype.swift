@@ -242,22 +242,27 @@ final class MaskOverlayRenderer: NSObject, MTKViewDelegate {
     override init() {
         super.init()
         let library: MTLLibrary?
-        if let url = KromoraKitResourceBundle.bundle.url(forResource: "MaskOverlay", withExtension: "metal"),
-           let source = try? String(contentsOf: url, encoding: .utf8) {
+        if let source = KromoraKitResourceBundle.metalSource(named: "MaskOverlay") {
             library = try? device.makeLibrary(source: source, options: nil)
         } else {
             library = device.makeDefaultLibrary()
         }
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library?.makeFunction(name: "mask_overlay_vertex")
-        descriptor.fragmentFunction = library?.makeFunction(name: "mask_overlay_fragment")
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        descriptor.colorAttachments[0].isBlendingEnabled = true
-        descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-        descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-        descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
-        descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-        pipeline = try? device.makeRenderPipelineState(descriptor: descriptor)
+        if let vertex = library?.makeFunction(name: "mask_overlay_vertex"),
+            let fragment = library?.makeFunction(name: "mask_overlay_fragment")
+        {
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = vertex
+            descriptor.fragmentFunction = fragment
+            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            descriptor.colorAttachments[0].isBlendingEnabled = true
+            descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+            pipeline = try? device.makeRenderPipelineState(descriptor: descriptor)
+        } else {
+            pipeline = nil
+        }
     }
 
     func update(
