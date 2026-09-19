@@ -2,8 +2,35 @@
 id: KRMA-455
 title: Fix ResolutionPlanner.plan calling ResolutionPlan.roi via wrong Self
 type: bug
-status: ready
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: ResolutionPlanner.plan calls ResolutionPlan.roi without duplicating the helper
+      result: pass
+      notes: Sources/KromoraKit/Models/ResolutionPlanner.swift uses ResolutionPlan.roi at the complete-presented-photo check; the fix is present in b26624f4a9ce115dd8750452d2173f45bc87114.
+    - criterion: ROI and hysteresis behavior remains correct
+      result: pass
+      notes: The existing ResolutionPlan.roi predicate and planner hysteresis logic are unchanged; CropROITests fit/zoom coverage passed.
+    - criterion: Builds under the available Swift 6 SDK
+      result: pass
+      notes: swift build passed with Swift 6.4, Xcode 27.0, macOS 27.0 SDK. No SDK-27-only API was introduced.
+  checks_run:
+    - swift build
+    - swift test --filter CropROITests (8 passed, 0 failures)
+    - xcrun --show-sdk-version (27.0)
+    - xcodebuild -version (Xcode 27.0)
+    - git diff --check
+    - dg validate (OK; pre-existing model-name warnings only)
+  findings: []
+  fixes: []
+  verification_commits:
+    - b26624f4a9ce115dd8750452d2173f45bc87114
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-19T01:43:13.917Z
+  session: 01MU7Q1ZERHJBBMEGW
 creation_provenance:
   runner: cursor
   model: unknown
@@ -14,9 +41,11 @@ labels:
   - resolution
   - correctness
 created: 2026-09-18T22:41:00.748Z
-updated: 2026-09-18T22:41:29.166Z
+updated: 2026-09-19T01:43:13.919Z
 order: zh
 board: product
+commits:
+  - b26624f4a9ce115dd8750452d2173f45bc87114
 ---
 
 ## Objective
@@ -113,3 +142,27 @@ Compatibility clarified: this fix is a type-qualification typo only — must wor
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-19T01:43:13.917Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] ResolutionPlanner.plan calls ResolutionPlan.roi without duplicating the helper (pass) — Sources/KromoraKit/Models/ResolutionPlanner.swift uses ResolutionPlan.roi at the complete-presented-photo check; the fix is present in b26624f4a9ce115dd8750452d2173f45bc87114.
+- [x] ROI and hysteresis behavior remains correct (pass) — The existing ResolutionPlan.roi predicate and planner hysteresis logic are unchanged; CropROITests fit/zoom coverage passed.
+- [x] Builds under the available Swift 6 SDK (pass) — swift build passed with Swift 6.4, Xcode 27.0, macOS 27.0 SDK. No SDK-27-only API was introduced.
+Checks run:
+- swift build
+- swift test --filter CropROITests (8 passed, 0 failures)
+- xcrun --show-sdk-version (27.0)
+- xcodebuild -version (Xcode 27.0)
+- git diff --check
+- dg validate (OK; pre-existing model-name warnings only)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- b26624f4a9ce115dd8750452d2173f45bc87114
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MU7Q1ZERHJBBMEGW
+Summary: Verified the existing ResolutionPlan.roi qualification fix from b26624f; no additional source change was needed because the requested correction is already present on the current branch.

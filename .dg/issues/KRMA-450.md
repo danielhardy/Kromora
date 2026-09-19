@@ -2,8 +2,47 @@
 id: KRMA-450
 title: Add signed notarized DMG release packaging for distribution
 type: task
-status: ready
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: scripts/release-dmg.sh produces Kromora-<version>.dmg with a properly structured Kromora.app
+      result: pass
+      notes: Ran KROMORA_SKIP_NOTARIZE=1 scripts/release-dmg.sh end-to-end; produced .build/releases/Kromora-<version>.dmg, mounted and verified executable/Info.plist/icon/resource bundle/entitlements.
+    - criterion: Distribution builds sign with Developer ID Application + hardened runtime; Team ID/bundle ID from env not hardcoded
+      result: pass
+      notes: release-dmg.sh validates the identity string against 'Developer ID Application:' via security find-identity, adds --options runtime --timestamp when identity != '-', and KROMORA_BUNDLE_IDENTIFIER overrides CFBundleIdentifier without any hardcoded LUTzy identifiers.
+    - criterion: Full path notarizes and staples both app and DMG when credentials configured
+      result: pass
+      notes: "Code path present (notarytool submit --wait, stapler staple, stapler validate for both app and DMG). Not exercised live: no Developer ID/notary credentials available in this environment, consistent with the implementer's disclosure."
+    - criterion: Skip-notarization env flag builds/signs app+DMG locally without contacting Apple, documented as non-ship
+      result: pass
+      notes: Verified live run with KROMORA_SKIP_NOTARIZE=1; prints explicit non-ship WARNING; docs/PACKAGING.md documents this.
+    - criterion: docs/PACKAGING.md documents prerequisites, usage, outputs, relation to build-macos-app.sh
+      result: pass
+    - criterion: Script fails closed on missing identity/profile, missing icon/plist, or failed codesign/notarize
+      result: pass
+      notes: "Verified: invalid version and missing KROMORA_CODESIGN_IDENTITY both exit 1 with no artifact written; cleanup() trap on EXIT/INT/TERM removes release_dmg unless success=1, and set -euo pipefail ensures any failed step (codesign/notarize/hdiutil) triggers it."
+    - criterion: CI/verify helper can still validate ad-hoc/local .app builds
+      result: pass
+      notes: scripts/build-macos-app.sh native (default) mode is unchanged in behavior; universal mode is opt-in via KROMORA_BUILD_ARCHS. Verified native app build still signs/verifies correctly.
+  checks_run:
+    - zsh -n scripts/release-dmg.sh
+    - zsh -n scripts/build-macos-app.sh
+    - git diff --check on the commit
+    - KROMORA_SKIP_NOTARIZE=1 scripts/release-dmg.sh 0.0.1-verify (full universal build, sign, DMG create, mount, verify, cleanup)
+    - lipo -archs on the built executable confirmed arm64+x86_64 universal binary
+    - scripts/release-dmg.sh with invalid version argument (fail-closed, no artifact)
+    - scripts/release-dmg.sh with no KROMORA_CODESIGN_IDENTITY in distribution mode (fail-closed, no artifact)
+    - git status --porcelain confirmed clean working tree aside from unrelated .dg bookkeeping
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-19T00:42:07.866Z
+  session: 01MU7NUHCJBIME68GD
 creation_provenance:
   runner: cursor
   model: unknown
@@ -13,8 +52,8 @@ labels:
   - release
   - distribution
 created: 2026-09-18T22:38:53.961Z
-updated: 2026-09-18T22:40:12.406Z
-order: n
+updated: 2026-09-19T00:42:07.868Z
+order: a0
 board: product
 ---
 
@@ -86,6 +125,40 @@ View with: `git show upstream/main:scripts/release-dmg.sh`
 
 Provenance: adapt LUTzy `scripts/release-dmg.sh` (PR #36 / e2cef20). Compose with existing `scripts/build-macos-app.sh` where possible. This ticket is the prerequisite artifact for KRMA-451 auto-update.
 
+### Comment — codex @ 2026-09-18T23:39:49.159Z
+
+Implemented in commit 234e29f. Added scripts/release-dmg.sh with universal arm64+x86_64 builds, version/build-number overrides, Developer ID + hardened-runtime signing, App Sandbox provisioning-profile checks, app and DMG notarization/stapling, hdiutil packaging, final mounted-DMG verification, and explicit KROMORA_SKIP_NOTARIZE=1 local dry-run behavior. Composed with build-macos-app.sh and corrected the SwiftPM resource-bundle verifier path. Updated packaging docs and scripts README. Checks passed: zsh -n, git diff --check, dg validate, SwiftPM dual-architecture release build, icon/resource verification, strict app signature/entitlement verification, universal lipo inspection, local signed DMG creation/mount/verification, and strict DMG signature verification. Apple notarization was not claimed or run because Developer ID/notary credentials were unavailable in this environment.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-19T00:42:07.866Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] scripts/release-dmg.sh produces Kromora-<version>.dmg with a properly structured Kromora.app (pass) — Ran KROMORA_SKIP_NOTARIZE=1 scripts/release-dmg.sh end-to-end; produced .build/releases/Kromora-<version>.dmg, mounted and verified executable/Info.plist/icon/resource bundle/entitlements.
+- [x] Distribution builds sign with Developer ID Application + hardened runtime; Team ID/bundle ID from env not hardcoded (pass) — release-dmg.sh validates the identity string against 'Developer ID Application:' via security find-identity, adds --options runtime --timestamp when identity != '-', and KROMORA_BUNDLE_IDENTIFIER overrides CFBundleIdentifier without any hardcoded LUTzy identifiers.
+- [x] Full path notarizes and staples both app and DMG when credentials configured (pass) — Code path present (notarytool submit --wait, stapler staple, stapler validate for both app and DMG). Not exercised live: no Developer ID/notary credentials available in this environment, consistent with the implementer's disclosure.
+- [x] Skip-notarization env flag builds/signs app+DMG locally without contacting Apple, documented as non-ship (pass) — Verified live run with KROMORA_SKIP_NOTARIZE=1; prints explicit non-ship WARNING; docs/PACKAGING.md documents this.
+- [x] docs/PACKAGING.md documents prerequisites, usage, outputs, relation to build-macos-app.sh (pass)
+- [x] Script fails closed on missing identity/profile, missing icon/plist, or failed codesign/notarize (pass) — Verified: invalid version and missing KROMORA_CODESIGN_IDENTITY both exit 1 with no artifact written; cleanup() trap on EXIT/INT/TERM removes release_dmg unless success=1, and set -euo pipefail ensures any failed step (codesign/notarize/hdiutil) triggers it.
+- [x] CI/verify helper can still validate ad-hoc/local .app builds (pass) — scripts/build-macos-app.sh native (default) mode is unchanged in behavior; universal mode is opt-in via KROMORA_BUILD_ARCHS. Verified native app build still signs/verifies correctly.
+Checks run:
+- zsh -n scripts/release-dmg.sh
+- zsh -n scripts/build-macos-app.sh
+- git diff --check on the commit
+- KROMORA_SKIP_NOTARIZE=1 scripts/release-dmg.sh 0.0.1-verify (full universal build, sign, DMG create, mount, verify, cleanup)
+- lipo -archs on the built executable confirmed arm64+x86_64 universal binary
+- scripts/release-dmg.sh with invalid version argument (fail-closed, no artifact)
+- scripts/release-dmg.sh with no KROMORA_CODESIGN_IDENTITY in distribution mode (fail-closed, no artifact)
+- git status --porcelain confirmed clean working tree aside from unrelated .dg bookkeeping
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MU7NUHCJBIME68GD
+Summary: Verified: release-dmg.sh builds, signs, and packages a universal signed DMG end-to-end (live skip-notarize run passed: universal arm64+x86_64 binary, hardened-runtime signing, DMG mount/verify, fail-closed on invalid version and missing identity). Notarize/staple code paths reviewed but not exercised (no Developer ID/notary credentials in this environment, as disclosed by the implementer). No blocking findings; no fixes needed.

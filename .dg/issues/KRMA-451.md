@@ -2,7 +2,7 @@
 id: KRMA-451
 title: Add zero-dependency GitHub Releases auto-update with signature verification
 type: feature
-status: ready
+status: done
 priority: high
 creation_provenance:
   runner: cursor
@@ -14,7 +14,7 @@ labels:
   - updater
   - security
 created: 2026-09-18T22:38:54.334Z
-updated: 2026-09-18T22:40:12.543Z
+updated: 2026-09-19T01:36:50.564Z
 depends_on:
   - KRMA-450
 order: y
@@ -99,6 +99,12 @@ View with:
 
 Provenance: adapt LUTzy zero-dep updater (PR #40). Blocked on KRMA-450 for DMG artifact shape. Security bar is runtime Team ID + bundle ID codesign verification before swap — never Sparkle, never install unverified downloads.
 
+### Comment — codex @ 2026-09-19T01:36:50.136Z
+
+Implemented zero-dependency GitHub Releases updater: strict version/feed parsing for danielhardy/Kromora, 24-hour quiet automatic checks, manual up-to-date/available/skipped/error states, skip-version persistence, injected coordinator/installer seams, read-only DMG mounting, runtime Team ID + bundle ID Developer ID signature verification, same-volume bundle swap, relaunch fallback, unsigned-build release-page fallback, update sheet, Check for Updates… menu item, Settings toggle, update logging, network entitlement, packaging docs, and focused tests. Verification: swift test --filter "KromoraSettingsTests|MenuCommandTests|UpdateTests|ModelDependencyTests" passed (24 tests); swift build passed; git diff --check passed. Full suite also exercised but has unrelated pre-existing/environmental failures in bundled resource loading, EffectsInspectorTests, and a render-process test.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-19T01:36:50.562Z: Implemented and verified the zero-dependency GitHub Releases updater, secure DMG installer, UI wiring, settings, entitlement/docs, and focused tests.

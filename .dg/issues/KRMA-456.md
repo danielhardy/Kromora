@@ -2,8 +2,41 @@
 id: KRMA-456
 title: Fix NeutralOriginSlider argument order in EffectsInspectorView
 type: bug
-status: ready
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: "EffectsValueRow's NeutralOriginSlider call compiles with args in declaration order (neutral: then step:)"
+      result: pass
+      notes: "Confirmed at EffectsInspectorView.swift:178-186; neutral: precedes step: 1."
+    - criterion: "Effects inspector sliders still snap with step: 1 and use row neutral for fill origin"
+      result: pass
+      notes: Both values still passed unchanged, just reordered.
+    - criterion: No API redesign of NeutralOriginSlider
+      result: pass
+      notes: "Initializer in NeutralOriginSlider.swift untouched: neutral before step."
+    - criterion: "Grep confirms no remaining call sites pass step: before neutral:"
+      result: pass
+      notes: "rg over Sources/KromoraKit/Views shows only one call site uses step: (EffectsInspectorView.swift), and it is ordered correctly."
+    - criterion: swift build succeeds for this diagnostic
+      result: pass
+      notes: swift build completed successfully (only pre-existing, out-of-scope CIKernel deprecation warnings).
+    - criterion: Compiles cleanly under Swift 6 against macOS 26 and macOS 27 SDKs (or documents which SDK verified)
+      result: pass
+      notes: Only macOS 27.0 SDK / Xcode 27.0 available locally; verified with that SDK. No macOS 27-only APIs used — fix is call-site argument order only, consistent with prior codex verification.
+  checks_run:
+    - swift build
+    - rg -n 'NeutralOriginSlider\(' -A8 Sources/KromoraKit/Views
+    - git diff --check
+    - xcrun --show-sdk-version / xcodebuild -version
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-19T01:45:23.340Z
+  session: 01MU7Q5R61PTJOBLEU
 creation_provenance:
   runner: cursor
   model: unknown
@@ -14,8 +47,8 @@ labels:
   - effects
   - correctness
 created: 2026-09-18T22:41:01.171Z
-updated: 2026-09-18T22:41:29.303Z
-order: zq
+updated: 2026-09-19T01:45:23.342Z
+order: a0
 board: product
 ---
 
@@ -125,6 +158,35 @@ Part of a three-issue Release compile unblock set from ./scripts/build-macos-app
 
 Compatibility clarified: this fix is Swift call-site argument order only — must work on macOS 26 and 27 SDKs; no OS-version-gated APIs.
 
+### Comment — codex @ 2026-09-19T01:44:36.146Z
+
+Verified the requested fix is already present in HEAD (b26624f): EffectsValueRow passes neutral: before step: 1, preserving the row neutral origin and whole-number snapping. Repository scan found no NeutralOriginSlider call sites with step: before neutral:. swift build passed with Swift 6.4 / Xcode 27.0 / macOS 27.0 SDK; only macOS 27.0 is installed locally, so macOS 26 was not available for direct verification. No SDK-specific APIs are involved. git diff --check passed.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-19T01:45:23.340Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] EffectsValueRow's NeutralOriginSlider call compiles with args in declaration order (neutral: then step:) (pass) — Confirmed at EffectsInspectorView.swift:178-186; neutral: precedes step: 1.
+- [x] Effects inspector sliders still snap with step: 1 and use row neutral for fill origin (pass) — Both values still passed unchanged, just reordered.
+- [x] No API redesign of NeutralOriginSlider (pass) — Initializer in NeutralOriginSlider.swift untouched: neutral before step.
+- [x] Grep confirms no remaining call sites pass step: before neutral: (pass) — rg over Sources/KromoraKit/Views shows only one call site uses step: (EffectsInspectorView.swift), and it is ordered correctly.
+- [x] swift build succeeds for this diagnostic (pass) — swift build completed successfully (only pre-existing, out-of-scope CIKernel deprecation warnings).
+- [x] Compiles cleanly under Swift 6 against macOS 26 and macOS 27 SDKs (or documents which SDK verified) (pass) — Only macOS 27.0 SDK / Xcode 27.0 available locally; verified with that SDK. No macOS 27-only APIs used — fix is call-site argument order only, consistent with prior codex verification.
+Checks run:
+- swift build
+- rg -n 'NeutralOriginSlider\(' -A8 Sources/KromoraKit/Views
+- git diff --check
+- xcrun --show-sdk-version / xcodebuild -version
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MU7Q5R61PTJOBLEU
+Summary: Re-verified: EffectsValueRow's NeutralOriginSlider call already passes neutral: before step: (HEAD b26624f). swift build succeeds under Xcode 27.0/macOS 27 SDK; no other call sites regress; git diff --check clean. No code changes needed.
