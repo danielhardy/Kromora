@@ -66,7 +66,7 @@ final class LibraryGridTests: TempDirectoryTestCase {
         )
     }
 
-    func testMosaicCacheRebuildsWhenPresentedAspectRatioChanges() {
+    func testMosaicCacheFreezesPlacedRowsWhenDeferredAspectRatioArrives() {
         let cache = LibraryMosaicLayoutCache()
         let layout = LibraryGridLayout()
         let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
@@ -75,18 +75,45 @@ final class LibraryGridTests: TempDirectoryTestCase {
         let initial = cache.rows(
             itemIDs: itemIDs,
             width: 900,
+            cropGeneration: 0,
             layout: layout,
             aspectRatioAt: { fallback[$0] }
         )
         let resolved = cache.rows(
             itemIDs: itemIDs,
             width: 900,
+            cropGeneration: 0,
+            layout: layout,
+            aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] }
+        )
+
+        XCTAssertEqual(resolved, initial, "metadata must not move already-placed mosaic rows")
+        XCTAssertEqual(cache.recomputeCount, 1, "a metadata update must not redo full-collection row math")
+    }
+
+    func testMosaicCacheRebuildsWhenCropGenerationChanges() {
+        let cache = LibraryMosaicLayoutCache()
+        let layout = LibraryGridLayout()
+        let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
+        let itemIDs = fallback.indices.map { _ in PhotoAssetID.imported(UUID()) }
+
+        let initial = cache.rows(
+            itemIDs: itemIDs,
+            width: 900,
+            cropGeneration: 0,
+            layout: layout,
+            aspectRatioAt: { fallback[$0] }
+        )
+        let resolved = cache.rows(
+            itemIDs: itemIDs,
+            width: 900,
+            cropGeneration: 1,
             layout: layout,
             aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] }
         )
 
         XCTAssertNotEqual(resolved, initial, "a crop must update the placed cell geometry")
-        XCTAssertEqual(cache.recomputeCount, 2, "a presented-aspect change must rebuild the mosaic")
+        XCTAssertEqual(cache.recomputeCount, 2, "a crop generation bump must rebuild the mosaic")
     }
 
     func testMosaicCacheRecomputesWhenOrderedItemIdentitiesChange() {
@@ -98,12 +125,14 @@ final class LibraryGridTests: TempDirectoryTestCase {
         _ = cache.rows(
             itemIDs: firstIDs,
             width: 900,
+            cropGeneration: 0,
             layout: layout,
             aspectRatioAt: { _ in 4.0 / 3.0 }
         )
         _ = cache.rows(
             itemIDs: secondIDs,
             width: 900,
+            cropGeneration: 0,
             layout: layout,
             aspectRatioAt: { _ in 4.0 / 3.0 }
         )

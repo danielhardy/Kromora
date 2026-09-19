@@ -275,15 +275,20 @@ struct LibraryGridLayout: Sendable, Equatable {
     }
 }
 
-/// Retains mosaic geometry until the ordered items, viewport, or presented aspect changes.
-/// Crop edits intentionally invalidate the snapshot so a portrait crop can move into a portrait
-/// cell without requiring an application restart. The row snapshot remains value data, so the
-/// lazy stack keeps virtualizing the hosted cells as before.
+/// Retains mosaic geometry across item mutations that do not change the filtered collection.
+///
+/// Metadata arrives after discovery and changes an item's aspect ratio from the photographic
+/// fallback to its real value. Rebuilding rows for that mutation would move every later item in
+/// the collection, so the cache does not key on the raw per-item aspect ratios. Crop edits also
+/// change an item's presented aspect ratio, but they are rare, explicit user actions rather than
+/// background metadata arrival, so they invalidate the snapshot through `cropGeneration` instead
+/// — bumped only by `ImageCollectionPresentationModel.setPresentedCrop`. The row snapshot is still
+/// value data, so the lazy stack keeps virtualizing the hosted cells as before.
 @MainActor
 final class LibraryMosaicLayoutCache {
     private var cachedItemIDs: [PhotoAssetID]?
     private var cachedWidth: Double?
-    private var cachedAspectRatios: [Double]?
+    private var cachedCropGeneration: Int?
     private var cachedRows: [LibraryGridLayout.MosaicRow] = []
 
     /// Exposed for regression tests and performance instrumentation.
@@ -292,20 +297,21 @@ final class LibraryMosaicLayoutCache {
     func rows(
         itemIDs: [PhotoAssetID],
         width: Double,
+        cropGeneration: Int,
         layout: LibraryGridLayout,
         aspectRatioAt: (Int) -> Double
     ) -> [LibraryGridLayout.MosaicRow] {
-        let aspectRatios = itemIDs.indices.map(aspectRatioAt)
         guard cachedItemIDs != itemIDs
             || cachedWidth != width
-            || cachedAspectRatios != aspectRatios else {
+            || cachedCropGeneration != cropGeneration else {
             return cachedRows
         }
 
+        let aspectRatios = itemIDs.indices.map(aspectRatioAt)
         cachedRows = layout.mosaicRows(aspectRatios: aspectRatios, width: width)
         cachedItemIDs = itemIDs
         cachedWidth = width
-        cachedAspectRatios = aspectRatios
+        cachedCropGeneration = cropGeneration
         recomputeCount += 1
         return cachedRows
     }
