@@ -22,8 +22,11 @@ enum KromoraEditTransferShortcuts {
 /// it can't reach the view model directly.
 public struct KromoraCommands: Commands {
     @ObservedObject private var settings: KromoraSettings
+#if KROMORA_DIRECT_DISTRIBUTION
     @ObservedObject private var updateCoordinator: UpdateCoordinator
+#endif
 
+#if KROMORA_DIRECT_DISTRIBUTION
     public init(
         settings: KromoraSettings = KromoraSettings(),
         updateCoordinator: UpdateCoordinator? = nil
@@ -31,6 +34,11 @@ public struct KromoraCommands: Commands {
         _settings = ObservedObject(wrappedValue: settings)
         _updateCoordinator = ObservedObject(wrappedValue: updateCoordinator ?? UpdateCoordinator())
     }
+#else
+    public init(settings: KromoraSettings = KromoraSettings()) {
+        _settings = ObservedObject(wrappedValue: settings)
+    }
+#endif
 
     public var body: some Commands {
         CommandMenu("View") {
@@ -111,9 +119,11 @@ public struct KromoraCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
         }
 
+#if KROMORA_DIRECT_DISTRIBUTION
         CommandGroup(after: .appInfo) {
             Button("Check for Updates…") { updateCoordinator.checkNow() }
         }
+#endif
     }
 
     private func post(_ name: Notification.Name) {

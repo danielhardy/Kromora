@@ -1,3 +1,4 @@
+#if KROMORA_DIRECT_DISTRIBUTION
 import AppKit
 import Combine
 import Foundation
@@ -178,3 +179,4 @@ public final class UpdateCoordinator: ObservableObject {
         }
     }
 }
+#endif

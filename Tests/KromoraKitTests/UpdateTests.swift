@@ -1,3 +1,4 @@
+#if KROMORA_DIRECT_DISTRIBUTION
 import Foundation
 import XCTest
 @testable import KromoraKit
@@ -141,3 +142,4 @@ final class UpdateTests: XCTestCase {
         XCTAssertFalse(unsigned.isSheetPresented)
     }
 }
+#endif

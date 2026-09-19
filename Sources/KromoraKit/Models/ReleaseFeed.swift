@@ -1,3 +1,4 @@
+#if KROMORA_DIRECT_DISTRIBUTION
 import Foundation
 
 /// The release data needed by the updater, independent of GitHub's complete payload.
@@ -117,3 +118,4 @@ public enum KromoraReleaseFeed {
 
 public typealias Release = KromoraRelease
 public typealias ReleaseFeed = KromoraReleaseFeed
+#endif

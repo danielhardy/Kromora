@@ -1,3 +1,4 @@
+#if KROMORA_DIRECT_DISTRIBUTION
 import AppKit
 import Foundation
 import Security
@@ -240,3 +241,4 @@ public enum KromoraUpdateInstaller {
 }
 
 public typealias UpdateInstaller = KromoraUpdateInstaller
+#endif
