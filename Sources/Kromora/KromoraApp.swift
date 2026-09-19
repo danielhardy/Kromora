@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appearanceController.start()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        viewModel.updateCoordinator.checkAutomaticallyIfDue()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -103,16 +104,39 @@ struct KromoraApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(viewModel: appDelegate.viewModel)
+            KromoraRootView(viewModel: appDelegate.viewModel)
                 .frame(minWidth: 800, minHeight: 500)
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1200, height: 800)
-        .commands { KromoraCommands(settings: appDelegate.viewModel.settings) }
+        .commands {
+            KromoraCommands(
+                settings: appDelegate.viewModel.settings,
+                updateCoordinator: appDelegate.viewModel.updateCoordinator
+            )
+        }
 
         Settings {
             KromoraSettingsScene(viewModel: appDelegate.viewModel)
         }
+    }
+}
+
+@MainActor
+private struct KromoraRootView: View {
+    let viewModel: AppViewModel
+    @ObservedObject private var updateCoordinator: UpdateCoordinator
+
+    init(viewModel: AppViewModel) {
+        self.viewModel = viewModel
+        self._updateCoordinator = ObservedObject(wrappedValue: viewModel.updateCoordinator)
+    }
+
+    var body: some View {
+        ContentView(viewModel: viewModel)
+            .sheet(isPresented: $updateCoordinator.isSheetPresented) {
+                UpdateSheet(coordinator: updateCoordinator)
+            }
     }
 }
 

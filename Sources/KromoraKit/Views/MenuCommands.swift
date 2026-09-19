@@ -22,9 +22,14 @@ enum KromoraEditTransferShortcuts {
 /// it can't reach the view model directly.
 public struct KromoraCommands: Commands {
     @ObservedObject private var settings: KromoraSettings
+    @ObservedObject private var updateCoordinator: UpdateCoordinator
 
-    public init(settings: KromoraSettings = KromoraSettings()) {
+    public init(
+        settings: KromoraSettings = KromoraSettings(),
+        updateCoordinator: UpdateCoordinator? = nil
+    ) {
         _settings = ObservedObject(wrappedValue: settings)
+        _updateCoordinator = ObservedObject(wrappedValue: updateCoordinator ?? UpdateCoordinator())
     }
 
     public var body: some Commands {
@@ -104,6 +109,10 @@ public struct KromoraCommands: Commands {
 
             Button("Export Selected...") { post(.exportSelected) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+        }
+
+        CommandGroup(after: .appInfo) {
+            Button("Check for Updates…") { updateCoordinator.checkNow() }
         }
     }
 

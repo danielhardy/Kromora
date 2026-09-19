@@ -41,6 +41,16 @@ public struct KromoraSettingsView: View {
                 Text("When off, Kromora follows the macOS appearance setting.")
             }
 
+            Section {
+                Toggle("Check for updates automatically", isOn: $settings.automaticUpdateChecks)
+                    .accessibilityLabel("Check for updates automatically")
+                    .accessibilityHint("Check GitHub Releases at most once every 24 hours")
+            } header: {
+                Text("Updates")
+            } footer: {
+                Text("Kromora checks GitHub Releases at most once every 24 hours. Offline failures stay quiet.")
+            }
+
             folderSection(
                 kind: .source,
                 status: settings.sourceFolderStatus,
