@@ -204,6 +204,11 @@ final class ImageCollectionPresentationModel: ObservableObject {
     @Published var isScanning: Bool = false
     @Published private(set) var scanWarnings: [ScanWarning] = []
     @Published private(set) var filter = LibraryFilter.all
+    /// Bumped only when a crop changes a presented aspect ratio. The mosaic cache keys on this
+    /// instead of diffing every item's aspect ratio so that deferred metadata arrival (which also
+    /// changes an item's aspect ratio, from the photographic fallback to the real value) does not
+    /// reflow already-placed rows — see `LibraryMosaicLayoutCache`.
+    @Published private(set) var cropGeneration = 0
     /// The persistent user-selected source folder, if one is set. Imported files live in
     /// `libraryFolderURL` and are present regardless of this value.
     @Published var sourceFolderURL: URL?
@@ -1710,6 +1715,7 @@ final class ImageCollectionPresentationModel: ObservableObject {
     func setPresentedCrop(_ crop: CropAdjustments, for id: PhotoAssetID) {
         guard let item = items.first(where: { $0.id == id }) else { return }
         guard item.setPresentedCrop(crop) else { return }
+        cropGeneration += 1
         invalidateCollectionProjection(notify: true)
     }
 

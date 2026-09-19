@@ -48,6 +48,7 @@ struct LibraryGridView: View {
                         let rows = mosaicCache.rows(
                             itemIDs: itemIDs,
                             width: max(1, geometry.size.width - 32),
+                            cropGeneration: collection.cropGeneration,
                             layout: layout,
                             aspectRatioAt: { entries[$0].aspectRatio }
                         )
