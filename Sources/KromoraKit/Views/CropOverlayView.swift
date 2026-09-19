@@ -6,6 +6,8 @@ import SwiftUI
 struct CropToolbarView: View {
     let aspectRatio: CropAspectRatio
     let orientation: CropAspectRatioOrientation
+    let onRotateCounterClockwise: () -> Void
+    let onRotateClockwise: () -> Void
     let onAspectRatioChange: (CropAspectRatio, CropAspectRatioOrientation) -> Void
     let onApply: () -> Void
     let onReset: () -> Void
@@ -42,6 +44,19 @@ struct CropToolbarView: View {
             .accessibilityLabel("Crop aspect ratio")
             .accessibilityHint(
                 "Choose a square, freeform, landscape, or portrait crop ratio")
+            Button(action: onRotateCounterClockwise) {
+                Label("Rotate counterclockwise", systemImage: "rotate.left")
+            }
+            .labelStyle(.iconOnly)
+            .help("Rotate 90° counterclockwise")
+            .accessibilityLabel("Rotate 90 degrees counterclockwise")
+
+            Button(action: onRotateClockwise) {
+                Label("Rotate clockwise", systemImage: "rotate.right")
+            }
+            .labelStyle(.iconOnly)
+            .help("Rotate 90° clockwise")
+            .accessibilityLabel("Rotate 90 degrees clockwise")
             Spacer()
             Button("Reset", action: onReset)
             Button("Cancel", action: onCancel)

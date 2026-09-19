@@ -447,6 +447,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var cropDraft: CGRect? { canvasState.cropDraft }
     var cropAspectRatio: CropAspectRatio { canvasState.cropAspectRatio }
     var cropOrientation: CropAspectRatioOrientation { canvasState.cropOrientation }
+    var cropRotation: ImageRotation { canvasState.cropRotation }
+    var cropSourceSize: CGSize { canvasState.cropImageSize(from: sourceSize) }
 
     var isInspectorPresented: Bool {
         get { inspectorState.isPresented }
@@ -3748,6 +3750,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // grain consequently describe this temporary full-source frame; the committed request
         // below restores their existing post-crop semantics.
         if canvasState.isCropToolActive {
+            requested.rotation = requested.rotation.addingClockwiseQuarterTurns(
+                canvasState.cropRotation.rawValue / 90
+            )
             requested.crop = .neutral
         }
 
@@ -4050,7 +4055,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     ) {
         guard sourceSize != .zero else { return }
         canvasState.selectCropAspectRatio(
-            aspectRatio, orientation: orientation, imageSize: sourceSize
+            aspectRatio, orientation: orientation, imageSize: cropSourceSize
         )
     }
 
@@ -4061,9 +4066,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let committed = canvasState.cropDraft ?? CropAdjustments.unitRect
         let aspectRatio = canvasState.cropAspectRatio
         let orientation = canvasState.cropOrientation
+        let cropRotation = canvasState.cropRotation
         canvasState.finishCrop()
         let previousDocument = document
         updateDocument {
+            $0.rotation = $0.rotation.addingClockwiseQuarterTurns(cropRotation.rawValue / 90)
             $0.crop = CropAdjustments(
                 normalizedRect: committed, aspectRatio: aspectRatio, orientation: orientation
             )
@@ -4140,10 +4147,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             statusMessage = "Open an image first"
             return
         }
-        // A draft crop is expressed in the current image coordinates. Finish that transient tool
-        // before changing the coordinate system so an unapplied rectangle cannot be committed
-        // against the wrong orientation later.
-        if canvasState.isCropToolActive { cancelCrop() }
+        if canvasState.isCropToolActive {
+            // Crop owns rotation while it is open. Remap the transient frame and render the
+            // effective orientation without touching the durable document or leaving Crop.
+            guard canvasState.rotateCrop(clockwise: clockwise) else { return }
+            schedulePreview()
+            statusMessage = "Rotated \(clockwise ? "clockwise" : "counterclockwise")"
+            return
+        }
         endUndoGrouping()
         updateDocument { document in
             document.rotation = document.rotation.addingClockwiseQuarterTurns(clockwise ? 1 : -1)
