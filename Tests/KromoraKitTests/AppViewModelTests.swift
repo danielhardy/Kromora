@@ -84,6 +84,77 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.portablePackageMaintenance.failureLog, [])
     }
 
+    func testExpiredWriterLeaseOpensLibraryAfterTakeoverConfirmation() throws {
+        let packageURL = tempDirectory.appendingPathComponent("Takeover.kromoralibrary")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "keep.jpg", in: tempDirectory
+        )
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs([sourceURL])
+        let libraryID = session.package.manifest.libraryID
+        try session.lease.release()
+
+        let stale = try PortablePackageLease.acquire(
+            at: packageURL, deviceName: "killed-swift-run", duration: -1
+        )
+        let viewModel = makeAppViewModel(
+            portablePackageURL: packageURL,
+            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(allowBreak: true)
+        )
+
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.collection.items.count, 1)
+        XCTAssertEqual(viewModel.portableLibrary?.package.manifest.libraryID, libraryID)
+        _ = stale
+    }
+
+    func testExpiredWriterLeaseFromDeadProcessOpensWithoutPrompt() throws {
+        let packageURL = tempDirectory.appendingPathComponent("DeadOwner.kromoralibrary")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "keep.jpg", in: tempDirectory
+        )
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs([sourceURL])
+        try session.lease.release()
+
+        let stale = try PortablePackageLease.acquire(
+            at: packageURL, deviceName: "killed-swift-run", processID: .max, duration: -1
+        )
+        let viewModel = makeAppViewModel(
+            portablePackageURL: packageURL,
+            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(allowBreak: false)
+        )
+
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.collection.items.count, 1)
+        _ = stale
+    }
+
+    func testExpiredWriterLeaseStaysClosedWhenTakeoverIsDeclined() throws {
+        let packageURL = tempDirectory.appendingPathComponent("Declined.kromoralibrary")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "hidden.jpg", in: tempDirectory
+        )
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs([sourceURL])
+        try session.lease.release()
+
+        let stale = try PortablePackageLease.acquire(
+            at: packageURL, deviceName: "killed-swift-run", duration: -1
+        )
+        let viewModel = makeAppViewModel(
+            portablePackageURL: packageURL,
+            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(allowBreak: false)
+        )
+
+        XCTAssertTrue(viewModel.collection.items.isEmpty)
+        let message = try XCTUnwrap(viewModel.errorMessage)
+        XCTAssertTrue(message.contains(packageURL.path), message)
+        XCTAssertTrue(message.contains("did not close cleanly"), message)
+        XCTAssertTrue(message.contains("killed-swift-run"), message)
+        _ = stale
+    }
+
     func testExportStatusReachesTheStatusBar() {
         let viewModel = makeAppViewModel()
         viewModel.export.onStatus?("Exported: photo.jpg")

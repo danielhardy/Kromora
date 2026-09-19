@@ -147,4 +147,38 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertThrowsError(try PortableLibrarySession(at: packageURL))
         XCTAssertEqual(try Data(contentsOf: sentinelURL), Data("preserve me".utf8))
     }
+
+    func testExpiredWriterLeaseStaysClosedUntilRecoveryIsRequested() throws {
+        let packageURL = tempDirectory.appendingPathComponent("Expired.kromoralibrary")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "keep.jpg", in: tempDirectory
+        )
+        let indexURL = tempDirectory.appendingPathComponent("ExpiredIndex/LibraryIndex.store")
+        let session = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        _ = try session.importURLs([sourceURL])
+        try session.lease.release()
+
+        let stale = try PortablePackageLease.acquire(
+            at: packageURL, deviceName: "killed-swift-run", duration: -1
+        )
+        XCTAssertThrowsError(
+            try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        ) { error in
+            guard case .expired(let info) = error as? PortablePackageLeaseError else {
+                return XCTFail("expected expired lease, got \(error)")
+            }
+            XCTAssertEqual(info.deviceName, "killed-swift-run")
+            XCTAssertEqual(
+                (error as Error).localizedDescription,
+                "The previous session on killed-swift-run (pid \(info.processID)) did not close cleanly, so the package writer lease has expired"
+            )
+        }
+
+        let recovered = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, recoverExpiredLease: true
+        )
+        XCTAssertEqual(recovered.assetCount, 1)
+        try recovered.lease.release()
+        _ = stale
+    }
 }

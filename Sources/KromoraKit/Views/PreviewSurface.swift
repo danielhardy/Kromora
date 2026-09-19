@@ -666,6 +666,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
         private var displayNotificationTokens: [NSObjectProtocol] = []
         private let pipeline: MTLRenderPipelineState?
         private let samplerState: MTLSamplerState?
+        /// Test/debug seam: the drawable path needs this pipeline. A missing bundled `.metal`
+        /// source must not abort process launch; the coordinator then uses the Core Image fallback.
+        var hasPresentationPipeline: Bool { pipeline != nil }
 
         private struct Vertex {
             var position: SIMD2<Float>
@@ -682,27 +685,32 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         override init() {
             let library: MTLLibrary?
-            if let url = KromoraKitResourceBundle.bundle.url(
-                forResource: "PreviewSurface", withExtension: "metal"),
-                let source = try? String(contentsOf: url, encoding: .utf8)
-            {
+            if let source = KromoraKitResourceBundle.metalSource(named: "PreviewSurface") {
                 library = try? RenderEngine.presentationDevice.makeLibrary(
                     source: source, options: nil)
             } else {
                 library = RenderEngine.presentationDevice.makeDefaultLibrary()
             }
 
-            let descriptor = MTLRenderPipelineDescriptor()
-            descriptor.vertexFunction = library?.makeFunction(name: "preview_quad_vertex")
-            descriptor.fragmentFunction = library?.makeFunction(name: "preview_quad_fragment")
-            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-            descriptor.colorAttachments[0].isBlendingEnabled = true
-            descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
-            descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
-            descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
-            descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
-            pipeline = try? RenderEngine.presentationDevice.makeRenderPipelineState(
-                descriptor: descriptor)
+            // Metal aborts in validateWithDevice when either function is nil. Keep the optional
+            // pipeline and fall through to the Core Image compatibility seam instead.
+            if let vertex = library?.makeFunction(name: "preview_quad_vertex"),
+                let fragment = library?.makeFunction(name: "preview_quad_fragment")
+            {
+                let descriptor = MTLRenderPipelineDescriptor()
+                descriptor.vertexFunction = vertex
+                descriptor.fragmentFunction = fragment
+                descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+                descriptor.colorAttachments[0].isBlendingEnabled = true
+                descriptor.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
+                descriptor.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
+                descriptor.colorAttachments[0].sourceAlphaBlendFactor = .sourceAlpha
+                descriptor.colorAttachments[0].destinationAlphaBlendFactor = .oneMinusSourceAlpha
+                pipeline = try? RenderEngine.presentationDevice.makeRenderPipelineState(
+                    descriptor: descriptor)
+            } else {
+                pipeline = nil
+            }
 
             let samplerDescriptor = MTLSamplerDescriptor()
             samplerDescriptor.minFilter = .linear

@@ -91,9 +91,16 @@ struct PortablePackageLeaseInfo: Codable, Equatable, Sendable {
     let acquiredAt: Date
     var heartbeatAt: Date
     var expiresAt: Date
+
+    /// True when this lock's recorded PID is not a live process on this Mac. Used to auto-recover
+    /// expired leases left by a killed `swift run` without presenting an unshowable launch alert.
+    var writerProcessIsGone: Bool {
+        if kill(processID, 0) == 0 { return false }
+        return errno == ESRCH
+    }
 }
 
-enum PortablePackageLeaseError: Error, Equatable, CustomStringConvertible {
+enum PortablePackageLeaseError: Error, Equatable, LocalizedError, CustomStringConvertible {
     case contended(PortablePackageLeaseInfo)
     case expired(PortablePackageLeaseInfo)
     case notOwner
@@ -105,20 +112,23 @@ enum PortablePackageLeaseError: Error, Equatable, CustomStringConvertible {
         switch self {
         case .contended(let info):
             return "Package is already being written by \(info.deviceName) (pid \(info.processID))"
-        case .expired: return "The package writer lease has expired"
+        case .expired(let info):
+            return "The previous session on \(info.deviceName) (pid \(info.processID)) did not close cleanly, so the package writer lease has expired"
         case .notOwner: return "This session does not own the package writer lease"
         case .missing: return "The package writer lease is missing"
         case .invalid: return "The package writer lease is invalid"
         case .injectedFailure(let boundary): return "Injected lease failure at \(boundary.rawValue)"
         }
     }
+
+    var errorDescription: String? { description }
 }
 
 /// An explicit single-writer lease stored beside the package manifest.
 ///
 /// Acquisition uses O_EXCL, so two processes cannot both become the owner. Expired leases are
-/// reported rather than silently broken; callers must explicitly call `breakExpired` after any
-/// transaction recovery and, normally, user confirmation.
+/// reported rather than silently broken; callers must explicitly call `breakExpired` or
+/// `recoverExpiredWriter` after any transaction recovery and, normally, user confirmation.
 final class PortablePackageLease: Sendable {
     static let defaultDuration: TimeInterval = 180
 
@@ -190,6 +200,13 @@ final class PortablePackageLease: Sendable {
             "manifest.lock.expired-\(UUID().uuidString)")
         try fm.moveItem(at: lockURL, to: quarantine)
         try? fm.removeItem(at: quarantine)
+    }
+
+    /// Rolls back any interrupted package transaction, then removes an expired writer lock.
+    /// Live (unexpired) leases are still reported as contended; this never steals a lock.
+    static func recoverExpiredWriter(at packageRoot: URL, now: Date = Date()) throws {
+        _ = try PortablePackageTransaction.recover(at: packageRoot)
+        try breakExpired(at: packageRoot, now: now)
     }
 
     var isExpired: Bool { isExpired(at: Date()) }

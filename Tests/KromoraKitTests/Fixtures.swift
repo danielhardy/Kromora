@@ -20,6 +20,18 @@ func makeInMemoryEditContainer() -> ModelContainer {
     return try! ModelContainer(for: schema, configurations: [configuration])
 }
 
+@MainActor
+struct ImmediatePortablePackageLeaseRecoveryConfirmer: PortablePackageLeaseRecoveryConfirming {
+    var allowBreak: Bool
+
+    func confirmBreakExpiredWriterLease(
+        packageURL: URL,
+        info: PortablePackageLeaseInfo
+    ) -> Bool {
+        allowBreak
+    }
+}
+
 func makeInMemoryEditStore(
     container: ModelContainer = makeInMemoryEditContainer(),
     artificialWriteDelay: Duration = .zero,
@@ -582,7 +594,8 @@ class TempDirectoryTestCase: XCTestCase {
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
-        fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy()
+        fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
+        leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil
     ) -> AppViewModel {
         let isolatedPreferences: UserDefaults
         if let preferences {
@@ -611,7 +624,8 @@ class TempDirectoryTestCase: XCTestCase {
             portableMaintenanceIdleDelay: portableMaintenanceIdleDelay,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider,
             fileDialog: fileDialog,
-            fileDropActionPolicy: fileDropActionPolicy
+            fileDropActionPolicy: fileDropActionPolicy,
+            leaseRecoveryConfirmer: leaseRecoveryConfirmer
         )
         appViewModels.append(viewModel)
         return viewModel
