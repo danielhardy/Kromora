@@ -116,7 +116,9 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.effectsValue(for: .texture), 0)
         XCTAssertEqual(viewModel.effectsValue(for: .clarity), -18)
         XCTAssertEqual(viewModel.vignetteValue(for: .amount), 0)
-        XCTAssertEqual(viewModel.vignetteValue(for: .midpoint), 40)
+        // The fractional binding write is rounded at the model boundary and must survive an
+        // unrelated Amount reset.
+        XCTAssertEqual(viewModel.vignetteValue(for: .midpoint), 41)
         XCTAssertEqual(viewModel.grainValue(for: .amount), 0)
         XCTAssertEqual(viewModel.grainValue(for: .size), 24)
         XCTAssertTrue(viewModel.hasEffects)
