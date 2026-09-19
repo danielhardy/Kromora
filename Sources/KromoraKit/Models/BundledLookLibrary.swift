@@ -54,7 +54,9 @@ struct BundledLookLibrary: Sendable {
         }
     }
 
-    static let resourceSubdirectory = "StarterLooks"
+    // SwiftPM preserves the copied target resource directory, so Starter Looks are bundled at
+    // Resources/StarterLooks in both .module and the packaged Kromora_KromoraKit.bundle.
+    static let resourceSubdirectory = "Resources/StarterLooks"
     static let manifestName = "manifest"
 
     /// Load whatever valid bundled entries are available. This is the runtime partial-failure path.
