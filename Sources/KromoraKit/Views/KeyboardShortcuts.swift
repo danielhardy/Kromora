@@ -450,6 +450,10 @@ final class KeyMonitor {
             guard KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods) else { return event }
             return vm.toggleSideBySide() ? nil : event
         case "[":
+            if vm.isCropToolActive {
+                vm.rotateCounterClockwise()
+                return nil
+            }
             if vm.inspectorState.isMaskingWorkspacePresented,
                (vm.maskInteractionState.activeTool == .brush
                 || vm.maskInteractionState.activeTool == .erase) {
@@ -468,6 +472,10 @@ final class KeyMonitor {
             }
             return nil
         case "]":
+            if vm.isCropToolActive {
+                vm.rotateClockwise()
+                return nil
+            }
             if vm.inspectorState.isMaskingWorkspacePresented,
                (vm.maskInteractionState.activeTool == .brush
                 || vm.maskInteractionState.activeTool == .erase) {

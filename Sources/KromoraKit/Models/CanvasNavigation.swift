@@ -15,6 +15,9 @@ final class CanvasInteractionState: ObservableObject {
     @Published private(set) var cropDraft: CGRect?
     @Published private(set) var cropAspectRatio: CropAspectRatio = .freeform
     @Published private(set) var cropOrientation: CropAspectRatioOrientation = .automatic
+    /// Rotation accumulated while Crop is open. This remains transient until Apply so a crop
+    /// session can be cancelled without changing the durable edit document.
+    @Published private(set) var cropRotation: ImageRotation = .zero
 
     func resetForSource() {
         navigation.resetForSource()
@@ -22,6 +25,7 @@ final class CanvasInteractionState: ObservableObject {
         cropDraft = nil
         cropAspectRatio = .freeform
         cropOrientation = .automatic
+        cropRotation = .zero
     }
 
     func fit() { navigation.fit() }
@@ -45,6 +49,7 @@ final class CanvasInteractionState: ObservableObject {
         cropDraft = committedCrop.normalizedRect ?? CropAdjustments.unitRect
         cropAspectRatio = committedCrop.aspectRatio
         cropOrientation = committedCrop.orientation
+        cropRotation = .zero
         return true
     }
 
@@ -72,6 +77,7 @@ final class CanvasInteractionState: ObservableObject {
         cropDraft = nil
         cropAspectRatio = .freeform
         cropOrientation = .automatic
+        cropRotation = .zero
     }
 
     func resetCropDraft() {
@@ -79,6 +85,22 @@ final class CanvasInteractionState: ObservableObject {
         cropDraft = CropAdjustments.unitRect
         cropAspectRatio = .freeform
         cropOrientation = .automatic
+    }
+
+    /// Rotate the draft crop and its coordinate system together. The rectangle is remapped before
+    /// the next render so it continues to frame the same content after the quarter-turn.
+    @discardableResult
+    func rotateCrop(clockwise: Bool) -> Bool {
+        guard isCropToolActive else { return false }
+        let turns = clockwise ? 1 : -1
+        cropDraft = CropAdjustments(normalizedRect: cropDraft ?? CropAdjustments.unitRect)
+            .rotated(byClockwiseQuarterTurns: turns).normalizedRect ?? CropAdjustments.unitRect
+        cropRotation = cropRotation.addingClockwiseQuarterTurns(turns)
+        return true
+    }
+
+    func cropImageSize(from committedOrientedSize: CGSize) -> CGSize {
+        cropRotation.orientedExtent(committedOrientedSize)
     }
 }
 

@@ -166,6 +166,8 @@ struct PreviewView: View {
                     CropToolbarView(
                         aspectRatio: canvasState.cropAspectRatio,
                         orientation: canvasState.cropOrientation,
+                        onRotateCounterClockwise: viewModel.rotateCounterClockwise,
+                        onRotateClockwise: viewModel.rotateClockwise,
                         onAspectRatioChange: viewModel.selectCropAspectRatio,
                         onApply: viewModel.commitCrop,
                         onReset: viewModel.resetCrop,
@@ -186,7 +188,7 @@ struct PreviewView: View {
                     if canvasState.isCropToolActive, viewModel.sourceSize != .zero {
                         CropOverlayView(
                             normalizedRect: canvasState.cropDraft ?? CropAdjustments.unitRect,
-                            imageSize: viewModel.sourceSize,
+                            imageSize: viewModel.cropSourceSize,
                             aspectRatio: canvasState.cropAspectRatio,
                             orientation: canvasState.cropOrientation,
                             onChange: viewModel.updateCropDraft
@@ -227,6 +229,10 @@ struct PreviewView: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .animation(.easeInOut(duration: 0.2), value: canvasState.isCropToolActive)
+            // The GPU preview request changes orientation at the same time as the draft frame is
+            // remapped. Animating this narrow crop subtree keeps the frame/layout transition
+            // readable without forcing a full-resolution render for intermediate angles.
+            .animation(.snappy(duration: 0.3, extraBounce: 0.04), value: canvasState.cropRotation)
         }
     }
 

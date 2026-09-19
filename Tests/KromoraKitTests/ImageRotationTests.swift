@@ -152,6 +152,46 @@ final class ImageRotationTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop.normalizedRect, originalCrop)
     }
 
+    func testRotatingWhileCroppingKeepsDraftTransientUntilApplyOrCancel() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "rotation-crop-draft.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.openImage(url: url)
+        try await waitUntil("the selected image") { viewModel.sourceImage != nil }
+
+        let draft = CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.5)
+        viewModel.beginCrop()
+        viewModel.updateCropDraft(draft)
+        let before = viewModel.document
+
+        viewModel.rotateClockwise()
+
+        XCTAssertTrue(viewModel.isCropToolActive)
+        XCTAssertEqual(viewModel.document, before, "rotation in Crop must remain a draft")
+        XCTAssertEqual(viewModel.cropRotation, .clockwise90)
+        XCTAssertEqual(
+            viewModel.cropDraft,
+            CropAdjustments(normalizedRect: draft).rotated(byClockwiseQuarterTurns: 1).normalizedRect
+        )
+
+        viewModel.cancelCrop()
+        XCTAssertEqual(viewModel.document, before, "Cancel must discard draft rotation and crop")
+        XCTAssertEqual(viewModel.cropRotation, .zero)
+
+        viewModel.beginCrop()
+        viewModel.updateCropDraft(draft)
+        viewModel.rotateClockwise()
+        viewModel.commitCrop()
+
+        XCTAssertEqual(viewModel.document.rotation, .clockwise90)
+        XCTAssertEqual(
+            viewModel.document.crop.normalizedRect,
+            CropAdjustments(normalizedRect: draft).rotated(byClockwiseQuarterTurns: 1).normalizedRect
+        )
+        XCTAssertFalse(viewModel.isCropToolActive)
+    }
+
     func testRenderEnginePreviewAndExportAgreeForRotatedCrop() async throws {
         let url = try Fixtures.writeGradientPNG(
             width: 96, height: 64, named: "rotation-export.png", in: tempDirectory
