@@ -224,10 +224,12 @@ enum ImageDecoder {
         if filter.orientation != orientation {
             filter.orientation = orientation
         }
-        guard let output = filter.outputImage else { return nil }
-        return displayOrientedRAWOutput(
+        guard let output = filter.outputImage, output.extent.isRasterizable else { return nil }
+        let displayOriented = displayOrientedRAWOutput(
             output, sensorSize: filter.nativeSize, orientation: orientation
         )
+        guard displayOriented.extent.isRasterizable else { return nil }
+        return displayOriented
     }
 
     /// Skip a second bake when `output` is already on the display axes. Internal for tests
