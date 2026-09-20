@@ -7,7 +7,7 @@ report_path=${KROMORA_PHOTO_INTELLIGENCE_REPORT_PATH:-artifacts/photo-intelligen
 
 cd "$repo_dir"
 KROMORA_PHOTO_INTELLIGENCE_REPORT_PATH="$report_path" \
-  swift test --filter PhotoIntelligenceCorpusTests.testGenerateVisualRegressionReport
+  swift test --filter PhotoIntelligenceRealCorpusTests.testGenerateVisualRegressionReport
 
 case "$report_path" in
   /*) absolute_path=$report_path ;;

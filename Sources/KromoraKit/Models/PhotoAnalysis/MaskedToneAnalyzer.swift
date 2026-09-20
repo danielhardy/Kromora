@@ -64,10 +64,18 @@ struct MaskedToneAnalyzer: Sendable {
         guard let pixels = await store.pixels(for: mask.reference) else {
             throw MaskedToneAnalysisError.missingPixels
         }
-        guard pixels.size == image.dimensions else {
+        // Vision may return a fixed-resolution square mask while the canonical analysis image
+        // preserves the source aspect ratio. Resample at this boundary so regional statistics
+        // still use the production RenderEngine without leaking provider geometry downstream.
+        let analysisMask: NormalizedMask
+        do {
+            analysisMask = pixels.size == image.dimensions
+                ? pixels
+                : try MaskOperations.resized(pixels, to: image.dimensions)
+        } catch {
             throw MaskedToneAnalysisError.mismatchedMask
         }
-        guard pixels.coverage > 0 else { throw MaskedToneAnalysisError.emptyMask }
+        guard analysisMask.coverage > 0 else { throw MaskedToneAnalysisError.emptyMask }
 
         let histogram = await engine.maskedHistogram(
             source: image.source,
@@ -76,7 +84,7 @@ struct MaskedToneAnalyzer: Sendable {
             scale: .preview(
                 maxSize: CGSize(width: image.dimensions.width, height: image.dimensions.height)),
             space: space,
-            mask: pixels
+            mask: analysisMask
         )
         try Task.checkCancellation()
         guard let histogram else { throw MaskedToneAnalysisError.unavailable }
@@ -92,7 +100,8 @@ struct MaskedToneAnalyzer: Sendable {
         guard mask.quality == mask.reference.quality,
             mask.reference.cacheKey.quality == mask.quality,
             mask.reference.cacheKey.kind == mask.kind,
-            mask.reference.size == image.dimensions
+            mask.reference.size.width > 0,
+            mask.reference.size.height > 0
         else {
             throw MaskedToneAnalysisError.mismatchedMask
         }

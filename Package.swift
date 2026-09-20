@@ -152,7 +152,7 @@ let package = Package(
         .testTarget(
             name: "KromoraKitTests",
             dependencies: ["KromoraKit"],
-            resources: [.copy("PerformanceBaselines")],
+            resources: [.copy("PerformanceBaselines"), .copy("Resources")],
             swiftSettings: distributionSwiftSettings + [.swiftLanguageMode(.v6)]
         ),
     ]

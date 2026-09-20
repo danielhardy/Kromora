@@ -18,8 +18,26 @@ dg validate
 
 `fast` covers deterministic model, coordinator, and fake-engine tests in parallel. `serial` covers
 Core Image, render, and AppKit/UI-sensitive tests. `scripts/ci-tests.sh optional` runs RAW-fixture,
-benchmark, and packaging checks when their inputs are available. Generated fixtures are created by
-the tests and are not committed.
+benchmark, and packaging checks when their inputs are available. Procedural fixtures are created by
+the tests and are not committed; the photo-intelligence resource exception is documented below.
+
+The photo-intelligence corpus has two intentionally separate checks. The fast
+`PhotoIntelligenceDecisionLogicTests` suite uses deterministic fakes to test scene/Auto decision
+logic. The serial `PhotoIntelligenceRealCorpusTests` suite writes deterministic procedural PNGs to
+a temporary directory, opens them as file-backed sources, and measures them through the production
+`RenderEngine` and Vision mask provider. It writes a disposable stats manifest beside the report;
+the test fails when a declared procedural target band drifts. Run the visual review with:
+
+```sh
+scripts/photo-intelligence-report.sh
+```
+
+The report is gitignored and contains real original/Auto-rendered pixels, a computed 4× pixel
+difference, and the returned subject mask when Vision provides one. AI-generated photo-intelligence
+fixtures (KRMA-459 Part C) may be committed under the tests target resources within a ≤ 5 MB budget,
+with a provenance manifest recording generator, model, date, and prompt. Procedural tone fixtures
+remain generated at test time. Licensed RAW / non-redistributable camera files still stay outside
+the checkout via `KROMORA_RAW_FIXTURE_DIR`.
 
 The standing Phase 1 identity gate is IdentityRegressionGateTests. It generates a disposable
 1,000-asset library and verifies full-library relocation, duplicate/collision handling, render and
