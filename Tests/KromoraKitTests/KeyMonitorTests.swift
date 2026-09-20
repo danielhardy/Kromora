@@ -37,20 +37,30 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         )
     }
 
+    private func importedPhoto(named name: String) throws -> (name: String, data: Data) {
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: name, in: tempDirectory
+        )
+        return (name, try Data(contentsOf: url))
+    }
+
     private func keyEvent(
         _ type: NSEvent.EventType,
         keyCode: UInt16,
-        isARepeat: Bool = false
+        isARepeat: Bool = false,
+        modifierFlags: NSEvent.ModifierFlags = [],
+        characters: String = "",
+        charactersIgnoringModifiers: String? = nil
     ) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(
             with: type,
             location: .zero,
-            modifierFlags: [],
+            modifierFlags: modifierFlags,
             timestamp: 0,
             windowNumber: 0,
             context: nil,
-            characters: "",
-            charactersIgnoringModifiers: "",
+            characters: characters,
+            charactersIgnoringModifiers: charactersIgnoringModifiers ?? characters,
             isARepeat: isARepeat,
             keyCode: keyCode
         ))
@@ -117,6 +127,80 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertTrue(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: []))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .shift))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .command))
+    }
+
+    func testPlainCommandCopyAndPasteRouteOnlyWhenGlobalSurfaceOwnsKeyboard() async throws {
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: makeInMemoryEditStore()
+        )
+        viewModel.importPhotosData([try importedPhoto(named: "keyboard-copy.png")])
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.sourceName != "keyboard-copy.png" {
+            XCTAssertLessThan(Date(), deadline, "the keyboard test source did not open")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let copyEvent = try keyEvent(
+            .keyDown, keyCode: 8, modifierFlags: .command,
+            characters: "c", charactersIgnoringModifiers: "c"
+        )
+        let pasteEvent = try keyEvent(
+            .keyDown, keyCode: 9, modifierFlags: .command,
+            characters: "v", charactersIgnoringModifiers: "v"
+        )
+        let sourceEdits = EditDocument(adjustments: [.exposure(ev: 0.4)])
+        viewModel.updateDocument { $0 = sourceEdits }
+
+        let globalMonitor = KeyMonitor(viewModel: viewModel)
+        defer { globalMonitor.stop() }
+        XCTAssertNil(globalMonitor.handle(copyEvent))
+        XCTAssertTrue(viewModel.isSelectiveCopyDialogPresented)
+
+        // Confirming the dialog supplies the clipboard state that ⌘V consumes below.
+        viewModel.confirmSelectiveCopy()
+        viewModel.updateDocument { $0 = EditDocument() }
+        XCTAssertNil(globalMonitor.handle(pasteEvent))
+        XCTAssertEqual(viewModel.document, sourceEdits)
+
+        let textViewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: makeInMemoryEditStore()
+        )
+        textViewModel.importPhotosData([try importedPhoto(named: "keyboard-text-focus.png")])
+        while textViewModel.sourceName != "keyboard-text-focus.png" {
+            XCTAssertLessThan(Date(), deadline, "the text-focus source did not open")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let textMonitor = KeyMonitor(
+            viewModel: textViewModel,
+            firstResponderProvider: { _ in NSText() }
+        )
+        defer { textMonitor.stop() }
+        XCTAssertNotNil(textMonitor.handle(copyEvent))
+        XCTAssertFalse(textViewModel.isSelectiveCopyDialogPresented)
+        XCTAssertNotNil(textMonitor.handle(pasteEvent))
+
+        // A native control also keeps plain ⌘C/⌘V. There is no plain-⌘C menu binding, so the
+        // event falls through unchanged; the explicit toolbar/menu Copy Edits… action remains
+        // available. This is intentional AppKit focus behavior, not a silent copy failure.
+        let controlViewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: makeInMemoryEditStore()
+        )
+        controlViewModel.importPhotosData([try importedPhoto(named: "keyboard-control-focus.png")])
+        while controlViewModel.sourceName != "keyboard-control-focus.png" {
+            XCTAssertLessThan(Date(), deadline, "the control-focus source did not open")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let controlMonitor = KeyMonitor(
+            viewModel: controlViewModel,
+            firstResponderProvider: { _ in NSButton() }
+        )
+        defer { controlMonitor.stop() }
+        XCTAssertNotNil(controlMonitor.handle(copyEvent))
+        XCTAssertFalse(controlViewModel.isSelectiveCopyDialogPresented)
+        XCTAssertNotNil(controlMonitor.handle(pasteEvent))
     }
 
     func testImageNavigationOwnershipConsumesDownAndUpIncludingBoundaries() {
