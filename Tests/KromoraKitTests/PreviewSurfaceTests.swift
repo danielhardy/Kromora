@@ -26,6 +26,40 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "MaskOverlay"))
     }
 
+    func testDoubleClickMouseDownTogglesCanvasAfterLeavingCropTool() throws {
+        var navigation = CanvasNavigation()
+        let view = PreviewMTKView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
+        view.onDoubleClick = { navigation.toggleFitAndRememberedZoom() }
+
+        let doubleClick = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: CGPoint(x: 160, y: 120),
+            modifierFlags: [],
+            timestamp: 1,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 2,
+            pressure: 1
+        ))
+
+        let canvasState = CanvasInteractionState()
+        XCTAssertTrue(canvasState.beginCrop(using: CropAdjustments()))
+        view.ignoresHits = canvasState.isCropToolActive
+        XCTAssertNil(view.hitTest(CGPoint(x: 160, y: 120)))
+
+        canvasState.finishCrop()
+        view.ignoresHits = canvasState.isCropToolActive
+        view.mouseDown(with: doubleClick)
+        XCTAssertEqual(navigation.mode, .custom)
+        XCTAssertEqual(navigation.zoom, CanvasNavigation.doubleClickFallbackZoom)
+
+        view.mouseDown(with: doubleClick)
+        XCTAssertEqual(navigation.mode, .fit)
+        XCTAssertEqual(navigation.zoom, 1)
+    }
+
     func testCoordinatorBuildsAPresentationPipelineFromBundledMetalSource() {
         let coordinator = PreviewSurfaceView.Coordinator()
         XCTAssertTrue(
@@ -383,6 +417,61 @@ final class PreviewSurfaceTests: XCTestCase {
                 presentationNavigation: pannedNavigation
             ))
         XCTAssertEqual(surface.navigationForPresentation(pannedNavigation), pannedNavigation)
+    }
+
+    func testPartialROIFollowsLivePanOnRetainedCompleteFrameWithoutGaps() async throws {
+        let surface = PreviewSurface()
+        let identity = PreviewFrameIdentity(
+            sourceToken: "source", documentHash: "document", space: .current)
+        let complete = CIImage(color: .blue).cropped(
+            to: CGRect(x: 0, y: 0, width: 800, height: 600))
+        var publishedNavigation = CanvasNavigation()
+        publishedNavigation.setZoom(8)
+
+        XCTAssertTrue(
+            surface.present(
+                complete,
+                detailIdentity: identity,
+                detailFactor: 0.5,
+                presentationImageExtent: CGRect(x: 0, y: 0, width: 800, height: 600),
+                coversPresentationExtent: true,
+                presentationNavigation: publishedNavigation
+            ))
+        let completeRevision = try XCTUnwrap(surface.pendingDisplayRevision())
+        surface.markPresentationSucceeded(displayRevision: completeRevision)
+        _ = try await waitForPresentationTexture(surface)
+
+        let roi = CIImage(color: .red).cropped(
+            to: CGRect(x: 240, y: 180, width: 160, height: 120))
+        XCTAssertTrue(
+            surface.present(
+                roi,
+                detailIdentity: identity,
+                detailFactor: 1,
+                presentationImageExtent: CGRect(x: 0, y: 0, width: 800, height: 600),
+                coversPresentationExtent: false,
+                layoutImageExtent: roi.extent,
+                presentationNavigation: publishedNavigation
+            ))
+
+        var pannedNavigation = publishedNavigation
+        pannedNavigation.pan(
+            by: CGSize(width: -80, height: 45),
+            imageExtent: CGRect(x: 0, y: 0, width: 800, height: 600),
+            viewportSize: CGSize(width: 800, height: 600)
+        )
+        XCTAssertNil(surface.presentationTexture)
+        XCTAssertNotNil(
+            PreviewSurfaceView.Coordinator().renderRetainedTextureForTesting(
+                surface: surface, navigation: pannedNavigation,
+                destinationSize: CGSize(width: 80, height: 60)
+            ),
+            "the retained complete texture must back the live pan before the ROI materializes"
+        )
+        XCTAssertEqual(
+            surface.navigationForPresentation(pannedNavigation), pannedNavigation,
+            "the retained complete frame must move with the pointer while the ROI catches up"
+        )
     }
 
     func testPresentationImageRemainsBoundedAbove100PercentAndKeepsTheSourceVisible() throws {

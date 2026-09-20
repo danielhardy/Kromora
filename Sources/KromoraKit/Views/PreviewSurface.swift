@@ -56,6 +56,17 @@ final class PreviewSurface: ObservableObject {
     private var lastValidCoversPresentationExtent = false
     private var lastValidPresentationNavigation: CanvasNavigation?
     private var lastValidSpace: WorkingSpace = .current
+    /// A complete frame is the gap-free backing image for live navigation while a newer ROI is
+    /// being rendered. It is deliberately kept separately from the current publication: moving
+    /// a partial ROI under a new transform would expose the canvas background at its edges.
+    private var retainedCompleteImage: CIImage?
+    private var retainedCompletePresentationImageExtent: CGRect?
+    private var retainedCompleteLayoutImageExtent: CGRect?
+    private var retainedCompleteTexture: MTLTexture?
+    private var retainedCompleteTextureExtent: CGRect?
+    private var retainedCompleteSpace: WorkingSpace = .current
+    private var retainedCompleteDetail: PublishedDetail?
+    private var retainedCompleteGeneration: UInt64 = 0
     /// The detail level of a published frame, plus whether that frame is the complete photo.
     /// Coverage is part of the record because a partial ROI frame is not interchangeable with a
     /// whole-photo frame of the same source and document, however sharp it is.
@@ -68,6 +79,7 @@ final class PreviewSurface: ObservableObject {
     private var currentDetail: PublishedDetail?
     private var pendingPresentationMaterializationRevision: UInt64?
     private var pendingPresentationMaterialization: (texture: MTLTexture, extent: CGRect)?
+    private var presentationMaterializations: [UInt64: (texture: MTLTexture, extent: CGRect)] = [:]
     private var pendingDisplayID: UInt64?
     private var pendingGPURevision: UInt64?
     /// The paused MTKView does not continuously redraw. Keep the active destination weakly so a
@@ -212,7 +224,8 @@ final class PreviewSurface: ObservableObject {
         pendingPresentationMaterializationRevision = surfaceRevision
         beginPresentationTextureMaterialization(
             image: image, space: space, surfaceRevision: surfaceRevision,
-            telemetryRevision: revision
+            telemetryRevision: revision, completeFrameIdentity: currentDetail?.identity,
+            isCompleteFrame: coversPresentationExtent
         )
         if let revision, let onPresented, !hasManagedPresentationLifecycle {
             presentationConfirmations.removeValue(forKey: revision)
@@ -266,16 +279,27 @@ final class PreviewSurface: ObservableObject {
     }
 
     fileprivate func mappedImageForPresentation(_ image: CIImage) -> CIImage {
+        Self.mappedImageForPresentation(
+            image, presentationImageExtent: presentationImageExtent,
+            coversPresentationExtent: coversPresentationExtent,
+            layoutImageExtent: layoutImageExtent
+        )
+    }
+
+    fileprivate static func mappedImageForPresentation(
+        _ image: CIImage, presentationImageExtent: CGRect?, coversPresentationExtent: Bool,
+        layoutImageExtent: CGRect?
+    ) -> CIImage {
         if coversPresentationExtent, let presentationImageExtent,
             presentationImageExtent.width > 0, presentationImageExtent.height > 0
         {
-            return Self.imageMapped(image, onto: presentationImageExtent)
+            return imageMapped(image, onto: presentationImageExtent)
         }
         if let layoutImageExtent,
             layoutImageExtent.width > 0, layoutImageExtent.height > 0,
             layoutImageExtent.width.isFinite, layoutImageExtent.height.isFinite
         {
-            return Self.imageMapped(image, onto: layoutImageExtent)
+            return imageMapped(image, onto: layoutImageExtent)
         }
         return image
     }
@@ -315,6 +339,16 @@ final class PreviewSurface: ObservableObject {
         lastValidPresentationNavigation = presentationNavigation
         lastValidSpace = space
         lastValidDetail = currentDetail
+        if coversPresentationExtent, let image {
+            retainedCompleteImage = image
+            retainedCompletePresentationImageExtent = presentationImageExtent
+            retainedCompleteLayoutImageExtent = layoutImageExtent
+            retainedCompleteTexture = presentationTexture
+            retainedCompleteTextureExtent = presentationTextureExtent
+            retainedCompleteSpace = space
+            retainedCompleteDetail = currentDetail
+            retainedCompleteGeneration &+= 1
+        }
         pendingDisplayID = nil
     }
 
@@ -366,7 +400,8 @@ final class PreviewSurface: ObservableObject {
 
     private func beginPresentationTextureMaterialization(
         image: CIImage, space: WorkingSpace, surfaceRevision: UInt64,
-        telemetryRevision: UInt64?
+        telemetryRevision: UInt64?, completeFrameIdentity: PreviewFrameIdentity?,
+        isCompleteFrame: Bool
     ) {
         let started = LiveEditTelemetryClock.now
         guard let submission = Self.makePresentationTexture(image: image, space: space) else {
@@ -374,6 +409,7 @@ final class PreviewSurface: ObservableObject {
             return
         }
         pendingPresentationMaterialization = (submission.texture, submission.extent)
+        presentationMaterializations[surfaceRevision] = (submission.texture, submission.extent)
 
         submission.commandBuffer.addCompletedHandler { [weak self] commandBuffer in
             let gpuMS: Double?
@@ -386,7 +422,9 @@ final class PreviewSurface: ObservableObject {
             Task { @MainActor in
                 self?.presentationTextureMaterializationCompleted(
                     surfaceRevision: surfaceRevision, telemetryRevision: telemetryRevision,
-                    succeeded: succeeded, gpuMS: gpuMS
+                    succeeded: succeeded, gpuMS: gpuMS,
+                    completeFrameIdentity: completeFrameIdentity,
+                    isCompleteFrame: isCompleteFrame
                 )
             }
         }
@@ -399,8 +437,8 @@ final class PreviewSurface: ObservableObject {
     }
 
     private func presentationTextureMaterializationCompleted(
-        surfaceRevision: UInt64,
-        telemetryRevision: UInt64?, succeeded: Bool, gpuMS: Double?
+        surfaceRevision: UInt64, telemetryRevision: UInt64?, succeeded: Bool, gpuMS: Double?,
+        completeFrameIdentity: PreviewFrameIdentity?, isCompleteFrame: Bool
     ) {
         if let telemetryRevision {
             telemetryByRevision[telemetryRevision]?.telemetry
@@ -412,16 +450,33 @@ final class PreviewSurface: ObservableObject {
                 )
             }
         }
-        guard pendingPresentationMaterializationRevision == surfaceRevision,
-            revision == surfaceRevision
-        else { return }
-        pendingPresentationMaterializationRevision = nil
-        let materialization = pendingPresentationMaterialization
-        pendingPresentationMaterialization = nil
+        let isCurrentMaterialization =
+            pendingPresentationMaterializationRevision == surfaceRevision
+            && revision == surfaceRevision
+        let materialization = presentationMaterializations.removeValue(forKey: surfaceRevision)
+        if isCurrentMaterialization {
+            pendingPresentationMaterializationRevision = nil
+            pendingPresentationMaterialization = nil
+        }
         if succeeded, let materialization {
+            if !isCurrentMaterialization, isCompleteFrame,
+                let completeFrameIdentity,
+                retainedCompleteDetail?.identity == completeFrameIdentity,
+                retainedCompleteImage != nil
+            {
+                retainedCompleteTexture = materialization.texture
+                retainedCompleteTextureExtent = materialization.extent
+                retainedCompleteGeneration &+= 1
+            }
+            guard isCurrentMaterialization else { return }
             presentationTexture = materialization.texture
             presentationTextureExtent = materialization.extent
             presentationTextureGeneration &+= 1
+            if coversPresentationExtent, pendingDisplayID == nil {
+                retainedCompleteTexture = materialization.texture
+                retainedCompleteTextureExtent = materialization.extent
+                retainedCompleteGeneration &+= 1
+            }
             // The fallback drawable can complete before this callback's main-actor hop. Keep the
             // retained texture in rollback state if the publication was already confirmed.
             if pendingDisplayID == nil {
@@ -516,6 +571,14 @@ final class PreviewSurface: ObservableObject {
         lastValidCoversPresentationExtent = false
         lastValidPresentationNavigation = nil
         lastValidSpace = .current
+        retainedCompleteImage = nil
+        retainedCompletePresentationImageExtent = nil
+        retainedCompleteLayoutImageExtent = nil
+        retainedCompleteTexture = nil
+        retainedCompleteTextureExtent = nil
+        retainedCompleteSpace = .current
+        retainedCompleteDetail = nil
+        retainedCompleteGeneration &+= 1
         lastValidDetail = nil
         currentDetail = nil
         revision &+= 1
@@ -529,14 +592,72 @@ final class PreviewSurface: ObservableObject {
         presentationConfirmations.removeAll()
         pendingPresentationMaterializationRevision = nil
         pendingPresentationMaterialization = nil
+        presentationMaterializations.removeAll()
     }
 
-    /// A complete frame can be transformed immediately for presentation-only navigation. A
-    /// partial ROI cannot: moving its quad before the replacement ROI arrives would uncover the
-    /// newly exposed photo area and clear it to the canvas background.
+    /// The current publication's navigation, or the current pointer navigation when a confirmed
+    /// complete frame can safely back a partial ROI. Keeping the old ROI at its publish-time
+    /// transform is the final fallback for the short interval before the first complete frame is
+    /// confirmed.
     func navigationForPresentation(_ current: CanvasNavigation) -> CanvasNavigation {
-        guard !coversPresentationExtent else { return current }
-        return presentationNavigation ?? current
+        presentationFrame(for: current)?.navigation ?? current
+    }
+
+    fileprivate struct PresentationFrame {
+        let image: CIImage
+        let texture: MTLTexture?
+        let textureExtent: CGRect?
+        let presentationImageExtent: CGRect?
+        let layoutImageExtent: CGRect?
+        let space: WorkingSpace
+        let navigation: CanvasNavigation
+        let generation: UInt64
+        let usesRetainedCompleteFrame: Bool
+    }
+
+    /// Select the pixels that may be moved under the pointer. A partial ROI is detail, not the
+    /// coverage contract: while it is catching up, the last complete photo remains visible and
+    /// follows the new transform immediately. Once the ROI is published at that navigation it
+    /// becomes the active detail frame again.
+    fileprivate func presentationFrame(for current: CanvasNavigation) -> PresentationFrame? {
+        guard let image else { return nil }
+
+        let currentFrame = PresentationFrame(
+            image: image,
+            texture: presentationTexture,
+            textureExtent: presentationTextureExtent,
+            presentationImageExtent: presentationImageExtent,
+            layoutImageExtent: coversPresentationExtent
+                ? presentationImageExtent : layoutImageExtent,
+            space: space,
+            navigation: coversPresentationExtent
+                ? current : (presentationNavigation ?? current),
+            generation: presentationTextureGeneration,
+            usesRetainedCompleteFrame: false
+        )
+        guard !coversPresentationExtent,
+            let publishedNavigation = presentationNavigation,
+            publishedNavigation != current,
+            let retainedCompleteImage,
+            let currentDetail,
+            let retainedCompleteDetail,
+            currentDetail.identity == retainedCompleteDetail.identity
+        else {
+            return currentFrame
+        }
+
+        return PresentationFrame(
+            image: retainedCompleteImage,
+            texture: retainedCompleteTexture,
+            textureExtent: retainedCompleteTextureExtent,
+            presentationImageExtent: retainedCompletePresentationImageExtent,
+            layoutImageExtent: retainedCompleteLayoutImageExtent
+                ?? retainedCompletePresentationImageExtent,
+            space: retainedCompleteSpace,
+            navigation: current,
+            generation: retainedCompleteGeneration,
+            usesRetainedCompleteFrame: true
+        )
     }
 
     private struct MaterializationSubmission {
@@ -802,7 +923,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         func draw(in view: MTKView) {
             self.view = view
             guard !isDrawing else { return }
-            guard let surface, let image = surface.image else { return }
+            guard let surface, let frame = surface.presentationFrame(for: navigation) else { return }
             let drawableAcquisitionStart = LiveEditTelemetryClock.now
             guard let drawable = view.currentDrawable,
                 let commandBuffer = commandQueue.makeCommandBuffer()
@@ -814,12 +935,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
             let drawableSize = (drawable.texture.width, drawable.texture.height)
             onDrawableSizeChange?(CGSize(width: drawableSize.0, height: drawableSize.1))
-            let drawNavigation = surface.navigationForPresentation(navigation)
+            let drawNavigation = frame.navigation
             let sameDrawableSize =
                 lastDrawableSize?.width == drawableSize.0
                 && lastDrawableSize?.height == drawableSize.1
             let sameTextureGeneration =
-                lastDrawnTextureGeneration == surface.presentationTextureGeneration
+                lastDrawnTextureGeneration == frame.generation
             let sameViewSpaceRotation =
                 lastDrawnViewSpaceRotationAngle.map {
                     abs($0 - viewSpaceRotationAngle) <= 0.000001
@@ -842,8 +963,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 height: CGFloat(drawable.texture.height)
             )
             guard destination.width > 0, destination.height > 0,
-                image.extent.width > 0, image.extent.height > 0,
-                image.extent.width.isFinite, image.extent.height.isFinite
+                frame.image.extent.width > 0, frame.image.extent.height > 0,
+                frame.image.extent.width.isFinite, frame.image.extent.height.isFinite
             else { return }
 
             let presentationRevision = surface.pendingPresentationRevision()
@@ -855,7 +976,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let displayRevision = surface.pendingDisplayRevision()
             let drawRevision = surface.revision
             let drawViewSpaceRotationAngle = viewSpaceRotationAngle
-            let drawTextureGeneration = surface.presentationTextureGeneration
+            let drawTextureGeneration = frame.generation
             isDrawing = true
             let presentationEncodingStart = LiveEditTelemetryClock.now
             let renderPass = view.currentRenderPassDescriptor
@@ -865,13 +986,13 @@ struct PreviewSurfaceView: NSViewRepresentable {
             renderPass?.colorAttachments[0].loadAction = .clear
             renderPass?.colorAttachments[0].storeAction = .store
 
-            if let texture = surface.presentationTexture,
-                let textureExtent = surface.presentationTextureExtent,
+            if let texture = frame.texture,
+                let textureExtent = frame.textureExtent,
                 let pipeline, let samplerState,
                 var geometry = Self.quadGeometry(
-                    imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
+                    imageExtent: frame.layoutImageExtent ?? textureExtent,
                     navigation: drawNavigation,
-                    destination: destination, virtualExtent: surface.presentationImageExtent,
+                    destination: destination, virtualExtent: frame.presentationImageExtent,
                     viewSpaceRotationAngle: drawViewSpaceRotationAngle
                 ),
                 let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
@@ -897,9 +1018,14 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     vertexCount: geometry.vertices.count)
                 encoder.endEncoding()
             } else if let output = Self.presentationImage(
-                surface.mappedImageForPresentation(image), navigation: drawNavigation,
+                PreviewSurface.mappedImageForPresentation(
+                    frame.image, presentationImageExtent: frame.presentationImageExtent,
+                    coversPresentationExtent: frame.usesRetainedCompleteFrame
+                        || surface.coversPresentationExtent,
+                    layoutImageExtent: frame.layoutImageExtent
+                ), navigation: drawNavigation,
                 destination: destination,
-                virtualExtent: surface.presentationImageExtent,
+                virtualExtent: frame.presentationImageExtent,
                 viewSpaceRotationAngle: drawViewSpaceRotationAngle,
                 appearance: appearance
             ) {
@@ -907,7 +1033,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 // production path above never evaluates this graph on presentation-only redraws.
                 context.render(
                     output, to: drawable.texture, commandBuffer: commandBuffer,
-                    bounds: destination, colorSpace: surface.space.cgColorSpace)
+                    bounds: destination, colorSpace: frame.space.cgColorSpace)
                 PreviewSurface.notePresentationCoreImageEvaluation()
             } else {
                 isDrawing = false
@@ -1235,8 +1361,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
         ) -> MTLTexture? {
             guard destinationSize.width > 0, destinationSize.height > 0,
                 destinationSize.width.isFinite, destinationSize.height.isFinite,
-                let texture = surface.presentationTexture,
-                let textureExtent = surface.presentationTextureExtent,
+                let frame = surface.presentationFrame(for: navigation),
+                let texture = frame.texture,
+                let textureExtent = frame.textureExtent,
                 let pipeline, let samplerState
             else { return nil }
 
@@ -1250,10 +1377,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
             descriptor.storageMode = .shared
             guard let target = device.makeTexture(descriptor: descriptor),
                 var geometry = Self.quadGeometry(
-                    imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
+                    imageExtent: frame.layoutImageExtent ?? textureExtent,
                     navigation: navigation,
                     destination: CGRect(x: 0, y: 0, width: width, height: height),
-                    virtualExtent: surface.presentationImageExtent,
+                    virtualExtent: frame.presentationImageExtent,
                     viewSpaceRotationAngle: viewSpaceRotationAngle
                 ),
                 let commandBuffer = commandQueue.makeCommandBuffer()
@@ -1301,7 +1428,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
 /// A paused MTKView still needs a display request after it first enters a window. This subclass
 /// covers the case where SwiftUI's update arrived before the view had a drawable.
-private final class PreviewMTKView: MTKView {
+// Internal so the AppKit mouse-down seam can be exercised with a real NSEvent in tests.
+final class PreviewMTKView: MTKView {
     var onScrollZoom: ((CGFloat) -> Void)?
     var onDoubleClick: (() -> Void)?
     var onEffectiveAppearanceChange: ((NSAppearance) -> Void)?
