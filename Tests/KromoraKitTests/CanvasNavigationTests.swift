@@ -335,13 +335,19 @@ final class CanvasObservationTests: TempDirectoryTestCase {
     }
 
     private func nextROIRequest(
-        from fake: FakeRenderEngine, after count: Int
+        from fake: FakeRenderEngine, after count: Int,
+        matching navigation: CanvasNavigation
     ) async throws -> FakeRenderEngine.Request {
         try await waitUntil("the next viewport ROI request") {
-            (await fake.previewRequests).dropFirst(count).contains { $0.sourceROI != nil }
+            (await fake.previewRequests).dropFirst(count).contains {
+                $0.sourceROI != nil && $0.presentationNavigation == navigation
+            }
         }
         let requests = await fake.previewRequests
-        return try XCTUnwrap(requests.dropFirst(count).first { $0.sourceROI != nil })
+        return try XCTUnwrap(
+            requests.dropFirst(count).first {
+                $0.sourceROI != nil && $0.presentationNavigation == navigation
+            })
     }
 
     private func assertContains(
@@ -402,7 +408,9 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         for zoom in [4.0, 8.0, CanvasNavigation.maximumZoom] {
             let beforeZoom = await fake.previewRequests.count
             viewModel.setCanvasZoom(zoom)
-            _ = try await nextROIRequest(from: fake, after: beforeZoom)
+            _ = try await nextROIRequest(
+                from: fake, after: beforeZoom, matching: viewModel.canvasNavigation
+            )
 
             viewModel.beginCanvasInteraction()
             let edgeDeltas = [
@@ -414,7 +422,9 @@ final class CanvasObservationTests: TempDirectoryTestCase {
             for delta in edgeDeltas {
                 let before = await fake.previewRequests.count
                 viewModel.panCanvas(by: delta, viewportSize: viewport)
-                let request = try await nextROIRequest(from: fake, after: before)
+                let request = try await nextROIRequest(
+                    from: fake, after: before, matching: viewModel.canvasNavigation
+                )
                 let plan = viewModel.resolutionPlan(
                     for: viewModel.document, nativeExtent: viewModel.sourceSize,
                     viewportSize: viewport, surface: .mainPreview
@@ -440,7 +450,9 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         let viewport = CGSize(width: 80, height: 60)
         viewModel.updatePreviewBackingSize(viewport)
         viewModel.setCanvasZoom(8)
-        _ = try await nextROIRequest(from: fake, after: 0)
+        _ = try await nextROIRequest(
+            from: fake, after: 0, matching: viewModel.canvasNavigation
+        )
         viewModel.panCanvas(by: CGSize(width: -12, height: 9), viewportSize: viewport)
         let focalBeforeEdit = viewModel.canvasNavigation.focalPoint
 
