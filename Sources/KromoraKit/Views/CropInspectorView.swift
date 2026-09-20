@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The framing controls for the dedicated Crop workspace. Crop owns the inspector while it is
@@ -40,9 +41,8 @@ struct CropInspectorView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     aspectSection
-                    rotationSection
+                    rotationAndFlipSection
                     straightenSection
-                    flipSection
                     perspectiveSection
 
                     Divider()
@@ -160,27 +160,57 @@ struct CropInspectorView: View {
         return pixelRatio >= 1 ? .landscape : .portrait
     }
 
-    private var rotationSection: some View {
+    private var rotationAndFlipSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Rotate")
+            Text("Rotate and Flip")
                 .font(.headline)
 
             HStack(spacing: 8) {
-                Button(action: onRotateCounterClockwise) {
-                    Label("Rotate counterclockwise", systemImage: "rotate.left")
-                        .labelStyle(.titleAndIcon)
-                }
-                .help("Rotate 90° counterclockwise")
-                .accessibilityLabel("Rotate 90 degrees counterclockwise")
-
-                Button(action: onRotateClockwise) {
-                    Label("Rotate clockwise", systemImage: "rotate.right")
-                        .labelStyle(.titleAndIcon)
-                }
-                .help("Rotate 90° clockwise")
-                .accessibilityLabel("Rotate 90 degrees clockwise")
+                transformButton(
+                    "Rotate 90 degrees counterclockwise",
+                    systemImage: "rotate.left",
+                    help: "Rotate 90 degrees counterclockwise",
+                    action: onRotateCounterClockwise
+                )
+                transformButton(
+                    "Rotate 90 degrees clockwise",
+                    systemImage: "rotate.right",
+                    help: "Rotate 90 degrees clockwise",
+                    action: onRotateClockwise
+                )
+                flipButton(
+                    "Flip horizontal",
+                    systemImage: flipHorizontalSystemImage,
+                    help: "Flip horizontally",
+                    isOn: flipHorizontal,
+                    action: onFlipHorizontal
+                )
+                flipButton(
+                    "Flip vertical",
+                    systemImage: flipVerticalSystemImage,
+                    rotation: flipVerticalSymbolUsesRotation ? .degrees(90) : .zero,
+                    help: "Flip vertically",
+                    isOn: flipVertical,
+                    action: onFlipVertical
+                )
             }
         }
+    }
+
+    private var flipHorizontalSystemImage: String {
+        Self.isSystemImageAvailable("flip.horizontal") ? "flip.horizontal" : "arrow.left.and.right"
+    }
+
+    private var flipVerticalSystemImage: String {
+        Self.isSystemImageAvailable("flip.horizontal") ? "flip.horizontal" : "arrow.up.and.down"
+    }
+
+    private var flipVerticalSymbolUsesRotation: Bool {
+        Self.isSystemImageAvailable("flip.horizontal")
+    }
+
+    private static func isSystemImageAvailable(_ name: String) -> Bool {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
     }
 
     private var straightenSection: some View {
@@ -206,19 +236,6 @@ struct CropInspectorView: View {
             )
             .accessibilityLabel("Straighten angle")
             .accessibilityValue("\(straightenAngle, specifier: "%.1f") degrees")
-        }
-    }
-
-    private var flipSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Flip")
-                .font(.headline)
-            HStack(spacing: 8) {
-                flipButton("Flip horizontal", systemImage: "arrow.left.and.right", isOn: flipHorizontal,
-                           action: onFlipHorizontal)
-                flipButton("Flip vertical", systemImage: "arrow.up.and.down", isOn: flipVertical,
-                           action: onFlipVertical)
-            }
         }
     }
 
@@ -272,15 +289,46 @@ struct CropInspectorView: View {
     }
 
     private func flipButton(
-        _ title: String, systemImage: String, isOn: Bool, action: @escaping () -> Void
+        _ title: String,
+        systemImage: String,
+        rotation: Angle = .zero,
+        help: String,
+        isOn: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Label {
+                Text(title)
+            } icon: {
+                Image(systemName: systemImage)
+                    .rotationEffect(rotation)
+            }
+        }
+        .buttonStyle(.bordered)
+        .labelStyle(.iconOnly)
+        .frame(width: 32, height: 32)
+        .contentShape(Rectangle())
+        .help(help)
+        .accessibilityLabel(title)
+        .tint(isOn ? .accentColor : nil)
+        .accessibilityValue(isOn ? "On" : "Off")
+    }
+
+    private func transformButton(
+        _ title: String,
+        systemImage: String,
+        help: String,
+        action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .labelStyle(.titleAndIcon)
+                .labelStyle(.iconOnly)
         }
         .buttonStyle(.bordered)
-        .tint(isOn ? .accentColor : nil)
-        .accessibilityValue(isOn ? "On" : "Off")
+        .frame(width: 32, height: 32)
+        .contentShape(Rectangle())
+        .help(help)
+        .accessibilityLabel(title)
     }
 
 }
