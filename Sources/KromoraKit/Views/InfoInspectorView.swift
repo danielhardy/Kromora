@@ -27,6 +27,8 @@ struct InfoInspectorView: View {
                     horizontalPerspective: canvasState.cropHorizontalPerspective,
                     onRotateCounterClockwise: viewModel.rotateCounterClockwise,
                     onRotateClockwise: viewModel.rotateClockwise,
+                    onBeginInteraction: viewModel.beginPreviewInteraction,
+                    onEndInteraction: viewModel.endPreviewInteraction,
                     onStraightenChange: viewModel.setCropStraightenAngle,
                     onFlipHorizontal: { viewModel.toggleCropFlip(horizontal: true) },
                     onFlipVertical: { viewModel.toggleCropFlip(horizontal: false) },

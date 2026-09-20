@@ -550,6 +550,57 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop, committed)
     }
 
+    func testCropGeometrySliderChangesStayInOneDisplayGenerationAndSettleAfterRelease() async throws {
+        let fake = FakeRenderEngine()
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "interactive-geometry.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: fake, editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        viewModel.beginPreviewInteraction()
+        let interactionRevision = viewModel.displayRevision
+
+        let changes: [(@MainActor () -> Void, (FakeRenderEngine.Request) -> Bool)] = [
+            ({ viewModel.setCropStraightenAngle(12) }, { request in
+                request.document.crop.straightenAngle == 12
+            }),
+            ({ viewModel.setCropStraightenAngle(24) }, { request in
+                request.document.crop.straightenAngle == 24
+            }),
+            ({ viewModel.setCropVerticalPerspective(0.2) }, { request in
+                request.document.crop.verticalPerspective == 0.2
+            }),
+            ({ viewModel.setCropHorizontalPerspective(-0.15) }, { request in
+                request.document.crop.horizontalPerspective == -0.15
+            }),
+        ]
+
+        for (change, matches) in changes {
+            let before = await fake.previewRequests.count
+            change()
+            _ = try await waitForPreviewRequest(
+                after: before, matching: "interactive crop geometry request", on: fake
+            ) { request in
+                guard case .interactive = request.scale else { return false }
+                return matches(request)
+            }
+            XCTAssertEqual(viewModel.displayRevision, interactionRevision)
+        }
+
+        viewModel.endPreviewInteraction()
+        _ = try await waitForPreviewRequest(
+            matching: "settled crop geometry request", on: fake
+        ) { request in
+            guard case .preview = request.scale else { return false }
+            return request.document.crop.straightenAngle == 24
+                && request.document.crop.verticalPerspective == 0.2
+                && request.document.crop.horizontalPerspective == -0.15
+        }
+    }
+
     func testCropModeOwnsAndRestoresEditChromeState() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray).cropped(

@@ -373,6 +373,56 @@ final class PreviewCostBenchmark: XCTestCase {
                      roundTrip - direct, roundTrip / direct))
     }
 
+    /// Measures the crop workspace's full-source geometry graph at the interactive viewport size.
+    /// This is opt-in because it creates a representative 24 MP fixture and runs real Core Image
+    /// work; the printed p95 is the number used when evaluating the 20 Hz drag target.
+    func testMeasureCropGeometryInteractiveCost() async throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["KROMORA_BENCH"] != nil,
+            "set KROMORA_BENCH=1 to run the crop geometry measurement"
+        )
+        let dir = try Fixtures.makeTempDirectory("bench-crop-geometry")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = try Fixtures.writeGradientPNG(
+            width: 6000, height: 4000, named: "crop-geometry.png", in: dir)
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 6000, height: 4000))
+        let engine = RenderEngine()
+        let viewport = CGSize(width: 1600, height: 1200)
+        let ticks = 30
+
+        func request(for tick: Int) -> RenderRequest {
+            let progress = Double(tick % ticks) / Double(ticks - 1)
+            return RenderRequest(
+                source: source,
+                document: EditDocument(crop: CropAdjustments(
+                    straightenAngle: -12 + 24 * progress,
+                    verticalPerspective: 0.35 * progress,
+                    horizontalPerspective: -0.25 * progress
+                )),
+                targetSize: viewport,
+                quality: .interactive,
+                output: .raster
+            )
+        }
+
+        for tick in 0..<3 { _ = await engine.makeCGImage(request(for: tick)) }
+        var samples: [Double] = []
+        samples.reserveCapacity(ticks)
+        for tick in 3..<(ticks + 3) {
+            let start = Date()
+            _ = await engine.makeCGImage(request(for: tick))
+            samples.append(Date().timeIntervalSince(start) * 1000)
+        }
+
+        let sorted = samples.sorted()
+        let p50 = sorted[sorted.count / 2]
+        let p95 = sorted[min(Int(Double(sorted.count - 1) * 0.95), sorted.count - 1)]
+        print("\n=== Crop geometry interactive benchmark (6000x4000, viewport 1600x1200, \(ticks) ticks) ===")
+        print(String(format: "  p50: %.2f ms/frame (%.1f Hz)", p50, 1_000 / p50))
+        print(String(format: "  p95: %.2f ms/frame (%.1f Hz)", p95, 1_000 / p95))
+        XCTAssertEqual(samples.count, ticks)
+    }
+
     // MARK: - Export (Step 6)
 
     /// The same question for **export**, which Step 6 cut over.
