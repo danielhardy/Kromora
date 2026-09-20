@@ -7,12 +7,39 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
 
     private actor Gate {
         private var waiters: [CheckedContinuation<Void, Never>] = []
+        private var waitingObservers: [CheckedContinuation<Void, Never>] = []
+        private var hasEnteredWait = false
+        private var isReleased = false
 
         func wait() async {
-            await withCheckedContinuation { waiters.append($0) }
+            hasEnteredWait = true
+            let observers = waitingObservers
+            waitingObservers.removeAll()
+            for observer in observers { observer.resume() }
+
+            guard !isReleased else { return }
+            await withCheckedContinuation { waiter in
+                if isReleased {
+                    waiter.resume()
+                } else {
+                    waiters.append(waiter)
+                }
+            }
+        }
+
+        func waitUntilEntered() async {
+            guard !hasEnteredWait else { return }
+            await withCheckedContinuation { observer in
+                if hasEnteredWait {
+                    observer.resume()
+                } else {
+                    waitingObservers.append(observer)
+                }
+            }
         }
 
         func releaseAll() {
+            isReleased = true
             let parked = waiters
             waiters.removeAll()
             for waiter in parked { waiter.resume() }
@@ -195,9 +222,7 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
             id: .init("package-blocker"), lane: .importCopyHash,
             operation: { await gate.wait() }
         )
-        try await waitUntil("package blocker", timeout: 10) {
-            scheduler.runningPackageIOCount == 1
-        }
+        await gate.waitUntilEntered()
 
         let maintenance = PortablePackageMaintenance(scheduler: scheduler)
         let outcomes = OutcomeProbe()
@@ -231,7 +256,7 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
-            if Date() > deadline { return XCTFail("timed out waiting for (description)") }
+            if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
