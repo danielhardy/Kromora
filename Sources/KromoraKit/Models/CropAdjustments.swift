@@ -35,6 +35,17 @@ enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// The ratio label for the resulting frame shape, without an orientation suffix — for UI
+    /// that presents orientation separately from the ratio picker (e.g. an icon control).
+    func shapeLabel(for orientation: CropAspectRatioOrientation) -> String {
+        guard supportsOrientationSelection else { return label }
+        switch orientation {
+        case .landscape: return landscapeLabel
+        case .portrait: return portraitLabel
+        case .automatic: return label
+        }
+    }
+
     private var landscapeLabel: String {
         switch self {
         case .fourToFive: return "5:4"

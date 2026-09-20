@@ -85,12 +85,12 @@ struct CropInspectorView: View {
                     Text(ratio.label).tag(ratio)
                 }
             } label: {
-                Label(aspectRatio.label, systemImage: "aspectratio")
+                Label(displayedAspectLabel, systemImage: "aspectratio")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .pickerStyle(.menu)
             .accessibilityLabel("Crop aspect ratio")
-            .accessibilityValue(aspectRatio.label)
+            .accessibilityValue(displayedAspectLabel)
             .accessibilityHint("Choose the crop frame ratio")
 
             if aspectRatio.supportsOrientationSelection {
@@ -112,6 +112,15 @@ struct CropInspectorView: View {
                 .accessibilityHint("Choose the orientation of the crop frame")
             }
         }
+    }
+
+    /// The current selection's label, tracking the effective orientation so the shown ratio
+    /// (e.g. "5:4" vs "4:5") always matches the frame that results — otherwise the header
+    /// would keep showing the raw preset name regardless of which orientation is active.
+    private var displayedAspectLabel: String {
+        aspectRatio.supportsOrientationSelection
+            ? aspectRatio.shapeLabel(for: effectiveOrientation)
+            : aspectRatio.label
     }
 
     private var aspectOptions: [CropAspectRatio] {

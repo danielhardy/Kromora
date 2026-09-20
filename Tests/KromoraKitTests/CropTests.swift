@@ -27,6 +27,10 @@ final class CropModelTests: XCTestCase {
             XCTAssertEqual(ratio.selectionLabel(for: .landscape), landscapeLabel)
             XCTAssertEqual(ratio.selectionLabel(for: .portrait), portraitLabel)
             XCTAssertEqual(
+                landscapeLabel, "\(ratio.shapeLabel(for: .landscape)) Landscape")
+            XCTAssertEqual(
+                portraitLabel, "\(ratio.shapeLabel(for: .portrait)) Portrait")
+            XCTAssertEqual(
                 try XCTUnwrap(ratio.normalizedRatio(for: imageSize, orientation: .landscape)),
                 landscapeValue, accuracy: 0.000001)
             XCTAssertEqual(
