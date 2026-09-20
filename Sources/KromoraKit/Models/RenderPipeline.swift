@@ -363,7 +363,30 @@ enum RenderPipeline {
         filter.setValue(CIVector(cgPoint: topRight), forKey: "inputTopRight")
         filter.setValue(CIVector(cgPoint: bottomRight), forKey: "inputBottomRight")
         filter.setValue(CIVector(cgPoint: bottomLeft), forKey: "inputBottomLeft")
-        return filter.outputImage ?? image
+        guard let corrected = filter.outputImage,
+              corrected.extent.width.isFinite, corrected.extent.height.isFinite,
+              corrected.extent.width > 0, corrected.extent.height > 0 else {
+            return image
+        }
+
+        // CIPerspectiveCorrection chooses the output rectangle from the source trapezoid. That
+        // rectangle can be taller/wider than the source (for example, correcting a narrowed top
+        // edge), while the crop workspace's presentation surface is deliberately planned against
+        // the unchanged full-source frame. Rebase the corrected pixels into that frame so a
+        // retained Metal texture and its presentation extent continue to describe the same photo
+        // coordinate system. The projective correction remains intact; only its output canvas is
+        // normalized to the geometry stage's source extent.
+        let correctedExtent = corrected.extent
+        let scaleX = extent.width / correctedExtent.width
+        let scaleY = extent.height / correctedExtent.height
+        guard scaleX.isFinite, scaleX > 0, scaleY.isFinite, scaleY > 0 else { return image }
+        return corrected
+            .transformed(by: CGAffineTransform(
+                a: scaleX, b: 0, c: 0, d: scaleY,
+                tx: extent.minX - correctedExtent.minX * scaleX,
+                ty: extent.minY - correctedExtent.minY * scaleY
+            ))
+            .cropped(to: extent)
     }
 
     static func geometryExtent(of size: CGSize, for crop: CropAdjustments) -> CGSize {

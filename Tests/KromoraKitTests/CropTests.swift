@@ -562,6 +562,23 @@ final class CropPipelineTests: TempDirectoryTestCase {
 
     func testPerspectivePreviewAndExportHaveTheSameComposition() async throws {
         let engine = RenderEngine()
+        let identity = await engine.makeCGImage(
+            source: source, document: EditDocument(), lut: nil, scale: .full, space: .current
+        )
+        let perspectiveOnly = EditDocument(crop: CropAdjustments(
+            verticalPerspective: 0.35, horizontalPerspective: -0.25
+        ))
+        let perspectiveOnlyRendered = await engine.makeCGImage(
+            source: source, document: perspectiveOnly, lut: nil, scale: .full, space: .current
+        )
+        let perspectiveOnlyImage = try XCTUnwrap(perspectiveOnlyRendered)
+        XCTAssertEqual(perspectiveOnlyImage.width, try XCTUnwrap(identity).width)
+        XCTAssertEqual(perspectiveOnlyImage.height, try XCTUnwrap(identity).height)
+        XCTAssertNotEqual(
+            try XCTUnwrap(identity).dataProvider?.data,
+            perspectiveOnlyImage.dataProvider?.data,
+            "perspective must change preview pixels"
+        )
         let document = EditDocument(crop: CropAdjustments(
             normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8),
             straightenAngle: 7,
@@ -716,6 +733,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
         for (change, matches) in changes {
             let before = await fake.previewRequests.count
+            let beforeSurfaceRevision = viewModel.previewSurface.revision
             change()
             _ = try await waitForPreviewRequest(
                 after: before, matching: "interactive crop geometry request", on: fake
@@ -724,6 +742,9 @@ final class CropWorkflowTests: TempDirectoryTestCase {
                 return matches(request)
             }
             XCTAssertEqual(viewModel.displayRevision, interactionRevision)
+            try await waitUntil("the published interactive crop geometry frame") {
+                viewModel.previewSurface.revision > beforeSurfaceRevision
+            }
         }
 
         viewModel.endPreviewInteraction()
