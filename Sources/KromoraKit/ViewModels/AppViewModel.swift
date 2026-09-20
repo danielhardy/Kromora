@@ -3807,6 +3807,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         submitSettledPreview(preemptsPredecessor: true)
     }
 
+    /// Entering Crop is a presentation transition, not an edit that should make the tool wait for
+    /// a settled render. Submit the uncropped frame through the interactive lane first so the
+    /// existing canvas can keep drawing while the inspector/overlay become usable. The coordinator
+    /// promotes this request to the normal settled preview after its quiet period, preserving the
+    /// full-quality/export-parity request without putting its cache lookup on the hotkey path.
+    private func scheduleCropEntryPreview() {
+        cancelIdlePreviewBuild()
+        scheduleInteractivePreview()
+    }
+
     /// The stored-edit corrective render for a speculative open (see `adoptStoredEdits`). Unlike
     /// every other settled submission, this queues behind the speculative request instead of
     /// cancelling it, so both renders reach the engine in order.
@@ -4085,8 +4095,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         canvasState.beginCrop(using: document.crop, sourceSize: sourceSize)
         statusMessage = "Adjust crop, then Done"
         // The committed preview may already be cropped. Ask for the same adjusted stage without
-        // the composition crop so the full-source overlay has actual pixels underneath it.
-        schedulePreview()
+        // the composition crop so the full-source overlay has actual pixels underneath it. The
+        // entry lane is interactive-first: the prior raster remains retained under the chrome,
+        // while the coordinator promotes this full-source request to settled preview quality.
+        scheduleCropEntryPreview()
     }
 
     func toggleCropTool() {
