@@ -4158,7 +4158,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         inspectorState.isPresented = true
         isShowingOriginal = false
         canvasState.beginCrop(using: document.crop, sourceSize: sourceSize)
-        statusMessage = "Adjust crop, then Done"
+        statusMessage = "Adjust crop, then Save"
         // The committed preview may already be cropped. Ask for the same adjusted stage without
         // the composition crop so the full-source overlay has actual pixels underneath it. The
         // entry lane is interactive-first: the prior raster remains retained under the chrome,
