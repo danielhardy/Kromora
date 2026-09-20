@@ -86,7 +86,7 @@ struct FilmstripView: View {
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.vertical, 4)
             }
             .background(.bar)
             .onAppear { collection.beginThumbnailDemand() }

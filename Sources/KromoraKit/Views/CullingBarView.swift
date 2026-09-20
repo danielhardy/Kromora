@@ -6,15 +6,17 @@ import SwiftUI
 /// and filter operation is available here with its current state visible at a glance.
 struct CullingBarView: View {
     @ObservedObject var viewModel: AppViewModel
+    var isCompact: Bool = false
 
     private var collection: ImageCollection { viewModel.collection }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 10) {
+            HStack(spacing: isCompact ? 6 : 10) {
                 if let item = collection.selectedItem {
                     CullingSelectionControls(
                         item: item,
+                        isCompact: isCompact,
                         onFlag: { flag in
                             viewModel.setFocusedFlag(flag, advance: true)
                         },
@@ -29,12 +31,12 @@ struct CullingBarView: View {
                 }
 
                 Divider()
-                    .frame(height: 24)
+                    .frame(height: isCompact ? 20 : 24)
 
-                LibraryFilterControls(collection: collection)
+                LibraryFilterControls(collection: collection, isCompact: isCompact)
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 7)
+            .padding(.vertical, isCompact ? 4 : 7)
         }
         .background(.bar)
         .accessibilityElement(children: .contain)
@@ -44,17 +46,22 @@ struct CullingBarView: View {
 
 private struct CullingSelectionControls: View {
     @ObservedObject var item: ImageCollection.Item
+    let isCompact: Bool
     let onFlag: (PhotoFlag) -> Void
     let onRating: (Int) -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: isCompact ? 6 : 8) {
             Button {
                 onFlag(item.asset.flag == .pick ? .none : .pick)
             } label: {
-                Label("Pick", systemImage: item.asset.flag == .pick ? "checkmark.circle.fill" : "checkmark.circle")
+                Label(
+                    "Pick",
+                    systemImage: item.asset.flag == .pick ? "checkmark.circle.fill" : "checkmark.circle"
+                )
             }
             .buttonStyle(.bordered)
+            .controlSize(isCompact ? .small : .regular)
             .tint(item.asset.flag == .pick ? .green : .secondary)
             .help("Mark as Pick and advance (P)")
             .accessibilityValue(item.asset.flag == .pick ? "On" : "Off")
@@ -62,9 +69,13 @@ private struct CullingSelectionControls: View {
             Button {
                 onFlag(item.asset.flag == .reject ? .none : .reject)
             } label: {
-                Label("Reject", systemImage: item.asset.flag == .reject ? "xmark.circle.fill" : "xmark.circle")
+                Label(
+                    "Reject",
+                    systemImage: item.asset.flag == .reject ? "xmark.circle.fill" : "xmark.circle"
+                )
             }
             .buttonStyle(.bordered)
+            .controlSize(isCompact ? .small : .regular)
             .tint(item.asset.flag == .reject ? .red : .secondary)
             .help("Mark as Reject and advance (X)")
             .accessibilityValue(item.asset.flag == .reject ? "On" : "Off")
@@ -79,8 +90,12 @@ private struct CullingSelectionControls: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.vertical, 4)
-                    .help(rating == item.asset.rating ? "Clear rating (0)" : "Rate \(rating) stars (\(rating))")
+                    .padding(.vertical, isCompact ? 2 : 4)
+                    .help(
+                        rating == item.asset.rating
+                            ? "Clear rating (0)"
+                            : "Rate \(rating) stars (\(rating))"
+                    )
                     .accessibilityLabel("\(rating) stars")
                     .accessibilityValue(rating == item.asset.rating ? "Selected" : "Not selected")
                 }
@@ -93,11 +108,12 @@ private struct CullingSelectionControls: View {
 
 struct LibraryFilterControls: View {
     @ObservedObject var collection: ImageCollection
+    let isCompact: Bool
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: isCompact ? 6 : 8) {
             Label("Filter", systemImage: "line.3.horizontal.decrease.circle")
-                .font(.caption)
+                .font(isCompact ? .caption2 : .caption)
                 .foregroundStyle(.secondary)
 
             Picker("Flag filter", selection: flagBinding) {
@@ -107,6 +123,7 @@ struct LibraryFilterControls: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .controlSize(isCompact ? .small : .regular)
             .focusable(false)
             .help("Filter by pick or reject status")
 
@@ -122,17 +139,18 @@ struct LibraryFilterControls: View {
             }
             .labelsHidden()
             .pickerStyle(.menu)
+            .controlSize(isCompact ? .small : .regular)
             .focusable(false)
             .help("Filter by star rating")
 
             Text("\(collection.filteredItemCount) of \(collection.items.count)")
-                .font(.caption.monospacedDigit())
+                .font(isCompact ? .caption2.monospacedDigit() : .caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
             if collection.filter.isFiltered {
                 Button("Clear") { collection.clearFilter() }
                     .buttonStyle(.borderless)
-                    .font(.caption)
+                    .font(isCompact ? .caption2 : .caption)
                     .help("Clear culling filters")
             }
         }
