@@ -99,10 +99,11 @@ struct GlobalToneAnalyzer: Sendable {
         else { throw GlobalToneAnalysisError.malformedHistogram }
 
         let count = histogram.totalWeight
+        let channelTolerance = max(1e-6, count * 1e-6)
         guard count > 0,
-            histogram.red.reduce(0, +) == count,
-            histogram.green.reduce(0, +) == count,
-            histogram.blue.reduce(0, +) == count
+            abs(histogram.red.reduce(0, +) - count) <= channelTolerance,
+            abs(histogram.green.reduce(0, +) - count) <= channelTolerance,
+            abs(histogram.blue.reduce(0, +) - count) <= channelTolerance
         else { throw GlobalToneAnalysisError.malformedHistogram }
 
         let perceptual = toneStatistics(

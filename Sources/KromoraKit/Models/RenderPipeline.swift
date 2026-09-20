@@ -44,7 +44,9 @@ enum RenderPipeline {
     /// bake turned portrait RAWs (EXIF 5–8) back into landscape. v26 preserves full-source local
     /// mask coordinates when a preview is evaluated from a non-nil source ROI. v27 makes thumbnail
     /// source sizing crop-aware so a settled crop is not enlarged from an under-sized raster.
-    static let cacheVersion = 27
+    /// v28 adds the non-destructive flip/straighten geometry stage before crop. v29 adds the
+    /// bounded vertical/horizontal perspective stage.
+    static let cacheVersion = 29
 
     /// Build the graph for `document` over `source`.
     ///
@@ -82,19 +84,23 @@ enum RenderPipeline {
         }
         let orientedNativeExtent = document.rotation.orientedExtent(source.nativeExtent)
         let orientedDeveloped = applyingRotation(document.rotation, to: developed)
+        let geometricallyDeveloped = applyingGeometry(document.crop, to: orientedDeveloped)
+        let geometryNativeExtent = geometryExtent(of: orientedNativeExtent, for: document.crop)
         let fullFrame = scaledSourceExtent(
-            nativeExtent: orientedNativeExtent,
-            imageExtent: orientedDeveloped.extent,
-            scale: scale.factor(for: orientedNativeExtent)
+            nativeExtent: geometryNativeExtent,
+            imageExtent: geometricallyDeveloped.extent,
+            scale: scale.factor(for: geometryNativeExtent)
         )
-        let visibleROI = (!scale.isFull ? sourceROI : nil)
+        // A mirror or deskew changes the source coordinate space. Disable the viewport ROI for
+        // that case so it cannot be applied in pre-transform coordinates and clip the wrong pixels.
+        let visibleROI = (!scale.isFull && !document.crop.hasGeometryTransform ? sourceROI : nil)
         let processingROI = visibleROI.map {
             expandedSourceROI($0, nativeExtent: orientedNativeExtent,
                                needsSpatialSupport: document.effects.hasSpatialWork)
         }
         let working = processingROI.map {
-            cropSourceROI($0, nativeExtent: orientedNativeExtent, in: orientedDeveloped)
-        } ?? orientedDeveloped
+            cropSourceROI($0, nativeExtent: orientedNativeExtent, in: geometricallyDeveloped)
+        } ?? geometricallyDeveloped
         let earlyCrop = visibleROI != nil
         let finalFrame: CGRect? = {
             guard earlyCrop, let crop = document.crop.normalizedRect else {
@@ -144,7 +150,9 @@ enum RenderPipeline {
         finalFrameExtent: CGRect? = nil,
         applyRotation: Bool = true
     ) -> CIImage {
-        let developed = applyRotation ? applyingRotation(document.rotation, to: developed) : developed
+        let developed = applyRotation
+            ? applyingGeometry(document.crop, to: applyingRotation(document.rotation, to: developed))
+            : developed
         let adjusted = buildPreLUTImage(
             developed: developed, document: document, toneCurveCache: toneCurveCache,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
@@ -286,6 +294,83 @@ enum RenderPipeline {
     static func applyingRotation(_ rotation: ImageRotation, to image: CIImage) -> CIImage {
         guard let orientation = rotation.coreImageOrientation else { return image }
         return image.oriented(orientation)
+    }
+
+    /// Apply the continuous crop geometry in the same oriented coordinate space used by the crop
+    /// rectangle. The stage order is quarter-turn rotation (at the call site), mirror, straighten,
+    /// perspective, then crop. Core Image keeps this lazy, so preview and export receive the same graph.
+    static func applyingGeometry(_ crop: CropAdjustments, to image: CIImage) -> CIImage {
+        var result = image
+        if crop.flipHorizontal || crop.flipVertical {
+            let extent = result.extent
+            let transform = CGAffineTransform(
+                a: crop.flipHorizontal ? -1 : 1, b: 0,
+                c: 0, d: crop.flipVertical ? -1 : 1,
+                tx: crop.flipHorizontal ? 2 * extent.midX : 0,
+                ty: crop.flipVertical ? 2 * extent.midY : 0
+            )
+            result = result.transformed(by: transform)
+        }
+        if crop.straightenAngle != 0 {
+            let radians = CGFloat(crop.straightenAngle * .pi / 180)
+            if let filter = CIFilter(name: "CIStraightenFilter") {
+                filter.setValue(result, forKey: kCIInputImageKey)
+                filter.setValue(radians, forKey: kCIInputAngleKey)
+                if let output = filter.outputImage { result = output }
+            } else {
+                // Keep a deterministic affine fallback for older Core Image runtimes that do not
+                // expose the named filter. Rotating around the image centre preserves the full
+                // transformed extent.
+                let center = CGPoint(x: result.extent.midX, y: result.extent.midY)
+                result = result.transformed(by: CGAffineTransform(translationX: center.x, y: center.y)
+                    .rotated(by: radians)
+                    .translatedBy(x: -center.x, y: -center.y))
+            }
+        }
+        return applyingPerspective(crop, to: result)
+    }
+
+    /// Correct a bounded source trapezoid into the current image frame. Using
+    /// `CIPerspectiveCorrection` keeps the output fully populated, unlike a destination
+    /// quadrilateral transform that can expose transparent wedges at the crop boundary.
+    static func applyingPerspective(_ crop: CropAdjustments, to image: CIImage) -> CIImage {
+        guard crop.verticalPerspective != 0 || crop.horizontalPerspective != 0,
+              image.extent.width.isFinite, image.extent.height.isFinite,
+              image.extent.width > 0, image.extent.height > 0 else { return image }
+
+        let extent = image.extent
+        let vertical = CGFloat(crop.verticalPerspective) * 0.45 * extent.width
+        let horizontal = CGFloat(crop.horizontalPerspective) * 0.45 * extent.height
+        func bounded(_ point: CGPoint) -> CGPoint {
+            CGPoint(
+                x: min(max(point.x, extent.minX), extent.maxX),
+                y: min(max(point.y, extent.minY), extent.maxY)
+            )
+        }
+
+        // Positive values narrow the top/left side of the source quadrilateral. The clamp is
+        // intentional: even malformed persisted values cannot create a reversed quadrilateral.
+        let topLeft = bounded(CGPoint(x: extent.minX + vertical, y: extent.maxY - horizontal))
+        let topRight = bounded(CGPoint(x: extent.maxX - vertical, y: extent.maxY + horizontal))
+        let bottomRight = bounded(CGPoint(x: extent.maxX + vertical, y: extent.minY - horizontal))
+        let bottomLeft = bounded(CGPoint(x: extent.minX - vertical, y: extent.minY + horizontal))
+        guard topLeft.x < topRight.x, bottomLeft.x < bottomRight.x,
+              bottomLeft.y < topLeft.y, bottomRight.y < topRight.y else { return image }
+
+        guard let filter = CIFilter(name: "CIPerspectiveCorrection") else { return image }
+        filter.setValue(image, forKey: kCIInputImageKey)
+        filter.setValue(CIVector(cgPoint: topLeft), forKey: "inputTopLeft")
+        filter.setValue(CIVector(cgPoint: topRight), forKey: "inputTopRight")
+        filter.setValue(CIVector(cgPoint: bottomRight), forKey: "inputBottomRight")
+        filter.setValue(CIVector(cgPoint: bottomLeft), forKey: "inputBottomLeft")
+        return filter.outputImage ?? image
+    }
+
+    static func geometryExtent(of size: CGSize, for crop: CropAdjustments) -> CGSize {
+        guard crop.straightenAngle != 0 else { return size }
+        return CropOverlayInteraction.rotatedImageExtent(
+            of: size, angle: crop.straightenAngle
+        )
     }
 
     /// Map a native-source ROI into a decoded image's coordinates without rasterizing it. The

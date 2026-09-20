@@ -8,7 +8,7 @@ import Foundation
 /// can later choose categories without replacing the clipboard schema or teaching every caller how
 /// to split an `EditDocument`.
 struct EditClipboardPayload: Codable, Sendable, Equatable {
-    static let currentVersion = 3
+    static let currentVersion = 5
 
     enum Category: String, Codable, CaseIterable, Hashable, Sendable {
         case light
@@ -33,23 +33,41 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         var normalizedRect: CGRect?
         var aspectRatio: CropAspectRatio
         var orientation: CropAspectRatioOrientation
+        var straightenAngle: Double
+        var flipHorizontal: Bool
+        var flipVertical: Bool
+        var verticalPerspective: Double
+        var horizontalPerspective: Double
 
         static let neutral = CropCategory(
-            normalizedRect: nil, aspectRatio: .freeform, orientation: .automatic
+            normalizedRect: nil, aspectRatio: .freeform, orientation: .automatic,
+            straightenAngle: 0, flipHorizontal: false, flipVertical: false,
+            verticalPerspective: 0, horizontalPerspective: 0
         )
 
         init(
             normalizedRect: CGRect? = nil,
             aspectRatio: CropAspectRatio = .freeform,
-            orientation: CropAspectRatioOrientation = .automatic
+            orientation: CropAspectRatioOrientation = .automatic,
+            straightenAngle: Double = 0,
+            flipHorizontal: Bool = false,
+            flipVertical: Bool = false,
+            verticalPerspective: Double = 0,
+            horizontalPerspective: Double = 0
         ) {
             self.normalizedRect = normalizedRect
             self.aspectRatio = aspectRatio
             self.orientation = orientation
+            self.straightenAngle = straightenAngle
+            self.flipHorizontal = flipHorizontal
+            self.flipVertical = flipVertical
+            self.verticalPerspective = verticalPerspective
+            self.horizontalPerspective = horizontalPerspective
         }
 
         private enum CodingKeys: String, CodingKey {
-            case normalizedRect, aspectRatio, orientation
+            case normalizedRect, aspectRatio, orientation, straightenAngle, flipHorizontal, flipVertical,
+                 verticalPerspective, horizontalPerspective
         }
 
         init(from decoder: Decoder) throws {
@@ -59,6 +77,15 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
             orientation = try container.decodeIfPresent(
                 CropAspectRatioOrientation.self, forKey: .orientation
             ) ?? .automatic
+            straightenAngle = try container.decodeIfPresent(Double.self, forKey: .straightenAngle) ?? 0
+            flipHorizontal = try container.decodeIfPresent(Bool.self, forKey: .flipHorizontal) ?? false
+            flipVertical = try container.decodeIfPresent(Bool.self, forKey: .flipVertical) ?? false
+            verticalPerspective = try container.decodeIfPresent(
+                Double.self, forKey: .verticalPerspective
+            ) ?? 0
+            horizontalPerspective = try container.decodeIfPresent(
+                Double.self, forKey: .horizontalPerspective
+            ) ?? 0
         }
     }
 
@@ -162,7 +189,12 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.crop = CropCategory(
             normalizedRect: document.crop.normalizedRect,
             aspectRatio: document.crop.aspectRatio,
-            orientation: document.crop.orientation
+            orientation: document.crop.orientation,
+            straightenAngle: document.crop.straightenAngle,
+            flipHorizontal: document.crop.flipHorizontal,
+            flipVertical: document.crop.flipVertical,
+            verticalPerspective: document.crop.verticalPerspective,
+            horizontalPerspective: document.crop.horizontalPerspective
         )
     }
 
@@ -198,7 +230,12 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
             result.crop = CropAdjustments(
                 normalizedRect: crop.normalizedRect,
                 aspectRatio: crop.aspectRatio,
-                orientation: crop.orientation
+                orientation: crop.orientation,
+                straightenAngle: crop.straightenAngle,
+                flipHorizontal: crop.flipHorizontal,
+                flipVertical: crop.flipVertical,
+                verticalPerspective: crop.verticalPerspective,
+                horizontalPerspective: crop.horizontalPerspective
             )
         }
         if categories.contains(.rotation) {

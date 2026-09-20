@@ -357,6 +357,76 @@ final class CropModelTests: XCTestCase {
         XCTAssertEqual(
             original.width * 400 / (original.height * 200), 2, accuracy: 0.000001)
     }
+
+    func testStraightenFrameIsContainedAndKeepsItsPixelRatioAcrossTheAllowedAngles() {
+        let sourceSize = CGSize(width: 1_600, height: 900)
+        let targets: [(String, CGFloat)] = [
+            ("square", 1), ("three-two", 1.5), ("two-three", 2.0 / 3.0),
+            ("sixteen-nine", 16.0 / 9.0), ("four-five", 4.0 / 5.0),
+            ("original", sourceSize.width / sourceSize.height), ("freeform", 1.2),
+        ]
+
+        for angle in stride(from: -45.0, through: 45.0, by: 1.0) {
+            let bounding = CropOverlayInteraction.rotatedImageExtent(
+                of: sourceSize, angle: angle)
+            for (label, pixelRatio) in targets {
+                let frame = CropOverlayInteraction.largestInscribedRect(
+                    sourceSize: sourceSize, angle: angle, pixelAspectRatio: pixelRatio)
+                XCTAssertTrue(
+                    CropOverlayInteraction.isContained(
+                        frame, inRotatedImageOf: sourceSize, angle: angle),
+                    "\(label) escaped at \(angle)°: \(frame)")
+                XCTAssertEqual(
+                    frame.width * bounding.width / (frame.height * bounding.height), pixelRatio,
+                    accuracy: 0.000001,
+                    "\(label) changed ratio at \(angle)°")
+            }
+        }
+    }
+
+    func testStraightenMoveAndResizeStayInsideTheRotatedImageAndKeepRatio() {
+        let sourceSize = CGSize(width: 1_600, height: 900)
+        let angle = 32.0
+        let bounding = CropOverlayInteraction.rotatedImageExtent(of: sourceSize, angle: angle)
+        let imageRect = CGRect(origin: .zero, size: bounding)
+        let start = CropOverlayInteraction.largestInscribedRect(
+            sourceSize: sourceSize, angle: angle, pixelAspectRatio: 1.5)
+        let moved = CropOverlayInteraction.translated(
+            start, delta: CGSize(width: 50_000, height: -50_000), imageRect: imageRect,
+            rotatedSourceSize: sourceSize, straightenAngle: angle, pixelAspectRatio: 1.5)
+        let resized = CropOverlayInteraction.resized(
+            start, handle: .bottomTrailing, delta: CGSize(width: 50_000, height: 50_000),
+            imageRect: imageRect, aspectRatio: .threeToTwo, orientation: .landscape,
+            imageSize: bounding, straightenAngle: angle, sourceImageSize: sourceSize,
+            pixelAspectRatio: 1.5)
+
+        for frame in [moved, resized] {
+            XCTAssertTrue(CropOverlayInteraction.isContained(
+                frame, inRotatedImageOf: sourceSize, angle: angle))
+            XCTAssertEqual(
+                frame.width * bounding.width / (frame.height * bounding.height), 1.5,
+                accuracy: 0.000001)
+        }
+    }
+
+    func testStraightenReversalOnlyKeepsOrShrinksTheFrame() {
+        let sourceSize = CGSize(width: 1_600, height: 900)
+        let initial = CropOverlayInteraction.largestInscribedRect(
+            sourceSize: sourceSize, angle: 0, pixelAspectRatio: 1.5)
+        let tilted = CropOverlayInteraction.reframedForStraightenChange(
+            initial, sourceSize: sourceSize, oldAngle: 0, newAngle: 32, pixelAspectRatio: 1.5)
+        let restored = CropOverlayInteraction.reframedForStraightenChange(
+            tilted, sourceSize: sourceSize, oldAngle: 32, newAngle: 0, pixelAspectRatio: 1.5)
+        let initialArea = initial.width * sourceSize.width * initial.height * sourceSize.height
+        let restoredArea = restored.width * sourceSize.width * restored.height * sourceSize.height
+
+        XCTAssertLessThanOrEqual(restoredArea, initialArea + 0.000001)
+        XCTAssertTrue(CropOverlayInteraction.isContained(
+            restored, inRotatedImageOf: sourceSize, angle: 0))
+        XCTAssertEqual(
+            restored.width * sourceSize.width / (restored.height * sourceSize.height), 1.5,
+            accuracy: 0.000001)
+    }
 }
 
 final class CropPipelineTests: TempDirectoryTestCase {
@@ -434,6 +504,45 @@ final class CropPipelineTests: TempDirectoryTestCase {
         assertPixelsEqual(
             try Pixels.bytes(of: preview), try Pixels.bytes(of: decoded),
             "preset preview and export must retain the same crop extent")
+    }
+
+    func testStraightenCropPreviewAndExportHaveOpaqueCornerPixels() async throws {
+        let engine = RenderEngine()
+        let sourceSize = source.nativeExtent
+        for angle in [-45.0, -30.0, 15.0, 45.0] {
+            let frame = CropOverlayInteraction.largestInscribedRect(
+                sourceSize: sourceSize, angle: angle, pixelAspectRatio: 1.5)
+            let document = EditDocument(crop: CropAdjustments(
+                normalizedRect: frame, aspectRatio: .threeToTwo,
+                orientation: .landscape, straightenAngle: angle
+            ))
+            let renderedPreview = await engine.makeCGImage(
+                source: source, document: document, lut: nil, scale: .full, space: .current
+            )
+            let preview = try XCTUnwrap(renderedPreview)
+            let exported = try await engine.encode(
+                source: source, document: document, lut: nil, scale: .full,
+                format: .png, quality: 1, space: .current
+            )
+            let decoded = try Pixels.decode(exported)
+            let images: [(String, [UInt8], Int, Int)] = [
+                ("preview", try Pixels.bytes(of: preview), preview.width, preview.height),
+                ("export", try Pixels.bytes(of: decoded), decoded.width, decoded.height),
+            ]
+            for (name, pixels, width, height) in images {
+                let corners = [
+                    3,
+                    (width - 1) * 4 + 3,
+                    (height - 1) * width * 4 + 3,
+                    ((height - 1) * width + width - 1) * 4 + 3,
+                ]
+                for index in corners {
+                    XCTAssertGreaterThan(
+                        pixels[index], 0,
+                        "\(name) has a transparent corner at \(angle)°")
+                }
+            }
+        }
     }
 
     func testFlipAndStraightenComposeBeforeCrop() async throws {
@@ -550,6 +659,33 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop, committed)
     }
 
+    func testStraightenAdjustsTheTransientDraftAndCommitKeepsTheSafeFrame() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "straighten-workflow.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        viewModel.selectCropAspectRatio(.threeToTwo, orientation: .landscape)
+        viewModel.setCropStraightenAngle(30)
+        let frame = try XCTUnwrap(viewModel.cropDraft)
+        XCTAssertTrue(CropOverlayInteraction.isContained(
+            frame, inRotatedImageOf: viewModel.sourceSize, angle: 30))
+        let rotatedSize = CropOverlayInteraction.rotatedImageExtent(
+            of: viewModel.sourceSize, angle: 30)
+        XCTAssertEqual(
+            frame.width * rotatedSize.width / (frame.height * rotatedSize.height), 1.5,
+            accuracy: 0.000001)
+
+        viewModel.commitCrop()
+        XCTAssertTrue(CropOverlayInteraction.isContained(
+            try XCTUnwrap(viewModel.document.crop.normalizedRect),
+            inRotatedImageOf: viewModel.sourceSize, angle: 30))
+        XCTAssertEqual(viewModel.document.crop.straightenAngle, 30, accuracy: 0.000001)
+    }
+
     func testCropGeometrySliderChangesStayInOneDisplayGenerationAndSettleAfterRelease() async throws {
         let fake = FakeRenderEngine()
         let url = try Fixtures.writeGradientPNG(
@@ -565,10 +701,10 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
         let changes: [(@MainActor () -> Void, (FakeRenderEngine.Request) -> Bool)] = [
             ({ viewModel.setCropStraightenAngle(12) }, { request in
-                request.document.crop.straightenAngle == 12
+                request.document.crop.straightenAngle == 0
             }),
             ({ viewModel.setCropStraightenAngle(24) }, { request in
-                request.document.crop.straightenAngle == 24
+                request.document.crop.straightenAngle == 0
             }),
             ({ viewModel.setCropVerticalPerspective(0.2) }, { request in
                 request.document.crop.verticalPerspective == 0.2
@@ -595,10 +731,32 @@ final class CropWorkflowTests: TempDirectoryTestCase {
             matching: "settled crop geometry request", on: fake
         ) { request in
             guard case .preview = request.scale else { return false }
-            return request.document.crop.straightenAngle == 24
+            return request.document.crop.straightenAngle == 0
                 && request.document.crop.verticalPerspective == 0.2
                 && request.document.crop.horizontalPerspective == -0.15
         }
+    }
+
+    func testCropStraightenUsesViewSpaceRotationWhileThePreviewRequestStaysUnstraightened() async throws {
+        let fake = FakeRenderEngine()
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "view-space-straighten.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(engine: fake, editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        viewModel.beginPreviewInteraction()
+        viewModel.setCropStraightenAngle(24)
+        _ = try await waitForPreviewRequest(
+            matching: "view-space straighten request", on: fake
+        ) { request in
+            guard case .interactive = request.scale else { return false }
+            return request.document.crop.straightenAngle == 0
+        }
+
+        XCTAssertEqual(viewModel.cropStraightenAngle, 24, accuracy: 0.000001)
+        viewModel.endPreviewInteraction()
     }
 
     func testCropModeOwnsAndRestoresEditChromeState() {
@@ -833,8 +991,11 @@ final class CropOverlayViewTests: XCTestCase {
         CropOverlayView(
             normalizedRect: CGRect(x: 0, y: 0, width: 1, height: 1),
             imageSize: CGSize(width: 400, height: 300),
+            sourceImageSize: CGSize(width: 400, height: 300),
             aspectRatio: .freeform,
             orientation: .automatic,
+            straightenAngle: 0,
+            pixelAspectRatio: nil,
             onChange: { _ in }
         )
     }

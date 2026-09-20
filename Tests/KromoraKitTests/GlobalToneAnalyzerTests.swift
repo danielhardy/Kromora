@@ -33,4 +33,21 @@ final class GlobalToneAnalyzerTests: XCTestCase {
             XCTAssertEqual(error as? GlobalToneAnalysisError, .malformedHistogram)
         }
     }
+
+    func testFractionalWeightedChannelsAllowFloatingPointAccumulationNoise() throws {
+        var red = [Double](repeating: 0, count: 256)
+        var green = [Double](repeating: 0, count: 256)
+        var blue = [Double](repeating: 0, count: 256)
+        var luma = [Double](repeating: 0, count: 256)
+        red[128] = 1.0000005
+        green[128] = 0.9999995
+        blue[128] = 1.0000002
+        luma[128] = 1
+
+        let result = try GlobalToneAnalyzer.statistics(from: WeightedHistogramData(
+            red: red, green: green, blue: blue, luma: luma
+        ))
+
+        XCTAssertEqual(result.tone.perceptual.p50, 128.0 / 255.0, accuracy: 0.0001)
+    }
 }

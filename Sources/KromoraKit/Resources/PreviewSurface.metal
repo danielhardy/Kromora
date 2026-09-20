@@ -12,6 +12,8 @@ struct PreviewQuadUniforms {
     float2 imageSize;
     float scale;
     float2 viewportSize;
+    float2 rotationCenter;
+    float rotationRadians;
 };
 
 struct PreviewQuadOutput {
@@ -27,6 +29,13 @@ vertex PreviewQuadOutput preview_quad_vertex(
     float2 pixelPosition = uniforms.transformOrigin
         + (uniforms.imageOrigin + vertices[vertexID].position * uniforms.imageSize)
             * uniforms.scale;
+    float2 rotationDelta = pixelPosition - uniforms.rotationCenter;
+    float sine = sin(uniforms.rotationRadians);
+    float cosine = cos(uniforms.rotationRadians);
+    pixelPosition = uniforms.rotationCenter + float2(
+        cosine * rotationDelta.x - sine * rotationDelta.y,
+        sine * rotationDelta.x + cosine * rotationDelta.y
+    );
     // CanvasNavigation and MaskOverlay are y-down (pixel y=0 is the top of the view). Metal
     // clip space is y-up, so the top of the view is NDC y=+1 — the same mapping as
     // MaskOverlay.metal. Mapping y=0 to NDC -1 inverts the presented frame on screen while

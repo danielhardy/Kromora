@@ -30,7 +30,12 @@ brake is disabled when the robust distribution contradicts the scene key: a
 low median plus retained upper structure and meaningful spread indicates material underexposure.
 Sunset, snow, fog, and backlit evidence do not create a blanket global lift; their existing color,
 dehaze, and regional policies remain independent. Backlit subjects can therefore receive a local
-subject correction without lifting a bright background indiscriminately.
+subject correction without lifting a bright background indiscriminately. Backlight inference uses
+the person/face matte when available instead of a broad saliency box, because the latter can
+include the bright sky around a subject. A likelihood of `0.30` or higher also prevents Auto from
+lowering global exposure to place a median dominated by that background; shadow lift then carries
+the subject correction. The coordinator composes the background as the foreground complement, and
+fractional resampled-mask histograms are accepted within a scale-aware floating-point tolerance.
 
 ## Bounds and guardrails
 

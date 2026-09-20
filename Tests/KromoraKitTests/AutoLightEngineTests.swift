@@ -37,6 +37,7 @@ final class AutoLightEngineTests: XCTestCase {
 
         let result = AutoLightEngine.evaluate(analysis: analysis)
 
+        XCTAssertGreaterThanOrEqual(result.light.exposure, 0)
         XCTAssertGreaterThan(result.light.shadows, 0)
         XCTAssertLessThan(result.light.highlights, 0)
         XCTAssertEqual(result.algorithmVersion, AutoLightConfiguration.currentVersion)

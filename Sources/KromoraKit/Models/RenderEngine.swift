@@ -178,6 +178,7 @@ struct RenderBuildPlan: Sendable, Equatable {
             )
         } ?? CGRect(origin: .zero, size: nativeExtent)
         let effectiveROI = sourceROI.flatMap { roi -> CGRect? in
+            guard !document.crop.hasGeometryTransform else { return nil }
             let intersection = roi.intersection(cropNativeRect)
             return intersection.isNull || intersection.width <= 0 || intersection.height <= 0
                 ? nil : intersection
@@ -1377,7 +1378,8 @@ actor RenderEngine: RenderEngining {
         ) else { return nil }
         try Task.checkCancellation()
         let orientedDeveloped = RenderPipeline.applyingRotation(document.rotation, to: developedFull)
-        let effectivePlan = plan.rebased(to: orientedDeveloped.extent, crop: document.crop)
+        let geometricallyDeveloped = RenderPipeline.applyingGeometry(document.crop, to: orientedDeveloped)
+        let effectivePlan = plan.rebased(to: geometricallyDeveloped.extent, crop: document.crop)
         let effectiveROI = effectivePlan.sourceROI
         let processingROI = effectivePlan.processingROI
         let working: CIImage
@@ -1385,10 +1387,10 @@ actor RenderEngine: RenderEngining {
             working = RenderPipeline.cropSourceROI(
                 processingROI,
                 nativeExtent: document.rotation.orientedExtent(source.nativeExtent),
-                in: orientedDeveloped
+                in: geometricallyDeveloped
             )
         } else {
-            working = orientedDeveloped
+            working = geometricallyDeveloped
         }
         let hasEarlyCrop = effectivePlan.hasEarlyCrop
         let finalFrameExtent = effectivePlan.finalFrameExtent

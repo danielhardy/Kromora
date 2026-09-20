@@ -51,6 +51,25 @@ final class SceneCharacteristicsAnalyzerTests: XCTestCase {
         XCTAssertGreaterThan(scene.backlightingLikelihood, scene.lowKeyLikelihood)
     }
 
+    func testBacklightUsesSemanticPersonWhenSaliencyIncludesBrightBackground() {
+        let salientBox = region(kind: .subject, mean: 0.58, coverage: 0.16, confidence: 1)
+        let person = region(kind: .person, mean: 0.18, coverage: 0.27, confidence: 1)
+        let background = region(kind: .background, mean: 0.80, coverage: 0.73, confidence: 1)
+        let analysis = makeAnalysis(
+            tone: tone(mean: 0.82, p25: 0.55, p50: 0.82, p75: 0.94, p95: 0.99),
+            regions: [salientBox, person, background],
+            relationships: RegionRelationships(
+                subjectToBackgroundLuminanceDelta: -0.22,
+                subjectContrast: 0.22
+            ),
+            primary: salientBox
+        )
+
+        let scene = SceneCharacteristicsAnalyzer.analyze(analysis)
+
+        XCTAssertGreaterThan(scene.backlightingLikelihood, 0.30)
+    }
+
     func testHighKeySceneIsHighKeyAndLowKeySceneIsLowKey() {
         let highSubject = region(kind: .subject, mean: 0.82, coverage: 0.35, confidence: 0.9)
         let high = makeAnalysis(

@@ -14,11 +14,34 @@ struct CropOverlayView: View {
 
     let normalizedRect: CGRect
     let imageSize: CGSize
+    let sourceImageSize: CGSize
     let aspectRatio: CropAspectRatio
     let orientation: CropAspectRatioOrientation
+    let straightenAngle: Double
+    let pixelAspectRatio: CGFloat?
     let onChange: (CGRect) -> Void
 
     @State private var dragSession: DragSession?
+
+    init(
+        normalizedRect: CGRect,
+        imageSize: CGSize,
+        sourceImageSize: CGSize = .zero,
+        aspectRatio: CropAspectRatio,
+        orientation: CropAspectRatioOrientation,
+        straightenAngle: Double = 0,
+        pixelAspectRatio: CGFloat? = nil,
+        onChange: @escaping (CGRect) -> Void
+    ) {
+        self.normalizedRect = normalizedRect
+        self.imageSize = imageSize
+        self.sourceImageSize = sourceImageSize
+        self.aspectRatio = aspectRatio
+        self.orientation = orientation
+        self.straightenAngle = straightenAngle
+        self.pixelAspectRatio = pixelAspectRatio
+        self.onChange = onChange
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -89,14 +112,18 @@ struct CropOverlayView: View {
                 case .move:
                     onChange(
                         CropOverlayInteraction.translated(
-                            session.startRect, delta: value.translation, imageRect: imageRect
+                            session.startRect, delta: value.translation, imageRect: imageRect,
+                            rotatedSourceSize: sourceImageSize, straightenAngle: straightenAngle,
+                            pixelAspectRatio: pixelAspectRatio
                         ))
                 case .resize(let handle):
                     onChange(
                         CropOverlayInteraction.resized(
                             session.startRect, handle: handle, delta: value.translation,
                             imageRect: imageRect, aspectRatio: aspectRatio,
-                            orientation: orientation, imageSize: imageSize
+                            orientation: orientation, imageSize: imageSize,
+                            straightenAngle: straightenAngle, sourceImageSize: sourceImageSize,
+                            pixelAspectRatio: pixelAspectRatio
                         ))
                 }
             }

@@ -579,6 +579,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
     /// The drawable reports backing pixels, which is the only reliable size across mixed-DPI
     /// windows and side-by-side panels. SwiftUI point geometry is not sufficient here.
     var onDrawableSizeChange: ((CGSize) -> Void)?
+    /// Crop-mode Straighten is deliberately a view-space transform. The render request remains
+    /// unstraightened so the photo can turn beneath the stable, axis-aligned crop overlay.
+    var viewSpaceRotationAngle: Double = 0
     /// When true, the MTKView declines AppKit hit testing so an overlay (crop) can own pointer
     /// input. SwiftUI `allowsHitTesting(false)` is not enough on its own because the representable
     /// still participates in the NSView hit-test walk.
@@ -590,6 +593,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         surface.attachDisplayView(view)
         context.coordinator.surface = surface
         context.coordinator.navigation = navigation
+        context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
         view.onScrollZoom = onScrollZoom
         view.onDoubleClick = onDoubleClick
@@ -614,6 +618,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         }
         context.coordinator.surface = surface
         context.coordinator.navigation = navigation
+        context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
         if let view = view as? PreviewMTKView {
             view.onScrollZoom = onScrollZoom
@@ -640,9 +645,11 @@ struct PreviewSurfaceView: NSViewRepresentable {
         weak var surface: PreviewSurface?
         weak var view: MTKView?
         var navigation = CanvasNavigation()
+        var viewSpaceRotationAngle: Double = 0
         var onDrawableSizeChange: ((CGSize) -> Void)?
         private var lastDrawnRevision: UInt64?
         private var lastDrawnNavigation: CanvasNavigation?
+        private var lastDrawnViewSpaceRotationAngle: Double?
         private var lastDrawnTextureGeneration: UInt64?
         private var lastDrawableSize: (width: Int, height: Int)?
         /// A drawable can be skipped after its command buffer has been submitted. Remember which
@@ -681,6 +688,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             var imageSize: SIMD2<Float>
             var scale: Float
             var viewportSize: SIMD2<Float>
+            var rotationCenter: SIMD2<Float>
+            var rotationRadians: Float
         }
 
         override init() {
@@ -759,6 +768,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             } else {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
+                lastDrawnViewSpaceRotationAngle = nil
                 lastDrawnTextureGeneration = nil
             }
             view?.setNeedsDisplay(view?.bounds ?? .zero)
@@ -790,6 +800,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 && lastDrawableSize?.height == drawableSize.1
             let sameTextureGeneration =
                 lastDrawnTextureGeneration == surface.presentationTextureGeneration
+            let sameViewSpaceRotation =
+                lastDrawnViewSpaceRotationAngle.map {
+                    abs($0 - viewSpaceRotationAngle) <= 0.000001
+                } ?? false
             // A pan/zoom/fit change does not bump `surface.revision` — it is presentation-only
             // and deliberately does not wait for a new render — so it must independently trigger
             // a redraw here, or dragging the image would have no visible effect until some other
@@ -797,6 +811,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             guard
                 surface.revision != lastDrawnRevision || !sameDrawableSize
                     || navigation != lastDrawnNavigation || !sameTextureGeneration
+                    || !sameViewSpaceRotation
             else {
                 return
             }
@@ -820,6 +835,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let displayRevision = surface.pendingDisplayRevision()
             let drawRevision = surface.revision
             let drawNavigation = navigation
+            let drawViewSpaceRotationAngle = viewSpaceRotationAngle
             let drawTextureGeneration = surface.presentationTextureGeneration
             isDrawing = true
             let presentationEncodingStart = LiveEditTelemetryClock.now
@@ -836,7 +852,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 var geometry = Self.quadGeometry(
                     imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
                     navigation: navigation,
-                    destination: destination, virtualExtent: surface.presentationImageExtent
+                    destination: destination, virtualExtent: surface.presentationImageExtent,
+                    viewSpaceRotationAngle: drawViewSpaceRotationAngle
                 ),
                 let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
                     device.makeBuffer(
@@ -864,6 +881,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 surface.mappedImageForPresentation(image), navigation: navigation,
                 destination: destination,
                 virtualExtent: surface.presentationImageExtent,
+                viewSpaceRotationAngle: drawViewSpaceRotationAngle,
                 appearance: appearance
             ) {
                 // Compatibility seam for a host without a usable Metal texture/pipeline. The
@@ -947,7 +965,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// never downscaled here; only pixels outside the current viewport are discarded.
         static func presentationImage(
             _ image: CIImage, navigation: CanvasNavigation, destination: CGRect,
-            virtualExtent: CGRect? = nil, appearance: NSAppearance? = nil
+            virtualExtent: CGRect? = nil, viewSpaceRotationAngle: Double = 0,
+            appearance: NSAppearance? = nil
         ) -> CIImage? {
             guard destination.width > 0, destination.height > 0,
                 destination.width.isFinite, destination.height.isFinite,
@@ -956,7 +975,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             else { return nil }
 
             let extent = image.extent
-            let transformExtent = virtualExtent ?? extent
+            let transformExtent = viewSpaceExtent(
+                for: virtualExtent ?? extent, angle: viewSpaceRotationAngle)
             let transform = navigation.transform(
                 imageExtent: transformExtent, viewportSize: destination.size)
             guard transform.scale.isFinite, transform.scale > 0,
@@ -964,8 +984,24 @@ struct PreviewSurfaceView: NSViewRepresentable {
             else {
                 return nil
             }
-            let displayed =
-                image
+            let presentationImage: CIImage
+            if abs(viewSpaceRotationAngle) > 0.000001 {
+                let radians = CGFloat(viewSpaceRotationAngle * .pi / 180)
+                let center = CGPoint(x: image.extent.midX, y: image.extent.midY)
+                let rotated = image.transformed(
+                    by: CGAffineTransform(translationX: center.x, y: center.y)
+                        .rotated(by: radians)
+                        .translatedBy(x: -center.x, y: -center.y))
+                let targetCenter = CGPoint(
+                    x: transformExtent.midX, y: transformExtent.midY)
+                presentationImage = rotated.transformed(
+                    by: CGAffineTransform(
+                        translationX: targetCenter.x - rotated.extent.midX,
+                        y: targetCenter.y - rotated.extent.midY))
+            } else {
+                presentationImage = image
+            }
+            let displayed = presentationImage
                 .transformed(by: transform.affineTransform(for: transformExtent))
                 .cropped(to: destination)
             // Resolve the dedicated canvas color against the editor view's effective appearance.
@@ -991,9 +1027,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         private static func quadGeometry(
             imageExtent: CGRect, navigation: CanvasNavigation, destination: CGRect,
-            virtualExtent: CGRect?
+            virtualExtent: CGRect?, viewSpaceRotationAngle: Double = 0
         ) -> (vertices: [Vertex], uniforms: Uniforms)? {
-            let transformExtent = virtualExtent ?? imageExtent
+            let transformExtent = viewSpaceExtent(
+                for: virtualExtent ?? imageExtent, angle: viewSpaceRotationAngle)
             let transform = navigation.transform(
                 imageExtent: transformExtent, viewportSize: destination.size
             )
@@ -1005,16 +1042,26 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 destination.width.isFinite, destination.height.isFinite
             else { return nil }
 
+            let isRotated = abs(viewSpaceRotationAngle) > 0.000001
+            let imageOrigin = isRotated
+                ? CGPoint(
+                    x: (transformExtent.width - imageExtent.width) / 2,
+                    y: (transformExtent.height - imageExtent.height) / 2)
+                : CGPoint(
+                    x: imageExtent.minX - transformExtent.minX,
+                    y: imageExtent.minY - transformExtent.minY)
             let origin = CGPoint(
-                x: transform.origin.x + (imageExtent.minX - transformExtent.minX) * transform.scale,
-                y: transform.origin.y + (imageExtent.minY - transformExtent.minY) * transform.scale
-            )
-            let size = CGSize(
-                width: imageExtent.width * transform.scale,
-                height: imageExtent.height * transform.scale)
+                x: transform.origin.x + imageOrigin.x * transform.scale,
+                y: transform.origin.y + imageOrigin.y * transform.scale)
+            let size = CGSize(width: imageExtent.width * transform.scale,
+                              height: imageExtent.height * transform.scale)
+            let center = CGPoint(
+                x: transform.origin.x + transformExtent.width * transform.scale / 2,
+                y: transform.origin.y + transformExtent.height * transform.scale / 2)
             let values = [
                 origin.x, origin.y, size.width, size.height,
-                transform.scale, destination.width, destination.height,
+                transform.scale, destination.width, destination.height, center.x, center.y,
+                viewSpaceRotationAngle,
             ]
             guard values.allSatisfy({ $0.isFinite }) else { return nil }
             return (
@@ -1027,13 +1074,25 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 uniforms: Uniforms(
                     transformOrigin: SIMD2(Float(transform.origin.x), Float(transform.origin.y)),
                     imageOrigin: SIMD2(
-                        Float(imageExtent.minX - transformExtent.minX),
-                        Float(imageExtent.minY - transformExtent.minY)),
+                        Float(imageOrigin.x), Float(imageOrigin.y)),
                     imageSize: SIMD2(Float(imageExtent.width), Float(imageExtent.height)),
                     scale: Float(transform.scale),
-                    viewportSize: SIMD2(Float(destination.width), Float(destination.height))
+                    viewportSize: SIMD2(Float(destination.width), Float(destination.height)),
+                    rotationCenter: SIMD2(Float(center.x), Float(center.y)),
+                    // CIImage uses a y-up coordinate system while the presenter uses y-down
+                    // screen pixels, so the visual transform is the inverse mathematical angle.
+                    rotationRadians: Float(-viewSpaceRotationAngle * .pi / 180)
                 )
             )
+        }
+
+        /// The upright crop frame is fitted against the rotated photo's AABB, while the texture
+        /// itself remains an unrotated rectangle until the presentation vertex transform turns it.
+        static func viewSpaceExtent(for extent: CGRect, angle: Double) -> CGRect {
+            guard abs(angle) > 0.000001 else { return extent }
+            return CGRect(
+                origin: .zero,
+                size: CropOverlayInteraction.rotatedImageExtent(of: extent.size, angle: angle))
         }
 
         private func drawingFinished(
@@ -1053,17 +1112,20 @@ struct PreviewSurfaceView: NSViewRepresentable {
             if retry || displayChanged || surfaceAdvanced || !succeeded {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
+                lastDrawnViewSpaceRotationAngle = nil
                 lastDrawnTextureGeneration = nil
                 lastDrawableSize = nil
             } else if succeeded, let surface, surface.revision == drawRevision, surface.image != nil
             {
                 lastDrawnRevision = drawRevision
                 lastDrawnNavigation = navigation
+                lastDrawnViewSpaceRotationAngle = viewSpaceRotationAngle
                 lastDrawnTextureGeneration = textureGeneration
                 lastDrawableSize = drawableSize
             } else {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
+                lastDrawnViewSpaceRotationAngle = nil
                 lastDrawnTextureGeneration = nil
                 lastDrawableSize = nil
             }
@@ -1107,6 +1169,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 // the paused view does not reject the fresh-draw request as redundant.
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
+                lastDrawnViewSpaceRotationAngle = nil
                 lastDrawableSize = nil
                 scheduleSkippedDrawRetry()
             }
@@ -1148,6 +1211,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// repaint behavior on hosts without a logged-in display; it never evaluates Core Image.
         func renderRetainedTextureForTesting(
             surface: PreviewSurface, navigation: CanvasNavigation, destinationSize: CGSize,
+            viewSpaceRotationAngle: Double = 0,
             appearance: NSAppearance? = nil
         ) -> MTLTexture? {
             guard destinationSize.width > 0, destinationSize.height > 0,
@@ -1170,7 +1234,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
                     navigation: navigation,
                     destination: CGRect(x: 0, y: 0, width: width, height: height),
-                    virtualExtent: surface.presentationImageExtent
+                    virtualExtent: surface.presentationImageExtent,
+                    viewSpaceRotationAngle: viewSpaceRotationAngle
                 ),
                 let commandBuffer = commandQueue.makeCommandBuffer()
             else { return nil }

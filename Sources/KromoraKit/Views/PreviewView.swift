@@ -166,8 +166,11 @@ struct PreviewView: View {
                         CropOverlayView(
                             normalizedRect: canvasState.cropDraft ?? CropAdjustments.unitRect,
                             imageSize: viewModel.cropSourceSize,
+                            sourceImageSize: viewModel.sourceSize,
                             aspectRatio: canvasState.cropAspectRatio,
                             orientation: canvasState.cropOrientation,
+                            straightenAngle: canvasState.cropStraightenAngle,
+                            pixelAspectRatio: canvasState.cropPixelAspectRatio,
                             onChange: viewModel.updateCropDraft
                         )
                         .padding(8)
@@ -233,6 +236,8 @@ struct PreviewView: View {
                 onScrollZoom: { factor in viewModel.zoomCanvas(by: factor) },
                 onDoubleClick: { viewModel.toggleCanvasZoom() },
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
+                viewSpaceRotationAngle: canvasState.isCropToolActive
+                    ? canvasState.cropStraightenAngle : 0,
                 ignoresHits: canvasState.isCropToolActive
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
