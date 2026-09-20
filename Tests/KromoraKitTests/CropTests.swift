@@ -8,7 +8,31 @@ import XCTest
 final class CropModelTests: XCTestCase {
     func testCommonCropAspectRatiosHaveClearCentralizedLabels() {
         XCTAssertEqual(
-            CropAspectRatio.allCases.map(\.label), ["Freeform", "1:1", "3:2", "4:3", "16:9"])
+            CropAspectRatio.allCases.map(\.label),
+            ["Original", "Freeform", "1:1", "16:9", "4:5", "5:7", "4:3", "3:5", "3:2", "Custom"])
+    }
+
+    func testOrientationLabelsMatchTheNormalizedFrameRatio() throws {
+        let imageSize = CGSize(width: 1_000, height: 1_000)
+        let expected: [(CropAspectRatio, String, String, CGFloat, CGFloat)] = [
+            (.sixteenToNine, "16:9 Landscape", "9:16 Portrait", 16.0 / 9.0, 9.0 / 16.0),
+            (.fourToThree, "4:3 Landscape", "3:4 Portrait", 4.0 / 3.0, 3.0 / 4.0),
+            (.threeToTwo, "3:2 Landscape", "2:3 Portrait", 3.0 / 2.0, 2.0 / 3.0),
+            (.fiveToSeven, "7:5 Landscape", "5:7 Portrait", 7.0 / 5.0, 5.0 / 7.0),
+            (.fourToFive, "5:4 Landscape", "4:5 Portrait", 5.0 / 4.0, 4.0 / 5.0),
+            (.threeToFive, "5:3 Landscape", "3:5 Portrait", 5.0 / 3.0, 3.0 / 5.0),
+        ]
+
+        for (ratio, landscapeLabel, portraitLabel, landscapeValue, portraitValue) in expected {
+            XCTAssertEqual(ratio.selectionLabel(for: .landscape), landscapeLabel)
+            XCTAssertEqual(ratio.selectionLabel(for: .portrait), portraitLabel)
+            XCTAssertEqual(
+                try XCTUnwrap(ratio.normalizedRatio(for: imageSize, orientation: .landscape)),
+                landscapeValue, accuracy: 0.000001)
+            XCTAssertEqual(
+                try XCTUnwrap(ratio.normalizedRatio(for: imageSize, orientation: .portrait)),
+                portraitValue, accuracy: 0.000001)
+        }
     }
 
     func testPresetSelectionPreservesCenterAndAdaptsToImageOrientation() throws {
@@ -276,6 +300,59 @@ final class CropModelTests: XCTestCase {
             CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0, height: 1)), .neutral)
         XCTAssertEqual(CropAdjustments(normalizedRect: nil), .neutral)
     }
+
+    func testGeometryDefaultsAndCodableMigrationAreNeutral() throws {
+        let legacy = try JSONDecoder().decode(
+            CropAdjustments.self,
+            from: Data("{\"normalizedRect\":null,\"aspectRatio\":\"Freeform\"}".utf8)
+        )
+        XCTAssertEqual(legacy, .neutral)
+
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6),
+            aspectRatio: .fourToFive,
+            orientation: .portrait,
+            straightenAngle: 18.5,
+            flipHorizontal: true,
+            flipVertical: true
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(CropAdjustments.self, from: JSONEncoder().encode(crop)), crop)
+        XCTAssertEqual(CropAdjustments(straightenAngle: 100).straightenAngle, 45)
+        XCTAssertEqual(CropAdjustments(straightenAngle: -100).straightenAngle, -45)
+    }
+
+    func testPerspectiveDefaultsAreBoundedAndCodable() throws {
+        XCTAssertEqual(CropAdjustments().verticalPerspective, 0)
+        XCTAssertEqual(CropAdjustments().horizontalPerspective, 0)
+        XCTAssertEqual(
+            CropAdjustments(verticalPerspective: 2, horizontalPerspective: -2),
+            CropAdjustments(
+                verticalPerspective: CropAdjustments.maximumPerspective,
+                horizontalPerspective: -CropAdjustments.maximumPerspective
+            )
+        )
+
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6),
+            verticalPerspective: 0.35,
+            horizontalPerspective: -0.2
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(CropAdjustments.self, from: JSONEncoder().encode(crop)), crop)
+        XCTAssertFalse(crop.isIdentity)
+        XCTAssertTrue(crop.hasGeometryTransform)
+    }
+
+    func testOriginalAspectIsSourcePixelIdentityWithoutResettingCrop() {
+        let crop = CGRect(x: 0.1, y: 0.15, width: 0.6, height: 0.5)
+        let original = CropOverlayInteraction.applying(
+            .original, to: crop, imageSize: CGSize(width: 400, height: 200))
+        XCTAssertEqual(original.midX, crop.midX, accuracy: 0.000001)
+        XCTAssertEqual(original.midY, crop.midY, accuracy: 0.000001)
+        XCTAssertEqual(
+            original.width * 400 / (original.height * 200), 2, accuracy: 0.000001)
+    }
 }
 
 final class CropPipelineTests: TempDirectoryTestCase {
@@ -353,6 +430,48 @@ final class CropPipelineTests: TempDirectoryTestCase {
         assertPixelsEqual(
             try Pixels.bytes(of: preview), try Pixels.bytes(of: decoded),
             "preset preview and export must retain the same crop extent")
+    }
+
+    func testFlipAndStraightenComposeBeforeCrop() async throws {
+        let engine = RenderEngine()
+        let document = EditDocument(crop: CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8),
+            straightenAngle: 12,
+            flipHorizontal: true
+        ))
+        let rendered = await engine.makeCGImage(
+            source: source, document: document, lut: nil, scale: .full, space: .current)
+        let image = try XCTUnwrap(rendered)
+        XCTAssertGreaterThan(image.width, 0)
+        XCTAssertGreaterThan(image.height, 0)
+        XCTAssertNotEqual(image.width, 96, "straighten should change the pre-crop geometry")
+    }
+
+    func testPerspectivePreviewAndExportHaveTheSameComposition() async throws {
+        let engine = RenderEngine()
+        let document = EditDocument(crop: CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8),
+            straightenAngle: 7,
+            flipHorizontal: true,
+            verticalPerspective: 0.35,
+            horizontalPerspective: -0.25
+        ))
+        let renderedImage = await engine.makeCGImage(
+            source: source, document: document, lut: nil, scale: .full, space: .current
+        )
+        let rendered = try XCTUnwrap(renderedImage)
+        let exported = try await engine.encode(
+            source: source, document: document, lut: nil, scale: .full,
+            format: .png, quality: 1, space: .current
+        )
+        let decoded = try Pixels.decode(exported)
+        XCTAssertGreaterThan(rendered.width, 0)
+        XCTAssertGreaterThan(rendered.height, 0)
+        XCTAssertEqual(decoded.width, rendered.width)
+        XCTAssertEqual(decoded.height, rendered.height)
+        assertPixelsEqual(
+            try Pixels.bytes(of: rendered), try Pixels.bytes(of: decoded),
+            "perspective preview and export must share the geometry pipeline")
     }
 }
 
@@ -518,6 +637,55 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         viewModel.redo()
         XCTAssertEqual(viewModel.document.crop.aspectRatio, .sixteenToNine)
         XCTAssertEqual(viewModel.document.crop.orientation, .portrait)
+    }
+
+    func testStraightenAndFlipAreDraftedUntilDoneAndCancelRestoresCommittedGeometry() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "geometry-workflow.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        viewModel.setCropStraightenAngle(22.5)
+        viewModel.toggleCropFlip(horizontal: true)
+        XCTAssertTrue(viewModel.document.crop.isIdentity)
+        XCTAssertEqual(viewModel.cropStraightenAngle, 22.5, accuracy: 0.000001)
+        XCTAssertTrue(viewModel.cropFlipHorizontal)
+        viewModel.cancelCrop()
+        XCTAssertTrue(viewModel.document.crop.isIdentity)
+
+        viewModel.beginCrop()
+        viewModel.setCropStraightenAngle(-12)
+        viewModel.toggleCropFlip(horizontal: false)
+        viewModel.commitCrop()
+        XCTAssertEqual(viewModel.document.crop.straightenAngle, -12, accuracy: 0.000001)
+        XCTAssertTrue(viewModel.document.crop.flipVertical)
+        viewModel.undo()
+        XCTAssertTrue(viewModel.document.crop.isIdentity)
+        viewModel.redo()
+        XCTAssertEqual(viewModel.document.crop.straightenAngle, -12, accuracy: 0.000001)
+        XCTAssertTrue(viewModel.document.crop.flipVertical)
+    }
+
+    func testCropAutoNoOpDoesNotTouchGeometryOrGlobalTone() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "auto-no-op.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        let before = viewModel.document
+        viewModel.runCropAuto()
+
+        XCTAssertEqual(viewModel.document, before)
+        XCTAssertEqual(viewModel.cropStraightenAngle, 0)
+        XCTAssertEqual(viewModel.cropVerticalPerspective, 0)
+        XCTAssertEqual(viewModel.cropHorizontalPerspective, 0)
+        XCTAssertEqual(viewModel.statusMessage, "Auto crop: no reliable horizon detected")
     }
 
     /// Covers the LUMO-115 fix directly: while Crop is open, the pixels under the full-source

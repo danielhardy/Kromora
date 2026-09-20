@@ -7,26 +7,41 @@ import Foundation
 /// use `.automatic` orientation to retain the source-aware behavior; the crop UI stores an
 /// explicit portrait or landscape choice when one is selected.
 enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
+    case original = "Original"
     case freeform = "Freeform"
     case square = "1:1"
-    case threeToTwo = "3:2"
-    case fourToThree = "4:3"
     case sixteenToNine = "16:9"
+    case fourToFive = "4:5"
+    case fiveToSeven = "5:7"
+    case fourToThree = "4:3"
+    case threeToFive = "3:5"
+    case threeToTwo = "3:2"
+    case custom = "Custom"
 
     var label: String { rawValue }
 
-    var isFreeform: Bool { self == .freeform }
+    var isFreeform: Bool { self == .freeform || self == .custom }
 
     var supportsOrientationSelection: Bool {
-        self != .freeform && self != .square
+        self != .original && !isFreeform && self != .square
     }
 
     func selectionLabel(for orientation: CropAspectRatioOrientation) -> String {
         guard supportsOrientationSelection else { return label }
         switch orientation {
-        case .landscape: return "\(label) Landscape"
+        case .landscape: return "\(landscapeLabel) Landscape"
         case .portrait: return "\(portraitLabel) Portrait"
         case .automatic: return label
+        }
+    }
+
+    private var landscapeLabel: String {
+        switch self {
+        case .fourToFive: return "5:4"
+        case .fiveToSeven: return "7:5"
+        case .threeToFive: return "5:3"
+        case .original, .freeform, .square, .sixteenToNine, .fourToThree, .threeToTwo, .custom:
+            return label
         }
     }
 
@@ -35,17 +50,24 @@ enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
         case .threeToTwo: return "2:3"
         case .fourToThree: return "3:4"
         case .sixteenToNine: return "9:16"
-        case .freeform, .square: return label
+        case .fourToFive: return "4:5"
+        case .fiveToSeven: return "5:7"
+        case .threeToFive: return "3:5"
+        case .original, .freeform, .square, .custom: return label
         }
     }
 
     private var landscapePixelRatio: CGFloat? {
         switch self {
-        case .freeform: return nil
+        case .original: return 1
+        case .freeform, .custom: return nil
         case .square: return 1
-        case .threeToTwo: return 3.0 / 2.0
         case .fourToThree: return 4.0 / 3.0
         case .sixteenToNine: return 16.0 / 9.0
+        case .fourToFive: return 5.0 / 4.0
+        case .fiveToSeven: return 7.0 / 5.0
+        case .threeToFive: return 5.0 / 3.0
+        case .threeToTwo: return 3.0 / 2.0
         }
     }
 
@@ -55,10 +77,14 @@ enum CropAspectRatio: String, Codable, CaseIterable, Hashable, Sendable {
         for imageSize: CGSize,
         orientation: CropAspectRatioOrientation = .automatic
     ) -> CGFloat? {
-        guard let landscapePixelRatio = landscapePixelRatio,
-            imageSize.width.isFinite, imageSize.height.isFinite,
+        guard imageSize.width.isFinite, imageSize.height.isFinite,
             imageSize.width > 0, imageSize.height > 0
         else { return nil }
+
+        // The source's pixel aspect becomes a 1:1 ratio in normalized coordinates. This keeps
+        // Original tied to the source framing without treating it as a crop reset.
+        if self == .original { return 1 }
+        guard let landscapePixelRatio else { return nil }
 
         let pixelRatio: CGFloat
         switch orientation {
@@ -103,23 +129,65 @@ struct CropAdjustments: Codable, Equatable, Sendable {
     var aspectRatio: CropAspectRatio
     var orientation: CropAspectRatioOrientation
 
+    /// Continuous clockwise deskew in degrees. It is deliberately separate from
+    /// `ImageRotation`, whose four values remain exact quarter turns.
+    var straightenAngle: Double {
+        didSet { straightenAngle = Self.clampedAngle(straightenAngle) }
+    }
+
+    /// Mirrors are applied after the quarter-turn and before straighten/crop.
+    var flipHorizontal: Bool
+    var flipVertical: Bool
+
+    /// Normalized keystone controls. Values are deliberately bounded below one so the
+    /// quadrilateral used by Core Image cannot collapse or invert the photo.
+    var verticalPerspective: Double {
+        didSet { verticalPerspective = Self.clampedPerspective(verticalPerspective) }
+    }
+    var horizontalPerspective: Double {
+        didSet { horizontalPerspective = Self.clampedPerspective(horizontalPerspective) }
+    }
+
     init(
         normalizedRect: CGRect? = nil,
         aspectRatio: CropAspectRatio = .freeform,
-        orientation: CropAspectRatioOrientation = .automatic
+        orientation: CropAspectRatioOrientation = .automatic,
+        straightenAngle: Double = 0,
+        flipHorizontal: Bool = false,
+        flipVertical: Bool = false,
+        verticalPerspective: Double = 0,
+        horizontalPerspective: Double = 0
     ) {
         self.normalizedRect = Self.normalized(normalizedRect)
         self.aspectRatio = aspectRatio
         self.orientation = orientation
+        self.straightenAngle = Self.clampedAngle(straightenAngle)
+        self.flipHorizontal = flipHorizontal
+        self.flipVertical = flipVertical
+        self.verticalPerspective = Self.clampedPerspective(verticalPerspective)
+        self.horizontalPerspective = Self.clampedPerspective(horizontalPerspective)
     }
 
     var isIdentity: Bool {
-        guard let normalizedRect else { return aspectRatio.isFreeform }
-        return normalizedRect == Self.unitRect && aspectRatio.isFreeform
+        guard let normalizedRect else {
+            return aspectRatio.isFreeform && straightenAngle == 0
+                && !flipHorizontal && !flipVertical
+                && verticalPerspective == 0 && horizontalPerspective == 0
+        }
+        return normalizedRect == Self.unitRect
+            && (aspectRatio.isFreeform || aspectRatio == .original)
+            && straightenAngle == 0 && !flipHorizontal && !flipVertical
+            && verticalPerspective == 0 && horizontalPerspective == 0
+    }
+
+    var hasGeometryTransform: Bool {
+        straightenAngle != 0 || flipHorizontal || flipVertical
+            || verticalPerspective != 0 || horizontalPerspective != 0
     }
 
     private enum CodingKeys: String, CodingKey {
-        case normalizedRect, aspectRatio, orientation
+        case normalizedRect, aspectRatio, orientation, straightenAngle, flipHorizontal, flipVertical,
+             verticalPerspective, horizontalPerspective
     }
 
     init(from decoder: Decoder) throws {
@@ -133,6 +201,17 @@ struct CropAdjustments: Codable, Equatable, Sendable {
             try container.decodeIfPresent(
                 CropAspectRatioOrientation.self, forKey: .orientation
             ) ?? .automatic
+        straightenAngle = Self.clampedAngle(
+            try container.decodeIfPresent(Double.self, forKey: .straightenAngle) ?? 0
+        )
+        flipHorizontal = try container.decodeIfPresent(Bool.self, forKey: .flipHorizontal) ?? false
+        flipVertical = try container.decodeIfPresent(Bool.self, forKey: .flipVertical) ?? false
+        verticalPerspective = Self.clampedPerspective(
+            try container.decodeIfPresent(Double.self, forKey: .verticalPerspective) ?? 0
+        )
+        horizontalPerspective = Self.clampedPerspective(
+            try container.decodeIfPresent(Double.self, forKey: .horizontalPerspective) ?? 0
+        )
     }
 
     private static func normalized(_ rect: CGRect?) -> CGRect? {
@@ -156,20 +235,68 @@ struct CropAdjustments: Codable, Equatable, Sendable {
     /// axis-swapped extent and frames the wrong region.
     func rotated(byClockwiseQuarterTurns turns: Int) -> CropAdjustments {
         let steps = ((turns % 4) + 4) % 4
-        guard steps != 0, let rect = normalizedRect else { return self }
+        guard steps != 0 else { return self }
 
-        var current = rect
-        for _ in 0..<steps {
-            current = CGRect(
-                x: current.minY,
-                y: 1 - current.minX - current.width,
-                width: current.height,
-                height: current.width
-            )
-        }
         var result = self
-        result.normalizedRect = current
+        if var current = normalizedRect {
+            for _ in 0..<steps {
+                current = CGRect(
+                    x: current.minY,
+                    y: 1 - current.minX - current.width,
+                    width: current.height,
+                    height: current.width
+                )
+            }
+            result.normalizedRect = current
+        }
+        if steps % 2 == 1 {
+            swap(&result.flipHorizontal, &result.flipVertical)
+            let vertical = result.verticalPerspective
+            result.verticalPerspective = result.horizontalPerspective
+            result.horizontalPerspective = vertical
+        }
         return result
+    }
+
+    /// Remap a crop rectangle when the active photo mirror changes, preserving the framed
+    /// source content while keeping the rectangle in the post-mirror coordinate space.
+    func mirrored(horizontal: Bool = false, vertical: Bool = false) -> CropAdjustments {
+        var result = self
+        guard var rect = normalizedRect else {
+            if horizontal {
+                result.flipHorizontal.toggle()
+                result.horizontalPerspective *= -1
+            }
+            if vertical {
+                result.flipVertical.toggle()
+                result.verticalPerspective *= -1
+            }
+            return result
+        }
+        if horizontal {
+            rect.origin.x = 1 - rect.maxX
+            result.flipHorizontal.toggle()
+            result.horizontalPerspective *= -1
+        }
+        if vertical {
+            rect.origin.y = 1 - rect.maxY
+            result.flipVertical.toggle()
+            result.verticalPerspective *= -1
+        }
+        result.normalizedRect = rect
+        return result
+    }
+
+    private static func clampedAngle(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, -45), 45)
+    }
+
+    static let maximumPerspective = 0.8
+
+    private static func clampedPerspective(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, -maximumPerspective), maximumPerspective)
     }
 }
 
