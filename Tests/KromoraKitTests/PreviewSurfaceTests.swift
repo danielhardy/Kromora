@@ -350,6 +350,41 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertTrue(surface.image === completePhoto)
     }
 
+    func testPartialROIFrameStaysAtPublishedNavigationUntilReplacementArrives() throws {
+        let surface = PreviewSurface()
+        let image = CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 400, height: 300))
+        var publishedNavigation = CanvasNavigation()
+        publishedNavigation.setZoom(8)
+
+        XCTAssertTrue(
+            surface.present(
+                image,
+                presentationImageExtent: CGRect(x: 0, y: 0, width: 3_200, height: 2_400),
+                coversPresentationExtent: false,
+                presentationNavigation: publishedNavigation
+            ))
+
+        var pannedNavigation = publishedNavigation
+        pannedNavigation.pan(
+            by: CGSize(width: -80, height: 45),
+            imageExtent: CGRect(x: 0, y: 0, width: 3_200, height: 2_400),
+            viewportSize: CGSize(width: 800, height: 600)
+        )
+        XCTAssertEqual(
+            surface.navigationForPresentation(pannedNavigation), publishedNavigation,
+            "a partial ROI must not move under a newer pan before its replacement is published"
+        )
+
+        XCTAssertTrue(
+            surface.present(
+                image,
+                presentationImageExtent: CGRect(x: 0, y: 0, width: 3_200, height: 2_400),
+                coversPresentationExtent: false,
+                presentationNavigation: pannedNavigation
+            ))
+        XCTAssertEqual(surface.navigationForPresentation(pannedNavigation), pannedNavigation)
+    }
+
     func testPresentationImageRemainsBoundedAbove100PercentAndKeepsTheSourceVisible() throws {
         let source = CIImage(color: CIColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1))
             .cropped(to: CGRect(x: 37, y: 19, width: 640, height: 400))

@@ -32,6 +32,10 @@ final class PreviewSurface: ObservableObject {
     /// Fit/Fill then fill the canvas instead of treating the texture as a top-left ROI of a
     /// larger virtual frame. Viewport-fragment ROI previews leave this false.
     private(set) var coversPresentationExtent = false
+    /// Navigation that produced the currently published frame. Partial ROI frames remain drawn
+    /// at this state while a newer pan is rendering, so the old fragment never exposes a blank
+    /// region by being moved under a newer transform.
+    private(set) var presentationNavigation: CanvasNavigation?
     /// Planner-space rectangle for an uncovered ROI fragment. Interactive frames can decode
     /// below the planner `targetSize`, so this is not always `image.extent`.
     private(set) var layoutImageExtent: CGRect?
@@ -50,6 +54,7 @@ final class PreviewSurface: ObservableObject {
     private var lastValidPresentationImageExtent: CGRect?
     private var lastValidLayoutImageExtent: CGRect?
     private var lastValidCoversPresentationExtent = false
+    private var lastValidPresentationNavigation: CanvasNavigation?
     private var lastValidSpace: WorkingSpace = .current
     /// The detail level of a published frame, plus whether that frame is the complete photo.
     /// Coverage is part of the record because a partial ROI frame is not interchangeable with a
@@ -123,6 +128,7 @@ final class PreviewSurface: ObservableObject {
         presentationImageExtent: CGRect? = nil,
         coversPresentationExtent: Bool = false,
         layoutImageExtent: CGRect? = nil,
+        presentationNavigation: CanvasNavigation? = nil,
         onPresented: (() -> Void)? = nil
     ) -> Bool {
         guard let image,
@@ -155,6 +161,7 @@ final class PreviewSurface: ObservableObject {
         )
         self.coversPresentationExtent = coversPresentationExtent
         self.layoutImageExtent = layoutImageExtent
+        self.presentationNavigation = presentationNavigation
         self.space = space
         // The new publication must not sample the previous frame's texture. Until the async
         // materialization completes, draw() intentionally takes the CI fallback path for this
@@ -305,6 +312,7 @@ final class PreviewSurface: ObservableObject {
         lastValidPresentationImageExtent = presentationImageExtent
         lastValidLayoutImageExtent = layoutImageExtent
         lastValidCoversPresentationExtent = coversPresentationExtent
+        lastValidPresentationNavigation = presentationNavigation
         lastValidSpace = space
         lastValidDetail = currentDetail
         pendingDisplayID = nil
@@ -319,6 +327,7 @@ final class PreviewSurface: ObservableObject {
         presentationImageExtent = lastValidPresentationImageExtent
         layoutImageExtent = lastValidLayoutImageExtent
         coversPresentationExtent = lastValidCoversPresentationExtent
+        presentationNavigation = lastValidPresentationNavigation
         space = lastValidSpace
         currentDetail = lastValidDetail
         pendingPresentationMaterializationRevision = nil
@@ -493,6 +502,7 @@ final class PreviewSurface: ObservableObject {
         image = nil
         presentationImageExtent = nil
         coversPresentationExtent = false
+        presentationNavigation = nil
         layoutImageExtent = nil
         space = .current
         lastValidImage = nil
@@ -504,6 +514,7 @@ final class PreviewSurface: ObservableObject {
         lastValidPresentationImageExtent = nil
         lastValidLayoutImageExtent = nil
         lastValidCoversPresentationExtent = false
+        lastValidPresentationNavigation = nil
         lastValidSpace = .current
         lastValidDetail = nil
         currentDetail = nil
@@ -518,6 +529,14 @@ final class PreviewSurface: ObservableObject {
         presentationConfirmations.removeAll()
         pendingPresentationMaterializationRevision = nil
         pendingPresentationMaterialization = nil
+    }
+
+    /// A complete frame can be transformed immediately for presentation-only navigation. A
+    /// partial ROI cannot: moving its quad before the replacement ROI arrives would uncover the
+    /// newly exposed photo area and clear it to the canvas background.
+    func navigationForPresentation(_ current: CanvasNavigation) -> CanvasNavigation {
+        guard !coversPresentationExtent else { return current }
+        return presentationNavigation ?? current
     }
 
     private struct MaterializationSubmission {
@@ -795,6 +814,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
             let drawableSize = (drawable.texture.width, drawable.texture.height)
             onDrawableSizeChange?(CGSize(width: drawableSize.0, height: drawableSize.1))
+            let drawNavigation = surface.navigationForPresentation(navigation)
             let sameDrawableSize =
                 lastDrawableSize?.width == drawableSize.0
                 && lastDrawableSize?.height == drawableSize.1
@@ -810,7 +830,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             // change (an edit, a settled render) happened to bump the revision.
             guard
                 surface.revision != lastDrawnRevision || !sameDrawableSize
-                    || navigation != lastDrawnNavigation || !sameTextureGeneration
+                    || drawNavigation != lastDrawnNavigation || !sameTextureGeneration
                     || !sameViewSpaceRotation
             else {
                 return
@@ -834,7 +854,6 @@ struct PreviewSurfaceView: NSViewRepresentable {
             }
             let displayRevision = surface.pendingDisplayRevision()
             let drawRevision = surface.revision
-            let drawNavigation = navigation
             let drawViewSpaceRotationAngle = viewSpaceRotationAngle
             let drawTextureGeneration = surface.presentationTextureGeneration
             isDrawing = true
@@ -851,7 +870,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 let pipeline, let samplerState,
                 var geometry = Self.quadGeometry(
                     imageExtent: surface.layoutExtent(forTextureExtent: textureExtent),
-                    navigation: navigation,
+                    navigation: drawNavigation,
                     destination: destination, virtualExtent: surface.presentationImageExtent,
                     viewSpaceRotationAngle: drawViewSpaceRotationAngle
                 ),
@@ -878,7 +897,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     vertexCount: geometry.vertices.count)
                 encoder.endEncoding()
             } else if let output = Self.presentationImage(
-                surface.mappedImageForPresentation(image), navigation: navigation,
+                surface.mappedImageForPresentation(image), navigation: drawNavigation,
                 destination: destination,
                 virtualExtent: surface.presentationImageExtent,
                 viewSpaceRotationAngle: drawViewSpaceRotationAngle,

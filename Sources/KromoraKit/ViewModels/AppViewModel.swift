@@ -3832,6 +3832,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     nativeExtent: document.rotation.orientedExtent(source.nativeExtent)
                 ),
             presentationImageExtent: plan.presentationImageExtent,
+            presentationNavigation: canvasState.navigation,
             quality: .preview,
             output: .raster, space: .current, requestRevision: requestRevision
         )
@@ -3987,6 +3988,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         nativeExtent: requested.rotation.orientedExtent(imageSource.nativeExtent)
                     ),
                 presentationImageExtent: plan.presentationImageExtent,
+                presentationNavigation: canvasState.navigation,
                 quality: .interactive,
                 output: .raster, space: .current, requestRevision: displayRevision
             ), phase: .interactive, assetID: activeAssetID, sourceRevision: sourceRevision,
@@ -4321,10 +4323,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// Pan is a presentation-only operation. The caller supplies a viewport-space pointer delta,
     /// so the image follows that delta on both axes. It updates the Metal transform immediately
-    /// and does not wait for a new render; zoom is the operation that asks the coordinator for more
-    /// detail.
+    /// for complete frames and asks the coordinator for a matching ROI when the current frame is
+    /// partial.
     func panCanvas(by delta: CGSize, viewportSize: CGSize) {
         guard let imageSource else { return }
+        let previousNavigation = canvasState.navigation
         let oriented = document.rotation.orientedExtent(imageSource.nativeExtent)
         let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
         canvasState.pan(
@@ -4336,6 +4339,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             ),
             viewportSize: viewportSize
         )
+        guard canvasState.navigation != previousNavigation else { return }
+
+        // A render planned for the previous focal point must not publish against this newer pan.
+        // During an explicit canvas gesture the interaction generation is kept stable for edit
+        // coalescing, so advance the display fence here for every changed pan position.
+        if isPreviewInteractionActive {
+            previewPresentation.advanceDisplayRevision()
+        }
+        scheduleInteractivePreview()
     }
 
     /// Read-only seam for controls implemented in extensions. Keeping the stored interaction flag
@@ -4496,6 +4508,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 presentationImageExtent: request.presentationImageExtent,
                 coversPresentationExtent: request.coversPresentationExtent,
                 layoutImageExtent: request.presentationLayoutExtent,
+                presentationNavigation: request.presentationNavigation,
                 onPresented: nil)
         } else if let cgImage = publication.image {
             // Non-GPU conformers retain a raster compatibility seam, but it terminates at the
@@ -4512,6 +4525,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 presentationImageExtent: request.presentationImageExtent,
                 coversPresentationExtent: request.coversPresentationExtent,
                 layoutImageExtent: request.presentationLayoutExtent,
+                presentationNavigation: request.presentationNavigation,
                 onPresented: nil)
         }
         guard publication.gpuImage != nil || publication.image != nil else {
@@ -4561,6 +4575,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             presentationImageExtent: request.presentationImageExtent,
             coversPresentationExtent: request.coversPresentationExtent,
             layoutImageExtent: request.presentationLayoutExtent,
+            presentationNavigation: request.presentationNavigation,
             onPresented: { [weak self] in
                 self?.didPresentVisibleFrame(
                     request, assetID: assetID, sourceRevision: sourceRevision,
@@ -4709,7 +4724,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                             space: request.space,
                             presentationImageExtent: request.presentationImageExtent,
                             coversPresentationExtent: request.coversPresentationExtent,
-                            layoutImageExtent: request.presentationLayoutExtent
+                            layoutImageExtent: request.presentationLayoutExtent,
+                            presentationNavigation: request.presentationNavigation
                         ) || hadValidOriginal
                     else {
                         self.comparisonPreviewDidFail(
@@ -4736,7 +4752,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         space: request.space,
                         presentationImageExtent: request.presentationImageExtent,
                         coversPresentationExtent: request.coversPresentationExtent,
-                        layoutImageExtent: request.presentationLayoutExtent
+                        layoutImageExtent: request.presentationLayoutExtent,
+                        presentationNavigation: request.presentationNavigation
                     ) || hadValidOriginal
                 else {
                     self.comparisonPreviewDidFail(

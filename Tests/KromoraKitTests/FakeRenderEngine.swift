@@ -112,6 +112,7 @@ actor FakeRenderEngine: RenderEngining {
         let format: ExportFormat?
         let sourceROI: CGRect?
         let presentationImageExtent: CGRect?
+        let presentationNavigation: CanvasNavigation
         let requestRevision: UInt64
         let assetID: PhotoAssetID?
         /// The `ImageSource` the call named. Recorded so a test can tell *which* image was asked
@@ -128,6 +129,7 @@ actor FakeRenderEngine: RenderEngining {
             maskResolution: MaskResolutionPolicy,
             sourceROI: CGRect? = nil,
             presentationImageExtent: CGRect? = nil,
+            presentationNavigation: CanvasNavigation = CanvasNavigation(),
             requestRevision: UInt64 = 0,
             assetID: PhotoAssetID? = nil
         ) {
@@ -139,6 +141,7 @@ actor FakeRenderEngine: RenderEngining {
             self.format = format
             self.sourceROI = sourceROI
             self.presentationImageExtent = presentationImageExtent
+            self.presentationNavigation = presentationNavigation
             self.requestRevision = requestRevision
             self.assetID = assetID
             self.source = source
@@ -159,6 +162,7 @@ actor FakeRenderEngine: RenderEngining {
             source = request.source
             sourceROI = request.sourceROI
             presentationImageExtent = request.presentationImageExtent
+            presentationNavigation = request.presentationNavigation
             requestRevision = request.requestRevision
             assetID = request.assetID
         }

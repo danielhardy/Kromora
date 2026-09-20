@@ -320,6 +320,41 @@ final class CanvasNavigationTests: XCTestCase {
 
 @MainActor
 final class CanvasObservationTests: TempDirectoryTestCase {
+    private func waitUntil(
+        _ description: String, timeout: TimeInterval = 5,
+        _ condition: @escaping @MainActor () async -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !(await condition()) {
+            if Date() > deadline {
+                throw TestSynchronizationError.timedOut(
+                    description, "condition did not become true")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func nextROIRequest(
+        from fake: FakeRenderEngine, after count: Int
+    ) async throws -> FakeRenderEngine.Request {
+        try await waitUntil("the next viewport ROI request") {
+            (await fake.previewRequests).dropFirst(count).contains { $0.sourceROI != nil }
+        }
+        let requests = await fake.previewRequests
+        return try XCTUnwrap(requests.dropFirst(count).first { $0.sourceROI != nil })
+    }
+
+    private func assertContains(
+        _ roi: CGRect, _ visible: CGRect,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let epsilon: CGFloat = 0.01
+        XCTAssertLessThanOrEqual(roi.minX, visible.minX + epsilon, file: file, line: line)
+        XCTAssertLessThanOrEqual(roi.minY, visible.minY + epsilon, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(roi.maxX + epsilon, visible.maxX, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(roi.maxY + epsilon, visible.maxY, file: file, line: line)
+    }
+
     func testPanCanvasPreservesPointerDirectionOnBothAxes() async throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let imageURL = try Fixtures.writeGradientPNG(
@@ -351,6 +386,83 @@ final class CanvasObservationTests: TempDirectoryTestCase {
 
         XCTAssertEqual(after.origin.x, before.origin.x + delta.width, accuracy: 0.000_001)
         XCTAssertEqual(after.origin.y, before.origin.y + delta.height, accuracy: 0.000_001)
+    }
+
+    func testPanAtDeepZoomRequestsROIsThatCoverEveryViewportEdge() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 100, height: 80, named: "deep-pan.png", in: tempDirectory
+        )
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the image to load") { viewModel.sourceImage != nil }
+
+        let viewport = CGSize(width: 80, height: 60)
+        viewModel.updatePreviewBackingSize(viewport)
+        for zoom in [4.0, 8.0, CanvasNavigation.maximumZoom] {
+            let beforeZoom = await fake.previewRequests.count
+            viewModel.setCanvasZoom(zoom)
+            _ = try await nextROIRequest(from: fake, after: beforeZoom)
+
+            viewModel.beginCanvasInteraction()
+            let edgeDeltas = [
+                CGSize(width: 10_000, height: 10_000),   // top-left
+                CGSize(width: -10_000, height: 0),       // top-right
+                CGSize(width: 0, height: -10_000),       // bottom-right
+                CGSize(width: 10_000, height: 0),        // bottom-left
+            ]
+            for delta in edgeDeltas {
+                let before = await fake.previewRequests.count
+                viewModel.panCanvas(by: delta, viewportSize: viewport)
+                let request = try await nextROIRequest(from: fake, after: before)
+                let plan = viewModel.resolutionPlan(
+                    for: viewModel.document, nativeExtent: viewModel.sourceSize,
+                    viewportSize: viewport, surface: .mainPreview
+                )
+                assertContains(
+                    try XCTUnwrap(request.sourceROI), plan.visibleSourceRect,
+                    file: #filePath, line: #line
+                )
+            }
+            viewModel.endCanvasInteraction()
+        }
+    }
+
+    func testEditTriggeredPreviewKeepsThePannedFocalPoint() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 100, height: 80, named: "edit-pan.png", in: tempDirectory
+        )
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the image to load") { viewModel.sourceImage != nil }
+
+        let viewport = CGSize(width: 80, height: 60)
+        viewModel.updatePreviewBackingSize(viewport)
+        viewModel.setCanvasZoom(8)
+        _ = try await nextROIRequest(from: fake, after: 0)
+        viewModel.panCanvas(by: CGSize(width: -12, height: 9), viewportSize: viewport)
+        let focalBeforeEdit = viewModel.canvasNavigation.focalPoint
+
+        let beforeEdit = await fake.previewRequests.count
+        viewModel.setToneCurvePoint(
+            LightCurvePoint(input: 0.5, output: 0.5), output: 0.8
+        )
+        try await waitUntil("the tone-curve preview") {
+            (await fake.previewRequests).dropFirst(beforeEdit).contains {
+                $0.document.light.toneCurve.value(at: 0.5) == 0.8
+            }
+        }
+
+        XCTAssertEqual(viewModel.canvasNavigation.focalPoint, focalBeforeEdit)
+        let renderRequests = await fake.renderRequests
+        let request = try XCTUnwrap(renderRequests.last {
+            $0.document.light.toneCurve.value(at: 0.5) == 0.8
+        })
+        XCTAssertEqual(
+            request.presentationNavigation, viewModel.canvasNavigation,
+            "an edit-triggered ROI must be planned for the current pan"
+        )
     }
 
     func testHighFrequencyCanvasAndCropUpdatesBypassBroadModelPublisher() {
