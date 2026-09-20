@@ -172,6 +172,42 @@ final class CopyPasteTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.statusMessage.contains("Light"))
     }
 
+    func testSelectiveCopyDialogSeedsAndPersistsRememberedCategories() async throws {
+        let preferences = makeTestUserDefaults()
+        let settings = KromoraSettings(
+            preferences: preferences,
+            userLookFolderURL: tempDirectory
+        )
+        settings.lastCopyCategories = [.light, .crop]
+
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: makeInMemoryEditStore(),
+            preferences: preferences
+        )
+        viewModel.importPhotosData([try photoData(named: "source.png")])
+        try await waitUntil("the source photo") { viewModel.sourceName == "source.png" }
+
+        // The dialog is the VM boundary used by both ⌘C and the Copy Edits… menu item. It must
+        // refresh its checklist from the persisted choice each time it opens, rather than from
+        // the previous sheet session.
+        viewModel.selectiveCopyCategories = [.color]
+        viewModel.presentSelectiveCopyDialog()
+        XCTAssertTrue(viewModel.isSelectiveCopyDialogPresented)
+        XCTAssertEqual(viewModel.selectiveCopyCategories, [.light, .crop])
+
+        viewModel.selectiveCopyCategories = [.color, .lut]
+        viewModel.confirmSelectiveCopy()
+
+        XCTAssertFalse(viewModel.isSelectiveCopyDialogPresented)
+        XCTAssertEqual(viewModel.editClipboardCategories, [.color, .lut])
+        let relaunchedSettings = KromoraSettings(
+            preferences: preferences,
+            userLookFolderURL: tempDirectory
+        )
+        XCTAssertEqual(relaunchedSettings.lastCopyCategories, [.color, .lut])
+    }
+
     func testMultiPasteUpdatesOnlySelectedPhotosAndEachDestinationCanUndo() async throws {
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
@@ -218,6 +254,45 @@ final class CopyPasteTests: TempDirectoryTestCase {
 
         viewModel.selectCollectionImage(at: 0)
         try await waitUntil("the source photo") { viewModel.sourceName == "one.png" }
+        XCTAssertEqual(viewModel.document, sourceEdits)
+    }
+
+    func testFilmstripShiftSelectionBuildsRangeThatPasteCovers() async throws {
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: makeInMemoryEditStore()
+        )
+        viewModel.importPhotosData([
+            try photoData(named: "filmstrip-one.png"),
+            try photoData(named: "filmstrip-two.png"),
+            try photoData(named: "filmstrip-three.png"),
+            try photoData(named: "filmstrip-four.png"),
+        ])
+        try await waitUntil("the first filmstrip photo") {
+            viewModel.sourceName == "filmstrip-one.png"
+        }
+
+        let sourceEdits = EditDocument(adjustments: [.exposure(ev: 0.85)])
+        viewModel.updateDocument { $0 = sourceEdits }
+        viewModel.copyAllEdits()
+
+        // This is the callback path used by FilmstripView: the first click establishes the
+        // anchor and the Shift-click extends the selection in display/source order.
+        viewModel.selectCollectionImage(at: 3, modifiers: [.shift])
+        try await waitUntil("the Shift-clicked filmstrip photo") {
+            viewModel.sourceName == "filmstrip-four.png"
+        }
+        XCTAssertEqual(viewModel.collection.selectedIndices, [0, 1, 2, 3])
+
+        viewModel.pasteEdits()
+
+        for item in viewModel.collection.items {
+            XCTAssertEqual(
+                viewModel.editorDocument.session(for: item.id)?.document,
+                sourceEdits,
+                "the Shift-selected range should receive the paste for \(item.displayName)"
+            )
+        }
         XCTAssertEqual(viewModel.document, sourceEdits)
     }
 }
