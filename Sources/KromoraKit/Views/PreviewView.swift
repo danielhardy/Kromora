@@ -280,6 +280,7 @@ struct PreviewView: View {
                 if !isDraggingCanvas {
                     isDraggingCanvas = true
                     dragTranslation = .zero
+                    viewModel.beginCanvasInteraction()
                 }
                 let delta = CGSize(
                     width: value.translation.width - dragTranslation.width,
@@ -292,6 +293,7 @@ struct PreviewView: View {
                 guard isDraggingCanvas else { return }
                 isDraggingCanvas = false
                 dragTranslation = .zero
+                viewModel.endCanvasInteraction()
             }
     }
 

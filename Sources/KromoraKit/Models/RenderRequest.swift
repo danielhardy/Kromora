@@ -44,6 +44,10 @@ struct RenderRequest: Sendable, Equatable {
     /// Scaled crop-frame geometry for the presentation surface when `sourceROI` is smaller than
     /// the committed crop. This never changes export pixels.
     let presentationImageExtent: CGRect?
+    /// Presentation-only navigation captured when this request was planned. The renderer ignores
+    /// this value; the surface uses it to keep a partial ROI registered with the pan that produced
+    /// it until a newer ROI is ready.
+    let presentationNavigation: CanvasNavigation
     let quality: RenderQuality
     let frameBudgetMilliseconds: Double
     let output: Output
@@ -67,6 +71,7 @@ struct RenderRequest: Sendable, Equatable {
         targetSize: CGSize? = nil,
         sourceROI: CGRect? = nil,
         presentationImageExtent: CGRect? = nil,
+        presentationNavigation: CanvasNavigation = CanvasNavigation(),
         quality: RenderQuality,
         frameBudgetMilliseconds: Double = 16.7,
         output: Output = .raster,
@@ -83,6 +88,7 @@ struct RenderRequest: Sendable, Equatable {
         self.targetSize = targetSize
         self.sourceROI = sourceROI
         self.presentationImageExtent = presentationImageExtent
+        self.presentationNavigation = presentationNavigation
         self.quality = quality
         self.frameBudgetMilliseconds = frameBudgetMilliseconds
         self.output = output

@@ -493,6 +493,7 @@ final class PreviewCoordinator {
             targetSize: request.targetSize,
             sourceROI: request.sourceROI,
             presentationImageExtent: request.presentationImageExtent,
+            presentationNavigation: request.presentationNavigation,
             quality: quality,
             frameBudgetMilliseconds: request.frameBudgetMilliseconds,
             output: .raster,
