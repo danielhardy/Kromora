@@ -1,100 +1,10 @@
 import CoreGraphics
 import SwiftUI
 
-/// Crop Apply/Reset/Cancel chrome. Lives above the canvas in `PreviewView` so it reserves
-/// height and cannot cover the top handles or steal their hits.
-struct CropToolbarView: View {
-    let aspectRatio: CropAspectRatio
-    let orientation: CropAspectRatioOrientation
-    let onRotateCounterClockwise: () -> Void
-    let onRotateClockwise: () -> Void
-    let onAspectRatioChange: (CropAspectRatio, CropAspectRatioOrientation) -> Void
-    let onApply: () -> Void
-    let onReset: () -> Void
-    let onCancel: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text("Crop")
-                .font(.headline)
-            Menu {
-                ForEach(CropAspectRatio.allCases, id: \.self) { ratio in
-                    if ratio.supportsOrientationSelection {
-                        Menu(ratio.label) {
-                            ratioButton(ratio, orientation: .landscape)
-                            ratioButton(ratio, orientation: .portrait)
-                        }
-                    } else {
-                        Button {
-                            onAspectRatioChange(ratio, .automatic)
-                        } label: {
-                            if ratio == aspectRatio && orientation == .automatic {
-                                Label(ratio.label, systemImage: "checkmark")
-                            } else {
-                                Text(ratio.label)
-                            }
-                        }
-                    }
-                }
-            } label: {
-                Label(
-                    aspectRatio.selectionLabel(for: orientation), systemImage: "aspectratio"
-                )
-            }
-            .accessibilityLabel("Crop aspect ratio")
-            .accessibilityHint(
-                "Choose a square, freeform, landscape, or portrait crop ratio")
-            Button(action: onRotateCounterClockwise) {
-                Label("Rotate counterclockwise", systemImage: "rotate.left")
-            }
-            .labelStyle(.iconOnly)
-            .help("Rotate 90° counterclockwise")
-            .accessibilityLabel("Rotate 90 degrees counterclockwise")
-
-            Button(action: onRotateClockwise) {
-                Label("Rotate clockwise", systemImage: "rotate.right")
-            }
-            .labelStyle(.iconOnly)
-            .help("Rotate 90° clockwise")
-            .accessibilityLabel("Rotate 90 degrees clockwise")
-            Spacer()
-            Button("Reset", action: onReset)
-            Button("Cancel", action: onCancel)
-            Button("Apply", action: onApply)
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Crop, \(aspectRatio.label)")
-        .accessibilityHint(
-            "Choose an aspect ratio, then drag the crop frame or handles within the image bounds"
-        )
-        .onExitCommand(perform: onCancel)
-    }
-
-    @ViewBuilder
-    private func ratioButton(
-        _ ratio: CropAspectRatio, orientation: CropAspectRatioOrientation
-    ) -> some View {
-        Button {
-            onAspectRatioChange(ratio, orientation)
-        } label: {
-            if ratio == aspectRatio && self.orientation == orientation {
-                Label(ratio.selectionLabel(for: orientation), systemImage: "checkmark")
-            } else {
-                Text(ratio.selectionLabel(for: orientation))
-            }
-        }
-    }
-}
-
 /// Coordinates are converted to the normalized bottom-left model space before they reach
 /// AppViewModel. Ratio geometry lives in `CropOverlayInteraction` so it is shared with model tests.
-/// Crop chrome is `CropToolbarView` in `PreviewView`, not this overlay, so the top handles stay
-/// reachable when the crop is the full image.
+/// Crop controls live in the docked inspector, so the top handles stay reachable when the crop is
+/// the full image.
 struct CropOverlayView: View {
     typealias Handle = CropHandle
 

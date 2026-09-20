@@ -10,6 +10,7 @@ public struct ContentView: View {
     @StateObject private var viewModel: AppViewModel
     @ObservedObject private var photosImportCoordinator: PhotosImportCoordinator
     @ObservedObject private var inspectorState: AppViewModel.InspectorState
+    @ObservedObject private var canvasState: CanvasInteractionState
     @State private var photosSelection: [PhotosPickerItem] = []
 
     public init() {
@@ -17,6 +18,7 @@ public struct ContentView: View {
         _viewModel = StateObject(wrappedValue: viewModel)
         _photosImportCoordinator = ObservedObject(wrappedValue: viewModel.photosImportCoordinator)
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
+        _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
     }
 
     /// Allows the application delegate to share the model that owns the persistence queue, so clean
@@ -25,6 +27,7 @@ public struct ContentView: View {
         _viewModel = StateObject(wrappedValue: viewModel)
         _photosImportCoordinator = ObservedObject(wrappedValue: viewModel.photosImportCoordinator)
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
+        _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
     }
 
     public var body: some View {
@@ -131,7 +134,15 @@ public struct ContentView: View {
             detailContent
         }
         .background(KromoraTheme.windowBackground)
-        .inspector(isPresented: $inspectorState.isPresented) {
+        .inspector(isPresented: Binding(
+            get: { canvasState.isCropToolActive || inspectorState.isPresented },
+            set: { isPresented in
+                // Crop owns the inspector for the duration of the mode.
+                if !canvasState.isCropToolActive {
+                    inspectorState.isPresented = isPresented
+                }
+            }
+        )) {
             InfoInspectorView(viewModel: viewModel, inspectorState: inspectorState)
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
@@ -153,7 +164,8 @@ public struct ContentView: View {
                 }
             } else {
                 HStack(spacing: 0) {
-                    if viewModel.isSourceBrowserPresented && !viewModel.collection.items.isEmpty {
+                    if !canvasState.isCropToolActive,
+                        viewModel.isSourceBrowserPresented && !viewModel.collection.items.isEmpty {
                         SourceBrowserView(viewModel: viewModel)
                             .frame(width: 240)
                             .transition(.move(edge: .leading).combined(with: .opacity))
@@ -163,7 +175,7 @@ public struct ContentView: View {
                     VStack(spacing: 0) {
                         PreviewView(viewModel: viewModel)
 
-                        if viewModel.collection.isActive {
+                        if viewModel.collection.isActive && !canvasState.isCropToolActive {
                             Divider()
                             CullingBarView(viewModel: viewModel)
                             Divider()
@@ -183,6 +195,7 @@ public struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: viewModel.collection.isActive)
+        .animation(.easeInOut(duration: 0.2), value: canvasState.isCropToolActive)
         .animation(.easeInOut(duration: 0.2), value: viewModel.isSourceBrowserPresented)
         .animation(.easeInOut(duration: 0.2), value: viewModel.navigation.mode)
     }
@@ -245,16 +258,20 @@ public struct ContentView: View {
         .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
         .accessibilityHint("Show or hide the editor sidebar")
         .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
-        .disabled(viewModel.sourceImage == nil)
+        .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
 
         // Keep reset scopes together and visible: the panel reset affects only the current stage,
         // while Reset Photo clears every edit on the active source. The File menu retains the
         // keyboard shortcut for the latter.
         Menu {
-            Button("Reset " + inspectorState.tab.title) {
-                viewModel.resetInspectorSection()
+            Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
+                if canvasState.isCropToolActive {
+                    viewModel.resetCrop()
+                } else {
+                    viewModel.resetInspectorSection()
+                }
             }
-            .disabled(inspectorState.tab == .info)
+            .disabled(!canvasState.isCropToolActive && inspectorState.tab == .info)
 
             Divider()
 
@@ -383,19 +400,36 @@ private struct CanvasToolbarControls: View {
     let hasImage: Bool
 
     var body: some View {
-        // Crop is a committed edit, but its in-progress rectangle stays transient until Apply.
-        Button {
-            viewModel.toggleCropTool()
-        } label: {
-            Label(
-                canvasState.isCropToolActive ? "Cancel Crop" : "Crop",
-                systemImage: canvasState.isCropToolActive ? "xmark" : "crop"
-            )
+        if canvasState.isCropToolActive {
+            Button {
+                viewModel.commitCrop()
+            } label: {
+                Label("Done", systemImage: "checkmark")
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityLabel("Done")
+            .help("Apply the crop and return to Edit (Return)")
+            .disabled(!hasImage)
+
+            // The Crop toggle remains a fast discard path, matching Escape and the Cancel action
+            // in the inspector.
+            Button {
+                viewModel.toggleCropTool()
+            } label: {
+                Label("Cancel Crop", systemImage: "xmark")
+            }
+            .help("Cancel the current crop")
+            .disabled(!hasImage)
+        } else {
+            // Crop is a committed edit, but its in-progress rectangle stays transient until Done.
+            Button {
+                viewModel.toggleCropTool()
+            } label: {
+                Label("Crop", systemImage: "crop")
+            }
+            .help("Crop the photo with a freeform or preset frame")
+            .disabled(!hasImage)
         }
-        .help(canvasState.isCropToolActive
-              ? "Cancel the current crop"
-              : "Crop the photo with a freeform or preset frame")
-        .disabled(!hasImage)
 
         // Canvas navigation is presentation-only; these controls never touch the edit document.
         Menu {
@@ -411,7 +445,7 @@ private struct CanvasToolbarControls: View {
             Label("\(canvasState.navigation.zoomPercent)%", systemImage: "magnifyingglass")
         }
         .help("Canvas zoom: fit, fill, or explicit zoom")
-        .disabled(!hasImage)
+        .disabled(!hasImage || canvasState.isCropToolActive)
     }
 }
 

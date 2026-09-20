@@ -5,10 +5,28 @@ import SwiftUI
 struct InfoInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var inspectorState: AppViewModel.InspectorState
+    @ObservedObject private var canvasState: CanvasInteractionState
+
+    init(viewModel: AppViewModel, inspectorState: AppViewModel.InspectorState) {
+        self.viewModel = viewModel
+        self.inspectorState = inspectorState
+        _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
-            if viewModel.sourceImage == nil {
+            if canvasState.isCropToolActive {
+                CropInspectorView(
+                    aspectRatio: canvasState.cropAspectRatio,
+                    orientation: canvasState.cropOrientation,
+                    onRotateCounterClockwise: viewModel.rotateCounterClockwise,
+                    onRotateClockwise: viewModel.rotateClockwise,
+                    onAspectRatioChange: viewModel.selectCropAspectRatio,
+                    onReset: viewModel.resetCrop,
+                    onCancel: viewModel.cancelCrop,
+                    onDone: viewModel.commitCrop
+                )
+            } else if viewModel.sourceImage == nil {
                 // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
                 // offers a trip to Develop to be told "this image is already rendered" about an image
                 // that does not exist. The empty state alone is the honest answer.

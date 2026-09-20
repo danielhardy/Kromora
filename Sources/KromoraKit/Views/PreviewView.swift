@@ -16,7 +16,6 @@ struct PreviewView: View {
     @State private var isMagnifyingCanvas = false
     @State private var isDropTargeted = false
     @ObservedObject private var maskingState: MaskInteractionState
-    @ObservedObject private var inspectorState: AppViewModel.InspectorState
 
     init(viewModel: AppViewModel) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
@@ -24,7 +23,6 @@ struct PreviewView: View {
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
         _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
         _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)
-        _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
     }
 
     private var maskOverlayBackingScale: CGFloat {
@@ -158,28 +156,7 @@ struct PreviewView: View {
 
     private var singleView: some View {
         GeometryReader { geometry in
-            // Crop chrome is a sibling above the canvas, not an overlay on it. Overlaying the
-            // bar on the image covers the top handles and also wins (or loses) the hit-test race
-            // with those handles, so neither the buttons nor the top-left handle stay usable.
-            VStack(spacing: 0) {
-                if canvasState.isCropToolActive, viewModel.sourceSize != .zero {
-                    CropToolbarView(
-                        aspectRatio: canvasState.cropAspectRatio,
-                        orientation: canvasState.cropOrientation,
-                        onRotateCounterClockwise: viewModel.rotateCounterClockwise,
-                        onRotateClockwise: viewModel.rotateClockwise,
-                        onAspectRatioChange: viewModel.selectCropAspectRatio,
-                        onApply: viewModel.commitCrop,
-                        onReset: viewModel.resetCrop,
-                        onCancel: viewModel.cancelCrop
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.top, 12)
-                    .padding(.bottom, 4)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                }
-
-                ZStack {
+            ZStack {
                     if previewSurface.image != nil {
                         canvasSurface(previewSurface)
                             .padding(8)
@@ -221,12 +198,11 @@ struct PreviewView: View {
                             .padding(20)
                         }
                     }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(singleViewAccessibilityLabel)
-                .accessibilityHint("Presentation only; does not change edits or export")
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(singleViewAccessibilityLabel)
+            .accessibilityHint("Presentation only; does not change edits or export")
             .frame(width: geometry.size.width, height: geometry.size.height)
             .animation(.easeInOut(duration: 0.2), value: canvasState.isCropToolActive)
             // The GPU preview request changes orientation at the same time as the draft frame is

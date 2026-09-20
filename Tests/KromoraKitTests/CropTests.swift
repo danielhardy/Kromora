@@ -427,6 +427,30 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop, committed)
     }
 
+    func testCropModeOwnsAndRestoresEditChromeState() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.sourceImage = CIImage(color: .gray).cropped(
+            to: CGRect(x: 0, y: 0, width: 100, height: 80)
+        )
+        viewModel.inspectorState.isPresented = false
+        viewModel.inspectorState.tab = .effects
+        viewModel.isSourceBrowserPresented = true
+
+        viewModel.beginCrop()
+
+        XCTAssertTrue(viewModel.isCropToolActive)
+        XCTAssertTrue(viewModel.inspectorState.isPresented)
+        XCTAssertTrue(viewModel.availableInspectorTabs.isEmpty)
+        XCTAssertFalse(viewModel.isSourceBrowserPresented)
+
+        viewModel.cancelCrop()
+
+        XCTAssertFalse(viewModel.isCropToolActive)
+        XCTAssertFalse(viewModel.inspectorState.isPresented)
+        XCTAssertEqual(viewModel.inspectorState.tab, .effects)
+        XCTAssertTrue(viewModel.isSourceBrowserPresented)
+    }
+
     func testCropToolOpenUnchangedTestRequestsTheFullUncroppedSource() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(
