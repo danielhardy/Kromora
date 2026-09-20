@@ -19,6 +19,19 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         case lut
         case develop
         case localAdjustments
+
+        var title: String {
+            switch self {
+            case .light: return "Light"
+            case .color: return "Color"
+            case .effects: return "Effects"
+            case .crop: return "Crop"
+            case .rotation: return "Rotation"
+            case .lut: return "Look / LUT"
+            case .develop: return "Develop (RAW)"
+            case .localAdjustments: return "Local adjustments / masks"
+            }
+        }
     }
 
     /// A category's currently supported post-develop stages. Empty is meaningful: it says that the

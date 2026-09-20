@@ -101,8 +101,11 @@ struct SourceBrowserView: View {
         ForEach(group.entries, id: \.item.id) { entry in
             Button {
                 let modifiers = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                var selectionModifiers: LibrarySelectionModel.Modifiers = []
+                if modifiers.contains(.command) { selectionModifiers.insert(.command) }
+                if modifiers.contains(.shift) { selectionModifiers.insert(.shift) }
                 viewModel.selectCollectionImage(
-                    at: entry.index, additive: modifiers.contains(.command)
+                    at: entry.index, modifiers: selectionModifiers
                 )
             } label: {
                 SourceBrowserRow(

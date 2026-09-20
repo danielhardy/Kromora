@@ -274,7 +274,8 @@ final class KeyMonitor {
         if vm.derive.isSheetPresented
             || vm.lookSave.isSheetPresented
             || vm.isRemovableMediaSelectorPresented
-            || vm.isPhotosPickerPresented {
+            || vm.isPhotosPickerPresented
+            || vm.isSelectiveCopyDialogPresented {
             return event
         }
 
@@ -301,6 +302,20 @@ final class KeyMonitor {
         // Command-A is the one grid command handled here; other Command-modified events belong to
         // the menu bar.
         if mods.contains(.command) {
+            if isDown,
+               mods == .command,
+               event.charactersIgnoringModifiers?.lowercased() == "c",
+               vm.sourceImage != nil {
+                vm.presentSelectiveCopyDialog()
+                return nil
+            }
+            if isDown,
+               mods == .command,
+               event.charactersIgnoringModifiers?.lowercased() == "v",
+               vm.canPasteEdits {
+                vm.pasteEdits()
+                return nil
+            }
             if KeyMonitorPolicy.isCommandBackslashShortcut(
                 keyCode: event.keyCode, modifiers: mods
             ) {

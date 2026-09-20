@@ -183,6 +183,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// commands.
     var editClipboard: EditClipboardPayload? { editorDocument.clipboard }
 
+    var editClipboardCategories: Set<EditClipboardPayload.Category> {
+        editorDocument.clipboardCategories
+    }
+
     var canPasteEdits: Bool { editorDocument.canPaste }
 
     /// The most recent persistence warning. A damaged edit catalog must not prevent the source
@@ -581,6 +585,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     /// Source-folder file browser panel visibility.
     @Published var isSourceBrowserPresented: Bool = false
+    @Published var isSelectiveCopyDialogPresented = false
+    @Published var selectiveCopyCategories: Set<EditClipboardPayload.Category> =
+        Set(EditClipboardPayload.Category.allCases)
     /// The visible workspace. Library selection, the active edit document, and render surfaces
     /// remain owned by their existing collaborators; this value only composes those surfaces.
     @Published private(set) var navigation = NavigationState()
@@ -937,6 +944,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             preferences: preferences,
             userLookFolderURL: userLookFolderURL
         )
+        self.selectiveCopyCategories = self.settings.lastCopyCategories
 #if KROMORA_DIRECT_DISTRIBUTION
         self.updateCoordinator = UpdateCoordinator(defaults: preferences)
 #endif
@@ -2954,11 +2962,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         resetAutoAdjustmentForLifecycle()
     }
 
-    func selectCollectionImage(at index: Int, additive: Bool = false) {
+    func selectCollectionImage(
+        at index: Int,
+        modifiers: LibrarySelectionModel.Modifiers = []
+    ) {
         guard collection.items.indices.contains(index) else { return }
         if isCropToolActive { cancelCrop() }
         cancelIdlePreviewBuild(resetCursor: true)
-        collection.select(at: index, modifiers: additive ? [.command] : [])
+        collection.select(at: index, modifiers: modifiers)
         let item = collection.items[index]
         requestEditedThumbnail(for: item.id, priority: .activeEditor)
 
@@ -2971,6 +2982,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 portableIdentity: item.asset.source.portableIdentity
             )
         }
+    }
+
+    /// Compatibility entry point for callers that only need Command-click semantics.
+    func selectCollectionImage(at index: Int, additive: Bool) {
+        selectCollectionImage(at: index, modifiers: additive ? [.command] : [])
     }
 
     // MARK: - Edit-aware thumbnails
@@ -3228,6 +3244,31 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Copy and paste
 
+    func presentSelectiveCopyDialog() {
+        guard activeAssetID != nil, sourceImage != nil else {
+            statusMessage = "Open an image first"
+            return
+        }
+        selectiveCopyCategories = settings.lastCopyCategories
+        isSelectiveCopyDialogPresented = true
+    }
+
+    func confirmSelectiveCopy() {
+        guard activeAssetID != nil, sourceImage != nil else {
+            isSelectiveCopyDialogPresented = false
+            statusMessage = "Open an image first"
+            return
+        }
+        settings.lastCopyCategories = selectiveCopyCategories
+        editorDocument.copy(document: document, categories: selectiveCopyCategories)
+        isSelectiveCopyDialogPresented = false
+        statusMessage = copiedEditsMessage(categories: selectiveCopyCategories)
+    }
+
+    func cancelSelectiveCopy() {
+        isSelectiveCopyDialogPresented = false
+    }
+
     /// Copy the active photo's value-state edits. RAW decoder defaults are represented by neutral
     /// optional settings, so copying never transfers a source photo's as-shot seed accidentally.
     func copyAllEdits() {
@@ -3255,10 +3296,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
             endUndoGrouping()
             let updated = clipboard.applying(
-                to: document, destinationIsRAW: source.kind == .raw
+                to: document, destinationIsRAW: source.kind == .raw,
+                categories: editClipboardCategories
             )
             updateDocument { $0 = updated }
-            statusMessage = "Pasted edits"
+            statusMessage = "Pasted \(copiedCategorySummary)"
             return
         }
 
@@ -3277,13 +3319,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
             if assetID == activeAssetID {
                 let updated = clipboard.applying(
-                    to: document, destinationIsRAW: destinationIsRAW
+                    to: document, destinationIsRAW: destinationIsRAW,
+                    categories: editClipboardCategories
                 )
                 updateDocument { $0 = updated }
             } else {
                 let updated = clipboard.applying(
                     to: editorDocument.session(for: assetID)?.document ?? EditDocument(),
-                    destinationIsRAW: destinationIsRAW
+                    destinationIsRAW: destinationIsRAW,
+                    categories: editClipboardCategories
                 )
                 guard editorDocument.apply(updated, to: assetID) else { continue }
                 requestEditedThumbnail(for: assetID, priority: .visibleGrid, force: true)
@@ -3302,9 +3346,30 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         statusMessage =
             pastedCount == 1
-            ? "Pasted edits to 1 photo"
-            : pastedCount > 1 ? "Pasted edits to \(pastedCount) photos" : "Pasted edits"
+            ? "Pasted \(copiedCategorySummary) to 1 photo"
+            : pastedCount > 1
+                ? "Pasted \(copiedCategorySummary) to \(pastedCount) photos"
+                : "Pasted \(copiedCategorySummary)"
         requestPersistenceFlush()
+    }
+
+    private var copiedCategorySummary: String {
+        if editClipboardCategories == Set(EditClipboardPayload.Category.allCases) {
+            return "edits"
+        }
+        return editClipboardCategories
+            .sorted { $0.title < $1.title }
+            .map(\.title)
+            .joined(separator: ", ")
+    }
+
+    private func copiedEditsMessage(
+        categories: Set<EditClipboardPayload.Category>
+    ) -> String {
+        let summary = categories == Set(EditClipboardPayload.Category.allCases)
+            ? "all edits"
+            : categories.sorted { $0.title < $1.title }.map(\.title).joined(separator: ", ")
+        return "Copied \(summary) from \(sourceName)"
     }
 
     /// Select a grid cell without leaving the grid. This is what makes a multi-selection useful:

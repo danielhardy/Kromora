@@ -70,6 +70,7 @@ public final class KromoraSettings: ObservableObject {
 #endif
         static let sourceFolder = "Kromora.settings.defaultSourceFolder"
         static let exportFolder = "Kromora.settings.defaultExportFolder"
+        static let lastCopyCategories = "Kromora.settings.lastCopyCategories"
         static let legacyDarkMode = "Lumo.alwaysDarkMode"
     }
 
@@ -90,6 +91,20 @@ public final class KromoraSettings: ObservableObject {
         didSet {
             guard showPhotoNames != oldValue else { return }
             preferences.set(showPhotoNames, forKey: Key.showPhotoNames)
+        }
+    }
+
+    /// The last confirmed selective-copy checklist. An absent value deliberately means all
+    /// categories, preserving Copy All behavior for existing profiles and first launch.
+    var lastCopyCategories: Set<EditClipboardPayload.Category> {
+        get {
+            guard let raw = preferences.array(forKey: Key.lastCopyCategories) as? [String] else {
+                return Set(EditClipboardPayload.Category.allCases)
+            }
+            return Set(raw.compactMap(EditClipboardPayload.Category.init(rawValue:)))
+        }
+        set {
+            preferences.set(newValue.map(\.rawValue).sorted(), forKey: Key.lastCopyCategories)
         }
     }
 

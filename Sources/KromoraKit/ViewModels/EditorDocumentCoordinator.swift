@@ -14,6 +14,8 @@ import Combine
 @MainActor
 final class EditorDocumentCoordinator: ObservableObject {
     @Published private(set) var clipboard: EditClipboardPayload?
+    @Published private(set) var clipboardCategories: Set<EditClipboardPayload.Category> =
+        Set(EditClipboardPayload.Category.allCases)
 
     private(set) var activeHistory = EditHistory()
     private var sessions: [PhotoAssetID: PhotoEditSession] = [:]
@@ -112,11 +114,16 @@ final class EditorDocumentCoordinator: ObservableObject {
         activeHistory.redo(current: current)
     }
 
-    func copy(document: EditDocument) {
+    func copy(
+        document: EditDocument,
+        categories: Set<EditClipboardPayload.Category> = Set(EditClipboardPayload.Category.allCases)
+    ) {
         clipboard = EditClipboardPayload(document: document)
+        clipboardCategories = categories
     }
 
     func clearClipboard() {
         clipboard = nil
+        clipboardCategories = Set(EditClipboardPayload.Category.allCases)
     }
 }

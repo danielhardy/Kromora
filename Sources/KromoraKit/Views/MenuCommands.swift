@@ -92,6 +92,7 @@ public struct KromoraCommands: Commands {
 
             Divider()
 
+            Button("Copy Edits…") { post(.selectiveCopy) }
             Button("Copy All Edits") { post(.copyAllEdits) }
                 .keyboardShortcut(
                     KromoraEditTransferShortcuts.copyKey,
@@ -140,6 +141,7 @@ struct MenuCommandReceivers: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(FileMenuCommandReceiver(viewModel: viewModel))
+            .modifier(SelectiveCopyMenuCommandReceiver(viewModel: viewModel))
             .modifier(ViewMenuCommandReceivers(viewModel: viewModel))
             .modifier(DeleteMenuCommandReceiver(viewModel: viewModel))
     }
@@ -201,6 +203,16 @@ private struct FileMenuCommandReceiver: ViewModifier {
     }
 }
 
+private struct SelectiveCopyMenuCommandReceiver: ViewModifier {
+    @ObservedObject var viewModel: AppViewModel
+
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .selectiveCopy)) { _ in
+            viewModel.presentSelectiveCopyDialog()
+        }
+    }
+}
+
 private struct DeleteMenuCommandReceiver: ViewModifier {
     @ObservedObject var viewModel: AppViewModel
 
@@ -249,6 +261,7 @@ extension Notification.Name {
     static let resetRotation = Notification.Name("Kromora.resetRotation")
     static let toggleInspector = Notification.Name("Kromora.toggleInspector")
     static let copyAllEdits = Notification.Name("Kromora.copyAllEdits")
+    static let selectiveCopy = Notification.Name("Kromora.selectiveCopy")
     static let pasteEdits = Notification.Name("Kromora.pasteEdits")
     static let deriveRecipe = Notification.Name("Kromora.deriveRecipe")
     static let saveLook = Notification.Name("Kromora.saveLook")
