@@ -191,19 +191,26 @@ public struct ContentView: View {
 
                         if viewModel.collection.isActive && !canvasState.isCropToolActive {
                             Divider()
-                            CullingBarView(viewModel: viewModel)
+                            CullingBarView(viewModel: viewModel, isCompact: true)
                             Divider()
-                            FilmstripView(collection: viewModel.collection, settings: viewModel.settings) { index, modifiers in
+                            FilmstripView(
+                                collection: viewModel.collection,
+                                settings: viewModel.settings
+                            ) { index, modifiers in
                                 viewModel.selectCollectionImage(at: index, modifiers: modifiers)
                             }
-                            .frame(height: 116)
+                            .frame(height: 110)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
 
-                            StatusBar(viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
-                                      onCancelImport: cancelPhotosImport,
-                                      onCancelExport: viewModel.cancelExport,
-                                      onCancelAuto: viewModel.cancelAutoAdjustment)
+                        StatusBar(
+                            viewModel: viewModel,
+                            photosImportCoordinator: photosImportCoordinator,
+                            showsKeyHints: false,
+                            onCancelImport: cancelPhotosImport,
+                            onCancelExport: viewModel.cancelExport,
+                            onCancelAuto: viewModel.cancelAutoAdjustment
+                        )
                     }
                 }
             }

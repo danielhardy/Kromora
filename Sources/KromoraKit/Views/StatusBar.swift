@@ -6,6 +6,7 @@ import SwiftUI
 struct StatusBar: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var photosImportCoordinator: PhotosImportCoordinator
+    var showsKeyHints: Bool = true
     var onCancelImport: () -> Void = {}
     var onCancelExport: () -> Void = {}
     var onCancelAuto: () -> Void = {}
@@ -69,23 +70,28 @@ struct StatusBar: View {
 
             Spacer()
 
-            // Hints
-            HStack(spacing: 12) {
-                KeyHint(key: "G/E", label: "library/edit")
-                KeyHint(key: "↑↓", label: "audition Looks")
-                if viewModel.collection.isActive {
-                    KeyHint(key: "←→", label: "cycle images")
-                    KeyHint(key: "P/X", label: "pick/reject")
-                    KeyHint(key: "0–5", label: "rate")
-                }
-                if viewModel.isComparisonPresentationAvailable {
-                    KeyHint(key: "V", label: viewModel.isSideBySide ? "single view" : "side-by-side")
-                    if !viewModel.isSideBySideVisible && viewModel.isComparisonAvailable {
-                        KeyHint(key: "⌘\\", label: "show original")
-                        KeyHint(key: "Space", label: "show original")
+            if showsKeyHints {
+                // Hints
+                HStack(spacing: 12) {
+                    KeyHint(key: "G/E", label: "library/edit")
+                    KeyHint(key: "↑↓", label: "audition Looks")
+                    if viewModel.collection.isActive {
+                        KeyHint(key: "←→", label: "cycle images")
+                        KeyHint(key: "P/X", label: "pick/reject")
+                        KeyHint(key: "0–5", label: "rate")
                     }
+                    if viewModel.isComparisonPresentationAvailable {
+                        KeyHint(
+                            key: "V",
+                            label: viewModel.isSideBySide ? "single view" : "side-by-side"
+                        )
+                        if !viewModel.isSideBySideVisible && viewModel.isComparisonAvailable {
+                            KeyHint(key: "⌘\\", label: "show original")
+                            KeyHint(key: "Space", label: "show original")
+                        }
+                    }
+                    KeyHint(key: "⌘S", label: "export")
                 }
-                KeyHint(key: "⌘S", label: "export")
             }
         }
         .padding(.horizontal, 16)
