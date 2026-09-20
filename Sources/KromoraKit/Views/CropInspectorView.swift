@@ -13,6 +13,8 @@ struct CropInspectorView: View {
     let horizontalPerspective: Double
     let onRotateCounterClockwise: () -> Void
     let onRotateClockwise: () -> Void
+    let onBeginInteraction: () -> Void
+    let onEndInteraction: () -> Void
     let onStraightenChange: (Double) -> Void
     let onFlipHorizontal: () -> Void
     let onFlipVertical: () -> Void
@@ -197,7 +199,10 @@ struct CropInspectorView: View {
                     set: { value in onStraightenChange(value) }
                 ),
                 in: -45...45,
-                step: 0.1
+                step: 0.1,
+                onEditingChanged: { editing in
+                    if editing { onBeginInteraction() } else { onEndInteraction() }
+                }
             )
             .accessibilityLabel("Straighten angle")
             .accessibilityValue("\(straightenAngle, specifier: "%.1f") degrees")
@@ -224,12 +229,16 @@ struct CropInspectorView: View {
             perspectiveSlider(
                 title: "Vertical",
                 value: verticalPerspective,
-                onChange: onVerticalPerspectiveChange
+                onChange: onVerticalPerspectiveChange,
+                onBeginInteraction: onBeginInteraction,
+                onEndInteraction: onEndInteraction
             )
             perspectiveSlider(
                 title: "Horizontal",
                 value: horizontalPerspective,
-                onChange: onHorizontalPerspectiveChange
+                onChange: onHorizontalPerspectiveChange,
+                onBeginInteraction: onBeginInteraction,
+                onEndInteraction: onEndInteraction
             )
         }
     }
@@ -237,7 +246,9 @@ struct CropInspectorView: View {
     private func perspectiveSlider(
         title: String,
         value: Double,
-        onChange: @escaping (Double) -> Void
+        onChange: @escaping (Double) -> Void,
+        onBeginInteraction: @escaping () -> Void,
+        onEndInteraction: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
@@ -250,7 +261,10 @@ struct CropInspectorView: View {
             Slider(
                 value: Binding(get: { value }, set: onChange),
                 in: -CropAdjustments.maximumPerspective...CropAdjustments.maximumPerspective,
-                step: 0.01
+                step: 0.01,
+                onEditingChanged: { editing in
+                    if editing { onBeginInteraction() } else { onEndInteraction() }
+                }
             )
             .accessibilityLabel("\(title) perspective")
             .accessibilityValue("\(value * 100, specifier: "%.0f") percent")

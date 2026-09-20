@@ -3538,7 +3538,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             from: document, to: updated, explicitlyInvalidated: invalidatesComparisonBaseline
         )
         let rotationChanged = updated.rotation != document.rotation
-        previewPresentation.advanceDisplayRevision()
+        if !isPreviewInteractionActive {
+            previewPresentation.advanceDisplayRevision()
+        }
         cancelHistogram(clear: false, pump: false)
         editorDocument.recordChange(from: document, to: updated)
         document = updated
@@ -3680,7 +3682,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let clamped = max(0, min(1, value))
         guard clamped != document.lut.intensity else { return }
         let oldDocument = document
-        previewPresentation.advanceDisplayRevision()
+        if !isPreviewInteractionActive {
+            previewPresentation.advanceDisplayRevision()
+        }
         cancelHistogram(clear: false, pump: false)
         document.lut.intensity = clamped
         if !document.hasVisibleLookEdits {
@@ -3944,7 +3948,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func scheduleInteractivePreview() {
         cancelIdlePreviewBuild()
         guard let imageSource else { return }
-        previewPresentation.advanceDisplayRevision()
+        // A gesture owns one display generation. PreviewCoordinator's request revision still
+        // rejects late frames from older slider values, while keeping this caller generation
+        // stable lets the newest interactive frame pass AppViewModel.publishPreview.
+        if !isPreviewInteractionActive {
+            previewPresentation.advanceDisplayRevision()
+        }
         cancelHistogram(clear: false, pump: false)
         let (requested, lut) = displayRequest
         let plan = resolutionPlan(
@@ -4020,6 +4029,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 pump: false
             )
         }
+        previewPresentation.advanceDisplayRevision()
         isPreviewInteractionActive = true
         previewCoordinator.beginInteraction()
     }
@@ -4225,7 +4235,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let oldValue = canvasState.navigation.zoom
         canvasState.setZoom(value)
         guard canvasState.navigation.zoom != oldValue else { return }
-        previewPresentation.advanceDisplayRevision()
+        if !isPreviewInteractionActive {
+            previewPresentation.advanceDisplayRevision()
+        }
         cancelHistogram(clear: false, pump: false)
         if isPreviewInteractionActive {
             scheduleInteractivePreview()
@@ -4244,6 +4256,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// queue a document save, which would flash a "saving" status and grow the undo stack for a
     /// gesture that never touches `document`.
     func beginCanvasInteraction() {
+        previewPresentation.advanceDisplayRevision()
         isPreviewInteractionActive = true
         previewCoordinator.beginInteraction()
     }

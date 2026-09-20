@@ -195,6 +195,28 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(publications[1].request.quality, .preview)
     }
 
+    func testInteractiveSubmissionPromotesAfterQuietPeriodWithoutGestureCallbacks() async throws {
+        let fake = FakeRenderEngine()
+        let coordinator = PreviewCoordinator(
+            engine: fake, interactiveDelay: .zero, settleDelay: .milliseconds(30)
+        )
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+
+        coordinator.submit(request(source: makeSource(), exposure: 0.4), phase: .interactive)
+
+        try await waitUntil("the interactive publication") {
+            publications.count == 1
+        }
+        XCTAssertEqual(publications[0].phase, .interactive)
+
+        try await waitUntil("the quiet-period settled publication") {
+            publications.count == 2
+        }
+        XCTAssertEqual(publications[1].phase, .settled)
+        XCTAssertEqual(publications[1].request.quality, .preview)
+    }
+
     func testSettledPromotionRetainsTheOriginatingInputTimestamp() async throws {
         let fake = FakeRenderEngine()
         let coordinator = PreviewCoordinator(engine: fake, settleDelay: .seconds(10))
