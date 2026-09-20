@@ -806,21 +806,40 @@ final class CropWorkflowTests: TempDirectoryTestCase {
 
         let before = await fake.previewRequests.count
         viewModel.beginCrop()
-        while !(await fake.previewRequests).dropFirst(before).contains(where: {
-            $0.document.crop.isIdentity && $0.sourceROI == nil
-        }) {
-            try await Task.sleep(for: .milliseconds(10))
+        let entryRequest = try await waitForPreviewRequest(
+            after: before, matching: "the uncropped interactive crop-entry preview", on: fake
+        ) {
+            guard case .interactive = $0.scale else { return false }
+            return $0.document.crop.isIdentity && $0.sourceROI == nil
         }
-        let requests = await fake.previewRequests
-        let request = try XCTUnwrap(
-            requests.dropFirst(before).first {
-                $0.document.crop.isIdentity && $0.sourceROI == nil
-            })
-        if case .preview(let size) = request.scale {
-            XCTAssertEqual(size, CGSize(width: 32, height: 24))
-        } else {
-            XCTFail("crop-tool-open must remain a preview request")
+        XCTAssertEqual(entryRequest.document.crop, .neutral)
+
+        let settledRequest = try await waitForPreviewRequest(
+            after: before, matching: "the settled uncropped crop-entry preview", on: fake
+        ) {
+            guard case .preview(let size) = $0.scale else { return false }
+            return $0.document.crop.isIdentity && $0.sourceROI == nil
+                && size == CGSize(width: 32, height: 24)
         }
+        XCTAssertEqual(settledRequest.document.crop, .neutral)
+    }
+
+    func testCropChromeActivatesWithoutWaitingForTheEntryRender() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.sourceImage = CIImage(color: .gray).cropped(
+            to: CGRect(x: 0, y: 0, width: 6_000, height: 4_000)
+        )
+        viewModel.inspectorState.isPresented = false
+        viewModel.isSourceBrowserPresented = true
+
+        let started = ContinuousClock.now
+        viewModel.beginCrop()
+        let elapsed = started.duration(to: .now)
+
+        XCTAssertTrue(viewModel.isCropToolActive)
+        XCTAssertTrue(viewModel.inspectorState.isPresented)
+        XCTAssertFalse(viewModel.isSourceBrowserPresented)
+        XCTAssertLessThan(elapsed, .milliseconds(100))
     }
 
     func testSelectingPresetStaysDraftUntilApplyAndUndoRedoRestoresTheRatio() async throws {
