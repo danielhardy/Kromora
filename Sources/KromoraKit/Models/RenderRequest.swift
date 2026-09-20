@@ -45,8 +45,8 @@ struct RenderRequest: Sendable, Equatable {
     /// the committed crop. This never changes export pixels.
     let presentationImageExtent: CGRect?
     /// Presentation-only navigation captured when this request was planned. The renderer ignores
-    /// this value; the surface uses it to keep a partial ROI registered with the pan that produced
-    /// it until a newer ROI is ready.
+    /// this value; the surface uses it to register a partial ROI with the pan that produced it,
+    /// while a retained complete frame keeps pointer navigation live until the ROI is ready.
     let presentationNavigation: CanvasNavigation
     let quality: RenderQuality
     let frameBudgetMilliseconds: Double

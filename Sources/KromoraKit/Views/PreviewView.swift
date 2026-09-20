@@ -269,6 +269,11 @@ struct PreviewView: View {
                         navigation: canvasState.navigation,
                         backingScale: maskOverlayBackingScale
                     )
+                    // The guides remain visible for the selection tool, but they must not
+                    // become a full-canvas hit-test shield. A drawing tool deliberately owns
+                    // clicks in the masking workspace; selection leaves canvas navigation to
+                    // the preview surface (including double-click zoom).
+                    .allowsHitTesting(maskingState.activeTool != .selection)
                 }
             }
         }
