@@ -456,6 +456,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var cropAspectRatio: CropAspectRatio { canvasState.cropAspectRatio }
     var cropOrientation: CropAspectRatioOrientation { canvasState.cropOrientation }
     var cropRotation: ImageRotation { canvasState.cropRotation }
+    var cropStraightenAngle: Double { canvasState.cropStraightenAngle }
+    var cropFlipHorizontal: Bool { canvasState.cropFlipHorizontal }
+    var cropFlipVertical: Bool { canvasState.cropFlipVertical }
+    var cropVerticalPerspective: Double { canvasState.cropVerticalPerspective }
+    var cropHorizontalPerspective: Double { canvasState.cropHorizontalPerspective }
     var cropSourceSize: CGSize { canvasState.cropImageSize(from: sourceSize) }
 
     var isInspectorPresented: Bool {
@@ -3775,7 +3780,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             requested.rotation = requested.rotation.addingClockwiseQuarterTurns(
                 canvasState.cropRotation.rawValue / 90
             )
-            requested.crop = .neutral
+            requested.crop = CropAdjustments(
+                // Straighten is a presentation transform while the crop workspace is open.
+                // The photo is rotated by PreviewSurfaceView beneath the upright overlay; keeping
+                // this stage neutral prevents CIStraightenFilter from baking an axis-aligned AABB
+                // that would make the pixels look zoomed inside a fixed image box.
+                straightenAngle: 0,
+                flipHorizontal: canvasState.cropFlipHorizontal,
+                flipVertical: canvasState.cropFlipVertical,
+                verticalPerspective: canvasState.cropVerticalPerspective,
+                horizontalPerspective: canvasState.cropHorizontalPerspective
+            )
         }
 
         return isShowingOriginal ? (requested, nil) : (requested, selectedLook)
@@ -4065,7 +4080,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         isSourceBrowserPresented = false
         inspectorState.isPresented = true
         isShowingOriginal = false
-        canvasState.beginCrop(using: document.crop)
+        canvasState.beginCrop(using: document.crop, sourceSize: sourceSize)
         statusMessage = "Adjust crop, then Done"
         // The committed preview may already be cropped. Ask for the same adjusted stage without
         // the composition crop so the full-source overlay has actual pixels underneath it.
@@ -4079,7 +4094,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Update only the transient framing rectangle. The model clamps it to image bounds and rejects
     /// invalid/degenerate values, so every pointer update remains safe to display.
     func updateCropDraft(_ normalizedRect: CGRect) {
-        canvasState.updateCropDraft(normalizedRect)
+        canvasState.updateCropDraft(normalizedRect, sourceSize: sourceSize)
     }
 
     /// Select a crop ratio in the transient tool state. The current crop center and approximate
@@ -4090,8 +4105,36 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     ) {
         guard sourceSize != .zero else { return }
         canvasState.selectCropAspectRatio(
-            aspectRatio, orientation: orientation, imageSize: cropSourceSize
+            aspectRatio, orientation: orientation, imageSize: cropSourceSize, sourceSize: sourceSize
         )
+    }
+
+    func setCropStraightenAngle(_ angle: Double) {
+        canvasState.setCropStraightenAngle(angle, sourceSize: sourceSize)
+        scheduleInteractivePreview()
+    }
+
+    func setCropVerticalPerspective(_ value: Double) {
+        canvasState.setCropVerticalPerspective(value)
+        scheduleInteractivePreview()
+    }
+
+    func setCropHorizontalPerspective(_ value: Double) {
+        canvasState.setCropHorizontalPerspective(value)
+        scheduleInteractivePreview()
+    }
+
+    /// Crop-workspace Auto is intentionally separate from the global Light/Color Auto engine.
+    /// Until a reliable horizon signal is available from photo analysis, the safe result is an
+    /// explicit no-op rather than a guessed crop or straighten.
+    func runCropAuto() {
+        guard canvasState.isCropToolActive else { return }
+        statusMessage = "Auto crop: no reliable horizon detected"
+    }
+
+    func toggleCropFlip(horizontal: Bool) {
+        canvasState.toggleCropFlip(horizontal: horizontal)
+        schedulePreview()
     }
 
     /// Commit the current draft as one ordinary document mutation, giving it persistence, undo,
@@ -4102,13 +4145,23 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let aspectRatio = canvasState.cropAspectRatio
         let orientation = canvasState.cropOrientation
         let cropRotation = canvasState.cropRotation
+        let straightenAngle = canvasState.cropStraightenAngle
+        let flipHorizontal = canvasState.cropFlipHorizontal
+        let flipVertical = canvasState.cropFlipVertical
+        let verticalPerspective = canvasState.cropVerticalPerspective
+        let horizontalPerspective = canvasState.cropHorizontalPerspective
         canvasState.finishCrop()
         restoreCropPresentation()
         let previousDocument = document
         updateDocument {
             $0.rotation = $0.rotation.addingClockwiseQuarterTurns(cropRotation.rawValue / 90)
             $0.crop = CropAdjustments(
-                normalizedRect: committed, aspectRatio: aspectRatio, orientation: orientation
+                normalizedRect: committed, aspectRatio: aspectRatio, orientation: orientation,
+                straightenAngle: straightenAngle,
+                flipHorizontal: flipHorizontal,
+                flipVertical: flipVertical,
+                verticalPerspective: verticalPerspective,
+                horizontalPerspective: horizontalPerspective
             )
         }
         canvasState.fit()

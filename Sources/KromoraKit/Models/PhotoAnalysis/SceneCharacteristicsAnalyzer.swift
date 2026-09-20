@@ -200,6 +200,13 @@ enum SceneCharacteristicsAnalyzer: Sendable {
             regions.first { $0.id == id }
         }
         let background = regions.first { $0.kind == .background }
+        let backlightSubject = regions
+            .filter { isBacklightSemanticSubject($0.kind) }
+            .max { lhs, rhs in
+                if lhs.importance != rhs.importance { return lhs.importance < rhs.importance }
+                return lhs.id.uuidString > rhs.id.uuidString
+            }
+            ?? subject
         let faceConfidence = regions
             .filter { isFace($0.kind) }
             .map(\.confidence)
@@ -222,10 +229,10 @@ enum SceneCharacteristicsAnalyzer: Sendable {
         let dynamicRange = unit(globalTone.p95 - globalTone.p05)
         let tonalKey = tonalKey(for: globalTone)
 
-        let subjectMean = subject?.tone.mean ?? 0
+        let subjectMean = backlightSubject?.tone.mean ?? 0
         let backgroundMean = background?.tone.mean
-        let signedBacklightDelta = relationships.subjectToBackgroundLuminanceDelta
-            ?? backgroundMean.map { subjectMean - $0 }
+        let signedBacklightDelta = backgroundMean.map { subjectMean - $0 }
+            ?? relationships.subjectToBackgroundLuminanceDelta
             ?? 0
         let backlightDirection = smoothRange(
             -signedBacklightDelta,
@@ -238,14 +245,14 @@ enum SceneCharacteristicsAnalyzer: Sendable {
             full: Thresholds.backlightBackgroundFull
         )
         let meaningfulArea = smoothRange(
-            subject?.coverage ?? 0,
+            backlightSubject?.coverage ?? 0,
             start: Thresholds.meaningfulSubjectCoverageStart,
             full: Thresholds.meaningfulSubjectCoverageFull
         )
         let semanticConfidence = max(faceConfidence, max(personConfidence, foregroundConfidence))
         // A face, person, or foreground signal is required to keep a dark object against a bright
         // sky from being over-interpreted as a human backlight scene.
-        let subjectSignal = max(semanticConfidence, subject?.confidence ?? 0)
+        let subjectSignal = max(semanticConfidence, backlightSubject?.confidence ?? 0)
         let backlighting = unit(
             backlightDirection * backgroundBrightness * meaningfulArea * subjectSignal
         )
@@ -470,6 +477,19 @@ enum SceneCharacteristicsAnalyzer: Sendable {
     private static func isForeground(_ kind: RegionKind) -> Bool {
         if case .foregroundInstance = kind { return true }
         return false
+    }
+
+    /// Saliency is useful for choosing a general primary subject, but a backlight subject needs
+    /// the tighter semantic matte when one is available. Real portraits can have a salient box
+    /// that includes much of the bright sky; person/face masks keep that sky out of the subject
+    /// mean used by this specific likelihood.
+    private static func isBacklightSemanticSubject(_ kind: RegionKind) -> Bool {
+        switch kind {
+        case .face, .faceInstance, .person:
+            return true
+        default:
+            return false
+        }
     }
 
     private static func isFace(_ kind: RegionKind) -> Bool {

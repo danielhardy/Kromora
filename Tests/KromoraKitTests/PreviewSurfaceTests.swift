@@ -34,6 +34,50 @@ final class PreviewSurfaceTests: XCTestCase {
         )
     }
 
+    func testCropStraightenFitsTheRotatedPhotoAABBWithoutChangingTheRenderedSourceExtent() {
+        let source = CGRect(x: 0, y: 0, width: 1_600, height: 900)
+        let presented = PreviewSurfaceView.Coordinator.viewSpaceExtent(for: source, angle: 24)
+        let expected = CropOverlayInteraction.rotatedImageExtent(of: source.size, angle: 24)
+
+        XCTAssertEqual(presented.origin, .zero)
+        XCTAssertEqual(presented.size.width, expected.width, accuracy: 0.000001)
+        XCTAssertEqual(presented.size.height, expected.height, accuracy: 0.000001)
+        XCTAssertEqual(source.size, CGSize(width: 1_600, height: 900))
+        XCTAssertGreaterThan(presented.width, source.width)
+        XCTAssertGreaterThan(presented.height, source.height)
+    }
+
+    func testRetainedTextureCropStraightenRotatesThePhotoInsteadOfZoomingItsTexture() async throws {
+        let surface = PreviewSurface()
+        let source = CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 6))
+        XCTAssertTrue(
+            surface.present(
+                source, presentationImageExtent: CGRect(x: 0, y: 0, width: 8, height: 6),
+                coversPresentationExtent: true
+            ))
+        _ = try await waitForPresentationTexture(surface)
+        XCTAssertEqual(surface.presentationTexture?.width, 8)
+        XCTAssertEqual(surface.presentationTexture?.height, 6)
+
+        let coordinator = PreviewSurfaceView.Coordinator()
+        let texture = try XCTUnwrap(
+            coordinator.renderRetainedTextureForTesting(
+                surface: surface, navigation: CanvasNavigation(), destinationSize: CGSize(width: 40, height: 30),
+                viewSpaceRotationAngle: 24
+            ))
+        let corner = try pixel(from: texture, at: (4, 0))
+        let center = try pixel(from: texture, at: (20, 15))
+        let background = try canvasBackgroundBytes()
+
+        XCTAssertEqual(corner, background, "the rotated AABB corner should remain empty canvas")
+        XCTAssertGreaterThan(
+            abs(Int(center[0]) - Int(background[0]))
+                + abs(Int(center[1]) - Int(background[1])),
+            40,
+            "the rotated photo should still occupy the fitted center"
+        )
+    }
+
     func testPresentStoresTheWorkingSpaceForThePresentedImage() {
         let surface = PreviewSurface()
         let image = CIImage(color: CIColor(red: 0.5, green: 0.25, blue: 0.75))

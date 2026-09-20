@@ -316,6 +316,13 @@ private enum AutoLightSceneSignals {
         let backlightLift = Double(analysis.scene.backlightingLikelihood)
             * Double(analysis.scene.subjectProminence) * AutoLightTuning.backlightExposureLift
         desired += backlightLift
+        // A strong backlight signal means the global median is dominated by the bright
+        // background. Lowering exposure to place that median would make the detected subject
+        // worse, so let the shadow correction carry the subject lift while exposure stays neutral
+        // or positive.
+        if analysis.scene.backlightingLikelihood >= 0.30 {
+            desired = max(desired, 0)
+        }
         return AdjustmentProposal(
             parameter: .exposure,
             preferred: AutoLightMath.bounded(desired, AutoLightBounds.exposure),

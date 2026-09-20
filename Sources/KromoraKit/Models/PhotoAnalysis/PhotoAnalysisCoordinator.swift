@@ -284,9 +284,19 @@ actor PhotoAnalysisCoordinator {
             try Task.checkCancellation()
             let stageStart = clock.now
             do {
-                let result = try await performMask(
-                    image: image, kind: stage.kind, quality: stage.quality
-                )
+                // Background is a coordinator-owned complement of the foreground union. Keep
+                // this stage on that composition path instead of handing `.background` to the
+                // Vision provider, which deliberately exposes only its source masks.
+                let result: RegionMask
+                if stage.kind == .background {
+                    result = try await performMask(
+                        assetID: assetID, source: source, kind: stage.kind, quality: stage.quality
+                    )
+                } else {
+                    result = try await performMask(
+                        image: image, kind: stage.kind, quality: stage.quality
+                    )
+                }
                 try Task.checkCancellation()
                 masks.append(result)
             } catch is CancellationError {
@@ -339,30 +349,40 @@ actor PhotoAnalysisCoordinator {
             // Background is the complement of the stable Foreground target. Going through the
             // coordinator's existing foreground request key means concurrent Foreground and
             // Background requests share one provider task, not merely one serialized Vision actor.
-            let foreground = try await mask(
-                assetID: assetID, source: source, kind: .foreground, quality: quality
-            )
-            guard let foregroundPixels = await maskStore.pixels(for: foreground.reference) else {
-                throw RegionMaskError.missingPixels
-            }
-            let backgroundPixels = try MaskOperations.invert(foregroundPixels)
-            let backgroundKey = foreground.reference.cacheKey.with(kind: .background, quality: quality)
-            if let reference = await maskStore.mask(for: backgroundKey, quality: quality),
-               let cachedPixels = await maskStore.pixels(for: reference) {
-                return RegionMask(
-                    kind: .background, bounds: normalizedBounds(of: cachedPixels), quality: quality,
-                    reference: reference, confidence: foreground.confidence,
-                    coverage: cachedPixels.coverage
+            do {
+                let foreground = try await mask(
+                    assetID: assetID, source: source, kind: .foreground, quality: quality
                 )
+                guard let foregroundPixels = await maskStore.pixels(for: foreground.reference) else {
+                    throw RegionMaskError.missingPixels
+                }
+                let backgroundPixels = try MaskOperations.invert(foregroundPixels)
+                let backgroundKey = foreground.reference.cacheKey.with(kind: .background, quality: quality)
+                if let reference = await maskStore.mask(for: backgroundKey, quality: quality),
+                   let cachedPixels = await maskStore.pixels(for: reference) {
+                    return RegionMask(
+                        kind: .background, bounds: normalizedBounds(of: cachedPixels), quality: quality,
+                        reference: reference, confidence: foreground.confidence,
+                        coverage: cachedPixels.coverage
+                    )
+                }
+                let reference = try await maskStore.store(
+                    backgroundPixels, for: backgroundKey, quality: quality
+                )
+                return RegionMask(
+                    kind: .background, bounds: normalizedBounds(of: backgroundPixels), quality: quality,
+                    reference: reference, confidence: foreground.confidence,
+                    coverage: backgroundPixels.coverage
+                )
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Custom providers may own a native background mask but not expose a separate
+                // foreground union. Preserve that provider contract as a fallback; Vision's
+                // production provider takes the composed path above.
+                let image = try AnalysisImageFactory.make(from: source, assetID: assetID)
+                return try await performMask(image: image, kind: kind, quality: quality)
             }
-            let reference = try await maskStore.store(
-                backgroundPixels, for: backgroundKey, quality: quality
-            )
-            return RegionMask(
-                kind: .background, bounds: normalizedBounds(of: backgroundPixels), quality: quality,
-                reference: reference, confidence: foreground.confidence,
-                coverage: backgroundPixels.coverage
-            )
         }
         var preparationInterval = KromoraObservability.begin(
             .analysisImagePreparation, source: source, maskQuality: quality

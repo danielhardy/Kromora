@@ -228,10 +228,8 @@ final class PhotoIntelligenceRealCorpusTests: XCTestCase {
             XCTAssertEqual(visionFaces, true, fixture.name)
             XCTAssertEqual(visionPeople, true, fixture.name)
             let auto = AutoLightEngine.evaluate(analysis: analysis)
-            XCTExpectFailure("KRMA-474: backlight detection is 0.000 on real photos") {
-                XCTAssertGreaterThan(analysis.scene.backlightingLikelihood, 0.30, fixture.name)
-                XCTAssertGreaterThanOrEqual(auto.light.exposure, 0, fixture.name)
-            }
+            XCTAssertGreaterThan(analysis.scene.backlightingLikelihood, 0.30, fixture.name)
+            XCTAssertGreaterThanOrEqual(auto.light.exposure, 0, fixture.name)
         case "ai-high-key-portrait":
             XCTAssertEqual(analysis.scene.tonalKey, .high, fixture.name)
             XCTAssertGreaterThan(analysis.scene.highKeyLikelihood, analysis.scene.lowKeyLikelihood, fixture.name)

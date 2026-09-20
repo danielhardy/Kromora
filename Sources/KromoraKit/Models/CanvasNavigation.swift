@@ -18,6 +18,14 @@ final class CanvasInteractionState: ObservableObject {
     /// Rotation accumulated while Crop is open. This remains transient until Apply so a crop
     /// session can be cancelled without changing the durable edit document.
     @Published private(set) var cropRotation: ImageRotation = .zero
+    @Published private(set) var cropStraightenAngle: Double = 0
+    /// The frame's physical aspect ratio captured when Straighten began. Preserving this value for
+    /// Freeform is what prevents an angle change from silently stretching a user-drawn frame.
+    @Published private(set) var cropPixelAspectRatio: CGFloat?
+    @Published private(set) var cropFlipHorizontal = false
+    @Published private(set) var cropFlipVertical = false
+    @Published private(set) var cropVerticalPerspective: Double = 0
+    @Published private(set) var cropHorizontalPerspective: Double = 0
 
     func resetForSource() {
         navigation.resetForSource()
@@ -26,6 +34,12 @@ final class CanvasInteractionState: ObservableObject {
         cropAspectRatio = .freeform
         cropOrientation = .automatic
         cropRotation = .zero
+        cropStraightenAngle = 0
+        cropPixelAspectRatio = nil
+        cropFlipHorizontal = false
+        cropFlipVertical = false
+        cropVerticalPerspective = 0
+        cropHorizontalPerspective = 0
     }
 
     func fit() { navigation.fit() }
@@ -42,7 +56,7 @@ final class CanvasInteractionState: ObservableObject {
     }
 
     @discardableResult
-    func beginCrop(using committedCrop: CropAdjustments) -> Bool {
+    func beginCrop(using committedCrop: CropAdjustments, sourceSize: CGSize = .zero) -> Bool {
         guard !isCropToolActive else { return false }
         navigation.fit()
         isCropToolActive = true
@@ -50,25 +64,56 @@ final class CanvasInteractionState: ObservableObject {
         cropAspectRatio = committedCrop.aspectRatio
         cropOrientation = committedCrop.orientation
         cropRotation = .zero
+        cropStraightenAngle = committedCrop.straightenAngle
+        cropPixelAspectRatio = nil
+        cropFlipHorizontal = committedCrop.flipHorizontal
+        cropFlipVertical = committedCrop.flipVertical
+        cropVerticalPerspective = committedCrop.verticalPerspective
+        cropHorizontalPerspective = committedCrop.horizontalPerspective
+        if committedCrop.straightenAngle != 0, sourceSize.width > 0, sourceSize.height > 0 {
+            cropPixelAspectRatio = Self.pixelAspectRatio(
+                for: committedCrop, sourceSize: sourceSize
+            )
+            cropDraft = CropOverlayInteraction.constrainedToRotatedImage(
+                cropDraft ?? CropAdjustments.unitRect,
+                sourceSize: sourceSize,
+                angle: committedCrop.straightenAngle,
+                pixelAspectRatio: cropPixelAspectRatio
+            )
+        }
         return true
     }
 
-    func updateCropDraft(_ normalizedRect: CGRect) {
+    func updateCropDraft(_ normalizedRect: CGRect, sourceSize: CGSize = .zero) {
         guard isCropToolActive else { return }
-        cropDraft = CropAdjustments(normalizedRect: normalizedRect).normalizedRect
+        let target = cropPixelAspectRatio ?? aspectPixelRatio(for: sourceSize)
+        cropDraft = CropOverlayInteraction.constrainedToRotatedImage(
+            normalizedRect, sourceSize: sourceSize, angle: cropStraightenAngle,
+            pixelAspectRatio: target
+        )
     }
 
     func selectCropAspectRatio(
         _ aspectRatio: CropAspectRatio,
         orientation: CropAspectRatioOrientation = .automatic,
-        imageSize: CGSize
+        imageSize: CGSize,
+        sourceSize: CGSize = .zero
     ) {
         guard isCropToolActive else { return }
         let current = cropDraft ?? CropAdjustments.unitRect
         cropAspectRatio = aspectRatio
         cropOrientation = orientation
-        cropDraft = CropOverlayInteraction.applying(
+        let adjusted = CropOverlayInteraction.applying(
             aspectRatio, orientation: orientation, to: current, imageSize: imageSize
+        )
+        cropPixelAspectRatio = cropStraightenAngle == 0
+            ? nil
+            : aspectRatio.pixelRatio(
+                for: validSourceSize(sourceSize) ?? imageSize, orientation: orientation
+            ) ?? cropPixelAspectRatio
+        cropDraft = CropOverlayInteraction.constrainedToRotatedImage(
+            adjusted, sourceSize: sourceSize, angle: cropStraightenAngle,
+            pixelAspectRatio: cropPixelAspectRatio
         )
     }
 
@@ -78,6 +123,12 @@ final class CanvasInteractionState: ObservableObject {
         cropAspectRatio = .freeform
         cropOrientation = .automatic
         cropRotation = .zero
+        cropStraightenAngle = 0
+        cropPixelAspectRatio = nil
+        cropFlipHorizontal = false
+        cropFlipVertical = false
+        cropVerticalPerspective = 0
+        cropHorizontalPerspective = 0
     }
 
     func resetCropDraft() {
@@ -85,6 +136,60 @@ final class CanvasInteractionState: ObservableObject {
         cropDraft = CropAdjustments.unitRect
         cropAspectRatio = .freeform
         cropOrientation = .automatic
+        cropStraightenAngle = 0
+        cropPixelAspectRatio = nil
+        cropFlipHorizontal = false
+        cropFlipVertical = false
+        cropVerticalPerspective = 0
+        cropHorizontalPerspective = 0
+    }
+
+    func setCropStraightenAngle(_ angle: Double, sourceSize: CGSize = .zero) {
+        guard isCropToolActive else { return }
+        let next = min(max(angle.isFinite ? angle : 0, -45), 45)
+        let target = cropPixelAspectRatio ?? aspectPixelRatio(for: sourceSize)
+        if cropPixelAspectRatio == nil { cropPixelAspectRatio = target }
+        if let target, let sourceSize = validSourceSize(sourceSize), let current = cropDraft {
+            cropDraft = CropOverlayInteraction.reframedForStraightenChange(
+                current, sourceSize: sourceSize, oldAngle: cropStraightenAngle,
+                newAngle: next, pixelAspectRatio: target
+            )
+        }
+        cropStraightenAngle = next
+    }
+
+    func setCropVerticalPerspective(_ value: Double) {
+        guard isCropToolActive else { return }
+        cropVerticalPerspective = Self.clampPerspective(value)
+    }
+
+    func setCropHorizontalPerspective(_ value: Double) {
+        guard isCropToolActive else { return }
+        cropHorizontalPerspective = Self.clampPerspective(value)
+    }
+
+    private static func clampPerspective(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return min(max(value, -CropAdjustments.maximumPerspective), CropAdjustments.maximumPerspective)
+    }
+
+    func toggleCropFlip(horizontal: Bool) {
+        guard isCropToolActive else { return }
+        let draft = CropAdjustments(
+            normalizedRect: cropDraft,
+            aspectRatio: cropAspectRatio,
+            orientation: cropOrientation,
+            straightenAngle: cropStraightenAngle,
+            flipHorizontal: cropFlipHorizontal,
+            flipVertical: cropFlipVertical,
+            verticalPerspective: cropVerticalPerspective,
+            horizontalPerspective: cropHorizontalPerspective
+        ).mirrored(horizontal: horizontal, vertical: !horizontal)
+        cropDraft = draft.normalizedRect ?? CropAdjustments.unitRect
+        cropFlipHorizontal = draft.flipHorizontal
+        cropFlipVertical = draft.flipVertical
+        cropVerticalPerspective = draft.verticalPerspective
+        cropHorizontalPerspective = draft.horizontalPerspective
     }
 
     /// Rotate the draft crop and its coordinate system together. The rectangle is remapped before
@@ -93,15 +198,67 @@ final class CanvasInteractionState: ObservableObject {
     func rotateCrop(clockwise: Bool) -> Bool {
         guard isCropToolActive else { return false }
         let turns = clockwise ? 1 : -1
-        cropDraft = CropAdjustments(normalizedRect: cropDraft ?? CropAdjustments.unitRect)
-            .rotated(byClockwiseQuarterTurns: turns).normalizedRect ?? CropAdjustments.unitRect
+        let rotated = CropAdjustments(
+            normalizedRect: cropDraft ?? CropAdjustments.unitRect,
+            aspectRatio: cropAspectRatio,
+            orientation: cropOrientation,
+            straightenAngle: cropStraightenAngle,
+            flipHorizontal: cropFlipHorizontal,
+            flipVertical: cropFlipVertical,
+            verticalPerspective: cropVerticalPerspective,
+            horizontalPerspective: cropHorizontalPerspective
+        ).rotated(byClockwiseQuarterTurns: turns)
+        cropDraft = rotated.normalizedRect ?? CropAdjustments.unitRect
+        cropFlipHorizontal = rotated.flipHorizontal
+        cropFlipVertical = rotated.flipVertical
+        cropVerticalPerspective = rotated.verticalPerspective
+        cropHorizontalPerspective = rotated.horizontalPerspective
         cropRotation = cropRotation.addingClockwiseQuarterTurns(turns)
         return true
     }
 
     func cropImageSize(from committedOrientedSize: CGSize) -> CGSize {
-        cropRotation.orientedExtent(committedOrientedSize)
+        let quarterTurned = cropRotation.orientedExtent(committedOrientedSize)
+        return RenderPipeline.geometryExtent(
+            of: quarterTurned,
+            for: CropAdjustments(straightenAngle: cropStraightenAngle)
+        )
     }
+
+    private func aspectPixelRatio(for sourceSize: CGSize) -> CGFloat? {
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return nil }
+        if let ratio = cropAspectRatio.pixelRatio(
+            for: sourceSize, orientation: cropOrientation
+        ) {
+            return ratio
+        }
+        guard let draft = cropDraft else { return nil }
+        let frame = RenderPipeline.geometryExtent(
+            of: sourceSize, for: CropAdjustments(straightenAngle: cropStraightenAngle)
+        )
+        guard draft.height > 0, frame.height > 0 else { return nil }
+        return draft.width * frame.width / (draft.height * frame.height)
+    }
+
+    private static func pixelAspectRatio(for crop: CropAdjustments, sourceSize: CGSize) -> CGFloat? {
+        guard let rect = crop.normalizedRect, rect.height > 0 else { return nil }
+        let frame = RenderPipeline.geometryExtent(
+            of: sourceSize, for: CropAdjustments(straightenAngle: crop.straightenAngle)
+        )
+        guard frame.width > 0, frame.height > 0 else { return nil }
+        if !crop.aspectRatio.isFreeform,
+            let ratio = crop.aspectRatio.pixelRatio(
+                for: sourceSize, orientation: crop.orientation
+            ) {
+            return ratio
+        }
+        return rect.width * frame.width / (rect.height * frame.height)
+    }
+
+    private func validSourceSize(_ size: CGSize) -> CGSize? {
+        size.width > 0 && size.height > 0 ? size : nil
+    }
+
 }
 
 /// Transient presentation state for the editor canvas.

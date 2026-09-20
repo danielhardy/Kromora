@@ -52,9 +52,10 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// invalidating image caches.
     var lastAutoRunFingerprint: AutoRunFingerprint?
 
-    /// v2 added the local-mask field. v3 adds the image rotation field. Missing fields decode to
-    /// their neutral values so existing edit records remain readable and are upgraded on save.
-    static let currentVersion = 4
+    /// v2 added the local-mask field. v3 added the image rotation field. v5 added continuous crop
+    /// geometry and v6 adds perspective; missing fields decode to neutral values so existing
+    /// records remain readable and are upgraded on save.
+    static let currentVersion = 6
 
     init(
         version: Int = EditDocument.currentVersion,
