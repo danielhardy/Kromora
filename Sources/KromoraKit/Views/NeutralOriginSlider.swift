@@ -207,18 +207,22 @@ enum SliderTrackStyle: Equatable, Sendable {
         case .neutral:
             return nil
         case .temperature:
-            return threePart(color(0.20, 0.48, 0.82), color(0.72, 0.78, 0.82), color(0.96, 0.67, 0.22))
+            return threePart(
+                color(0.08, 0.38, 0.88), color(0.56, 0.65, 0.74), color(1.00, 0.50, 0.08)
+            )
         case .tint:
-            return threePart(color(0.25, 0.66, 0.38), color(0.72, 0.76, 0.74), color(0.82, 0.29, 0.63))
+            return threePart(
+                color(0.10, 0.72, 0.30), color(0.62, 0.68, 0.64), color(0.94, 0.16, 0.62)
+            )
         case .saturation:
             return intensity(
-                color(0.43, 0.48, 0.52), color(0.55, 0.62, 0.66),
-                color(0.17, 0.75, 0.73), color(0.92, 0.43, 0.32)
+                color(0.28, 0.34, 0.40), color(0.55, 0.62, 0.66),
+                color(0.02, 0.78, 0.76), color(0.98, 0.32, 0.20)
             )
         case .vibrance:
             return intensity(
-                color(0.45, 0.47, 0.52), color(0.60, 0.63, 0.68),
-                color(0.28, 0.62, 0.86), color(0.75, 0.35, 0.78)
+                color(0.30, 0.32, 0.40), color(0.55, 0.60, 0.68),
+                color(0.16, 0.68, 0.94), color(0.82, 0.22, 0.84)
             )
         case .hue:
             return NSGradient(
@@ -350,7 +354,7 @@ final class NeutralOriginSliderCell: NSSliderCell {
             to: NSPoint(x: bar.maxX, y: bar.midY), options: []
         )
         // The full range remains visible, while an active span gets the unmuted ramp below.
-        emptyTrackColor.withAlphaComponent(0.38).setFill()
+        emptyTrackColor.withAlphaComponent(0.22).setFill()
         NSBezierPath(rect: bar).fill()
         NSGraphicsContext.restoreGraphicsState()
     }

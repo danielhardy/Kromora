@@ -806,7 +806,34 @@ private struct LocalAdjustmentValueRow: View {
     let beginInteraction: () -> Void
     let endInteraction: () -> Void
 
+    private var usesWholeNumberValue: Bool {
+        switch control {
+        case .temperature, .tint, .saturation, .vibrance:
+            return true
+        case .exposure, .contrast, .highlights, .shadows, .whites, .blacks,
+            .texture, .clarity, .dehaze:
+            return false
+        }
+    }
+
+    private var wholeNumberFieldFormat: FloatingPointFormatStyle<Double> {
+        switch control {
+        case .tint, .saturation, .vibrance:
+            return ColorSettingFormatting.signedWholeNumberFormat
+        case .temperature:
+            return ColorSettingFormatting.wholeNumberFormat
+        case .exposure, .contrast, .highlights, .shadows, .whites, .blacks, .texture, .clarity,
+             .dehaze:
+            return ColorSettingFormatting.wholeNumberFormat
+        }
+    }
+
     var body: some View {
+        let displayedValue = Binding<Double>(
+            get: { usesWholeNumberValue ? value.rounded() : value },
+            set: { value = usesWholeNumberValue ? $0.rounded() : $0 }
+        )
+
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 ResettableAdjustmentLabel(
@@ -814,41 +841,46 @@ private struct LocalAdjustmentValueRow: View {
                     reset: reset
                 )
                 Spacer()
-                TextField(control.title, value: $value, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(width: 78)
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityLabel(control.title)
-                    .accessibilityValue(control.readout(value))
-                    .accessibilitySortPriority(1)
+                TextField(
+                    control.title,
+                    value: displayedValue,
+                    format: usesWholeNumberValue
+                        ? wholeNumberFieldFormat
+                        : .number
+                )
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+                .frame(width: 78)
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel(control.title)
+                .accessibilityValue(control.readout(value))
+                .accessibilitySortPriority(1)
             }
 
             Group {
                 if control == .temperature {
                     TemperatureSlider(
-                        value: $value,
+                        value: displayedValue,
                         in: control.range,
                         neutral: control.neutral,
                         trackStyle: control.trackStyle,
                         accessibilityTitle: control.title,
                         accessibilityReadout: control.readout(value),
                         onEditingChanged: { editing in
-                            if editing { beginInteraction() }
-                            else { endInteraction() }
+                            if editing { beginInteraction() } else { endInteraction() }
                         }
                     )
                 } else {
                     NeutralOriginSlider(
-                        value: $value,
+                        value: displayedValue,
                         in: control.range,
                         neutral: control.neutral,
+                        step: usesWholeNumberValue ? 1 : nil,
                         trackStyle: control.trackStyle,
                         accessibilityTitle: control.title,
                         accessibilityReadout: control.readout(value),
                         onEditingChanged: { editing in
-                            if editing { beginInteraction() }
-                            else { endInteraction() }
+                            if editing { beginInteraction() } else { endInteraction() }
                         }
                     )
                 }

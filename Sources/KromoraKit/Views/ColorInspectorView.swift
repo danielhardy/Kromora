@@ -90,6 +90,7 @@ struct ColorInspectorView: View {
                             : AdjustmentControl.tint.neutral,
                         trackStyle: .tint,
                         readout: tintReadout,
+                        fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
                         reset: { viewModel.resetWhiteBalance(.tint) },
                         resetActionTitle: viewModel.sourceIsRAW ? "Reset to As Shot" : "Reset to neutral",
                         disabled: viewModel.sourceIsRAW && viewModel.rawCapabilities == nil
@@ -117,6 +118,7 @@ struct ColorInspectorView: View {
                         neutral: control.neutral,
                         trackStyle: control.trackStyle,
                         readout: signedWholeReadout,
+                        fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
                         reset: { viewModel.resetColor(control) }
                     )
                 }
@@ -147,6 +149,7 @@ struct ColorInspectorView: View {
                                     neutral: control.neutral,
                                     trackStyle: control.trackStyle,
                                     readout: signedWholeReadout,
+                                    fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
                                     reset: {
                                         viewModel.resetMixer(channel, control)
                                     }
@@ -216,6 +219,7 @@ struct ColorInspectorView: View {
                         range: control.range,
                         neutral: control.neutral,
                         readout: control == .blending ? unsignedWholeReadout : signedWholeReadout,
+                        fieldFormat: gradingGlobalFieldFormat(for: control),
                         reset: { viewModel.resetGrading(control) }
                     )
                 }
@@ -244,6 +248,7 @@ struct ColorInspectorView: View {
         neutral: Double,
         trackStyle: SliderTrackStyle = .neutral,
         readout: @escaping (Double) -> String,
+        fieldFormat: FloatingPointFormatStyle<Double> = ColorSettingFormatting.wholeNumberFormat,
         reset: @escaping () -> Void,
         resetActionTitle: String = "Reset to neutral",
         disabled: Bool = false,
@@ -256,6 +261,7 @@ struct ColorInspectorView: View {
             neutral: neutral,
             trackStyle: trackStyle,
             readout: readout,
+            fieldFormat: fieldFormat,
             reset: reset,
             resetActionTitle: resetActionTitle,
             beginInteraction: viewModel.beginPreviewInteraction,
@@ -283,6 +289,14 @@ struct ColorInspectorView: View {
 
     private var hueReadout: (Double) -> String {
         { value in String(format: "%.0f°", value) }
+    }
+
+    private func gradingGlobalFieldFormat(
+        for control: ColorGradingGlobalControl
+    ) -> FloatingPointFormatStyle<Double> {
+        control == .balance
+            ? ColorSettingFormatting.signedWholeNumberFormat
+            : ColorSettingFormatting.wholeNumberFormat
     }
 
     private func mixerExpansion(for channel: ColorMixerChannelName) -> Binding<Bool> {
@@ -316,6 +330,7 @@ private struct ColorValueRow: View {
     let neutral: Double
     let trackStyle: SliderTrackStyle
     let readout: (Double) -> String
+    let fieldFormat: FloatingPointFormatStyle<Double>
     let reset: () -> Void
     let resetActionTitle: String
     let beginInteraction: () -> Void
@@ -323,6 +338,11 @@ private struct ColorValueRow: View {
     let usesTemperatureSlider: Bool
 
     var body: some View {
+        let wholeNumberValue = Binding<Double>(
+            get: { value.rounded() },
+            set: { value = $0.rounded() }
+        )
+
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 ResettableAdjustmentLabel(
@@ -331,41 +351,40 @@ private struct ColorValueRow: View {
                     resetActionTitle: resetActionTitle
                 )
                 Spacer()
-                TextField(title, value: $value, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(width: 68)
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityLabel(title)
-                    .accessibilityValue(readout(value))
-                    .accessibilitySortPriority(1)
+                TextField(title, value: wholeNumberValue, format: fieldFormat)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(.caption, design: .monospaced))
+                .frame(width: 68)
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel(title)
+                .accessibilityValue(readout(value))
+                .accessibilitySortPriority(1)
             }
 
             Group {
                 if usesTemperatureSlider {
                     TemperatureSlider(
-                        value: $value,
+                        value: wholeNumberValue,
                         in: range,
                         neutral: neutral,
                         trackStyle: trackStyle,
                         accessibilityTitle: title,
                         accessibilityReadout: readout(value),
                         onEditingChanged: { editing in
-                            if editing { beginInteraction() }
-                            else { endInteraction() }
+                            if editing { beginInteraction() } else { endInteraction() }
                         }
                     )
                 } else {
                     NeutralOriginSlider(
-                        value: $value,
+                        value: wholeNumberValue,
                         in: range,
                         neutral: neutral,
+                        step: 1,
                         trackStyle: trackStyle,
                         accessibilityTitle: title,
                         accessibilityReadout: readout(value),
                         onEditingChanged: { editing in
-                            if editing { beginInteraction() }
-                            else { endInteraction() }
+                            if editing { beginInteraction() } else { endInteraction() }
                         }
                     )
                 }
