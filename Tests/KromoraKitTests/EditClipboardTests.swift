@@ -137,6 +137,41 @@ final class CopyPasteTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document, sourceEdits, "pasting must not consume or alter the source")
     }
 
+    func testSelectiveCopyMaskLeavesUncheckedDestinationStagesIntact() async throws {
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: makeInMemoryEditStore()
+        )
+        viewModel.importPhotosData([
+            try photoData(named: "source.png"),
+            try photoData(named: "destination.png"),
+        ])
+        try await waitUntil("the source photo") { viewModel.sourceName == "source.png" }
+
+        let sourceEdits = EditDocument(
+            adjustments: [.exposure(ev: 0.8), .vibrance(amount: 0.7)],
+            lut: LUTSettings(lutID: LUTID(raw: "copied.cube"), intensity: 0.9)
+        )
+        viewModel.updateDocument { $0 = sourceEdits }
+        viewModel.editorDocument.copy(document: sourceEdits, categories: [.light])
+
+        viewModel.selectCollectionImage(at: 1)
+        try await waitUntil("the destination photo") { viewModel.sourceName == "destination.png" }
+        let destinationLook = LUTSettings(lutID: LUTID(raw: "destination.cube"), intensity: 0.2)
+        viewModel.updateDocument {
+            $0 = EditDocument(
+                adjustments: [.exposure(ev: -0.4), .vibrance(amount: -0.3)],
+                lut: destinationLook
+            )
+        }
+
+        viewModel.pasteEdits()
+
+        XCTAssertEqual(viewModel.document.adjustments, [.exposure(ev: 0.8), .vibrance(amount: -0.3)])
+        XCTAssertEqual(viewModel.document.lut, destinationLook)
+        XCTAssertTrue(viewModel.statusMessage.contains("Light"))
+    }
+
     func testMultiPasteUpdatesOnlySelectedPhotosAndEachDestinationCanUndo() async throws {
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),

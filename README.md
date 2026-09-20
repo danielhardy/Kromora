@@ -210,7 +210,8 @@ imports use a SHA-256 identity for the delivered bytes.
 | `⌘D` | Derive a Look from a JPG |
 | `⌘Z` / `⌘⇧Z` | Undo / redo |
 | `⌘⇧R` | Reset the current photo |
-| `⌘⌥C` / `⌘⌥V` | Copy / paste all edits |
+| `⌘C` / `⌘V` | Choose edit categories / paste selected edits |
+| `⌘⌥C` / `⌘⌥V` | Copy all / paste all edits |
 | `⌘S` | Export |
 | `⌘⇧E` | Export all |
 

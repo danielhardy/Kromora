@@ -71,6 +71,14 @@ public struct ContentView: View {
             .sheet(isPresented: $viewModel.isRemovableMediaSelectorPresented) {
                 RemovableMediaSelectorView(viewModel: viewModel)
             }
+            .sheet(isPresented: $viewModel.isSelectiveCopyDialogPresented) {
+                SelectiveCopySheet(
+                    categories: $viewModel.selectiveCopyCategories,
+                    sourceName: viewModel.sourceName,
+                    onCopy: viewModel.confirmSelectiveCopy,
+                    onCancel: viewModel.cancelSelectiveCopy
+                )
+            }
             .onAppear {
                 viewModel.refreshRemovableMedia()
             }
@@ -179,8 +187,8 @@ public struct ContentView: View {
                             Divider()
                             CullingBarView(viewModel: viewModel)
                             Divider()
-                            FilmstripView(collection: viewModel.collection, settings: viewModel.settings) { index, additive in
-                                viewModel.selectCollectionImage(at: index, additive: additive)
+                            FilmstripView(collection: viewModel.collection, settings: viewModel.settings) { index, modifiers in
+                                viewModel.selectCollectionImage(at: index, modifiers: modifiers)
                             }
                             .frame(height: 116)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -328,11 +336,11 @@ public struct ContentView: View {
 
         // Edit transfer
         Button {
-            viewModel.copyAllEdits()
+            viewModel.presentSelectiveCopyDialog()
         } label: {
-            Label("Copy Edits", systemImage: "doc.on.doc")
+            Label("Copy Edits…", systemImage: "doc.on.doc")
         }
-        .help("Copy all edits from the active photo (⌘⌥C)")
+        .help("Choose edit categories to copy from the active photo (⌘C)")
         .disabled(viewModel.sourceImage == nil)
 
         Button {

@@ -36,6 +36,17 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
         XCTAssertTrue(relaunched.showPhotoNames)
     }
 
+    func testLastCopyCategoriesPersistAcrossRelaunch() {
+        let defaults = makeDefaults()
+        let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+
+        XCTAssertEqual(first.lastCopyCategories, Set(EditClipboardPayload.Category.allCases))
+        first.lastCopyCategories = [.light, .color, .crop]
+
+        let relaunched = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+        XCTAssertEqual(relaunched.lastCopyCategories, [.light, .color, .crop])
+    }
+
     func testSourceAndExportFoldersPersistIndependentlyAndReset() throws {
         let defaults = makeDefaults()
         let source = tempDirectory.appendingPathComponent("Imports")

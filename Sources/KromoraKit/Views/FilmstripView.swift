@@ -5,7 +5,7 @@ import AppKit
 struct FilmstripView: View {
     @ObservedObject var collection: ImageCollection
     @ObservedObject var settings: KromoraSettings
-    let onSelect: (Int, Bool) -> Void
+    let onSelect: (Int, LibrarySelectionModel.Modifiers) -> Void
 
     var body: some View {
         let entries = collection.thumbnailEntries
@@ -19,7 +19,10 @@ struct FilmstripView: View {
                             let item = resolved.item
                             Button {
                                 let modifiers = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
-                                onSelect(resolved.index, modifiers.contains(.command))
+                                var selectionModifiers: LibrarySelectionModel.Modifiers = []
+                                if modifiers.contains(.command) { selectionModifiers.insert(.command) }
+                                if modifiers.contains(.shift) { selectionModifiers.insert(.shift) }
+                                onSelect(resolved.index, selectionModifiers)
                             } label: {
                                 FilmstripThumbnail(
                                     item: item,
@@ -59,7 +62,7 @@ struct FilmstripView: View {
                                     // still belongs to the focused filmstrip control.
                                     return result
                                 }
-                                onSelect(adjacentIndex, false)
+                                onSelect(adjacentIndex, [])
                                 return result
                             }
                             // Use the source ID for navigation scrolling; the mosaic keeps the
