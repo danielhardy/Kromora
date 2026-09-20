@@ -88,6 +88,12 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 @MainActor
 public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination {
 
+    private struct CropPresentationSnapshot {
+        let isInspectorPresented: Bool
+        let inspectorTab: InspectorTab
+        let isSourceBrowserPresented: Bool
+    }
+
     /// Inspector presentation state has its own observation boundary. The editor model still
     /// owns histogram scheduling and tab validity, but changing the inspector chrome does not
     /// need to publish through the model observed by the library and canvas shells.
@@ -306,7 +312,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// picker can honestly expose the loading state, but it disappears for standard images and for
     /// RAW decoders with no actionable controls.
     var availableInspectorTabs: [InspectorTab] {
-        InspectorTab.availableTabs(
+        guard !isCropToolActive else { return [] }
+        return InspectorTab.availableTabs(
             hasImage: sourceImage != nil,
             developPanelState: developPanelState,
             hasMaskingTarget: maskingAssetID != nil
@@ -441,6 +448,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// keeps compatibility accessors below so existing commands and tests retain their API while
     /// SwiftUI views can observe the narrow state object directly.
     let inspectorState = InspectorState()
+    private var cropPresentationSnapshot: CropPresentationSnapshot?
 
     var canvasNavigation: CanvasNavigation { canvasState.navigation }
     var isCropToolActive: Bool { canvasState.isCropToolActive }
@@ -475,6 +483,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// its persistent editor and selection semantics; the other tabs remain ordinary inspector
     /// navigation and implicitly return from Masking when selected.
     func selectInspectorTab(_ requestedTab: InspectorTab) {
+        guard !isCropToolActive else { return }
         if requestedTab == .masking {
             openMaskingWorkspace()
         } else {
@@ -1121,7 +1130,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             inspectorState.objectWillChange.sink { [weak self] _ in
                 Task { @MainActor [weak self] in
                     guard let self, !self.isShuttingDown else { return }
-                    if self.inspectorState.isPresented, self.inspectorState.tab == .info {
+                    if self.inspectorState.isPresented,
+                        !self.isCropToolActive,
+                        self.inspectorState.tab == .info {
                         self.updateHistogram()
                     } else {
                         self.cancelHistogram(clear: true)
@@ -1868,6 +1879,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         pendingEditedThumbnailAssetID = nil
         previewSurface.clear()
         originalPreviewSurface.clear()
+        if canvasState.isCropToolActive {
+            canvasState.finishCrop()
+            restoreCropPresentation()
+        }
         canvasState.resetForSource()
         maskInteractionState.resetForSource()
         restoreMaskSelection()
@@ -2784,6 +2799,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func toggleSourceBrowser() {
+        guard !isCropToolActive else { return }
         if navigation.isGrid, !navigate(to: .edit) { return }
         isSourceBrowserPresented.toggle()
     }
@@ -2800,6 +2816,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func navigate(to mode: NavigationState.Mode) -> Bool {
         switch mode {
         case .grid:
+            if isCropToolActive { cancelCrop() }
             guard collection.isActive else { return false }
             navigation.move(to: .grid)
             collection.beginThumbnailDemand()
@@ -2934,6 +2951,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func selectCollectionImage(at index: Int, additive: Bool = false) {
         guard collection.items.indices.contains(index) else { return }
+        if isCropToolActive { cancelCrop() }
         cancelIdlePreviewBuild(resetCursor: true)
         collection.select(at: index, modifiers: additive ? [.command] : [])
         let item = collection.items[index]
@@ -4029,9 +4047,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         guard !canvasState.isCropToolActive else { return }
         endUndoGrouping()
+        cropPresentationSnapshot = CropPresentationSnapshot(
+            isInspectorPresented: inspectorState.isPresented,
+            inspectorTab: inspectorState.tab,
+            isSourceBrowserPresented: isSourceBrowserPresented
+        )
+        isSourceBrowserPresented = false
+        inspectorState.isPresented = true
         isShowingOriginal = false
         canvasState.beginCrop(using: document.crop)
-        statusMessage = "Adjust crop, then Apply"
+        statusMessage = "Adjust crop, then Done"
         // The committed preview may already be cropped. Ask for the same adjusted stage without
         // the composition crop so the full-source overlay has actual pixels underneath it.
         schedulePreview()
@@ -4068,6 +4093,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let orientation = canvasState.cropOrientation
         let cropRotation = canvasState.cropRotation
         canvasState.finishCrop()
+        restoreCropPresentation()
         let previousDocument = document
         updateDocument {
             $0.rotation = $0.rotation.addingClockwiseQuarterTurns(cropRotation.rawValue / 90)
@@ -4089,10 +4115,19 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func cancelCrop() {
         guard canvasState.isCropToolActive else { return }
         canvasState.finishCrop()
+        restoreCropPresentation()
         canvasState.fit()
         // Restore the committed framing without touching history or persistence.
         schedulePreview()
         statusMessage = hasCropAdjustments ? "Crop unchanged" : "Crop cancelled"
+    }
+
+    private func restoreCropPresentation() {
+        guard let snapshot = cropPresentationSnapshot else { return }
+        cropPresentationSnapshot = nil
+        isSourceBrowserPresented = snapshot.isSourceBrowserPresented
+        inspectorState.tab = snapshot.inspectorTab
+        inspectorState.isPresented = snapshot.isInspectorPresented
     }
 
     /// While editing, Reset returns the draft to the full image. Outside the tool it clears the
@@ -4275,6 +4310,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// Return every edit on the current photo to its neutral state as one reversible operation.
     func resetPhoto() {
+        if isCropToolActive { cancelCrop() }
         cancelAutoAdjustment()
         endUndoGrouping()
         let previousDocument = document
@@ -4297,6 +4333,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// toolbar uses this alongside each panel's local reset links so the scope is explicit before
     /// the action is taken; every branch still records through the stage's existing undo path.
     func resetInspectorSection() {
+        if isCropToolActive {
+            resetCrop()
+            return
+        }
         if inspectorState.isMaskingWorkspacePresented {
             resetSelectedMask()
             return
@@ -4732,6 +4772,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             statusMessage = "Open an image first"
             return
         }
+        guard !isCropToolActive else { return }
         isInspectorPresented.toggle()
     }
 
