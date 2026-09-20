@@ -82,15 +82,23 @@ struct CropInspectorView: View {
             Text("Aspect")
                 .font(.headline)
 
-            Picker(selection: aspectSelection) {
+            Menu {
                 ForEach(aspectOptions, id: \.self) { ratio in
-                    Text(ratio.label).tag(ratio)
+                    Button {
+                        selectAspect(ratio)
+                    } label: {
+                        if ratio == aspectRatio {
+                            Label(ratio.label, systemImage: "checkmark")
+                        } else {
+                            Text(ratio.label)
+                        }
+                    }
                 }
             } label: {
                 Label(displayedAspectLabel, systemImage: "aspectratio")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .pickerStyle(.menu)
+            .menuStyle(.borderlessButton)
             .accessibilityLabel("Crop aspect ratio")
             .accessibilityValue(displayedAspectLabel)
             .accessibilityHint("Choose the crop frame ratio")
@@ -130,16 +138,11 @@ struct CropInspectorView: View {
          .fiveToSeven, .fourToFive, .threeToFive, .custom]
     }
 
-    private var aspectSelection: Binding<CropAspectRatio> {
-        Binding(
-            get: { aspectRatio },
-            set: { ratio in
-                let nextOrientation = ratio.supportsOrientationSelection
-                    ? effectiveOrientation
-                    : .automatic
-                onAspectRatioChange(ratio, nextOrientation)
-            }
-        )
+    private func selectAspect(_ ratio: CropAspectRatio) {
+        let nextOrientation = ratio.supportsOrientationSelection
+            ? effectiveOrientation
+            : .automatic
+        onAspectRatioChange(ratio, nextOrientation)
     }
 
     private var orientationSelection: Binding<CropAspectRatioOrientation> {

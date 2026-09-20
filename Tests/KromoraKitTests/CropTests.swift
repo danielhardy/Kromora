@@ -871,6 +871,37 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop.orientation, .portrait)
     }
 
+    func testSelectingAspectPresetsImmediatelyReshapesTheDraftForBothOrientations() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "aspect-selection.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        let fullFrame = try XCTUnwrap(viewModel.cropDraft)
+
+        viewModel.selectCropAspectRatio(.square)
+        let square = try XCTUnwrap(viewModel.cropDraft)
+        XCTAssertNotEqual(square, fullFrame)
+        XCTAssertEqual(square.width * 32 / (square.height * 24), 1, accuracy: 0.000001)
+
+        viewModel.selectCropAspectRatio(.fourToFive, orientation: .landscape)
+        let landscape = try XCTUnwrap(viewModel.cropDraft)
+        XCTAssertEqual(viewModel.cropAspectRatio, .fourToFive)
+        XCTAssertEqual(viewModel.cropOrientation, .landscape)
+        XCTAssertEqual(
+            landscape.width * 32 / (landscape.height * 24), 1.25, accuracy: 0.000001)
+
+        viewModel.selectCropAspectRatio(.fourToFive, orientation: .portrait)
+        let portrait = try XCTUnwrap(viewModel.cropDraft)
+        XCTAssertEqual(viewModel.cropOrientation, .portrait)
+        XCTAssertEqual(
+            portrait.width * 32 / (portrait.height * 24), 0.8, accuracy: 0.000001)
+        XCTAssertNotEqual(portrait, landscape)
+    }
+
     func testStraightenAndFlipAreDraftedUntilDoneAndCancelRestoresCommittedGeometry() async throws {
         let url = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "geometry-workflow.png", in: tempDirectory)
