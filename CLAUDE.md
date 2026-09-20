@@ -58,9 +58,11 @@ The package is split so the app's code is testable (`@testable` can't import an 
   `PhotoAnalysisCoordinator` own focused workflows. Only `ContentView` and
   `KromoraCommands` are `public`; keep the rest internal.
 - `Sources/Kromora/` — the `@main` entry point, `AppDelegate`, and the asset catalog. Nothing else belongs here.
-- `Tests/KromoraKitTests/` — XCTest. **Fixtures are generated, never committed** (`Fixtures.swift` builds
-  `.cube` files and orientation-tagged JPEGs into a temp dir). Licensed camera files for the opt-in
-  RAW lane live outside the checkout and are selected with `KROMORA_RAW_FIXTURE_DIR`.
+- `Tests/KromoraKitTests/` — XCTest. **Most fixtures are generated, never committed** (`Fixtures.swift`
+  builds `.cube` files and orientation-tagged JPEGs into a temp dir). Exception (KRMA-459): a small
+  set of AI-generated photo-intelligence JPEGs (≤ 5 MB total, each ≤ 500 KB) may be committed under
+  the tests target resources with a provenance manifest. Licensed camera files for the opt-in RAW
+  lane still live outside the checkout and are selected with `KROMORA_RAW_FIXTURE_DIR`.
 
 When a test needs something currently `private`, widen it to internal with a comment saying why —
 `RecipeExtractor.buildCube` and `workingSize` are the precedent.
