@@ -129,6 +129,18 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertGreaterThan(magenta.blueComponent, magenta.greenComponent, "the positive tint end should retain blue")
     }
 
+    func testChromaTracksRemainClearlyColouredWhenInactive() {
+        for style in [SliderTrackStyle.saturation, .vibrance] {
+            let sample = trackColor(style: style, at: 0.2)
+            let components = [sample.redComponent, sample.greenComponent, sample.blueComponent]
+            XCTAssertGreaterThan(
+                components.max()! - components.min()!,
+                0.06,
+                "\(style) should not collapse into a grey inactive track"
+            )
+        }
+    }
+
     func testSemanticTrackReachesBothEdgesOfTheBar() {
         let left = trackColor(style: .temperature, at: 0.02)
         let right = trackColor(style: .temperature, at: 0.98)
