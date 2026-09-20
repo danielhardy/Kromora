@@ -13,6 +13,12 @@ public struct ContentView: View {
     @ObservedObject private var canvasState: CanvasInteractionState
     @State private var photosSelection: [PhotosPickerItem] = []
 
+    /// The window toolbar has a deliberately small crop-mode surface. Keep this as a named seam
+    /// so the crop branch cannot accidentally grow the normal Edit chrome back into the workspace.
+    static func toolbarMode(isCropToolActive: Bool) -> EditorToolbarMode {
+        isCropToolActive ? .crop : .edit
+    }
+
     public init() {
         let viewModel = AppViewModel(includeBundledLooks: true)
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -210,171 +216,184 @@ public struct ContentView: View {
 
     @ViewBuilder
     private var toolbarContent: some View {
-        Picker("Workspace", selection: Binding(
-            get: { viewModel.navigation.mode },
-            set: { viewModel.navigate(to: $0) }
-        )) {
-            ForEach(NavigationState.Mode.allCases) { mode in
-                Text(mode.title)
-                    .tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .frame(width: 142)
-        .focusable(false)
-        .help("Library (G) or Edit (E)")
-
-        CanvasToolbarControls(
-            viewModel: viewModel,
-            canvasState: viewModel.canvasState,
-            hasImage: viewModel.sourceImage != nil
-        )
-
-        AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
-            viewModel.runAutoAdjustment()
-        }
-        .accessibilityLabel("Auto photo adjustment")
-        .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
-        .help(viewModel.autoAdjustmentHelp)
-        .disabled(!viewModel.canRunAutoAdjustment)
-
-        // Keep the comparison affordance in a stable toolbar position. The model still guards
-        // the action, so an untouched or unloaded image cannot enter an invalid comparison.
-        Button {
-            viewModel.toggleSideBySide()
-        } label: {
-            Label(
-                viewModel.isSideBySide ? "Single View" : "Side by Side",
-                systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
+        switch Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) {
+        case .crop:
+            CropToolbarControls(
+                viewModel: viewModel,
+                hasImage: viewModel.sourceImage != nil
             )
-        }
-        .accessibilityLabel("Comparison view")
-        .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
-        .accessibilityHint("Switch comparison view (V)")
-        .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
-        .disabled(!viewModel.isComparisonPresentationAvailable)
-
-        // Keep the editor controls on the trailing side of the toolbar. Source-folder browsing
-        // remains available from Import, while this button reveals the editor's inspector.
-        Button {
-            viewModel.toggleInspector()
-        } label: {
-            Label("Info", systemImage: "sidebar.right")
-        }
-        .accessibilityLabel("Editor sidebar")
-        .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
-        .accessibilityHint("Show or hide the editor sidebar")
-        .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
-        .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
-
-        // Keep reset scopes together and visible: the panel reset affects only the current stage,
-        // while Reset Photo clears every edit on the active source. The File menu retains the
-        // keyboard shortcut for the latter.
-        Menu {
-            Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
-                if canvasState.isCropToolActive {
-                    viewModel.resetCrop()
-                } else {
-                    viewModel.resetInspectorSection()
+        case .edit:
+            Picker("Workspace", selection: Binding(
+                get: { viewModel.navigation.mode },
+                set: { viewModel.navigate(to: $0) }
+            )) {
+                ForEach(NavigationState.Mode.allCases) { mode in
+                    Text(mode.title)
+                        .tag(mode)
                 }
             }
-            .disabled(!canvasState.isCropToolActive && inspectorState.tab == .info)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(width: 142)
+            .focusable(false)
+            .help("Library (G) or Edit (E)")
 
-            Divider()
+            CanvasToolbarControls(
+                viewModel: viewModel,
+                canvasState: viewModel.canvasState,
+                hasImage: viewModel.sourceImage != nil
+            )
 
-            Button("Reset Photo") {
-                viewModel.resetPhoto()
+            AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
+                viewModel.runAutoAdjustment()
             }
-        } label: {
-            Label("Reset", systemImage: "arrow.counterclockwise")
-        }
-        .help("Reset the current adjustment section or the whole photo")
-        .disabled(viewModel.sourceImage == nil)
+            .accessibilityLabel("Auto photo adjustment")
+            .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
+            .help(viewModel.autoAdjustmentHelp)
+            .disabled(!viewModel.canRunAutoAdjustment)
 
-        // Import menu
-        Menu {
-            Button("Open Image...") {
-                viewModel.openImageDialog()
+            // Keep the comparison affordance in a stable toolbar position. The model still guards
+            // the action, so an untouched or unloaded image cannot enter an invalid comparison.
+            Button {
+                viewModel.toggleSideBySide()
+            } label: {
+                Label(
+                    viewModel.isSideBySide ? "Single View" : "Side by Side",
+                    systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
+                )
             }
-            Divider()
-            Button("Import from Photos...") {
-                viewModel.importFromPhotos()
+            .accessibilityLabel("Comparison view")
+            .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
+            .accessibilityHint("Switch comparison view (V)")
+            .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
+            .disabled(!viewModel.isComparisonPresentationAvailable)
+
+            // Keep the editor controls on the trailing side of the toolbar. Source-folder browsing
+            // remains available from Import, while this button reveals the editor's inspector.
+            Button {
+                viewModel.toggleInspector()
+            } label: {
+                Label("Info", systemImage: "sidebar.right")
             }
-            Button("Open Source Folder...") {
-                viewModel.chooseSourceFolder()
-            }
-            Menu("Removable Media") {
-                if viewModel.removableMediaVolumes.isEmpty {
-                    Text("No supported media mounted")
-                } else {
-                    ForEach(viewModel.removableMediaVolumes) { volume in
-                        Button(volume.menuLabel) {
-                            viewModel.openRemovableMedia(volume)
-                        }
+            .accessibilityLabel("Editor sidebar")
+            .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
+            .accessibilityHint("Show or hide the editor sidebar")
+            .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
+            .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
+
+            // Keep reset scopes together and visible: the panel reset affects only the current stage,
+            // while Reset Photo clears every edit on the active source. The File menu retains the
+            // keyboard shortcut for the latter.
+            Menu {
+                Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
+                    if canvasState.isCropToolActive {
+                        viewModel.resetCrop()
+                    } else {
+                        viewModel.resetInspectorSection()
                     }
                 }
+                .disabled(!canvasState.isCropToolActive && inspectorState.tab == .info)
+
                 Divider()
-                Button("Refresh Removable Media") {
-                    viewModel.refreshRemovableMedia()
+
+                Button("Reset Photo") {
+                    viewModel.resetPhoto()
                 }
-            }
-            if !viewModel.collection.items.isEmpty {
-                Button("Refresh Source Folder") {
-                    viewModel.refreshSource()
-                }
-            }
-            if photosImportCoordinator.progress != nil {
-                Divider()
-                Button("Cancel Photos Import") {
-                    cancelPhotosImport()
-                }
-            }
-        } label: {
-            Label("Import", systemImage: "photo.on.rectangle")
-        }
-
-        // Edit transfer
-        Button {
-            viewModel.presentSelectiveCopyDialog()
-        } label: {
-            Label("Copy Edits…", systemImage: "doc.on.doc")
-        }
-        .help("Choose edit categories to copy from the active photo (⌘C)")
-        .disabled(viewModel.sourceImage == nil)
-
-        Button {
-            viewModel.pasteEdits()
-        } label: {
-            Label("Paste Edits", systemImage: "doc.on.clipboard")
-        }
-        .help("Paste edits to the active photo or current selection (⌘⌥V)")
-        .disabled(!viewModel.canPasteEdits)
-
-        Divider()
-
-        // Export
-        Button {
-            viewModel.exportDialog()
-        } label: {
-            Label("Export", systemImage: "square.and.arrow.up")
-        }
-        // ⌘S is bound once, on the File ▸ Export menu item (KromoraApp.swift).
-        // Binding it here too gave the window two competing handlers.
-        .help("Export the graded image (⌘S)")
-        .disabled(viewModel.sourceImage == nil)
-
-        // Selected export — the grid selection is independent from the active edit photo.
-        if viewModel.collection.isActive {
-            Button {
-                viewModel.exportSelectedDialog()
             } label: {
-                Label("Export Selected", systemImage: "square.and.arrow.up.on.square")
+                Label("Reset", systemImage: "arrow.counterclockwise")
             }
-            .help("Export the selected photos from their originals and saved edits (⌘⇧E)")
-            .disabled(viewModel.isExporting)
+            .help("Reset the current adjustment section or the whole photo")
+            .disabled(viewModel.sourceImage == nil)
+
+            // Import menu
+            Menu {
+                Button("Open Image...") {
+                    viewModel.openImageDialog()
+                }
+                Divider()
+                Button("Import from Photos...") {
+                    viewModel.importFromPhotos()
+                }
+                Button("Open Source Folder...") {
+                    viewModel.chooseSourceFolder()
+                }
+                Menu("Removable Media") {
+                    if viewModel.removableMediaVolumes.isEmpty {
+                        Text("No supported media mounted")
+                    } else {
+                        ForEach(viewModel.removableMediaVolumes) { volume in
+                            Button(volume.menuLabel) {
+                                viewModel.openRemovableMedia(volume)
+                            }
+                        }
+                    }
+                    Divider()
+                    Button("Refresh Removable Media") {
+                        viewModel.refreshRemovableMedia()
+                    }
+                }
+                if !viewModel.collection.items.isEmpty {
+                    Button("Refresh Source Folder") {
+                        viewModel.refreshSource()
+                    }
+                }
+                if photosImportCoordinator.progress != nil {
+                    Divider()
+                    Button("Cancel Photos Import") {
+                        cancelPhotosImport()
+                    }
+                }
+            } label: {
+                Label("Import", systemImage: "photo.on.rectangle")
+            }
+
+            // Edit transfer
+            Button {
+                viewModel.presentSelectiveCopyDialog()
+            } label: {
+                Label("Copy Edits…", systemImage: "doc.on.doc")
+            }
+            .help("Choose edit categories to copy from the active photo (⌘C)")
+            .disabled(viewModel.sourceImage == nil)
+
+            Button {
+                viewModel.pasteEdits()
+            } label: {
+                Label("Paste Edits", systemImage: "doc.on.clipboard")
+            }
+            .help("Paste edits to the active photo or current selection (⌘⌥V)")
+            .disabled(!viewModel.canPasteEdits)
+
+            Divider()
+
+            // Export
+            Button {
+                viewModel.exportDialog()
+            } label: {
+                Label("Export", systemImage: "square.and.arrow.up")
+            }
+            // ⌘S is bound once, on the File ▸ Export menu item (KromoraApp.swift).
+            // Binding it here too gave the window two competing handlers.
+            .help("Export the graded image (⌘S)")
+            .disabled(viewModel.sourceImage == nil)
+
+            // Selected export — the grid selection is independent from the active edit photo.
+            if viewModel.collection.isActive {
+                Button {
+                    viewModel.exportSelectedDialog()
+                } label: {
+                    Label("Export Selected", systemImage: "square.and.arrow.up.on.square")
+                }
+                .help("Export the selected photos from their originals and saved edits (⌘⇧E)")
+                .disabled(viewModel.isExporting)
+            }
         }
     }
+}
+
+enum EditorToolbarMode: Equatable {
+    case edit
+    case crop
 }
 
 /// The Auto action changes its symbol and progress title while its work is running. Keep both
@@ -408,36 +427,14 @@ private struct CanvasToolbarControls: View {
     let hasImage: Bool
 
     var body: some View {
-        if canvasState.isCropToolActive {
-            Button {
-                viewModel.commitCrop()
-            } label: {
-                Label("Done", systemImage: "checkmark")
-            }
-            .buttonStyle(.borderedProminent)
-            .accessibilityLabel("Done")
-            .help("Apply the crop and return to Edit (Return)")
-            .disabled(!hasImage)
-
-            // The Crop toggle remains a fast discard path, matching Escape and the Cancel action
-            // in the inspector.
-            Button {
-                viewModel.toggleCropTool()
-            } label: {
-                Label("Cancel Crop", systemImage: "xmark")
-            }
-            .help("Cancel the current crop")
-            .disabled(!hasImage)
-        } else {
-            // Crop is a committed edit, but its in-progress rectangle stays transient until Done.
-            Button {
-                viewModel.toggleCropTool()
-            } label: {
-                Label("Crop", systemImage: "crop")
-            }
-            .help("Crop the photo with a freeform or preset frame")
-            .disabled(!hasImage)
+        // Crop is a committed edit, but its in-progress rectangle stays transient until Save.
+        Button {
+            viewModel.toggleCropTool()
+        } label: {
+            Label("Crop", systemImage: "crop")
         }
+        .help("Crop the photo with a freeform or preset frame")
+        .disabled(!hasImage)
 
         // Canvas navigation is presentation-only; these controls never touch the edit document.
         Menu {
@@ -453,7 +450,44 @@ private struct CanvasToolbarControls: View {
             Label("\(canvasState.navigation.zoomPercent)%", systemImage: "magnifyingglass")
         }
         .help("Canvas zoom: fit, fill, or explicit zoom")
-        .disabled(!hasImage || canvasState.isCropToolActive)
+        .disabled(!hasImage)
+    }
+}
+
+/// Crop owns the window toolbar while its draft is open. Undo intentionally uses the normal
+/// document history: the draft is transient and is still discarded only by Cancel.
+private struct CropToolbarControls: View {
+    let viewModel: AppViewModel
+    let hasImage: Bool
+
+    var body: some View {
+        Button {
+            viewModel.commitCrop()
+        } label: {
+            Label("Save", systemImage: "checkmark")
+        }
+        .buttonStyle(.borderedProminent)
+        .accessibilityLabel("Save")
+        .help("Apply the crop and return to Edit (Return)")
+        .disabled(!hasImage)
+
+        Button {
+            viewModel.cancelCrop()
+        } label: {
+            Label("Cancel", systemImage: "xmark")
+        }
+        .accessibilityLabel("Cancel")
+        .help("Cancel the current crop (Escape)")
+        .disabled(!hasImage)
+
+        Button {
+            viewModel.undo()
+        } label: {
+            Label("Undo", systemImage: "arrow.uturn.backward")
+        }
+        .accessibilityLabel("Undo")
+        .help("Undo the last committed edit")
+        .disabled(!hasImage || !viewModel.canUndo)
     }
 }
 

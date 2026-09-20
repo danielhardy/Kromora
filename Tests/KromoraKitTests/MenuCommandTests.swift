@@ -64,6 +64,38 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(contentView.contains(".disabled(!viewModel.isComparisonPresentationAvailable)"))
     }
 
+    @MainActor
+    func testCropToolbarOwnsExclusiveWindowChrome() throws {
+        XCTAssertEqual(ContentView.toolbarMode(isCropToolActive: true), .crop)
+        XCTAssertEqual(ContentView.toolbarMode(isCropToolActive: false), .edit)
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        let contentView = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift"),
+            encoding: .utf8
+        )
+        let cropBranch = try XCTUnwrap(
+            contentView
+                .components(separatedBy: "case .crop:")
+                .dropFirst()
+                .first?
+                .components(separatedBy: "case .edit:")
+                .first
+        )
+
+        XCTAssertTrue(cropBranch.contains("CropToolbarControls("))
+        XCTAssertFalse(cropBranch.contains("Picker(\"Workspace\""))
+        XCTAssertFalse(cropBranch.contains("AutoToolbarButton"))
+        XCTAssertFalse(cropBranch.contains("Export Selected"))
+        XCTAssertTrue(contentView.contains("Label(\"Save\", systemImage: \"checkmark\")"))
+        XCTAssertTrue(contentView.contains("Label(\"Cancel\", systemImage: \"xmark\")"))
+        XCTAssertTrue(contentView.contains("Label(\"Undo\", systemImage: \"arrow.uturn.backward\")"))
+        XCTAssertTrue(contentView.contains(".disabled(!hasImage || !viewModel.canUndo)"))
+    }
+
     func testRelocatedViewActionsHaveStableNotificationNames() {
         XCTAssertEqual(Notification.Name.resetRotation.rawValue, "Kromora.resetRotation")
         XCTAssertEqual(Notification.Name.toggleInspector.rawValue, "Kromora.toggleInspector")
