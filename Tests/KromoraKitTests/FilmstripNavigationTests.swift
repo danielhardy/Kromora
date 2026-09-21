@@ -4,6 +4,13 @@ import SwiftUI
 
 @MainActor
 final class FilmstripNavigationTests: TempDirectoryTestCase {
+    func testFilmstripLayoutUsesLargerCellsWithoutAStatusRow() {
+        XCTAssertEqual(FilmstripLayout.thumbnailSize, 96)
+        XCTAssertGreaterThan(FilmstripLayout.thumbnailSize, 72)
+        XCTAssertEqual(FilmstripLayout.stripHeight(showPhotoNames: false), 103)
+        XCTAssertEqual(FilmstripLayout.stripHeight(showPhotoNames: true), 118)
+    }
+
     func testFocusedArrowPressConsumesDownRepeatAndUp() {
         XCTAssertEqual(
             FilmstripNavigation.keyPressResult(for: .down), .handled

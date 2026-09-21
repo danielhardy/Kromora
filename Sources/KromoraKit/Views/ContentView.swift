@@ -199,7 +199,11 @@ public struct ContentView: View {
                             ) { index, modifiers in
                                 viewModel.selectCollectionImage(at: index, modifiers: modifiers)
                             }
-                            .frame(height: 110)
+                            .frame(
+                                height: FilmstripLayout.stripHeight(
+                                    showPhotoNames: viewModel.settings.showPhotoNames
+                                )
+                            )
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
 
