@@ -342,7 +342,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
     }
 
     /// Opens a real `PortableLibrarySession` on a private copy of the fixture package and
-    /// publishes the browsing projection exactly as AppViewModel launch/reload do. The copy
+    /// publishes the windowed browsing projection exactly as AppViewModel launch/reload do
+    /// (KRMA-519 scope item 2: first page only, stable identity, zero record reads). The copy
     /// keeps lease acquisition and disposable-index writes off the shared fixture.
     private func measureProductionLaunch(fixture: ScaleFixture) async throws -> ProductionProbe {
         let copyURL = tempDirectory.appendingPathComponent(
@@ -361,19 +362,37 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             session.assetRecordReadObserver = { _ in counter.record() }
             let launchEnd = DispatchTime.now().uptimeNanoseconds
             let reloadStart = DispatchTime.now().uptimeNanoseconds
-            let assets = try session.browsingAssets()
+            // Production launch/reload publish exactly one window (page 0); retained Items stay
+            // bounded by the page size while totalCount proves the full library is addressable.
+            let window = try session.browsingWindow(pageIndex: 0, query: .all)
             let reloadEnd = DispatchTime.now().uptimeNanoseconds
-            guard assets.count == fixture.assetIDs.count else {
+            guard window.totalCount == fixture.assetIDs.count else {
                 throw NSError(domain: "KromoraScaleRegression", code: 2, userInfo: [
                     NSLocalizedDescriptionKey:
-                        "browsing projection returned \(assets.count) of \(fixture.assetIDs.count) assets"
+                        "browsing window total \(window.totalCount) != \(fixture.assetIDs.count) assets"
                 ])
             }
-            let firstPage = try session.browsingAssets(pageIndex: 0)
-            guard !firstPage.isEmpty else {
+            guard !window.assets.isEmpty else {
                 throw NSError(domain: "KromoraScaleRegression", code: 3, userInfo: [
-                    NSLocalizedDescriptionKey: "browsing projection returned an empty first page"
+                    NSLocalizedDescriptionKey: "browsing window returned an empty first page"
                 ])
+            }
+            guard window.assets.count <= window.pageSize else {
+                throw NSError(domain: "KromoraScaleRegression", code: 4, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "window holds \(window.assets.count) items beyond page size \(window.pageSize)"
+                ])
+            }
+            // Stable identity across pages: page 0 and page 1 must not share IDs when paged.
+            if window.totalCount > window.assets.count {
+                let next = try session.browsingWindow(pageIndex: 1, query: .all)
+                let firstIDs = Set(window.assets.map(\.id))
+                let secondIDs = Set(next.assets.map(\.id))
+                guard firstIDs.intersection(secondIDs).isEmpty else {
+                    throw NSError(domain: "KromoraScaleRegression", code: 5, userInfo: [
+                        NSLocalizedDescriptionKey: "browsing windows share stable identities across pages"
+                    ])
+                }
             }
             // The session owns no heartbeat or imports without a scheduler; scope exit runs
             // deinit on the main actor, which cancels renewal and releases the writer lease.

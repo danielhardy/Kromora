@@ -33,7 +33,7 @@ struct CullingBarView: View {
                 Divider()
                     .frame(height: isCompact ? 20 : 24)
 
-                LibraryFilterControls(collection: collection, isCompact: isCompact)
+                LibraryFilterControls(collection: collection, viewModel: viewModel, isCompact: isCompact)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, isCompact ? 4 : 7)
@@ -108,7 +108,23 @@ private struct CullingSelectionControls: View {
 
 struct LibraryFilterControls: View {
     @ObservedObject var collection: ImageCollection
+    @ObservedObject var viewModel: AppViewModel
     let isCompact: Bool
+
+    private var isPortableWindowed: Bool { collection.isPortableWindowed }
+
+    private var currentFilter: LibraryFilter {
+        isPortableWindowed ? viewModel.portableQuery.filter : collection.filter
+    }
+
+    private var countText: String {
+        if let total = collection.portableTotalCount, isPortableWindowed {
+            return "\(collection.items.count) of \(total)"
+        }
+        return "\(collection.filteredItemCount) of \(collection.items.count)"
+    }
+
+    private var isFiltered: Bool { currentFilter.isFiltered }
 
     var body: some View {
         HStack(spacing: isCompact ? 6 : 8) {
@@ -143,12 +159,18 @@ struct LibraryFilterControls: View {
             .focusable(false)
             .help("Filter by star rating")
 
-            Text("\(collection.filteredItemCount) of \(collection.items.count)")
+            Text(countText)
                 .font(isCompact ? .caption2.monospacedDigit() : .caption.monospacedDigit())
                 .foregroundStyle(.secondary)
 
-            if collection.filter.isFiltered {
-                Button("Clear") { collection.clearFilter() }
+            if isFiltered {
+                Button("Clear") {
+                    if isPortableWindowed {
+                        viewModel.setPortableFilter(.all)
+                    } else {
+                        collection.clearFilter()
+                    }
+                }
                     .buttonStyle(.borderless)
                     .font(isCompact ? .caption2 : .caption)
                     .help("Clear culling filters")
@@ -158,22 +180,34 @@ struct LibraryFilterControls: View {
 
     private var flagBinding: Binding<LibraryFlagFilter> {
         Binding(
-            get: { collection.filter.flag },
+            get: { currentFilter.flag },
             set: { value in
-                var filter = collection.filter
-                filter.flag = value
-                collection.setFilter(filter)
+                if isPortableWindowed {
+                    var filter = viewModel.portableQuery.filter
+                    filter.flag = value
+                    viewModel.setPortableFilter(filter)
+                } else {
+                    var filter = collection.filter
+                    filter.flag = value
+                    collection.setFilter(filter)
+                }
             }
         )
     }
 
     private var ratingBinding: Binding<LibraryRatingFilter> {
         Binding(
-            get: { collection.filter.rating },
+            get: { currentFilter.rating },
             set: { value in
-                var filter = collection.filter
-                filter.rating = value
-                collection.setFilter(filter)
+                if isPortableWindowed {
+                    var filter = viewModel.portableQuery.filter
+                    filter.rating = value
+                    viewModel.setPortableFilter(filter)
+                } else {
+                    var filter = collection.filter
+                    filter.rating = value
+                    collection.setFilter(filter)
+                }
             }
         )
     }
