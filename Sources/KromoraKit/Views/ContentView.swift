@@ -354,23 +354,6 @@ public struct ContentView: View {
                 Label("Import", systemImage: "photo.on.rectangle")
             }
 
-            // Edit transfer
-            Button {
-                viewModel.presentSelectiveCopyDialog()
-            } label: {
-                Label("Copy Edits…", systemImage: "doc.on.doc")
-            }
-            .help("Choose edit categories to copy from the active photo (⌘C)")
-            .disabled(viewModel.sourceImage == nil)
-
-            Button {
-                viewModel.pasteEdits()
-            } label: {
-                Label("Paste Edits", systemImage: "doc.on.clipboard")
-            }
-            .help("Paste edits to the active photo or current selection (⌘⌥V)")
-            .disabled(!viewModel.canPasteEdits)
-
             Divider()
 
             // Export
@@ -383,17 +366,6 @@ public struct ContentView: View {
             // Binding it here too gave the window two competing handlers.
             .help("Export the graded image (⌘S)")
             .disabled(viewModel.sourceImage == nil)
-
-            // Selected export — the grid selection is independent from the active edit photo.
-            if viewModel.collection.isActive {
-                Button {
-                    viewModel.exportSelectedDialog()
-                } label: {
-                    Label("Export Selected", systemImage: "square.and.arrow.up.on.square")
-                }
-                .help("Export the selected photos from their originals and saved edits (⌘⇧E)")
-                .disabled(viewModel.isExporting)
-            }
         }
     }
 }

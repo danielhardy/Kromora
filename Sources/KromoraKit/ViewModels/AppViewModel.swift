@@ -5133,7 +5133,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         makeBatchExportRequest(from: collection.items)
     }
 
-    /// The panel-free request used by Export Selected. Unlike the historical `batchExportRequest`
+    /// The panel-free request used by Export Originals. Unlike the historical `batchExportRequest`
     /// compatibility seam, this list is never widened to the whole collection.
     var selectedBatchExportRequest:
         (items: [ExportCoordinator.BatchItem], document: EditDocument, lut: CubeLUT?)

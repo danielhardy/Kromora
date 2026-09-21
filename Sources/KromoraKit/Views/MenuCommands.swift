@@ -116,7 +116,7 @@ public struct KromoraCommands: Commands {
             Button("Export...") { post(.exportImage) }
                 .keyboardShortcut("s")
 
-            Button("Export Selected...") { post(.exportSelected) }
+            Button("Export Originals...") { post(.exportSelected) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
         }
 

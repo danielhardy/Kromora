@@ -37,6 +37,21 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(Notification.Name.importLook.rawValue, "Kromora.importLook")
     }
 
+    func testBatchExportMenuUsesOriginalsLabelAndExistingRoute() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        let menuCommands = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(menuCommands.contains("Button(\"Export Originals...\") { post(.exportSelected) }"))
+        XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"e\", modifiers: [.command, .shift])"))
+        XCTAssertFalse(menuCommands.contains("Button(\"Export Selected...\")"))
+    }
+
     func testViewMenuRoutesRelocatedEditorActionsAndKeepsComparisonToolbarStable() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // KromoraKitTests
@@ -62,6 +77,9 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertFalse(contentView.contains("systemImage: \"sidebar.leading\""))
         XCTAssertTrue(contentView.contains("viewModel.toggleInspector()"))
         XCTAssertTrue(contentView.contains(".disabled(!viewModel.isComparisonPresentationAvailable)"))
+        XCTAssertFalse(contentView.contains("Label(\"Copy Edits…\", systemImage: \"doc.on.doc\")"))
+        XCTAssertFalse(contentView.contains("Label(\"Paste Edits\", systemImage: \"doc.on.clipboard\")"))
+        XCTAssertFalse(contentView.contains("Label(\"Export Selected\", systemImage: \"square.and.arrow.up.on.square\")"))
     }
 
     @MainActor
