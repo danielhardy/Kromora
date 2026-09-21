@@ -298,7 +298,7 @@ final class KeyMonitor {
 
         // Plain Command-C/V are intentionally deferred while an NSText or NSControl owns focus.
         // NSText handles its normal editing command; an NSControl lets the event fall through to
-        // the menu (which has no plain-Command-C binding), so the explicit Copy Edits… toolbar or
+        // the menu (which has no plain-Command-C binding), so the explicit Edit ▸ Copy Edits…
         // menu action remains the available route from native-control focus.
         if !KeyMonitorPolicy.globalShortcutsOwnKeyboard(firstResponder) {
             return event
