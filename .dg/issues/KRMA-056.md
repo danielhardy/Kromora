@@ -9,12 +9,7 @@ labels:
   - epic:quality
   - phase:10
 created: 2026-08-30T18:30:36.467Z
-updated: 2026-09-10T12:53:37.438Z
-depends_on:
-  - KRMA-028
-  - KRMA-034
-  - KRMA-039
-  - KRMA-043
+updated: 2026-09-21T02:12:20.628Z
 estimate: 5
 order: 3llllllk
 board: product

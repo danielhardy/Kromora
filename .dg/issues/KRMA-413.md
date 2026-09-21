@@ -48,10 +48,7 @@ labels:
   - backup
   - recovery
 created: 2026-09-12T19:44:25.610Z
-updated: 2026-09-13T16:06:02.367Z
-depends_on:
-  - KRMA-392
-  - KRMA-391
+updated: 2026-09-21T02:09:32.087Z
 order: a0
 board: product
 commits:
