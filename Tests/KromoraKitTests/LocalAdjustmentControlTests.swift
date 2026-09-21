@@ -25,28 +25,32 @@ final class LocalAdjustmentControlTests: XCTestCase {
         }
     }
 
-    func testEveryLocalControlRoundTripsItsExactValueAndPreservesSiblings() throws {
+    func testEveryLocalControlQuantizesToHundredthsAndPreservesSiblings() throws {
         var adjustments = LocalAdjustments.neutral
         let values: [LocalAdjustmentControl: Double] = [
             .exposure: 1.234567,
-            .contrast: -42.25,
-            .highlights: 17.75,
-            .shadows: -63.5,
+            .contrast: -42.256,
+            .highlights: 17.754,
+            .shadows: -63.505,
             .whites: 28.125,
             .blacks: -11.875,
             .temperature: 9000.125,
-            .tint: -37.5,
-            .saturation: 72.5,
-            .vibrance: -18.25,
-            .texture: 44.75,
+            .tint: -37.506,
+            .saturation: 72.504,
+            .vibrance: -18.256,
+            .texture: 44.754,
             .clarity: -23.125,
             .dehaze: 9.875,
         ]
 
         for control in LocalAdjustmentControl.allCases {
-            let expected = try XCTUnwrap(values[control])
-            control.setting(expected, in: &adjustments)
-            XCTAssertEqual(control.value(in: adjustments), expected, accuracy: 1e-12)
+            let input = try XCTUnwrap(values[control])
+            control.setting(input, in: &adjustments)
+            XCTAssertEqual(
+                control.value(in: adjustments), LocalAdjustments.quantized(input), accuracy: 1e-12,
+                "\(control) must store hundredth precision"
+            )
+            XCTAssertEqual(control.step, LocalAdjustments.precision)
         }
 
         let reopened = try JSONDecoder().decode(
@@ -54,13 +58,41 @@ final class LocalAdjustmentControlTests: XCTestCase {
             from: JSONEncoder().encode(adjustments)
         )
         XCTAssertEqual(reopened, adjustments)
+
+        let global = LightAdjustments(exposure: 1.234567)
+        XCTAssertEqual(global.exposure, 1.234567, accuracy: 1e-12)
     }
 
-    func testLocalReadoutsKeepUnitsPrecisionAndSignConvention() {
+    func testLocalReadoutsKeepUnitsAndHundredthPrecision() {
         XCTAssertEqual(LocalAdjustmentControl.exposure.readout(1.234), "+1.23 EV")
-        XCTAssertEqual(LocalAdjustmentControl.temperature.readout(6500.4), "6500 K")
-        XCTAssertEqual(LocalAdjustmentControl.contrast.readout(-12.5), "-12")
-        XCTAssertEqual(LocalAdjustmentControl.saturation.readout(12), "+12")
+        XCTAssertEqual(LocalAdjustmentControl.temperature.readout(6500.4), "6500.40 K")
+        XCTAssertEqual(LocalAdjustmentControl.contrast.readout(-12.5), "-12.50")
+        XCTAssertEqual(LocalAdjustmentControl.saturation.readout(12), "+12.00")
+    }
+
+    func testCopyPasteAndPersistenceKeepLocalAdjustmentsQuantized() throws {
+        let source = EditDocument(localAdjustments: [
+            LocalAdjustmentLayer(
+                adjustments: LocalAdjustments(exposure: 1.234, temperature: 5842.206, tint: -14.046)
+            )
+        ])
+        let clipboard = EditClipboardPayload(document: source)
+        let reopenedClipboard = try JSONDecoder().decode(
+            EditClipboardPayload.self,
+            from: JSONEncoder().encode(clipboard)
+        )
+        let pasted = reopenedClipboard.applying(
+            to: EditDocument(), destinationIsRAW: false, categories: [.localAdjustments]
+        )
+
+        let expected = LocalAdjustments(exposure: 1.23, temperature: 5842.21, tint: -14.05)
+        XCTAssertEqual(pasted.localAdjustments.first?.adjustments, expected)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                EditDocument.self, from: JSONEncoder().encode(pasted)
+            ).localAdjustments.first?.adjustments,
+            expected
+        )
     }
 }
 
@@ -91,14 +123,14 @@ final class LocalAdjustmentBindingTests: TempDirectoryTestCase {
         viewModel.endPreviewInteraction()
 
         XCTAssertEqual(
-            viewModel.localAdjustmentValue(.exposure, in: firstID), 2.345678, accuracy: 1e-12)
+            viewModel.localAdjustmentValue(.exposure, in: firstID), 2.35, accuracy: 1e-12)
         XCTAssertEqual(viewModel.localAdjustmentValue(.exposure, in: secondID), 0, accuracy: 1e-12)
         XCTAssertEqual(viewModel.document.light, globalBefore.light)
         XCTAssertEqual(viewModel.document.color, globalBefore.color)
         XCTAssertEqual(viewModel.document.effects, globalBefore.effects)
         XCTAssertEqual(viewModel.document.adjustments, globalBefore.adjustments)
         var expectedFirst = firstBefore
-        expectedFirst.adjustments.exposure = 2.345678
+        expectedFirst.adjustments.exposure = 2.35
         XCTAssertEqual(viewModel.document.localAdjustments.first, expectedFirst)
         XCTAssertEqual(viewModel.document.localAdjustments.last?.adjustments, .neutral)
 
@@ -106,7 +138,7 @@ final class LocalAdjustmentBindingTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.localAdjustmentValue(.exposure, in: firstID), 0, accuracy: 1e-12)
         viewModel.redo()
         XCTAssertEqual(
-            viewModel.localAdjustmentValue(.exposure, in: firstID), 2.345678, accuracy: 1e-12)
+            viewModel.localAdjustmentValue(.exposure, in: firstID), 2.35, accuracy: 1e-12)
 
         viewModel.resetMaskAdjustment(.exposure, in: firstID)
         XCTAssertEqual(viewModel.localAdjustmentValue(.exposure, in: firstID), 0, accuracy: 1e-12)

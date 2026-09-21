@@ -66,6 +66,9 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// Every local adjustment shares one hundredth-level keyboard and slider increment.
+    var step: Double { LocalAdjustments.precision }
+
     func value(in adjustments: LocalAdjustments) -> Double {
         switch self {
         case .exposure: return adjustments.exposure
@@ -102,16 +105,16 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         }
     }
 
-    /// The same display contract used by the global inspectors for the corresponding stage.
+    /// The local display contract: every persisted value can be shown at its full precision.
     func readout(_ value: Double) -> String {
         switch self {
         case .exposure:
             return String(format: "%+.2f EV", value)
         case .temperature:
-            return ColorSettingFormatting.temperature(value)
+            return String(format: "%.2f K", value)
         case .contrast, .highlights, .shadows, .whites, .blacks, .tint, .saturation, .vibrance,
             .texture, .clarity, .dehaze:
-            return String(format: "%+.0f", value)
+            return String(format: "%+.2f", value)
         }
     }
 }

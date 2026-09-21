@@ -9,6 +9,7 @@ struct TemperatureSlider: View {
     @Binding private var value: Double
     private let range: ClosedRange<Double>
     private let neutral: Double
+    private let step: Double?
     private let trackStyle: SliderTrackStyle
     private let accessibilityTitle: String?
     private let accessibilityReadout: String?
@@ -21,11 +22,13 @@ struct TemperatureSlider: View {
         trackStyle: SliderTrackStyle = .temperature,
         accessibilityTitle: String? = nil,
         accessibilityReadout: String? = nil,
-        onEditingChanged: @escaping (Bool) -> Void = { _ in }
+        onEditingChanged: @escaping (Bool) -> Void = { _ in },
+        step: Double? = nil
     ) {
         self._value = value
         self.range = range
         self.neutral = neutral
+        self.step = step
         self.trackStyle = trackStyle
         self.accessibilityTitle = accessibilityTitle
         self.accessibilityReadout = accessibilityReadout
@@ -37,7 +40,17 @@ struct TemperatureSlider: View {
         let source = $value
         let sliderValue = Binding<Double>(
             get: { mapping.sliderPosition(for: source.wrappedValue) },
-            set: { source.wrappedValue = mapping.kelvinValue(for: $0) }
+            set: { position in
+                let kelvin = mapping.kelvinValue(for: position)
+                guard let step, step.isFinite, step > 0 else {
+                    source.wrappedValue = kelvin
+                    return
+                }
+                source.wrappedValue = min(
+                    max((kelvin / step).rounded(.toNearestOrAwayFromZero) * step, range.lowerBound),
+                    range.upperBound
+                )
+            }
         )
 
         NeutralOriginSlider(
