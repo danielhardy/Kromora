@@ -10,7 +10,10 @@ struct MediaVolumeImportProgress: Equatable, Sendable {
     let total: Int
     var processed: Int
     var imported: Int
+    var duplicates: Int = 0
     var skipped: Int
+    var failed: Int = 0
+    var failureReasons: [String] = []
     var currentName: String?
     var cancelled: Bool
 
@@ -86,7 +89,10 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 
 /// Central state for the Kromora app.
 @MainActor
-public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination {
+public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination,
+    AsyncPhotosImportDestination {
+
+    var packageImportDoesNotNeedDigest: Bool { portableLibrary != nil }
 
     private struct CropPresentationSnapshot {
         let isInspectorPresented: Bool
@@ -659,6 +665,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var portablePhotosImportWasEmpty = false
     private var portablePhotosImportFirstAssetID: PortablePhotoAssetID?
     private var droppedPromiseTask: Task<Void, Never>?
+    /// Every asynchronous import handoff captures this token. A late provider result can never
+    /// publish into a newer import operation.
+    private var importOperationID = UUID()
+    private var portableImportTask: PortablePackageImportHandle?
+    @Published private(set) var portableImportProgress: PortablePackageImportProgress?
 
     /// Removable volumes are discovered independently of the selector so the Import menu can name
     /// mounted volumes that contain supported images, or offer a permission-recovery path when
@@ -709,6 +720,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// The production library boundary. When present, package membership and originals are
     /// canonical; the legacy ImageCollection remains only as a bounded presentation bridge.
     let portableLibrary: PortableLibrarySession?
+    /// The single portable filter/sort/search authority (KRMA-519 scope item 3). The collection's
+    /// own `filter` stays on the folder path; portable filtering runs in the query controller so
+    /// it never materializes the full collection.
+    @Published var portableQuery = LibraryQuery.all
     /// Background compaction shares the scheduler with editor work but uses its detached
     /// package-I/O lane, so a foreground edit can take the admission window back immediately.
     /// Writing images to disk — the single export, the batch run, and naming. Production exports
@@ -889,6 +904,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
         let normalizedPortablePackageURL = portablePackageURL?.standardizedFileURL
+        // Create the shared package-I/O scheduler before opening the session so its lease
+        // heartbeat is admitted on the same lane as imports and maintenance.
+        let packageIOScheduler = ImageWorkScheduler()
         let openedPortableLibrary: PortableLibrarySession?
         let portableOpenError: String?
         let effectiveEditStore: EditDocumentStore
@@ -896,7 +914,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             do {
                 let session = try Self.openPortableLibrarySession(
                     at: normalizedPortablePackageURL,
-                    confirmer: leaseRecoveryConfirmer
+                    confirmer: leaseRecoveryConfirmer,
+                    scheduler: packageIOScheduler
                 )
                 openedPortableLibrary = session
                 portableOpenError = nil
@@ -945,7 +964,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 #if KROMORA_DIRECT_DISTRIBUTION
         self.updateCoordinator = UpdateCoordinator(defaults: preferences)
 #endif
-        self.workScheduler = ImageWorkScheduler()
+        self.workScheduler = packageIOScheduler
         self.persistence = EditPersistenceCoordinator(store: effectiveEditStore)
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane
         // would let a burst of filmstrip/grid work evict a row's continuation before it can return.
@@ -1047,6 +1066,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         applicationShell.onMediaChanged = { [weak self] in
             self?.libraryMediaWorkflow.refreshRemovableMedia()
+        }
+        applicationShell.onApplicationActivated = { [weak self] in
+            self?.portableLibrary?.renewAfterWake()
         }
         applicationShell.start()
 
@@ -1170,11 +1192,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         wireCoordinators()
         library.restoreFolder()
 
-        if let portableLibrary {
+        if portableLibrary != nil {
             do {
-                // Launch paints from index summaries only: no asset record is opened and no
-                // original is fingerprinted. Full records resolve lazily when an asset opens.
-                collection.loadPortableAssets(try portableLibrary.browsingAssets())
+                // Launch paints the first query page from index summaries only: no asset record
+                // is opened, no original is fingerprinted, and retained Items stay bounded by
+                // the page size. Further pages fault in on scroll/selection with stable identity.
+                try reloadPortableWindow(pageIndex: 0)
                 navigation.move(to: .grid)
                 collection.beginThumbnailDemand()
             } catch {
@@ -1371,10 +1394,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     private static func openPortableLibrarySession(
         at url: URL,
-        confirmer: (any PortablePackageLeaseRecoveryConfirming)?
+        confirmer: (any PortablePackageLeaseRecoveryConfirming)?,
+        scheduler: ImageWorkScheduler
     ) throws -> PortableLibrarySession {
         do {
-            return try PortableLibrarySession(at: url)
+            return try PortableLibrarySession(at: url, scheduler: scheduler)
         } catch let error as PortablePackageLeaseError {
             guard case .expired(let info) = error else { throw error }
             let shouldRecover: Bool
@@ -1388,7 +1412,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     == true
             }
             guard shouldRecover else { throw error }
-            return try PortableLibrarySession(at: url, recoverExpiredLease: true)
+            return try PortableLibrarySession(
+                at: url, recoverExpiredLease: true, scheduler: scheduler
+            )
         }
     }
 
@@ -1715,47 +1741,252 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         portableLibrary != nil || portableLibraryOpenError != nil
     }
 
+    private func beginImportOperation() -> UUID {
+        portableImportTask?.cancel()
+        portableImportTask = nil
+        portableImportProgress = nil
+        let id = UUID()
+        importOperationID = id
+        return id
+    }
+
+    private func isCurrentImport(_ id: UUID) -> Bool {
+        importOperationID == id && !isShuttingDown
+    }
+
+    private func presentImportOutcome(_ summary: ImportOutcomeSummary, prefix: String) {
+        statusMessage = summary.status(prefix: prefix)
+    }
+
+    private func observePortableImport(
+        _ handle: PortablePackageImportHandle,
+        operationID: UUID,
+        total: Int,
+        prefix: String,
+        onSuccess: @escaping @MainActor (PortablePackageImportResult) -> Void,
+        onFailure: @escaping @MainActor (Error) -> Void
+    ) {
+        portableImportTask = handle
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            for await progress in handle.progress {
+                guard self.isCurrentImport(operationID) else { return }
+                self.portableImportProgress = progress
+                self.statusMessage = "(prefix) (progress.processed)/(progress.total)…"
+            }
+            do {
+                let result = try await handle.value()
+                guard self.isCurrentImport(operationID) else { return }
+                self.portableImportTask = nil
+                self.portableImportProgress = nil
+                _ = total
+                onSuccess(result)
+            } catch {
+                guard self.isCurrentImport(operationID) else { return }
+                self.portableImportTask = nil
+                self.portableImportProgress = nil
+                onFailure(error)
+            }
+        }
+    }
+
     private func reloadPortableCollection() throws {
+        try reloadPortableWindow(pageIndex: 0)
+    }
+
+    /// Publish one query page as the visible window (KRMA-519 scope items 2-3). Membership,
+    /// ordering, filtering, and selection come from the query controller; the collection holds
+    /// only the window's Items as a presentation adapter.
+    func reloadPortableWindow(pageIndex: Int = 0) throws {
         guard let portableLibrary else { return }
-        // Reload republishes the browsing projection. Like launch, this opens no records;
-        // KRMA-519 scope item 2 will narrow this further to the visible window.
-        collection.loadPortableAssets(try portableLibrary.browsingAssets())
+        let window = try portableLibrary.browsingWindow(
+            pageIndex: pageIndex, query: portableQuery
+        )
+        collection.loadPortableWindow(
+            assets: window.assets, totalCount: window.totalCount,
+            pageIndex: pageIndex, pageSize: window.pageSize, query: portableQuery
+        )
+        // The query controller is the single selection authority; mirror it into the adapter
+        // so keyboard navigation, culling, and open all agree on the active asset.
+        collection.syncPortableSelection(
+            selectedIDs: portableLibrary.portableSelectedIDs,
+            activeID: portableLibrary.portableActiveID
+        )
         navigation.move(to: .grid)
         collection.beginThumbnailDemand()
     }
 
-    private func openPortableAsset(_ assetID: PortablePhotoAssetID) {
-        guard let item = collection.items.first(where: {
-            $0.asset.source.portableIdentity.assetID == assetID
-        }) else {
-            statusMessage = "The imported photo is not available in the package index."
-            return
-        }
-        // The grid item carries the derived browsing locator. Verify it against the package
-        // (record fallback for pre-current layouts) so opening pays at most one record read.
-        if let portableLibrary,
-           let verified = try? portableLibrary.resolveEmbeddedSourceURL(for: assetID) {
-            openImage(url: verified, assetID: item.id)
-            return
-        }
-        guard let url = item.url else {
-            statusMessage = "The imported photo is not available in the package index."
-            return
-        }
-        openImage(url: url, assetID: item.id)
+    /// Fault the next page when the visible window approaches its tail. Grid/filmstrip call this
+    /// from `onAppear` of trailing cells so scrolling never materializes the full library.
+    func loadMorePortableIfNeeded(currentIndex: Int) {
+        guard let portableLibrary, collection.isPortableWindowed,
+              collection.portableHasMorePages else { return }
+        // Prefetch when within two pages of the tail; the grid's LazyVStack only materializes
+        // near-visible cells, so this stays proportional to the viewport, not the library.
+        let loaded = collection.items.count
+        guard currentIndex >= loaded - collection.portablePageSize else { return }
+        let nextPage = collection.portablePageIndex + 1
+        guard let window = try? portableLibrary.browsingWindow(
+            pageIndex: nextPage, query: portableQuery
+        ) else { return }
+        collection.appendPortableWindow(assets: window.assets, pageIndex: nextPage)
     }
 
-    func openImage(url: URL) {
+    /// Portable filtering/sorting preserve user-visible behavior without materializing the full
+    /// collection: the query controller re-pages from summaries and the window reloads page 0.
+    func setPortableFilter(_ filter: LibraryFilter) {
+        guard portableLibrary != nil, portableQuery.filter != filter else { return }
+        portableQuery.filter = filter
+        try? reloadPortableWindow(pageIndex: 0)
+    }
+
+    func setPortableSort(_ sort: LibraryQuerySort) {
+        guard portableLibrary != nil, portableQuery.sort != sort else { return }
+        portableQuery.sort = sort
+        try? reloadPortableWindow(pageIndex: 0)
+    }
+
+    func setPortableSearch(_ text: String?) {
+        let normalized = text?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let next: String? = (normalized?.isEmpty == false) ? normalized : nil
+        guard portableLibrary != nil, portableQuery.searchText != next else { return }
+        portableQuery.searchText = next
+        try? reloadPortableWindow(pageIndex: 0)
+    }
+
+    /// Route a presentation selection through the query-controller authority, then mirror back.
+    /// Ordinary click replaces, Command toggles, Shift is approximated as additive here because
+    /// range extension needs the ordered window IDs owned by the collection.
+    func selectPortableItem(at index: Int, modifiers: LibrarySelectionModel.Modifiers = []) {
+        guard let portableLibrary, collection.items.indices.contains(index) else { return }
+        let photoID = collection.items[index].id
+        guard let portableID = Self.portableID(for: photoID) else {
+            collection.select(at: index, modifiers: modifiers)
+            return
+        }
+        if modifiers.contains(.command) {
+            portableLibrary.togglePortableSelection(portableID)
+        } else {
+            portableLibrary.select(portableID)
+        }
+        collection.select(at: index, modifiers: modifiers)
+        collection.syncPortableSelection(
+            selectedIDs: portableLibrary.portableSelectedIDs,
+            activeID: portableLibrary.portableActiveID
+        )
+    }
+
+    private static func portableID(for photoID: PhotoAssetID) -> PortablePhotoAssetID? {
+        let prefix = "portable:"
+        guard photoID.raw.hasPrefix(prefix) else { return nil }
+        let uuidString = String(photoID.raw.dropFirst(prefix.count))
+        guard let uuid = UUID(uuidString: uuidString) else { return nil }
+        return PortablePhotoAssetID(uuid: uuid)
+    }
+
+    private func openPortableAsset(_ assetID: PortablePhotoAssetID) {
+        // The query controller is authoritative: record the open target there first so
+        // filtering/sorting/page changes keep it selected even when it is off-window.
+        if let portableLibrary { portableLibrary.select(assetID) }
+        if let item = collection.items.first(where: {
+            $0.asset.source.portableIdentity.assetID == assetID
+        }) {
+            // The grid item carries the derived browsing locator. Verify it against the package
+            // (record fallback for pre-current layouts) so opening pays at most one record read.
+            if let portableLibrary,
+               let verified = try? portableLibrary.resolveEmbeddedSourceURL(for: assetID) {
+                openImage(url: verified, assetID: item.id)
+                return
+            }
+            guard let url = item.url else {
+                statusMessage = "The imported photo is not available in the package index."
+                return
+            }
+            openImage(url: url, assetID: item.id)
+            return
+        }
+        // Off-window open (e.g. import result on page > 0, or filtered-out position): fault the
+        // containing page into the window, then open from the stable identity. This keeps launch
+        // bounded while preserving open-anywhere behavior.
+        if let portableLibrary {
+            let pageSize = portableLibrary.queryController.pageSize
+            let ordered = portableLibrary.page(at: 0, query: portableQuery)
+            _ = ordered
+            // Find the asset's page by scanning query pages without opening records.
+            var pageIndex = 0
+            while true {
+                let page = portableLibrary.page(at: pageIndex, query: portableQuery)
+                if page.items.contains(where: { $0.assetID == assetID }) {
+                    if let window = try? portableLibrary.browsingWindow(
+                        pageIndex: pageIndex, query: portableQuery
+                    ) {
+                        collection.loadPortableWindow(
+                            assets: window.assets, totalCount: window.totalCount,
+                            pageIndex: pageIndex, pageSize: window.pageSize, query: portableQuery
+                        )
+                        collection.syncPortableSelection(
+                            selectedIDs: portableLibrary.portableSelectedIDs,
+                            activeID: portableLibrary.portableActiveID
+                        )
+                        if let item = collection.items.first(where: {
+                            $0.asset.source.portableIdentity.assetID == assetID
+                        }), let verified = try? portableLibrary.resolveEmbeddedSourceURL(
+                            for: assetID
+                        ) {
+                            openImage(url: verified, assetID: item.id)
+                            return
+                        }
+                    }
+                    break
+                }
+                guard page.hasNextPage else { break }
+                pageIndex += 1
+                // Bound the scan: pageSize is 500, so even a 100k library faults at most its
+                // index entries (summaries only, no records) to locate one asset.
+                if pageIndex * pageSize > 200_000 { break }
+            }
+        }
+        statusMessage = "The imported photo is not available in the package index."
+    }
+
+    func openImage(url: URL, operationID: UUID? = nil) {
+        let operationID = operationID ?? beginImportOperation()
         cancelPendingPreviewDebounce()
         if let portableLibrary {
             do {
-                let result = try portableLibrary.importURLs([url])
-                let assetID = result.imported.first?.assetID
-                    ?? result.duplicates.first?.existingAssetID
-                try reloadPortableCollection()
-                if let assetID { openPortableAsset(assetID) }
+                let handle = try portableLibrary.startImportURLs([url])
+                observePortableImport(
+                    handle, operationID: operationID, total: 1, prefix: "Photo import",
+                    onSuccess: { [weak self] result in
+                        guard let self else { return }
+                        do {
+                            try self.reloadPortableCollection()
+                            if let assetID = result.imported.first?.assetID
+                                ?? result.duplicates.first?.existingAssetID
+                            { self.openPortableAsset(assetID) }
+                            self.presentImportOutcome(
+                                ImportOutcomeSummary(result: result, total: 1),
+                                prefix: "Photo import"
+                            )
+                        } catch { self.presentError(error.localizedDescription) }
+                    },
+                    onFailure: { [weak self] error in
+                        guard let self, self.isCurrentImport(operationID) else { return }
+                        self.presentImportOutcome(
+                            .failure(total: 1, reason: "(url.lastPathComponent): \(error.localizedDescription)"),
+                            prefix: "Photo import"
+                        )
+                    }
+                )
             } catch {
-                presentError("Kromora could not import \(url.lastPathComponent): \(error.localizedDescription)")
+                guard isCurrentImport(operationID) else { return }
+                presentImportOutcome(
+                    .failure(
+                        total: 1,
+                        reason: "\(url.lastPathComponent): \(error.localizedDescription)"
+                    ),
+                    prefix: "Photo import"
+                )
             }
             return
         }
@@ -2414,46 +2645,98 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Replace the one-off library with the selected files and open the first item. Keeping this
     /// separate from the AppKit panel makes the selection behavior deterministic to test and
     /// ensures an empty/cancelled result does not disturb the current edit.
-    func openImages(urls: [URL]) {
-        guard !urls.isEmpty else { return }
+    @discardableResult
+    func openImages(urls: [URL], operationID: UUID? = nil) -> ImportOutcomeSummary? {
+        guard !urls.isEmpty else { return nil }
+        let operationID = operationID ?? beginImportOperation()
         if let portableLibrary {
             do {
-                let result = try portableLibrary.importURLs(urls)
-                try reloadPortableCollection()
-                if let assetID = result.imported.first?.assetID
-                    ?? result.duplicates.first?.existingAssetID
-                { openPortableAsset(assetID) }
-                if !result.failures.isEmpty {
-                    statusMessage = "Imported \(result.imported.count) photo\(result.imported.count == 1 ? "" : "s"); "
-                        + "skipped \(result.failures.count): "
-                        + result.failures.map { $0.source.name }.joined(separator: ", ")
-                }
+                let handle = try portableLibrary.startImportURLs(urls)
+                observePortableImport(
+                    handle, operationID: operationID, total: urls.count, prefix: "Photo import",
+                    onSuccess: { [weak self] result in
+                        guard let self else { return }
+                        do {
+                            try self.reloadPortableCollection()
+                            if let assetID = result.imported.first?.assetID
+                                ?? result.duplicates.first?.existingAssetID
+                            { self.openPortableAsset(assetID) }
+                            self.presentImportOutcome(
+                                ImportOutcomeSummary(result: result, total: urls.count),
+                                prefix: "Photo import"
+                            )
+                        } catch { self.presentError(error.localizedDescription) }
+                    },
+                    onFailure: { [weak self] error in
+                        guard let self, self.isCurrentImport(operationID) else { return }
+                        self.presentImportOutcome(
+                            .failure(total: urls.count, reason: error.localizedDescription),
+                            prefix: "Photo import"
+                        )
+                    }
+                )
+                // The package path is asynchronous by design; callers observe completion through
+                // the model's progress/status state rather than receiving a synchronous summary.
+                return nil
             } catch {
-                presentError("Kromora could not import the selected photos: \(error.localizedDescription)")
+                guard isCurrentImport(operationID) else { return nil }
+                presentImportOutcome(
+                    .failure(total: urls.count, reason: error.localizedDescription),
+                    prefix: "Photo import"
+                )
+                return .failure(total: urls.count, reason: error.localizedDescription)
             }
-            return
+
         }
-        guard !portableLibraryFailureIsActive else { return }
+        guard !portableLibraryFailureIsActive else { return nil }
         let ids = collection.addFromURLs(urls)
+        let summary = ImportOutcomeSummary(
+            total: urls.count, imported: ids.count, skipped: urls.count - ids.count
+        )
         guard let firstID = ids.first,
             let firstItem = collection.items.first(where: { $0.id == firstID }),
             let url = firstItem.url
-        else { return }
+        else { return summary }
         openImage(url: url, assetID: firstID)
+        return summary
     }
 
     // MARK: - Photo import
 
     func openImage(data: Data, name: String) {
+        let operationID = beginImportOperation()
         if let portableLibrary {
             do {
-                let result = try portableLibrary.importData(data, name: name)
-                try reloadPortableCollection()
-                if let assetID = result.imported.first?.assetID
-                    ?? result.duplicates.first?.existingAssetID
-                { openPortableAsset(assetID) }
+                let handle = try portableLibrary.startImportData(data, name: name)
+                observePortableImport(
+                    handle, operationID: operationID, total: 1, prefix: "Photo import",
+                    onSuccess: { [weak self] result in
+                        guard let self else { return }
+                        do {
+                            try self.reloadPortableCollection()
+                            if let assetID = result.imported.first?.assetID
+                                ?? result.duplicates.first?.existingAssetID
+                            { self.openPortableAsset(assetID) }
+                            self.presentImportOutcome(
+                                ImportOutcomeSummary(result: result, total: 1),
+                                prefix: "Photo import"
+                            )
+                        } catch { self.presentError(error.localizedDescription) }
+                    },
+                    onFailure: { [weak self] error in
+                        guard let self, self.isCurrentImport(operationID) else { return }
+                        self.presentImportOutcome(
+                            .failure(total: 1, reason: "(name): \(error.localizedDescription)"),
+                            prefix: "Photo import"
+                        )
+                    }
+                )
             } catch {
-                presentError("Kromora could not import \(name): \(error.localizedDescription)")
+                guard isCurrentImport(operationID) else { return }
+                presentImportOutcome(
+                    .failure(total: 1, reason: "\(name): \(error.localizedDescription)"),
+                    prefix: "Photo import"
+                )
             }
             return
         }
@@ -2496,6 +2779,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func preparePhotosImport(totalCount: Int) {
+        _ = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
         didPresentInspectorForPhotosImport = false
         if portableLibrary != nil {
@@ -2508,7 +2792,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         collection.beginDataImport(reservedCount: max(0, totalCount))
     }
 
-    func insertPhotosImport(_ item: ImageCollection.PhotoImportItem, ordinal: Int) {
+    func insertPhotosImport(
+        _ item: ImageCollection.PhotoImportItem, ordinal: Int
+    ) -> PhotosImportInsertionOutcome {
         if let portableLibrary {
             do {
                 let result = try portableLibrary.importData(
@@ -2531,12 +2817,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         presentInspectorForFirstPhotosImportItem()
                     }
                 }
+                if let assetID = result.imported.first?.assetID {
+                    return .inserted("portable:\(assetID.raw)")
+                }
+                if let assetID = result.duplicates.first?.existingAssetID {
+                    return .duplicate("portable:\(assetID.raw)")
+                }
+                if let failure = result.failures.first {
+                    return .failed(failure.reason)
+                }
+                return result.cancelled
+                    ? .failed("Photos import was cancelled before the package write completed.")
+                    : .failed("The package did not report an import outcome.")
             } catch {
-                recordPhotosImportFailureDestination(
-                    name: item.name, ordinal: ordinal
-                )
+                return .failed(error.localizedDescription)
             }
-            return
         }
         let assetID = collection.appendDataImport(item, ordinal: ordinal)
         if collection.currentDataImportCount == 1 {
@@ -2547,6 +2842,53 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 assetID: assetID, traceQuality: "photosImport", dataFingerprint: item.contentDigest
             )
             presentInspectorForFirstPhotosImportItem()
+        }
+        return .inserted(assetID.raw)
+    }
+
+    /// Package Photos imports await the detached package worker before updating the presentation
+    /// bridge. This keeps temp-file creation, copying, hashing, fsync, and commit off the main
+    /// actor while retaining the existing synchronous destination for legacy-folder imports.
+    func insertPhotosImportAsync(
+        _ item: ImageCollection.PhotoImportItem, ordinal: Int
+    ) async -> PhotosImportInsertionOutcome {
+        guard let portableLibrary else {
+            return insertPhotosImport(item, ordinal: ordinal)
+        }
+        do {
+            let result = try portableLibrary.startImportData(
+                item.data,
+                name: item.name,
+                rebuildIndex: !isPortablePhotosImportActive
+            )
+            let outcome = try await result.value()
+            let assetID = outcome.imported.first?.assetID
+                ?? outcome.duplicates.first?.existingAssetID
+            if isPortablePhotosImportActive {
+                if let assetID, portablePhotosImportFirstAssetID == nil {
+                    portablePhotosImportFirstAssetID = assetID
+                }
+                portablePhotosImportNeedsRefresh =
+                    portablePhotosImportNeedsRefresh || !outcome.imported.isEmpty
+            } else {
+                try reloadPortableCollection()
+                if collection.items.count == 1, let assetID {
+                    openPortableAsset(assetID)
+                    presentInspectorForFirstPhotosImportItem()
+                }
+            }
+            if let assetID = outcome.imported.first?.assetID {
+                return .inserted("portable:\(assetID.raw)")
+            }
+            if let assetID = outcome.duplicates.first?.existingAssetID {
+                return .duplicate("portable:\(assetID.raw)")
+            }
+            if let failure = outcome.failures.first { return .failed(failure.reason) }
+            return outcome.cancelled
+                ? .failed("Photos import was cancelled before the package write completed.")
+                : .failed("The package did not report an import outcome.")
+        } catch {
+            return .failed(error.localizedDescription)
         }
     }
 
@@ -2570,7 +2912,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         photosImportCoordinator.finish(cancelled: cancelled)
     }
 
-    func recordPhotosImportFailureDestination(name: String, ordinal: Int?) {
+    func recordPhotosImportFailureDestination(name: String, ordinal: Int?, reason: String) {
+        // Package failures stay in ImportOutcomeSummary. They must not create a legacy
+        // collection placeholder or otherwise be reported as a successful presentation import.
+        guard portableLibrary == nil else { return }
+        _ = reason
         if let ordinal {
             collection.recordDataImportFailure(ordinal: ordinal, name: name)
         } else {
@@ -2578,11 +2924,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    func finishPhotosImportDestination(cancelled: Bool) {
+    func finishPhotosImportDestination(summary: ImportOutcomeSummary) {
+        _ = summary
         if let portableLibrary {
             guard isPortablePhotosImportActive else { return }
             defer {
-                portableLibrary.finishImportBatch()
                 isPortablePhotosImportActive = false
                 portablePhotosImportNeedsRefresh = false
                 portablePhotosImportWasEmpty = false
@@ -2590,7 +2936,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
             guard portablePhotosImportNeedsRefresh else { return }
             do {
-                try portableLibrary.refreshIndex()
+                // Publish the coalesced membership delta before materializing the presentation
+                // bridge; otherwise the bridge would snapshot the previous index generation.
+                portableLibrary.finishImportBatch()
                 try reloadPortableCollection()
                 if portablePhotosImportWasEmpty,
                    let assetID = portablePhotosImportFirstAssetID
@@ -2610,18 +2958,39 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func importPhotosData(_ items: [(name: String, data: Data)]) {
+        let operationID = beginImportOperation()
         if let portableLibrary {
             do {
-                var firstAssetID: PortablePhotoAssetID?
-                for item in items {
-                    let result = try portableLibrary.importData(item.data, name: item.name)
-                    firstAssetID = firstAssetID ?? result.imported.first?.assetID
-                        ?? result.duplicates.first?.existingAssetID
-                }
-                try reloadPortableCollection()
-                if let firstAssetID { openPortableAsset(firstAssetID) }
+                let handle = try portableLibrary.startImportDataBatch(items)
+                observePortableImport(
+                    handle, operationID: operationID, total: items.count, prefix: "Photos import",
+                    onSuccess: { [weak self] result in
+                        guard let self else { return }
+                        do {
+                            try self.reloadPortableCollection()
+                            if let assetID = result.imported.first?.assetID
+                                ?? result.duplicates.first?.existingAssetID
+                            { self.openPortableAsset(assetID) }
+                            self.presentImportOutcome(
+                                ImportOutcomeSummary(result: result, total: items.count),
+                                prefix: "Photos import"
+                            )
+                        } catch { self.presentError(error.localizedDescription) }
+                    },
+                    onFailure: { [weak self] error in
+                        guard let self, self.isCurrentImport(operationID) else { return }
+                        self.presentImportOutcome(
+                            .failure(total: items.count, reason: error.localizedDescription),
+                            prefix: "Photos import"
+                        )
+                    }
+                )
             } catch {
-                presentError("Kromora could not import Photos data: \(error.localizedDescription)")
+                guard isCurrentImport(operationID) else { return }
+                presentImportOutcome(
+                    .failure(total: items.count, reason: error.localizedDescription),
+                    prefix: "Photos import"
+                )
             }
             return
         }
@@ -2680,20 +3049,55 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func importRemovableMedia(_ request: RemovableMediaImportRequest) {
         let volume = request.volume
         let files = request.files
+        guard !isShuttingDown else { return }
+        importOperationID = request.operationID
+        let operationID = request.operationID
         if let portableLibrary {
             do {
-                let result = try portableLibrary.importURLs(files.map(\.url))
-                try reloadPortableCollection()
-                if let assetID = result.imported.first?.assetID
-                    ?? result.duplicates.first?.existingAssetID
-                { openPortableAsset(assetID) }
-                libraryMediaWorkflow.finishImport(
-                    imported: result.imported.count, skipped: 0, cancelled: false,
-                    total: files.count
+                let handle = try portableLibrary.startImportURLs(files.map(\.url))
+                observePortableImport(
+                    handle, operationID: operationID, total: files.count,
+                    prefix: "Removable media import",
+                    onSuccess: { [weak self] result in
+                        guard let self else { return }
+                        do {
+                            try self.reloadPortableCollection()
+                            if let assetID = result.imported.first?.assetID
+                                ?? result.duplicates.first?.existingAssetID
+                            { self.openPortableAsset(assetID) }
+                            self.libraryMediaWorkflow.finishImport(
+                                summary: ImportOutcomeSummary(
+                                    result: result,
+                                    total: request.totalSelected,
+                                    preflightSkipped: request.totalSelected - files.count
+                                ),
+                                operationID: request.operationID
+                            )
+                        } catch {
+                            self.libraryMediaWorkflow.finishImport(
+                                summary: .failure(
+                                    total: request.totalSelected,
+                                    reason: error.localizedDescription
+                                ), operationID: request.operationID
+                            )
+                        }
+                    },
+                    onFailure: { [weak self] error in
+                        guard let self, self.isCurrentImport(operationID) else { return }
+                        self.libraryMediaWorkflow.finishImport(
+                            summary: .failure(
+                                total: request.totalSelected, reason: error.localizedDescription
+                            ), operationID: request.operationID
+                        )
+                    }
                 )
             } catch {
-                presentError(
-                    "Kromora could not import removable-media photos: \(error.localizedDescription)"
+                guard isCurrentImport(operationID) else { return }
+                libraryMediaWorkflow.finishImport(
+                    summary: .failure(
+                        total: request.totalSelected, reason: error.localizedDescription
+                    ),
+                    operationID: request.operationID
                 )
             }
             isRemovableMediaSelectorPresented = false
@@ -2713,8 +3117,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             )
         }
         libraryMediaWorkflow.finishImport(
-            imported: ids.count, skipped: files.count - ids.count, cancelled: false,
-            total: files.count
+            summary: ImportOutcomeSummary(
+                total: request.totalSelected,
+                imported: ids.count,
+                skipped: request.totalSelected - ids.count
+            ),
+            operationID: request.operationID
         )
         isRemovableMediaSelectorPresented = false
     }
@@ -2738,34 +3146,46 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         case .image(let data, let name):
             openImage(data: data, name: name)
         case .promises(let receivers):
+            let operationID = beginImportOperation()
             droppedPromiseTask?.cancel()
             droppedPromiseTask = Task { @MainActor [weak self] in
-                guard let self, !self.isShuttingDown else { return }
+                guard let self, self.isCurrentImport(operationID) else { return }
                 ImageDrop.purgeDropDirectories()
                 let directory: URL
                 do {
                     directory = try ImageDrop.makeDropDirectory()
                 } catch {
-                    self.presentError(
-                        "Kromora could not prepare the Photos drop: \(error.localizedDescription)"
-                    )
+                    guard self.isCurrentImport(operationID) else { return }
+                    self.statusMessage = "Photos drop failed: \(error.localizedDescription)"
+                    self.droppedPromiseTask = nil
                     return
                 }
-                defer { ImageDrop.purgeDropDirectories() }
+                defer {
+                    ImageDrop.purgeDropDirectories()
+                }
 
                 let result = await ImageDrop.receive(receivers, into: directory)
+                guard self.isCurrentImport(operationID) else { return }
+                var summary: ImportOutcomeSummary?
                 if !result.urls.isEmpty {
                     // Promise URLs are already known to be files. Use the same durable multi-file
                     // path as other library imports rather than opening a Photos derivative URL.
-                    self.openImages(urls: result.urls)
+                    summary = self.openImages(urls: result.urls, operationID: operationID)
                 }
                 if !result.failures.isEmpty {
-                    let prefix = result.urls.isEmpty ? "No Photos files imported" :
-                        "Imported \(result.urls.count) Photos file\(result.urls.count == 1 ? "" : "s")"
-                    self.statusMessage = "\(prefix); skipped \(result.failures.count): "
-                        + result.failures.joined(separator: "; ")
-                } else if result.urls.isEmpty {
-                    self.statusMessage = "No Photos files could be redeemed."
+                    let promiseSummary = ImportOutcomeSummary(
+                        total: result.failures.count,
+                        failed: result.failures.count,
+                        failureReasons: result.failures
+                    )
+                    let combined = (summary ?? ImportOutcomeSummary(total: 0)).adding(
+                        promiseSummary
+                    )
+                    self.presentImportOutcome(combined, prefix: "Photos drop")
+                } else if let summary {
+                    self.presentImportOutcome(summary, prefix: "Photos drop")
+                } else {
+                    self.statusMessage = "Photos drop complete — 0 imported, 0 duplicate, 0 skipped, 0 failed"
                 }
                 self.droppedPromiseTask = nil
             }
@@ -2774,26 +3194,52 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// Adopt `url` as the source folder (persisted), reveal the browser, and
     /// open its first image. Shared by the menu/toolbar action and folder drops.
-    func openSourceFolder(url: URL) {
+    @discardableResult
+    func openSourceFolder(url: URL) -> ImportOutcomeSummary? {
+        let operationID = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
         if let portableLibrary {
             let files = supportedImageURLs(in: url)
             guard !files.isEmpty else {
                 statusMessage = "No supported images were found in \(url.lastPathComponent)."
-                return
+                return nil
             }
             do {
-                let result = try portableLibrary.importURLs(files)
-                try reloadPortableCollection()
-                if let assetID = result.imported.first?.assetID
-                    ?? result.duplicates.first?.existingAssetID
-                { openPortableAsset(assetID) }
+                let handle = try portableLibrary.startImportURLs(files)
+                observePortableImport(
+                    handle, operationID: operationID, total: files.count, prefix: "Folder import",
+                    onSuccess: { [weak self] result in
+                        guard let self else { return }
+                        do {
+                            try self.reloadPortableCollection()
+                            if let assetID = result.imported.first?.assetID
+                                ?? result.duplicates.first?.existingAssetID
+                            { self.openPortableAsset(assetID) }
+                            self.presentImportOutcome(
+                                ImportOutcomeSummary(result: result, total: files.count),
+                                prefix: "Folder import"
+                            )
+                        } catch { self.presentError(error.localizedDescription) }
+                    },
+                    onFailure: { [weak self] error in
+                        guard let self, self.isCurrentImport(operationID) else { return }
+                        self.presentImportOutcome(
+                            .failure(total: files.count, reason: error.localizedDescription),
+                            prefix: "Folder import"
+                        )
+                    }
+                )
+                return nil
             } catch {
-                presentError("Kromora could not import the folder: \(error.localizedDescription)")
+                guard isCurrentImport(operationID) else { return nil }
+                let summary = ImportOutcomeSummary.failure(
+                    total: files.count, reason: error.localizedDescription
+                )
+                presentImportOutcome(summary, prefix: "Folder import")
+                return summary
             }
-            return
         }
-        guard !portableLibraryFailureIsActive else { return }
+        guard !portableLibraryFailureIsActive else { return nil }
         let didPersistBookmark = collection.setSourceFolder(url)
         if !didPersistBookmark {
             presentError(
@@ -2805,6 +3251,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         navigation.move(to: .grid)
         collection.beginThumbnailDemand()
         openFirstImageWhenScanned()
+        return nil
     }
 
     private func supportedImageURLs(in folder: URL) -> [URL] {
@@ -2919,6 +3366,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self.pendingEditedThumbnailAssetID = nil
         }
         _ = collection.removeItems(with: deletedSet)
+        if let portableLibrary, collection.isPortableWindowed {
+            // Query controller already dropped tombstones via index delta; mirror the single
+            // authority back into the window adapter so selection never points at a deleted ID.
+            collection.syncPortableSelection(
+                selectedIDs: portableLibrary.portableSelectedIDs,
+                activeID: portableLibrary.portableActiveID
+            )
+        }
         previewPresentation.cache.invalidateAll()
         Thumbnails.invalidateCache()
         await engine.invalidateRenderCaches()
@@ -2978,7 +3433,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard collection.items.indices.contains(index) else { return }
         if isCropToolActive { cancelCrop() }
         cancelIdlePreviewBuild(resetCursor: true)
-        collection.select(at: index, modifiers: modifiers)
+        if portableLibrary != nil, collection.isPortableWindowed {
+            selectPortableItem(at: index, modifiers: modifiers)
+            loadMorePortableIfNeeded(currentIndex: index)
+        } else {
+            collection.select(at: index, modifiers: modifiers)
+        }
         let item = collection.items[index]
         requestEditedThumbnail(for: item.id, priority: .activeEditor)
 
@@ -3497,6 +3957,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func selectPreviousImage() {
         guard collection.isActive else { return }
+        if portableLibrary != nil, collection.isPortableWindowed {
+            let prev = collection.selectedIndex
+            collection.selectPrevious()
+            if collection.selectedIndex != prev {
+                selectCollectionImage(at: collection.selectedIndex)
+            }
+            // Keyboard stepping stays within the faulted window; scrolling faults more via
+            // onAppear prefetch. The query controller remains authoritative through
+            // selectCollectionImage -> selectPortableItem.
+            return
+        }
         let prev = collection.selectedIndex
         collection.selectPrevious()
         if collection.selectedIndex != prev {
@@ -3506,6 +3977,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func selectNextImage() {
         guard collection.isActive else { return }
+        if portableLibrary != nil, collection.isPortableWindowed {
+            // At the window tail with more pages, fault the next page before stepping so
+            // keyboard navigation can traverse the full query without materializing it.
+            if collection.portableHasMorePages,
+               collection.selectedIndex >= collection.items.count - 1 {
+                loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
+            }
+            let prev = collection.selectedIndex
+            collection.selectNext()
+            if collection.selectedIndex != prev {
+                selectCollectionImage(at: collection.selectedIndex)
+            }
+            return
+        }
         let prev = collection.selectedIndex
         collection.selectNext()
         if collection.selectedIndex != prev {
@@ -5386,7 +5871,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// `deinit` hook: `deinit` is nonisolated in Swift 6 and cannot safely perform actor cleanup.
     /// Production launch behavior is unchanged; the app's normal termination path still flushes
     /// pending edits before quitting.
-    func shutdown() async {
+    public func shutdown() async {
         guard !isShuttingDown else { return }
         isShuttingDown = true
 
@@ -5471,6 +5956,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await previewCoordinator.shutdown()
         await lookPreviewCoordinator.shutdown()
         await workScheduler.cancelAllAndWait()
+        // The scheduler barrier comes before the session releases its writer lease. This keeps a
+        // queued import/maintenance operation from starting against a newly opened package.
+        await portableLibrary?.shutdown()
         for task in tasks {
             if let task { await task.value }
         }

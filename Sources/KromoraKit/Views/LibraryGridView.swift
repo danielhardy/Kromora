@@ -37,6 +37,14 @@ struct LibraryGridView: View {
                 .padding(.horizontal, 12)
             }
             Divider()
+            if collection.isPortableWindowed, let total = collection.portableTotalCount {
+                Text("Showing \(collection.items.count) of \(total) — scroll for more")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 4)
+                    .accessibilityLabel("Showing \(collection.items.count) of \(total) photos")
+            }
 
             GeometryReader { geometry in
                 if entries.isEmpty {
@@ -61,7 +69,8 @@ struct LibraryGridView: View {
                                     settings: viewModel.settings,
                                     spacing: layout.spacing,
                                     onSelect: select(index:),
-                                    onOpen: onOpen
+                                    onOpen: onOpen,
+                                    onAppearIndex: { viewModel.loadMorePortableIfNeeded(currentIndex: $0) }
                                 )
                             }
                         }
@@ -98,7 +107,14 @@ struct LibraryGridView: View {
         var modifiers: LibrarySelectionModel.Modifiers = []
         if flags.contains(.command) { modifiers.insert(.command) }
         if flags.contains(.shift) { modifiers.insert(.shift) }
-        collection.select(at: index, modifiers: modifiers)
+        if collection.isPortableWindowed {
+            // Single authority: the query controller owns portable selection; the collection
+            // mirrors it so grid, filmstrip, keyboard, culling, and open stay coherent.
+            viewModel.selectPortableItem(at: index, modifiers: modifiers)
+            viewModel.loadMorePortableIfNeeded(currentIndex: index)
+        } else {
+            collection.select(at: index, modifiers: modifiers)
+        }
     }
 }
 
@@ -110,6 +126,7 @@ private struct LibraryMosaicRow: View {
     let spacing: Double
     let onSelect: (Int) -> Void
     let onOpen: () -> Void
+    var onAppearIndex: ((Int) -> Void)? = nil
 
     private var cells: [LibraryMosaicCellLayout] {
         zip(row.itemIndices, row.itemWidths).compactMap { offset, width in
@@ -142,6 +159,7 @@ private struct LibraryMosaicRow: View {
                         // appearance before its row's appearance.
                         collection.beginThumbnailDemand()
                         collection.requestThumbnail(for: item.id)
+                        onAppearIndex?(resolved.index)
                     }
                     .onDisappear {
                         collection.releaseThumbnail(for: item.id)

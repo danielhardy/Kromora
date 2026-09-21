@@ -37,11 +37,18 @@ final class ImageCollectionPresentationModel: ObservableObject {
         /// digest is shared by the durable source record, thumbnails, and the first render.
         let contentDigest: String
 
-        init(name: String, data: Data, localIdentifier: String? = nil, contentDigest: String? = nil) {
+        init(
+            name: String,
+            data: Data,
+            localIdentifier: String? = nil,
+            contentDigest: String? = nil,
+            calculateContentDigest: Bool = true
+        ) {
             self.name = name
             self.data = data
             self.localIdentifier = localIdentifier
-            self.contentDigest = contentDigest ?? PhotoAssetID.contentDigest(data)
+            self.contentDigest = contentDigest
+                ?? (calculateContentDigest ? PhotoAssetID.contentDigest(data) : "")
         }
     }
 
@@ -204,6 +211,14 @@ final class ImageCollectionPresentationModel: ObservableObject {
     @Published var isScanning: Bool = false
     @Published private(set) var scanWarnings: [ScanWarning] = []
     @Published private(set) var filter = LibraryFilter.all
+    /// Windowed portable browsing state (KRMA-519 scope item 2). When non-nil, `items` holds only
+    /// the visible page/window while `portableTotalCount` is the full query match count. Folder
+    /// libraries leave this nil and retain the full in-memory model. Stable
+    /// `portable:<uuid>` identity keeps selection coherent as pages fault in.
+    @Published private(set) var portableTotalCount: Int?
+    @Published private(set) var portablePageIndex: Int = 0
+    @Published private(set) var portablePageSize: Int = 500
+    private(set) var portableQuery = LibraryQuery.all
     /// Bumped only when a crop changes a presented aspect ratio. The mosaic cache keys on this
     /// instead of diffing every item's aspect ratio so that deferred metadata arrival (which also
     /// changes an item's aspect ratio, from the photographic fallback to the real value) does not
@@ -530,6 +545,19 @@ final class ImageCollectionPresentationModel: ObservableObject {
     /// source of truth; these `Item` objects are only the existing presentation/materialisation
     /// bridge needed by the current grid and editor views.
     func loadPortableAssets(_ assets: [PhotoAsset]) {
+        loadPortableWindow(
+            assets: assets, totalCount: assets.count, pageIndex: 0,
+            pageSize: max(1, assets.count), query: .all
+        )
+    }
+
+    /// Publish exactly one query page as the visible window. Launch and reload use page 0 so
+    /// retained `Item` objects stay bounded by the page size instead of the library size; further
+    /// pages fault in via `appendPortableWindow` with stable identity preserved.
+    func loadPortableWindow(
+        assets: [PhotoAsset], totalCount: Int, pageIndex: Int, pageSize: Int,
+        query: LibraryQuery
+    ) {
         scanGeneration &+= 1
         scanTask?.cancel()
         scanTask = nil
@@ -545,6 +573,10 @@ final class ImageCollectionPresentationModel: ObservableObject {
         dataImportItemIndices.removeAll()
         selectedIndex = 0
         selection.clear()
+        portableTotalCount = totalCount
+        portablePageIndex = max(0, pageIndex)
+        portablePageSize = max(1, pageSize)
+        portableQuery = query
         thumbnailDemandIDs.removeAll()
         thumbnailDemandPriorities.removeAll()
         preparedThumbnailIDs.removeAll()
@@ -557,6 +589,82 @@ final class ImageCollectionPresentationModel: ObservableObject {
             enqueueMetadata(for: item, generation: scanGeneration)
         }
         enqueueThumbnails()
+    }
+
+    /// Fault the next page into the visible window. Identity is stable (`portable:<uuid>`), so
+    /// existing selection and thumbnail caches survive the append; only the page cursor advances.
+    /// Returns false when there is no further page for the current window query.
+    @discardableResult
+    func appendPortableWindow(assets: [PhotoAsset], pageIndex: Int) -> Bool {
+        guard let total = portableTotalCount, pageIndex == portablePageIndex + 1, !assets.isEmpty
+        else { return false }
+        let existingIDs = Set(items.map(\.id))
+        let fresh = assets.filter { !existingIDs.contains($0.id) }.map { Item(asset: $0) }
+        guard !fresh.isEmpty else {
+            portablePageIndex = pageIndex
+            return true
+        }
+        items.append(contentsOf: fresh)
+        portablePageIndex = pageIndex
+        _ = total
+        invalidateCollectionProjection()
+        for item in fresh {
+            enqueueMetadata(for: item, generation: scanGeneration)
+        }
+        enqueueThumbnails()
+        return true
+    }
+
+    var isPortableWindowed: Bool { portableTotalCount != nil }
+
+    var portableHasMorePages: Bool {
+        guard let total = portableTotalCount else { return false }
+        return (portablePageIndex + 1) * portablePageSize < total
+    }
+
+    /// Mirror the query-controller selection (the single portable authority) into the
+    /// presentation adapter without clearing thumbnail caches. Unknown IDs are ignored so a stale
+    /// page never resurrects a deleted asset as a selection.
+    func syncPortableSelection(selectedIDs: Set<PortablePhotoAssetID>, activeID: PortablePhotoAssetID?) {
+        guard portableTotalCount != nil else { return }
+        let portableIDs = Set(items.compactMap { item -> PortablePhotoAssetID? in
+            let uuidString = item.id.raw.hasPrefix("portable:")
+                ? String(item.id.raw.dropFirst("portable:".count))
+                : nil
+            guard let uuidString, let uuid = UUID(uuidString: uuidString) else { return nil }
+            return PortablePhotoAssetID(uuid: uuid)
+        }.filter { selectedIDs.contains($0) })
+        // Map back to PhotoAssetIDs present in this window for the presentation model.
+        let windowIDs = Set(items.filter { item in
+            let uuidString = item.id.raw.hasPrefix("portable:")
+                ? String(item.id.raw.dropFirst("portable:".count))
+                : nil
+            guard let uuidString, let uuid = UUID(uuidString: uuidString) else { return false }
+            return portableIDs.contains(PortablePhotoAssetID(uuid: uuid))
+        }.map(\.id))
+        var next = selection
+        // Rebuild through the ordered window IDs so anchor/active stay deterministic.
+        let ordered = items.map(\.id).filter { windowIDs.contains($0) }
+        if ordered.isEmpty {
+            next.clear()
+        } else {
+            next.clear()
+            // Preserve multi-selection order from the window; active follows the controller.
+            for id in ordered { next.focus(id, in: ordered) }
+            if let activeID {
+                let activePhotoID = PhotoAssetID(rawValue: "portable:\(activeID.raw)")
+                if windowIDs.contains(activePhotoID) {
+                    next.focus(activePhotoID, in: ordered)
+                }
+            }
+        }
+        selection = next
+        if let activePhotoID = activeID.map({ PhotoAssetID(rawValue: "portable:\($0.raw)") }),
+           let index = items.firstIndex(where: { $0.id == activePhotoID }) {
+            selectedIndex = index
+        } else if let first = ordered.compactMap({ id in items.firstIndex(where: { $0.id == id }) }).first {
+            selectedIndex = first
+        }
     }
 
     @discardableResult
@@ -647,6 +755,9 @@ final class ImageCollectionPresentationModel: ObservableObject {
         scanTask?.cancel()
         stopMetadataLoading()
         items = []
+        portableTotalCount = nil
+        portablePageIndex = 0
+        portableQuery = .all
         invalidateCollectionProjection()
         pendingImportSlots.removeAll()
         dataImportOrdinals.removeAll()
@@ -1357,6 +1468,13 @@ final class ImageCollectionPresentationModel: ObservableObject {
         invalidateCollectionProjection()
         persistCullingStates()
         persistDeletedAssetIDs()
+        if portableTotalCount != nil {
+            // Portable deletions go through the package (query controller already dropped the
+            // tombstoned IDs via index delta); keep the window count coherent without
+            // materializing the full library. The exact total is re-anchored by the next
+            // window reload; this decrement keeps the "Showing X of Y" chrome truthful.
+            portableTotalCount = max(0, (portableTotalCount ?? items.count) - removed.count)
+        }
         reconcileSelection()
         selectedIndex = min(selectedIndex, max(0, items.count - 1))
         isActive = !items.isEmpty || !pendingImportSlots.isEmpty
@@ -1559,6 +1677,9 @@ final class ImageCollectionPresentationModel: ObservableObject {
         stopMetadataLoading()
         stopScopedURL()
         items = []
+        portableTotalCount = nil
+        portablePageIndex = 0
+        portableQuery = .all
         invalidateCollectionProjection()
         pendingImportSlots.removeAll()
         dataImportOrdinals.removeAll()
