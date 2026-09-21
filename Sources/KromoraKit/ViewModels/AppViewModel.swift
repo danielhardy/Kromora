@@ -4341,26 +4341,31 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Canvas navigation
 
-    func fitCanvas() {
-        canvasState.fit()
+    /// Apply a presentation-only navigation change. Canvas navigation must never pass through
+    /// `updateDocument`, because the edit history describes photo content rather than how that
+    /// content is currently framed in the viewport.
+    private func applyCanvasNavigation(_ change: () -> Void) {
+        change()
         schedulePreview()
+    }
+
+    func fitCanvas() {
+        applyCanvasNavigation { canvasState.fit() }
     }
 
     func fillCanvas() {
-        canvasState.fill()
-        schedulePreview()
+        applyCanvasNavigation { canvasState.fill() }
     }
 
     func resetCanvas() {
-        canvasState.reset()
-        schedulePreview()
+        applyCanvasNavigation { canvasState.reset() }
     }
 
     func toggleCanvasZoom() {
-        canvasState.toggleFitAndRememberedZoom()
-        schedulePreview()
+        applyCanvasNavigation { canvasState.toggleFitAndRememberedZoom() }
     }
 
+    /// Set the canvas presentation zoom without touching the document or its undo/redo history.
     func setCanvasZoom(_ value: CGFloat) {
         let oldValue = canvasState.navigation.zoom
         canvasState.setZoom(value)
