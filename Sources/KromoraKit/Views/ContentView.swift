@@ -264,7 +264,7 @@ public struct ContentView: View {
             .disabled(!viewModel.canRunAutoAdjustment)
 
             // Keep the comparison affordance in a stable toolbar position. The model still guards
-            // the action, so an untouched or unloaded image cannot enter an invalid comparison.
+            // the action until a source is loaded; an untouched source is valid split-view input.
             Button {
                 viewModel.toggleSideBySide()
             } label: {
