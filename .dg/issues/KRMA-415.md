@@ -50,10 +50,7 @@ labels:
   - recovery
   - performance
 created: 2026-09-12T19:44:27.380Z
-updated: 2026-09-13T18:31:29.428Z
-depends_on:
-  - KRMA-392
-  - KRMA-389
+updated: 2026-09-21T02:09:38.792Z
 order: a0
 board: product
 commits:

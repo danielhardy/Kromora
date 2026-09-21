@@ -58,9 +58,8 @@ labels:
   - performance
   - preview
 created: 2026-09-14T03:07:28.871Z
-updated: 2026-09-14T10:37:59.421Z
+updated: 2026-09-21T02:09:44.690Z
 depends_on:
-  - KRMA-382
   - KRMA-430
 order: w
 board: product

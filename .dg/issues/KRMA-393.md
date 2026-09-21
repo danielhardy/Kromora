@@ -47,12 +47,8 @@ labels:
   - backup
   - recovery
 created: 2026-09-12T19:19:25.898Z
-updated: 2026-09-13T18:35:24.004Z
+updated: 2026-09-21T02:09:32.023Z
 depends_on:
-  - KRMA-392
-  - KRMA-391
-  - KRMA-411
-  - KRMA-412
   - KRMA-413
   - KRMA-414
   - KRMA-415
