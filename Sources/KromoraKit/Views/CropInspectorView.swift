@@ -65,7 +65,7 @@ struct CropInspectorView: View {
             HStack(spacing: 8) {
                 Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Done", action: onDone)
+                Button("Save", action: onDone)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
             }

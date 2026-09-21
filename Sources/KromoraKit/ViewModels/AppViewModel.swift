@@ -4525,6 +4525,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             collection.setPresentedCrop(document.crop, for: activeAssetID)
         }
         sourceSize = restored.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
+        let cropToolRemainsActive = canvasState.isCropToolActive
+        if cropToolRemainsActive {
+            canvasState.reseedCrop(using: restored.crop, sourceSize: sourceSize)
+        }
         if !document.hasVisibleLookEdits {
             // Space is a transient single-view state. Undoing/redoing to identity must not leave
             // it armed when the before/after surface no longer exists.
@@ -4548,7 +4552,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         pendingDevelopChange = comparisonChanged
         restoreMaskSelection()
-        schedulePreview()
+        if cropToolRemainsActive {
+            scheduleCropEntryPreview()
+        } else {
+            schedulePreview()
+        }
     }
 
     private func publishPreview(_ publication: PreviewCoordinator.Publication) {

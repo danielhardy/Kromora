@@ -892,6 +892,57 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop.orientation, .portrait)
     }
 
+    func testUndoRedoWhileCropIsOpenReseedsDraftBeforeSaveOrCancel() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "history-in-crop-workflow.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        let committedRect = CGRect(x: 0.1, y: 0.2, width: 0.7, height: 0.6)
+        viewModel.beginCrop()
+        viewModel.updateCropDraft(committedRect)
+        viewModel.commitCrop()
+        viewModel.rotateClockwise()
+        let rotatedDocument = viewModel.document
+        XCTAssertTrue(viewModel.canUndo)
+
+        viewModel.beginCrop()
+        viewModel.updateCropDraft(CGRect(x: 0.3, y: 0.1, width: 0.4, height: 0.5))
+        viewModel.undo()
+
+        XCTAssertTrue(viewModel.isCropToolActive)
+        XCTAssertEqual(viewModel.document.rotation, .zero)
+        XCTAssertEqual(viewModel.cropRotation, .zero)
+        XCTAssertEqual(viewModel.cropDraft, viewModel.document.crop.normalizedRect)
+        XCTAssertNotEqual(viewModel.document, rotatedDocument)
+
+        viewModel.redo()
+        XCTAssertTrue(viewModel.isCropToolActive)
+        XCTAssertEqual(viewModel.document, rotatedDocument)
+        XCTAssertEqual(viewModel.cropRotation, .zero)
+        XCTAssertEqual(viewModel.cropDraft, viewModel.document.crop.normalizedRect)
+
+        // Cancel keeps the restored committed history state and cannot put the pre-Undo draft back.
+        viewModel.cancelCrop()
+        XCTAssertFalse(viewModel.isCropToolActive)
+        XCTAssertEqual(viewModel.document, rotatedDocument)
+
+        // Undo again, change the freshly re-seeded draft, and Save it. The old draft must not leak.
+        viewModel.undo()
+        viewModel.beginCrop()
+        let savedRect = CGRect(x: 0.2, y: 0.15, width: 0.5, height: 0.55)
+        viewModel.updateCropDraft(savedRect)
+        viewModel.commitCrop()
+        XCTAssertEqual(viewModel.document.rotation, .zero)
+        let savedCrop = try XCTUnwrap(viewModel.document.crop.normalizedRect)
+        XCTAssertEqual(savedCrop.origin.x, savedRect.origin.x, accuracy: 0.000001)
+        XCTAssertEqual(savedCrop.origin.y, savedRect.origin.y, accuracy: 0.000001)
+        XCTAssertEqual(savedCrop.width, savedRect.width, accuracy: 0.000001)
+        XCTAssertEqual(savedCrop.height, savedRect.height, accuracy: 0.000001)
+    }
+
     func testSelectingAspectPresetsImmediatelyReshapesTheDraftForBothOrientations() async throws {
         let url = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "aspect-selection.png", in: tempDirectory)

@@ -94,6 +94,13 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(contentView.contains("Label(\"Cancel\", systemImage: \"xmark\")"))
         XCTAssertTrue(contentView.contains("Label(\"Undo\", systemImage: \"arrow.uturn.backward\")"))
         XCTAssertTrue(contentView.contains(".disabled(!hasImage || !viewModel.canUndo)"))
+
+        let cropInspector = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/CropInspectorView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(cropInspector.contains("Button(\"Save\", action: onDone)"))
+        XCTAssertFalse(cropInspector.contains("Button(\"Done\", action: onDone)"))
     }
 
     func testRelocatedViewActionsHaveStableNotificationNames() {
