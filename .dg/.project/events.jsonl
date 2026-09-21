@@ -9853,3 +9853,5 @@
 {"id":"evt_muam1912_kmntcj","type":"issue.updated","ts":"2026-09-21T02:12:31.862Z","actor":"cli","issue_id":"KRMA-001","payload":{"before":{"status":"done","order":"kvoha2sd"},"after":{"status":"done","order":"kvoha2sd"},"fields":["depends_on"]}}
 {"id":"evt_muam1917_q6gjuj","type":"dependency.unlinked","ts":"2026-09-21T02:12:31.867Z","actor":"cli","issue_id":"KRMA-001","payload":{"depends_on":"KRMA-002"}}
 {"id":"evt_muam19b9_9b0eus","type":"issue.archived","ts":"2026-09-21T02:12:32.229Z","actor":"cli","issue_id":"KRMA-001","payload":{"title":"Epic 0 — Product identity and clean baseline"}}
+{"id":"evt_muam4dtc_xokatk","type":"issue.created","ts":"2026-09-21T02:14:58.032Z","actor":"codex","issue_id":"KRMA-501","payload":{"title":"Do not record transient zoom changes in edit history"}}
+{"id":"evt_muam4vdb_0vy1g0","type":"issue.updated","ts":"2026-09-21T02:15:20.783Z","actor":"human","issue_id":"KRMA-501","payload":{"before":{"status":"backlog","order":"z"},"after":{"status":"backlog","order":"z"},"fields":["body"]}}
