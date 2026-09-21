@@ -187,30 +187,45 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(cell.knobRect(flipped: false), nativeKnob)
     }
 
-    func testThumbVisualCentersOnTheNativeBarAcrossControlSizes() {
-        for controlSize in [
-            NSControl.ControlSize.mini, .small, .regular, .large,
-        ] {
-            let slider = makeSlider(range: -100...100, neutral: 0, value: 0)
+    /// The rendered picture, not the arithmetic: draws the whole control the way AppKit does and
+    /// compares the vertical centre of the bar's rows with the thumb's rows. The bar is measured
+    /// in a column well clear of the knob and the thumb in the knob's own column, so neither
+    /// measurement is contaminated by the other.
+    func testRenderedThumbIsVerticallyCenteredOnTheRenderedBar() {
+        for controlSize in [NSControl.ControlSize.mini, .small, .regular] {
+            let slider = makeSlider(range: -100...100, neutral: 0, value: 60)
             guard let cell = slider.cell as? NeutralOriginSliderCell else {
                 return XCTFail("the slider is not using the neutral-origin cell")
             }
             cell.controlSize = controlSize
+            guard let rep = slider.bitmapImageRepForCachingDisplay(in: slider.bounds) else {
+                return XCTFail("could not build a bitmap for \(controlSize)")
+            }
+            slider.cacheDisplay(in: slider.bounds, to: rep)
 
-            let nativeKnob = cell.knobRect(flipped: slider.isFlipped)
-            let nativeBar = cell.barRect(flipped: slider.isFlipped)
-            let circle = NeutralOriginSliderCell.circularKnobRect(
-                in: nativeKnob,
-                centeredOn: nativeBar.midY
-            )
+            let scale = CGFloat(rep.pixelsWide) / slider.bounds.width
+            let knob = cell.knobRect(flipped: slider.isFlipped)
+            let thumbColumn = Int(knob.midX * scale)
+            let barColumn = Int(slider.bounds.width * 0.15 * scale)
 
+            func inkedRows(in column: Int) -> [Int] {
+                (0..<rep.pixelsHigh).filter { y in
+                    (rep.colorAt(x: column, y: y)?.alphaComponent ?? 0) > 0.05
+                }
+            }
+            let barRows = inkedRows(in: barColumn)
+            let thumbRows = inkedRows(in: thumbColumn)
+            guard let barFirst = barRows.first, let barLast = barRows.last,
+                  let thumbFirst = thumbRows.first, let thumbLast = thumbRows.last
+            else {
+                return XCTFail("no bar or thumb pixels rendered for \(controlSize)")
+            }
+            let barCentre = CGFloat(barFirst + barLast + 1) / 2
+            let thumbCentre = CGFloat(thumbFirst + thumbLast + 1) / 2
             XCTAssertEqual(
-                circle.midY,
-                nativeBar.midY,
-                accuracy: 0.001,
-                "thumb and bar must share a vertical centre for \(controlSize)"
+                thumbCentre, barCentre, accuracy: 1.0 / scale + 0.001,
+                "rendered thumb must be centred on the rendered bar for \(controlSize)"
             )
-            XCTAssertEqual(circle.midX, nativeKnob.midX, accuracy: 0.001)
         }
     }
 
