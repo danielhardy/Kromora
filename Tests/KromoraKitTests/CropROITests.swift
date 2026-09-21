@@ -253,4 +253,26 @@ final class CropROITests: TempDirectoryTestCase {
         XCTAssertGreaterThan(image.extent.height, 0)
         XCTAssertTrue(image.extent.isRasterizable)
     }
+
+    func testGeometryROIWithoutPresentationROIFallsBackToTheCompleteFrame() {
+        let source = ImageSource(
+            url: URL(fileURLWithPath: "/tmp/geometry-plan.png"),
+            nativeExtent: CGSize(width: 96, height: 64)
+        )
+        let document = EditDocument(crop: CropAdjustments(straightenAngle: 20))
+        let roi = CGRect(x: 10, y: 10, width: 30, height: 20)
+        let legacy = RenderBuildPlan.make(
+            source: source, document: document, scale: .preview(maxSize: CGSize(width: 48, height: 32)),
+            sourceROI: roi, presentationROI: nil
+        )
+        XCTAssertNil(legacy.sourceROI, "a native ROI cannot be applied after geometry on its own")
+        XCTAssertFalse(legacy.hasEarlyCrop)
+
+        let aware = RenderBuildPlan.make(
+            source: source, document: document, scale: .preview(maxSize: CGSize(width: 48, height: 32)),
+            sourceROI: roi, presentationROI: CGRect(x: 0.2, y: 0.2, width: 0.3, height: 0.3)
+        )
+        XCTAssertNotNil(aware.sourceROI)
+        XCTAssertTrue(aware.hasEarlyCrop)
+    }
 }
