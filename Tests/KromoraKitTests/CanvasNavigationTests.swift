@@ -320,6 +320,21 @@ final class CanvasNavigationTests: XCTestCase {
 
 @MainActor
 final class CanvasObservationTests: TempDirectoryTestCase {
+    private func applyPresentationNavigation(_ viewModel: AppViewModel) {
+        viewModel.setCanvasZoom(2)
+        viewModel.zoomCanvas(by: 0.5)
+        viewModel.fillCanvas()
+        viewModel.fitCanvas()
+        viewModel.toggleCanvasZoom()
+        viewModel.resetCanvas()
+        viewModel.toggleCanvasZoom()
+        viewModel.fitCanvas()
+        viewModel.beginCanvasInteraction()
+        viewModel.setCanvasZoom(3)
+        viewModel.zoomCanvas(by: 0.5)
+        viewModel.endCanvasInteraction()
+    }
+
     private func waitUntil(
         _ description: String, timeout: TimeInterval = 5,
         _ condition: @escaping @MainActor () async -> Bool
@@ -546,6 +561,46 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         viewModel.toggleCanvasZoom()
         XCTAssertEqual(viewModel.canvasNavigation.mode, .fit)
         XCTAssertEqual(viewModel.document, document)
+    }
+
+    func testCanvasNavigationLeavesEmptyHistoryAndRedoStateUnchanged() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let document = viewModel.document
+
+        applyPresentationNavigation(viewModel)
+
+        XCTAssertEqual(viewModel.document, document)
+        XCTAssertEqual(viewModel.undoDepth, 0)
+        XCTAssertFalse(viewModel.canUndo)
+        XCTAssertFalse(viewModel.canRedo)
+    }
+
+    func testZoomFollowedByPersistentEditCreatesOneUndoEntry() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let original = viewModel.document
+
+        applyPresentationNavigation(viewModel)
+        viewModel.updateDocument { $0.light.exposure = 0.75 }
+        let edited = viewModel.document
+
+        XCTAssertEqual(viewModel.undoDepth, 1)
+        XCTAssertTrue(viewModel.canUndo)
+        XCTAssertFalse(viewModel.canRedo)
+
+        viewModel.undo()
+        XCTAssertEqual(viewModel.document, original)
+        XCTAssertFalse(viewModel.canUndo)
+        XCTAssertTrue(viewModel.canRedo)
+
+        applyPresentationNavigation(viewModel)
+        XCTAssertEqual(viewModel.undoDepth, 0)
+        XCTAssertFalse(viewModel.canUndo)
+        XCTAssertTrue(viewModel.canRedo)
+
+        viewModel.redo()
+        XCTAssertEqual(viewModel.document, edited)
+        XCTAssertTrue(viewModel.canUndo)
+        XCTAssertFalse(viewModel.canRedo)
     }
 
     func testMaskOverlayStateBypassesBroadModelPublisher() {

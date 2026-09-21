@@ -2,8 +2,38 @@
 id: KRMA-501
 title: Do not record transient zoom changes in edit history
 type: bug
-status: claimed
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Transient canvas navigation does not add history entries or change undo/redo availability
+      result: pass
+      notes: Focused model/view-model coverage exercises explicit zoom, zoom multiplication, fit, fill, reset, double-click toggle, and zoom during an active canvas interaction.
+    - criterion: Persistent edits after zoom remain exactly one undoable operation
+      result: pass
+      notes: Regression test applies a Light edit after navigation and verifies one undo entry plus undo/redo restoration.
+    - criterion: Undo and redo remain usable across later zoom transitions
+      result: pass
+      notes: Regression test creates a redo branch, navigates the canvas, then confirms redo still restores the persistent document edit.
+    - criterion: Presentation rendering remains intact
+      result: pass
+      notes: PreviewCutoverTests and the full test suite continue to pass.
+    - criterion: Focused tests and dg validate pass
+      result: pass
+      notes: Focused navigation/preview tests pass; full swift test and dg validate pass.
+  checks_run:
+    - swift test --filter CanvasNavigationTests|CanvasObservationTests|PreviewCutoverTests (40 passed, 1 skipped)
+    - swift test (1564 passed, 55 skipped, 0 failures)
+    - dg validate (OK; pre-existing unknown-model warnings only)
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-21T02:37:09.896Z
+  session: 01MUAMMBXM9KGGQXRH
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -13,15 +43,9 @@ labels:
   - zoom
   - ux
 created: 2026-09-21T02:14:57.965Z
-updated: 2026-09-21T02:28:55.403Z
+updated: 2026-09-21T02:37:09.897Z
 order: a0
 board: product
-claim:
-  actor: codex
-  session: 01MUAMMBXM9KGGQXRH
-  claimed_at: 2026-09-21T02:28:55.402Z
-  expires_at: 2026-09-21T03:28:55.402Z
-  model: gpt-5.6-luna
 ---
 
 ## Objective
@@ -51,3 +75,29 @@ The edit history should represent changes that permanently affect the photo, suc
 ## Implementation notes
 
 Trace the boundary between `CanvasNavigation` or other presentation state and the document history/update path in `AppViewModel`. Keep preview scheduling and render invalidation for zoom intact; this ticket concerns history persistence and undo grouping, not zoom performance or image rendering.
+
+## Agent log
+
+- 2026-09-21T02:37:09.896Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Transient canvas navigation does not add history entries or change undo/redo availability (pass) — Focused model/view-model coverage exercises explicit zoom, zoom multiplication, fit, fill, reset, double-click toggle, and zoom during an active canvas interaction.
+- [x] Persistent edits after zoom remain exactly one undoable operation (pass) — Regression test applies a Light edit after navigation and verifies one undo entry plus undo/redo restoration.
+- [x] Undo and redo remain usable across later zoom transitions (pass) — Regression test creates a redo branch, navigates the canvas, then confirms redo still restores the persistent document edit.
+- [x] Presentation rendering remains intact (pass) — PreviewCutoverTests and the full test suite continue to pass.
+- [x] Focused tests and dg validate pass (pass) — Focused navigation/preview tests pass; full swift test and dg validate pass.
+Checks run:
+- swift test --filter CanvasNavigationTests|CanvasObservationTests|PreviewCutoverTests (40 passed, 1 skipped)
+- swift test (1564 passed, 55 skipped, 0 failures)
+- dg validate (OK; pre-existing unknown-model warnings only)
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MUAMMBXM9KGGQXRH
+Summary: Keep canvas navigation out of edit history; add zoom/fit/fill/reset/toggle undo-redo regression coverage.
