@@ -337,9 +337,7 @@ struct PortablePackageImporter: Sendable {
     }
 
     private static func safeFilename(_ name: String) -> String {
-        let lastPathComponent = URL(fileURLWithPath: name).lastPathComponent
-        let candidate = lastPathComponent.isEmpty ? "original" : lastPathComponent
-        return candidate.replacingOccurrences(of: "/", with: "_")
+        PortableLibraryPackage.safeFilename(name)
     }
 
     private static func encode<T: Encodable>(_ value: T) throws -> Data {

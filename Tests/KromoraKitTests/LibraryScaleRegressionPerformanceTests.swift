@@ -72,6 +72,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         let memoryBytes: Double
         let decodedThumbnailCount: Double
         let observableObjectCount: Double
+        let productionLaunchMs: Double
+        let productionReloadMs: Double
+        let productionRecordReads: Double
     }
 
     private actor WriterProbe {
@@ -135,6 +138,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
                 metrics["memory-footprint", default: []].append(measured.memoryBytes)
                 metrics["decoded-thumbnail-count", default: []].append(measured.decodedThumbnailCount)
                 metrics["observable-object-count", default: []].append(measured.observableObjectCount)
+                metrics["production-launch", default: []].append(measured.productionLaunchMs)
+                metrics["production-reload", default: []].append(measured.productionReloadMs)
+                metrics["production-record-reads", default: []].append(measured.productionRecordReads)
                 metrics["interactive-preview-submission", default: []].append(
                     try await measureInteractivePreview(at: fixture.generated.rootURL)
                 )
@@ -148,7 +154,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
                     let unit: String
                     switch key {
                     case "memory-footprint": unit = "bytes"
-                    case "decoded-thumbnail-count", "observable-object-count": unit = "count"
+                    case "decoded-thumbnail-count", "observable-object-count",
+                        "production-record-reads": unit = "count"
                     default: unit = "ms"
                     }
                     return (key, Self.metric(values, unit: unit))
@@ -295,6 +302,15 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
                 || selectedController.selectedIDs == Set([selectedID])
         )
 
+        // KRMA-519 production-path probe: AppViewModel launch and reload publish the session
+        // browsing projection, not the bare index session measured above. A zero-record-read
+        // gate here keeps the benchmark honest about what production actually opens.
+        let production = try await measureProductionLaunch(fixture: fixture)
+        XCTAssertEqual(
+            production.recordReads, 0,
+            "production launch/reload must not open asset records"
+        )
+
         return CollectionMetrics(
             warmLaunchMs: milliseconds(from: openStart, to: warmLaunchEnd),
             firstPageMs: milliseconds(from: openStart, to: firstPageEnd),
@@ -302,7 +318,73 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             scrollMs: milliseconds(from: scrollStart, to: scrollEnd),
             memoryBytes: Double(memory),
             decodedThumbnailCount: Double(decodedThumbnailCount),
-            observableObjectCount: Double(observableObjectCount)
+            observableObjectCount: Double(observableObjectCount),
+            productionLaunchMs: production.launchMs,
+            productionReloadMs: production.reloadMs,
+            productionRecordReads: Double(production.recordReads)
+        )
+    }
+
+    private struct ProductionProbe {
+        let launchMs: Double
+        let reloadMs: Double
+        let recordReads: Int
+    }
+
+    private final class RecordReadCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var count = 0
+
+        func record() {
+            lock.lock(); defer { lock.unlock() }
+            count += 1
+        }
+    }
+
+    /// Opens a real `PortableLibrarySession` on a private copy of the fixture package and
+    /// publishes the browsing projection exactly as AppViewModel launch/reload do. The copy
+    /// keeps lease acquisition and disposable-index writes off the shared fixture.
+    private func measureProductionLaunch(fixture: ScaleFixture) async throws -> ProductionProbe {
+        let copyURL = tempDirectory.appendingPathComponent(
+            "Production-\(fixture.assetIDs.count)-\(UUID().uuidString).kromoralibrary"
+        )
+        try FileManager.default.copyItem(at: fixture.package.rootURL, to: copyURL)
+        defer { try? FileManager.default.removeItem(at: copyURL) }
+        let copyIndexURL = tempDirectory.appendingPathComponent(
+            "Production-\(fixture.assetIDs.count)-\(UUID().uuidString)/LibraryIndex.store"
+        )
+        defer { try? FileManager.default.removeItem(at: copyIndexURL.deletingLastPathComponent()) }
+        let counter = RecordReadCounter()
+        let launchStart = DispatchTime.now().uptimeNanoseconds
+        let probe = try await MainActor.run {
+            let session = try PortableLibrarySession(at: copyURL, indexURL: copyIndexURL)
+            session.assetRecordReadObserver = { _ in counter.record() }
+            let launchEnd = DispatchTime.now().uptimeNanoseconds
+            let reloadStart = DispatchTime.now().uptimeNanoseconds
+            let assets = try session.browsingAssets()
+            let reloadEnd = DispatchTime.now().uptimeNanoseconds
+            guard assets.count == fixture.assetIDs.count else {
+                throw NSError(domain: "KromoraScaleRegression", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "browsing projection returned \(assets.count) of \(fixture.assetIDs.count) assets"
+                ])
+            }
+            let firstPage = try session.browsingAssets(pageIndex: 0)
+            guard !firstPage.isEmpty else {
+                throw NSError(domain: "KromoraScaleRegression", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "browsing projection returned an empty first page"
+                ])
+            }
+            // The session owns no heartbeat or imports without a scheduler; scope exit runs
+            // deinit on the main actor, which cancels renewal and releases the writer lease.
+            return (
+                launchMs: milliseconds(from: launchStart, to: launchEnd),
+                reloadMs: milliseconds(from: reloadStart, to: reloadEnd),
+                recordReads: counter.count
+            )
+        }
+        return ProductionProbe(
+            launchMs: probe.launchMs, reloadMs: probe.reloadMs, recordReads: probe.recordReads
         )
     }
 

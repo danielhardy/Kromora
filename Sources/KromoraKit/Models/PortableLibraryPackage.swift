@@ -448,6 +448,42 @@ struct PortableLibraryPackage {
         )
     }
 
+    /// The writer's filename rule, shared so the browsing derivation below cannot drift from the
+    /// import layout. Internal (not private): PortablePackageImporter stages originals with this
+    /// rule and the session derives the same path when a record has not been opened.
+    static func safeFilename(_ name: String) -> String {
+        let lastPathComponent = URL(fileURLWithPath: name).lastPathComponent
+        let candidate = lastPathComponent.isEmpty ? "original" : lastPathComponent
+        return candidate.replacingOccurrences(of: "/", with: "_")
+    }
+
+    /// Best-effort browsing locator for an embedded original, derived from the index summary
+    /// without opening the asset record. This performs no file I/O and never hashes bytes: it is
+    /// only the writer-layout join of shard, asset directory, and staged filename. It is not
+    /// canonical identity — the record remains authoritative — so open/export/edit paths must use
+    /// `verifiedEmbeddedSourceURL(for:displayName:)` (record fallback) or resolve the record.
+    func browsingOriginalURL(
+        for assetID: PortablePhotoAssetID, displayName: String
+    ) -> URL {
+        let shard = Self.shard(for: assetID)
+        let filename = Self.safeFilename(displayName)
+        return rootURL.appendingPathComponent(
+            "Assets/\(shard)/\(assetID.raw)/Original/\(filename)"
+        ).standardizedFileURL
+    }
+
+    /// Canonical source URL for one asset with a cheap fast path: the derived browsing locator
+    /// when the file exists, otherwise the record's stored locator. Browsing keeps zero record
+    /// reads; opening pays exactly one record read for assets whose layout predates the current
+    /// writer or whose original was relocated outside the package transaction layer.
+    func verifiedEmbeddedSourceURL(
+        for assetID: PortablePhotoAssetID, displayName: String
+    ) throws -> URL {
+        let derived = browsingOriginalURL(for: assetID, displayName: displayName)
+        if FileManager.default.fileExists(atPath: derived.path) { return derived }
+        return try embeddedSourceURL(for: readAssetRecord(for: assetID))
+    }
+
     static let allShards: [String] = (0..<256).map { String(format: "%02x", $0) }
 
     static func shard(for assetID: PortablePhotoAssetID) -> String {

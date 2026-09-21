@@ -5,6 +5,24 @@ at 1,000, 10,000, and 100,000 assets, writes only membership summaries and a loc
 measures the package-backed query path. The fixture deliberately has no asset records, originals,
 or thumbnail files in the package; an accidental eager read therefore fails loudly.
 
+Since KRMA-519 the fixture also measures the production path: each sample opens a real
+`PortableLibrarySession` on a private copy of the fixture package and publishes the browsing
+projection exactly as AppViewModel launch (`production-launch`) and reload (`production-reload`)
+do, with a read observer gating `production-record-reads` to zero. The copy keeps lease
+acquisition and disposable-index writes off the shared fixture. This closes the KRMA-519 false
+assurance gap where the benchmark measured only the bare index session while production
+materialized every record.
+
+## KRMA-519 production-path probe (first capture)
+
+One sample at 1,000 assets on Mac16,11 / macOS 27.0, 2026-09-21: `production-launch` 240.49 ms
+(real session open: manifest, membership, writer lease, disposable projection),
+`production-reload` 85.97 ms (browsing projection over all 1,000 summaries), and
+`production-record-reads` 0. The pre-519 production path opened one record per asset plus one
+full-file fingerprint hash per original at launch; the committed KRMA-410 table above still
+reports the bare index-session capture. Promote these rows into the comparison table with a
+three-sample 10k/100k run before closing KRMA-519.
+
 Run it only in the optional benchmark lane:
 
 ```sh

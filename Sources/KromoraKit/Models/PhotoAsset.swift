@@ -247,6 +247,43 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         )
     }
 
+    /// Browsing projection for a portable asset whose record has not been opened.
+    ///
+    /// Unlike `init(url:id:data:)`, this performs no file I/O: no resource lookup, no sample
+    /// read, and no full-file hash. The caller supplies the derived embedded URL (see
+    /// `PortableLibraryPackage.browsingOriginalURL`) and the index summary. The placeholder
+    /// fingerprints are deterministic per asset UUID and digest-shaped so a browsing observation
+    /// can never alias another asset or a record-resolved observation in `matches(_)`; opening
+    /// the asset resolves the record identity and replaces this value before any render, cache,
+    /// or edit consumer depends on source bytes.
+    init(
+        browsingPortableAsset assetID: PortablePhotoAssetID,
+        embeddedURL: URL,
+        summary: PortablePackageAssetSummary
+    ) {
+        self.id = PhotoAssetID(rawValue: "portable:\(assetID.raw)")
+        self.url = embeddedURL.standardizedFileURL
+        self.data = nil
+        self.bookmarkData = nil
+        let observationDigest = PhotoAssetID.contentDigest(Data(("browsing:" + assetID.raw).utf8))
+        self.fingerprint = PhotoSourceFingerprint(
+            byteCount: nil,
+            modificationDate: nil,
+            resourceIdentifier: nil,
+            sampleDigest: observationDigest
+        )
+        self.portableIdentity = PortablePhotoIdentity(
+            assetID: assetID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(
+                contentHash: PortablePhotoSourceFingerprint.contentHash(
+                    of: Data(("browsing:" + assetID.raw).utf8)
+                ),
+                decoderVersion: "browsing-v1",
+                geometry: summary.dimensions
+            )
+        )
+    }
+
     init(
         data: Data,
         id: PhotoAssetID? = nil,
