@@ -80,6 +80,8 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertFalse(contentView.contains("Label(\"Copy Edits…\", systemImage: \"doc.on.doc\")"))
         XCTAssertFalse(contentView.contains("Label(\"Paste Edits\", systemImage: \"doc.on.clipboard\")"))
         XCTAssertFalse(contentView.contains("Label(\"Export Selected\", systemImage: \"square.and.arrow.up.on.square\")"))
+        XCTAssertTrue(contentView.contains("viewModel.shareDialog()"),
+                      "the Edit toolbar export/share action must use the selection-aware route")
     }
 
     @MainActor
