@@ -1172,7 +1172,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         if let portableLibrary {
             do {
-                collection.loadPortableAssets(try portableLibrary.materializedAssets())
+                // Launch paints from index summaries only: no asset record is opened and no
+                // original is fingerprinted. Full records resolve lazily when an asset opens.
+                collection.loadPortableAssets(try portableLibrary.browsingAssets())
                 navigation.move(to: .grid)
                 collection.beginThumbnailDemand()
             } catch {
@@ -1715,7 +1717,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     private func reloadPortableCollection() throws {
         guard let portableLibrary else { return }
-        collection.loadPortableAssets(try portableLibrary.materializedAssets())
+        // Reload republishes the browsing projection. Like launch, this opens no records;
+        // KRMA-519 scope item 2 will narrow this further to the visible window.
+        collection.loadPortableAssets(try portableLibrary.browsingAssets())
         navigation.move(to: .grid)
         collection.beginThumbnailDemand()
     }
@@ -1723,7 +1727,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func openPortableAsset(_ assetID: PortablePhotoAssetID) {
         guard let item = collection.items.first(where: {
             $0.asset.source.portableIdentity.assetID == assetID
-        }), let url = item.url else {
+        }) else {
+            statusMessage = "The imported photo is not available in the package index."
+            return
+        }
+        // The grid item carries the derived browsing locator. Verify it against the package
+        // (record fallback for pre-current layouts) so opening pays at most one record read.
+        if let portableLibrary,
+           let verified = try? portableLibrary.resolveEmbeddedSourceURL(for: assetID) {
+            openImage(url: verified, assetID: item.id)
+            return
+        }
+        guard let url = item.url else {
             statusMessage = "The imported photo is not available in the package index."
             return
         }

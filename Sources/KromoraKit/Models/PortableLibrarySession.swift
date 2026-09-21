@@ -168,6 +168,11 @@ final class PortableLibrarySession {
         importCatalog = nil
     }
 
+    /// Test/diagnostic hook invoked once per asset record opened by `materialize(_:)`. The
+    /// browsing projection below never fires it; the scale regression suite uses it to prove
+    /// that launch and reload do not open non-visible records.
+    var assetRecordReadObserver: ((PortablePhotoAssetID) -> Void)?
+
     func materializedAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
         try materialize(page(at: pageIndex, query: query).items)
     }
@@ -186,8 +191,81 @@ final class PortableLibrarySession {
         }
     }
 
+    /// Browsing projection for the presentation bridge. Grid metadata (identity, name, type,
+    /// dimensions, rating, flag, and the derived embedded URL) comes from `LibraryIndexEntry`
+    /// summaries only: no asset record is opened, no original is fingerprinted, and no thumbnail
+    /// bytes are read. Full records are resolved lazily by `resolveEmbeddedSourceURL(for:)` when
+    /// an asset is opened, exported, or edited.
+    ///
+    /// Membership and ordering still come from the paged package-backed index; this loop adapts
+    /// every page to the existing collection UI until that UI consumes pages directly (KRMA-519
+    /// scope item 2). The per-item cost is pure value construction, so launch and reload stay
+    /// bounded by the index rather than by record or original I/O.
+    func browsingAssets(query: LibraryQuery = .all) throws -> [PhotoAsset] {
+        var assets: [PhotoAsset] = []
+        var pageIndex = 0
+        while true {
+            let page = self.page(at: pageIndex, query: query)
+            assets.append(contentsOf: page.items.map { Self.browsingAsset(for: $0, package: package) })
+            guard page.hasNextPage else { return assets }
+            pageIndex += 1
+        }
+    }
+
+    /// The first visible window of the browsing projection. Grid and filmstrip paint from this
+    /// page; stable `PhotoAssetID` identity (`portable:<uuid>`) keeps selection coherent as
+    /// further pages fault in.
+    func browsingAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
+        try page(at: pageIndex, query: query).items.map { Self.browsingAsset(for: $0, package: package) }
+    }
+
+    /// Canonical source URL for opening, exporting, or editing one asset. The derived browsing
+    /// locator wins when the file exists (zero record reads); otherwise exactly one record is
+    /// opened for the requested asset and never for its neighbours.
+    func resolveEmbeddedSourceURL(for assetID: PortablePhotoAssetID) throws -> URL {
+        if let entry = queryController.index.entry(for: assetID) {
+            return try package.verifiedEmbeddedSourceURL(
+                for: assetID, displayName: entry.summary.displayName
+            )
+        }
+        return try package.embeddedSourceURL(for: package.readAssetRecord(for: assetID))
+    }
+
+    private static func browsingAsset(
+        for item: LibraryQueryItem, package: PortableLibraryPackage
+    ) -> PhotoAsset {
+        let summary = item.summary
+        let embeddedURL = package.browsingOriginalURL(
+            for: item.assetID, displayName: summary.displayName
+        )
+        let source = PhotoAssetSource(
+            browsingPortableAsset: item.assetID,
+            embeddedURL: embeddedURL,
+            summary: summary
+        )
+        let metadata = PhotoAssetMetadata(
+            dimensions: summary.dimensions,
+            captureDate: summary.captureDate,
+            cameraMake: summary.cameraMake,
+            cameraModel: summary.cameraModel,
+            lens: summary.lens
+        )
+        let state = PhotoAssetLibraryState(
+            rating: summary.rating ?? 0,
+            flag: PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
+        )
+        return PhotoAsset(
+            source: source,
+            filename: summary.displayName,
+            fileType: embeddedURL.pathExtension,
+            metadata: metadata,
+            libraryState: state
+        )
+    }
+
     private func materialize(_ items: [LibraryQueryItem]) throws -> [PhotoAsset] {
         try items.map { item in
+            assetRecordReadObserver?(item.assetID)
             let record = try package.readAssetRecord(for: item.assetID)
             let sourceURL = try package.embeddedSourceURL(for: record)
             let source = PhotoAssetSource(
