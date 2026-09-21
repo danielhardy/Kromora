@@ -256,6 +256,24 @@ struct ContentAwareAutoEngine: Sendable {
                 sourceFingerprint: selected.sourceFingerprint
             )
         }
+        if selectedWithRegionalCorrections.status == .unchanged,
+            selectedWithRegionalCorrections.document != current
+        {
+            // Candidates are evaluated from the clean Auto baseline, so "unchanged" means Auto's
+            // answer is the neutral baseline. When the current document carries Auto-owned values
+            // that differ from it, keeping them would be the silent no-op this run must replace.
+            selectedWithRegionalCorrections = AutoEnhancementCoordinatorResult(
+                status: .improved,
+                document: selectedWithRegionalCorrections.document,
+                provenance: selectedWithRegionalCorrections.provenance,
+                message: "Auto replaced existing adjustments with a neutral result.",
+                budget: selectedWithRegionalCorrections.budget,
+                candidateNotes: selectedWithRegionalCorrections.candidateNotes,
+                selectedScore: selectedWithRegionalCorrections.selectedScore,
+                evaluatedDocumentHash: selectedWithRegionalCorrections.evaluatedDocumentHash,
+                sourceFingerprint: selectedWithRegionalCorrections.sourceFingerprint
+            )
+        }
         return .from(
             selectedWithRegionalCorrections, current: current,
             confidence: max(native.confidence, signalConfidence.overall),

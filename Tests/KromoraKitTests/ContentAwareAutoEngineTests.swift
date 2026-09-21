@@ -98,6 +98,40 @@ final class ContentAwareAutoEngineTests: TempDirectoryTestCase {
         XCTAssertTrue(result.reasons.contains { $0.contains("no material regional cast") })
     }
 
+    func testBalancedFrameWithExistingAutoOwnedEditsReplacesThemWithNeutralResult() async throws {
+        let sourceData = try solidJPEG(red: 0.48, green: 0.48, blue: 0.48)
+        let source = ImageSource(data: sourceData, nativeExtent: CGSize(width: 32, height: 24))
+        let assetID = PhotoAssetID.data(sourceData)
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("masks-balanced-edited"))
+        let engine = RenderEngine()
+        let analysisCoordinator = PhotoAnalysisCoordinator(
+            engine: engine,
+            maskStore: store,
+            cache: PhotoAnalysisCache(
+                directory: tempDirectory.appendingPathComponent("analysis-balanced-edited")),
+            maskProvider: FixtureRegionalMaskProvider(masks: [:]),
+            stages: [:]
+        )
+        defer { Task { await analysisCoordinator.shutdown() } }
+
+        var edited = EditDocument()
+        edited.light.exposure = 1.5
+        edited.color.saturation = 30
+        edited.crop = CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8))
+
+        let result = await ContentAwareAutoEngine(
+            engine: engine,
+            analysisCoordinator: analysisCoordinator,
+            maskStore: store
+        ).run(source: source, assetID: assetID, current: edited)
+
+        XCTAssertEqual(result.status, .improved, result.reasons.joined(separator: " "))
+        let applied = EditDocument.applyingAutoResult(result, to: edited)
+        XCTAssertEqual(applied.light.exposure, 0)
+        XCTAssertEqual(applied.color.saturation, 0)
+        XCTAssertEqual(applied.crop, edited.crop)
+    }
+
     func testUnderexposedFrameSelectsMeaningfulExposureThroughProductionRenderer() async throws {
         let sourceData = try Fixtures.jpegData(
             for: Fixtures.makeParametricCGImage(width: 96, height: 64) { nx, ny in
