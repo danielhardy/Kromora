@@ -80,13 +80,16 @@ struct FilmstripView: View {
                                 collection.releaseThumbnail(for: item.id)
                             }
                         } else if let slot = entry.placeholder {
-                            FilmstripPlaceholder(slot: slot)
-                                .id(entry.id)
+                            FilmstripPlaceholder(
+                                slot: slot,
+                                showsCaption: settings.showPhotoNames
+                            )
+                            .id(entry.id)
                         }
                     }
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 4)
+                .padding(.vertical, FilmstripLayout.stripVerticalPadding)
             }
             .background(.bar)
             .onAppear { collection.beginThumbnailDemand() }
@@ -97,6 +100,22 @@ struct FilmstripView: View {
                 }
             }
         }
+    }
+}
+
+/// Geometry for the Edit filmstrip. The strip height is derived from the cell and optional
+/// caption so status badges do not reserve a second row below every thumbnail.
+enum FilmstripLayout {
+    static let thumbnailSize: CGFloat = 96
+    static let stripVerticalPadding: CGFloat = 3
+    static let captionSpacing: CGFloat = 3
+    static let captionHeight: CGFloat = 12
+
+    static func stripHeight(showPhotoNames: Bool) -> CGFloat {
+        thumbnailSize
+            + (showPhotoNames ? captionSpacing + captionHeight : 0)
+            + (stripVerticalPadding * 2)
+            + 1
     }
 }
 
@@ -139,29 +158,46 @@ struct FilmstripThumbnail: View {
     let isSelected: Bool
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: FilmstripLayout.captionSpacing) {
             ZStack {
                 if let thumbnail = item.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 72, height: 72)
+                        .frame(
+                            width: FilmstripLayout.thumbnailSize,
+                            height: FilmstripLayout.thumbnailSize
+                        )
                         .clipped()
                 } else {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.15))
-                        .frame(width: 72, height: 72)
+                        .frame(
+                            width: FilmstripLayout.thumbnailSize,
+                            height: FilmstripLayout.thumbnailSize
+                        )
                         .overlay {
                             ProgressView()
                                 .scaleEffect(0.5)
                         }
                 }
 
-                if item.asset.flag == .reject {
-                    Color.black.opacity(0.58)
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.red, .white)
+                if item.asset.flag != .none {
+                    flagBadge
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .bottomLeading
+                        )
+                }
+
+                if item.asset.rating > 0 {
+                    ratingBadge
+                        .frame(
+                            maxWidth: .infinity,
+                            maxHeight: .infinity,
+                            alignment: .bottomTrailing
+                        )
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -176,26 +212,12 @@ struct FilmstripThumbnail: View {
                     .foregroundColor(isSelected ? .primary : .secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .frame(width: 72)
+                    .frame(
+                        width: FilmstripLayout.thumbnailSize,
+                        height: FilmstripLayout.captionHeight
+                    )
                     .accessibilityLabel(item.displayName)
             }
-
-            HStack(spacing: 3) {
-                if item.asset.flag == .pick {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
-                } else if item.asset.flag == .reject {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.red)
-                }
-                if item.asset.rating > 0 {
-                    Image(systemName: "star.fill")
-                        .foregroundStyle(.yellow)
-                    Text("\(item.asset.rating)")
-                }
-            }
-            .font(.system(size: 8, weight: .semibold))
-            .frame(height: 10)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(item.displayName)
@@ -208,16 +230,43 @@ struct FilmstripThumbnail: View {
         let flag = item.asset.flag == .none ? "unflagged" : item.asset.flag.rawValue
         return "\(selection), \(flag), \(item.asset.rating) stars"
     }
+
+    private var flagBadge: some View {
+        Image(systemName: item.asset.flag == .pick ? "checkmark.circle.fill" : "xmark.circle.fill")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(item.asset.flag == .pick ? .green : .red, .white)
+            .padding(3)
+            .background(.black.opacity(0.72), in: Circle())
+            .padding(4)
+    }
+
+    private var ratingBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "star.fill")
+                .foregroundStyle(.yellow)
+            Text("\(item.asset.rating)")
+        }
+        .font(.system(size: 9, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 4)
+        .padding(.vertical, 3)
+        .background(.black.opacity(0.72), in: Capsule())
+        .padding(4)
+    }
 }
 
 private struct FilmstripPlaceholder: View {
     let slot: ImageCollection.PendingImportSlot
+    let showsCaption: Bool
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(spacing: FilmstripLayout.captionSpacing) {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.secondary.opacity(0.09))
-                .frame(width: 72, height: 72)
+                .frame(
+                    width: FilmstripLayout.thumbnailSize,
+                    height: FilmstripLayout.thumbnailSize
+                )
                 .overlay {
                     if slot.state == .pending {
                         ProgressView()
@@ -227,11 +276,16 @@ private struct FilmstripPlaceholder: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-            Text(slot.state == .pending ? "Importing" : "Unavailable")
-                .font(.system(size: 9))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .frame(width: 72)
+            if showsCaption {
+                Text(slot.state == .pending ? "Importing" : "Unavailable")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(
+                        width: FilmstripLayout.thumbnailSize,
+                        height: FilmstripLayout.captionHeight
+                    )
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(slot.state == .pending ? "Importing photo" : "Photo unavailable")
