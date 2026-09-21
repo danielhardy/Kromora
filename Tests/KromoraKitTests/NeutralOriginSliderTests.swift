@@ -187,6 +187,46 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(cell.knobRect(flipped: false), nativeKnob)
     }
 
+    func testThumbVisualCentersOnTheNativeBarAcrossControlSizes() {
+        for controlSize in [
+            NSControl.ControlSize.mini, .small, .regular, .large,
+        ] {
+            let slider = makeSlider(range: -100...100, neutral: 0, value: 0)
+            guard let cell = slider.cell as? NeutralOriginSliderCell else {
+                return XCTFail("the slider is not using the neutral-origin cell")
+            }
+            cell.controlSize = controlSize
+
+            let nativeKnob = cell.knobRect(flipped: slider.isFlipped)
+            let nativeBar = cell.barRect(flipped: slider.isFlipped)
+            let circle = NeutralOriginSliderCell.circularKnobRect(
+                in: nativeKnob,
+                centeredOn: nativeBar.midY
+            )
+
+            XCTAssertEqual(
+                circle.midY,
+                nativeBar.midY,
+                accuracy: 0.001,
+                "thumb and bar must share a vertical centre for \(controlSize)"
+            )
+            XCTAssertEqual(circle.midX, nativeKnob.midX, accuracy: 0.001)
+        }
+    }
+
+    func testThumbVisualCanCorrectAnOffsetNativeKnobRectWithoutChangingItsHorizontalGeometry() {
+        let nativeKnob = NSRect(x: 40, y: 3, width: 20, height: 16)
+        let circle = NeutralOriginSliderCell.circularKnobRect(in: nativeKnob, centeredOn: 12)
+
+        XCTAssertEqual(circle.midX, nativeKnob.midX, accuracy: 0.001)
+        XCTAssertEqual(circle.midY, 12, accuracy: 0.001)
+        XCTAssertEqual(
+            circle.width,
+            min(nativeKnob.width, nativeKnob.height) * NeutralOriginSliderCell.knobVisualScale,
+            accuracy: 0.001
+        )
+    }
+
     func testColorControlsUseDocumentedSemanticTracks() {
         XCTAssertEqual(ColorGlobalControl.saturation.trackStyle, .saturation)
         XCTAssertEqual(ColorGlobalControl.vibrance.trackStyle, .vibrance)
