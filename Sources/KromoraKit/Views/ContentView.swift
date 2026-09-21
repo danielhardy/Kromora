@@ -46,8 +46,9 @@ public struct ContentView: View {
                 }
             }
             // The inspector is a sibling column of the navigation content. Explicitly keep the
-            // native window-toolbar material visible so SwiftUI paints the chrome across that
-            // column too, instead of exposing the canvas in the seam above the inspector.
+            // native window-toolbar material visible so SwiftUI paints one continuous chrome band
+            // across that column too. Inspector roots stay transparent so their system material
+            // starts below this band instead of owning a competing top edge.
             .toolbarBackground(.visible, for: .windowToolbar)
             .photosPicker(
                 isPresented: $viewModel.isPhotosPickerPresented,

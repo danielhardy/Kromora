@@ -8,13 +8,29 @@ import SwiftUI
 /// dark mode while the window is open. Keep fixed dark colors out of these shell
 /// surfaces; image-analysis canvases have their own explicitly scoped colors.
 enum KromoraTheme {
+    // Surface roles for the editor shell:
+    //
+    // - Window toolbar: full-width native toolbar material; do not paint a custom fill.
+    // - Inspector: the system inspector material, below the toolbar band.
+    // - Canvas surround: the dedicated recessed stage below, kept distinct from chrome.
+    // - Secondary chrome: source browser, filmstrip, culling, and status surfaces share the
+    //   quieter semantic under-page color rather than the elevated `.bar` material.
+    // - Analysis plots: locally scoped dark plot surfaces only.
+
     static var windowBackground: Color {
         Color(nsColor: .windowBackgroundColor)
     }
 
-    /// Dedicated editor surface color. The system `.bar` material used by the source browser
-    /// can converge with `windowBackgroundColor` on newer macOS releases, so the image canvas
-    /// needs an explicit neutral that remains visibly recessed in either appearance.
+    /// Quiet semantic surface for chrome that supports the canvas without competing with it.
+    /// `underPageBackgroundColor` follows the active light/dark appearance and is deliberately
+    /// shared by the source browser and the large bottom chrome family.
+    static var secondaryChrome: Color {
+        Color(nsColor: .underPageBackgroundColor)
+    }
+
+    /// Dedicated editor surface color. Secondary chrome can converge with
+    /// `windowBackgroundColor` on newer macOS releases, so the image canvas needs an explicit
+    /// neutral that remains visibly recessed in either appearance.
     static var canvasBackground: Color {
         Color(nsColor: canvasBackgroundNSColor)
     }

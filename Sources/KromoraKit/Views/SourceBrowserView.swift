@@ -15,7 +15,7 @@ struct SourceBrowserView: View {
             Divider()
             list
         }
-        .background(.bar)
+        .background(KromoraTheme.secondaryChrome)
     }
 
     // MARK: - Header
@@ -87,6 +87,7 @@ struct SourceBrowserView: View {
                 }
             }
             .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
             .onChange(of: collection.selectedIndex) { _, idx in
                 guard collection.items.indices.contains(idx) else { return }
                 withAnimation(.easeInOut(duration: 0.2)) {

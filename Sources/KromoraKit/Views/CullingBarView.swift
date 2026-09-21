@@ -38,7 +38,7 @@ struct CullingBarView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, isCompact ? 4 : 7)
         }
-        .background(.bar)
+        .background(KromoraTheme.secondaryChrome)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Photo culling controls")
     }

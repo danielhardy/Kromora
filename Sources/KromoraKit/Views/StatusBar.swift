@@ -96,7 +96,7 @@ struct StatusBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(.bar)
+        .background(KromoraTheme.secondaryChrome)
     }
 }
 

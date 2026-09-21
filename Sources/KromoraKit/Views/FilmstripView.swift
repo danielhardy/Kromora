@@ -91,7 +91,7 @@ struct FilmstripView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, FilmstripLayout.stripVerticalPadding)
             }
-            .background(.bar)
+            .background(KromoraTheme.secondaryChrome)
             .onAppear { collection.beginThumbnailDemand() }
             .onChange(of: collection.selectedIndex) { _, newIndex in
                 guard collection.items.indices.contains(newIndex) else { return }

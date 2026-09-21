@@ -26,7 +26,7 @@ struct PreviewView: View {
         NSScreen.main?.backingScaleFactor ?? 2
     }
 
-    /// The editor canvas is deliberately distinct from the source browser's `.bar` material.
+    /// The editor canvas is deliberately distinct from the source browser's secondary chrome.
     /// The Metal surface resolves the same token for its letterbox; see `PreviewSurfaceView`.
     private var bgColor: Color { KromoraTheme.canvasBackground }
 
