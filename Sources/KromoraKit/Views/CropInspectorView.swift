@@ -120,8 +120,10 @@ struct CropInspectorView: View {
                         action: { onAspectRatioChange(aspectRatio, .portrait) }
                     )
                 }
+                // Without `.contain`, these container modifiers propagate to the buttons and
+                // replace their own "Landscape" / "Portrait" labels and selected values.
+                .accessibilityElement(children: .contain)
                 .accessibilityLabel("Crop orientation")
-                .accessibilityValue(effectiveOrientation == .landscape ? "Landscape" : "Portrait")
                 .accessibilityHint("Choose the orientation of the crop frame")
             }
         }
