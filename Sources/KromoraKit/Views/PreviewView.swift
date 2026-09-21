@@ -10,10 +10,6 @@ struct PreviewView: View {
     // until an unrelated AppViewModel change causes this view to rebuild.
     @ObservedObject private var previewSurface: PreviewSurface
     @ObservedObject private var originalPreviewSurface: PreviewSurface
-    @State private var dragTranslation: CGSize = .zero
-    @State private var magnification: CGFloat = 1
-    @State private var isDraggingCanvas = false
-    @State private var isMagnifyingCanvas = false
     @State private var isDropTargeted = false
     @ObservedObject private var maskingState: MaskInteractionState
 
@@ -225,16 +221,23 @@ struct PreviewView: View {
         return viewModel.isComparisonAvailable ? "Edited photo preview" : "Photo preview"
     }
 
-    /// A full-panel surface with presentation-only mouse and trackpad navigation. The same
-    /// navigation value is passed to both comparison panels, so before/after remains registered.
+    /// A full-panel surface with presentation-only mouse and trackpad navigation. Pan, pinch, and
+    /// double-click live on `PreviewMTKView` so a SwiftUI `DragGesture` cannot swallow the AppKit
+    /// click path. The same navigation value is passed to both comparison panels.
     @ViewBuilder
     private func canvasSurface(_ surface: PreviewSurface) -> some View {
-        GeometryReader { geometry in
+        GeometryReader { _ in
             let preview = PreviewSurfaceView(
                 surface: surface,
                 navigation: canvasState.navigation,
                 onScrollZoom: { factor in viewModel.zoomCanvas(by: factor) },
                 onDoubleClick: { viewModel.toggleCanvasZoom() },
+                onCanvasInteractionBegan: { viewModel.beginCanvasInteraction() },
+                onCanvasInteractionEnded: { viewModel.endCanvasInteraction() },
+                onPan: { delta, viewportSize in
+                    viewModel.panCanvas(by: delta, viewportSize: viewportSize)
+                },
+                onMagnify: { factor in viewModel.zoomCanvas(by: factor) },
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
                 viewSpaceRotationAngle: canvasState.isCropToolActive
                     ? canvasState.cropStraightenAngle : 0,
@@ -244,16 +247,9 @@ struct PreviewView: View {
 
             ZStack {
                 if canvasState.isCropToolActive {
-                    // Keep the navigation gesture wrappers out of the hit-test tree while the
-                    // crop overlay owns pointer input. Disabling only PreviewSurfaceView still
-                    // leaves the GeometryReader's navigation gestures eligible to win an interior
-                    // drag.
                     preview.allowsHitTesting(false)
                 } else {
                     preview
-                        .contentShape(Rectangle())
-                        .gesture(dragGesture(viewportSize: geometry.size))
-                        .simultaneousGesture(magnificationGesture(viewportSize: geometry.size))
                 }
 
                 if viewModel.isMaskingWorkspaceActive,
@@ -277,49 +273,6 @@ struct PreviewView: View {
                 }
             }
         }
-    }
-
-    private func dragGesture(viewportSize: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 2)
-            .onChanged { value in
-                if !isDraggingCanvas {
-                    isDraggingCanvas = true
-                    dragTranslation = .zero
-                    viewModel.beginCanvasInteraction()
-                }
-                let delta = CGSize(
-                    width: value.translation.width - dragTranslation.width,
-                    height: value.translation.height - dragTranslation.height
-                )
-                dragTranslation = value.translation
-                viewModel.panCanvas(by: delta, viewportSize: viewportSize)
-            }
-            .onEnded { _ in
-                guard isDraggingCanvas else { return }
-                isDraggingCanvas = false
-                dragTranslation = .zero
-                viewModel.endCanvasInteraction()
-            }
-    }
-
-    private func magnificationGesture(viewportSize: CGSize) -> some Gesture {
-        MagnificationGesture()
-            .onChanged { value in
-                if !isMagnifyingCanvas {
-                    isMagnifyingCanvas = true
-                    magnification = 1
-                    viewModel.beginCanvasInteraction()
-                }
-                guard value.isFinite, value > 0 else { return }
-                viewModel.zoomCanvas(by: value / magnification)
-                magnification = value
-            }
-            .onEnded { _ in
-                guard isMagnifyingCanvas else { return }
-                isMagnifyingCanvas = false
-                magnification = 1
-                viewModel.endCanvasInteraction()
-            }
     }
 
     // MARK: - Empty state

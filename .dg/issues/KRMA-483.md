@@ -2,7 +2,7 @@
 id: KRMA-483
 title: Double-click on the Edit canvas no longer toggles fit and zoom
 type: bug
-status: done
+status: review
 priority: high
 verification_report:
   verdict: pass
@@ -42,8 +42,8 @@ labels:
   - regression
   - ui
 created: 2026-09-20T16:05:45.277Z
-updated: 2026-09-20T17:19:22.854Z
-order: a0
+updated: 2026-09-21T01:13:09.683Z
+order: q
 board: product
 ---
 
@@ -92,6 +92,14 @@ Hypotheses to check, none confirmed:
 ### Comment — codex @ 2026-09-20T17:19:22.853Z
 
 Root-cause attribution correction: the full-canvas MaskCanvasOverlay that could shield selection-mode preview input was introduced by 0af0c30f (feat(LUMO-220): add persistent masking workspace). Commit 77808e5 later added crop hit-testing changes but did not introduce the mask overlay. The implementation fix and verification results are unchanged.
+
+### Comment — cursor @ 2026-09-21T01:13:08.851Z
+
+Reopened: the previous 'done' did not restore double-click in the running app.
+
+Root cause vs the KRMA-483 patch: MaskCanvasOverlay hit-testing was only part of the story. PreviewView still wrapped PreviewSurfaceView in a SwiftUI DragGesture, which consumes mouse-down before PreviewMTKView.mouseDown ever sees clickCount == 2. The regression test called mouseDown on the MTKView directly, so it passed while the product path stayed broken. KRMA-495 hit the same gap.
+
+Fix now in the working tree (uncommitted): pan, pinch, and double-click now live on PreviewMTKView itself, with no SwiftUI drag/magnify overlay. Double-click toggles zoom without starting a pan (2pt slop). Please verify in Edit: double-click at fit zooms in; double-click while zoomed returns to fit.
 
 ## Agent log
 

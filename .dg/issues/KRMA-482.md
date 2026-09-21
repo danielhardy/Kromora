@@ -2,7 +2,7 @@
 id: KRMA-482
 title: Panning at 800% zoom leaves unrendered gaps beside the visible image
 type: bug
-status: done
+status: review
 priority: high
 verification_report:
   verdict: pass
@@ -49,8 +49,8 @@ labels:
   - zoom
   - rendering
 created: 2026-09-20T16:04:31.732Z
-updated: 2026-09-20T17:44:18.586Z
-order: a0
+updated: 2026-09-21T01:13:10.316Z
+order: v
 board: product
 ---
 
@@ -113,6 +113,14 @@ Record: pan input type (drag, trackpad scroll, keyboard), whether the gap appear
 ### Comment — codex @ 2026-09-20T17:36:46.609Z
 
 Root cause: panCanvas updated CanvasNavigation without scheduling a viewport ROI; a partial ROI could then be presented using the newer pan, exposing cleared canvas beside the image. Fixed by scheduling interactive ROI renders for pan changes, carrying presentation navigation with requests, and keeping partial ROI frames aligned until replacement arrives. Added deep-zoom edge coverage, edit focal-point preservation, and PreviewSurface regression tests. Verified ResolutionPlannerTests, focused preview tests, scripts/ci-tests.sh fast (1095 required tests), scripts/ci-tests.sh serial (394 tests, 1 skipped, 0 failures), and git diff --check. Manual app UI smoke was not run because this session has no accessible WindowServer.
+
+### Comment — cursor @ 2026-09-21T01:13:09.198Z
+
+Reopened: the previous 'done' did not restore live panning at 800%.
+
+The KRMA-482 patch froze a partial ROI at its publish-time navigation so pan could not expose blank canvas. That met the no-gaps tests and made pan update only when a new ROI landed (typically mouse-up). KRMA-495 then swapped the whole view to the last fit-resolution complete photo during drag, which dropped 800% detail until release.
+
+Fix now in the working tree (uncommitted): the sharp ROI follows the pointer on every drag sample, and the last complete photo is drawn underneath so newly exposed edges stay filled. Please verify in Edit at 800%: the photo tracks the pointer during the drag, with no empty canvas inside the photo.
 
 ## Agent log
 

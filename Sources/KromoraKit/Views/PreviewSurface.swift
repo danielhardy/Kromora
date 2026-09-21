@@ -32,9 +32,9 @@ final class PreviewSurface: ObservableObject {
     /// Fit/Fill then fill the canvas instead of treating the texture as a top-left ROI of a
     /// larger virtual frame. Viewport-fragment ROI previews leave this false.
     private(set) var coversPresentationExtent = false
-    /// Navigation that produced the currently published frame. Partial ROI frames remain drawn
-    /// at this state while a newer pan is rendering, so the old fragment never exposes a blank
-    /// region by being moved under a newer transform.
+    /// Navigation that produced the currently published frame. A partial ROI keeps this value so
+    /// the presenter can tell pointer motion from a matching render; the ROI itself still follows
+    /// the pointer, with the last complete photo filling newly exposed edges.
     private(set) var presentationNavigation: CanvasNavigation?
     /// Planner-space rectangle for an uncovered ROI fragment. Interactive frames can decode
     /// below the planner `targetSize`, so this is not always `image.extent`.
@@ -595,12 +595,16 @@ final class PreviewSurface: ObservableObject {
         presentationMaterializations.removeAll()
     }
 
-    /// The current publication's navigation, or the current pointer navigation when a confirmed
-    /// complete frame can safely back a partial ROI. Keeping the old ROI at its publish-time
-    /// transform is the final fallback for the short interval before the first complete frame is
-    /// confirmed.
+    /// The navigation applied to the visible photo. Live pan uses the pointer whenever a complete
+    /// underlay can fill newly exposed edges; a lone partial ROI stays at its publish-time
+    /// transform so it cannot uncover the canvas.
     func navigationForPresentation(_ current: CanvasNavigation) -> CanvasNavigation {
-        presentationFrame(for: current)?.navigation ?? current
+        presentationStack(for: current)?.detail.navigation ?? current
+    }
+
+    /// True when a confirmed complete photo is drawn under a partial ROI during pointer motion.
+    func presentsCompleteCoverageUnderlay(for current: CanvasNavigation) -> Bool {
+        presentationStack(for: current)?.underlay != nil
     }
 
     fileprivate struct PresentationFrame {
@@ -615,14 +619,32 @@ final class PreviewSurface: ObservableObject {
         let usesRetainedCompleteFrame: Bool
     }
 
-    /// Select the pixels that may be moved under the pointer. A partial ROI is detail, not the
-    /// coverage contract: while it is catching up, the last complete photo remains visible and
-    /// follows the new transform immediately. Once the ROI is published at that navigation it
-    /// becomes the active detail frame again.
-    fileprivate func presentationFrame(for current: CanvasNavigation) -> PresentationFrame? {
+    fileprivate struct PresentationStack {
+        let detail: PresentationFrame
+        let underlay: PresentationFrame?
+    }
+
+    /// Select the pixels that may be moved under the pointer. A partial ROI is detail: it follows
+    /// the pointer so the already-visible region stays sharp. The last complete photo is coverage:
+    /// it is drawn underneath at the same transform so a pan cannot expose the canvas. Only when
+    /// that complete frame does not yet exist does the ROI freeze at its publish-time navigation.
+    fileprivate func presentationStack(for current: CanvasNavigation) -> PresentationStack? {
         guard let image else { return nil }
 
-        let currentFrame = PresentationFrame(
+        let hasCompleteUnderlay =
+            !coversPresentationExtent
+            && presentationNavigation != nil
+            && presentationNavigation != current
+            && retainedCompleteImage != nil
+
+        let detailNavigation: CanvasNavigation
+        if coversPresentationExtent || hasCompleteUnderlay {
+            detailNavigation = current
+        } else {
+            detailNavigation = presentationNavigation ?? current
+        }
+
+        let detail = PresentationFrame(
             image: image,
             texture: presentationTexture,
             textureExtent: presentationTextureExtent,
@@ -630,23 +652,15 @@ final class PreviewSurface: ObservableObject {
             layoutImageExtent: coversPresentationExtent
                 ? presentationImageExtent : layoutImageExtent,
             space: space,
-            navigation: coversPresentationExtent
-                ? current : (presentationNavigation ?? current),
+            navigation: detailNavigation,
             generation: presentationTextureGeneration,
             usesRetainedCompleteFrame: false
         )
-        guard !coversPresentationExtent,
-            let publishedNavigation = presentationNavigation,
-            publishedNavigation != current,
-            let retainedCompleteImage,
-            let currentDetail,
-            let retainedCompleteDetail,
-            currentDetail.identity == retainedCompleteDetail.identity
-        else {
-            return currentFrame
+        guard hasCompleteUnderlay, let retainedCompleteImage else {
+            return PresentationStack(detail: detail, underlay: nil)
         }
 
-        return PresentationFrame(
+        let underlay = PresentationFrame(
             image: retainedCompleteImage,
             texture: retainedCompleteTexture,
             textureExtent: retainedCompleteTextureExtent,
@@ -658,6 +672,11 @@ final class PreviewSurface: ObservableObject {
             generation: retainedCompleteGeneration,
             usesRetainedCompleteFrame: true
         )
+        return PresentationStack(detail: detail, underlay: underlay)
+    }
+
+    fileprivate func presentationFrame(for current: CanvasNavigation) -> PresentationFrame? {
+        presentationStack(for: current)?.detail
     }
 
     private struct MaterializationSubmission {
@@ -716,6 +735,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
     var navigation: CanvasNavigation = CanvasNavigation()
     var onScrollZoom: ((CGFloat) -> Void)?
     var onDoubleClick: (() -> Void)?
+    var onCanvasInteractionBegan: (() -> Void)?
+    var onCanvasInteractionEnded: (() -> Void)?
+    var onPan: ((CGSize, CGSize) -> Void)?
+    var onMagnify: ((CGFloat) -> Void)?
     /// The drawable reports backing pixels, which is the only reliable size across mixed-DPI
     /// windows and side-by-side panels. SwiftUI point geometry is not sufficient here.
     var onDrawableSizeChange: ((CGSize) -> Void)?
@@ -737,6 +760,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
         view.onScrollZoom = onScrollZoom
         view.onDoubleClick = onDoubleClick
+        view.onCanvasInteractionBegan = onCanvasInteractionBegan
+        view.onCanvasInteractionEnded = onCanvasInteractionEnded
+        view.onPan = onPan
+        view.onMagnify = onMagnify
         view.ignoresHits = ignoresHits
         view.delegate = context.coordinator
         view.enableSetNeedsDisplay = true
@@ -763,6 +790,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
         if let view = view as? PreviewMTKView {
             view.onScrollZoom = onScrollZoom
             view.onDoubleClick = onDoubleClick
+            view.onCanvasInteractionBegan = onCanvasInteractionBegan
+            view.onCanvasInteractionEnded = onCanvasInteractionEnded
+            view.onPan = onPan
+            view.onMagnify = onMagnify
             view.ignoresHits = ignoresHits
         }
         // SwiftUI may call updateNSView before the MTKView has a drawable (notably while a
@@ -920,10 +951,62 @@ struct PreviewSurfaceView: NSViewRepresentable {
             displayConfigurationChanged()
         }
 
+        private static func metalFrames(in stack: PreviewSurface.PresentationStack) -> [PreviewSurface.PresentationFrame] {
+            var frames: [PreviewSurface.PresentationFrame] = []
+            if let underlay = stack.underlay, underlay.texture != nil, underlay.textureExtent != nil {
+                frames.append(underlay)
+            }
+            if stack.detail.texture != nil, stack.detail.textureExtent != nil {
+                frames.append(stack.detail)
+            }
+            return frames
+        }
+
+        private static func textureGeneration(for stack: PreviewSurface.PresentationStack) -> UInt64 {
+            stack.detail.generation &+ (stack.underlay?.generation ?? 0)
+        }
+
+        private func encode(
+            _ frames: [PreviewSurface.PresentationFrame], destination: CGRect, rotation: Double,
+            encoder: MTLRenderCommandEncoder
+        ) {
+            guard let pipeline, let samplerState else { return }
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setFragmentSamplerState(samplerState, index: 0)
+            for frame in frames {
+                guard let texture = frame.texture,
+                    let textureExtent = frame.textureExtent,
+                    var geometry = Self.quadGeometry(
+                        imageExtent: frame.layoutImageExtent ?? textureExtent,
+                        navigation: frame.navigation,
+                        destination: destination,
+                        virtualExtent: frame.presentationImageExtent,
+                        viewSpaceRotationAngle: rotation
+                    ),
+                    let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
+                        device.makeBuffer(
+                            bytes: rawBuffer.baseAddress!,
+                            length: rawBuffer.count, options: .storageModeShared)
+                    }),
+                    let uniformBuffer = device.makeBuffer(
+                        bytes: &geometry.uniforms,
+                        length: MemoryLayout<Uniforms>.stride,
+                        options: .storageModeShared)
+                else { continue }
+                encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
+                encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+                encoder.setFragmentTexture(texture, index: 0)
+                encoder.drawPrimitives(
+                    type: .triangleStrip, vertexStart: 0,
+                    vertexCount: geometry.vertices.count)
+            }
+        }
+
         func draw(in view: MTKView) {
             self.view = view
             guard !isDrawing else { return }
-            guard let surface, let frame = surface.presentationFrame(for: navigation) else { return }
+            guard let surface, let stack = surface.presentationStack(for: navigation) else { return }
+            let frame = stack.detail
             let drawableAcquisitionStart = LiveEditTelemetryClock.now
             guard let drawable = view.currentDrawable,
                 let commandBuffer = commandQueue.makeCommandBuffer()
@@ -936,11 +1019,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let drawableSize = (drawable.texture.width, drawable.texture.height)
             onDrawableSizeChange?(CGSize(width: drawableSize.0, height: drawableSize.1))
             let drawNavigation = frame.navigation
+            let drawTextureGeneration = Self.textureGeneration(for: stack)
             let sameDrawableSize =
                 lastDrawableSize?.width == drawableSize.0
                 && lastDrawableSize?.height == drawableSize.1
             let sameTextureGeneration =
-                lastDrawnTextureGeneration == frame.generation
+                lastDrawnTextureGeneration == drawTextureGeneration
             let sameViewSpaceRotation =
                 lastDrawnViewSpaceRotationAngle.map {
                     abs($0 - viewSpaceRotationAngle) <= 0.000001
@@ -976,7 +1060,6 @@ struct PreviewSurfaceView: NSViewRepresentable {
             let displayRevision = surface.pendingDisplayRevision()
             let drawRevision = surface.revision
             let drawViewSpaceRotationAngle = viewSpaceRotationAngle
-            let drawTextureGeneration = frame.generation
             isDrawing = true
             let presentationEncodingStart = LiveEditTelemetryClock.now
             let renderPass = view.currentRenderPassDescriptor
@@ -986,36 +1069,15 @@ struct PreviewSurfaceView: NSViewRepresentable {
             renderPass?.colorAttachments[0].loadAction = .clear
             renderPass?.colorAttachments[0].storeAction = .store
 
-            if let texture = frame.texture,
-                let textureExtent = frame.textureExtent,
-                let pipeline, let samplerState,
-                var geometry = Self.quadGeometry(
-                    imageExtent: frame.layoutImageExtent ?? textureExtent,
-                    navigation: drawNavigation,
-                    destination: destination, virtualExtent: frame.presentationImageExtent,
-                    viewSpaceRotationAngle: drawViewSpaceRotationAngle
-                ),
-                let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
-                    device.makeBuffer(
-                        bytes: rawBuffer.baseAddress!,
-                        length: rawBuffer.count, options: .storageModeShared)
-                }),
-                let uniformBuffer = device.makeBuffer(
-                    bytes: &geometry.uniforms,
-                    length: MemoryLayout<Uniforms>.stride,
-                    options: .storageModeShared),
+            let metalFrames = Self.metalFrames(in: stack)
+            if !metalFrames.isEmpty, pipeline != nil, samplerState != nil,
                 let encoder = renderPass.flatMap({
                     commandBuffer.makeRenderCommandEncoder(descriptor: $0)
                 })
             {
-                encoder.setRenderPipelineState(pipeline)
-                encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-                encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
-                encoder.setFragmentTexture(texture, index: 0)
-                encoder.setFragmentSamplerState(samplerState, index: 0)
-                encoder.drawPrimitives(
-                    type: .triangleStrip, vertexStart: 0,
-                    vertexCount: geometry.vertices.count)
+                encode(
+                    metalFrames, destination: destination, rotation: drawViewSpaceRotationAngle,
+                    encoder: encoder)
                 encoder.endEncoding()
             } else if let output = Self.presentationImage(
                 PreviewSurface.mappedImageForPresentation(
@@ -1361,11 +1423,11 @@ struct PreviewSurfaceView: NSViewRepresentable {
         ) -> MTLTexture? {
             guard destinationSize.width > 0, destinationSize.height > 0,
                 destinationSize.width.isFinite, destinationSize.height.isFinite,
-                let frame = surface.presentationFrame(for: navigation),
-                let texture = frame.texture,
-                let textureExtent = frame.textureExtent,
-                let pipeline, let samplerState
+                let stack = surface.presentationStack(for: navigation),
+                pipeline != nil, samplerState != nil
             else { return nil }
+            let metalFrames = Self.metalFrames(in: stack)
+            guard !metalFrames.isEmpty else { return nil }
 
             let width = Int(destinationSize.width.rounded())
             let height = Int(destinationSize.height.rounded())
@@ -1375,14 +1437,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             )
             descriptor.usage = [.shaderRead, .renderTarget]
             descriptor.storageMode = .shared
+            let destination = CGRect(x: 0, y: 0, width: width, height: height)
             guard let target = device.makeTexture(descriptor: descriptor),
-                var geometry = Self.quadGeometry(
-                    imageExtent: frame.layoutImageExtent ?? textureExtent,
-                    navigation: navigation,
-                    destination: CGRect(x: 0, y: 0, width: width, height: height),
-                    virtualExtent: frame.presentationImageExtent,
-                    viewSpaceRotationAngle: viewSpaceRotationAngle
-                ),
                 let commandBuffer = commandQueue.makeCommandBuffer()
             else { return nil }
 
@@ -1391,29 +1447,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
             pass.colorAttachments[0].clearColor = Self.canvasBackgroundClearColor(for: appearance)
             pass.colorAttachments[0].loadAction = .clear
             pass.colorAttachments[0].storeAction = .store
-            guard
-                let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
-                    device.makeBuffer(
-                        bytes: rawBuffer.baseAddress!, length: rawBuffer.count,
-                        options: .storageModeShared)
-                }),
-                let uniformBuffer = device.makeBuffer(
-                    bytes: &geometry.uniforms,
-                    length: MemoryLayout<Uniforms>.stride,
-                    options: .storageModeShared
-                ),
-                let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass)
-            else {
+            guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
                 return nil
             }
-            encoder.setRenderPipelineState(pipeline)
-            encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
-            encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
-            encoder.setFragmentTexture(texture, index: 0)
-            encoder.setFragmentSamplerState(samplerState, index: 0)
-            encoder.drawPrimitives(
-                type: .triangleStrip, vertexStart: 0,
-                vertexCount: geometry.vertices.count)
+            encode(
+                metalFrames, destination: destination, rotation: viewSpaceRotationAngle,
+                encoder: encoder)
             encoder.endEncoding()
             commandBuffer.commit()
             commandBuffer.waitUntilCompleted()
@@ -1432,8 +1471,21 @@ struct PreviewSurfaceView: NSViewRepresentable {
 final class PreviewMTKView: MTKView {
     var onScrollZoom: ((CGFloat) -> Void)?
     var onDoubleClick: (() -> Void)?
+    var onCanvasInteractionBegan: (() -> Void)?
+    var onCanvasInteractionEnded: (() -> Void)?
+    var onPan: ((CGSize, CGSize) -> Void)?
+    var onMagnify: ((CGFloat) -> Void)?
     var onEffectiveAppearanceChange: ((NSAppearance) -> Void)?
     var ignoresHits = false
+
+    /// Matches the SwiftUI `DragGesture(minimumDistance: 2)` slop so a double-click does not pan.
+    private static let panSlop: CGFloat = 2
+    private var dragStartPoint: CGPoint?
+    private var lastDragPoint: CGPoint?
+    private var isPanning = false
+    private var isMagnifying = false
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         ignoresHits ? nil : super.hitTest(point)
@@ -1441,10 +1493,62 @@ final class PreviewMTKView: MTKView {
 
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
+            cancelPanWithoutEndingInteraction()
             onDoubleClick?()
             return
         }
-        super.mouseDown(with: event)
+        let point = canvasPoint(for: event)
+        dragStartPoint = point
+        lastDragPoint = point
+        isPanning = false
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let point = canvasPoint(for: event)
+        guard let start = dragStartPoint else { return }
+        if !isPanning {
+            let distance = hypot(point.x - start.x, point.y - start.y)
+            guard distance >= Self.panSlop else { return }
+            isPanning = true
+            onCanvasInteractionBegan?()
+            publishPan(from: start, to: point)
+            lastDragPoint = point
+            return
+        }
+        if let last = lastDragPoint {
+            publishPan(from: last, to: point)
+        }
+        lastDragPoint = point
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        // The last mouseDragged sample is the pointer position. mouseUp can arrive in a
+        // different coordinate space than mouseDragged (SwiftUI hosting vs AppKit y-up), and
+        // applying that delta inverts the vertical pan — landing near the start plus the
+        // opposite of the drag. Do not pan here.
+        if isPanning {
+            onCanvasInteractionEnded?()
+        }
+        dragStartPoint = nil
+        lastDragPoint = nil
+        isPanning = false
+    }
+
+    override func magnify(with event: NSEvent) {
+        let factor = 1 + event.magnification
+        if event.phase == .began || (!isMagnifying && event.phase != .ended && event.phase != .cancelled)
+        {
+            isMagnifying = true
+            onCanvasInteractionBegan?()
+        }
+        if factor.isFinite, factor > 0, event.phase != .ended, event.phase != .cancelled {
+            onMagnify?(factor)
+        }
+        if event.phase == .ended || event.phase == .cancelled {
+            guard isMagnifying else { return }
+            isMagnifying = false
+            onCanvasInteractionEnded?()
+        }
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -1471,5 +1575,31 @@ final class PreviewMTKView: MTKView {
     override func layout() {
         super.layout()
         setNeedsDisplay(bounds)
+    }
+
+    private func canvasPoint(for event: NSEvent) -> CGPoint {
+        var point = convert(event.locationInWindow, from: nil)
+        if !isFlipped {
+            point.y = bounds.height - point.y
+        }
+        return point
+    }
+
+    private func publishPan(from last: CGPoint, to point: CGPoint) {
+        let viewport = bounds.size
+        guard viewport.width > 0, viewport.height > 0 else { return }
+        onPan?(
+            CGSize(width: point.x - last.x, height: point.y - last.y),
+            viewport
+        )
+    }
+
+    private func cancelPanWithoutEndingInteraction() {
+        dragStartPoint = nil
+        lastDragPoint = nil
+        if isPanning {
+            isPanning = false
+            onCanvasInteractionEnded?()
+        }
     }
 }

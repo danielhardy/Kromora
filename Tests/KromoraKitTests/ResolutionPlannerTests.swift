@@ -55,6 +55,40 @@ final class ResolutionPlannerTests: TempDirectoryTestCase {
         XCTAssertLessThan(deep.visibleSourceRect.width, native.width)
     }
 
+    func testVerticalPanRequestsTheMatchingCoreImageSourceStrip() {
+        let viewport = CGSize(width: 800, height: 600)
+        let imageExtent = CGRect(origin: .zero, size: native)
+
+        var topNavigation = CanvasNavigation()
+        topNavigation.setZoom(8)
+        topNavigation.pan(
+            by: CGSize(width: 0, height: 10_000),
+            imageExtent: imageExtent, viewportSize: viewport
+        )
+        var topPlanner = ResolutionPlanner()
+        let top = topPlanner.plan(
+            nativeExtent: native, viewportSize: viewport, navigation: topNavigation
+        )
+
+        var bottomNavigation = CanvasNavigation()
+        bottomNavigation.setZoom(8)
+        bottomNavigation.pan(
+            by: CGSize(width: 0, height: -10_000),
+            imageExtent: imageExtent, viewportSize: viewport
+        )
+        var bottomPlanner = ResolutionPlanner()
+        let bottom = bottomPlanner.plan(
+            nativeExtent: native, viewportSize: viewport, navigation: bottomNavigation
+        )
+
+        XCTAssertGreaterThan(
+            top.visibleSourceRect.minY, bottom.visibleSourceRect.minY,
+            "dragging the photo down must request the top of the source, not the bottom"
+        )
+        XCTAssertGreaterThan(top.visibleSourceRect.minY, native.height / 2)
+        XCTAssertLessThan(bottom.visibleSourceRect.maxY, native.height / 2)
+    }
+
     func testZoomInThenFitReturnsToFreshCompletePhotoPlanAndCacheIdentity() {
         let source = ImageSource(data: Data("zoom-round-trip".utf8), nativeExtent: native)
         let document = EditDocument()
