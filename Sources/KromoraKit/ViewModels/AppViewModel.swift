@@ -431,13 +431,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// for the transient Space comparison.
     var isSideBySideVisible: Bool { isSideBySide && sourceImage != nil }
 
-    /// The explicit comparison affordance is available for every loaded source when either a
-    /// meaningful before/after exists or the user has retained the side-by-side presentation.
-    /// Keeping this separate from `isComparisonAvailable` prevents the toolbar and status hints
-    /// from disappearing merely because the current document is back at identity.
-    var isComparisonPresentationAvailable: Bool {
-        sourceImage != nil && (isComparisonAvailable || isSideBySide)
-    }
+    /// The split/single presentation affordance is available for every loaded source. This is
+    /// intentionally broader than `isComparisonAvailable`: an identity document still has valid
+    /// pixels, so both panes can show the same source image until a visible edit exists to compare.
+    var isComparisonPresentationAvailable: Bool { sourceImage != nil }
 
     /// The visible render is owned by these surfaces, not published image values on this model.
     let previewSurface = PreviewSurface()
@@ -4907,11 +4904,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     @discardableResult
     func toggleSideBySide() -> Bool {
-        // An active retained side-by-side preference must remain dismissible after Reset Photo or
-        // when navigation lands on an identity document. Enabling it from single view still uses
-        // the meaningful-edit gate, preserving the existing affordance semantics for untouched
-        // photos.
-        guard isComparisonAvailable || isSideBySideVisible else { return false }
+        // Split view is a presentation choice, not an edit-state affordance. An identity document
+        // still has valid source pixels, so entering it should render that same source into both
+        // panes; an edited document continues through the baseline comparison path below.
+        guard sourceImage != nil else { return false }
         isSideBySide.toggle()
         if isSideBySide {
             if isShowingOriginal {

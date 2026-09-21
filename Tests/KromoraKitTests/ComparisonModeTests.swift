@@ -42,6 +42,73 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         XCTAssertFalse(viewModel.isSideBySideVisible)
     }
 
+    func testCanToggleBeforeEditsAfterEditsAndAfterRemovingEdits() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(
+            engine: fake,
+            editStore: makeInMemoryEditStore(),
+            preferences: makeDefaults()
+        )
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "toggle-at-any-edit-state.png", in: tempDirectory
+        )
+
+        viewModel.openImage(url: image)
+        try await waitUntil("the initial preview") {
+            viewModel.sourceName == image.lastPathComponent && viewModel.previewSurface.image != nil
+        }
+
+        let identity = viewModel.document
+        let initialNavigation = viewModel.canvasNavigation
+        XCTAssertTrue(viewModel.isComparisonPresentationAvailable)
+        XCTAssertEqual(viewModel.undoDepth, 0)
+
+        XCTAssertTrue(viewModel.toggleSideBySide(), "an unedited photo can enter split view")
+        try await waitUntil("the unedited Original pane") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+        XCTAssertTrue(viewModel.document.isIdentity)
+        XCTAssertEqual(viewModel.document, identity)
+        XCTAssertEqual(viewModel.undoDepth, 0)
+        XCTAssertEqual(viewModel.canvasNavigation, initialNavigation)
+        XCTAssertTrue(viewModel.toggleSideBySide(), "an unedited photo can return to single view")
+        XCTAssertFalse(viewModel.isSideBySide)
+
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
+        let edited = viewModel.document
+        XCTAssertTrue(viewModel.isComparisonAvailable)
+        XCTAssertTrue(viewModel.toggleSideBySide(), "an edited photo can enter split view")
+        try await waitUntil("the edited Original pane") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+        XCTAssertEqual(viewModel.document, edited)
+        XCTAssertEqual(viewModel.undoDepth, 1)
+        XCTAssertEqual(viewModel.canvasNavigation, initialNavigation)
+        XCTAssertTrue(viewModel.toggleSideBySide(), "an edited photo can return to single view")
+
+        viewModel.updateDocument { $0 = EditDocument() }
+        try await waitUntil("the unedited adjusted preview") {
+            viewModel.document.isIdentity && viewModel.previewSurface.image != nil
+        }
+        XCTAssertFalse(viewModel.isComparisonAvailable)
+        XCTAssertTrue(viewModel.isComparisonPresentationAvailable)
+        XCTAssertTrue(viewModel.toggleSideBySide(), "a reset photo can enter split view")
+        try await waitUntil("the reset Original pane") {
+            viewModel.originalPreviewSurface.image != nil
+        }
+        XCTAssertTrue(viewModel.document.isIdentity)
+        XCTAssertEqual(viewModel.undoDepth, 2)
+        XCTAssertEqual(viewModel.canvasNavigation, initialNavigation)
+        XCTAssertTrue(viewModel.toggleSideBySide(), "a reset photo can return to single view")
+        XCTAssertFalse(viewModel.isSideBySide)
+
+        let requests = await fake.previewRequests
+        XCTAssertTrue(
+            requests.contains { $0.document.isIdentity },
+            "the identity split fallback must request the same source document for both panes"
+        )
+    }
+
     func testSelectedModeIsRememberedAcrossRelaunch() {
         let defaults = makeDefaults()
         let firstLaunch = makeViewModel(defaults: defaults)
