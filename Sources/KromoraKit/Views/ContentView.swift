@@ -461,8 +461,8 @@ private struct CanvasToolbarControls: View {
     }
 }
 
-/// Crop owns the window toolbar while its draft is open. Undo intentionally uses the normal
-/// document history: the draft is transient and is still discarded only by Cancel.
+/// Crop owns the window toolbar while its draft is open. Undo and Redo use the normal document
+/// history; applying a history state re-seeds the transient draft before a later Save.
 private struct CropToolbarControls: View {
     let viewModel: AppViewModel
     let hasImage: Bool

@@ -60,6 +60,22 @@ final class CanvasInteractionState: ObservableObject {
         guard !isCropToolActive else { return false }
         navigation.fit()
         isCropToolActive = true
+        seedCrop(using: committedCrop, sourceSize: sourceSize)
+        return true
+    }
+
+    /// Replace an active crop draft after the committed document changes through history. The
+    /// draft is transient, so it must track the restored rotation/crop before the next render or
+    /// a later Save could apply the old frame to the new document.
+    @discardableResult
+    func reseedCrop(using committedCrop: CropAdjustments, sourceSize: CGSize = .zero) -> Bool {
+        guard isCropToolActive else { return false }
+        navigation.fit()
+        seedCrop(using: committedCrop, sourceSize: sourceSize)
+        return true
+    }
+
+    private func seedCrop(using committedCrop: CropAdjustments, sourceSize: CGSize) {
         cropDraft = committedCrop.normalizedRect ?? CropAdjustments.unitRect
         cropAspectRatio = committedCrop.aspectRatio
         cropOrientation = committedCrop.orientation
@@ -81,7 +97,6 @@ final class CanvasInteractionState: ObservableObject {
                 pixelAspectRatio: cropPixelAspectRatio
             )
         }
-        return true
     }
 
     func updateCropDraft(_ normalizedRect: CGRect, sourceSize: CGSize = .zero) {
