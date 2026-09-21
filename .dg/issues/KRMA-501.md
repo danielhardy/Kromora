@@ -2,7 +2,7 @@
 id: KRMA-501
 title: Do not record transient zoom changes in edit history
 type: bug
-status: backlog
+status: claimed
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,9 +13,15 @@ labels:
   - zoom
   - ux
 created: 2026-09-21T02:14:57.965Z
-updated: 2026-09-21T02:15:20.721Z
-order: z
+updated: 2026-09-21T02:28:55.403Z
+order: a0
 board: product
+claim:
+  actor: codex
+  session: 01MUAMMBXM9KGGQXRH
+  claimed_at: 2026-09-21T02:28:55.402Z
+  expires_at: 2026-09-21T03:28:55.402Z
+  model: gpt-5.6-luna
 ---
 
 ## Objective

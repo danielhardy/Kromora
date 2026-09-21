@@ -2,7 +2,7 @@
 id: KRMA-502
 title: Slider thumbs sit too low relative to the track
 type: bug
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,8 +13,8 @@ labels:
   - ui
   - ux
 created: 2026-09-21T02:19:32.613Z
-updated: 2026-09-21T02:19:50.379Z
-order: zh
+updated: 2026-09-21T02:29:00.432Z
+order: a0
 board: product
 ---
 
