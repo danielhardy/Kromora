@@ -269,7 +269,10 @@ final class NeutralOriginSliderCell: NSSliderCell {
 
     override func drawBar(inside rect: NSRect, flipped: Bool) {
         barDrawCount += 1
-        let bar = Self.barRect(in: rect)
+        // AppKit's draw input is not the same geometry as its public barRect on every control
+        // size. Use the native bar's centre as the vertical reference so our replacement track
+        // and the knob below agree even when AppKit applies a size-specific offset.
+        let bar = Self.barRect(in: rect, alignedTo: barRect(flipped: flipped))
         let radius = bar.height / 2
         guard minValue < maxValue else { return }
 
@@ -302,7 +305,14 @@ final class NeutralOriginSliderCell: NSSliderCell {
     }
 
     override func drawKnob(_ knobRect: NSRect) {
-        let circle = Self.circularKnobRect(in: knobRect)
+        // The native knob rect retains AppKit's horizontal travel and hit target, but its vertical
+        // placement is not the visual alignment contract of the custom track on every SDK/control
+        // size. Align only the drawn circle to AppKit's bar centre.
+        let flipped = controlView?.isFlipped ?? false
+        let circle = Self.circularKnobRect(
+            in: knobRect,
+            centeredOn: barRect(flipped: flipped).midY
+        )
         guard !circle.isEmpty else { return }
 
         NSGraphicsContext.saveGraphicsState()
@@ -393,23 +403,24 @@ final class NeutralOriginSliderCell: NSSliderCell {
         NSBezierPath(roundedRect: marker, xRadius: 0.5, yRadius: 0.5).fill()
     }
 
-    private static func barRect(in rect: NSRect) -> NSRect {
+    private static func barRect(in rect: NSRect, alignedTo nativeBar: NSRect) -> NSRect {
         guard rect.height > barThickness else { return rect }
         return NSRect(
-            x: rect.minX, y: rect.midY - barThickness / 2,
+            x: rect.minX, y: nativeBar.midY - barThickness / 2,
             width: rect.width, height: barThickness
         )
     }
 
-    /// Fits a scaled circle inside AppKit's native knob rect, preserving its center and therefore
-    /// preserving the knob's existing value geometry and hit target.
-    static func circularKnobRect(in rect: NSRect) -> NSRect {
+    /// Fits a scaled circle inside AppKit's native knob rect. Its horizontal centre remains the
+    /// native value position, while its vertical centre follows the visual bar rather than relying
+    /// on an SDK-specific offset in the native knob rect.
+    static func circularKnobRect(in rect: NSRect, centeredOn centerY: CGFloat? = nil) -> NSRect {
         let diameter = min(rect.width, rect.height)
         guard diameter > 0 else { return .zero }
         let visualDiameter = diameter * knobVisualScale
         return NSRect(
             x: rect.midX - visualDiameter / 2,
-            y: rect.midY - visualDiameter / 2,
+            y: (centerY ?? rect.midY) - visualDiameter / 2,
             width: visualDiameter,
             height: visualDiameter
         )
