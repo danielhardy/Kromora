@@ -97,6 +97,12 @@ final class CanvasNavigationTests: XCTestCase {
         XCTAssertEqual(navigation.zoom, CanvasNavigation.minimumZoom)
         navigation.setZoom(100)
         XCTAssertEqual(navigation.zoom, CanvasNavigation.maximumZoom)
+
+        let focalBeforeLimitGesture = navigation.focalPoint
+        navigation.zoom(
+            by: 2, at: CGPoint(x: 20, y: 30), imageExtent: landscape, viewportSize: viewport)
+        XCTAssertEqual(navigation.zoom, CanvasNavigation.maximumZoom)
+        XCTAssertEqual(navigation.focalPoint, focalBeforeLimitGesture)
     }
 
     func testDoubleClickUsesDeterministicFallbackAndTogglesBackToFit() {
@@ -116,6 +122,57 @@ final class CanvasNavigationTests: XCTestCase {
         navigation.toggleFitAndRememberedZoom()
         XCTAssertEqual(navigation.mode, .custom)
         XCTAssertEqual(navigation.zoom, CanvasNavigation.doubleClickFallbackZoom)
+    }
+
+    func testZoomAroundViewportPointKeepsTheImagePointStable() {
+        var navigation = CanvasNavigation()
+        let imageExtent = CGRect(origin: .zero, size: CGSize(width: 400, height: 200))
+        let viewport = CGSize(width: 300, height: 200)
+        let pointer = CGPoint(x: 75, y: 100)
+        let before = navigation.transform(imageExtent: imageExtent, viewportSize: viewport)
+        let imagePoint = CGPoint(
+            x: (pointer.x - before.origin.x) / before.scale,
+            y: (pointer.y - before.origin.y) / before.scale
+        )
+
+        navigation.zoom(
+            by: 2, at: pointer, imageExtent: imageExtent, viewportSize: viewport)
+        let after = navigation.transform(imageExtent: imageExtent, viewportSize: viewport)
+        let projected = CGPoint(
+            x: after.origin.x + imagePoint.x * after.scale,
+            y: after.origin.y + imagePoint.y * after.scale
+        )
+
+        assertPoint(projected, equals: pointer)
+        XCTAssertNotEqual(navigation.focalPoint, CanvasNavigation.center)
+    }
+
+    func testDoubleClickZoomUsesTheClickAsItsFocalPointAndResetsToFit() {
+        var navigation = CanvasNavigation()
+        let imageExtent = CGRect(origin: .zero, size: CGSize(width: 400, height: 200))
+        let viewport = CGSize(width: 300, height: 200)
+        let click = CGPoint(x: 75, y: 100)
+        let before = navigation.transform(imageExtent: imageExtent, viewportSize: viewport)
+        let imagePoint = CGPoint(
+            x: (click.x - before.origin.x) / before.scale,
+            y: (click.y - before.origin.y) / before.scale
+        )
+
+        navigation.toggleFitAndRememberedZoom(
+            at: click, imageExtent: imageExtent, viewportSize: viewport)
+        let zoomed = navigation.transform(imageExtent: imageExtent, viewportSize: viewport)
+        assertPoint(
+            CGPoint(
+                x: zoomed.origin.x + imagePoint.x * zoomed.scale,
+                y: zoomed.origin.y + imagePoint.y * zoomed.scale
+            ),
+            equals: click
+        )
+
+        navigation.toggleFitAndRememberedZoom(
+            at: click, imageExtent: imageExtent, viewportSize: viewport)
+        XCTAssertEqual(navigation.mode, .fit)
+        XCTAssertEqual(navigation.focalPoint, CanvasNavigation.center)
     }
 
     func testFitAndFillRetainTheLastChosenZoom() {

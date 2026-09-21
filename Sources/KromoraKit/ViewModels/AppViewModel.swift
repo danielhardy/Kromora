@@ -4365,6 +4365,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         applyCanvasNavigation { canvasState.toggleFitAndRememberedZoom() }
     }
 
+    func toggleCanvasZoom(at viewportPoint: CGPoint, viewportSize: CGSize) {
+        guard let imageExtent = canvasImageExtent else {
+            toggleCanvasZoom()
+            return
+        }
+        applyCanvasNavigation {
+            canvasState.toggleFitAndRememberedZoom(
+                at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
+        }
+    }
+
     /// Set the canvas presentation zoom without touching the document or its undo/redo history.
     func setCanvasZoom(_ value: CGFloat) {
         let oldValue = canvasState.navigation.zoom
@@ -4384,6 +4395,38 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func zoomCanvas(by factor: CGFloat) {
         guard factor.isFinite, factor > 0 else { return }
         setCanvasZoom(canvasState.navigation.zoom * factor)
+    }
+
+    func zoomCanvas(by factor: CGFloat, at viewportPoint: CGPoint, viewportSize: CGSize) {
+        guard factor.isFinite, factor > 0, let imageExtent = canvasImageExtent else { return }
+        let oldNavigation = canvasState.navigation
+        canvasState.zoom(
+            by: factor, at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
+        finishCanvasZoomChange(from: oldNavigation)
+    }
+
+    private var canvasImageExtent: CGRect? {
+        guard let imageSource else { return nil }
+        let oriented = document.rotation.orientedExtent(imageSource.nativeExtent)
+        let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
+        let size = CGSize(width: oriented.width * crop.width, height: oriented.height * crop.height)
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
+            return nil
+        }
+        return CGRect(origin: .zero, size: size)
+    }
+
+    private func finishCanvasZoomChange(from oldNavigation: CanvasNavigation) {
+        guard canvasState.navigation != oldNavigation else { return }
+        if !isPreviewInteractionActive {
+            previewPresentation.advanceDisplayRevision()
+        }
+        cancelHistogram(clear: false, pump: false)
+        if isPreviewInteractionActive {
+            scheduleInteractivePreview()
+        } else {
+            scheduleSettledPreviewAfterDebounce()
+        }
     }
 
     /// Pinch-zoom is presentation-only, unlike a slider drag, so this deliberately does not call

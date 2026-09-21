@@ -51,6 +51,20 @@ final class CanvasInteractionState: ObservableObject {
         navigation.setZoom(value)
     }
 
+    func zoom(
+        by factor: CGFloat, at viewportPoint: CGPoint, imageExtent: CGRect, viewportSize: CGSize
+    ) {
+        navigation.zoom(
+            by: factor, at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
+    }
+
+    func toggleFitAndRememberedZoom(
+        at viewportPoint: CGPoint, imageExtent: CGRect, viewportSize: CGSize
+    ) {
+        navigation.toggleFitAndRememberedZoom(
+            at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
+    }
+
     func pan(by delta: CGSize, imageExtent: CGRect, viewportSize: CGSize) {
         navigation.pan(by: delta, imageExtent: imageExtent, viewportSize: viewportSize)
     }
@@ -341,6 +355,20 @@ struct CanvasNavigation: Equatable, Sendable {
         focalPoint = Self.center
     }
 
+    /// Toggle the remembered zoom around a viewport-space pointer. The second toggle retains the
+    /// existing fit reset so a double-click returns to a predictable whole-image presentation.
+    mutating func toggleFitAndRememberedZoom(
+        at viewportPoint: CGPoint, imageExtent: CGRect, viewportSize: CGSize
+    ) {
+        guard mode == .fit else {
+            fit()
+            return
+        }
+
+        let target = Self.clampZoom(rememberedZoom ?? Self.doubleClickFallbackZoom)
+        zoom(by: target, at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
+    }
+
     mutating func setZoom(_ value: CGFloat) {
         mode = .custom
         zoom = Self.clampZoom(value)
@@ -352,6 +380,49 @@ struct CanvasNavigation: Equatable, Sendable {
     mutating func multiplyZoom(by factor: CGFloat) {
         guard factor.isFinite, factor > 0 else { return }
         setZoom(zoom * factor)
+    }
+
+    /// Zoom around a viewport-space point while keeping the corresponding image point fixed when
+    /// the existing pan clamps allow it. The focal point is derived from the desired image origin,
+    /// so the same normalized navigation state remains valid after a viewport resize.
+    mutating func zoom(
+        by factor: CGFloat, at viewportPoint: CGPoint, imageExtent: CGRect, viewportSize: CGSize
+    ) {
+        guard factor.isFinite, factor > 0,
+            viewportPoint.x.isFinite, viewportPoint.y.isFinite,
+            Self.isValidSize(imageExtent.size), Self.isValidSize(viewportSize)
+        else { return }
+
+        let before = transform(
+            imageExtent: imageExtent, viewportSize: viewportSize)
+        guard before.scale.isFinite, before.scale > 0 else { return }
+
+        let targetZoom = Self.clampZoom(zoom * factor)
+        // A gesture that is already at a zoom limit must not turn into an implicit pan merely
+        // because its pointer is away from the current focal point.
+        guard targetZoom != zoom || mode == .fit else { return }
+        let target = Self.transform(
+            imageExtent: imageExtent, viewportSize: viewportSize,
+            mode: .custom, zoom: targetZoom, focalPoint: focalPoint
+        )
+        guard target.scale.isFinite, target.scale > 0 else { return }
+
+        let imagePoint = CGPoint(
+            x: (viewportPoint.x - before.origin.x) / before.scale,
+            y: (viewportPoint.y - before.origin.y) / before.scale
+        )
+        let desiredOrigin = CGPoint(
+            x: viewportPoint.x - imagePoint.x * target.scale,
+            y: viewportPoint.y - imagePoint.y * target.scale
+        )
+
+        mode = .custom
+        zoom = targetZoom
+        rememberedZoom = targetZoom
+        focalPoint = Self.focalPoint(
+            afterMovingOrigin: CGSize(width: desiredOrigin.x, height: desiredOrigin.y),
+            imageExtent: imageExtent, viewportSize: viewportSize, scale: target.scale
+        )
     }
 
     /// Pan in the coordinate space of the visible SwiftUI canvas. The focal point representation

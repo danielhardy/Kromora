@@ -733,12 +733,12 @@ final class PreviewSurface: ObservableObject {
 struct PreviewSurfaceView: NSViewRepresentable {
     @ObservedObject var surface: PreviewSurface
     var navigation: CanvasNavigation = CanvasNavigation()
-    var onScrollZoom: ((CGFloat) -> Void)?
-    var onDoubleClick: (() -> Void)?
+    var onScrollZoom: ((CGFloat, CGPoint, CGSize) -> Void)?
+    var onDoubleClick: ((CGPoint, CGSize) -> Void)?
     var onCanvasInteractionBegan: (() -> Void)?
     var onCanvasInteractionEnded: (() -> Void)?
     var onPan: ((CGSize, CGSize) -> Void)?
-    var onMagnify: ((CGFloat) -> Void)?
+    var onMagnify: ((CGFloat, CGPoint, CGSize) -> Void)?
     /// The drawable reports backing pixels, which is the only reliable size across mixed-DPI
     /// windows and side-by-side panels. SwiftUI point geometry is not sufficient here.
     var onDrawableSizeChange: ((CGSize) -> Void)?
@@ -1469,12 +1469,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
 /// covers the case where SwiftUI's update arrived before the view had a drawable.
 // Internal so the AppKit mouse-down seam can be exercised with a real NSEvent in tests.
 final class PreviewMTKView: MTKView {
-    var onScrollZoom: ((CGFloat) -> Void)?
-    var onDoubleClick: (() -> Void)?
+    var onScrollZoom: ((CGFloat, CGPoint, CGSize) -> Void)?
+    var onDoubleClick: ((CGPoint, CGSize) -> Void)?
     var onCanvasInteractionBegan: (() -> Void)?
     var onCanvasInteractionEnded: (() -> Void)?
     var onPan: ((CGSize, CGSize) -> Void)?
-    var onMagnify: ((CGFloat) -> Void)?
+    var onMagnify: ((CGFloat, CGPoint, CGSize) -> Void)?
     var onEffectiveAppearanceChange: ((NSAppearance) -> Void)?
     var ignoresHits = false
 
@@ -1494,7 +1494,7 @@ final class PreviewMTKView: MTKView {
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2 {
             cancelPanWithoutEndingInteraction()
-            onDoubleClick?()
+            onDoubleClick?(canvasPoint(for: event), bounds.size)
             return
         }
         let point = canvasPoint(for: event)
@@ -1542,7 +1542,7 @@ final class PreviewMTKView: MTKView {
             onCanvasInteractionBegan?()
         }
         if factor.isFinite, factor > 0, event.phase != .ended, event.phase != .cancelled {
-            onMagnify?(factor)
+            onMagnify?(factor, canvasPoint(for: event), bounds.size)
         }
         if event.phase == .ended || event.phase == .cancelled {
             guard isMagnifying else { return }
@@ -1554,7 +1554,7 @@ final class PreviewMTKView: MTKView {
     override func scrollWheel(with event: NSEvent) {
         let delta = event.scrollingDeltaY
         if delta.isFinite, abs(delta) > 0.001 {
-            onScrollZoom?(pow(1.01, delta))
+            onScrollZoom?(pow(1.01, delta), canvasPoint(for: event), bounds.size)
         } else {
             super.scrollWheel(with: event)
         }
