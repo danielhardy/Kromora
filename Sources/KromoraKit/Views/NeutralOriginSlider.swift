@@ -239,6 +239,11 @@ enum SliderTrackStyle: Equatable, Sendable {
 /// remain AppKit's. That keeps the control behaving like a macOS slider while avoiding the stock
 /// capsule thumb, which leaves the coloured bar looking capped at either end.
 final class NeutralOriginSliderCell: NSSliderCell {
+    /// The drawn thumb is smaller than AppKit's native knob rect. The native rect remains the
+    /// source of travel geometry and hit testing, so shrinking the visual does not make the
+    /// control harder to grab or change where values reach the track ends.
+    static let knobVisualScale: CGFloat = 0.8
+
     /// The value the fill is anchored at, in slider space.
     var neutral: Double = 0
     /// The visual explanation of this slider's effect. `.neutral` retains the ordinary adaptive
@@ -396,16 +401,17 @@ final class NeutralOriginSliderCell: NSSliderCell {
         )
     }
 
-    /// Fits the largest possible circle inside AppKit's native knob rect, preserving its center
-    /// and therefore preserving the knob's existing value geometry and hit target.
+    /// Fits a scaled circle inside AppKit's native knob rect, preserving its center and therefore
+    /// preserving the knob's existing value geometry and hit target.
     static func circularKnobRect(in rect: NSRect) -> NSRect {
         let diameter = min(rect.width, rect.height)
         guard diameter > 0 else { return .zero }
+        let visualDiameter = diameter * knobVisualScale
         return NSRect(
-            x: rect.midX - diameter / 2,
-            y: rect.midY - diameter / 2,
-            width: diameter,
-            height: diameter
+            x: rect.midX - visualDiameter / 2,
+            y: rect.midY - visualDiameter / 2,
+            width: visualDiameter,
+            height: visualDiameter
         )
     }
 }
