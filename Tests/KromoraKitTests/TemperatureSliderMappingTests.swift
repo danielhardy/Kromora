@@ -53,9 +53,10 @@ final class TemperatureSliderMappingTests: XCTestCase {
         XCTAssertEqual(mapping.sliderPosition(for: 10000), log(5) / log(5.5), accuracy: 1e-12)
     }
 
-    func testColorReadoutsRoundTemperatureAndTintWithoutChangingTheValues() {
+    func testColorReadoutsRoundGlobalTemperatureAndTintWithoutChangingTheValues() {
         XCTAssertEqual(ColorSettingFormatting.temperature(5842.2), "5842 K")
         XCTAssertEqual(ColorSettingFormatting.tint(14.04), "+14")
-        XCTAssertEqual(LocalAdjustmentControl.temperature.readout(6500.4), "6500 K")
+        // Mask-local readouts show their full hundredth-level precision (KRMA-503).
+        XCTAssertEqual(LocalAdjustmentControl.temperature.readout(6500.4), "6500.40 K")
     }
 }
