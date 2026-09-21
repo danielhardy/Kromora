@@ -30,7 +30,7 @@ final class PreviewSurfaceTests: XCTestCase {
         var navigation = CanvasNavigation()
         let view = PreviewMTKView(
             frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
-        view.onDoubleClick = { navigation.toggleFitAndRememberedZoom() }
+        view.onDoubleClick = { _, _ in navigation.toggleFitAndRememberedZoom() }
 
         let doubleClick = try XCTUnwrap(NSEvent.mouseEvent(
             with: .leftMouseDown,
@@ -128,7 +128,7 @@ final class PreviewSurfaceTests: XCTestCase {
         var zoomed = false
         var began = 0
         var panCount = 0
-        view.onDoubleClick = { zoomed = true }
+        view.onDoubleClick = { _, _ in zoomed = true }
         view.onCanvasInteractionBegan = { began += 1 }
         view.onPan = { _, _ in panCount += 1 }
 

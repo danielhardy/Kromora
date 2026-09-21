@@ -230,14 +230,20 @@ struct PreviewView: View {
             let preview = PreviewSurfaceView(
                 surface: surface,
                 navigation: canvasState.navigation,
-                onScrollZoom: { factor in viewModel.zoomCanvas(by: factor) },
-                onDoubleClick: { viewModel.toggleCanvasZoom() },
+                onScrollZoom: { factor, point, viewportSize in
+                    viewModel.zoomCanvas(by: factor, at: point, viewportSize: viewportSize)
+                },
+                onDoubleClick: { point, viewportSize in
+                    viewModel.toggleCanvasZoom(at: point, viewportSize: viewportSize)
+                },
                 onCanvasInteractionBegan: { viewModel.beginCanvasInteraction() },
                 onCanvasInteractionEnded: { viewModel.endCanvasInteraction() },
                 onPan: { delta, viewportSize in
                     viewModel.panCanvas(by: delta, viewportSize: viewportSize)
                 },
-                onMagnify: { factor in viewModel.zoomCanvas(by: factor) },
+                onMagnify: { factor, point, viewportSize in
+                    viewModel.zoomCanvas(by: factor, at: point, viewportSize: viewportSize)
+                },
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
                 viewSpaceRotationAngle: canvasState.isCropToolActive
                     ? canvasState.cropStraightenAngle : 0,
