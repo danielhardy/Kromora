@@ -168,6 +168,25 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(circle.midY, nativeKnob.midY, accuracy: 0.001)
     }
 
+    func testThumbVisualIsEightyPercentOfTheNativeKnobWhileHitGeometryStaysNative() {
+        let slider = makeSlider(range: -100...100, neutral: 0, value: 0)
+        guard let cell = slider.cell as? NeutralOriginSliderCell else {
+            return XCTFail("the slider is not using the neutral-origin cell")
+        }
+
+        let nativeKnob = cell.knobRect(flipped: false)
+        let circle = NeutralOriginSliderCell.circularKnobRect(in: nativeKnob)
+        let nativeDiameter = min(nativeKnob.width, nativeKnob.height)
+
+        XCTAssertEqual(
+            circle.width,
+            nativeDiameter * NeutralOriginSliderCell.knobVisualScale,
+            accuracy: 0.001
+        )
+        XCTAssertEqual(circle.height, circle.width, accuracy: 0.001)
+        XCTAssertEqual(cell.knobRect(flipped: false), nativeKnob)
+    }
+
     func testColorControlsUseDocumentedSemanticTracks() {
         XCTAssertEqual(ColorGlobalControl.saturation.trackStyle, .saturation)
         XCTAssertEqual(ColorGlobalControl.vibrance.trackStyle, .vibrance)
