@@ -21,6 +21,9 @@ struct CropInspectorView: View {
     let onFlipVertical: () -> Void
     let onVerticalPerspectiveChange: (Double) -> Void
     let onHorizontalPerspectiveChange: (Double) -> Void
+    let onResetStraighten: () -> Void
+    let onResetVerticalPerspective: () -> Void
+    let onResetHorizontalPerspective: () -> Void
     let onAuto: () -> Void
     let onAspectRatioChange: (CropAspectRatio, CropAspectRatioOrientation) -> Void
     let onReset: () -> Void
@@ -255,26 +258,29 @@ struct CropInspectorView: View {
     private var straightenSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Straighten")
-                    .font(.headline)
+                ResettableAdjustmentLabel(title: "Straighten", reset: onResetStraighten)
                 Spacer()
                 Text("\(straightenAngle, specifier: "%.1f")°")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(
+            NeutralOriginSlider(
                 value: Binding(
                     get: { straightenAngle },
                     set: { value in onStraightenChange(value) }
                 ),
                 in: -45...45,
+                neutral: 0,
                 step: 0.1,
+                accessibilityTitle: "Straighten angle",
+                accessibilityReadout: String(format: "%.1f degrees", straightenAngle),
                 onEditingChanged: { editing in
                     if editing { onBeginInteraction() } else { onEndInteraction() }
                 }
             )
             .accessibilityLabel("Straighten angle")
             .accessibilityValue("\(straightenAngle, specifier: "%.1f") degrees")
+            .accessibilityAction(named: Text("Reset to neutral"), onResetStraighten)
         }
     }
 
@@ -284,15 +290,21 @@ struct CropInspectorView: View {
                 .font(.headline)
             perspectiveSlider(
                 title: "Vertical",
-                value: verticalPerspective,
-                onChange: onVerticalPerspectiveChange,
+                value: Binding(
+                    get: { verticalPerspective },
+                    set: { value in onVerticalPerspectiveChange(value) }
+                ),
+                reset: onResetVerticalPerspective,
                 onBeginInteraction: onBeginInteraction,
                 onEndInteraction: onEndInteraction
             )
             perspectiveSlider(
                 title: "Horizontal",
-                value: horizontalPerspective,
-                onChange: onHorizontalPerspectiveChange,
+                value: Binding(
+                    get: { horizontalPerspective },
+                    set: { value in onHorizontalPerspectiveChange(value) }
+                ),
+                reset: onResetHorizontalPerspective,
                 onBeginInteraction: onBeginInteraction,
                 onEndInteraction: onEndInteraction
             )
@@ -301,29 +313,35 @@ struct CropInspectorView: View {
 
     private func perspectiveSlider(
         title: String,
-        value: Double,
-        onChange: @escaping (Double) -> Void,
+        value: Binding<Double>,
+        reset: @escaping () -> Void,
         onBeginInteraction: @escaping () -> Void,
         onEndInteraction: @escaping () -> Void
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(title)
+                ResettableAdjustmentLabel(title: title, reset: reset)
                 Spacer()
-                Text("\(value * 100, specifier: "%.0f")%")
+                Text("\(value.wrappedValue * 100, specifier: "%.0f")%")
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
-            Slider(
-                value: Binding(get: { value }, set: onChange),
+            NeutralOriginSlider(
+                value: value,
                 in: -CropAdjustments.maximumPerspective...CropAdjustments.maximumPerspective,
+                neutral: 0,
                 step: 0.01,
+                accessibilityTitle: "\(title) perspective",
+                accessibilityReadout: String(
+                    format: "%.0f percent", value.wrappedValue * 100
+                ),
                 onEditingChanged: { editing in
                     if editing { onBeginInteraction() } else { onEndInteraction() }
                 }
             )
             .accessibilityLabel("\(title) perspective")
-            .accessibilityValue("\(value * 100, specifier: "%.0f") percent")
+            .accessibilityValue("\(value.wrappedValue * 100, specifier: "%.0f") percent")
+            .accessibilityAction(named: Text("Reset to neutral"), reset)
         }
     }
 
