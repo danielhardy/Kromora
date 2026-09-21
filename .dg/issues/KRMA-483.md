@@ -2,16 +2,48 @@
 id: KRMA-483
 title: Double-click on the Edit canvas no longer toggles fit and zoom
 type: bug
-status: backlog
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Root cause identified and introducing commit named
+      result: pass
+      notes: The full-canvas MaskCanvasOverlay added by 77808e5 remained hit-testable for selection mode and could shield PreviewMTKView.
+    - criterion: Double-click toggles fit and remembered zoom in both directions
+      result: pass
+      notes: PreviewMTKView receives a real NSEvent with clickCount 2 and toggles custom fallback zoom then fit.
+    - criterion: Real click path regression coverage
+      result: pass
+      notes: PreviewSurfaceTests sends NSEvent.mouseEvent to PreviewMTKView and asserts both navigation states.
+    - criterion: Crop enter/leave coverage
+      result: pass
+      notes: The test asserts hit testing is suppressed during crop and double-click works after finishCrop.
+    - criterion: Fast and serial CI lanes
+      result: pass
+      notes: "fast: 1093 tests passed; serial: 393 tests, 1 expected local-RAW skip, 0 failures."
+  checks_run:
+    - swift test --filter PreviewSurfaceTests/testDoubleClickMouseDownTogglesCanvasAfterLeavingCropTool
+    - scripts/ci-tests.sh fast
+    - scripts/ci-tests.sh serial
+    - git diff --check
+    - dg validate
+  findings: []
+  fixes:
+    - PreviewView.swift disables hit testing for MaskCanvasOverlay only when the selection tool is active; drawing tools continue to own masking clicks.
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-20T17:18:16.577Z
+  session: 01MUA2QQA9D04YKSGU
 labels:
   - preview
   - zoom
   - regression
   - ui
 created: 2026-09-20T16:05:45.277Z
-updated: 2026-09-20T16:05:45.277Z
-order: zh
+updated: 2026-09-20T17:19:22.854Z
+order: a0
 board: product
 ---
 
@@ -57,6 +89,35 @@ Hypotheses to check, none confirmed:
 - Related ticket: KRMA-482 (blank regions when panning at 800%). Both touch the same zoom and pan code, so land them in a way that lets each be verified separately.
 - Prefer keeping the double-click in `PreviewMTKView` if hit-testing can be fixed. If the SwiftUI drag gesture is the culprit, an alternative is `SpatialTapGesture(count: 2)` (already used in `LightInspectorView`) on the same wrapper, ordered so it does not delay drag-to-pan.
 
+### Comment — codex @ 2026-09-20T17:19:22.853Z
+
+Root-cause attribution correction: the full-canvas MaskCanvasOverlay that could shield selection-mode preview input was introduced by 0af0c30f (feat(LUMO-220): add persistent masking workspace). Commit 77808e5 later added crop hit-testing changes but did not introduce the mask overlay. The implementation fix and verification results are unchanged.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-20T17:18:16.577Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Root cause identified and introducing commit named (pass) — The full-canvas MaskCanvasOverlay added by 77808e5 remained hit-testable for selection mode and could shield PreviewMTKView.
+- [x] Double-click toggles fit and remembered zoom in both directions (pass) — PreviewMTKView receives a real NSEvent with clickCount 2 and toggles custom fallback zoom then fit.
+- [x] Real click path regression coverage (pass) — PreviewSurfaceTests sends NSEvent.mouseEvent to PreviewMTKView and asserts both navigation states.
+- [x] Crop enter/leave coverage (pass) — The test asserts hit testing is suppressed during crop and double-click works after finishCrop.
+- [x] Fast and serial CI lanes (pass) — fast: 1093 tests passed; serial: 393 tests, 1 expected local-RAW skip, 0 failures.
+Checks run:
+- swift test --filter PreviewSurfaceTests/testDoubleClickMouseDownTogglesCanvasAfterLeavingCropTool
+- scripts/ci-tests.sh fast
+- scripts/ci-tests.sh serial
+- git diff --check
+- dg validate
+Findings:
+- None
+Fixes:
+- PreviewView.swift disables hit testing for MaskCanvasOverlay only when the selection tool is active; drawing tools continue to own masking clicks.
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MUA2QQA9D04YKSGU
+Summary: Fixed KRMA-483: selection-mode mask guides no longer shield the preview, so PreviewMTKView receives double-click zoom; active mask tools retain click ownership. Regression introduced by 77808e5 (Keep crop chrome off the canvas and hit-test handles in one overlay gesture). Added real NSEvent clickCount=2 coverage including crop enter/leave and both zoom directions. Verified scripts/ci-tests.sh fast (1093 passed), scripts/ci-tests.sh serial (393 tests, 1 expected local-RAW skip, 0 failures), focused AppKit regression test, git diff --check, and dg validate.
