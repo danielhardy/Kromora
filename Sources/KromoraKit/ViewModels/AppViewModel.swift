@@ -3900,6 +3900,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 : plan.previewSourceROI(
                     nativeExtent: document.rotation.orientedExtent(source.nativeExtent)
                 ),
+            presentationROI: canonical || cropInteractionActive
+                ? nil : plan.visiblePresentationRect,
             presentationImageExtent: plan.presentationImageExtent,
             presentationNavigation: canvasState.navigation,
             quality: .preview,
@@ -4056,6 +4058,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     : plan.previewSourceROI(
                         nativeExtent: requested.rotation.orientedExtent(imageSource.nativeExtent)
                     ),
+                presentationROI: canvasState.isCropToolActive
+                    ? nil : plan.visiblePresentationRect,
                 presentationImageExtent: plan.presentationImageExtent,
                 presentationNavigation: canvasState.navigation,
                 quality: .interactive,

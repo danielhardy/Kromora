@@ -152,6 +152,7 @@ struct RenderWorkStatistics: Sendable, Equatable {
 struct RenderBuildPlan: Sendable, Equatable {
     let scale: RenderScale
     let sourceROI: CGRect?
+    let presentationROI: CGRect?
     let processingROI: CGRect?
     let fullFrameExtent: CGRect
     let hasEarlyCrop: Bool
@@ -164,7 +165,8 @@ struct RenderBuildPlan: Sendable, Equatable {
         source: ImageSource,
         document: EditDocument,
         scale: RenderScale,
-        sourceROI: CGRect?
+        sourceROI: CGRect?,
+        presentationROI: CGRect?
     ) -> Self {
         let maskIdentity = RenderCacheHash.digest(RenderEngine.MaskRecipeIdentity(document.localAdjustments))
         let documentIdentity = RenderCacheHash.digest(document)
@@ -178,8 +180,10 @@ struct RenderBuildPlan: Sendable, Equatable {
             )
         } ?? CGRect(origin: .zero, size: nativeExtent)
         let effectiveROI = sourceROI.flatMap { roi -> CGRect? in
-            guard !document.crop.hasGeometryTransform else { return nil }
-            let intersection = roi.intersection(cropNativeRect)
+            let boundary = document.crop.hasGeometryTransform
+                ? CGRect(origin: .zero, size: nativeExtent)
+                : cropNativeRect
+            let intersection = roi.intersection(boundary)
             return intersection.isNull || intersection.width <= 0 || intersection.height <= 0
                 ? nil : intersection
         }
@@ -191,12 +195,14 @@ struct RenderBuildPlan: Sendable, Equatable {
         }
         // This is the geometry of the complete scaled source, even when the graph below is
         // evaluated from a smaller ROI. Spatial effects use it as their photographic reference.
+        let geometryNativeExtent = RenderPipeline.geometryExtent(
+            of: nativeExtent, for: document.crop
+        )
+        let factor = scale.factor(for: nativeExtent)
         let fullFrameExtent = CGRect(
             origin: .zero,
-            size: CGSize(
-                width: nativeExtent.width * scale.factor(for: nativeExtent),
-                height: nativeExtent.height * scale.factor(for: nativeExtent)
-            )
+            size: CGSize(width: geometryNativeExtent.width * factor,
+                         height: geometryNativeExtent.height * factor)
         )
         let hasEarlyCrop = !scale.isFull && effectiveROI != nil
         let finalFrameExtent: CGRect? = {
@@ -211,7 +217,8 @@ struct RenderBuildPlan: Sendable, Equatable {
             )
         }()
         return Self(
-            scale: scale, sourceROI: effectiveROI, processingROI: processingROI,
+            scale: scale, sourceROI: effectiveROI, presentationROI: presentationROI,
+            processingROI: processingROI,
             fullFrameExtent: fullFrameExtent, hasEarlyCrop: hasEarlyCrop,
             finalFrameExtent: finalFrameExtent,
             includePostRenderWhiteBalance: source.kind == .standard,
@@ -223,11 +230,9 @@ struct RenderBuildPlan: Sendable, Equatable {
     /// orientation and RAW metadata normally agree with `ImageSource.nativeExtent`, but the
     /// decoder remains the source of truth for the graph's actual extent.
     func rebased(to decodedExtent: CGRect, crop: CropAdjustments) -> Self {
-        let fullFrameExtent = RenderPipeline.scaledSourceExtent(
-            nativeExtent: decodedExtent.size,
-            imageExtent: decodedExtent,
-            scale: scale.factor(for: decodedExtent.size)
-        )
+        // `decodedExtent` is already the authoritative post-geometry raster extent. Re-scaling
+        // it here would apply the preview factor a second time for a rotated AABB.
+        let fullFrameExtent = CGRect(origin: .zero, size: decodedExtent.size)
         let finalFrameExtent: CGRect? = {
             guard hasEarlyCrop, let crop = crop.normalizedRect else {
                 return hasEarlyCrop ? fullFrameExtent : nil
@@ -240,7 +245,8 @@ struct RenderBuildPlan: Sendable, Equatable {
             )
         }()
         return Self(
-            scale: scale, sourceROI: sourceROI, processingROI: processingROI,
+            scale: scale, sourceROI: sourceROI, presentationROI: presentationROI,
+            processingROI: processingROI,
             fullFrameExtent: fullFrameExtent, hasEarlyCrop: hasEarlyCrop,
             finalFrameExtent: finalFrameExtent,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
@@ -446,6 +452,7 @@ actor RenderEngine: RenderEngining {
             image = try await buildImage(request.source, request.document, request.lut,
                                          request.renderScale, request.space, quality: request.quality,
                                          sourceROI: request.sourceROI,
+                                         presentationROI: request.presentationROI,
                                          maskTransform: request.maskTransform,
                                          assetID: request.assetID, requestRevision: request.requestRevision,
                                          resolveSemanticMasks: request.maskResolution == .resolved)
@@ -676,6 +683,7 @@ actor RenderEngine: RenderEngining {
             image = try await buildImage(
                 request.source, request.document, request.lut, request.renderScale, request.space,
                 quality: request.quality, sourceROI: request.sourceROI,
+                presentationROI: request.presentationROI,
                 maskTransform: request.maskTransform,
                 assetID: request.assetID, requestRevision: request.requestRevision,
                 resolveSemanticMasks: request.maskResolution == .resolved
@@ -849,6 +857,7 @@ actor RenderEngine: RenderEngining {
             )
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
                                          quality: request.quality, sourceROI: request.sourceROI,
+                                         presentationROI: request.presentationROI,
                                          maskTransform: request.maskTransform,
                                          assetID: request.assetID, requestRevision: request.requestRevision,
                                          resolveSemanticMasks: request.maskResolution == .resolved)
@@ -856,6 +865,7 @@ actor RenderEngine: RenderEngining {
         } else {
             image = try await buildImage(request.source, request.document, request.lut, scale, outputSpace,
                                          quality: request.quality, sourceROI: request.sourceROI,
+                                         presentationROI: request.presentationROI,
                                          maskTransform: request.maskTransform,
                                          assetID: request.assetID, requestRevision: request.requestRevision,
                                          resolveSemanticMasks: request.maskResolution == .resolved)
@@ -1343,6 +1353,7 @@ actor RenderEngine: RenderEngining {
         _ space: WorkingSpace,
         quality: RenderQuality,
         sourceROI: CGRect? = nil,
+        presentationROI: CGRect? = nil,
         maskTransform: LocalMaskRenderTransform = .identity,
         assetID: PhotoAssetID? = nil,
         requestRevision: UInt64 = 0,
@@ -1353,7 +1364,8 @@ actor RenderEngine: RenderEngining {
         // the decoder/graph section so a future concurrent build worker can do this work without
         // borrowing the actor-owned Core Image resources.
         let plan = RenderBuildPlan.make(
-            source: source, document: document, scale: scale, sourceROI: sourceROI
+            source: source, document: document, scale: scale, sourceROI: sourceROI,
+            presentationROI: presentationROI
         )
         let maskIdentity = plan.maskIdentity
         let documentIdentity = plan.documentIdentity
@@ -1383,7 +1395,23 @@ actor RenderEngine: RenderEngining {
         let effectiveROI = effectivePlan.sourceROI
         let processingROI = effectivePlan.processingROI
         let working: CIImage
-        if !scale.isFull, let processingROI {
+        if !scale.isFull, effectivePlan.hasEarlyCrop, document.crop.hasGeometryTransform,
+           let presentationROI = effectivePlan.presentationROI
+        {
+            // Geometry changes the source coordinate system, so crop the already-transformed
+            // graph in post-geometry coordinates. This lets Core Image propagate the viewport
+            // demand through straighten/flip/perspective without treating a native ROI as if it
+            // were still in the transformed image's coordinate space.
+            let extent = geometricallyDeveloped.extent
+            let support = document.effects.hasSpatialWork ? CGFloat(0.028) : CGFloat(0.001)
+            let expanded = CGRect(
+                x: max(0, presentationROI.minX - support) * extent.width + extent.minX,
+                y: max(0, presentationROI.minY - support) * extent.height + extent.minY,
+                width: min(1, presentationROI.width + support * 2) * extent.width,
+                height: min(1, presentationROI.height + support * 2) * extent.height
+            ).intersection(extent)
+            working = geometricallyDeveloped.cropped(to: expanded)
+        } else if !scale.isFull, let processingROI {
             working = RenderPipeline.cropSourceROI(
                 processingROI,
                 nativeExtent: document.rotation.orientedExtent(source.nativeExtent),
@@ -1456,11 +1484,22 @@ actor RenderEngine: RenderEngining {
             finalFrameExtent: finalFrameExtent
         )
         guard hasEarlyCrop, let effectiveROI else { return output }
-        return output.cropped(to: RenderPipeline.scaledSourceRect(
-            effectiveROI,
-            nativeExtent: document.rotation.orientedExtent(source.nativeExtent),
-            imageExtent: fullFrameExtent
-        ))
+        let outputROI: CGRect = {
+            if document.crop.hasGeometryTransform, let presentationROI = effectivePlan.presentationROI {
+                return CGRect(
+                    x: presentationROI.minX * fullFrameExtent.width,
+                    y: presentationROI.minY * fullFrameExtent.height,
+                    width: presentationROI.width * fullFrameExtent.width,
+                    height: presentationROI.height * fullFrameExtent.height
+                )
+            }
+            return RenderPipeline.scaledSourceRect(
+                effectiveROI,
+                nativeExtent: document.rotation.orientedExtent(source.nativeExtent),
+                imageExtent: fullFrameExtent
+            )
+        }()
+        return output.cropped(to: outputROI)
     }
 
     /// Standard-image decode is immutable value work. It does not touch the interactive RAW
@@ -2651,6 +2690,7 @@ actor RenderEngine: RenderEngining {
             lutFingerprint: request.lut?.cacheFingerprint ?? "none",
             targetScale: RenderScaleKey(scale, nativeExtent: request.source.nativeExtent),
             sourceROI: request.sourceROI,
+            presentationROI: request.presentationROI,
             quality: request.quality,
             space: request.space,
             pipelineVersion: RenderPipeline.cacheVersion

@@ -143,6 +143,7 @@ struct PreviewCacheKey: Hashable, Sendable {
     let lutFingerprint: String
     let targetScale: RenderScaleKey
     let sourceROI: CGRect?
+    let presentationROI: CGRect?
     let quality: RenderQuality
     let space: WorkingSpace
     let pipelineVersion: Int
