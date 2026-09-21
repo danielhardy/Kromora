@@ -6,31 +6,51 @@ measures the package-backed query path. The fixture deliberately has no asset re
 or thumbnail files in the package; an accidental eager read therefore fails loudly.
 
 Since KRMA-519 the fixture also measures the production path: each sample opens a real
-`PortableLibrarySession` on a private copy of the fixture package and publishes the windowed
-browsing projection exactly as AppViewModel launch (`production-launch`) and reload
-(`production-reload`) do — first query page only, stable `portable:<uuid>` identity, totalCount
-for the full query — with a read observer gating `production-record-reads` to zero and a page-size
-bound gating retained Items. The copy keeps lease acquisition and disposable-index writes off
-the shared fixture. This closes the KRMA-519 false assurance gap where the benchmark measured
-only the bare index session while production materialized every record (slice 1) and then every
-`PhotoAsset`+`Item` (slice 2 windows to the first page; further pages fault in on scroll/selection
-via `browsingWindow`/`appendPortableWindow` with the query controller as the single
-filter/sort/selection authority).
+`PortableLibrarySession` on a private copy of the fixture package and walks the exact
+AppViewModel launch sequence — session open (`production-launch`), first query page via
+`browsingWindow(pageIndex: 0)` (`production-reload`), first grid frame through the real
+`ImageCollection` window adapter (`production-first-grid`), and one delta-based library-state
+write followed by reload (`production-mutation-reload`) — with a read observer gating
+`production-record-reads` to zero and a page-size bound gating retained Items. The copy keeps
+lease acquisition and disposable-index writes off the shared fixture. This closes the KRMA-519
+false assurance gap where the benchmark measured only the bare index session while production
+materialized every record (slice 1) and then every `PhotoAsset`+`Item` (slice 2 windows to the
+first page; further pages fault in on scroll/selection via `browsingWindow`/`appendPortableWindow`
+with the query controller as the single filter/sort/selection authority).
 
-## KRMA-519 production-path probe (windowed; slice 2)
+## KRMA-519 production-path probe (windowed; slice 3)
 
-Slice 1 capture (full browsing projection, 1k): `production-launch` 240.49 ms (real session open:
-manifest, membership, writer lease, disposable projection), `production-reload` 85.97 ms (browsing
-projection over all 1,000 summaries), `production-record-reads` 0.
+Slice 3 promotes the windowed production path into the comparison table with a three-sample
+run at 1k/10k/100k on 2026-09-21 (Mac16,11, macOS 27.0, disk unavailable from `diskutil`,
+Apple Swift 6.4). With three samples the documented nearest-rank p95 and p99.9 are both the
+maximum, so each cell below is a single p95 / p99.9 value (ms, except record reads in counts).
 
-Slice 2 narrows launch/reload to the first query page (`browsingWindow(pageIndex: 0)`): retained
-`Item` objects stay bounded by the page size (500) while `totalCount` proves the full library is
-addressable, pages preserve stable identity with zero overlapping IDs, and filter/sort/selection
-run in the query controller without opening records (`LibraryWindowedBrowsingTests`: 5 tests).
-The pre-519 production path opened one record per asset plus one full-file fingerprint hash per
-original at launch; the committed KRMA-410 table above still reports the bare index-session
-capture. Promote windowed rows into the comparison table with a three-sample 10k/100k run before
-closing KRMA-519.
+| Scale | production-launch | production-reload | production-first-grid | production-mutation-reload | production-record-reads |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 281.98 / 281.98 | 44.71 / 44.71 | 17.21 / 17.21 | 45.71 / 45.71 | 0 / 0 |
+| 10,000 | 2,089.18 / 2,089.18 | 67.63 / 67.63 | 16.17 / 16.17 | 87.86 / 87.86 | 0 / 0 |
+| 100,000 | 21,300.04 / 21,300.04 | 335.16 / 335.16 | 17.02 / 17.02 | 323.02 / 323.02 | 0 / 0 |
+
+First-grid time is flat across scales: retained `Item` objects stay bounded by the page size
+(500) while `totalCount` proves the full library is addressable, pages preserve stable identity
+with zero overlapping IDs, and filter/sort/selection run in the query controller without opening
+records (`LibraryBrowsingProjectionTests`, `LibraryWindowedBrowsingTests`). Launch is dominated
+by the one-time disposable projection build from membership shards plus the index write; reload
+is the steady-state paging cost. The pre-519 production path opened one record per asset plus
+one full-file fingerprint hash per original at launch.
+
+Earlier slices: slice 1 (full browsing projection, 1k) measured `production-launch` 240.49 ms,
+`production-reload` 85.97 ms, 0 reads; slice 2 narrowed launch/reload to the first query page
+with stable `portable:<uuid>` identity. Slice 3 additionally routes grid keyboard stepping
+(`selectNext/PreviousPortableInGrid`) through the controller authority, fires the record-read
+observer on the `resolveEmbeddedSourceURL` record fallback so the zero-read gate is honest, and
+hardens launch/reload into the first-grid and mutation-reload rows above.
+
+Known follow-up (pre-existing, not a 519 regression): `PortablePackageImportCatalog` builds its
+duplicate-detection map by opening every asset record, and the scale fixture carries no records
+by design, so an import against the fixture copy throws instead of quietly materializing.
+Import-time catalog reads need hash-index work tracked separately; the mutation-reload row above
+proves the post-mutation reload path stays at zero reads.
 
 Run it only in the optional benchmark lane:
 

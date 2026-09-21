@@ -74,6 +74,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         let observableObjectCount: Double
         let productionLaunchMs: Double
         let productionReloadMs: Double
+        let productionFirstGridMs: Double
+        let productionMutationReloadMs: Double
         let productionRecordReads: Double
     }
 
@@ -140,6 +142,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
                 metrics["observable-object-count", default: []].append(measured.observableObjectCount)
                 metrics["production-launch", default: []].append(measured.productionLaunchMs)
                 metrics["production-reload", default: []].append(measured.productionReloadMs)
+                metrics["production-first-grid", default: []].append(measured.productionFirstGridMs)
+                metrics["production-mutation-reload", default: []].append(measured.productionMutationReloadMs)
                 metrics["production-record-reads", default: []].append(measured.productionRecordReads)
                 metrics["interactive-preview-submission", default: []].append(
                     try await measureInteractivePreview(at: fixture.generated.rootURL)
@@ -308,7 +312,7 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         let production = try await measureProductionLaunch(fixture: fixture)
         XCTAssertEqual(
             production.recordReads, 0,
-            "production launch/reload must not open asset records"
+            "production launch/reload/grid/mutation must not open asset records"
         )
 
         return CollectionMetrics(
@@ -321,6 +325,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             observableObjectCount: Double(observableObjectCount),
             productionLaunchMs: production.launchMs,
             productionReloadMs: production.reloadMs,
+            productionFirstGridMs: production.firstGridMs,
+            productionMutationReloadMs: production.mutationReloadMs,
             productionRecordReads: Double(production.recordReads)
         )
     }
@@ -328,6 +334,8 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
     private struct ProductionProbe {
         let launchMs: Double
         let reloadMs: Double
+        let firstGridMs: Double
+        let mutationReloadMs: Double
         let recordReads: Int
     }
 
@@ -343,8 +351,17 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
 
     /// Opens a real `PortableLibrarySession` on a private copy of the fixture package and
     /// publishes the windowed browsing projection exactly as AppViewModel launch/reload do
-    /// (KRMA-519 scope item 2: first page only, stable identity, zero record reads). The copy
-    /// keeps lease acquisition and disposable-index writes off the shared fixture.
+    /// (KRMA-519 scope item 2: first page only, stable identity, zero record reads), paints the
+    /// first grid frame through the real `ImageCollection` window adapter, then mutates one
+    /// asset through the delta-based index update and reloads to prove the mutation path does
+    /// not regress to full materialization. The copy keeps lease acquisition and
+    /// disposable-index writes off the shared fixture.
+    ///
+    /// Import itself is deliberately not exercised here: `PortablePackageImportCatalog` builds
+    /// its duplicate-detection map by opening every asset record, and the scale fixture
+    /// carries no records by design, so an import throws instead of quietly materializing.
+    /// That catalog scan is pre-existing import-pipeline behavior (it also predates KRMA-519),
+    /// not a browsing-projection regression; it needs hash-index work tracked separately.
     private func measureProductionLaunch(fixture: ScaleFixture) async throws -> ProductionProbe {
         let copyURL = tempDirectory.appendingPathComponent(
             "Production-\(fixture.assetIDs.count)-\(UUID().uuidString).kromoralibrary"
@@ -394,16 +411,66 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
                     ])
                 }
             }
+            // First grid frame: publish the window through the real presentation adapter
+            // exactly as AppViewModel.reloadPortableWindow does. Retained Items stay bounded
+            // by the page size; the adapter never opens records on its own.
+            let gridStart = DispatchTime.now().uptimeNanoseconds
+            let collection = makeTestCollection()
+            collection.loadPortableWindow(
+                assets: window.assets, totalCount: window.totalCount,
+                pageIndex: 0, pageSize: window.pageSize, query: .all
+            )
+            let gridEnd = DispatchTime.now().uptimeNanoseconds
+            guard collection.items.count == window.assets.count else {
+                throw NSError(domain: "KromoraScaleRegression", code: 6, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "grid holds \(collection.items.count) items for \(window.assets.count) window assets"
+                ])
+            }
+            guard collection.items.count <= window.pageSize else {
+                throw NSError(domain: "KromoraScaleRegression", code: 7, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "grid holds \(collection.items.count) items beyond page size \(window.pageSize)"
+                ])
+            }
+            // Mutation/reload path: a library-state write lands through the delta-based index
+            // update, then reload republishes page 0. Total count is unchanged, the new state
+            // is visible, and record reads stay at zero, proving the mutation path does not
+            // regress to full materialization at scale.
+            let firstItem = try XCTUnwrap(session.page(at: 0, query: .all).items.first)
+            let nextRating = ((firstItem.summary.rating ?? 0) + 1) % 6
+            let nextFlag: PhotoFlag = firstItem.summary.flag == PhotoFlag.pick.rawValue ? .none : .pick
+            try session.updateLibraryState(for: firstItem.assetID, rating: nextRating, flag: nextFlag)
+            let mutationReloadStart = DispatchTime.now().uptimeNanoseconds
+            let reloaded = try session.browsingWindow(pageIndex: 0, query: .all)
+            let mutationReloadEnd = DispatchTime.now().uptimeNanoseconds
+            guard reloaded.totalCount == fixture.assetIDs.count else {
+                throw NSError(domain: "KromoraScaleRegression", code: 8, userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "post-mutation total \(reloaded.totalCount) != \(fixture.assetIDs.count)"
+                ])
+            }
+            let mutated = reloaded.assets.first(where: {
+                $0.source.portableIdentity.assetID == firstItem.assetID
+            })
+            guard mutated?.rating == nextRating, mutated?.flag == nextFlag else {
+                throw NSError(domain: "KromoraScaleRegression", code: 9, userInfo: [
+                    NSLocalizedDescriptionKey: "post-mutation reload does not show the new state"
+                ])
+            }
             // The session owns no heartbeat or imports without a scheduler; scope exit runs
             // deinit on the main actor, which cancels renewal and releases the writer lease.
             return (
                 launchMs: milliseconds(from: launchStart, to: launchEnd),
                 reloadMs: milliseconds(from: reloadStart, to: reloadEnd),
+                firstGridMs: milliseconds(from: gridStart, to: gridEnd),
+                mutationReloadMs: milliseconds(from: mutationReloadStart, to: mutationReloadEnd),
                 recordReads: counter.count
             )
         }
         return ProductionProbe(
-            launchMs: probe.launchMs, reloadMs: probe.reloadMs, recordReads: probe.recordReads
+            launchMs: probe.launchMs, reloadMs: probe.reloadMs, firstGridMs: probe.firstGridMs,
+            mutationReloadMs: probe.mutationReloadMs, recordReads: probe.recordReads
         )
     }
 
