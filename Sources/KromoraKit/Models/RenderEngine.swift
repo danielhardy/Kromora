@@ -180,6 +180,9 @@ struct RenderBuildPlan: Sendable, Equatable {
             )
         } ?? CGRect(origin: .zero, size: nativeExtent)
         let effectiveROI = sourceROI.flatMap { roi -> CGRect? in
+            // A geometry ROI is only safe when the caller also supplied the post-geometry
+            // rectangle; without it the native ROI cannot be applied after the transform.
+            if document.crop.hasGeometryTransform, presentationROI == nil { return nil }
             let boundary = document.crop.hasGeometryTransform
                 ? CGRect(origin: .zero, size: nativeExtent)
                 : cropNativeRect

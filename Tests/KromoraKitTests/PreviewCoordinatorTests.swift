@@ -42,6 +42,32 @@ final class PreviewCoordinatorTests: XCTestCase {
         XCTAssertEqual(publications.first?.request.document.rawDevelop.exposure, 0.5)
     }
 
+    func testRebuiltRequestsKeepTheGeometryPresentationROI() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(
+            engine: fake, interactiveDelay: .zero, settleDelay: .zero
+        )
+        let source = makeSource()
+        let roi = CGRect(x: 0.25, y: 0.25, width: 0.25, height: 0.25)
+        coordinator.beginInteraction()
+        coordinator.submit(
+            RenderRequest(
+                source: source,
+                document: EditDocument(crop: CropAdjustments(straightenAngle: 12)),
+                sourceROI: CGRect(x: 10, y: 10, width: 40, height: 40),
+                presentationROI: roi,
+                quality: .preview, output: .raster
+            ),
+            phase: .interactive
+        )
+        try await waitUntil("the interactive request") { await fake.requests.count == 1 }
+        coordinator.endInteraction()
+        try await waitUntil("the settled request") { await fake.requests.count == 2 }
+        let requests = await fake.allRequests()
+        XCTAssertEqual(requests.map(\.presentationROI), [roi, roi],
+                       "quality rebuilds must not drop the post-geometry viewport rectangle")
+    }
+
     func testAStaleResultCannotPublishAfterANewRevision() async throws {
         let fake = ControlledRenderEngine()
         let coordinator = PreviewCoordinator(

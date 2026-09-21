@@ -492,6 +492,7 @@ final class PreviewCoordinator {
             lut: request.lut,
             targetSize: request.targetSize,
             sourceROI: request.sourceROI,
+            presentationROI: request.presentationROI,
             presentationImageExtent: request.presentationImageExtent,
             presentationNavigation: request.presentationNavigation,
             quality: quality,
