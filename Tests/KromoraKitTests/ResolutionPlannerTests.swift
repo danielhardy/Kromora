@@ -19,6 +19,68 @@ final class ResolutionPlannerTests: TempDirectoryTestCase {
         XCTAssertEqual(plan.cropRect, CGRect(x: 0.25, y: 0.25, width: 0.25, height: 0.25))
     }
 
+    func testCommittedStraightenPresentationExtentUsesGeometryAABB() {
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.2, width: 0.8, height: 0.4),
+            straightenAngle: 35
+        )
+        var planner = ResolutionPlanner()
+        let plan = planner.plan(
+            nativeExtent: native, crop: crop, viewportSize: CGSize(width: 1_600, height: 1_200)
+        )
+
+        let geometry = RenderPipeline.geometryExtent(of: plan.sourceSize, for: crop)
+        let expected = CGSize(
+            width: crop.normalizedRect!.width * geometry.width,
+            height: crop.normalizedRect!.height * geometry.height
+        )
+
+        XCTAssertEqual(plan.presentationImageExtent.size.width, expected.width, accuracy: 0.001)
+        XCTAssertEqual(plan.presentationImageExtent.size.height, expected.height, accuracy: 0.001)
+        XCTAssertEqual(
+            plan.presentationImageExtent.width / plan.presentationImageExtent.height,
+            expected.width / expected.height,
+            accuracy: 0.000001
+        )
+        XCTAssertNil(
+            plan.previewSourceROI(nativeExtent: native),
+            "straightened presentation must not publish a pre-transform native ROI"
+        )
+        XCTAssertTrue(plan.coversPresentedPhoto(nativeExtent: native))
+    }
+
+    func testCommittedGeometryDeepZoomUsesAConservativeNativeROI() {
+        var navigation = CanvasNavigation()
+        navigation.setZoom(8)
+        let crops = [
+            CropAdjustments(straightenAngle: 35),
+            CropAdjustments(flipHorizontal: true),
+            CropAdjustments(verticalPerspective: 0.35, horizontalPerspective: -0.25),
+        ]
+
+        for crop in crops {
+            var planner = ResolutionPlanner()
+            let plan = planner.plan(
+                nativeExtent: native, crop: crop,
+                viewportSize: CGSize(width: 800, height: 600), navigation: navigation
+            )
+            let roi = try! XCTUnwrap(
+                plan.previewSourceROI(nativeExtent: native),
+                "deep geometry zoom should retain a viewport ROI"
+            )
+
+            XCTAssertFalse(plan.coversPresentedPhoto(nativeExtent: native))
+            XCTAssertGreaterThanOrEqual(roi.minX, 0)
+            XCTAssertGreaterThanOrEqual(roi.minY, 0)
+            XCTAssertLessThanOrEqual(roi.maxX, native.width)
+            XCTAssertLessThanOrEqual(roi.maxY, native.height)
+            XCTAssertLessThan(
+                roi.width * roi.height, native.width * native.height,
+                "the geometry ROI should be smaller than the complete native frame"
+            )
+        }
+    }
+
     func testFitDetailIsDiscreteAndHysteresisBoundsResizeTransitions() {
         var planner = ResolutionPlanner()
         let initial = planner.plan(nativeExtent: native, viewportSize: CGSize(width: 1_620, height: 1_080))
@@ -187,6 +249,7 @@ final class ResolutionPlannerTests: TempDirectoryTestCase {
             targetScale: RenderScaleKey(
                 request.renderScale, nativeExtent: request.source.nativeExtent),
             sourceROI: request.sourceROI,
+            presentationROI: request.presentationROI,
             quality: request.quality,
             space: request.space,
             pipelineVersion: RenderPipeline.cacheVersion

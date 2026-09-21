@@ -45,8 +45,9 @@ enum RenderPipeline {
     /// mask coordinates when a preview is evaluated from a non-nil source ROI. v27 makes thumbnail
     /// source sizing crop-aware so a settled crop is not enlarged from an under-sized raster.
     /// v28 adds the non-destructive flip/straighten geometry stage before crop. v29 adds the
-    /// bounded vertical/horizontal perspective stage.
-    static let cacheVersion = 29
+    /// bounded vertical/horizontal perspective stage. v30 normalizes straighten output onto its
+    /// geometry AABB so post-geometry ROI previews share the planner's frame.
+    static let cacheVersion = 30
 
     /// Build the graph for `document` over `source`.
     ///
@@ -312,6 +313,7 @@ enum RenderPipeline {
             result = result.transformed(by: transform)
         }
         if crop.straightenAngle != 0 {
+            let sourceExtent = result.extent
             let radians = CGFloat(crop.straightenAngle * .pi / 180)
             if let filter = CIFilter(name: "CIStraightenFilter") {
                 filter.setValue(result, forKey: kCIInputImageKey)
@@ -326,6 +328,28 @@ enum RenderPipeline {
                     .rotated(by: radians)
                     .translatedBy(x: -center.x, y: -center.y))
             }
+
+            // Some Core Image runtimes keep CIStraightenFilter's original extent even though
+            // the pixels occupy the rotated AABB. Rebase the result to the explicit geometry
+            // extent used by ResolutionPlanner so the renderer, ROI crop, and presenter share one
+            // coordinate system on every supported runtime.
+            let expected = CGRect(
+                origin: .zero,
+                size: geometryExtent(of: sourceExtent.size, for: CropAdjustments(
+                    straightenAngle: crop.straightenAngle
+                ))
+            )
+            let actual = result.extent
+            guard actual.width > 0, actual.height > 0,
+                  expected.width > 0, expected.height > 0 else { return result }
+            result = result
+                .transformed(by: CGAffineTransform(
+                    a: expected.width / actual.width, b: 0,
+                    c: 0, d: expected.height / actual.height,
+                    tx: expected.minX - actual.minX * expected.width / actual.width,
+                    ty: expected.minY - actual.minY * expected.height / actual.height
+                ))
+                .cropped(to: expected)
         }
         return applyingPerspective(crop, to: result)
     }
@@ -393,6 +417,149 @@ enum RenderPipeline {
         guard crop.straightenAngle != 0 else { return size }
         return CropOverlayInteraction.rotatedImageExtent(
             of: size, angle: crop.straightenAngle
+        )
+    }
+
+    /// Conservatively maps a post-geometry presentation rectangle back into native source space.
+    ///
+    /// `sourceROI` is consumed before `applyingGeometry`, so passing the presentation rectangle
+    /// directly would clip the wrong pixels as soon as a committed crop contains a flip,
+    /// straighten, or perspective correction. The inverse is deliberately an enclosure rather
+    /// than a tight polygon: Core Image can evaluate the geometry graph over this rectangle while
+    /// the final output is cropped back to the post-geometry presentation rectangle.
+    static func sourceROI(
+        forPresentationROI presentationROI: CGRect,
+        nativeExtent: CGSize,
+        crop: CropAdjustments
+    ) -> CGRect {
+        guard nativeExtent.width > 0, nativeExtent.height > 0,
+              nativeExtent.width.isFinite, nativeExtent.height.isFinite,
+              presentationROI.width > 0, presentationROI.height > 0,
+              presentationROI.minX.isFinite, presentationROI.minY.isFinite,
+              presentationROI.width.isFinite, presentationROI.height.isFinite
+        else { return CGRect(origin: .zero, size: nativeExtent) }
+
+        let geometry = CGRect(origin: .zero, size: geometryExtent(of: nativeExtent, for: crop))
+        let clamped = presentationROI.intersection(geometry)
+        guard !clamped.isNull, clamped.width > 0, clamped.height > 0 else {
+            return CGRect(origin: .zero, size: nativeExtent)
+        }
+
+        let corners = [
+            CGPoint(x: clamped.minX, y: clamped.minY),
+            CGPoint(x: clamped.maxX, y: clamped.minY),
+            CGPoint(x: clamped.maxX, y: clamped.maxY),
+            CGPoint(x: clamped.minX, y: clamped.maxY),
+        ]
+        let inverseAngles: [CGFloat] = crop.straightenAngle == 0
+            ? [0]
+            // CIStraightenFilter and the affine compatibility fallback have differed in angle
+            // direction across OS implementations. Keeping both inverse enclosures is cheap at a
+            // zoomed viewport and guarantees that the optimization cannot discard a corner.
+            : [
+                -CGFloat(crop.straightenAngle * .pi / 180),
+                CGFloat(crop.straightenAngle * .pi / 180),
+            ]
+        let center = CGPoint(x: nativeExtent.width / 2, y: nativeExtent.height / 2)
+        var mapped: [CGPoint] = []
+        mapped.reserveCapacity(corners.count * inverseAngles.count)
+        for angle in inverseAngles {
+            for corner in corners {
+                let beforeStraighten = inversePerspectivePoint(
+                    corner, extent: geometry, crop: crop
+                )
+                mapped.append(
+                    beforeStraighten.applying(
+                        CGAffineTransform(translationX: center.x, y: center.y)
+                            .rotated(by: angle)
+                            .translatedBy(x: -center.x, y: -center.y)
+                    )
+                )
+            }
+        }
+
+        if crop.flipHorizontal || crop.flipVertical {
+            mapped = mapped.map { point in
+                CGPoint(
+                    x: crop.flipHorizontal ? nativeExtent.width - point.x : point.x,
+                    y: crop.flipVertical ? nativeExtent.height - point.y : point.y
+                )
+            }
+        }
+        guard let bounds = mapped.reduce(nil, { partial, point in
+            let pointRect = CGRect(origin: point, size: .zero)
+            return partial.map { $0.union(pointRect) } ?? pointRect
+        }) else {
+            return CGRect(origin: .zero, size: nativeExtent)
+        }
+
+        // Include a small source-space edge margin for interpolation at the geometry boundary.
+        // Spatial effects receive their larger, independent support margin in expandedSourceROI.
+        let margin = max(2, min(nativeExtent.width, nativeExtent.height) * 0.001)
+        return bounds.insetBy(dx: -margin, dy: -margin)
+            .intersection(CGRect(origin: .zero, size: nativeExtent))
+    }
+
+    private static func inversePerspectivePoint(
+        _ point: CGPoint, extent: CGRect, crop: CropAdjustments
+    ) -> CGPoint {
+        guard crop.verticalPerspective != 0 || crop.horizontalPerspective != 0,
+              extent.width > 0, extent.height > 0 else { return point }
+
+        let vertical = CGFloat(crop.verticalPerspective) * 0.45 * extent.width
+        let horizontal = CGFloat(crop.horizontalPerspective) * 0.45 * extent.height
+        func bounded(_ point: CGPoint) -> CGPoint {
+            CGPoint(
+                x: min(max(point.x, extent.minX), extent.maxX),
+                y: min(max(point.y, extent.minY), extent.maxY)
+            )
+        }
+        let topLeft = bounded(CGPoint(x: extent.minX + vertical, y: extent.maxY - horizontal))
+        let topRight = bounded(CGPoint(x: extent.maxX - vertical, y: extent.maxY + horizontal))
+        let bottomRight = bounded(CGPoint(x: extent.maxX + vertical, y: extent.minY - horizontal))
+        let bottomLeft = bounded(CGPoint(x: extent.minX - vertical, y: extent.minY + horizontal))
+        let u = min(max((point.x - extent.minX) / extent.width, 0), 1)
+        let v = min(max((point.y - extent.minY) / extent.height, 0), 1)
+        // Homography from the corrected rectangle to the source quadrilateral. Mapping the
+        // viewport's four corners through the actual projective transform keeps the enclosure
+        // valid for perspective correction; a bilinear interpolation would be close but can miss
+        // an edge of the projective quad.
+        let dx1 = bottomRight.x - topRight.x + topLeft.x - bottomLeft.x
+        let dy1 = bottomRight.y - topRight.y + topLeft.y - bottomLeft.y
+        let dx2 = topRight.x - bottomRight.x
+        let dy2 = topRight.y - bottomRight.y
+        let dx3 = topLeft.x - bottomRight.x
+        let dy3 = topLeft.y - bottomRight.y
+        let determinant = dx2 * dy3 - dx3 * dy2
+        guard abs(determinant) > 0.0000001 else {
+            let bottom = CGPoint(
+                x: bottomLeft.x + (bottomRight.x - bottomLeft.x) * u,
+                y: bottomLeft.y + (bottomRight.y - bottomLeft.y) * u
+            )
+            let top = CGPoint(
+                x: topLeft.x + (topRight.x - topLeft.x) * u,
+                y: topLeft.y + (topRight.y - topLeft.y) * u
+            )
+            return CGPoint(
+                x: bottom.x + (top.x - bottom.x) * v,
+                y: bottom.y + (top.y - bottom.y) * v
+            )
+        }
+        let g = (dx1 * dy3 - dx3 * dy1) / determinant
+        let h = (dx2 * dy1 - dx1 * dy2) / determinant
+        let a = CGPoint(
+            x: bottomRight.x - bottomLeft.x + g * bottomRight.x,
+            y: bottomRight.y - bottomLeft.y + g * bottomRight.y
+        )
+        let b = CGPoint(
+            x: topLeft.x - bottomLeft.x + h * topLeft.x,
+            y: topLeft.y - bottomLeft.y + h * topLeft.y
+        )
+        let denominator = g * u + h * v + 1
+        guard abs(denominator) > 0.0000001 else { return bottomLeft }
+        return CGPoint(
+            x: (a.x * u + b.x * v + bottomLeft.x) / denominator,
+            y: (a.y * u + b.y * v + bottomLeft.y) / denominator
         )
     }
 

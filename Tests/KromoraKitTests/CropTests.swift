@@ -703,6 +703,46 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.crop.straightenAngle, 30, accuracy: 0.000001)
     }
 
+    func testCommittedStraightenPreviewRequestUsesGeometryPresentationExtent() async throws {
+        let fake = FakeRenderEngine()
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "straighten-presentation.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(
+            engine: fake, editStore: makeInMemoryEditStore())
+        viewModel.openImage(url: url)
+        try await waitUntil("the source image") { viewModel.sourceImage != nil }
+
+        viewModel.beginCrop()
+        viewModel.setCropStraightenAngle(30)
+        viewModel.commitCrop()
+
+        let request = try await waitForPreviewRequest(
+            matching: "the committed straightened preview", on: fake
+        ) { request in
+            request.document.crop.straightenAngle == 30
+        }
+        let source = try XCTUnwrap(request.source)
+        let native = request.document.rotation.orientedExtent(source.nativeExtent)
+        let factor = request.scale.factor(for: native)
+        let scaledNative = CGSize(width: native.width * factor, height: native.height * factor)
+        let geometry = RenderPipeline.geometryExtent(of: scaledNative, for: request.document.crop)
+        let crop = try XCTUnwrap(request.document.crop.normalizedRect)
+        let expected = CGSize(
+            width: crop.width * geometry.width,
+            height: crop.height * geometry.height
+        )
+        let presentation = try XCTUnwrap(request.presentationImageExtent)
+
+        XCTAssertNil(request.sourceROI, "straightened previews must use a complete-frame request")
+        XCTAssertEqual(presentation.width, expected.width, accuracy: 0.001)
+        XCTAssertEqual(presentation.height, expected.height, accuracy: 0.001)
+        XCTAssertEqual(
+            presentation.width / presentation.height,
+            expected.width / expected.height,
+            accuracy: 0.000001
+        )
+    }
+
     func testCropGeometrySliderChangesStayInOneDisplayGenerationAndSettleAfterRelease() async throws {
         let fake = FakeRenderEngine()
         let url = try Fixtures.writeGradientPNG(

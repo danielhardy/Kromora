@@ -41,6 +41,10 @@ struct RenderRequest: Sendable, Equatable {
     /// scaled source (so adjacent pans hit the developed-source cache), but expensive graph stages
     /// may operate only on this rectangle. `nil` preserves the uncropped/full-source path.
     let sourceROI: CGRect?
+    /// The exact visible rectangle in normalized post-geometry coordinates. Geometry previews
+    /// carry this alongside the conservative pre-transform `sourceROI` so the transformed output
+    /// can be cropped and placed without stretching the presentation frame.
+    let presentationROI: CGRect?
     /// Scaled crop-frame geometry for the presentation surface when `sourceROI` is smaller than
     /// the committed crop. This never changes export pixels.
     let presentationImageExtent: CGRect?
@@ -70,6 +74,7 @@ struct RenderRequest: Sendable, Equatable {
         lut: CubeLUT? = nil,
         targetSize: CGSize? = nil,
         sourceROI: CGRect? = nil,
+        presentationROI: CGRect? = nil,
         presentationImageExtent: CGRect? = nil,
         presentationNavigation: CanvasNavigation = CanvasNavigation(),
         quality: RenderQuality,
@@ -87,6 +92,7 @@ struct RenderRequest: Sendable, Equatable {
         self.lut = lut
         self.targetSize = targetSize
         self.sourceROI = sourceROI
+        self.presentationROI = presentationROI
         self.presentationImageExtent = presentationImageExtent
         self.presentationNavigation = presentationNavigation
         self.quality = quality
@@ -157,6 +163,16 @@ struct RenderRequest: Sendable, Equatable {
     /// to fill the canvas instead of treating a cropped fit frame as a postage-stamp ROI.
     var coversPresentationExtent: Bool {
         guard let sourceROI else { return true }
+        if document.crop.hasGeometryTransform {
+            // Compatibility callers that predate the two-coordinate-space contract remain
+            // complete-frame requests. New geometry-aware callers provide the exact transformed
+            // viewport rectangle and can safely publish a partial frame.
+            guard let presentationROI else { return true }
+            return Self.rect(
+                presentationROI,
+                matches: document.crop.normalizedRect ?? CropAdjustments.unitRect
+            )
+        }
         let native = document.rotation.orientedExtent(source.nativeExtent)
         let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
         return ResolutionPlan.roi(sourceROI, coversCrop: crop, nativeExtent: native)
@@ -182,6 +198,29 @@ struct RenderRequest: Sendable, Equatable {
             native.width.isFinite, native.height.isFinite
         else { return nil }
         let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
+        if document.crop.hasGeometryTransform, let presentationROI {
+            let geometry = RenderPipeline.geometryExtent(of: targetSize, for: document.crop)
+            guard geometry.width > 0, geometry.height > 0 else { return nil }
+            let presented = CGRect(
+                x: crop.minX * geometry.width,
+                y: crop.minY * geometry.height,
+                width: crop.width * geometry.width,
+                height: crop.height * geometry.height
+            )
+            let roi = CGRect(
+                x: presentationROI.minX * geometry.width,
+                y: presentationROI.minY * geometry.height,
+                width: presentationROI.width * geometry.width,
+                height: presentationROI.height * geometry.height
+            )
+            let fromTop = presented.maxY - roi.maxY
+            return CGRect(
+                x: roi.minX,
+                y: presented.minY + fromTop,
+                width: roi.width,
+                height: roi.height
+            )
+        }
         let presented = CGRect(
             x: crop.minX * native.width,
             y: crop.minY * native.height,
@@ -195,6 +234,17 @@ struct RenderRequest: Sendable, Equatable {
             width: sourceROI.width / native.width * targetSize.width,
             height: sourceROI.height / native.height * targetSize.height
         )
+    }
+
+    private static func rect(_ lhs: CGRect, matches rhs: CGRect) -> Bool {
+        let epsilon = max(
+            0.0001,
+            0.0001 * max(max(lhs.width, lhs.height), max(rhs.width, rhs.height))
+        )
+        return abs(lhs.minX - rhs.minX) <= epsilon
+            && abs(lhs.minY - rhs.minY) <= epsilon
+            && abs(lhs.width - rhs.width) <= epsilon
+            && abs(lhs.height - rhs.height) <= epsilon
     }
 
     /// The durable pixel contract for a sized export. The renderer applies this after the shared

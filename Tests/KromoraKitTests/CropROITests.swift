@@ -224,4 +224,33 @@ final class CropROITests: TempDirectoryTestCase {
             try Pixels.bytes(of: try Pixels.decode(export.data)), tolerance: 2,
             "the committed-crop ROI must match the same visible export crop")
     }
+
+    func testGeometryViewportROIRendersThePostGeometryFragment() async throws {
+        let url = try Fixtures.writeGradientPNG(
+            width: 96, height: 64, named: "geometry-roi.png", in: tempDirectory)
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
+        let document = EditDocument(crop: CropAdjustments(straightenAngle: 35))
+        var navigation = CanvasNavigation()
+        navigation.setZoom(8)
+        var planner = ResolutionPlanner()
+        let plan = planner.plan(
+            nativeExtent: source.nativeExtent, crop: document.crop,
+            viewportSize: CGSize(width: 48, height: 36), navigation: navigation
+        )
+        let request = RenderRequest(
+            source: source, document: document, targetSize: plan.sourceSize,
+            sourceROI: try XCTUnwrap(plan.previewSourceROI(nativeExtent: source.nativeExtent)),
+            presentationROI: plan.visiblePresentationRect,
+            presentationImageExtent: plan.presentationImageExtent,
+            presentationNavigation: navigation, quality: .preview, output: .raster
+        )
+        XCTAssertFalse(request.coversPresentationExtent)
+        XCTAssertNotNil(request.presentationLayoutExtent)
+
+        let rendered = await RenderEngine().makeCIImage(request)
+        let image = try XCTUnwrap(rendered)
+        XCTAssertGreaterThan(image.extent.width, 0)
+        XCTAssertGreaterThan(image.extent.height, 0)
+        XCTAssertTrue(image.extent.isRasterizable)
+    }
 }
