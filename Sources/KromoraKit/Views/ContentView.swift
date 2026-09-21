@@ -362,7 +362,7 @@ public struct ContentView: View {
 
             // Export
             Button {
-                viewModel.exportDialog()
+                viewModel.shareDialog()
             } label: {
                 Label("Export", systemImage: "square.and.arrow.up")
             }

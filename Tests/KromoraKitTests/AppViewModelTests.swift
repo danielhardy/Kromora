@@ -626,6 +626,13 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
     // MARK: - Export naming
 
+    func testShareUsesSinglePhotoFlowUntilThereIsARealMultiSelection() {
+        XCTAssertEqual(AppViewModel.shareDialogMode(for: 0), .singlePhoto)
+        XCTAssertEqual(AppViewModel.shareDialogMode(for: 1), .singlePhoto)
+        XCTAssertEqual(AppViewModel.shareDialogMode(for: 2), .selectedPhotos)
+        XCTAssertEqual(AppViewModel.shareDialogMode(for: 12), .selectedPhotos)
+    }
+
     func testExportDialogNameUsesSourceAndLUT() throws {
         // Exercises the naming the export panel is seeded with, without the panel.
         let url = try Fixtures.writeCube(

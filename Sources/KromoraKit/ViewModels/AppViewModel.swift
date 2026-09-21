@@ -5053,6 +5053,30 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Export
 
+    /// The destination flow used by the Edit toolbar's Share action. A single selected photo keeps
+    /// the existing save-panel behavior, while a multi-selection is handed to the selected-item
+    /// batch exporter so the user chooses one destination folder for the whole operation.
+    enum ShareDialogMode: Equatable {
+        case singlePhoto
+        case selectedPhotos
+    }
+
+    static func shareDialogMode(for selectionCount: Int) -> ShareDialogMode {
+        selectionCount > 1 ? .selectedPhotos : .singlePhoto
+    }
+
+    /// Share the active photo, or every photo selected in the Edit thumbnail strip when the
+    /// selection contains more than one item. This is deliberately separate from `exportDialog()`:
+    /// File ▸ Export remains the single-photo save-panel command, while Share is selection-aware.
+    func shareDialog() {
+        switch Self.shareDialogMode(for: collection.selectedItems.count) {
+        case .singlePhoto:
+            exportDialog()
+        case .selectedPhotos:
+            exportSelectedDialog()
+        }
+    }
+
     /// Export the open image at full resolution.
     ///
     /// **The Step 6 cutover.** What goes to disk is now the same `EditDocument` the screen is
