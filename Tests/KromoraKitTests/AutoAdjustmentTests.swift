@@ -200,6 +200,8 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
             $0.adjustments = [.exposure(ev: 0.5)]
             $0.effects.vignette.amount = 10
             $0.crop = CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8))
+            $0.rotation = .quarterTurnClockwise
+            $0.localAdjustments = [LocalAdjustmentLayer(name: "Photographer mask")]
         }
         let before = viewModel.document
         let depthBefore = viewModel.undoDepth
@@ -216,11 +218,17 @@ final class AutoAdjustmentTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.adjustments, before.adjustments)
         XCTAssertEqual(viewModel.document.effects, before.effects)
         XCTAssertEqual(viewModel.document.crop, before.crop)
+        XCTAssertEqual(viewModel.document.rotation, before.rotation)
+        XCTAssertEqual(viewModel.document.localAdjustments, before.localAdjustments)
         XCTAssertEqual(viewModel.document.color.mixer, before.color.mixer)
         XCTAssertNotEqual(viewModel.document.light, before.light)
+        let after = viewModel.document
 
         viewModel.undo()
         XCTAssertEqual(viewModel.document, before, "one undo must restore the complete prior document")
+        XCTAssertTrue(viewModel.canRedo)
+        viewModel.redo()
+        XCTAssertEqual(viewModel.document, after, "redo must restore Auto as one coherent operation")
     }
 
     func testFailureLeavesAutoAndHistogramOutOfLoadingState() async throws {

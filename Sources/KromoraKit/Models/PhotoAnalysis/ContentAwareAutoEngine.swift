@@ -38,7 +38,11 @@ struct ContentAwareAutoEngine: Sendable {
                 timings: partialTimings()
             )
         }
-        let expectedHash = current.editHash
+        // Evaluate from a clean Auto-owned global baseline. The complete document is still used
+        // by the caller for stale-revision protection and final application; this baseline only
+        // prevents previous Light/Color values from suppressing a fresh Auto proposal.
+        let autoBaseline = current.autoAdjustmentBaseline
+        let expectedHash = autoBaseline.editHash
         await onProgress?(.analyzing)
         let sourceKind: AutoSourceKind = source.kind == .raw ? .raw : .standard
         let analysisStart = clock.now
@@ -92,7 +96,7 @@ struct ContentAwareAutoEngine: Sendable {
         let measurementStart = clock.now
         do {
             measurement = try await measurer.measure(
-                source: source, assetID: assetID, document: current,
+                source: source, assetID: assetID, document: autoBaseline,
                 expectedDocumentHash: expectedHash, lut: lut,
                 configuration: .default, masks: masks
             )
@@ -143,11 +147,11 @@ struct ContentAwareAutoEngine: Sendable {
             measurement: measurement,
             scene: scene,
             signalConfidence: signalConfidence,
-            asShotTemperature: current.rawDevelop.neutralTemperature,
-            asShotTint: current.rawDevelop.neutralTint
+            asShotTemperature: autoBaseline.rawDevelop.neutralTemperature,
+            asShotTint: autoBaseline.rawDevelop.neutralTint
         )
         let native = AutoEnhancementPolicy.propose(
-            facts: facts, current: current, sourceKind: sourceKind
+            facts: facts, current: autoBaseline, sourceKind: sourceKind
         )
 
         // The Apple-reference adapter renders the analysis view through the sampler; that
@@ -156,7 +160,7 @@ struct ContentAwareAutoEngine: Sendable {
         let apple = await AppleEnhancementReferenceAdapter(
             engine: engine, space: .sRGB
         ).referenceProposal(
-            source: source, document: current, lut: lut, sourceKind: sourceKind,
+            source: source, document: autoBaseline, lut: lut, sourceKind: sourceKind,
             scene: scene, signalConfidence: signalConfidence,
             asShotTemperature: facts.asShotTemperature, asShotTint: facts.asShotTint
         ).proposal
@@ -166,7 +170,7 @@ struct ContentAwareAutoEngine: Sendable {
         let coordinator = AutoEnhancementCoordinator(engine: engine)
         var renderInterval = KromoraObservability.begin(.autoCandidateRender, source: source)
         let selected = await coordinator.run(
-            source: source, current: current, expectedDocumentHash: expectedHash,
+            source: source, current: autoBaseline, expectedDocumentHash: expectedHash,
             facts: facts, regions: measurement.regions, native: native, apple: apple,
             sourceKind: sourceKind, lut: lut, onProgress: onProgress
         )

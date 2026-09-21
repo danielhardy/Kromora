@@ -135,6 +135,28 @@ struct EditDocument: Codable, Sendable, Equatable {
         return updated
     }
 
+    /// The document view used to compute a fresh Auto result.
+    ///
+    /// Auto owns the global Light numeric controls and global vibrance/saturation. Reset those
+    /// fields before measuring or proposing so a prior edit cannot turn a new Auto invocation into
+    /// an accidental no-op. Every other field remains in the baseline: crop, rotation, masks,
+    /// curves, mixer, grading, effects, Looks, and ordered adjustment nodes are still part of the
+    /// rendered context and are retained when the result is applied.
+    var autoAdjustmentBaseline: Self {
+        var baseline = self
+        var light = baseline.light
+        light.exposure = 0
+        light.contrast = 0
+        light.highlights = 0
+        light.shadows = 0
+        light.whites = 0
+        light.blacks = 0
+        baseline.light = light
+        baseline.color.vibrance = 0
+        baseline.color.saturation = 0
+        return baseline
+    }
+
     /// Reconciles the Auto-generated recipes in a candidate with the current document. Stable
     /// purpose identity updates an existing Auto layer in place, while any user-owned layer is
     /// protected from replacement. User layers not mentioned by the candidate are byte-for-byte

@@ -1480,10 +1480,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let assetID = self.activeAssetID
         let currentDocument = document
         let currentLUT = resolvedLUT(document.lut.lutID)
-        var analysisDocument = document
-        analysisDocument.light = .neutral
-        analysisDocument.color.vibrance = 0
-        analysisDocument.color.saturation = 0
+        var analysisDocument = document.autoAdjustmentBaseline
         // Do not compensate for an existing Look. Auto is a source baseline; applying it also
         // preserves the active Look on the document below.
         analysisDocument.lut = .none
