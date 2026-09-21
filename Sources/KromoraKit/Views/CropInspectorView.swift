@@ -54,7 +54,8 @@ struct CropInspectorView: View {
                     Button(action: onAuto) {
                         Label("Auto", systemImage: "wand.and.stars")
                     }
-                    .accessibilityHint("Suggest a horizon straighten when reliable evidence is available")
+                    .accessibilityHint(
+                        "Suggest a horizon straighten when reliable evidence is available")
                 }
                 .padding(16)
             }
@@ -104,19 +105,21 @@ struct CropInspectorView: View {
             .accessibilityHint("Choose the crop frame ratio")
 
             if aspectRatio.supportsOrientationSelection {
-                Picker("Crop orientation", selection: orientationSelection) {
-                    Label("Landscape", systemImage: "rectangle.landscape")
-                        .labelStyle(.iconOnly)
-                        .accessibilityLabel("Landscape")
-                        .tag(CropAspectRatioOrientation.landscape)
-                    Label("Portrait", systemImage: "rectangle.portrait")
-                        .labelStyle(.iconOnly)
-                        .accessibilityLabel("Portrait")
-                        .tag(CropAspectRatioOrientation.portrait)
+                HStack(spacing: 8) {
+                    orientationButton(
+                        "Landscape",
+                        systemImage: landscapeOrientationSystemImage,
+                        isSelected: effectiveOrientation == .landscape,
+                        action: { onAspectRatioChange(aspectRatio, .landscape) }
+                    )
+                    orientationButton(
+                        "Portrait",
+                        systemImage: portraitOrientationSystemImage,
+                        rotation: portraitOrientationSymbolRotation,
+                        isSelected: effectiveOrientation == .portrait,
+                        action: { onAspectRatioChange(aspectRatio, .portrait) }
+                    )
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
                 .accessibilityLabel("Crop orientation")
                 .accessibilityValue(effectiveOrientation == .landscape ? "Landscape" : "Portrait")
                 .accessibilityHint("Choose the orientation of the crop frame")
@@ -134,22 +137,30 @@ struct CropInspectorView: View {
     }
 
     private var aspectOptions: [CropAspectRatio] {
-        [.original, .freeform, .square, .sixteenToNine, .fourToThree, .threeToTwo,
-         .fiveToSeven, .fourToFive, .threeToFive, .custom]
+        [
+            .original, .freeform, .square, .sixteenToNine, .fourToThree, .threeToTwo,
+            .fiveToSeven, .fourToFive, .threeToFive, .custom,
+        ]
     }
 
     private func selectAspect(_ ratio: CropAspectRatio) {
-        let nextOrientation = ratio.supportsOrientationSelection
+        let nextOrientation =
+            ratio.supportsOrientationSelection
             ? effectiveOrientation
             : .automatic
         onAspectRatioChange(ratio, nextOrientation)
     }
 
-    private var orientationSelection: Binding<CropAspectRatioOrientation> {
-        Binding(
-            get: { effectiveOrientation },
-            set: { orientation in onAspectRatioChange(aspectRatio, orientation) }
-        )
+    private var landscapeOrientationSystemImage: String {
+        Self.isSystemImageAvailable("rectangle.landscape") ? "rectangle.landscape" : "rectangle"
+    }
+
+    private var portraitOrientationSystemImage: String {
+        Self.isSystemImageAvailable("rectangle.portrait") ? "rectangle.portrait" : "rectangle"
+    }
+
+    private var portraitOrientationSymbolRotation: Angle {
+        Self.isSystemImageAvailable("rectangle.portrait") ? .zero : .degrees(90)
     }
 
     /// Legacy documents can use automatic orientation. Resolve that state for the control from
@@ -157,8 +168,9 @@ struct CropInspectorView: View {
     private var effectiveOrientation: CropAspectRatioOrientation {
         guard orientation == .automatic else { return orientation }
         guard imageSize.width > 0, imageSize.height > 0,
-              let normalized = aspectRatio.normalizedRatio(for: imageSize),
-              normalized.isFinite else { return .landscape }
+            let normalized = aspectRatio.normalizedRatio(for: imageSize),
+            normalized.isFinite
+        else { return .landscape }
         let pixelRatio = normalized * imageSize.width / imageSize.height
         return pixelRatio >= 1 ? .landscape : .portrait
     }
@@ -214,6 +226,28 @@ struct CropInspectorView: View {
 
     private static func isSystemImageAvailable(_ name: String) -> Bool {
         NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+    }
+
+    private func orientationButton(
+        _ title: String,
+        systemImage: String,
+        rotation: Angle = .zero,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .rotationEffect(rotation)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .frame(width: 32, height: 32)
+        .contentShape(Rectangle())
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .tint(isSelected ? .accentColor : .secondary)
     }
 
     private var straightenSection: some View {
