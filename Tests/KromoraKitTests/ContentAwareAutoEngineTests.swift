@@ -135,6 +135,49 @@ final class ContentAwareAutoEngineTests: TempDirectoryTestCase {
         XCTAssertTrue(result.proposedDocument.localAdjustments.isEmpty)
     }
 
+    func testAutoReplacesExistingGlobalValuesWhilePreservingUnrelatedEdits() async throws {
+        let sourceData = try Fixtures.jpegData(
+            for: Fixtures.makeParametricCGImage(width: 96, height: 64) { nx, ny in
+                let value = 0.04 + 0.56 * ((nx + ny) / 2)
+                return (value, value, value * 0.98)
+            }
+        )
+        let source = ImageSource(data: sourceData, nativeExtent: CGSize(width: 96, height: 64))
+        let assetID = PhotoAssetID.data(sourceData)
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("masks-replace"))
+        let engine = RenderEngine()
+        let analysisCoordinator = PhotoAnalysisCoordinator(
+            engine: engine,
+            maskStore: store,
+            cache: PhotoAnalysisCache(
+                directory: tempDirectory.appendingPathComponent("analysis-replace")
+            ),
+            maskProvider: FixtureRegionalMaskProvider(masks: [:]),
+            stages: [:]
+        )
+        defer { Task { await analysisCoordinator.shutdown() } }
+
+        var edited = EditDocument()
+        edited.light.exposure = 4
+        edited.color.saturation = 40
+        let mask = LocalAdjustmentLayer(name: "Photographer mask")
+        edited.localAdjustments = [mask]
+
+        let result = await ContentAwareAutoEngine(
+            engine: engine,
+            analysisCoordinator: analysisCoordinator,
+            maskStore: store
+        ).run(source: source, assetID: assetID, current: edited)
+
+        XCTAssertEqual(result.status, .improved, result.reasons.joined(separator: " "))
+        let applied = result.applying(to: edited)
+        XCTAssertNotEqual(applied.light.exposure, edited.light.exposure)
+        XCTAssertNotEqual(applied.color.saturation, edited.color.saturation)
+        XCTAssertEqual(applied.crop, edited.crop)
+        XCTAssertEqual(applied.rotation, edited.rotation)
+        XCTAssertEqual(applied.localAdjustments, edited.localAdjustments)
+    }
+
     private static let maskSize = PixelDimensions(width: 64, height: 48)
 
     private func makeRegionalMasks(
