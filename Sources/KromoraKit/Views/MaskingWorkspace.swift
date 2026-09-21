@@ -26,7 +26,6 @@ struct MaskingWorkspace: View {
             .padding(12)
         }
         .frame(minWidth: 280, idealWidth: 320)
-        .background(KromoraTheme.windowBackground)
         .onAppear { viewModel.restoreMaskSelection() }
         .onChange(of: viewModel.document.localAdjustments) { _, _ in
             viewModel.restoreMaskSelection()

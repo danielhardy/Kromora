@@ -157,7 +157,6 @@ struct LookInspectorView: View {
             intensitySection
         }
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
-        .background(KromoraTheme.windowBackground)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Look adjustments")
         .accessibilityValue(presentationState.title)

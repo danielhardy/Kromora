@@ -75,7 +75,8 @@ struct CropInspectorView: View {
             .frame(maxWidth: .infinity, alignment: .trailing)
             .padding(16)
         }
-        .background(KromoraTheme.windowBackground)
+        // The enclosing SwiftUI inspector supplies the chrome material. A forced window fill here
+        // would extend the crop pane into the toolbar's top edge.
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Crop inspector")
         .onExitCommand(perform: onCancel)

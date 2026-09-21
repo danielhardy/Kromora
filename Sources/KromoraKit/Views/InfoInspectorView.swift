@@ -78,7 +78,8 @@ struct InfoInspectorView: View {
             }
         }
         .frame(minWidth: 240, idealWidth: 280)
-        .background(KromoraTheme.windowBackground)
+        // Leave the pane transparent so the native inspector material owns the surface and
+        // begins below the window toolbar instead of creating a second opaque slab.
         .animation(inspectorAnimation, value: canvasState.isCropToolActive)
     }
 
