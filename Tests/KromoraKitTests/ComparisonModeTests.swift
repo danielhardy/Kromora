@@ -35,6 +35,18 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         }
     }
 
+    /// Split/single presentation needs a loaded source (the toolbar control is disabled without
+    /// one), so tests that drive `toggleSideBySide()` must open a photo first.
+    private func openPhoto(_ viewModel: AppViewModel, named name: String) async throws {
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: name, in: tempDirectory
+        )
+        viewModel.openImage(url: image)
+        try await waitUntil("the \(name) source") {
+            viewModel.sourceName == image.lastPathComponent && viewModel.sourceImage != nil
+        }
+    }
+
     func testFirstLaunchDefaultsToSinglePhoto() {
         let viewModel = makeViewModel(defaults: makeDefaults())
 
@@ -109,9 +121,10 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         )
     }
 
-    func testSelectedModeIsRememberedAcrossRelaunch() {
+    func testSelectedModeIsRememberedAcrossRelaunch() async throws {
         let defaults = makeDefaults()
         let firstLaunch = makeViewModel(defaults: defaults)
+        try await openPhoto(firstLaunch, named: "relaunch.png")
         firstLaunch.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
 
         XCTAssertTrue(firstLaunch.toggleSideBySide())
@@ -224,8 +237,9 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         XCTAssertFalse(viewModel.isSideBySide)
     }
 
-    func testSpaceIsSingleViewOnly() {
+    func testSpaceIsSingleViewOnly() async throws {
         let viewModel = makeViewModel(defaults: makeDefaults())
+        try await openPhoto(viewModel, named: "space.png")
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
         XCTAssertTrue(viewModel.toggleSideBySide())
 
@@ -589,9 +603,10 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         }, "second-photo request crossed an edit identity fence; requests=\(diagnostics)")
     }
 
+    /// Retain the side-by-side preference before any photo is open, as a relaunch would. The
+    /// toggle itself needs a loaded source, so set the preference directly.
     private func enableSideBySide(on viewModel: AppViewModel) {
-        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.25)] }
-        XCTAssertTrue(viewModel.toggleSideBySide())
+        viewModel.isSideBySide = true
     }
 
     private func waitForBothSurfaces(
@@ -629,9 +644,10 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.sourceName, image.lastPathComponent)
     }
 
-    func testReturningToSinglePhotoModeIsAlsoRemembered() {
+    func testReturningToSinglePhotoModeIsAlsoRemembered() async throws {
         let defaults = makeDefaults()
         let viewModel = makeViewModel(defaults: defaults)
+        try await openPhoto(viewModel, named: "return-single.png")
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
 
         XCTAssertTrue(viewModel.toggleSideBySide())
