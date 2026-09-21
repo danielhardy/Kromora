@@ -594,9 +594,10 @@ final class PortableLibrarySession {
         pendingImportIndexDelta = .empty
     }
 
-    /// Test/diagnostic hook invoked once per asset record opened by `materialize(_:)`. The
-    /// browsing projection below never fires it; the scale regression suite uses it to prove
-    /// that launch and reload do not open non-visible records.
+    /// Test/diagnostic hook invoked once per asset record opened by `materialize(_:)` or the
+    /// `resolveEmbeddedSourceURL(for:)` record fallback. The browsing projection never fires
+    /// it; the scale regression suite uses it to prove that launch, reload, first grid frame,
+    /// and import/reload do not open non-visible records.
     var assetRecordReadObserver: ((PortablePhotoAssetID) -> Void)?
 
     func materializedAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
@@ -650,10 +651,19 @@ final class PortableLibrarySession {
     /// opened for the requested asset and never for its neighbours.
     func resolveEmbeddedSourceURL(for assetID: PortablePhotoAssetID) throws -> URL {
         if let entry = queryController.index.entry(for: assetID) {
+            // Keep the observer honest: `verifiedEmbeddedSourceURL` opens the record when the
+            // derived file is missing, so check the cheap derived path first and only count
+            // the fallback when a record is actually opened. The returned URL is identical.
+            let derived = package.browsingOriginalURL(
+                for: assetID, displayName: entry.summary.displayName
+            )
+            if FileManager.default.fileExists(atPath: derived.path) { return derived }
+            assetRecordReadObserver?(assetID)
             return try package.verifiedEmbeddedSourceURL(
                 for: assetID, displayName: entry.summary.displayName
             )
         }
+        assetRecordReadObserver?(assetID)
         return try package.embeddedSourceURL(for: package.readAssetRecord(for: assetID))
     }
 

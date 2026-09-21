@@ -485,7 +485,7 @@ final class KeyMonitor {
             }
             guard vm.collection.isActive else { return event }
             if vm.navigation.isGrid {
-                vm.collection.selectPrevious()
+                vm.selectPreviousPortableInGrid()
             } else {
                 vm.selectPreviousImage()
             }
@@ -507,7 +507,7 @@ final class KeyMonitor {
             }
             guard vm.collection.isActive else { return event }
             if vm.navigation.isGrid {
-                vm.collection.selectNext()
+                vm.selectNextPortableInGrid()
             } else {
                 vm.selectNextImage()
             }
@@ -557,7 +557,7 @@ final class KeyMonitor {
             }
             if isDown, vm.collection.isActive {
                 if vm.navigation.isGrid {
-                    vm.collection.selectPrevious()
+                    vm.selectPreviousPortableInGrid()
                 } else {
                     vm.selectPreviousImage()
                 }
@@ -573,7 +573,7 @@ final class KeyMonitor {
             }
             if isDown, vm.collection.isActive {
                 if vm.navigation.isGrid {
-                    vm.collection.selectNext()
+                    vm.selectNextPortableInGrid()
                 } else {
                     vm.selectNextImage()
                 }

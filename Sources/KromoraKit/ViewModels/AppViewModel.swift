@@ -1876,6 +1876,36 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
     }
 
+    /// Grid keyboard stepping under the single portable authority. Unlike the editor
+    /// steppers, moving in the grid changes selection without opening the asset; at the
+    /// window tail with more pages, the next page faults in first so keyboard traversal
+    /// covers the full query without materializing it.
+    func selectNextPortableInGrid() {
+        guard portableLibrary != nil, collection.isPortableWindowed else {
+            collection.selectNext()
+            return
+        }
+        if collection.portableHasMorePages,
+           collection.selectedIndex >= collection.items.count - 1 {
+            loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
+        }
+        let target = min(collection.selectedIndex + 1, collection.items.count - 1)
+        guard collection.items.indices.contains(target), target != collection.selectedIndex
+        else { return }
+        selectPortableItem(at: target)
+    }
+
+    func selectPreviousPortableInGrid() {
+        guard portableLibrary != nil, collection.isPortableWindowed else {
+            collection.selectPrevious()
+            return
+        }
+        let target = max(collection.selectedIndex - 1, 0)
+        guard collection.items.indices.contains(target), target != collection.selectedIndex
+        else { return }
+        selectPortableItem(at: target)
+    }
+
     private static func portableID(for photoID: PhotoAssetID) -> PortablePhotoAssetID? {
         let prefix = "portable:"
         guard photoID.raw.hasPrefix(prefix) else { return nil }

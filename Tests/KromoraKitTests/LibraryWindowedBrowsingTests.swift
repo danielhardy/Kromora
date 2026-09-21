@@ -152,4 +152,46 @@ final class LibraryWindowedBrowsingTests: TempDirectoryTestCase {
         XCTAssertTrue(collection.selection.isEmpty)
         XCTAssertNil(session.portableActiveID)
     }
+
+    func testGridKeyboardStepsThroughSingleAuthority() throws {
+        let packageURL = tempDirectory.appendingPathComponent(
+            "GridKeyboard-\(UUID().uuidString).kromoralibrary"
+        )
+        let seed = try PortableLibrarySession(at: packageURL)
+        var sources: [URL] = []
+        for ordinal in 0..<3 {
+            sources.append(try Fixtures.writeJPEG(
+                width: 20 + ordinal * 2, height: 14, orientation: 1,
+                named: "gridkey-\(ordinal).jpg", in: tempDirectory
+            ))
+        }
+        let result = try seed.importURLs(sources)
+        XCTAssertEqual(result.imported.count, 3)
+        // The view model opens its own session; release the seeding lease first.
+        try seed.lease.release()
+
+        let viewModel = makeAppViewModel(portablePackageURL: packageURL)
+        XCTAssertTrue(viewModel.collection.isPortableWindowed)
+        XCTAssertEqual(viewModel.collection.items.count, 3)
+
+        // Grid stepping moves the controller authority without opening the asset.
+        viewModel.selectNextPortableInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 1)
+        XCTAssertTrue(viewModel.navigation.isGrid)
+        var activeID = try XCTUnwrap(viewModel.portableLibrary?.portableActiveID)
+        XCTAssertEqual(viewModel.collection.items[1].id.raw, "portable:\(activeID.raw)")
+        XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[1].id)
+
+        viewModel.selectNextPortableInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 2)
+        // Clamped at the tail of the single window; no wraparound, no open.
+        viewModel.selectNextPortableInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 2)
+        XCTAssertTrue(viewModel.navigation.isGrid)
+
+        viewModel.selectPreviousPortableInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 1)
+        activeID = try XCTUnwrap(viewModel.portableLibrary?.portableActiveID)
+        XCTAssertEqual(viewModel.collection.items[1].id.raw, "portable:\(activeID.raw)")
+    }
 }
