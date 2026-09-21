@@ -168,6 +168,9 @@ struct RenderRequest: Sendable, Equatable {
     /// image's own extent is in that smaller space. Placing it with that origin on the planner-sized
     /// virtual crop puts the fragment in the wrong corner of a zoomed canvas — the viewport goes
     /// empty until the settled frame, which shares `targetSize`, arrives.
+    ///
+    /// `sourceROI` is native Core Image space (y-up). The presenter is y-down, matching
+    /// `CanvasNavigation`, so this inverts Y within the committed crop.
     var presentationLayoutExtent: CGRect? {
         guard let sourceROI, let targetSize,
             targetSize.width > 0, targetSize.height > 0,
@@ -178,9 +181,17 @@ struct RenderRequest: Sendable, Equatable {
         guard native.width > 0, native.height > 0,
             native.width.isFinite, native.height.isFinite
         else { return nil }
+        let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
+        let presented = CGRect(
+            x: crop.minX * native.width,
+            y: crop.minY * native.height,
+            width: crop.width * native.width,
+            height: crop.height * native.height
+        )
+        let fromTop = presented.maxY - sourceROI.maxY
         return CGRect(
             x: sourceROI.minX / native.width * targetSize.width,
-            y: sourceROI.minY / native.height * targetSize.height,
+            y: (presented.minY + fromTop) / native.height * targetSize.height,
             width: sourceROI.width / native.width * targetSize.width,
             height: sourceROI.height / native.height * targetSize.height
         )

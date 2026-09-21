@@ -4399,9 +4399,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     /// Pan is a presentation-only operation. The caller supplies a viewport-space pointer delta,
-    /// so the image follows that delta on both axes. It updates the Metal transform immediately
-    /// for complete frames and asks the coordinator for a matching ROI when the current frame is
-    /// partial.
+    /// so the image follows that delta on both axes. The Metal presenter moves the current frame
+    /// immediately; a matching ROI is requested so newly exposed edges refine to full detail.
     func panCanvas(by delta: CGSize, viewportSize: CGSize) {
         guard let imageSource else { return }
         let previousNavigation = canvasState.navigation

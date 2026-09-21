@@ -115,8 +115,8 @@ final class CropROITests: TempDirectoryTestCase {
         XCTAssertFalse(fragment.coversPresentationExtent)
         XCTAssertEqual(
             fragment.presentationLayoutExtent,
-            CGRect(x: 30, y: 20, width: 20, height: 16),
-            "a same-scale fragment's layout is the ROI in planner pixels"
+            CGRect(x: 30, y: 28, width: 20, height: 16),
+            "a same-scale fragment's layout is the ROI in y-down planner pixels"
         )
         XCTAssertNil(
             fit.presentationLayoutExtent,
@@ -142,9 +142,28 @@ final class CropROITests: TempDirectoryTestCase {
         )
         XCTAssertEqual(
             request.presentationLayoutExtent,
-            CGRect(x: 480, y: 320, width: 960, height: 640),
-            "layout must use planner pixels, not the reduced interactive decode origin"
+            CGRect(x: 480, y: 640, width: 960, height: 640),
+            "layout must use y-down planner pixels, not the reduced interactive decode origin"
         )
+    }
+
+    func testPresentationLayoutPutsATopSourceStripAtTheTopOfTheCanvas() {
+        let native = CGSize(width: 1_000, height: 800)
+        let source = ImageSource(
+            url: URL(fileURLWithPath: "/tmp/layout-y.png"), nativeExtent: native)
+        let top = RenderRequest(
+            source: source, document: EditDocument(), targetSize: native,
+            sourceROI: CGRect(x: 0, y: 600, width: 1_000, height: 200),
+            quality: .preview, output: .raster
+        )
+        let bottom = RenderRequest(
+            source: source, document: EditDocument(), targetSize: native,
+            sourceROI: CGRect(x: 0, y: 0, width: 1_000, height: 200),
+            quality: .preview, output: .raster
+        )
+
+        XCTAssertEqual(top.presentationLayoutExtent?.minY, 0)
+        XCTAssertEqual(bottom.presentationLayoutExtent?.minY, 600)
     }
 
     func testPanCacheHitTestRepeatedROIRenderDoesNotRedevelopTheSource() async throws {

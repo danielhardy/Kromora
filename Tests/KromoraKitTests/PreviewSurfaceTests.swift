@@ -60,6 +60,103 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertEqual(navigation.zoom, 1)
     }
 
+    func testMouseDragPublishesPanBeforeMouseUp() throws {
+        let view = PreviewMTKView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
+        var began = 0
+        var ended = 0
+        var deltas: [CGSize] = []
+        view.onCanvasInteractionBegan = { began += 1 }
+        view.onCanvasInteractionEnded = { ended += 1 }
+        view.onPan = { delta, viewport in
+            XCTAssertEqual(viewport, CGSize(width: 320, height: 240))
+            deltas.append(delta)
+        }
+
+        view.mouseDown(with: try mouseEvent(at: CGPoint(x: 160, y: 120), clickCount: 1))
+        XCTAssertEqual(began, 0)
+        XCTAssertTrue(deltas.isEmpty)
+
+        view.mouseDragged(with: try mouseEvent(
+            at: CGPoint(x: 148, y: 132), clickCount: 1, type: .leftMouseDragged
+        ))
+        XCTAssertEqual(began, 1)
+        XCTAssertEqual(ended, 0)
+        XCTAssertFalse(deltas.isEmpty, "the photo must move during the drag, not on mouse-up")
+        let total = deltas.reduce(CGSize.zero) { CGSize(width: $0.width + $1.width, height: $0.height + $1.height) }
+        XCTAssertEqual(total.width, -12, accuracy: 0.001)
+        XCTAssertEqual(total.height, -12, accuracy: 0.001)
+
+        view.mouseUp(with: try mouseEvent(
+            at: CGPoint(x: 148, y: 132), clickCount: 1, type: .leftMouseUp
+        ))
+        XCTAssertEqual(ended, 1)
+        XCTAssertEqual(deltas.count, 1, "mouse-up must not apply another pan sample")
+    }
+
+    func testMouseUpDoesNotInvertTheAccumulatedPan() throws {
+        let view = PreviewMTKView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
+        var total = CGSize.zero
+        var ended = 0
+        view.onPan = { delta, _ in
+            total.width += delta.width
+            total.height += delta.height
+        }
+        view.onCanvasInteractionEnded = { ended += 1 }
+
+        view.mouseDown(with: try mouseEvent(at: CGPoint(x: 160, y: 120), clickCount: 1))
+        view.mouseDragged(with: try mouseEvent(
+            at: CGPoint(x: 160, y: 80), clickCount: 1, type: .leftMouseDragged
+        ))
+        XCTAssertEqual(total.width, 0, accuracy: 0.001)
+        XCTAssertEqual(total.height, 40, accuracy: 0.001)
+
+        // A y-down hosting view can deliver mouseUp with the vertical axis flipped relative to
+        // mouseDragged. That used to apply approximately -2× the drag and jump the photo.
+        view.mouseUp(with: try mouseEvent(
+            at: CGPoint(x: 160, y: 160), clickCount: 1, type: .leftMouseUp
+        ))
+        XCTAssertEqual(ended, 1)
+        XCTAssertEqual(total.width, 0, accuracy: 0.001)
+        XCTAssertEqual(total.height, 40, accuracy: 0.001)
+    }
+
+    func testDoubleClickDoesNotStartAPan() throws {
+        let view = PreviewMTKView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
+        var zoomed = false
+        var began = 0
+        var panCount = 0
+        view.onDoubleClick = { zoomed = true }
+        view.onCanvasInteractionBegan = { began += 1 }
+        view.onPan = { _, _ in panCount += 1 }
+
+        view.mouseDown(with: try mouseEvent(at: CGPoint(x: 160, y: 120), clickCount: 2))
+        XCTAssertTrue(zoomed)
+        XCTAssertEqual(began, 0)
+        XCTAssertEqual(panCount, 0)
+    }
+
+    func testMouseDragPreservesPointerDirectionOnBothAxes() throws {
+        let view = PreviewMTKView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 240), device: nil)
+        var total = CGSize.zero
+        view.onPan = { delta, _ in
+            total.width += delta.width
+            total.height += delta.height
+        }
+
+        view.mouseDown(with: try mouseEvent(at: CGPoint(x: 160, y: 120), clickCount: 1))
+        // AppKit y-up: increasing y is upward. A downward drag decreases y and must become a
+        // positive canvas delta so the photo moves down with the pointer (KRMA-439).
+        view.mouseDragged(with: try mouseEvent(
+            at: CGPoint(x: 180, y: 90), clickCount: 1, type: .leftMouseDragged
+        ))
+        XCTAssertEqual(total.width, 20, accuracy: 0.001)
+        XCTAssertEqual(total.height, 30, accuracy: 0.001)
+    }
+
     func testCoordinatorBuildsAPresentationPipelineFromBundledMetalSource() {
         let coordinator = PreviewSurfaceView.Coordinator()
         XCTAssertTrue(
@@ -406,8 +503,9 @@ final class PreviewSurfaceTests: XCTestCase {
         )
         XCTAssertEqual(
             surface.navigationForPresentation(pannedNavigation), publishedNavigation,
-            "a partial ROI must not move under a newer pan before its replacement is published"
+            "a lone partial ROI must not move under a newer pan before a complete underlay exists"
         )
+        XCTAssertFalse(surface.presentsCompleteCoverageUnderlay(for: pannedNavigation))
 
         XCTAssertTrue(
             surface.present(
@@ -461,16 +559,20 @@ final class PreviewSurfaceTests: XCTestCase {
             viewportSize: CGSize(width: 800, height: 600)
         )
         XCTAssertNil(surface.presentationTexture)
+        XCTAssertTrue(
+            surface.presentsCompleteCoverageUnderlay(for: pannedNavigation),
+            "the last complete photo must fill edges the ROI has not covered yet"
+        )
         XCTAssertNotNil(
             PreviewSurfaceView.Coordinator().renderRetainedTextureForTesting(
                 surface: surface, navigation: pannedNavigation,
                 destinationSize: CGSize(width: 80, height: 60)
             ),
-            "the retained complete texture must back the live pan before the ROI materializes"
+            "the retained complete texture must back live pan before the ROI materializes"
         )
         XCTAssertEqual(
             surface.navigationForPresentation(pannedNavigation), pannedNavigation,
-            "the retained complete frame must move with the pointer while the ROI catches up"
+            "the ROI must move with the pointer while the complete frame covers newly exposed edges"
         )
     }
 
@@ -1105,6 +1207,22 @@ final class PreviewSurfaceTests: XCTestCase {
                 provider: try XCTUnwrap(provider), decode: nil, shouldInterpolate: false,
                 intent: .defaultIntent
             ))
+    }
+
+    private func mouseEvent(
+        at location: CGPoint, clickCount: Int, type: NSEvent.EventType = .leftMouseDown
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.mouseEvent(
+            with: type,
+            location: location,
+            modifierFlags: [],
+            timestamp: 1,
+            windowNumber: 0,
+            context: nil,
+            eventNumber: 1,
+            clickCount: clickCount,
+            pressure: 1
+        ))
     }
 
     private func waitForPresentationTexture(_ surface: PreviewSurface) async throws -> MTLTexture {

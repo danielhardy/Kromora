@@ -208,10 +208,14 @@ struct ResolutionPlanner: Equatable, Sendable {
         guard !visible.isNull, visible.width > 0, visible.height > 0 else {
             return CGRect(origin: .zero, size: nativeExtent)
         }
+        // CanvasNavigation is y-down (0 is the top of the crop). Core Image and CropAdjustments
+        // are y-up (0 is the bottom of the source). Convert only the vertical edge so a pan toward
+        // the top of the photo requests the top of the source, not the bottom.
+        let yUpInCrop = cropSize.height - visible.maxY
         return CGRect(
             x: cropRect.minX * nativeExtent.width + visible.minX / cropSize.width * cropRect.width
                 * nativeExtent.width,
-            y: cropRect.minY * nativeExtent.height + visible.minY / cropSize.height
+            y: cropRect.minY * nativeExtent.height + yUpInCrop / cropSize.height
                 * cropRect.height * nativeExtent.height,
             width: visible.width / cropSize.width * cropRect.width * nativeExtent.width,
             height: visible.height / cropSize.height * cropRect.height * nativeExtent.height
