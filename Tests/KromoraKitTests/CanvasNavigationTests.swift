@@ -433,6 +433,47 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         XCTAssertGreaterThanOrEqual(roi.maxY + epsilon, visible.maxY, file: file, line: line)
     }
 
+    func testPointerZoomAnchorsAgainstTheStraightenedPresentationExtent() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 100, height: 80, named: "straight-zoom.png", in: tempDirectory
+        )
+        viewModel.openImage(url: imageURL)
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.sourceImage == nil {
+            if Date() > deadline {
+                XCTFail("timed out waiting for the image to load")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        viewModel.updateDocument { $0.crop = CropAdjustments(straightenAngle: 20) }
+
+        // The presented image is the straighten-enlarged frame, not the oriented source size.
+        let extent = CGRect(
+            origin: .zero,
+            size: RenderPipeline.geometryExtent(
+                of: viewModel.sourceSize, for: viewModel.document.crop))
+        XCTAssertNotEqual(extent.size, viewModel.sourceSize)
+
+        let viewport = CGSize(width: 80, height: 60)
+        let pointer = CGPoint(x: 15, y: 50)
+        let before = viewModel.canvasNavigation.transform(
+            imageExtent: extent, viewportSize: viewport)
+        let imagePoint = CGPoint(
+            x: (pointer.x - before.origin.x) / before.scale,
+            y: (pointer.y - before.origin.y) / before.scale
+        )
+
+        viewModel.zoomCanvas(by: 3, at: pointer, viewportSize: viewport)
+        let after = viewModel.canvasNavigation.transform(
+            imageExtent: extent, viewportSize: viewport)
+        XCTAssertEqual(
+            after.origin.x + imagePoint.x * after.scale, pointer.x, accuracy: 0.000_001)
+        XCTAssertEqual(
+            after.origin.y + imagePoint.y * after.scale, pointer.y, accuracy: 0.000_001)
+    }
+
     func testPanCanvasPreservesPointerDirectionOnBothAxes() async throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let imageURL = try Fixtures.writeGradientPNG(

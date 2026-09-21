@@ -4407,7 +4407,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     private var canvasImageExtent: CGRect? {
         guard let imageSource else { return nil }
-        let oriented = document.rotation.orientedExtent(imageSource.nativeExtent)
+        // Straighten enlarges the geometry frame before the crop rect applies, exactly as
+        // ResolutionPlanner and RenderPipeline size the presented image; ignoring it would
+        // anchor zoom and pan against the wrong aspect for a straightened crop.
+        let oriented = RenderPipeline.geometryExtent(
+            of: document.rotation.orientedExtent(imageSource.nativeExtent), for: document.crop)
         let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
         let size = CGSize(width: oriented.width * crop.width, height: oriented.height * crop.height)
         guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
@@ -4448,19 +4452,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// so the image follows that delta on both axes. The Metal presenter moves the current frame
     /// immediately; a matching ROI is requested so newly exposed edges refine to full detail.
     func panCanvas(by delta: CGSize, viewportSize: CGSize) {
-        guard let imageSource else { return }
+        guard let imageExtent = canvasImageExtent else { return }
         let previousNavigation = canvasState.navigation
-        let oriented = document.rotation.orientedExtent(imageSource.nativeExtent)
-        let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
-        canvasState.pan(
-            by: delta,
-            imageExtent: CGRect(
-                origin: .zero,
-                size: CGSize(
-                    width: oriented.width * crop.width, height: oriented.height * crop.height)
-            ),
-            viewportSize: viewportSize
-        )
+        canvasState.pan(by: delta, imageExtent: imageExtent, viewportSize: viewportSize)
         guard canvasState.navigation != previousNavigation else { return }
 
         // A render planned for the previous focal point must not publish against this newer pan.
