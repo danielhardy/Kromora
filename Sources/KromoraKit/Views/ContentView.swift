@@ -7,6 +7,7 @@ import AppKit
 /// One of two entry points KromoraKit exposes to the executable (the other is
 /// `KromoraCommands`); everything else in the module stays internal.
 public struct ContentView: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @StateObject private var viewModel: AppViewModel
     @ObservedObject private var photosImportCoordinator: PhotosImportCoordinator
     @ObservedObject private var inspectorState: AppViewModel.InspectorState
@@ -180,31 +181,35 @@ public struct ContentView: View {
                 HStack(spacing: 0) {
                     if !canvasState.isCropToolActive,
                         viewModel.isSourceBrowserPresented && !viewModel.collection.items.isEmpty {
-                        SourceBrowserView(viewModel: viewModel)
-                            .frame(width: 240)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
-                        Divider()
+                        HStack(spacing: 0) {
+                            SourceBrowserView(viewModel: viewModel)
+                                .frame(width: 240)
+                            Divider()
+                        }
+                        .transition(sourceBrowserTransition)
                     }
 
                     VStack(spacing: 0) {
                         PreviewView(viewModel: viewModel)
 
                         if viewModel.collection.isActive && !canvasState.isCropToolActive {
-                            Divider()
-                            CullingBarView(viewModel: viewModel, isCompact: true)
-                            Divider()
-                            FilmstripView(
-                                collection: viewModel.collection,
-                                settings: viewModel.settings
-                            ) { index, modifiers in
-                                viewModel.selectCollectionImage(at: index, modifiers: modifiers)
-                            }
-                            .frame(
-                                height: FilmstripLayout.stripHeight(
-                                    showPhotoNames: viewModel.settings.showPhotoNames
+                            VStack(spacing: 0) {
+                                Divider()
+                                CullingBarView(viewModel: viewModel, isCompact: true)
+                                Divider()
+                                FilmstripView(
+                                    collection: viewModel.collection,
+                                    settings: viewModel.settings
+                                ) { index, modifiers in
+                                    viewModel.selectCollectionImage(at: index, modifiers: modifiers)
+                                }
+                                .frame(
+                                    height: FilmstripLayout.stripHeight(
+                                        showPhotoNames: viewModel.settings.showPhotoNames
+                                    )
                                 )
-                            )
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            }
+                            .transition(bottomChromeTransition)
                         }
 
                         StatusBar(
@@ -220,155 +225,177 @@ public struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: viewModel.collection.isActive)
-        .animation(.easeInOut(duration: 0.2), value: canvasState.isCropToolActive)
-        .animation(.easeInOut(duration: 0.2), value: viewModel.isSourceBrowserPresented)
+        .animation(chromeAnimation, value: canvasState.isCropToolActive)
+        .animation(chromeAnimation, value: viewModel.isSourceBrowserPresented)
         .animation(.easeInOut(duration: 0.2), value: viewModel.navigation.mode)
     }
 
-    @ViewBuilder
+    private var chromeAnimation: Animation? {
+        accessibilityReduceMotion ? nil : .easeInOut(duration: 0.3)
+    }
+
+    private var bottomChromeTransition: AnyTransition {
+        accessibilityReduceMotion
+            ? .opacity
+            : .move(edge: .bottom).combined(with: .opacity)
+    }
+
+    private var sourceBrowserTransition: AnyTransition {
+        accessibilityReduceMotion
+            ? .opacity
+            : .move(edge: .leading).combined(with: .opacity)
+    }
+
     private var toolbarContent: some View {
-        switch Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) {
-        case .crop:
-            CropToolbarControls(
-                viewModel: viewModel,
-                hasImage: viewModel.sourceImage != nil
-            )
-        case .edit:
-            Picker("Workspace", selection: Binding(
-                get: { viewModel.navigation.mode },
-                set: { viewModel.navigate(to: $0) }
-            )) {
-                ForEach(NavigationState.Mode.allCases) { mode in
-                    Text(mode.title)
-                        .tag(mode)
-                }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 142)
-            .focusable(false)
-            .help("Library (G) or Edit (E)")
-
-            CanvasToolbarControls(
-                viewModel: viewModel,
-                canvasState: viewModel.canvasState,
-                hasImage: viewModel.sourceImage != nil
-            )
-
-            AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
-                viewModel.runAutoAdjustment()
-            }
-            .accessibilityLabel("Auto photo adjustment")
-            .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
-            .help(viewModel.autoAdjustmentHelp)
-            .disabled(!viewModel.canRunAutoAdjustment)
-
-            // Keep the comparison affordance in a stable toolbar position. The model still guards
-            // the action until a source is loaded; an untouched source is valid split-view input.
-            Button {
-                viewModel.toggleSideBySide()
-            } label: {
-                Label(
-                    viewModel.isSideBySide ? "Single View" : "Side by Side",
-                    systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
+        Group {
+            switch Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) {
+            case .crop:
+                CropToolbarControls(
+                    viewModel: viewModel,
+                    hasImage: viewModel.sourceImage != nil
                 )
-            }
-            .accessibilityLabel("Comparison view")
-            .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
-            .accessibilityHint("Switch comparison view (V)")
-            .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
-            .disabled(!viewModel.isComparisonPresentationAvailable)
-
-            // Keep the editor controls on the trailing side of the toolbar. Source-folder browsing
-            // remains available from Import, while this button reveals the editor's inspector.
-            Button {
-                viewModel.toggleInspector()
-            } label: {
-                Label("Info", systemImage: "sidebar.right")
-            }
-            .accessibilityLabel("Editor sidebar")
-            .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
-            .accessibilityHint("Show or hide the editor sidebar")
-            .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
-            .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
-
-            // Keep reset scopes together and visible: the panel reset affects only the current stage,
-            // while Reset Photo clears every edit on the active source. The File menu retains the
-            // keyboard shortcut for the latter.
-            Menu {
-                Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
-                    if canvasState.isCropToolActive {
-                        viewModel.resetCrop()
-                    } else {
-                        viewModel.resetInspectorSection()
-                    }
-                }
-                .disabled(!canvasState.isCropToolActive && inspectorState.tab == .info)
-
-                Divider()
-
-                Button("Reset Photo") {
-                    viewModel.resetPhoto()
-                }
-            } label: {
-                Label("Reset", systemImage: "arrow.counterclockwise")
-            }
-            .help("Reset the current adjustment section or the whole photo")
-            .disabled(viewModel.sourceImage == nil)
-
-            // Import menu
-            Menu {
-                Button("Open Image...") {
-                    viewModel.openImageDialog()
-                }
-                Divider()
-                Button("Import from Photos...") {
-                    viewModel.importFromPhotos()
-                }
-                Button("Open Source Folder...") {
-                    viewModel.chooseSourceFolder()
-                }
-                Menu("Removable Media") {
-                    if viewModel.removableMediaVolumes.isEmpty {
-                        Text("No supported media mounted")
-                    } else {
-                        ForEach(viewModel.removableMediaVolumes) { volume in
-                            Button(volume.menuLabel) {
-                                viewModel.openRemovableMedia(volume)
-                            }
+                .transition(.opacity)
+            case .edit:
+                Group {
+                    Picker("Workspace", selection: Binding(
+                        get: { viewModel.navigation.mode },
+                        set: { viewModel.navigate(to: $0) }
+                    )) {
+                        ForEach(NavigationState.Mode.allCases) { mode in
+                            Text(mode.title)
+                                .tag(mode)
                         }
                     }
-                    Divider()
-                    Button("Refresh Removable Media") {
-                        viewModel.refreshRemovableMedia()
-                    }
-                }
-                if !viewModel.collection.items.isEmpty {
-                    Button("Refresh Source Folder") {
-                        viewModel.refreshSource()
-                    }
-                }
-                if photosImportCoordinator.progress != nil {
-                    Divider()
-                    Button("Cancel Photos Import") {
-                        cancelPhotosImport()
-                    }
-                }
-            } label: {
-                Label("Import", systemImage: "photo.on.rectangle")
-            }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 142)
+                    .focusable(false)
+                    .help("Library (G) or Edit (E)")
 
-            // Export
-            Button {
-                viewModel.shareDialog()
-            } label: {
-                Label("Export", systemImage: "square.and.arrow.up")
+                    CanvasToolbarControls(
+                        viewModel: viewModel,
+                        canvasState: viewModel.canvasState,
+                        hasImage: viewModel.sourceImage != nil
+                    )
+
+                    AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
+                        viewModel.runAutoAdjustment()
+                    }
+                    .accessibilityLabel("Auto photo adjustment")
+                    .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
+                    .help(viewModel.autoAdjustmentHelp)
+                    .disabled(!viewModel.canRunAutoAdjustment)
+
+                    // Keep the comparison affordance in a stable toolbar position. The model still guards
+                    // the action until a source is loaded; an untouched source is valid split-view input.
+                    Button {
+                        viewModel.toggleSideBySide()
+                    } label: {
+                        Label(
+                            viewModel.isSideBySide ? "Single View" : "Side by Side",
+                            systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
+                        )
+                    }
+                    .accessibilityLabel("Comparison view")
+                    .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
+                    .accessibilityHint("Switch comparison view (V)")
+                    .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
+                    .disabled(!viewModel.isComparisonPresentationAvailable)
+
+                    // Keep the editor controls on the trailing side of the toolbar. Source-folder browsing
+                    // remains available from Import, while this button reveals the editor's inspector.
+                    Button {
+                        viewModel.toggleInspector()
+                    } label: {
+                        Label("Info", systemImage: "sidebar.right")
+                    }
+                    .accessibilityLabel("Editor sidebar")
+                    .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
+                    .accessibilityHint("Show or hide the editor sidebar")
+                    .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
+                    .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
+
+                    // Keep reset scopes together and visible: the panel reset affects only the current stage,
+                    // while Reset Photo clears every edit on the active source. The File menu retains the
+                    // keyboard shortcut for the latter.
+                    Menu {
+                        Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
+                            if canvasState.isCropToolActive {
+                                viewModel.resetCrop()
+                            } else {
+                                viewModel.resetInspectorSection()
+                            }
+                        }
+                        .disabled(!canvasState.isCropToolActive && inspectorState.tab == .info)
+
+                        Divider()
+
+                        Button("Reset Photo") {
+                            viewModel.resetPhoto()
+                        }
+                    } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise")
+                    }
+                    .help("Reset the current adjustment section or the whole photo")
+                    .disabled(viewModel.sourceImage == nil)
+
+                    // Import menu
+                    Menu {
+                        Button("Open Image...") {
+                            viewModel.openImageDialog()
+                        }
+                        Divider()
+                        Button("Import from Photos...") {
+                            viewModel.importFromPhotos()
+                        }
+                        Button("Open Source Folder...") {
+                            viewModel.chooseSourceFolder()
+                        }
+                        Menu("Removable Media") {
+                            if viewModel.removableMediaVolumes.isEmpty {
+                                Text("No supported media mounted")
+                            } else {
+                                ForEach(viewModel.removableMediaVolumes) { volume in
+                                    Button(volume.menuLabel) {
+                                        viewModel.openRemovableMedia(volume)
+                                    }
+                                }
+                            }
+                            Divider()
+                            Button("Refresh Removable Media") {
+                                viewModel.refreshRemovableMedia()
+                            }
+                        }
+                        if !viewModel.collection.items.isEmpty {
+                            Button("Refresh Source Folder") {
+                                viewModel.refreshSource()
+                            }
+                        }
+                        if photosImportCoordinator.progress != nil {
+                            Divider()
+                            Button("Cancel Photos Import") {
+                                cancelPhotosImport()
+                            }
+                        }
+                    } label: {
+                        Label("Import", systemImage: "photo.on.rectangle")
+                    }
+
+                    // Export
+                    Button {
+                        viewModel.shareDialog()
+                    } label: {
+                        Label("Export", systemImage: "square.and.arrow.up")
+                    }
+                    // ⌘S is bound once, on the File ▸ Export menu item (KromoraApp.swift).
+                    // Binding it here too gave the window two competing handlers.
+                    .help("Export the graded image (⌘S)")
+                    .disabled(viewModel.sourceImage == nil)
+                }
+                .transition(.opacity)
             }
-            // ⌘S is bound once, on the File ▸ Export menu item (KromoraApp.swift).
-            // Binding it here too gave the window two competing handlers.
-            .help("Export the graded image (⌘S)")
-            .disabled(viewModel.sourceImage == nil)
         }
+        .animation(chromeAnimation, value: canvasState.isCropToolActive)
     }
 }
 

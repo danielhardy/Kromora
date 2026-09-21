@@ -3,6 +3,7 @@ import SwiftUI
 /// Main image preview area. Supports side-by-side (original vs Look)
 /// and single-image mode. Hold Space to flash original in single mode.
 struct PreviewView: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var canvasState: CanvasInteractionState
     // The preview image is owned by a separate observation boundary. Keep observing it even while
@@ -203,11 +204,17 @@ struct PreviewView: View {
             .accessibilityLabel(singleViewAccessibilityLabel)
             .accessibilityHint("Presentation only; does not change edits or export")
             .frame(width: geometry.size.width, height: geometry.size.height)
-            .animation(.easeInOut(duration: 0.2), value: canvasState.isCropToolActive)
+            .animation(
+                accessibilityReduceMotion ? nil : .easeInOut(duration: 0.3),
+                value: canvasState.isCropToolActive
+            )
             // The GPU preview request changes orientation at the same time as the draft frame is
             // remapped. Animating this narrow crop subtree keeps the frame/layout transition
             // readable without forcing a full-resolution render for intermediate angles.
-            .animation(.snappy(duration: 0.3, extraBounce: 0.04), value: canvasState.cropRotation)
+            .animation(
+                accessibilityReduceMotion ? nil : .snappy(duration: 0.3, extraBounce: 0.04),
+                value: canvasState.cropRotation
+            )
         }
     }
 

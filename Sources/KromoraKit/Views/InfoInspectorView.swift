@@ -3,6 +3,7 @@ import SwiftUI
 /// Docked inspector pane: histogram of the displayed image up top, EXIF/TIFF
 /// metadata listed below. Toggled from the toolbar (and ⌘I).
 struct InfoInspectorView: View {
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var inspectorState: AppViewModel.InspectorState
     @ObservedObject private var canvasState: CanvasInteractionState
@@ -43,36 +44,52 @@ struct InfoInspectorView: View {
                     onCancel: viewModel.cancelCrop,
                     onDone: viewModel.commitCrop
                 )
+                .transition(inspectorTransition(edge: .trailing))
             } else if viewModel.sourceImage == nil {
                 // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
                 // offers a trip to Develop to be told "this image is already rendered" about an image
                 // that does not exist. The empty state alone is the honest answer.
                 emptyState
+                    .transition(.opacity)
             } else {
-                tabSwitcher
+                Group {
+                    tabSwitcher
 
-                Divider()
+                    Divider()
 
-                switch inspectorState.tab.content {
-                case .info:
-                    infoContent
-                case .light:
-                    LightInspectorView(viewModel: viewModel)
-                case .develop:
-                    DevelopInspectorView(viewModel: viewModel)
-                case .color:
-                    ColorInspectorView(viewModel: viewModel)
-                case .effects:
-                    EffectsInspectorView(viewModel: viewModel)
-                case .look:
-                    LookInspectorView(viewModel: viewModel)
-                case .masking:
-                    MaskingWorkspace(viewModel: viewModel)
+                    switch inspectorState.tab.content {
+                    case .info:
+                        infoContent
+                    case .light:
+                        LightInspectorView(viewModel: viewModel)
+                    case .develop:
+                        DevelopInspectorView(viewModel: viewModel)
+                    case .color:
+                        ColorInspectorView(viewModel: viewModel)
+                    case .effects:
+                        EffectsInspectorView(viewModel: viewModel)
+                    case .look:
+                        LookInspectorView(viewModel: viewModel)
+                    case .masking:
+                        MaskingWorkspace(viewModel: viewModel)
+                    }
                 }
+                .transition(inspectorTransition(edge: .leading))
             }
         }
         .frame(minWidth: 240, idealWidth: 280)
         .background(KromoraTheme.windowBackground)
+        .animation(inspectorAnimation, value: canvasState.isCropToolActive)
+    }
+
+    private var inspectorAnimation: Animation? {
+        accessibilityReduceMotion ? nil : .easeInOut(duration: 0.3)
+    }
+
+    private func inspectorTransition(edge: Edge) -> AnyTransition {
+        accessibilityReduceMotion
+            ? .opacity
+            : .move(edge: edge).combined(with: .opacity)
     }
 
     private var tabSwitcher: some View {
