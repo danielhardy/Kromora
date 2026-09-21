@@ -358,8 +358,6 @@ public struct ContentView: View {
                 Label("Import", systemImage: "photo.on.rectangle")
             }
 
-            Divider()
-
             // Export
             Button {
                 viewModel.shareDialog()
