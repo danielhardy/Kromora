@@ -13,6 +13,4 @@
 PROJ-*-finish.sh
 # END DispatchGraph
 
-# Local archive exports duplicate the canonical issue records under issues/.
-# Keep issue Markdown and .project/events.jsonl as the durable history instead.
-archive/
+# Archived issue records are retained in the repository alongside the active issue records.
