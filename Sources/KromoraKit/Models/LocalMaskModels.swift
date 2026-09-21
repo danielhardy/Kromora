@@ -9,6 +9,8 @@ import Foundation
 /// therefore independent of preview/export resolution.
 struct LocalAdjustments: Codable, Sendable, Equatable {
     static let neutral = LocalAdjustments()
+    /// The smallest photographer-facing increment supported by mask-local adjustments.
+    static let precision = 0.01
 
     static let exposureRange = LightAdjustments.exposureRange
     static let contrastRange = LightAdjustments.contrastRange
@@ -95,9 +97,21 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
         )
     }
 
-    private static func clamp(_ value: Double, to range: ClosedRange<Double>, default fallback: Double) -> Double {
+    /// Quantize a value to the precision stored in a local mask recipe.
+    ///
+    /// This is intentionally part of the model boundary rather than only a view concern. It keeps
+    /// slider edits, numeric entry, copied layers, decoded documents, previews, and exports on the
+    /// same hundredth-level representation.
+    static func quantized(_ value: Double) -> Double {
+        guard value.isFinite else { return 0 }
+        return (value / Self.precision).rounded(.toNearestOrAwayFromZero) * Self.precision
+    }
+
+    private static func clamp(
+        _ value: Double, to range: ClosedRange<Double>, default fallback: Double
+    ) -> Double {
         guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
+        return Self.quantized(min(max(value, range.lowerBound), range.upperBound))
     }
 }
 

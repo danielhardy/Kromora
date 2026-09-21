@@ -806,34 +806,7 @@ private struct LocalAdjustmentValueRow: View {
     let beginInteraction: () -> Void
     let endInteraction: () -> Void
 
-    private var usesWholeNumberValue: Bool {
-        switch control {
-        case .temperature, .tint, .saturation, .vibrance:
-            return true
-        case .exposure, .contrast, .highlights, .shadows, .whites, .blacks,
-            .texture, .clarity, .dehaze:
-            return false
-        }
-    }
-
-    private var wholeNumberFieldFormat: FloatingPointFormatStyle<Double> {
-        switch control {
-        case .tint, .saturation, .vibrance:
-            return ColorSettingFormatting.signedWholeNumberFormat
-        case .temperature:
-            return ColorSettingFormatting.wholeNumberFormat
-        case .exposure, .contrast, .highlights, .shadows, .whites, .blacks, .texture, .clarity,
-             .dehaze:
-            return ColorSettingFormatting.wholeNumberFormat
-        }
-    }
-
     var body: some View {
-        let displayedValue = Binding<Double>(
-            get: { usesWholeNumberValue ? value.rounded() : value },
-            set: { value = usesWholeNumberValue ? $0.rounded() : $0 }
-        )
-
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 ResettableAdjustmentLabel(
@@ -843,10 +816,8 @@ private struct LocalAdjustmentValueRow: View {
                 Spacer()
                 TextField(
                     control.title,
-                    value: displayedValue,
-                    format: usesWholeNumberValue
-                        ? wholeNumberFieldFormat
-                        : .number
+                    value: $value,
+                    format: .number.precision(.fractionLength(0...2))
                 )
                 .textFieldStyle(.roundedBorder)
                 .font(.system(.caption, design: .monospaced))
@@ -860,7 +831,7 @@ private struct LocalAdjustmentValueRow: View {
             Group {
                 if control == .temperature {
                     TemperatureSlider(
-                        value: displayedValue,
+                        value: $value,
                         in: control.range,
                         neutral: control.neutral,
                         trackStyle: control.trackStyle,
@@ -868,14 +839,15 @@ private struct LocalAdjustmentValueRow: View {
                         accessibilityReadout: control.readout(value),
                         onEditingChanged: { editing in
                             if editing { beginInteraction() } else { endInteraction() }
-                        }
+                        },
+                        step: control.step
                     )
                 } else {
                     NeutralOriginSlider(
-                        value: displayedValue,
+                        value: $value,
                         in: control.range,
                         neutral: control.neutral,
-                        step: usesWholeNumberValue ? 1 : nil,
+                        step: control.step,
                         trackStyle: control.trackStyle,
                         accessibilityTitle: control.title,
                         accessibilityReadout: control.readout(value),
