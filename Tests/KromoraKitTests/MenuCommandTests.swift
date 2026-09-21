@@ -84,6 +84,31 @@ final class MenuCommandTests: XCTestCase {
                       "the Edit toolbar export/share action must use the selection-aware route")
     }
 
+    func testImportAndExportToolbarControlsHaveNoStandaloneSeparator() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        let contentView = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift"),
+            encoding: .utf8
+        )
+        let importControl = try XCTUnwrap(
+            contentView.components(separatedBy: "Label(\"Import\", systemImage: \"photo.on.rectangle\")")
+                .dropFirst().first
+        )
+        let exportControl = try XCTUnwrap(
+            importControl.components(separatedBy: "// Export").first
+        )
+
+        XCTAssertFalse(exportControl.contains("Divider()"),
+                       "Import and Export must not be separated by a standalone toolbar divider")
+        XCTAssertTrue(contentView.contains("viewModel.importFromPhotos()"))
+        XCTAssertTrue(contentView.contains("viewModel.shareDialog()"))
+        XCTAssertTrue(contentView.contains("Label(\"Import\", systemImage: \"photo.on.rectangle\")"))
+        XCTAssertTrue(contentView.contains("Label(\"Export\", systemImage: \"square.and.arrow.up\")"))
+    }
+
     @MainActor
     func testCropToolbarOwnsExclusiveWindowChrome() throws {
         XCTAssertEqual(ContentView.toolbarMode(isCropToolActive: true), .crop)
