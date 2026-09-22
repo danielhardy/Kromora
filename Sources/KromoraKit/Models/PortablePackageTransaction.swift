@@ -103,6 +103,10 @@ struct PortablePackageLeaseInfo: Codable, Equatable, Sendable {
 enum PortablePackageLeaseError: Error, Equatable, LocalizedError, CustomStringConvertible {
     case contended(PortablePackageLeaseInfo)
     case expired(PortablePackageLeaseInfo)
+    /// The lock was acquired by this process/session, but ownership could not be retained.
+    /// This is intentionally distinct from `expired`, which describes a stale previous session
+    /// during acquisition and is the only state eligible for explicit recovery.
+    case lostDuringSession
     case notOwner
     case missing
     case invalid
@@ -114,6 +118,8 @@ enum PortablePackageLeaseError: Error, Equatable, LocalizedError, CustomStringCo
             return "Package is already being written by \(info.deviceName) (pid \(info.processID))"
         case .expired(let info):
             return "The previous session on \(info.deviceName) (pid \(info.processID)) did not close cleanly, so the package writer lease has expired"
+        case .lostDuringSession:
+            return "The package writer lease was lost during this editing session. Writes are paused; keep unsaved edits and reopen the library to continue."
         case .notOwner: return "This session does not own the package writer lease"
         case .missing: return "The package writer lease is missing"
         case .invalid: return "The package writer lease is invalid"
@@ -135,6 +141,7 @@ final class PortablePackageLease: Sendable {
     private struct State: Sendable {
         var info: PortablePackageLeaseInfo
         var released = false
+        var lostDuringSession = false
     }
 
     let packageRoot: URL
@@ -236,11 +243,23 @@ final class PortablePackageLease: Sendable {
     ) throws {
         try faultInjector?.check(.leaseLoss)
         guard !state.withLock({ $0.released }) else { throw PortablePackageLeaseError.notOwner }
-        guard let current = try? Self.readInfo(at: lockURL) else {
-            throw PortablePackageLeaseError.missing
+        guard !state.withLock({ $0.lostDuringSession }) else {
+            throw PortablePackageLeaseError.lostDuringSession
         }
-        guard current.ownerID == ownerID else { throw PortablePackageLeaseError.notOwner }
-        guard current.expiresAt > date else { throw PortablePackageLeaseError.expired(current) }
+        guard let current = try? Self.readInfo(at: lockURL) else {
+            state.withLock { $0.lostDuringSession = true }
+            throw PortablePackageLeaseError.lostDuringSession
+        }
+        guard current.ownerID == ownerID else {
+            state.withLock { $0.lostDuringSession = true }
+            throw PortablePackageLeaseError.lostDuringSession
+        }
+        guard current.expiresAt > date else {
+            state.withLock { $0.lostDuringSession = true }
+            // Preserve the useful expiry detail for the first low-level probe. Subsequent
+            // assertions from this acquired lease return the session-loss state.
+            throw PortablePackageLeaseError.expired(current)
+        }
     }
 
     func release() throws {
@@ -489,7 +508,14 @@ struct PortablePackageTransaction {
         )
     }
 
-    mutating func stage(data: Data, at relativePath: String) throws {
+    @discardableResult
+    mutating func stage(
+        data: Data,
+        at relativePath: String,
+        chunkSize: Int = .max,
+        isCancelled: @Sendable () -> Bool = { false },
+        checksum: String? = nil
+    ) throws -> PortablePackageStagedFile {
         try validateRelativePath(relativePath)
         guard !journal.files.contains(where: { $0.relativePath == relativePath }) else {
             throw PortablePackageTransactionError.duplicateStagedPath(relativePath)
@@ -499,15 +525,45 @@ struct PortablePackageTransaction {
         let destination = packageRoot.appendingPathComponent(stagingPath)
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try data.write(to: destination, options: [])
-        let checksum = Self.sha256(data)
+        let output = try FileHandle(forWritingTo: destinationURLCreatingIfNeeded(destination))
+        var hasher = SHA256()
+        var offset = 0
+        let step = max(1, min(chunkSize, data.count == 0 ? 1 : data.count))
+        do {
+            while offset < data.count {
+                if isCancelled() { throw CancellationError() }
+                let end = min(data.count, offset + step)
+                let chunk = data[offset..<end]
+                try output.write(contentsOf: chunk)
+                if checksum == nil { hasher.update(data: chunk) }
+                offset = end
+            }
+            if isCancelled() { throw CancellationError() }
+            try output.synchronize()
+            try fullSync(output.fileDescriptor)
+            try output.close()
+        } catch {
+            try? output.close()
+            throw error
+        }
+        let stagedChecksum = checksum ?? hasher.finalize().hexString
         let file = PortablePackageTransactionFile(
             relativePath: relativePath, stagingPath: stagingPath, backupPath: nil,
-            byteCount: UInt64(data.count), stagedChecksum: checksum, publicationState: .staged
+            byteCount: UInt64(data.count), stagedChecksum: stagedChecksum, publicationState: .staged
         )
         journal.files.append(file)
         try persistJournal()
         try faultInjector?.check(.stage)
+        return PortablePackageStagedFile(
+            byteCount: UInt64(data.count), checksum: stagedChecksum, usedClonefile: false
+        )
+    }
+
+    private func destinationURLCreatingIfNeeded(_ url: URL) throws -> URL {
+        if !FileManager.default.createFile(atPath: url.path, contents: nil) {
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSURLErrorKey: url.path])
+        }
+        return url
     }
 
     /// Journals a same-volume move. Unlike a copy, this preserves the package's single original

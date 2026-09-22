@@ -131,7 +131,8 @@ struct PortableLibraryBackup {
         options: PortableLibraryBackupOptions = .init(),
         flushPendingEdits: (() throws -> Void)? = nil,
         isCancelled: @Sendable () -> Bool = { false },
-        progress: @Sendable (PortableLibraryBackupProgress) -> Void = { _ in }
+        progress: @Sendable (PortableLibraryBackupProgress) -> Void = { _ in },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) throws -> PortableLibraryBackupResult {
         try flushPendingEdits?()
 
@@ -142,6 +143,10 @@ struct PortableLibraryBackup {
 
         let lease = try PortablePackageLease.acquire(at: sourceRoot)
         defer { try? lease.release() }
+        // Establish a fresh heartbeat before recovery/snapshot work. The copy and verification
+        // loops renew again at file boundaries, so a large backup cannot leave the package open
+        // under an expiring writer lease.
+        try lease.renew(now: now())
         // A process can have crashed after publishing some transaction files but before the
         // journal was removed. Recover that transaction while the backup owns the writer lease;
         // otherwise the backup could faithfully copy an in-flight commit.
@@ -195,6 +200,7 @@ struct PortableLibraryBackup {
 
         for sourceFile in sourceFiles {
             try checkCancellation(isCancelled)
+            try lease.renew(now: now())
             totalBytes += sourceFile.byteCount
             let sourceURL = sourceRoot.appendingPathComponent(sourceFile.relativePath)
             let digest = try hashFile(at: sourceURL, chunkSize: options.chunkSize, isCancelled: isCancelled)
@@ -280,6 +286,7 @@ struct PortableLibraryBackup {
         try writeJSON(metadata, to: backupRecovery.appendingPathComponent(completeName))
         try syncDirectory(backupRecovery)
         try checkCancellation(isCancelled)
+        try lease.renew(now: now())
         try options.faultInjector?.check(.publish)
 
         progress(.init(
@@ -309,12 +316,13 @@ struct PortableLibraryBackup {
         options: PortableLibraryBackupOptions = .init(),
         flushPendingEdits: @escaping @Sendable () async throws -> Void,
         isCancelled: @Sendable @escaping () -> Bool = { false },
-        progress: @Sendable @escaping (PortableLibraryBackupProgress) -> Void = { _ in }
+        progress: @Sendable @escaping (PortableLibraryBackupProgress) -> Void = { _ in },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) async throws -> PortableLibraryBackupResult {
         try await flushPendingEdits()
         return try run(
             package: package, to: destinationURL, options: options,
-            isCancelled: isCancelled, progress: progress
+            isCancelled: isCancelled, progress: progress, now: now
         )
     }
 
@@ -328,7 +336,8 @@ struct PortableLibraryBackup {
         options: PortableLibraryBackupOptions = .init(),
         flushPendingEditsResult: @escaping @Sendable () async -> PersistenceFlushResult,
         isCancelled: @escaping @Sendable () -> Bool = { false },
-        progress: @escaping @Sendable (PortableLibraryBackupProgress) -> Void = { _ in }
+        progress: @escaping @Sendable (PortableLibraryBackupProgress) -> Void = { _ in },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) async throws -> PortableLibraryBackupResult {
         switch await flushPendingEditsResult() {
         case .success:
@@ -340,7 +349,7 @@ struct PortableLibraryBackup {
         }
         return try run(
             package: package, to: destinationURL, options: options,
-            isCancelled: isCancelled, progress: progress
+            isCancelled: isCancelled, progress: progress, now: now
         )
     }
 
@@ -682,11 +691,13 @@ extension PortableLibraryPackage {
         options: PortableLibraryBackupOptions = .init(),
         flushPendingEdits: (() throws -> Void)? = nil,
         isCancelled: @Sendable () -> Bool = { false },
-        progress: @Sendable (PortableLibraryBackupProgress) -> Void = { _ in }
+        progress: @Sendable (PortableLibraryBackupProgress) -> Void = { _ in },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) throws -> PortableLibraryBackupResult {
         try PortableLibraryBackup.run(
             package: self, to: destinationURL, options: options,
-            flushPendingEdits: flushPendingEdits, isCancelled: isCancelled, progress: progress
+            flushPendingEdits: flushPendingEdits, isCancelled: isCancelled, progress: progress,
+            now: now
         )
     }
 
@@ -696,11 +707,13 @@ extension PortableLibraryPackage {
         options: PortableLibraryBackupOptions = .init(),
         flushPendingEdits: @escaping @Sendable () async throws -> Void,
         isCancelled: @escaping @Sendable () -> Bool = { false },
-        progress: @escaping @Sendable (PortableLibraryBackupProgress) -> Void = { _ in }
+        progress: @escaping @Sendable (PortableLibraryBackupProgress) -> Void = { _ in },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) async throws -> PortableLibraryBackupResult {
         try await PortableLibraryBackup.run(
             package: self, to: destinationURL, options: options,
-            flushPendingEdits: flushPendingEdits, isCancelled: isCancelled, progress: progress
+            flushPendingEdits: flushPendingEdits, isCancelled: isCancelled, progress: progress,
+            now: now
         )
     }
 
@@ -710,12 +723,13 @@ extension PortableLibraryPackage {
         options: PortableLibraryBackupOptions = .init(),
         flushPendingEditsResult: @escaping @Sendable () async -> PersistenceFlushResult,
         isCancelled: @escaping @Sendable () -> Bool = { false },
-        progress: @escaping @Sendable (PortableLibraryBackupProgress) -> Void = { _ in }
+        progress: @escaping @Sendable (PortableLibraryBackupProgress) -> Void = { _ in },
+        now: @escaping @Sendable () -> Date = { Date() }
     ) async throws -> PortableLibraryBackupResult {
         try await PortableLibraryBackup.run(
             package: self, to: destinationURL, options: options,
             flushPendingEditsResult: flushPendingEditsResult,
-            isCancelled: isCancelled, progress: progress
+            isCancelled: isCancelled, progress: progress, now: now
         )
     }
 }

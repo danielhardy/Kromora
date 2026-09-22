@@ -3,7 +3,7 @@ import AppKit
 
 /// Horizontal thumbnail strip for browsing imported images.
 struct FilmstripView: View {
-    @ObservedObject var collection: ImageCollection
+    @Bindable var collection: ImageCollection
     @ObservedObject var settings: KromoraSettings
     let onSelect: (Int, LibrarySelectionModel.Modifiers) -> Void
 
@@ -79,12 +79,6 @@ struct FilmstripView: View {
                             .onDisappear {
                                 collection.releaseThumbnail(for: item.id)
                             }
-                        } else if let slot = entry.placeholder {
-                            FilmstripPlaceholder(
-                                slot: slot,
-                                showsCaption: settings.showPhotoNames
-                            )
-                            .id(entry.id)
                         }
                     }
                 }
@@ -153,7 +147,7 @@ enum FilmstripNavigation {
 }
 
 struct FilmstripThumbnail: View {
-    @ObservedObject var item: ImageCollection.Item
+    @Bindable var item: ImageCollection.Item
     @ObservedObject var settings: KromoraSettings
     let isSelected: Bool
 
@@ -252,42 +246,5 @@ struct FilmstripThumbnail: View {
         .padding(.vertical, 3)
         .background(.black.opacity(0.72), in: Capsule())
         .padding(4)
-    }
-}
-
-private struct FilmstripPlaceholder: View {
-    let slot: ImageCollection.PendingImportSlot
-    let showsCaption: Bool
-
-    var body: some View {
-        VStack(spacing: FilmstripLayout.captionSpacing) {
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.secondary.opacity(0.09))
-                .frame(
-                    width: FilmstripLayout.thumbnailSize,
-                    height: FilmstripLayout.thumbnailSize
-                )
-                .overlay {
-                    if slot.state == .pending {
-                        ProgressView()
-                            .scaleEffect(0.5)
-                    } else {
-                        Image(systemName: "photo.badge.exclamationmark")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            if showsCaption {
-                Text(slot.state == .pending ? "Importing" : "Unavailable")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(
-                        width: FilmstripLayout.thumbnailSize,
-                        height: FilmstripLayout.captionHeight
-                    )
-            }
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(slot.state == .pending ? "Importing photo" : "Photo unavailable")
     }
 }

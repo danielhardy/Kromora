@@ -30,6 +30,9 @@ final class ImageWorkScheduler {
     }
 
     enum PackageIOLane: Sendable, Equatable {
+        /// Lease renewal is latency-sensitive: it must be admitted ahead of ordinary package
+        /// maintenance whenever the single package-I/O worker becomes available.
+        case leaseHeartbeat
         case importCopyHash
         case indexRebuild
         case validation
@@ -37,6 +40,7 @@ final class ImageWorkScheduler {
 
         var defaultPriority: Priority {
             switch self {
+            case .leaseHeartbeat: return .packageIO
             case .importCopyHash: return .packageIO
             case .indexRebuild, .validation, .maintenance: return .background
             }
@@ -299,6 +303,16 @@ final class ImageWorkScheduler {
         if pump { self.pump() }
     }
 
+    /// Cancels one admitted operation and waits for an operation that had already entered its
+    /// detached body. This is the per-job teardown barrier used by the package lease heartbeat;
+    /// releasing the lock before this returns could allow a late renewal to touch a new owner.
+    func cancelAndWait(id: JobID) async {
+        let runningTask = running[id]?.task
+        cancel(id: id, countAsCancellation: true)
+        pump()
+        await runningTask?.value
+    }
+
     func cancel(ids: Set<JobID>) {
         for id in ids {
             cancel(id: id, countAsCancellation: true)
@@ -336,7 +350,16 @@ final class ImageWorkScheduler {
         if let active = running.removeValue(forKey: id) {
             active.task.cancel()
             if countAsCancellation { cancelledCount += 1 }
-            active.onTerminal(.cancelled)
+            // A detached package operation may still be inside a copy, fsync, or transaction
+            // rollback after Task.cancel(). Keep the package-I/O slot occupied until its task
+            // reaches `finished`; otherwise a queued writer could overlap the rollback and break
+            // the single-writer invariant. Thumbnail/editor cancellation retains the historical
+            // eager terminal callback because those operations do not mutate package state.
+            if active.lane == .packageIO {
+                running[id] = active
+            } else {
+                active.onTerminal(.cancelled)
+            }
         }
     }
 

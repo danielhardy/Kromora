@@ -6,9 +6,8 @@ import SwiftUI
 /// and filter operation is available here with its current state visible at a glance.
 struct CullingBarView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var collection: ImageCollection
     var isCompact: Bool = false
-
-    private var collection: ImageCollection { viewModel.collection }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -45,7 +44,7 @@ struct CullingBarView: View {
 }
 
 private struct CullingSelectionControls: View {
-    @ObservedObject var item: ImageCollection.Item
+    @Bindable var item: ImageCollection.Item
     let isCompact: Bool
     let onFlag: (PhotoFlag) -> Void
     let onRating: (Int) -> Void
@@ -107,7 +106,7 @@ private struct CullingSelectionControls: View {
 }
 
 struct LibraryFilterControls: View {
-    @ObservedObject var collection: ImageCollection
+    @Bindable var collection: ImageCollection
     @ObservedObject var viewModel: AppViewModel
     let isCompact: Bool
 

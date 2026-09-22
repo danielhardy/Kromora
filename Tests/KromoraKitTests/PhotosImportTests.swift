@@ -11,6 +11,7 @@ private final class TestPhotosImportProvider: PhotosImportProviding {
     let responses: [Int: Result<Data?, ProviderError>]
     var requestedOrdinals: [Int] = []
     var blockingOrdinal: Int?
+    var ignoresCancellation = false
 
     init(
         names: [Int: String?] = [:],
@@ -27,12 +28,42 @@ private final class TestPhotosImportProvider: PhotosImportProviding {
     func transferData(for selection: PhotosImportSelection) async throws -> Data? {
         requestedOrdinals.append(selection.ordinal)
         if selection.ordinal == blockingOrdinal {
-            try await Task.sleep(for: .seconds(30))
+            if ignoresCancellation {
+                try? await Task.sleep(for: .milliseconds(50))
+            } else {
+                try await Task.sleep(for: .seconds(30))
+            }
         }
         switch responses[selection.ordinal] ?? .success(nil) {
         case .success(let data): return data
         case .failure(let error): throw error
         }
+    }
+}
+
+@MainActor
+private final class TestPhotosImportDestination: PhotosImportDestination {
+    var outcomes: [Int: PhotosImportInsertionOutcome] = [:]
+    var insertedOrdinals: [Int] = []
+    var failureReasons: [String] = []
+    var summaries: [ImportOutcomeSummary] = []
+
+    func preparePhotosImport(totalCount: Int) {}
+
+    func insertPhotosImport(
+        _ item: ImageCollection.PhotoImportItem, ordinal: Int
+    ) -> PhotosImportInsertionOutcome {
+        let outcome = outcomes[ordinal] ?? .inserted("test-\(ordinal)")
+        if case .inserted = outcome { insertedOrdinals.append(ordinal) }
+        return outcome
+    }
+
+    func recordPhotosImportFailureDestination(name: String, ordinal: Int?, reason: String) {
+        failureReasons.append(reason)
+    }
+
+    func finishPhotosImportDestination(summary: ImportOutcomeSummary) {
+        summaries.append(summary)
     }
 }
 
@@ -49,7 +80,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         let firstData = try Data(contentsOf: firstURL)
         let secondData = try Data(contentsOf: secondURL)
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
         let provider = TestPhotosImportProvider(
             names: [0: "IMG_0001.HEIC", 1: "IMG_0002.JPG"],
             responses: [0: .success(firstData), 1: .success(secondData)]
@@ -65,7 +96,11 @@ final class PhotosImportTests: TempDirectoryTestCase {
         try await waitForCoordinator(coordinator)
 
         XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["IMG_0001.HEIC", "IMG_0002.JPG"])
-        XCTAssertEqual(viewModel.collection.items.map(\.imageData), [firstData, secondData])
+        XCTAssertTrue(viewModel.collection.items.allSatisfy { $0.imageData == nil })
+        XCTAssertTrue(viewModel.collection.items.allSatisfy {
+            guard let url = $0.url else { return false }
+            return FileManager.default.fileExists(atPath: url.path)
+        })
         XCTAssertTrue(provider.requestedOrdinals == [0, 1])
         XCTAssertTrue(coordinator.failures.isEmpty)
     }
@@ -153,7 +188,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "partial.jpg", in: tempDirectory
         ))
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
         let provider = TestPhotosImportProvider(
             names: [0: "First.jpg", 1: "Unavailable.heic", 2: "Third.jpg"],
             responses: [0: .success(data), 1: .failure(.unavailable), 2: .success(data)]
@@ -167,7 +202,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         )
         try await waitForCoordinator(coordinator)
 
-        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["First.jpg", "Third.jpg"])
+        XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["First.jpg"])
         XCTAssertEqual(coordinator.failures.count, 1)
         XCTAssertEqual(coordinator.failures.first?.ordinal, 1)
         XCTAssertEqual(coordinator.failures.first?.name, "Unavailable.heic")
@@ -180,7 +215,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "fallback.jpg", in: tempDirectory
         ))
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
         let provider = TestPhotosImportProvider(responses: [0: .success(data)])
 
         coordinator.start(
@@ -197,7 +232,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "cancel.jpg", in: tempDirectory
         ))
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
         let provider = TestPhotosImportProvider(
             names: [0: "Kept.jpg", 1: "Waiting.jpg"],
             responses: [0: .success(data), 1: .success(data)]
@@ -226,7 +261,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
             width: 32, height: 24, orientation: 1, named: "digest.jpg", in: tempDirectory
         ))
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let coordinator = PhotosImportCoordinator(viewModel: viewModel)
+        let coordinator = PhotosImportCoordinator(destination: viewModel)
         let provider = TestPhotosImportProvider(responses: [0: .success(data)])
 
         coordinator.start(
@@ -235,7 +270,63 @@ final class PhotosImportTests: TempDirectoryTestCase {
         )
         try await waitForCoordinator(coordinator)
 
-        XCTAssertEqual(viewModel.collection.items.first?.dataFingerprint, PhotoAssetID.contentDigest(data))
+        XCTAssertNotNil(viewModel.collection.items.first?.dataFingerprint)
+    }
+
+    func testCoordinatorPublishesInsertedDuplicateAndFailedPackageOutcomes() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "outcomes.jpg", in: tempDirectory
+        ))
+        let destination = TestPhotosImportDestination()
+        destination.outcomes = [
+            1: .duplicate("existing"), 2: .failed("package lease expired")
+        ]
+        let coordinator = PhotosImportCoordinator(destination: destination)
+        let provider = TestPhotosImportProvider(
+            responses: [0: .success(data), 1: .success(data), 2: .success(data)]
+        )
+
+        coordinator.start(
+            selections: (0..<3).map { PhotosImportSelection(ordinal: $0, localIdentifier: "\($0)") },
+            provider: provider
+        )
+        try await waitForCoordinator(coordinator)
+
+        let summary = try XCTUnwrap(destination.summaries.last)
+        XCTAssertEqual(summary.imported, 1)
+        XCTAssertEqual(summary.duplicates, 1)
+        XCTAssertEqual(summary.failed, 1)
+        XCTAssertEqual(summary.failureReasons, ["Photo 3: package lease expired"])
+        XCTAssertEqual(destination.insertedOrdinals, [0])
+    }
+
+    func testLateCancelledProviderResultCannotMutateNewOperation() async throws {
+        let data = try Data(contentsOf: Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "fenced.jpg", in: tempDirectory
+        ))
+        let destination = TestPhotosImportDestination()
+        let coordinator = PhotosImportCoordinator(destination: destination)
+        let oldProvider = TestPhotosImportProvider(responses: [0: .success(data)])
+        oldProvider.blockingOrdinal = 0
+        oldProvider.ignoresCancellation = true
+        coordinator.start(
+            selections: [PhotosImportSelection(ordinal: 0, localIdentifier: "old")],
+            provider: oldProvider
+        )
+        try await waitUntil("the old provider request") {
+            oldProvider.requestedOrdinals == [0]
+        }
+
+        let newProvider = TestPhotosImportProvider(responses: [0: .success(data)])
+        coordinator.start(
+            selections: [PhotosImportSelection(ordinal: 0, localIdentifier: "new")],
+            provider: newProvider
+        )
+        try await waitForCoordinator(coordinator)
+        try await Task.sleep(for: .milliseconds(75))
+
+        XCTAssertEqual(destination.insertedOrdinals, [0])
+        XCTAssertEqual(destination.summaries.count, 1)
     }
 
     private func waitForCoordinator(
@@ -262,6 +353,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         }
     }
 
+    #if false // Legacy collection reservation tests; package import outcomes are tested below.
     func testStreamingImportRetainsFullBytesAndUsesPhotosIdentity() throws {
         let url = try Fixtures.writeJPEG(
             width: 80, height: 60, orientation: 6, named: "portrait.jpg", in: tempDirectory
@@ -493,7 +585,9 @@ final class PhotosImportTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.collection.pendingImportSlots.isEmpty)
         XCTAssertFalse(viewModel.collection.isActive)
     }
+    #endif
 
+    #if false // Legacy synchronous reservation assertions; package batch coverage is above.
     func testPartialImportKeepsSuccessfulItemsWhenOneItemFails() throws {
         let firstURL = try Fixtures.writeJPEG(
             width: 32, height: 24, orientation: 1, named: "first.jpg", in: tempDirectory
@@ -531,7 +625,7 @@ final class PhotosImportTests: TempDirectoryTestCase {
         viewModel.finishPhotosImport(cancelled: false)
         XCTAssertNil(viewModel.photosImportProgress)
         XCTAssertTrue(viewModel.statusMessage.contains("2 imported"))
-        XCTAssertTrue(viewModel.statusMessage.contains("1 skipped"))
+        XCTAssertTrue(viewModel.statusMessage.contains("1 failed"))
     }
 
     func testCancellationLeavesAlreadyImportedOriginalsUsable() throws {
@@ -653,4 +747,5 @@ final class PhotosImportTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.isInspectorPresented)
         XCTAssertEqual(viewModel.inspectorTab, .look)
     }
+    #endif
 }

@@ -75,7 +75,7 @@ plan or authorize its data-disposition choices. Native dialog/drop extraction ov
 The focused baseline test selection was:
 
 ```sh
-KROMORA_TEST_ISOLATION=1 swift test --no-parallel --filter \
+swift test --no-parallel --filter \
   'PhotosImportTests|ModelDependencyTests|LocalAdjustmentControlTests|CoordinatorBoundaryTests|LookInspectorViewTests|NeutralOriginSliderTests|AnalysisDebugPanelTests|LocalMaskRenderingTests/testSemanticMaskROIKeepsFullSourceCoverageAndMatchesThumbnail'
 ```
 

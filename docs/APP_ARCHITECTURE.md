@@ -1,5 +1,21 @@
 # Application ownership boundaries
 
+## Library product boundary (KRMA-520)
+
+The library product is package-backed. Referenced-folder browsing has no product future and is not
+restored, persisted, or maintained as a second mode. A folder chooser, folder drop, Photos import,
+or removable-volume selection is an import source: accepted assets are copied into the open
+`.kromoralibrary` package and then presented through the package query/window model.
+
+This is a deliberate migration boundary, not an on-disk cleanup. Existing `EditStore*.store`
+files are left untouched for backup/recovery and are not read as a library fallback. Future
+referenced assets, if product requirements return, will be represented as package `.referenced`
+records rather than by reintroducing a source bookmark or folder-backed collection mode.
+
+The cleanup is intentionally measurable: `ImageCollection.swift` is now 653 lines, down from
+2,010 lines at the pre-cleanup baseline, because scan/discovery, bookmark recovery, legacy
+reservations, and UserDefaults culling state no longer have a product owner.
+
 `AppViewModel` is the application composition root and a façade for the main window. It wires
 collaborators, owns published cross-feature presentation state, and sequences source/revision
 fences. Feature workflows do not reach into one another's private state.

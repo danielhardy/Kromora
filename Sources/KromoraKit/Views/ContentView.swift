@@ -9,9 +9,11 @@ import AppKit
 public struct ContentView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @StateObject private var viewModel: AppViewModel
-    @ObservedObject private var photosImportCoordinator: PhotosImportCoordinator
+    @Bindable private var photosImportCoordinator: PhotosImportCoordinator
     @ObservedObject private var inspectorState: AppViewModel.InspectorState
-    @ObservedObject private var canvasState: CanvasInteractionState
+    @Bindable private var canvasState: CanvasInteractionState
+    @Bindable private var collection: ImageCollection
+    @Bindable private var exportCoordinator: ExportCoordinator
     @State private var photosSelection: [PhotosPickerItem] = []
 
     /// The window toolbar has a deliberately small crop-mode surface. Keep this as a named seam
@@ -23,22 +25,27 @@ public struct ContentView: View {
     public init() {
         let viewModel = AppViewModel(includeBundledLooks: true)
         _viewModel = StateObject(wrappedValue: viewModel)
-        _photosImportCoordinator = ObservedObject(wrappedValue: viewModel.photosImportCoordinator)
+        _photosImportCoordinator = Bindable(wrappedValue: viewModel.photosImportCoordinator)
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
-        _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
+        _canvasState = Bindable(wrappedValue: viewModel.canvasState)
+        _collection = Bindable(wrappedValue: viewModel.collection)
+        _exportCoordinator = Bindable(wrappedValue: viewModel.export)
     }
 
     /// Allows the application delegate to share the model that owns the persistence queue, so clean
     /// termination can flush the same edit catalog the window has been using.
     public init(viewModel: AppViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
-        _photosImportCoordinator = ObservedObject(wrappedValue: viewModel.photosImportCoordinator)
+        _photosImportCoordinator = Bindable(wrappedValue: viewModel.photosImportCoordinator)
         _inspectorState = ObservedObject(wrappedValue: viewModel.inspectorState)
-        _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
+        _canvasState = Bindable(wrappedValue: viewModel.canvasState)
+        _collection = Bindable(wrappedValue: viewModel.collection)
+        _exportCoordinator = Bindable(wrappedValue: viewModel.export)
     }
 
     public var body: some View {
-        mainContent
+        let _ = ViewBodyCounter.noteContentViewBody()
+        return mainContent
             .navigationTitle("")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
@@ -166,14 +173,15 @@ public struct ContentView: View {
 
     private var detailContent: some View {
         Group {
-            if viewModel.navigation.isGrid && viewModel.collection.isActive {
+            if viewModel.navigation.isGrid && collection.isActive {
                 VStack(spacing: 0) {
                     LibraryGridView(
-                        collection: viewModel.collection,
+                        collection: collection,
                         viewModel: viewModel,
                         onOpen: viewModel.openLibraryImageForEditing
                     )
                     StatusBar(viewModel: viewModel, photosImportCoordinator: photosImportCoordinator,
+                              export: exportCoordinator, collection: collection,
                               onCancelImport: cancelPhotosImport,
                               onCancelExport: viewModel.cancelExport,
                               onCancelAuto: viewModel.cancelAutoAdjustment)
@@ -181,7 +189,7 @@ public struct ContentView: View {
             } else {
                 HStack(spacing: 0) {
                     if !canvasState.isCropToolActive,
-                        viewModel.isSourceBrowserPresented && !viewModel.collection.items.isEmpty {
+                        viewModel.isSourceBrowserPresented && !collection.items.isEmpty {
                         HStack(spacing: 0) {
                             SourceBrowserView(viewModel: viewModel)
                                 .frame(width: 240)
@@ -193,13 +201,13 @@ public struct ContentView: View {
                     VStack(spacing: 0) {
                         PreviewView(viewModel: viewModel)
 
-                        if viewModel.collection.isActive && !canvasState.isCropToolActive {
+                        if collection.isActive && !canvasState.isCropToolActive {
                             VStack(spacing: 0) {
                                 Divider()
-                                CullingBarView(viewModel: viewModel, isCompact: true)
+                                CullingBarView(viewModel: viewModel, collection: collection, isCompact: true)
                                 Divider()
                                 FilmstripView(
-                                    collection: viewModel.collection,
+                                    collection: collection,
                                     settings: viewModel.settings
                                 ) { index, modifiers in
                                     viewModel.selectCollectionImage(at: index, modifiers: modifiers)
@@ -216,6 +224,8 @@ public struct ContentView: View {
                         StatusBar(
                             viewModel: viewModel,
                             photosImportCoordinator: photosImportCoordinator,
+                            export: exportCoordinator,
+                            collection: collection,
                             showsKeyHints: false,
                             onCancelImport: cancelPhotosImport,
                             onCancelExport: viewModel.cancelExport,
@@ -225,7 +235,7 @@ public struct ContentView: View {
                 }
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: viewModel.collection.isActive)
+        .animation(.easeInOut(duration: 0.25), value: collection.isActive)
         .animation(chromeAnimation, value: canvasState.isCropToolActive)
         .animation(chromeAnimation, value: viewModel.isSourceBrowserPresented)
         .animation(.easeInOut(duration: 0.2), value: viewModel.navigation.mode)
@@ -367,7 +377,7 @@ public struct ContentView: View {
                                 viewModel.refreshRemovableMedia()
                             }
                         }
-                        if !viewModel.collection.items.isEmpty {
+                        if !collection.items.isEmpty {
                             Button("Refresh Source Folder") {
                                 viewModel.refreshSource()
                             }
@@ -432,7 +442,7 @@ struct AutoToolbarButton: View {
 /// participate in the interaction.
 private struct CanvasToolbarControls: View {
     let viewModel: AppViewModel
-    @ObservedObject var canvasState: CanvasInteractionState
+    @Bindable var canvasState: CanvasInteractionState
     let hasImage: Bool
 
     var body: some View {

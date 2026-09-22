@@ -1,6 +1,6 @@
 import CoreGraphics
 import Foundation
-import Combine
+import Observation
 
 /// High-frequency, presentation-only state for the editor canvas.
 ///
@@ -8,24 +8,28 @@ import Combine
 /// updates occur at pointer frequency and should invalidate only the canvas subtree. The
 /// `AppViewModel` remains the owner of the committed `EditDocument`, history, rendering, and
 /// persistence boundaries.
+///
+/// Migrated to Observation (KRMA-521): views observe this object directly through `@Bindable`
+/// so pointer-frequency updates never pass through AppViewModel's broad publisher.
 @MainActor
-final class CanvasInteractionState: ObservableObject {
-    @Published private(set) var navigation = CanvasNavigation()
-    @Published private(set) var isCropToolActive = false
-    @Published private(set) var cropDraft: CGRect?
-    @Published private(set) var cropAspectRatio: CropAspectRatio = .freeform
-    @Published private(set) var cropOrientation: CropAspectRatioOrientation = .automatic
+@Observable
+final class CanvasInteractionState {
+    private(set) var navigation = CanvasNavigation()
+    private(set) var isCropToolActive = false
+    private(set) var cropDraft: CGRect?
+    private(set) var cropAspectRatio: CropAspectRatio = .freeform
+    private(set) var cropOrientation: CropAspectRatioOrientation = .automatic
     /// Rotation accumulated while Crop is open. This remains transient until Apply so a crop
     /// session can be cancelled without changing the durable edit document.
-    @Published private(set) var cropRotation: ImageRotation = .zero
-    @Published private(set) var cropStraightenAngle: Double = 0
+    private(set) var cropRotation: ImageRotation = .zero
+    private(set) var cropStraightenAngle: Double = 0
     /// The frame's physical aspect ratio captured when Straighten began. Preserving this value for
     /// Freeform is what prevents an angle change from silently stretching a user-drawn frame.
-    @Published private(set) var cropPixelAspectRatio: CGFloat?
-    @Published private(set) var cropFlipHorizontal = false
-    @Published private(set) var cropFlipVertical = false
-    @Published private(set) var cropVerticalPerspective: Double = 0
-    @Published private(set) var cropHorizontalPerspective: Double = 0
+    private(set) var cropPixelAspectRatio: CGFloat?
+    private(set) var cropFlipHorizontal = false
+    private(set) var cropFlipVertical = false
+    private(set) var cropVerticalPerspective: Double = 0
+    private(set) var cropHorizontalPerspective: Double = 0
 
     func resetForSource() {
         navigation.resetForSource()

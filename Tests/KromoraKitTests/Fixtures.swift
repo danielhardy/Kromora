@@ -558,10 +558,7 @@ class TempDirectoryTestCase: XCTestCase {
         libraryFolderURL: URL? = nil
     ) -> ImageCollection {
         ImageCollection(
-            scheduler: scheduler ?? ImageWorkScheduler(),
-            defaults: defaults ?? makeTestUserDefaults(),
-            libraryFolderURL: libraryFolderURL
-                ?? tempDirectory.appendingPathComponent("managed-library", isDirectory: true)
+            scheduler: scheduler ?? ImageWorkScheduler()
         )
     }
 
@@ -612,15 +609,14 @@ class TempDirectoryTestCase: XCTestCase {
             mediaVolumeNotificationCenter: mediaVolumeNotificationCenter,
             applicationNotificationCenter: applicationNotificationCenter,
             includeBundledLooks: includeBundledLooks,
-            libraryFolderURL: libraryFolderURL
-                ?? tempDirectory.appendingPathComponent("managed-library", isDirectory: true),
             userLookFolderURL: userLookFolderURL
                 ?? tempDirectory.appendingPathComponent("looks", isDirectory: true),
             photoAnalysisCoordinator: photoAnalysisCoordinator,
             previewDiskCacheDirectory: previewDiskCacheDirectory
                 ?? tempDirectory.appendingPathComponent("developed-previews", isDirectory: true),
             previewDiskCacheCapBytes: previewDiskCacheCapBytes,
-            portablePackageURL: portablePackageURL,
+            portablePackageURL: portablePackageURL
+                ?? tempDirectory.appendingPathComponent("Test Library.kromoralibrary", isDirectory: true),
             portableMaintenanceIdleDelay: portableMaintenanceIdleDelay,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider,
             fileDialog: fileDialog,

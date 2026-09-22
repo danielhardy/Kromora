@@ -75,6 +75,37 @@ struct LibraryIndexEntry: Codable, Equatable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// The small canonical-to-projection change set emitted by a package transaction.  Import and
+/// trash operations can update the disposable index without reopening every membership shard.
+struct LibraryIndexDelta: Equatable, Sendable {
+    let upserts: [LibraryIndexEntry]
+    let removals: [PortablePhotoAssetID]
+
+    static let empty = Self(upserts: [], removals: [])
+
+    init(
+        upserts: [LibraryIndexEntry] = [],
+        removals: [PortablePhotoAssetID] = []
+    ) {
+        self.upserts = upserts
+        self.removals = removals
+    }
+
+    func merging(_ other: Self) -> Self {
+        var upsertsByID = Dictionary(uniqueKeysWithValues: upserts.map { ($0.assetID, $0) })
+        var removalsByID = Set(removals)
+        for assetID in other.removals {
+            upsertsByID.removeValue(forKey: assetID)
+            removalsByID.insert(assetID)
+        }
+        for entry in other.upserts {
+            removalsByID.remove(entry.assetID)
+            upsertsByID[entry.assetID] = entry
+        }
+        return Self(upserts: Array(upsertsByID.values), removals: Array(removalsByID))
+    }
+}
+
 /// A local, rebuildable projection of package membership shards.
 ///
 /// The package remains canonical.  This value contains only the fields needed to browse a
@@ -97,6 +128,20 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
     /// Rebuild the projection from the package's membership summaries only.
     init(package: PortableLibraryPackage) throws {
         try self.init(libraryID: package.manifest.libraryID, entries: Self.readEntries(from: package))
+    }
+
+    /// Applies a transaction's membership delta while retaining the projection's current
+    /// contents. This deliberately does not touch the package, so callers can publish the
+    /// in-memory query state immediately and coalesce the durable index write separately.
+    func applying(_ delta: LibraryIndexDelta) throws -> Self {
+        var entries = Dictionary(uniqueKeysWithValues: entries.map { ($0.assetID, $0) })
+        for assetID in delta.removals {
+            entries.removeValue(forKey: assetID)
+        }
+        for entry in delta.upserts {
+            entries[entry.assetID] = entry
+        }
+        return try Self(libraryID: libraryID, entries: Array(entries.values))
     }
 
     /// Rebuilds the local projection from membership shards and atomically publishes it.

@@ -32,6 +32,7 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
+    #if false // Legacy non-package deletion path; package removal is covered below.
     func testAnalysisCacheFailureSkipsDeletionForThatItem() async throws {
         let source = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "analysis-failure.png", in: tempDirectory
@@ -57,7 +58,9 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         await analysis.shutdown()
         await collection.shutdown()
     }
+    #endif
 
+    #if false // Referenced-folder ownership was removed from the product boundary.
     func testManagedAndReferencedSourcesFollowOwnershipPolicy() async throws {
         let managedSource = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "managed.png", in: tempDirectory
@@ -120,6 +123,7 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         await managedCollection.shutdown()
         await referencedCollection.shutdown()
     }
+    #endif
 
     func testPortableLibraryRemovalUsesThePortableSession() async throws {
         let source = try Fixtures.writeGradientPNG(

@@ -68,7 +68,7 @@ struct PreviewDiskCache: Sendable {
     private let pipelineVersion: Int
 
     init(
-        directory: URL = PreviewDiskCache.defaultDirectory(),
+        directory: URL,
         capBytes: Int64 = PreviewDiskCache.defaultCapBytes,
         pipelineVersion: Int = RenderPipeline.cacheVersion
     ) {
@@ -159,10 +159,6 @@ struct PreviewDiskCache: Sendable {
         bitmap.interpolationQuality = CGInterpolationQuality.high
         bitmap.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
         return bitmap.makeImage()
-    }
-
-    static func defaultDirectory() -> URL {
-        KromoraStorage.cacheDirectory(named: "DevelopedPreviews")
     }
 
     /// Settled previews for a portable library are package-derived artifacts. They remain

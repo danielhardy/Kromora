@@ -5,7 +5,7 @@ import SwiftUI
 struct PreviewView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject var viewModel: AppViewModel
-    @ObservedObject var canvasState: CanvasInteractionState
+    @Bindable var canvasState: CanvasInteractionState
     // The preview image is owned by a separate observation boundary. Keep observing it even while
     // the spinner is on screen; otherwise a completed replacement render can sit in the surface
     // until an unrelated AppViewModel change causes this view to rebuild.
@@ -16,7 +16,7 @@ struct PreviewView: View {
 
     init(viewModel: AppViewModel) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
-        _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
+        _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
         _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
         _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)

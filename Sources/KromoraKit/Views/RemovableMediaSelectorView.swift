@@ -123,7 +123,7 @@ struct RemovableMediaSelectorView: View {
                     .frame(width: 130)
                 Text(progress.cancelled
                      ? "Import cancelled"
-                     : "Imported \(progress.imported), skipped \(progress.skipped)")
+                     : "Imported \(progress.imported), duplicate \(progress.duplicates), skipped \(progress.skipped), failed \(progress.failed)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

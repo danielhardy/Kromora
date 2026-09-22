@@ -68,19 +68,59 @@ final class LUTLibrary: ObservableObject {
     ///
     /// Starter Looks deliberately retain category ordering so the picker can present each
     /// category as a contiguous group. Monochrome is the neutral starting point and appears first.
+    ///
+    /// Memoized against `libraryRevision` (KRMA-521): filtering/sorting runs only when the
+    /// canonical categories change, not on every access during grid/inspector reevaluation.
     var starterCategories: [Category] {
-        categories
+        if let cached = cachedStarterCategories, cached.revision == libraryRevision {
+            return cached.value
+        }
+        let value = categories
             .filter { $0.source == .bundled }
             .sorted { Self.starterCategoryPrecedes($0.name, $1.name) }
+        cachedStarterCategories = (libraryRevision, value)
+        projectionRebuildCount &+= 1
+        return value
     }
 
-    var starterLooks: [CubeLUT] { starterCategories.flatMap(\.luts) }
-    var myLooks: [CubeLUT] { sortedLooks(excluding: .bundled) }
+    var starterLooks: [CubeLUT] {
+        if let cached = cachedStarterLooks, cached.revision == libraryRevision {
+            return cached.value
+        }
+        let value = starterCategories.flatMap(\.luts)
+        cachedStarterLooks = (libraryRevision, value)
+        return value
+    }
+    var myLooks: [CubeLUT] {
+        if let cached = cachedMyLooks, cached.revision == libraryRevision {
+            return cached.value
+        }
+        let value = sortedLooks(excluding: .bundled)
+        cachedMyLooks = (libraryRevision, value)
+        return value
+    }
     var lookCollections: [LookCollection] {
-        LookCollectionID.allCases.map { id in
+        if let cached = cachedLookCollections, cached.revision == libraryRevision {
+            return cached.value
+        }
+        let value = LookCollectionID.allCases.map { id in
             LookCollection(id: id, looks: id == .starter ? starterLooks : myLooks)
         }
+        cachedLookCollections = (libraryRevision, value)
+        return value
     }
+
+    /// Revision bumped by every `publishCategories()` so memoized projections invalidate exactly
+    /// once per library change. Tests assert `projectionRebuildCount` stays stable across
+    /// repeated reads without an intervening publish.
+    private(set) var libraryRevision: UInt64 = 0
+    /// Number of times the starter-category projection was rebuilt. Test-only diagnostics;
+    /// production code must read the memoized accessors, not this counter.
+    private(set) var projectionRebuildCount = 0
+    private var cachedStarterCategories: (revision: UInt64, value: [Category])?
+    private var cachedStarterLooks: (revision: UInt64, value: [CubeLUT])?
+    private var cachedMyLooks: (revision: UInt64, value: [CubeLUT])?
+    private var cachedLookCollections: (revision: UInt64, value: [LookCollection])?
 
     /// Fired after every scan publishes its results, whatever started it.
     ///
@@ -371,6 +411,7 @@ final class LUTLibrary: ObservableObject {
             )
         }
         allLUTs = categories.flatMap(\.luts)
+        libraryRevision &+= 1
     }
 
     private func sortedLooks(source: LUTSource? = nil, excluding: LUTSource? = nil) -> [CubeLUT] {
@@ -459,7 +500,7 @@ final class LUTLibrary: ObservableObject {
         }
 
         // Resolve symlinks on both sides so the category math holds even when
-        // the root is itself a symlink (matches ImageCollection.loadFromFolder).
+        // the root is itself a symlink (matches the package import file walk).
         let rootPath = folder.resolvingSymlinksInPath().path
         var skipped = 0
 

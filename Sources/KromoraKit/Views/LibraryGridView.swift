@@ -8,7 +8,7 @@ import SwiftUI
 /// `onAppear`, and releases in-flight work from `onDisappear`, so scrolling does not create a decode
 /// task for the entire folder.
 struct LibraryGridView: View {
-    @ObservedObject var collection: ImageCollection
+    @Bindable var collection: ImageCollection
     @ObservedObject var viewModel: AppViewModel
     let onOpen: () -> Void
 
@@ -16,11 +16,12 @@ struct LibraryGridView: View {
     @State private var mosaicCache = LibraryMosaicLayoutCache()
 
     var body: some View {
+        let _ = ViewBodyCounter.noteGridBody()
         let entries = collection.thumbnailEntries
 
-        VStack(spacing: 0) {
+        return VStack(spacing: 0) {
             HStack(spacing: 0) {
-                CullingBarView(viewModel: viewModel)
+                CullingBarView(viewModel: viewModel, collection: collection)
                 Divider()
                     .frame(height: 28)
                 Button(role: .destructive) {
@@ -121,7 +122,7 @@ struct LibraryGridView: View {
 private struct LibraryMosaicRow: View {
     let row: LibraryGridLayout.MosaicRow
     let entries: [ImageCollection.ThumbnailEntry]
-    @ObservedObject var collection: ImageCollection
+    @Bindable var collection: ImageCollection
     @ObservedObject var settings: KromoraSettings
     let spacing: Double
     let onSelect: (Int) -> Void
@@ -177,9 +178,6 @@ private struct LibraryMosaicRow: View {
                         collection.selection.selectedIDs.contains(item.id) ? .isSelected : []
                     )
                     .accessibilityHint("Double-click to edit")
-                } else if let slot = entry.placeholder {
-                    LibraryGridPlaceholder(slot: slot)
-                        .frame(width: CGFloat(cell.width), height: CGFloat(row.imageHeight))
                 }
             }
         }
@@ -194,7 +192,7 @@ private struct LibraryMosaicCellLayout: Identifiable {
 }
 
 private struct LibraryEmptyState: View {
-    @ObservedObject var collection: ImageCollection
+    @Bindable var collection: ImageCollection
 
     var body: some View {
         VStack(spacing: 10) {
@@ -214,7 +212,7 @@ private struct LibraryEmptyState: View {
 }
 
 private struct LibraryGridCell: View {
-    @ObservedObject var item: ImageCollection.Item
+    @Bindable var item: ImageCollection.Item
     @ObservedObject var settings: KromoraSettings
     let isSelected: Bool
     let isActive: Bool
@@ -315,31 +313,5 @@ private struct LibraryGridCell: View {
         }
         .font(.caption2.weight(.semibold))
         .frame(minWidth: 14)
-    }
-}
-
-private struct LibraryGridPlaceholder: View {
-    let slot: ImageCollection.PendingImportSlot
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(Color.secondary.opacity(0.09))
-            .overlay {
-                VStack(spacing: 7) {
-                    if slot.state == .pending {
-                        ProgressView()
-                            .controlSize(.small)
-                    } else {
-                        Image(systemName: "photo.badge.exclamationmark")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Text(slot.state == .pending ? "Importing" : "Unavailable")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(slot.state == .pending ? "Importing photo" : "Photo unavailable")
     }
 }

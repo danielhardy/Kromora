@@ -1,13 +1,22 @@
 import SwiftUI
 import AppKit
 
-/// Docked panel listing the source folder's images, grouped by subfolder.
+/// Docked panel listing package-backed library images, grouped by package-relative path.
 /// Click a row to open it; the current selection is highlighted and scrolled
 /// into view, staying in sync with the filmstrip and ←/→ navigation.
 struct SourceBrowserView: View {
     @ObservedObject var viewModel: AppViewModel
+    @Bindable var collection: ImageCollection
 
-    private var collection: ImageCollection { viewModel.collection }
+    init(viewModel: AppViewModel) {
+        self.viewModel = viewModel
+        self._collection = Bindable(wrappedValue: viewModel.collection)
+    }
+
+    init(viewModel: AppViewModel, collection: ImageCollection) {
+        self.viewModel = viewModel
+        self._collection = Bindable(wrappedValue: collection)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +35,7 @@ struct SourceBrowserView: View {
                 Image(systemName: "folder")
                     .foregroundColor(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(collection.sourceFolderURL?.lastPathComponent ?? "Source")
+                    Text("Library")
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -39,11 +48,6 @@ struct SourceBrowserView: View {
                         .foregroundColor(.secondary)
                 }
                 Spacer()
-                if collection.isScanning {
-                    ProgressView()
-                        .controlSize(.small)
-                        .help("Scanning source folder")
-                }
                 Button {
                     viewModel.refreshSource()
                 } label: {
@@ -51,8 +55,7 @@ struct SourceBrowserView: View {
                 }
                 .buttonStyle(.borderless)
                 .foregroundColor(.secondary)
-                .help("Rescan source folder")
-                .disabled(collection.sourceFolderURL == nil)
+                .help("Refresh library")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -132,8 +135,7 @@ struct SourceBrowserView: View {
 
     // MARK: - Grouping
 
-    /// Only show subfolder section headers when there's actually more than one
-    /// group (i.e. the source has subfolders).
+    /// Only show section headers when the package contains more than one relative group.
     private var showHeaders: Bool { groups.count > 1 }
 
     private struct Group: Identifiable {
@@ -156,7 +158,7 @@ struct SourceBrowserView: View {
         return order.map { key in
             Group(
                 id: key.isEmpty ? "·root" : key,
-                name: key.isEmpty ? (collection.sourceFolderURL?.lastPathComponent ?? "Images") : key,
+                name: key.isEmpty ? "Images" : key,
                 entries: buckets[key]!.map { (index: $0.0, item: $0.1) }
             )
         }
@@ -166,7 +168,7 @@ struct SourceBrowserView: View {
 // MARK: - Row
 
 private struct SourceBrowserRow: View {
-    @ObservedObject var item: ImageCollection.Item
+    @Bindable var item: ImageCollection.Item
     let isSelected: Bool
 
     var body: some View {

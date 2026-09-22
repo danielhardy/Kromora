@@ -9,6 +9,20 @@ import UniformTypeIdentifiers
 struct RemovableMediaImportRequest: Sendable, Equatable {
     let volume: MediaVolume
     let files: [MediaVolumeFile]
+    let totalSelected: Int
+    let operationID: UUID
+
+    init(
+        volume: MediaVolume,
+        files: [MediaVolumeFile],
+        totalSelected: Int? = nil,
+        operationID: UUID = UUID()
+    ) {
+        self.volume = volume
+        self.files = files
+        self.totalSelected = totalSelected ?? files.count
+        self.operationID = operationID
+    }
 }
 /// Owns library-adjacent presentation work that can outlive a menu action: mounted-volume
 /// discovery, volume scanning, selection, source-folder dialog/drop routing, and cancellation.
@@ -34,6 +48,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     private var scanTask: Task<Void, Never>?
     private var importValidationTask: Task<Void, Never>?
     private var isShuttingDown = false
+    private var importOperationID = UUID()
 
     var onStatus: (@MainActor (String) -> Void)?
     var onError: (@MainActor (String) -> Void)?
@@ -95,21 +110,23 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     }
 
     func refreshRemovableMedia() {
+        let operationID = beginImportOperation()
         discoveryTask?.cancel()
         let provider = self.provider
         discoveryTask = Task { [weak self] in
             let volumes = await provider.discover()
-            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+            guard let self, self.isCurrentImport(operationID), !Task.isCancelled else { return }
             self.removableMediaVolumes = volumes
         }
     }
 
     func importFromRemovableMedia() {
+        let operationID = beginImportOperation()
         discoveryTask?.cancel()
         let provider = self.provider
         discoveryTask = Task { [weak self] in
             let volumes = await provider.discover()
-            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+            guard let self, self.isCurrentImport(operationID), !Task.isCancelled else { return }
             self.removableMediaVolumes = volumes
             guard let volume = volumes.first else {
                 self.onStatus?("No supported removable media is mounted")
@@ -120,6 +137,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     }
 
     func openRemovableMedia(_ volume: MediaVolume) {
+        let operationID = beginImportOperation()
         scanTask?.cancel()
         importValidationTask?.cancel()
         removableMediaVolume = volume
@@ -134,12 +152,14 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         scanTask = Task { [weak self] in
             do {
                 let result = try await provider.scan(volume)
-                guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
+                guard let self, self.isCurrentImport(operationID), !Task.isCancelled else {
+                    return
+                }
                 self.publishScan(result)
             } catch is CancellationError {
                 // Closing the selector is a normal cancellation.
             } catch {
-                guard let self, !self.isShuttingDown else { return }
+                guard let self, self.isCurrentImport(operationID) else { return }
                 if case .permissionDenied = error as? MediaVolumeError,
                     provider.supportsInteractiveAccessGrant,
                     let granted = self.requestAccess(for: volume)
@@ -150,14 +170,18 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
                     }
                     do {
                         let result = try await provider.scan(granted)
-                        guard !Task.isCancelled, !self.isShuttingDown else { return }
+                        guard self.isCurrentImport(operationID), !Task.isCancelled else {
+                            return
+                        }
                         self.publishScan(result)
                     } catch is CancellationError {
                     } catch {
+                        guard self.isCurrentImport(operationID) else { return }
                         self.isRemovableMediaScanning = false
                         self.removableMediaWarnings = [error.localizedDescription]
                     }
                 } else {
+                    guard self.isCurrentImport(operationID) else { return }
                     self.isRemovableMediaScanning = false
                     self.removableMediaWarnings = [error.localizedDescription]
                 }
@@ -178,6 +202,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     }
 
     func cancelRemovableMediaImport() {
+        _ = beginImportOperation()
         scanTask?.cancel()
         importValidationTask?.cancel()
         isRemovableMediaScanning = false
@@ -195,6 +220,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             return
         }
 
+        let operationID = beginImportOperation()
         importValidationTask?.cancel()
         removableMediaImportProgress = MediaVolumeImportProgress(
             total: selected.count, processed: 0, imported: 0, skipped: 0,
@@ -207,9 +233,18 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             defer { if hasScope { accessURL.stopAccessingSecurityScopedResource() } }
             var usable: [MediaVolumeFile] = []
             for file in selected {
-                guard !Task.isCancelled, !self.isShuttingDown else {
-                    self.finishImport(imported: usable.count, skipped: selected.count - usable.count,
-                                      cancelled: true, total: selected.count)
+                guard self.isCurrentImport(operationID), !Task.isCancelled else {
+                    if self.isCurrentImport(operationID) {
+                        self.finishImport(
+                            summary: ImportOutcomeSummary(
+                                total: selected.count,
+                                imported: usable.count,
+                                skipped: selected.count - usable.count,
+                                cancelled: true
+                            ),
+                            operationID: operationID
+                        )
+                    }
                     return
                 }
                 var progress = self.removableMediaImportProgress ?? .init(
@@ -230,24 +265,47 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
                 self.removableMediaImportProgress = progress
                 await Task.yield()
             }
+            guard self.isCurrentImport(operationID), !Task.isCancelled else { return }
             guard !usable.isEmpty else {
-                self.onStatus?("No selected images could be read from \(volume.name)")
+                self.finishImport(
+                    summary: ImportOutcomeSummary(
+                        total: selected.count, skipped: selected.count
+                    ),
+                    operationID: operationID
+                )
                 self.isRemovableMediaSelectorPresented = false
                 return
             }
-            self.onImportRequest?(RemovableMediaImportRequest(volume: volume, files: usable))
+            self.onImportRequest?(
+                RemovableMediaImportRequest(
+                    volume: volume, files: usable, totalSelected: selected.count,
+                    operationID: operationID
+                )
+            )
         }
     }
 
-    func finishImport(imported: Int, skipped: Int, cancelled: Bool, total: Int) {
+    func finishImport(summary: ImportOutcomeSummary, operationID: UUID? = nil) {
+        if let operationID, !isCurrentImport(operationID) { return }
         removableMediaImportProgress = MediaVolumeImportProgress(
-            total: total, processed: imported + skipped, imported: imported,
-            skipped: skipped, currentName: nil, cancelled: cancelled
+            total: summary.total,
+            processed: summary.imported + summary.duplicates + summary.skipped + summary.failed,
+            imported: summary.imported,
+            duplicates: summary.duplicates,
+            skipped: summary.skipped,
+            failed: summary.failed,
+            failureReasons: summary.failureReasons,
+            currentName: nil,
+            cancelled: summary.cancelled
         )
-        onStatus?(
-            cancelled
-            ? "Removable media import cancelled — \(imported) imported, \(skipped) skipped"
-            : "Removable media import complete — \(imported) imported, \(skipped) skipped"
+        onStatus?(summary.status(prefix: "Removable media import"))
+    }
+
+    func finishImport(imported: Int, skipped: Int, cancelled: Bool, total: Int) {
+        finishImport(
+            summary: ImportOutcomeSummary(
+                total: total, imported: imported, skipped: skipped, cancelled: cancelled
+            )
         )
     }
 
@@ -277,6 +335,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     func shutdown() async {
         guard !isShuttingDown else { return }
         isShuttingDown = true
+        _ = beginImportOperation()
         discoveryTask?.cancel()
         scanTask?.cancel()
         importValidationTask?.cancel()
@@ -285,5 +344,15 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         scanTask = nil
         importValidationTask = nil
         for task in tasks { await task?.value }
+    }
+
+    private func beginImportOperation() -> UUID {
+        let id = UUID()
+        importOperationID = id
+        return id
+    }
+
+    private func isCurrentImport(_ id: UUID) -> Bool {
+        importOperationID == id && !isShuttingDown
     }
 }

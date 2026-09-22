@@ -10,7 +10,6 @@ The lane is opt-in because it creates 1,000, 10,000, and 100,000 temporary JPEGs
 minutes:
 
 ```sh
-KROMORA_TEST_ISOLATION=1 \
 KROMORA_LIBRARY_BASELINE_BENCHMARK=1 \
 KROMORA_LIBRARY_BASELINE_SAMPLES=3 \
 KROMORA_LIBRARY_BASELINE_OUTPUT=/tmp/kromora-library-baseline.json \

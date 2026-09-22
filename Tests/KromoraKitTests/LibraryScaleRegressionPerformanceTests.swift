@@ -579,9 +579,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             engine: fake,
             editStore: makeInMemoryEditStore(),
             preferences: makeTestUserDefaults(),
-            libraryFolderURL: tempDirectory.appendingPathComponent("managed-library"),
             userLookFolderURL: tempDirectory.appendingPathComponent("looks"),
-            previewDiskCacheDirectory: tempDirectory.appendingPathComponent("preview-cache")
+            previewDiskCacheDirectory: tempDirectory.appendingPathComponent("preview-cache"),
+            portablePackageURL: tempDirectory.appendingPathComponent("Scale.kromoralibrary")
         )
         do {
             let firstURL = root
