@@ -68,9 +68,7 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         )
         XCTAssertFalse(storedAfterDelete.found, "the edit record is removed")
 
-        let relaunchedCollection = ImageCollection(
-            defaults: defaults, libraryFolderURL: managedFolder
-        )
+        let relaunchedCollection = ImageCollection()
         relaunchedCollection.loadFromFolder(sourceFolder)
         await relaunchedCollection.scanCompletion()
         XCTAssertTrue(relaunchedCollection.items.isEmpty, "the tombstone survives a rescan")

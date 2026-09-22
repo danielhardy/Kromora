@@ -79,20 +79,18 @@ case "${1:-}" in
         skip_filter="($serial_filter|$optional_filter)"
         run_lane "deterministic-parallel" \
             "swift test --parallel --skip '$skip_filter'" \
-            env KROMORA_TEST_ISOLATION=1 swift test --parallel --skip "$skip_filter"
+            swift test --parallel --skip "$skip_filter"
         ;;
     serial)
         audit_lanes
         run_lane "render-ui-serial" \
             "swift test --no-parallel --filter '$serial_filter' --skip '$optional_filter'" \
-            env KROMORA_TEST_ISOLATION=1 \
             swift test --no-parallel --filter "$serial_filter" --skip "$optional_filter"
         ;;
     identity)
         audit_lanes
         run_lane "identity-relocation-gate" \
             "swift test --no-parallel --filter '$identity_filter'" \
-            env KROMORA_TEST_ISOLATION=1 \
             swift test --no-parallel --filter "$identity_filter"
         ;;
     optional)
@@ -100,7 +98,7 @@ case "${1:-}" in
         print "Requirements: KROMORA_RAW_FIXTURE_DIR for RAW/JPG coverage; benchmark-specific KROMORA_* settings; a logged-in display for Metal/AppKit capture."
         run_lane "optional-raw-benchmarks" \
             "swift test --no-parallel --filter '$optional_filter'" \
-            env KROMORA_TEST_ISOLATION=1 swift test --no-parallel --filter "$optional_filter"
+            swift test --no-parallel --filter "$optional_filter"
         ;;
     *)
         usage

@@ -72,6 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 startTerminationFlush(sender)
             case .alertSecondButtonReturn:
                 await viewModel.discardPendingWrites()
+                await viewModel.shutdown()
                 terminationFlushInProgress = false
                 sender.reply(toApplicationShouldTerminate: true)
             default:
@@ -81,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        await viewModel.shutdown()
         sender.reply(toApplicationShouldTerminate: true)
     }
 

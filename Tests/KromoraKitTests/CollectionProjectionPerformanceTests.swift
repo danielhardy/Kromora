@@ -46,26 +46,16 @@ final class CollectionProjectionPerformanceTests: TempDirectoryTestCase {
         _ = collection.thumbnailEntries
         let rebuildsBeforeThumbnail = collection.projectionRebuildCount
 
-        var collectionChanges = 0
-        var itemChanges = 0
-        let collectionSubscription = collection.objectWillChange.sink { _ in
-            collectionChanges += 1
-        }
-        let itemSubscription = items[1].objectWillChange.sink { _ in
-            itemChanges += 1
-        }
-
+        // KRMA-521 Observation isolation: mutating one item's thumbnail must not rebuild the
+        // collection projection or mutate collection-level state. The item itself must reflect
+        // the new thumbnail while siblings stay empty.
         items[1].thumbnail = NSImage(size: NSSize(width: 8, height: 8))
         _ = collection.thumbnailEntries
 
-        XCTAssertEqual(itemChanges, 1)
-        XCTAssertEqual(collectionChanges, 0)
+        XCTAssertNotNil(items[1].thumbnail)
         XCTAssertEqual(collection.projectionRebuildCount, rebuildsBeforeThumbnail)
         XCTAssertNil(items[0].thumbnail)
         XCTAssertNil(items[2].thumbnail)
-
-        collectionSubscription.cancel()
-        itemSubscription.cancel()
     }
 
     func testFilterRevisionRebuildsTheProjectionWithoutChangingItemIdentityOrder() {

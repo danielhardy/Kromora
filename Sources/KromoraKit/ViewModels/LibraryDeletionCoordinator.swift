@@ -49,6 +49,12 @@ final class LibraryDeletionCoordinator {
 
         var deletedIDs: [PhotoAssetID] = []
         var failures: [String] = []
+        guard let portableLibrary else {
+            return LibraryDeletionResult(
+                deletedIDs: [],
+                failures: ["Could not remove photos because the library package is unavailable."]
+            )
+        }
         for candidate in candidates {
             guard let item = collection.items.first(where: { $0.id == candidate.id }) else {
                 continue
@@ -63,15 +69,8 @@ final class LibraryDeletionCoordinator {
                 continue
             }
 
-            var trashedURL: NSURL?
             do {
-                if candidate.isManaged, let url = candidate.url {
-                    if let portableLibrary {
-                        try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
-                    } else {
-                        try FileManager.default.trashItem(at: url, resultingItemURL: &trashedURL)
-                    }
-                }
+                try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
                 try await editStore.delete(
                     for: EditSourceReference(
                         assetID: candidate.id,
@@ -81,9 +80,6 @@ final class LibraryDeletionCoordinator {
                 )
                 deletedIDs.append(candidate.id)
             } catch {
-                if let trashedURL, let originalURL = candidate.url {
-                    try? FileManager.default.moveItem(at: trashedURL as URL, to: originalURL)
-                }
                 failures.append(
                     "Could not remove \(candidate.displayName): " + error.localizedDescription
                 )

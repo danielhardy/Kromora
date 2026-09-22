@@ -1,5 +1,10 @@
 # Portable library package — implementation plan
 
+> Product status (KRMA-520): the package-backed library is now the only library mode. The design
+> notes below retain format and migration history; folder chooser/drop and removable media are
+> import sources, not persisted referenced-folder browsing. Existing `EditStore*.store` files
+> remain untouched. If referenced assets return, they will use package `.referenced` records.
+
 **Status:** the Pictures-backed package and storage boundary are active. This remains design input
 for future scale/format work; the sequenced implementation issues began with KRMA-389
 (phase 0), KRMA-390 (phase 1), KRMA-391 (phase 2), KRMA-392 (phase 3), and KRMA-393 (phase 4).
@@ -8,10 +13,9 @@ Time-bound.
 **Scope:** local-only. iCloud sync is explicitly out of scope (see [Deliberately out of scope](#deliberately-out-of-scope)).
 **Target scale:** 100,000 assets on a single Mac.
 
-This document is a sequenced implementation plan. Unlike [`ENGINEERING_GUIDE.md`](ENGINEERING_GUIDE.md),
-which records durable architecture, this file describes work that has not happened yet. As each phase
-lands, the invariants it establishes move into the engineering guide and the corresponding section
-here is reduced to a pointer. When all five phases are done, this file is deleted.
+This document is a sequenced implementation plan and format history. Durable current architecture
+belongs in [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md); completed package work below remains as
+historical context for compatibility and future scale work.
 
 The current product uses a Pictures-backed portable package for managed library data. The local
 index and device caches are projections, while package edit sidecars are canonical. The approved
@@ -23,9 +27,9 @@ package phases must not silently migrate or delete current library data.
 
 ## 1. Goal and premise
 
-Kromora today browses **referenced folders**. Edits live in a SwiftData store under Application
-Support, keyed by a `PhotoAssetID` derived from the file's inode or canonical path. Masks, previews
-and thumbnails are device-local caches keyed the same way.
+The package-backed product presents imported assets from the package query/index. The former
+referenced-folder browser and its SwiftData-backed collection projection are retired. Legacy edit
+stores remain on disk but are not opened as a library fallback.
 
 That is fine for a single-machine development tool and wrong for a photo library. Moving the photos
 breaks the edits. Moving to a new Mac loses everything. There is no unit a user can back up, hand to

@@ -1,6 +1,6 @@
 # CLAUDE.md — project guidance for AI agents
 
-Kromora is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**): it develops RAW through `CIRAWFilter`, applies tone/colour adjustments, local masks, and `.cube` LUTs through one Metal-backed render pipeline, and can derive a `.cube` LUT from a (RAW, JPG) pair. The current product is the folder-backed Library/Edit workflow with culling, deletion, content-aware Auto, comparison, and full-resolution export. See [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for the current coordinator boundaries and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for the explicitly future portable-library work.
+Kromora is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**): it develops RAW through `CIRAWFilter`, applies tone/colour adjustments, local masks, and `.cube` LUTs through one Metal-backed render pipeline, and can derive a `.cube` LUT from a (RAW, JPG) pair. The current product is the package-backed Library/Edit workflow with culling, deletion, content-aware Auto, comparison, and full-resolution export. See [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for the current coordinator boundaries and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for package format history and migration notes.
 
 ## Build / run / test
 

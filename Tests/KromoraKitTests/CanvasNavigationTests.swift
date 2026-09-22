@@ -597,29 +597,28 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         )
 
         var appChanges = 0
-        var canvasChanges = 0
         var inspectorChanges = 0
         let appSubscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
-        let canvasSubscription = viewModel.canvasState.objectWillChange.sink {
-            _ in canvasChanges += 1
-        }
         let inspectorSubscription = viewModel.inspectorState.objectWillChange.sink {
             _ in inspectorChanges += 1
         }
 
         // A wheel/pinch update is presentation-only and must not fan out through AppViewModel.
+        // CanvasInteractionState is @Observable (KRMA-521): assert the value changed locally
+        // while the broad model publisher stayed silent.
+        let zoomBefore = viewModel.canvasState.navigation.zoom
         viewModel.setCanvasZoom(2)
         XCTAssertEqual(appChanges, 0)
-        XCTAssertGreaterThan(canvasChanges, 0)
+        XCTAssertNotEqual(viewModel.canvasState.navigation.zoom, zoomBefore)
+        XCTAssertEqual(viewModel.canvasState.navigation.zoom, 2)
 
         // Crop-handle movement has the same contract. The opening transition may update status,
         // so begin first and measure only the pointer-frequency draft mutation.
         viewModel.beginCrop()
         appChanges = 0
-        canvasChanges = 0
         viewModel.updateCropDraft(CGRect(x: 0.1, y: 0.1, width: 0.7, height: 0.7))
         XCTAssertEqual(appChanges, 0)
-        XCTAssertGreaterThan(canvasChanges, 0)
+        XCTAssertNotNil(viewModel.canvasState.cropDraft)
 
         // Inspector chrome is independently observable and is not forwarded through the broad
         // model publisher either.
@@ -628,7 +627,7 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         XCTAssertEqual(appChanges, 0)
         XCTAssertGreaterThan(inspectorChanges, 0)
 
-        withExtendedLifetime((appSubscription, canvasSubscription, inspectorSubscription)) {}
+        withExtendedLifetime((appSubscription, inspectorSubscription)) {}
     }
 
     func testSourceResetClearsNavigationAndCropTransientState() {

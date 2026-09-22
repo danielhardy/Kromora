@@ -24,18 +24,23 @@ import AppKit
 /// It also removes the `[processor]` capture into `Task.detached` that §2 of the spec flags: the
 /// non-`Sendable` singleton is gone from both loops, and the work now happens inside the actor that
 /// owns the context.
+///
+/// Migrated to Observation (KRMA-521): batch progress publishes through this object's own
+/// boundary. The status bar observes the coordinator directly through `@Bindable` so export
+/// progress never passes through AppViewModel's former objectWillChange fan-in.
 @MainActor
-final class ExportCoordinator: ObservableObject {
+@Observable
+final class ExportCoordinator {
 
-    @Published private(set) var isExporting: Bool = false
+    private(set) var isExporting: Bool = false
     /// Progress (0...1) during a multi-image "Export All" run.
-    @Published private(set) var batchProgress: Double = 0
+    private(set) var batchProgress: Double = 0
     /// Number of items that have reached a terminal state in the current batch.
-    @Published private(set) var batchCompleted: Int = 0
+    private(set) var batchCompleted: Int = 0
     /// Total number of items in the current batch. Zero means that no batch is active.
-    @Published private(set) var batchTotal: Int = 0
+    private(set) var batchTotal: Int = 0
     /// The source currently in the expensive decode/render/commit section.
-    @Published private(set) var batchCurrentItem: String?
+    private(set) var batchCurrentItem: String?
     /// The format used by the most recently started export in this session.
     /// Both export dialogs use this to seed their accessory view.
     private(set) var lastUsedFormat: ExportFormat

@@ -6,16 +6,17 @@ struct InfoInspectorView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var inspectorState: AppViewModel.InspectorState
-    @ObservedObject private var canvasState: CanvasInteractionState
+    @Bindable private var canvasState: CanvasInteractionState
 
     init(viewModel: AppViewModel, inspectorState: AppViewModel.InspectorState) {
         self.viewModel = viewModel
         self.inspectorState = inspectorState
-        _canvasState = ObservedObject(wrappedValue: viewModel.canvasState)
+        _canvasState = Bindable(wrappedValue: viewModel.canvasState)
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let _ = ViewBodyCounter.noteInspectorBody()
+        return VStack(spacing: 0) {
             if canvasState.isCropToolActive {
                 CropInspectorView(
                     aspectRatio: canvasState.cropAspectRatio,

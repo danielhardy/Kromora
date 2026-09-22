@@ -1,10 +1,27 @@
 import Foundation
 import XCTest
+import os.lock
 
 @testable import KromoraKit
 
 @MainActor
 final class PortableLibrarySessionTests: TempDirectoryTestCase {
+    private final class TestLeaseClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: Date
+
+        init(_ value: Date) { self.value = value }
+
+        func now() -> Date {
+            lock.lock(); defer { lock.unlock() }
+            return value
+        }
+
+        func advance(_ seconds: TimeInterval) {
+            lock.lock(); value = value.addingTimeInterval(seconds); lock.unlock()
+        }
+    }
+
     func testDefaultPackageLivesInPicturesWithCanonicalName() {
         let packageURL = KromoraStorage.defaultPortableLibraryPackageURL
         XCTAssertEqual(packageURL.lastPathComponent, KromoraStorage.portableLibraryPackageName)
@@ -27,7 +44,10 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertTrue(
             PreviewDiskCache.packageDirectory(for: packageURL).path.hasPrefix(packageURL.path)
         )
-        XCTAssertFalse(PreviewDiskCache.defaultDirectory().path.hasPrefix(packageURL.path))
+        XCTAssertEqual(
+            PreviewDiskCache.packageDirectory(for: packageURL).deletingLastPathComponent(),
+            packageURL.appendingPathComponent("Derived", isDirectory: true)
+        )
     }
 
     func testPackageReopensAfterDisposableProjectionAndDerivedDataAreRemoved() async throws {
@@ -180,5 +200,145 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertEqual(recovered.assetCount, 1)
         try recovered.lease.release()
         _ = stale
+    }
+
+    func testShortLeaseHeartbeatKeepsImportsWritablePastTwoDurations() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("Heartbeat.kromoralibrary")
+        let clock = TestLeaseClock(Date(timeIntervalSince1970: 10_000))
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(
+            at: packageURL,
+            leaseDuration: 3,
+            clock: .init(
+                now: { clock.now() },
+                // Keep the production heartbeat suspended; renewAfterWake drives the same
+                // package-I/O operation deterministically in this test.
+                sleep: { _ in try await Task.sleep(for: .seconds(3600)) }
+            ),
+            scheduler: scheduler
+        )
+        let heartbeatID = ImageWorkScheduler.JobID(
+            "portable-package-lease-heartbeat-\(session.lease.ownerID.uuidString)"
+        )
+        for _ in 0..<7 {
+            clock.advance(1)
+            session.renewAfterWake()
+            for _ in 0..<5_000 {
+                if !scheduler.contains(heartbeatID) { break }
+                await Task.yield()
+            }
+            XCTAssertGreaterThanOrEqual(session.lease.info.heartbeatAt, clock.now())
+        }
+        XCTAssertGreaterThan(
+            clock.now().timeIntervalSince1970,
+            session.lease.info.acquiredAt.timeIntervalSince1970 + 6
+        )
+
+        let source = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "long-session.jpg", in: tempDirectory
+        )
+        let result = try session.importURLs([source])
+        XCTAssertEqual(result.imported.count, 1)
+        XCTAssertTrue(result.failures.isEmpty)
+        await session.shutdown()
+    }
+
+    func testLeaseLossDuringSessionStopsWritesWithDistinctError() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LostHeartbeat.kromoralibrary")
+        let clock = TestLeaseClock(Date(timeIntervalSince1970: 20_000))
+        let session = try PortableLibrarySession(
+            at: packageURL,
+            leaseDuration: 2,
+            clock: .init(now: { clock.now() }),
+            scheduler: nil
+        )
+        clock.advance(3)
+        try FileManager.default.removeItem(at: packageURL.appendingPathComponent("manifest.lock"))
+
+        XCTAssertThrowsError(try session.importData(Data("dirty snapshot".utf8), name: "lost.jpg")) {
+            XCTAssertEqual($0 as? PortablePackageLeaseError, .lostDuringSession)
+        }
+        await session.shutdown()
+    }
+
+    func testShutdownWaitsForHeartbeatBeforeReleasingLease() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("ShutdownHeartbeat.kromoralibrary")
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(
+            at: packageURL,
+            leaseDuration: 3,
+            scheduler: scheduler
+        )
+
+        await session.shutdown()
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: packageURL.appendingPathComponent("manifest.lock").path
+            )
+        )
+        session.renewAfterWake()
+        XCTAssertFalse(scheduler.contains(.init("portable-package-lease-heartbeat-\(session.lease.ownerID.uuidString)")))
+    }
+
+    func testAsyncImportPublishesProgressAndAppliesMembershipDelta() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("AsyncImport.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("AsyncImport.index")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 24, height: 16, orientation: 1, named: "async.jpg", in: tempDirectory
+        )
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, scheduler: scheduler
+        )
+
+        let handle = try session.startImportURLs([sourceURL])
+        var progress: [PortablePackageImportProgress] = []
+        for await value in handle.progress { progress.append(value) }
+        let result = try await handle.value()
+
+        XCTAssertEqual(result.imported.count, 1)
+        XCTAssertEqual(result.indexDelta.upserts.count, 1)
+        XCTAssertEqual(progress.first?.phase, .preparing)
+        XCTAssertEqual(progress.last?.phase, .finished)
+        XCTAssertEqual(session.assetCount, 1)
+        for _ in 0..<5_000 {
+            if !scheduler.contains(.init("portable-package-index-write-\(session.lease.ownerID.uuidString)")) {
+                break
+            }
+            await Task.yield()
+        }
+        XCTAssertEqual(try LibraryIndexProjection.load(from: indexURL).count, 1)
+        await session.shutdown()
+    }
+
+    func testAsyncImportCancellationLeavesNoPublishedAsset() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("AsyncCancelled.kromoralibrary")
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(at: packageURL, scheduler: scheduler)
+        let handle = try session.startImportData(
+            Data(repeating: 0x5a, count: 8 * 1024 * 1024), name: "cancelled.raw"
+        )
+
+        let cancellation = Task { @MainActor in
+            for await value in handle.progress where value.phase != .preparing {
+                if value.phase == .staging {
+                    handle.cancel()
+                    return
+                }
+            }
+        }
+        do {
+            _ = try await handle.value()
+            XCTFail("expected cancellation")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        await cancellation.value
+        await scheduler.cancelAllAndWait()
+        XCTAssertEqual(session.assetCount, 0)
+        for shard in PortableLibraryPackage.allShards {
+            XCTAssertTrue(try session.package.readMembershipShard(shard).entries.isEmpty)
+        }
+        await session.shutdown()
     }
 }

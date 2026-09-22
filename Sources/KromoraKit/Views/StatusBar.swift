@@ -5,14 +5,17 @@ import SwiftUI
 
 struct StatusBar: View {
     @ObservedObject var viewModel: AppViewModel
-    @ObservedObject var photosImportCoordinator: PhotosImportCoordinator
+    @Bindable var photosImportCoordinator: PhotosImportCoordinator
+    @Bindable var export: ExportCoordinator
+    @Bindable var collection: ImageCollection
     var showsKeyHints: Bool = true
     var onCancelImport: () -> Void = {}
     var onCancelExport: () -> Void = {}
     var onCancelAuto: () -> Void = {}
 
     var body: some View {
-        HStack(spacing: 0) {
+        let _ = ViewBodyCounter.noteToolbarBody()
+        return HStack(spacing: 0) {
             // Status message
             if let progress = photosImportCoordinator.progress {
                 ProgressView(value: progress.fraction)
@@ -27,12 +30,12 @@ struct StatusBar: View {
                     .buttonStyle(.borderless)
                     .font(.caption)
                     .padding(.leading, 8)
-            } else if viewModel.isBatchExporting {
-                ProgressView(value: viewModel.batchProgress)
+            } else if export.isExporting && export.batchTotal > 0 {
+                ProgressView(value: export.batchProgress)
                     .frame(width: 110)
                     .controlSize(.small)
-                Text("Exporting \(viewModel.batchCompleted)/\(viewModel.batchTotal)" +
-                     (viewModel.batchCurrentItem.map { "  \($0)" } ?? ""))
+                Text("Exporting \(export.batchCompleted)/\(export.batchTotal)" +
+                     (export.batchCurrentItem.map { "  \($0)" } ?? ""))
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
@@ -75,7 +78,7 @@ struct StatusBar: View {
                 HStack(spacing: 12) {
                     KeyHint(key: "G/E", label: "library/edit")
                     KeyHint(key: "↑↓", label: "audition Looks")
-                    if viewModel.collection.isActive {
+                    if collection.isActive {
                         KeyHint(key: "←→", label: "cycle images")
                         KeyHint(key: "P/X", label: "pick/reject")
                         KeyHint(key: "0–5", label: "rate")
