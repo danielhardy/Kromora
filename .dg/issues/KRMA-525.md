@@ -13,7 +13,9 @@ labels:
   - dead-code
   - masks
 created: 2026-09-21T20:33:06.322Z
-updated: 2026-09-22T16:21:19.553Z
+updated: 2026-09-22T19:54:43.373Z
+depends_on:
+  - KRMA-543
 estimate: 3
 order: a0
 board: product
