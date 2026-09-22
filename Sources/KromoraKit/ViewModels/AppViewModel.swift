@@ -969,7 +969,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 ?? PreviewDiskCache.packageDirectory(for: normalizedPortablePackageURL),
             capBytes: previewDiskCacheCapBytes
         )
-        self.previewPresentation = PreviewPresentationCoordinator(cache: previewCache)
+        self.previewPresentation = PreviewPresentationCoordinator(cache: previewCache, engine: engine)
         self.sourceSession = SourceSessionCoordinator(
             engine: engine, editStore: effectiveEditStore,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider
@@ -3201,6 +3201,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func deleteLibraryItems(
         _ candidates: [ImageCollection.DeletionCandidate]
     ) async -> LibraryDeletionResult {
+        let identitiesByID: [PhotoAssetID: PortablePhotoIdentity] = Dictionary(
+            uniqueKeysWithValues: candidates.compactMap { candidate in
+                guard let item = collection.items.first(where: { $0.id == candidate.id }) else {
+                    return nil
+                }
+                return (candidate.id, item.asset.source.portableIdentity)
+            }
+        )
         let result = await libraryDeletionCoordinator.delete(candidates)
         guard !result.deletedIDs.isEmpty else {
             if let message = result.failures.first { presentError(message) }
@@ -3230,7 +3238,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 activeID: portableLibrary.portableActiveID
             )
         }
-        previewPresentation.cache.invalidateAll()
+        let deletedIdentities = Set(
+            result.deletedIDs.compactMap { identitiesByID[$0] }
+        )
+        await previewPresentation.cache.invalidate(identities: deletedIdentities)
         Thumbnails.invalidateCache()
         await engine.invalidateRenderCaches()
 

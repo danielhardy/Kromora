@@ -210,7 +210,9 @@ struct CIAutoAdjustmentDescriptor: AppleAutoAdjustmentDescribing {
         guard image.extent.width.isFinite, image.extent.height.isFinite,
               image.extent.width > 0, image.extent.height > 0
         else { return nil }
-        let context = CIContext(options: [.workingColorSpace: space.cgColorSpace])
+        let context = RenderEngineResources.makeOneShotContext(
+            workingColorSpace: space.cgColorSpace
+        )
         guard let rendered = context.createCGImage(image, from: image.extent) else { return nil }
         let width = rendered.width
         let height = rendered.height

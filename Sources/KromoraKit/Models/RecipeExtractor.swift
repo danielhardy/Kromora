@@ -97,7 +97,7 @@ struct RecipeExtractor {
         isCancelled: (() -> Bool)? = nil
     ) throws -> Result {
 
-        let context = makeContext()
+        let context = RenderEngineResources.makeOneShotContext(preferMetal: true)
 
         // PINNED to .sRGB, deliberately NOT WorkingSpace.current.
         //
@@ -488,13 +488,6 @@ struct RecipeExtractor {
     }
 
     // MARK: - Internals
-
-    private static func makeContext() -> CIContext {
-        if let device = MTLCreateSystemDefaultDevice() {
-            return CIContext(mtlDevice: device, options: [.useSoftwareRenderer: false])
-        }
-        return CIContext()
-    }
 
     /// The extent both images are analyzed at: `size`, capped so its longest
     /// side is at most `longEdge`. `longEdge <= 0` means "analyze natively".

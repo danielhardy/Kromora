@@ -247,7 +247,7 @@ enum LookLUTConverter {
             lut: document.lut
         )
 
-        let context = CIContext(options: [CIContextOption.cacheIntermediates: false])
+        let context = RenderEngineResources.makeOneShotContext(cacheIntermediates: false)
         let input = makeGridInput(size: size, space: space)
         let output = RenderPipeline.buildImage(
             developed: input,

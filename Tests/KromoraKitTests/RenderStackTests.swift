@@ -2,21 +2,10 @@ import XCTest
 import CoreImage
 @testable import KromoraKit
 
-/// Phase 2 Step 7's ship gate: one live render context, plus explicitly isolated one-shot samplers.
-///
-/// The count to assert is 2, not 1, and the difference is the whole point. `RecipeExtractor` keeps
-/// its own context by design (`docs/ENGINEERING_GUIDE.md`): it sits outside the stack, never imports
-/// `EditDocument`, never calls `RenderEngine`, and samples in a space pinned to sRGB regardless of
-/// `WorkingSpace.current` — because a derived cube has to be *fit* in the space it will later be
-/// *applied* in (§4.4). Folding it into the engine would quietly couple those two spaces together.
-///
-/// So the invariant is not "one context in the module". It is "one context in the live render path,
-/// owned by RenderEngineResources, plus explicitly named one-shot samplers. PreviewDiskCache is
-/// intentionally one of those samplers: it rasterizes an already-presented frame on a detached
-/// background task and never participates in RenderEngine's live graph. AppleEnhancementReference
-/// (KRMA-346) is one for the same reason: it renders a single ≤768px Apple-enhancement reference
-/// through a method-local, uncached context once per Auto invocation — outside preview, export,
-/// and every cache — and only value pixels cross back out.
+/// Phase 2's render-boundary ship gate: live and one-shot Core Image contexts are centralized in
+/// RenderEngineResources/RenderEngine. The other render-adjacent owners use the shared factory,
+/// which keeps context construction auditable and prevents a new ad-hoc context from bypassing the
+/// engine resource policy.
 ///
 /// **This reads source text, and that is deliberate.** A `CIContext` leaves no observable trace —
 /// two of them render identically, cost twice the memory, and no runtime assertion can tell them
@@ -71,15 +60,10 @@ final class RenderStackTests: XCTestCase {
         let owners = try filesConstructingAContext()
         XCTAssertEqual(
             owners,
-            [
-                "LookLUTConverter.swift", "RenderEngine.swift", "RenderEngineResources.swift",
-                "PreviewDiskCache.swift", "RecipeExtractor.swift",
-                "AppleEnhancementReference.swift",
-            ],
+            ["RenderEngine.swift", "RenderEngineResources.swift"],
             """
-            RenderEngineResources owns the live render context. RecipeExtractor, LookLUTConverter, \
-            PreviewDiskCache, and AppleEnhancementReference are explicit one-shot samplers outside \
-            the live render path.
+            RenderEngineResources owns shared and one-shot context construction; RenderEngine owns \
+            the live render context. Other render-adjacent code must use those boundaries.
             """
         )
     }

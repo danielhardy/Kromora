@@ -1,5 +1,6 @@
 import CoreImage
 import Metal
+import CoreGraphics
 
 /// Actor-confined GPU and cache resources used by `RenderEngine`.
 ///
@@ -23,6 +24,71 @@ final class RenderEngineResources {
     let processingPrefixCache: BoundedLRUCache<ProcessingPrefixCacheKey, CIImage>
     let localMaskCache: BoundedLRUCache<LocalMaskCacheKey, LocalMaskPayload>
     let localMaskRenderer: LocalMaskRenderer
+
+    /// Create a context for an isolated, value-only sampler. Keeping this factory beside the
+    /// engine-owned context makes every Core Image context construction auditable in one place;
+    /// these contexts are intentionally not retained by the live render engine.
+    static func makeOneShotContext(
+        workingColorSpace: CGColorSpace? = nil,
+        cacheIntermediates: Bool = true,
+        preferMetal: Bool = false
+    ) -> CIContext {
+        var options: [CIContextOption: Any] = [
+            .cacheIntermediates: cacheIntermediates
+        ]
+        if let workingColorSpace {
+            options[.workingColorSpace] = workingColorSpace
+        }
+        if preferMetal, let device = MTLCreateSystemDefaultDevice() {
+            return CIContext(mtlDevice: device, options: options)
+        }
+        return CIContext(options: options)
+    }
+
+    /// Rasterize a completed image at the durable preview size. The production overload uses the
+    /// engine's retained context; the static overload exists only for legacy/test samplers.
+    func canonicalPreviewRaster(
+        from image: CIImage,
+        space: WorkingSpace,
+        longEdge: Int
+    ) -> CGImage? {
+        Self.canonicalPreviewRaster(
+            from: image, space: space, longEdge: longEdge, context: context
+        )
+    }
+
+    static func canonicalPreviewRaster(
+        from image: CIImage,
+        space: WorkingSpace,
+        longEdge: Int,
+        context: CIContext
+    ) -> CGImage? {
+        let extent = image.extent.integral
+        guard longEdge > 0, extent.width > 0, extent.height > 0,
+              extent.width.isFinite, extent.height.isFinite else { return nil }
+
+        let scale = CGFloat(longEdge) / max(extent.width, extent.height)
+        let width = max(1, Int((extent.width * scale).rounded()))
+        let height = max(1, Int((extent.height * scale).rounded()))
+        let scaled = image.transformed(by: CGAffineTransform(
+            translationX: -extent.minX, y: -extent.minY
+        )).transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let target = CGRect(x: 0, y: 0, width: width, height: height)
+        return context.createCGImage(
+            scaled, from: target, format: .RGBA8, colorSpace: space.cgColorSpace
+        )
+    }
+
+    static func canonicalPreviewRaster(
+        from image: CIImage,
+        space: WorkingSpace,
+        longEdge: Int
+    ) -> CGImage? {
+        let context = makeOneShotContext(workingColorSpace: space.cgColorSpace)
+        return canonicalPreviewRaster(
+            from: image, space: space, longEdge: longEdge, context: context
+        )
+    }
 
     init(configuration: RenderCacheConfiguration) {
         self.configuration = configuration

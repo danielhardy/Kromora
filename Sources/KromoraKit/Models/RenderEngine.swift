@@ -42,6 +42,15 @@ protocol RenderEngining: Sendable {
     /// preview frames do not pay for an encoded PNG that is immediately decoded again.
     func makeCGImage(_ request: RenderRequest) async -> sending CGImage?
 
+    /// Rasterize a completed preview frame into the durable cache's canonical long-edge size.
+    /// Core Image work stays beside the engine-owned context; callers receive only the finished
+    /// value that the disk cache can encode.
+    func makeCanonicalPreviewRaster(
+        _ image: sending CIImage,
+        space: WorkingSpace,
+        longEdge: Int
+    ) async -> sending CGImage?
+
     /// Produce a thumbnail CGImage. The default preserves older conformers' thumbnail recording
     /// seam; `RenderEngine` overrides it to rasterize directly without encoded bytes.
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage?
@@ -306,6 +315,20 @@ extension RenderEngining {
               let image = CGImageSourceCreateImageAtIndex(imageSource, 0, nil)
         else { return nil }
         return image
+    }
+
+    func makeCanonicalPreviewRaster(
+        _ image: sending CIImage,
+        space: WorkingSpace,
+        longEdge: Int
+    ) async -> sending CGImage? {
+        // Compatibility seam for fake/lightweight renderers. Production RenderEngine overrides
+        // this with its retained context; the fallback still keeps context construction inside
+        // RenderEngineResources and lets existing renderer doubles exercise preview caching.
+        guard !Task.isCancelled else { return nil }
+        return RenderEngineResources.canonicalPreviewRaster(
+            from: image, space: space, longEdge: longEdge
+        )
     }
 
     /// Thumbnail callers can use a CGImage without changing the established fake-render seam.
@@ -703,6 +726,15 @@ actor RenderEngine: RenderEngining {
         return context.createCGImage(
             image, from: rect, format: .RGBA8, colorSpace: request.space.cgColorSpace
         )
+    }
+
+    func makeCanonicalPreviewRaster(
+        _ image: sending CIImage,
+        space: WorkingSpace,
+        longEdge: Int
+    ) async -> sending CGImage? {
+        guard !Task.isCancelled else { return nil }
+        return resources.canonicalPreviewRaster(from: image, space: space, longEdge: longEdge)
     }
 
     /// The edited-thumbnail path uses the actor-local rasterizer directly. Keeping this separate
