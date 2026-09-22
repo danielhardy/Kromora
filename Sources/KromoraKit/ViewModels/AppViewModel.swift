@@ -105,8 +105,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// need to publish through the model observed by the library and canvas shells.
     @MainActor
     final class InspectorState: ObservableObject {
-        @Published var isPresented = false
-        @Published var tab: InspectorTab = .info
+        /// Assignment observers run after `@Published` has emitted its will-change event. The
+        /// histogram gate needs the assigned value synchronously, so it uses this callback
+        /// instead of trying to read the old value from the projected publisher.
+        var onPresentationChange: (() -> Void)?
+
+        @Published var isPresented = false {
+            didSet { onPresentationChange?() }
+        }
+        @Published var tab: InspectorTab = .info {
+            didSet { onPresentationChange?() }
+        }
 
         /// Masking is an inspector tab, not a second presentation mode. Keep the previous tab so
         /// Done/Escape can return to the edit control the user came from.
@@ -1142,17 +1151,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         // Inspector chrome is observed by its own view subtree. Histogram work still belongs to
-        // this model. React to the assigned values (not objectWillChange, which fires before
-        // assignment) without forwarding through AppViewModel's broad publisher and without
-        // spawning a Task per notification.
-        cancellables.append(
-            inspectorState.$isPresented.sink { [weak self] _ in
-                self?.refreshHistogramGate()
-            })
-        cancellables.append(
-            inspectorState.$tab.sink { [weak self] _ in
-                self?.refreshHistogramGate()
-            })
+        // this model. Use InspectorState's post-assignment callback so the gate sees the new
+        // value synchronously; @Published emits from willSet and would otherwise read stale state.
+        inspectorState.onPresentationChange = { [weak self] in
+            self?.refreshHistogramGate()
+        }
 
         previewCoordinator.onPublication = { [weak self] publication in
             self?.publishPreview(publication)
@@ -1185,7 +1188,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 // is opened, no original is fingerprinted, and retained Items stay bounded by
                 // the page size. Further pages fault in on scroll/selection with stable identity.
                 try reloadPortableWindow(pageIndex: 0)
-                navigation.move(to: .grid)
+                if collection.isActive {
+                    navigation.move(to: .grid)
+                }
                 collection.beginThumbnailDemand()
             } catch {
                 presentError(
@@ -1693,6 +1698,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         statusMessage = summary.status(prefix: prefix)
     }
 
+    private func failOpenImage(_ url: URL, reason: String) {
+        // A failed replacement import must not blank an already displayed photo. For a fresh
+        // open, however, the import boundary is the source-loading boundary, so publish the same
+        // terminal state the source session uses and let callers stop waiting on published state.
+        guard sourceImage == nil else {
+            presentImportOutcome(
+                .failure(total: 1, reason: "\(url.lastPathComponent): \(reason)"),
+                prefix: "Photo import"
+            )
+            return
+        }
+        isLoading = false
+        previewState = .failed
+        presentError("Could not open \(url.lastPathComponent): \(reason)")
+    }
+
     private func observePortableImport(
         _ handle: PortablePackageImportHandle,
         operationID: UUID,
@@ -1747,7 +1768,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             selectedIDs: portableLibrary.portableSelectedIDs,
             activeID: portableLibrary.portableActiveID
         )
-        navigation.move(to: .grid)
+        if collection.isActive {
+            navigation.move(to: .grid)
+        }
         collection.beginThumbnailDemand()
     }
 
@@ -1919,11 +1942,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
                     guard let self else { return }
+                    guard let assetID = result.imported.first?.assetID
+                        ?? result.duplicates.first?.existingAssetID else {
+                        self.failOpenImage(
+                            url,
+                            reason: result.failures.first?.reason ?? "The import produced no asset."
+                        )
+                        return
+                    }
                     do {
                         try self.reloadPortableCollection()
-                        if let assetID = result.imported.first?.assetID
-                            ?? result.duplicates.first?.existingAssetID
-                        { self.openPortableAsset(assetID) }
+                        self.openPortableAsset(assetID)
                         self.presentImportOutcome(
                             ImportOutcomeSummary(result: result, total: 1),
                             prefix: "Photo import"
@@ -1932,18 +1961,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 },
                 onFailure: { [weak self] error in
                     guard let self, self.isCurrentImport(operationID) else { return }
-                    self.presentImportOutcome(
-                        .failure(total: 1, reason: "\(url.lastPathComponent): \(error.localizedDescription)"),
-                        prefix: "Photo import"
-                    )
+                    self.failOpenImage(url, reason: error.localizedDescription)
                 }
             )
         } catch {
             guard isCurrentImport(operationID) else { return }
-            presentImportOutcome(
-                .failure(total: 1, reason: "\(url.lastPathComponent): \(error.localizedDescription)"),
-                prefix: "Photo import"
-            )
+            failOpenImage(url, reason: error.localizedDescription)
         }
     }
 

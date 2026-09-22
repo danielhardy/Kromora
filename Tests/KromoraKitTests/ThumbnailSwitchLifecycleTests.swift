@@ -337,7 +337,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "first.png", in: tempDirectory
         )
-        let second = try Fixtures.writeGradientPNG(
+        let second = try Fixtures.writeClarityPNG(
             width: 16, height: 12, named: "second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
@@ -373,7 +373,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "comparison-first.png", in: tempDirectory
         )
-        let second = try Fixtures.writeGradientPNG(
+        let second = try Fixtures.writeClarityPNG(
             width: 16, height: 12, named: "comparison-second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
@@ -512,7 +512,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "sequential-first.png", in: tempDirectory
         )
-        let second = try Fixtures.writeGradientPNG(
+        let second = try Fixtures.writeClarityPNG(
             width: 16, height: 12, named: "sequential-second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
@@ -520,10 +520,13 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let viewModel = makeAppViewModel(engine: engine)
 
         viewModel.openImage(url: first)
+        try await waitUntil("the first managed import") {
+            viewModel.collection.items.contains { $0.displayName == "sequential-first.png" }
+        }
         // One-off opens are copied into the managed library before rendering. Assert the durable
         // source identity while retaining the original filename as the photo under test.
         guard let firstManagedURL = viewModel.collection.items.first(where: {
-            $0.displayName == "sequential-first"
+            $0.displayName == "sequential-first.png"
         })?.url else {
             return XCTFail("one-off open should add the first managed-library item")
         }
@@ -543,8 +546,11 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         // second model/view action after that release, matching the reported spinner failure.
         await engine.gatePreviews()
         viewModel.openImage(url: second)
+        try await waitUntil("the second managed import") {
+            viewModel.collection.items.contains { $0.displayName == "sequential-second.png" }
+        }
         guard let secondManagedURL = viewModel.collection.items.first(where: {
-            $0.displayName == "sequential-second"
+            $0.displayName == "sequential-second.png"
         })?.url else {
             return XCTFail("one-off open should add the second managed-library item")
         }
@@ -815,7 +821,12 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
     func testFailedSourceAndFailedHistogramLeaveTerminalStates() async throws {
         let missing = tempDirectory.appendingPathComponent("missing.png")
         let sourceEngine = FakeRenderEngine()
-        let sourceViewModel = makeAppViewModel(engine: sourceEngine)
+        let sourceViewModel = makeAppViewModel(
+            engine: sourceEngine,
+            portablePackageURL: tempDirectory.appendingPathComponent(
+                "source-failure.kromoralibrary", isDirectory: true
+            )
+        )
         sourceViewModel.openImage(url: missing)
 
         try await waitUntil("the source failure") {
@@ -829,7 +840,12 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         )
         let histogramEngine = FakeRenderEngine()
         await histogramEngine.setShouldFailHistogram(true)
-        let histogramViewModel = makeAppViewModel(engine: histogramEngine)
+        let histogramViewModel = makeAppViewModel(
+            engine: histogramEngine,
+            portablePackageURL: tempDirectory.appendingPathComponent(
+                "histogram-failure.kromoralibrary", isDirectory: true
+            )
+        )
         histogramViewModel.openImage(url: image)
         try await waitUntil("the image presentation") {
             histogramViewModel.previewState == .ready
