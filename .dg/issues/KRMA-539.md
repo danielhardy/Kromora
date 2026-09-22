@@ -5,37 +5,6 @@ type: task
 status: review
 priority: high
 agent: codex
-verification_report:
-  verdict: pass
-  acceptance_criteria:
-    - criterion: The focused MaskingWorkspaceTests suite passes without timeout.
-      result: pass
-      notes: MaskingWorkspaceTests passed 36/36 serially and in five repeated parallel runs.
-    - criterion: Switching photos preserves the active photo and restores its mask document.
-      result: pass
-      notes: The active-photo/tab restoration regression passed; source-session loads now await the persistence barrier before reading stored edits.
-    - criterion: Persisted semantic masks reopen with their target and source state.
-      result: pass
-      notes: The semantic-mask reuse/reopen regression passed, including persisted Subject target and source-switch isolation.
-    - criterion: The fast lane no longer reports this suite.
-      result: pass
-      notes: The fast lane reached the masking suite without a MaskingWorkspaceTests failure; remaining fast-lane failures were unrelated suites already tracked separately.
-  checks_run:
-    - swift test --no-parallel --filter KromoraKitTests.MaskingWorkspaceTests (36 passed)
-    - swift test --parallel --filter KromoraKitTests.MaskingWorkspaceTests (5 repeated runs, 36 passed each)
-    - swift test --no-parallel --filter KromoraKitTests.SourceSessionCoordinatorTests (4 passed)
-    - swift test --no-parallel --filter KromoraKitTests.EditPersistenceIntegrationTests (11 passed)
-    - swift build -c release
-    - dg validate --json
-    - git diff --check
-  findings: []
-  fixes:
-    - Source switching now waits for queued edit persistence to finish before stored-document reads begin.
-  verification_commits: []
-  actor: codex
-  resolved_model: gpt-5.6-luna
-  completed_at: 2026-09-22T18:47:44.169Z
-  session: 01MUD0OSEAKUDM9UFV
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
