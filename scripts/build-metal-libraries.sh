@@ -26,7 +26,7 @@ ci_source="$resources/KromoraCIKernels.ci.metal"
 ci_library="$resources/KromoraCIKernels.ci.metallib"
 ci_checksum="$resources/KromoraCIKernels.sha256"
 
-presentation_sources=("$resources/PreviewSurface.metal" "$resources/MaskOverlay.metal")
+presentation_sources=("$resources/PreviewSurface.metal")
 presentation_library="$resources/KromoraPresentation.metallib"
 presentation_checksum="$resources/KromoraPresentation.sha256"
 

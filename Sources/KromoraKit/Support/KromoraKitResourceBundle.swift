@@ -47,7 +47,7 @@ enum KromoraKitResourceBundle {
         return try? Data(contentsOf: url)
     }
 
-    /// The precompiled presentation shaders (PreviewSurface + MaskOverlay functions).
+    /// The precompiled presentation shader library.
     static func presentationMetallibData() -> Data? {
         data(forResource: "KromoraPresentation", withExtension: "metallib")
     }
