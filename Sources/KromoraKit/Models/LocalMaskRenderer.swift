@@ -6,12 +6,33 @@ import Foundation
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
 final class LocalMaskRenderer {
-    static let version = 7
+    static let version = 8
     private let maxBrushStrokeCacheEntries = 8
     private let maxBrushStrokeCacheCostBytes: Int
-    private var brushStrokeCache: [String: [Float]] = [:]
-    private var brushStrokeCacheCosts: [String: Int] = [:]
-    private var brushStrokeCacheOrder: [String] = []
+    private struct BrushRasterRegion: Equatable {
+        let x: Int
+        let y: Int
+        let width: Int
+        let height: Int
+
+        var isEmpty: Bool { width <= 0 || height <= 0 }
+    }
+
+    private struct CachedBrushStroke {
+        let region: BrushRasterRegion
+        let values: [Float]
+    }
+
+    private struct BrushStrokeCacheEntry {
+        let raster: CachedBrushStroke
+        let cost: Int
+        var older: String?
+        var newer: String?
+    }
+
+    private var brushStrokeCache: [String: BrushStrokeCacheEntry] = [:]
+    private var brushStrokeCacheOldest: String?
+    private var brushStrokeCacheNewest: String?
     private var brushStrokeCacheCostBytes = 0
 
     init(maxBrushStrokeCacheCostBytes: Int = 64 * 1024 * 1024) {
@@ -170,8 +191,8 @@ final class LocalMaskRenderer {
 
     func removeAllCachedBrushStrokes() {
         brushStrokeCache.removeAll(keepingCapacity: true)
-        brushStrokeCacheCosts.removeAll(keepingCapacity: true)
-        brushStrokeCacheOrder.removeAll(keepingCapacity: true)
+        brushStrokeCacheOldest = nil
+        brushStrokeCacheNewest = nil
         brushStrokeCacheCostBytes = 0
     }
 
@@ -199,7 +220,12 @@ final class LocalMaskRenderer {
         )?.cropped(to: extent)
     }
 
-    private func rasterImage(_ mask: NormalizedMask, extent: CGRect) -> CIImage? {
+    private func rasterImage(
+        _ mask: NormalizedMask,
+        extent: CGRect,
+        pixelOrigin: CGPoint = .zero,
+        fullDimensions: PixelDimensions? = nil
+    ) -> CIImage? {
         guard mask.size.width > 0, mask.size.height > 0,
               mask.size.width <= Int.max / 4,
               mask.values.count <= Int.max / 4 else { return nil }
@@ -226,8 +252,11 @@ final class LocalMaskRenderer {
             bitmapData: data, bytesPerRow: bytesPerRow,
             size: CGSize(width: width, height: mask.size.height), format: .RGBA8, colorSpace: nil
         )
+        let sourceDimensions = fullDimensions ?? mask.size
+        guard sourceDimensions.width > 0, sourceDimensions.height > 0 else { return nil }
         let scale = CGAffineTransform(
-            scaleX: extent.width / CGFloat(width), y: extent.height / CGFloat(mask.size.height)
+            scaleX: extent.width / CGFloat(sourceDimensions.width),
+            y: extent.height / CGFloat(sourceDimensions.height)
         )
         // Preserve hard semantic definitions when a binary raster is enlarged. Smooth sampling
         // is correct for Vision's soft person boundaries, but it would introduce a visible
@@ -235,7 +264,10 @@ final class LocalMaskRenderer {
         let sampled = mask.isBinary ? image.samplingNearest() : image.samplingLinear()
         return sampled
             .transformed(by: scale)
-            .transformed(by: CGAffineTransform(translationX: extent.minX, y: extent.minY))
+            .transformed(by: CGAffineTransform(
+                translationX: extent.minX + pixelOrigin.x * scale.a,
+                y: extent.minY + pixelOrigin.y * scale.d
+            ))
             .cropped(to: extent)
     }
 
@@ -246,54 +278,149 @@ final class LocalMaskRenderer {
         transform: LocalMaskRenderTransform
     ) -> CIImage? {
         guard dimensions.width > 0, dimensions.height > 0 else { return nil }
-        var values = [Float](repeating: 0, count: dimensions.width * dimensions.height)
+        guard !Task.isCancelled else { return nil }
         let width = Double(dimensions.width)
         let height = Double(dimensions.height)
         let shorterSide = max(min(width, height), 1)
+        var outputTiles: [BrushOutputTileKey: BrushOutputTile] = [:]
         for stroke in definition.strokes where !stroke.samples.isEmpty && stroke.radius > 0 {
+            guard !Task.isCancelled else { return nil }
             let key = RenderCacheHash.digest(stroke)
                 + ":\(dimensions.width)x\(dimensions.height):\(RenderCacheHash.digest(transform))"
-            let strokeValues = cachedStrokeRaster(
+            guard let strokeRaster = cachedStrokeRaster(
                 for: stroke, key: key, dimensions: dimensions, width: width,
                 height: height, shorterSide: shorterSide, transform: transform
+            ) else { return nil }
+            mergeBrushStroke(
+                strokeRaster, density: stroke.density, into: &outputTiles,
+                dimensions: dimensions
             )
-            for index in values.indices {
-                values[index] = Float(BrushMaskMath.accumulatedOpacity(
-                    current: Double(values[index]), stamp: Double(strokeValues[index]),
-                    density: stroke.density
-                ))
+        }
+        guard !Task.isCancelled else { return nil }
+        var resultImage: CIImage?
+        for tile in outputTiles.values {
+            guard let tileImage = rasterImage(
+                values: tile.values, tileSize: PixelDimensions(
+                    width: tile.region.width, height: tile.region.height),
+                pixelOrigin: CGPoint(x: tile.region.x, y: tile.region.y),
+                fullDimensions: dimensions, extent: extent
+            ) else { return nil }
+            resultImage = resultImage.map { tileImage.composited(over: $0) } ?? tileImage
+        }
+        guard let resultImage else { return emptyMask(extent: extent) }
+        // A crop cannot enlarge an image extent. Put the touched tile over a transparent full
+        // frame so downstream mask composition keeps the established full-frame coordinate
+        // contract without allocating a full-frame CPU raster here.
+        return resultImage.composited(over: emptyMask(extent: extent)).cropped(to: extent)
+    }
+
+    private static let brushOutputTileSize = 256
+
+    private struct BrushOutputTileKey: Hashable {
+        let x: Int
+        let y: Int
+    }
+
+    private struct BrushOutputTile {
+        let region: BrushRasterRegion
+        var values: [Float]
+    }
+
+    private func mergeBrushStroke(
+        _ strokeRaster: CachedBrushStroke, density: Double,
+        into outputTiles: inout [BrushOutputTileKey: BrushOutputTile],
+        dimensions: PixelDimensions
+    ) {
+        let region = strokeRaster.region
+        let firstTileX = region.x / Self.brushOutputTileSize
+        let lastTileX = (region.x + region.width - 1) / Self.brushOutputTileSize
+        let firstTileY = region.y / Self.brushOutputTileSize
+        let lastTileY = (region.y + region.height - 1) / Self.brushOutputTileSize
+        let cap = min(max(density.isFinite ? density : 1, 0), 1)
+
+        for tileY in firstTileY...lastTileY {
+            for tileX in firstTileX...lastTileX {
+                if Task.isCancelled { return }
+                let originX = tileX * Self.brushOutputTileSize
+                let originY = tileY * Self.brushOutputTileSize
+                let tileRegion = BrushRasterRegion(
+                    x: originX, y: originY,
+                    width: min(Self.brushOutputTileSize, dimensions.width - originX),
+                    height: min(Self.brushOutputTileSize, dimensions.height - originY)
+                )
+                let key = BrushOutputTileKey(x: tileX, y: tileY)
+                if outputTiles[key] == nil {
+                    outputTiles[key] = BrushOutputTile(
+                        region: tileRegion,
+                        values: [Float](repeating: 0, count: tileRegion.width * tileRegion.height)
+                    )
+                }
+                guard var tile = outputTiles[key] else { continue }
+                let overlap = BrushRasterRegion(
+                    x: max(region.x, tile.region.x), y: max(region.y, tile.region.y),
+                    width: min(region.x + region.width, tile.region.x + tile.region.width)
+                        - max(region.x, tile.region.x),
+                    height: min(region.y + region.height, tile.region.y + tile.region.height)
+                        - max(region.y, tile.region.y)
+                )
+                guard !overlap.isEmpty else { continue }
+                for y in 0..<overlap.height {
+                    if Task.isCancelled { return }
+                    for x in 0..<overlap.width {
+                        let globalX = overlap.x + x
+                        let globalY = overlap.y + y
+                        let sourceIndex = (globalY - region.y) * region.width
+                            + (globalX - region.x)
+                        let tileIndex = (globalY - tile.region.y) * tile.region.width
+                            + (globalX - tile.region.x)
+                        tile.values[tileIndex] = Float(BrushMaskMath.accumulatedOpacity(
+                            current: Double(tile.values[tileIndex]),
+                            stamp: Double(strokeRaster.values[sourceIndex]), density: cap
+                        ))
+                    }
+                }
+                outputTiles[key] = tile
             }
         }
-        let mask = try? NormalizedMask(size: dimensions, values: values)
-        return mask.flatMap { rasterImage($0, extent: extent) }
     }
 
     private func cachedStrokeRaster(
         for stroke: BrushStroke, key: String, dimensions: PixelDimensions,
         width: Double, height: Double, shorterSide: Double,
         transform: LocalMaskRenderTransform
-    ) -> [Float] {
+    ) -> CachedBrushStroke? {
         if let cached = brushStrokeCache[key] {
-            brushStrokeCacheOrder.removeAll { $0 == key }
-            brushStrokeCacheOrder.append(key)
-            return cached
+            touchBrushStrokeCache(key)
+            return cached.raster
         }
         let sourceSize = CGSize(width: width, height: height)
         let resampled = BrushMaskMath.resampledAndSimplified(
             stroke.samples, sourceSize: sourceSize, radius: stroke.radius)
+        guard !Task.isCancelled, !resampled.isEmpty else { return nil }
         let transformed = resampled.map { sample in
             BrushSample(point: transformPoint(sample.point, transform), pressure: sample.pressure)
         }
-        var result = [Float](repeating: 0, count: dimensions.width * dimensions.height)
-        for y in 0..<dimensions.height {
-            for x in 0..<dimensions.width {
+        let region = brushRasterRegion(
+            for: transformed, stroke: stroke, dimensions: dimensions,
+            width: width, height: height, shorterSide: shorterSide
+        )
+        guard !region.isEmpty else { return nil }
+        let resultCount = region.width.multipliedReportingOverflow(by: region.height)
+        guard !resultCount.overflow else {
+            return nil
+        }
+        var result = [Float](repeating: 0, count: resultCount.partialValue)
+        for y in 0..<region.height {
+            guard !Task.isCancelled else { return nil }
+            for x in 0..<region.width {
                 let point = CGPoint(
-                    x: (Double(x) + 0.5) / width,
-                    y: (Double(y) + 0.5) / height
+                    x: (Double(region.x + x) + 0.5) / width,
+                    y: (Double(region.y + y) + 0.5) / height
                 )
-                let index = y * dimensions.width + x
+                let index = y * region.width + x
                 var opacity = 0.0
-                for sample in transformed {
+                for (sampleIndex, sample) in transformed.enumerated() {
+                    if sampleIndex % 64 == 0 && Task.isCancelled { return nil }
                     let distance = hypot(
                         (point.x - sample.point.x) * width,
                         (point.y - sample.point.y) * height
@@ -311,22 +438,136 @@ final class LocalMaskRenderer {
             }
         }
         let cost = result.count.multipliedReportingOverflow(by: MemoryLayout<Float>.size)
+        let raster = CachedBrushStroke(region: region, values: result)
         guard !cost.overflow, maxBrushStrokeCacheCostBytes > 0,
               cost.partialValue <= maxBrushStrokeCacheCostBytes else {
-            return result
+            return raster
         }
-        while (brushStrokeCache.count >= maxBrushStrokeCacheEntries
-                || brushStrokeCacheCostBytes > maxBrushStrokeCacheCostBytes - cost.partialValue),
-              let oldest = brushStrokeCacheOrder.first {
-            brushStrokeCacheOrder.removeFirst()
-            brushStrokeCacheCostBytes -= brushStrokeCacheCosts.removeValue(forKey: oldest) ?? 0
-            brushStrokeCache.removeValue(forKey: oldest)
+        insertBrushStroke(raster, for: key, cost: cost.partialValue)
+        return raster
+    }
+
+    private func brushRasterRegion(
+        for samples: [BrushSample], stroke: BrushStroke, dimensions: PixelDimensions,
+        width: Double, height: Double, shorterSide: Double
+    ) -> BrushRasterRegion {
+        guard let first = samples.first else {
+            return BrushRasterRegion(x: 0, y: 0, width: 0, height: 0)
         }
-        brushStrokeCache[key] = result
-        brushStrokeCacheCosts[key] = cost.partialValue
-        brushStrokeCacheOrder.append(key)
-        brushStrokeCacheCostBytes += cost.partialValue
-        return result
+        var minX = first.point.x
+        var maxX = first.point.x
+        var minY = first.point.y
+        var maxY = first.point.y
+        for sample in samples.dropFirst() {
+            minX = min(minX, sample.point.x)
+            maxX = max(maxX, sample.point.x)
+            minY = min(minY, sample.point.y)
+            maxY = max(maxY, sample.point.y)
+        }
+        let radius = stroke.radius * shorterSide
+        let normalizedRadiusX = radius / width
+        let normalizedRadiusY = radius / height
+        let lowerX = minX - normalizedRadiusX
+        let upperX = maxX + normalizedRadiusX
+        let lowerY = minY - normalizedRadiusY
+        let upperY = maxY + normalizedRadiusY
+
+        // Include a one-pixel halo around the mathematical dab bounds. This keeps pixel-center
+        // rounding and Core Image's later sampling from clipping a feather at a tile edge.
+        let xRange = pixelRange(lower: lowerX, upper: upperX, count: dimensions.width)
+        let yRange = pixelRange(lower: lowerY, upper: upperY, count: dimensions.height)
+        guard let xRange, let yRange else {
+            return BrushRasterRegion(x: 0, y: 0, width: 0, height: 0)
+        }
+        return BrushRasterRegion(
+            x: xRange.lowerBound, y: yRange.lowerBound,
+            width: xRange.count, height: yRange.count
+        )
+    }
+
+    private func pixelRange(lower: Double, upper: Double, count: Int) -> ClosedRange<Int>? {
+        guard count > 0, lower < Double(count), upper >= 0 else { return nil }
+        let lowerPixel = lower * Double(count) - 0.5
+        let upperPixel = upper * Double(count) - 0.5
+        let lowerIndex = lowerPixel.isFinite
+            ? max(0, Int(floor(lowerPixel)) - 1)
+            : 0
+        let upperIndex = upperPixel.isFinite
+            ? min(count - 1, Int(ceil(upperPixel)) + 1)
+            : count - 1
+        guard upperIndex >= lowerIndex else { return nil }
+        return lowerIndex...upperIndex
+    }
+
+    private func rasterImage(
+        values: [Float], tileSize: PixelDimensions, pixelOrigin: CGPoint,
+        fullDimensions: PixelDimensions, extent: CGRect
+    ) -> CIImage? {
+        guard let mask = try? NormalizedMask(size: tileSize, values: values) else { return nil }
+        return rasterImage(
+            mask, extent: extent, pixelOrigin: pixelOrigin, fullDimensions: fullDimensions
+        )
+    }
+
+    private func touchBrushStrokeCache(_ key: String) {
+        guard let entry = brushStrokeCache[key], brushStrokeCacheNewest != key else { return }
+        unlinkBrushStrokeCache(key, entry: entry)
+        appendBrushStrokeCache(key, entry: entry)
+    }
+
+    private func insertBrushStroke(_ raster: CachedBrushStroke, for key: String, cost: Int) {
+        if let existing = brushStrokeCache[key] {
+            removeBrushStrokeCache(key, entry: existing)
+        }
+        while brushStrokeCache.count >= maxBrushStrokeCacheEntries
+                || brushStrokeCacheCostBytes > maxBrushStrokeCacheCostBytes - cost {
+            guard let oldest = brushStrokeCacheOldest,
+                  let entry = brushStrokeCache[oldest] else { break }
+            removeBrushStrokeCache(oldest, entry: entry)
+        }
+        let entry = BrushStrokeCacheEntry(
+            raster: raster, cost: cost, older: brushStrokeCacheNewest, newer: nil
+        )
+        brushStrokeCache[key] = entry
+        if let newest = brushStrokeCacheNewest {
+            brushStrokeCache[newest]?.newer = key
+        } else {
+            brushStrokeCacheOldest = key
+        }
+        brushStrokeCacheNewest = key
+        brushStrokeCacheCostBytes += cost
+    }
+
+    private func removeBrushStrokeCache(_ key: String, entry: BrushStrokeCacheEntry) {
+        unlinkBrushStrokeCache(key, entry: entry)
+        brushStrokeCache.removeValue(forKey: key)
+        brushStrokeCacheCostBytes -= entry.cost
+    }
+
+    private func unlinkBrushStrokeCache(_ key: String, entry: BrushStrokeCacheEntry) {
+        if let older = entry.older {
+            brushStrokeCache[older]?.newer = entry.newer
+        } else {
+            brushStrokeCacheOldest = entry.newer
+        }
+        if let newer = entry.newer {
+            brushStrokeCache[newer]?.older = entry.older
+        } else {
+            brushStrokeCacheNewest = entry.older
+        }
+    }
+
+    private func appendBrushStrokeCache(_ key: String, entry: BrushStrokeCacheEntry) {
+        var updated = entry
+        updated.older = brushStrokeCacheNewest
+        updated.newer = nil
+        brushStrokeCache[key] = updated
+        if let newest = brushStrokeCacheNewest {
+            brushStrokeCache[newest]?.newer = key
+        } else {
+            brushStrokeCacheOldest = key
+        }
+        brushStrokeCacheNewest = key
     }
 
     private func transformPoint(_ point: CGPoint, _ transform: LocalMaskRenderTransform) -> CGPoint {

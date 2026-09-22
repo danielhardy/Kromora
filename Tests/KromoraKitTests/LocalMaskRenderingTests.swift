@@ -667,16 +667,89 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
 
         _ = renderer.image(for: payload(at: CGPoint(x: 0.25, y: 0.5)), extent: extent, transform: .identity)
         XCTAssertEqual(renderer.cachedBrushStrokeCount, 1)
-        XCTAssertEqual(renderer.cachedBrushStrokeCostBytes, 8 * 8 * MemoryLayout<Float>.size)
+        XCTAssertLessThan(
+            renderer.cachedBrushStrokeCostBytes, 8 * 8 * MemoryLayout<Float>.size,
+            "a small dab should cache only its touched tile"
+        )
 
         _ = renderer.image(for: payload(at: CGPoint(x: 0.75, y: 0.5)), extent: extent, transform: .identity)
-        XCTAssertEqual(renderer.cachedBrushStrokeCount, 1)
+        XCTAssertGreaterThanOrEqual(renderer.cachedBrushStrokeCount, 1)
         XCTAssertLessThanOrEqual(
             renderer.cachedBrushStrokeCostBytes, 8 * 8 * MemoryLayout<Float>.size)
 
         renderer.removeAllCachedBrushStrokes()
         XCTAssertEqual(renderer.cachedBrushStrokeCount, 0)
         XCTAssertEqual(renderer.cachedBrushStrokeCostBytes, 0)
+    }
+
+    func testBrushRasterUsesTouchedTileAndPreservesNonZeroExtentCoordinates() throws {
+        let dimensions = PixelDimensions(width: 128, height: 64)
+        let renderer = LocalMaskRenderer()
+        let payload = LocalMaskPayload(
+            sourceFingerprint: "roi-test", targetSize: dimensions, quality: .preview,
+            descriptor: .brush(BrushMaskDefinition(strokes: [BrushStroke(
+                samples: [
+                    BrushSample(point: CGPoint(x: 0.22, y: 0.63)),
+                    BrushSample(point: CGPoint(x: 0.28, y: 0.64)),
+                ], radius: 0.03, feather: 0.7
+            )]))
+        )
+        let origin = CGRect(x: 19, y: 7, width: 128, height: 64)
+        guard let shifted = renderer.image(for: payload, extent: origin, transform: .identity),
+              let zeroOrigin = renderer.image(
+                  for: payload, extent: CGRect(origin: .zero, size: origin.size), transform: .identity
+              ) else {
+            return XCTFail("brush ROI did not render")
+        }
+
+        XCTAssertLessThan(
+            renderer.cachedBrushStrokeCostBytes,
+            dimensions.width * dimensions.height * MemoryLayout<Float>.size / 16,
+            "a small stroke should not retain a full-frame raster"
+        )
+        assertPixelsEqual(
+            try Pixels.bytes(of: shifted), try Pixels.bytes(of: zeroOrigin), tolerance: 1,
+            "moving the Core Image extent origin must not move brush coverage"
+        )
+    }
+
+    func testBrushRasterAccumulatesSeparatedStrokesWithoutFullFrameSmear() throws {
+        let dimensions = PixelDimensions(width: 64, height: 32)
+        let renderer = LocalMaskRenderer()
+        let definition = BrushMaskDefinition(strokes: [
+            BrushStroke(samples: [BrushSample(point: CGPoint(x: 0.2, y: 0.5))], radius: 0.08),
+            BrushStroke(samples: [BrushSample(point: CGPoint(x: 0.8, y: 0.5))], radius: 0.08),
+        ])
+        let payload = LocalMaskPayload(
+            sourceFingerprint: "separated-strokes", targetSize: dimensions, quality: .preview,
+            descriptor: .brush(definition)
+        )
+        guard let image = renderer.image(
+            for: payload, extent: CGRect(origin: .zero, size: CGSize(
+                width: dimensions.width, height: dimensions.height)), transform: .identity
+        ) else {
+            return XCTFail("separated brush strokes did not render")
+        }
+        let pixels = try Pixels.bytes(of: image)
+        XCTAssertEqual(pixels.count, dimensions.width * dimensions.height * 4)
+        guard pixels.count >= dimensions.width * dimensions.height * 4 else { return }
+        let alphaValues = stride(from: 3, to: pixels.count, by: 4).map { pixels[$0] }
+        XCTAssertGreaterThan(alphaValues.max() ?? 0, 200, "the brush image should contain coverage")
+        if let firstOnly = renderer.image(
+            for: LocalMaskPayload(
+                sourceFingerprint: "single-stroke", targetSize: dimensions, quality: .preview,
+                descriptor: .brush(BrushMaskDefinition(strokes: [definition.strokes[0]]))
+            ), extent: CGRect(origin: .zero, size: CGSize(
+                width: dimensions.width, height: dimensions.height)), transform: .identity
+        ) {
+            let firstPixels = try Pixels.bytes(of: firstOnly)
+            let firstAlpha = stride(from: 3, to: firstPixels.count, by: 4).map { firstPixels[$0] }
+            XCTAssertGreaterThan(firstAlpha.max() ?? 0, 200, "a single dab should contain coverage")
+        }
+        let alphaAt = { (x: Int, y: Int) in pixels[(y * dimensions.width + x) * 4 + 3] }
+        XCTAssertGreaterThan(alphaAt(13, 16), 200, "the first dab should remain covered")
+        XCTAssertGreaterThan(alphaAt(51, 16), 200, "the second dab should remain covered")
+        XCTAssertLessThan(alphaAt(32, 16), 5, "separated dabs must not smear across the frame")
     }
 
     func testMaskOverlayUsesResolvedAlphaAndSoloDoesNotChangeExport() async throws {
