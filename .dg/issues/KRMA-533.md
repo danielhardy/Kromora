@@ -2,7 +2,7 @@
 id: KRMA-533
 title: Harden the direct-distribution updater and verify App Sandbox behavior
 type: task
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,9 +13,9 @@ labels:
   - security
   - distribution
 created: 2026-09-21T20:33:13.027Z
-updated: 2026-09-21T20:33:13.420Z
+updated: 2026-09-22T15:27:41.660Z
 estimate: 3
-order: zzzy
+order: zzy
 board: product
 ---
 

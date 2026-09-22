@@ -2,7 +2,7 @@
 id: KRMA-532
 title: Reach a zero-warning build and enforce the warning budget
 type: task
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,12 +13,12 @@ labels:
   - hygiene
   - ci
 created: 2026-09-21T20:33:12.132Z
-updated: 2026-09-21T20:33:30.808Z
+updated: 2026-09-22T13:27:18.334Z
 depends_on:
   - KRMA-524
   - KRMA-517
 estimate: 5
-order: zzzx
+order: zzx
 board: product
 ---
 

@@ -2,9 +2,11 @@
 id: KRMA-529
 title: Continue AppViewModel decomposition by extracting workflow coordinators
 type: task
-status: backlog
+status: ready
 priority: medium
-agent: pi
+agent: claude
+verification_agent: codex
+model: sonnet
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -14,12 +16,12 @@ labels:
   - architecture
   - app-model
 created: 2026-09-21T20:33:09.664Z
-updated: 2026-09-21T21:53:25.934Z
+updated: 2026-09-22T15:05:22.632Z
 depends_on:
   - KRMA-520
   - KRMA-528
 estimate: 13
-order: zzzh
+order: zzh
 board: product
 ---
 

@@ -2,7 +2,7 @@
 id: KRMA-525
 title: Delete the unused mask-overlay prototype
 type: task
-status: ready
+status: verification
 priority: high
 creation_provenance:
   runner: codex
@@ -13,10 +13,16 @@ labels:
   - dead-code
   - masks
 created: 2026-09-21T20:33:06.322Z
-updated: 2026-09-21T21:55:34.845Z
+updated: 2026-09-22T15:49:29.255Z
 estimate: 3
-order: zv
+order: a0
 board: product
+claim:
+  actor: claude
+  session: 01MUCUNPRASU9CPPP3
+  claimed_at: 2026-09-22T15:49:29.254Z
+  expires_at: 2026-09-22T16:49:29.254Z
+  model: sonnet
 ---
 
 ## Objective
@@ -49,3 +55,8 @@ Independent and safe to do early. Keep this separate from CQ-08 brush optimizati
 ## Likely files and checks
 
 Views/MaskOverlayPrototype.swift, Resources/MaskOverlay.metal, MaskOverlayPerformanceBenchmark.swift, CanvasNavigationTests.swift, Package.swift/resource lists, and performance baselines.
+
+
+### Comment — codex @ 2026-09-22T15:49:22.570Z
+
+Implemented in 95b4b6d. Deleted Sources/KromoraKit/Views/MaskOverlayPrototype.swift, Sources/KromoraKit/Resources/MaskOverlay.metal, and Tests/KromoraKitTests/MaskOverlayPerformanceBenchmark.swift; removed the prototype navigation test and optional-lane entry; rebuilt KromoraPresentation.metallib and checksum with PreviewSurface only; updated parity/resource validation and active cleanup documentation. Production mask behavior remains covered by LocalMaskRenderingTests. Passed swift build, swift build -c release, resource freshness check, dg validate, and focused mask/Metal/preview/navigation tests (109 executed, 1 existing opt-in skip). Full fast/serial lanes encountered unrelated pre-existing async library/navigation/thumbnail failures and headless KeyMonitor focus failures; no task-scoped failures.

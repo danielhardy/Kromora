@@ -2,9 +2,11 @@
 id: KRMA-530
 title: Split RenderEngine responsibilities and bound revision bookkeeping
 type: task
-status: backlog
+status: ready
 priority: medium
-agent: pi
+agent: claude
+verification_agent: codex
+model: sonnet
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -14,13 +16,13 @@ labels:
   - architecture
   - rendering
 created: 2026-09-21T20:33:10.575Z
-updated: 2026-09-21T21:55:53.285Z
+updated: 2026-09-22T15:44:09.173Z
 depends_on:
   - KRMA-522
   - KRMA-523
   - KRMA-524
 estimate: 8
-order: zzzq
+order: zzq
 board: product
 ---
 
