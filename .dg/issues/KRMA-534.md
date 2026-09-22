@@ -2,7 +2,7 @@
 id: KRMA-534
 title: Centralize package path safety and shared serialization helpers
 type: task
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,9 +13,9 @@ labels:
   - security
   - package
 created: 2026-09-21T20:33:13.935Z
-updated: 2026-09-21T20:33:14.210Z
+updated: 2026-09-22T15:44:16.222Z
 estimate: 5
-order: zzzz
+order: zzz
 board: product
 ---
 

@@ -2,7 +2,7 @@
 id: KRMA-531
 title: Simplify EditDocumentStore into a package-backed bounded cache
 type: task
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,11 +13,11 @@ labels:
   - simplification
   - persistence
 created: 2026-09-21T20:33:11.210Z
-updated: 2026-09-21T20:33:29.884Z
+updated: 2026-09-22T13:27:15.266Z
 depends_on:
   - KRMA-520
 estimate: 8
-order: zzzv
+order: zzv
 board: product
 ---
 
