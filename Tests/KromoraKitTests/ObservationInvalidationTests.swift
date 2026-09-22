@@ -15,13 +15,107 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
     // MARK: - Fan-in removal
 
     func testNoTaskPerChildNotificationRemains() {
-        // The forwarding loop is deleted; views hold children directly. Assert the composition
-        // root exposes the children that views must observe instead of relying on fan-in.
+        // High-frequency children are @Observable and observed directly via `@Bindable`;
+        // they must never pass through AppViewModel fan-in. Low-frequency ObservableObject
+        // children (settings, library, media workflow, editor document, derive, look-save)
+        // are still consumed via `viewModel.*` until their views hold them directly, so they
+        // forward synchronously with `objectWillChange.send()` in the same turn — never via
+        // a Task, which had incorrect will-change timing. Assert the composition root exposes
+        // the isolated children that views must observe directly.
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         XCTAssertNotNil(viewModel.collection as Any)
         XCTAssertNotNil(viewModel.photosImportCoordinator as Any)
         XCTAssertNotNil(viewModel.export as Any)
         XCTAssertNotNil(viewModel.canvasState as Any)
+    }
+
+    func testLowFrequencyChildrenForwardSynchronouslyWithoutTask() {
+        // Interim KRMA-521 boundary: legacy views still read these via `viewModel.*`, so a
+        // child will-change must synchronously invalidate the root in the same turn. A Task
+        // would defer to a later turn (the pre-migration bug); asserting the increment is
+        // visible immediately proves no Task sits in the path.
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        var appChanges = 0
+        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+
+        let beforeNames = viewModel.settings.showPhotoNames
+        viewModel.settings.showPhotoNames = !beforeNames
+        XCTAssertEqual(appChanges, 1, "settings must forward synchronously")
+
+        viewModel.library.isScanning = true
+        XCTAssertEqual(appChanges, 2, "library must forward synchronously")
+        viewModel.library.isScanning = false
+        XCTAssertEqual(appChanges, 3)
+
+        viewModel.derive.isSheetPresented = true
+        XCTAssertEqual(appChanges, 4, "derive sheet must forward synchronously")
+        viewModel.derive.isSheetPresented = false
+        XCTAssertEqual(appChanges, 5)
+
+        viewModel.lookSave.isSheetPresented = true
+        XCTAssertEqual(appChanges, 6, "look-save sheet must forward synchronously")
+        viewModel.lookSave.isSheetPresented = false
+        XCTAssertEqual(appChanges, 7)
+
+        viewModel.editorDocument.copy(document: EditDocument())
+        // `copy` writes two @Published values (clipboard + categories), so two
+        // will-change events forward synchronously.
+        XCTAssertEqual(appChanges, 9, "clipboard must forward synchronously")
+
+        viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = true
+        XCTAssertEqual(appChanges, 10, "removable-media chrome must forward synchronously")
+        viewModel.libraryMediaWorkflow.isRemovableMediaSelectorPresented = false
+        XCTAssertEqual(appChanges, 11)
+
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testViewModelImportCoordinatorProgressStaysIsolated() {
+        // The viewModel-owned import coordinator with its destination detached must not fan
+        // into the root: progress publishes through its own @Observable boundary. Destination
+        // writes (prepare/finish -> viewModel @Published) are a separate, legitimate path and
+        // are detached here to isolate fan-in from destination side effects.
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let coordinator = viewModel.photosImportCoordinator
+        coordinator.destination = nil
+        coordinator.onStatus = nil
+        coordinator.onProgress = nil
+        var appChanges = 0
+        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+
+        coordinator.begin(totalCount: 2)
+        XCTAssertEqual(appChanges, 0)
+        coordinator.updatePhase(.transferring, name: "photo-1.jpg")
+        XCTAssertEqual(appChanges, 0)
+        coordinator.cancel()
+        XCTAssertEqual(appChanges, 0)
+
+        withExtendedLifetime(subscription) {}
+    }
+
+    func testCollectionThumbnailStreamingDoesNotTriggerBroadPublisher() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let item = ImageCollection.Item(
+            asset: PhotoAsset(
+                source: PhotoAssetSource(
+                    data: Data([0x01]),
+                    id: .imported(UUID()),
+                    fingerprint: PhotoSourceFingerprint(
+                        byteCount: 1, modificationDate: nil,
+                        resourceIdentifier: UUID().uuidString, sampleDigest: UUID().uuidString
+                    )
+                ),
+                filename: "thumb.jpg", fileType: "jpg"
+            ))
+        viewModel.collection.items = [item]
+        var appChanges = 0
+        let subscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
+
+        item.setOriginalThumbnail(NSImage(size: NSSize(width: 4, height: 4)))
+        XCTAssertEqual(appChanges, 0, "thumbnail arrival must not invalidate the root")
+        XCTAssertNotNil(item.thumbnail)
+
+        withExtendedLifetime(subscription) {}
     }
 
     func testThumbnailStreamingDoesNotTouchCollectionRevision() {

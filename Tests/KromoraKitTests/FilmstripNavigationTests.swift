@@ -63,28 +63,30 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "first.png", in: tempDirectory
         )
         let second = try Fixtures.writeGradientPNG(
-            width: 16, height: 12, named: "second.png", in: tempDirectory
+            width: 17, height: 12, named: "second.png", in: tempDirectory
         )
         let third = try Fixtures.writeGradientPNG(
-            width: 16, height: 12, named: "third.png", in: tempDirectory
+            width: 18, height: 12, named: "third.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
         let reader = FakeRenderEventReader(await engine.eventStream())
         await engine.gateSourcePreparation()
         let viewModel = makeAppViewModel(engine: engine)
+        let assets = try installPackageAssets([first, second, third], in: viewModel)
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == assets[0].id })
+        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == assets[1].id })
+        let thirdIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == assets[2].id })
+        let managedThirdURL = try XCTUnwrap(assets[2].url)
 
-        viewModel.openImage(url: first)
+        viewModel.selectCollectionImage(at: firstIndex)
         _ = try await TestSynchronization.nextEvent(from: reader, "first source preparation start") {
             if case .sourcePreparationStarted = $0 { return true }
             return false
         } diagnostics: {
             "source preparations=\(await engine.sourcePreparationCount)"
         }
-        viewModel.openImage(url: second)
-        viewModel.openImage(url: third)
-        let managedThirdURL = try XCTUnwrap(
-            viewModel.collection.items.first(where: { $0.displayName == "third" })?.url
-        )
+        viewModel.selectCollectionImage(at: secondIndex)
+        viewModel.selectCollectionImage(at: thirdIndex)
 
         await engine.releaseSourcePreparation()
         _ = try await TestSynchronization.nextEvent(from: reader, "the newest source preparation") {
@@ -107,7 +109,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         let preparationCount = await engine.sourcePreparationCount
         XCTAssertEqual(preparationCount, 2,
                        "one active preparation plus the newest pending source is the bound")
-        XCTAssertEqual(viewModel.sourceSize, CGSize(width: 16, height: 12))
+        XCTAssertEqual(viewModel.sourceSize, CGSize(width: 18, height: 12))
     }
 
     /// A pristine open admits one settled preview; an open with stored edits speculates with the
@@ -119,27 +121,33 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "single-first.png", in: tempDirectory
         )
         let second = try Fixtures.writeGradientPNG(
-            width: 16, height: 12, named: "single-second.png", in: tempDirectory
+            width: 17, height: 12, named: "single-second.png", in: tempDirectory
         )
-        let storedDocument = EditDocument(adjustments: [.exposure(ev: 0.6)])
-        let store = makeInMemoryEditStore()
-        try await store.save(
-            storedDocument,
-            for: EditSourceReference(assetID: .file(second), url: second)
-        )
-
         let engine = FakeRenderEngine()
         let reader = FakeRenderEventReader(await engine.eventStream())
-        let viewModel = makeAppViewModel(engine: engine, editStore: store)
-        viewModel.collection.loadFromFolder(tempDirectory)
+        let viewModel = makeAppViewModel(engine: engine)
+        let assets = try installPackageAssets([first, second], in: viewModel)
         await viewModel.collection.scanCompletion()
-        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == first })
-        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == second })
+        let firstAsset = try XCTUnwrap(assets.first { $0.displayName == first.lastPathComponent })
+        let secondAsset = try XCTUnwrap(assets.first { $0.displayName == second.lastPathComponent })
+        let firstURL = try XCTUnwrap(firstAsset.url)
+        let secondURL = try XCTUnwrap(secondAsset.url)
+        let storedDocument = EditDocument(adjustments: [.exposure(ev: 0.6)])
+        try await viewModel.editStore.save(
+            storedDocument,
+            for: EditSourceReference(
+                assetID: secondAsset.id,
+                portableIdentity: secondAsset.source.portableIdentity,
+                url: secondURL
+            )
+        )
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == firstAsset.id })
+        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == secondAsset.id })
 
         viewModel.selectCollectionImage(at: firstIndex)
         _ = try await TestSynchronization.nextEvent(from: reader, "the first settled preview") {
             if case .previewCompleted(let request) = $0 {
-                return request.source?.backing == .url(first)
+                return request.source?.backing == .url(firstURL)
             }
             return false
         } diagnostics: {
@@ -151,7 +159,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         viewModel.selectCollectionImage(at: secondIndex)
         let secondPreview = try await TestSynchronization.nextEvent(from: reader, "the edited settled preview") {
             if case .previewCompleted(let request) = $0 {
-                return request.source?.backing == .url(second)
+                return request.source?.backing == .url(secondURL)
                     && request.document == storedDocument
             }
             return false
@@ -174,26 +182,33 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "prefetch-first.png", in: tempDirectory
         )
         let second = try Fixtures.writeGradientPNG(
-            width: 16, height: 12, named: "prefetch-second.png", in: tempDirectory
-        )
-        let storedDocument = EditDocument(adjustments: [.exposure(ev: 0.8)])
-        let store = makeInMemoryEditStore()
-        try await store.save(
-            storedDocument,
-            for: EditSourceReference(assetID: .file(second), url: second)
+            width: 17, height: 12, named: "prefetch-second.png", in: tempDirectory
         )
 
         let engine = FakeRenderEngine()
         let reader = FakeRenderEventReader(await engine.eventStream())
-        let viewModel = makeAppViewModel(engine: engine, editStore: store)
-        viewModel.collection.loadFromFolder(tempDirectory)
+        let viewModel = makeAppViewModel(engine: engine)
+        let assets = try installPackageAssets([first, second], in: viewModel)
         await viewModel.collection.scanCompletion()
-        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == first })
+        let firstAsset = try XCTUnwrap(assets.first { $0.displayName == first.lastPathComponent })
+        let secondAsset = try XCTUnwrap(assets.first { $0.displayName == second.lastPathComponent })
+        let firstURL = try XCTUnwrap(firstAsset.url)
+        let secondURL = try XCTUnwrap(secondAsset.url)
+        let storedDocument = EditDocument(adjustments: [.exposure(ev: 0.8)])
+        try await viewModel.editStore.save(
+            storedDocument,
+            for: EditSourceReference(
+                assetID: secondAsset.id,
+                portableIdentity: secondAsset.source.portableIdentity,
+                url: secondURL
+            )
+        )
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == firstAsset.id })
 
         viewModel.selectCollectionImage(at: firstIndex)
         _ = try await TestSynchronization.nextEvent(from: reader, "the first settled preview") {
             if case .previewCompleted(let request) = $0 {
-                return request.source?.backing == .url(first)
+                return request.source?.backing == .url(firstURL)
             }
             return false
         } diagnostics: {
@@ -204,7 +219,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
             from: reader, "the stored-edit neighbor prefetch"
         ) {
             if case .textureRequested(let request) = $0 {
-                return request.source?.backing == .url(second)
+                return request.source?.backing == .url(secondURL)
             }
             return false
         } diagnostics: {
@@ -215,7 +230,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         }
         XCTAssertEqual(request.document, storedDocument)
         let encodeCount = await engine.encodeRequests.count
-        let renderedNeighbor = await engine.renderRequests.contains { $0.source.backing == .url(second) }
+        let renderedNeighbor = await engine.renderRequests.contains { $0.source.backing == .url(secondURL) }
         XCTAssertEqual(encodeCount, 0)
         XCTAssertFalse(
             renderedNeighbor,
@@ -236,15 +251,19 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         let engine = FakeRenderEngine()
         let reader = FakeRenderEventReader(await engine.eventStream())
         let viewModel = makeAppViewModel(engine: engine)
-        viewModel.collection.loadFromFolder(tempDirectory)
+        let assets = try installPackageAssets([first, second], in: viewModel)
         await viewModel.collection.scanCompletion()
-        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == first })
-        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == second })
+        let firstAsset = try XCTUnwrap(assets.first { $0.displayName == first.lastPathComponent })
+        let secondAsset = try XCTUnwrap(assets.first { $0.displayName == second.lastPathComponent })
+        let firstURL = try XCTUnwrap(firstAsset.url)
+        let secondURL = try XCTUnwrap(secondAsset.url)
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == firstAsset.id })
+        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == secondAsset.id })
 
         viewModel.selectCollectionImage(at: firstIndex)
         _ = try await TestSynchronization.nextEvent(from: reader, "the first settled preview") {
             if case .previewCompleted(let request) = $0 {
-                return request.source?.backing == .url(first)
+                return request.source?.backing == .url(firstURL)
             }
             return false
         } diagnostics: {
@@ -254,7 +273,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
 
         let prefetch = try await TestSynchronization.nextEvent(from: reader, "the scale-matched prefetch") {
             if case .textureRequested(let request) = $0 {
-                return request.source?.backing == .url(second)
+                return request.source?.backing == .url(secondURL)
             }
             return false
         } diagnostics: {
@@ -271,7 +290,7 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         viewModel.selectCollectionImage(at: secondIndex)
         let selected = try await TestSynchronization.nextEvent(from: reader, "the selected neighbor preview") {
             if case .previewCompleted(let request) = $0 {
-                return request.source?.backing == .url(second)
+                return request.assetID == selectedAssetID
             }
             return false
         } diagnostics: {
@@ -290,6 +309,16 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
             RenderScaleKey(prefetchRequest.scale, nativeExtent: prefetchSource.nativeExtent),
             RenderScaleKey(selectedRequest.scale, nativeExtent: prefetchSource.nativeExtent)
         )
+    }
+
+    private func installPackageAssets(
+        _ urls: [URL], in viewModel: AppViewModel
+    ) throws -> [PhotoAsset] {
+        let library = try XCTUnwrap(viewModel.portableLibrary)
+        _ = try library.importURLs(urls)
+        let assets = try library.materializedAssets()
+        viewModel.collection.loadPortableAssets(assets)
+        return assets
     }
 
     nonisolated private static func requestDiagnostic(_ request: FakeRenderEngine.Request) -> String {

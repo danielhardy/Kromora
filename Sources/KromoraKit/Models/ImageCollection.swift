@@ -175,9 +175,13 @@ final class ImageCollectionPresentationModel {
     private var preparedThumbnailIDs: Set<PhotoAssetID> = []
     private var metadataTask: Task<Void, Never>?
     private var metadataContinuation: AsyncStream<MetadataRequest>.Continuation?
+    private var nextMetadataRequestID: UInt64 = 0
+    private var pendingMetadataRequestIDs: Set<UInt64> = []
+    private var metadataCompletionWaiters: [CheckedContinuation<Void, Never>] = []
     private var scanGeneration: UInt64 = 0
 
     private struct MetadataRequest: Sendable {
+        let id: UInt64
         let itemID: PhotoAssetID
         let generation: UInt64
         let name: String
@@ -345,7 +349,12 @@ final class ImageCollectionPresentationModel {
     }
 
     func refresh() { /* Package refreshes are explicit session/index reloads. */ }
-    func scanCompletion() async { await metadataTask?.value }
+    func scanCompletion() async {
+        guard !pendingMetadataRequestIDs.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            metadataCompletionWaiters.append(continuation)
+        }
+    }
 
     func shutdown() async {
         scanGeneration &+= 1
@@ -534,6 +543,10 @@ final class ImageCollectionPresentationModel {
         metadataContinuation = nil
         metadataTask?.cancel()
         metadataTask = nil
+        pendingMetadataRequestIDs.removeAll()
+        let waiters = metadataCompletionWaiters
+        metadataCompletionWaiters.removeAll()
+        waiters.forEach { $0.resume() }
     }
     private func startMetadataLoading() {
         let (stream, continuation) = AsyncStream<MetadataRequest>.makeStream()
@@ -543,15 +556,34 @@ final class ImageCollectionPresentationModel {
                 guard !Task.isCancelled else { return }
                 let outcome = Self.readMetadata(request.source, name: request.name)
                 guard !Task.isCancelled else { return }
-                await MainActor.run { self?.applyMetadata(outcome, itemID: request.itemID, generation: request.generation) }
+                await MainActor.run {
+                    self?.applyMetadata(
+                        outcome, itemID: request.itemID, generation: request.generation,
+                        requestID: request.id
+                    )
+                }
             }
         }
     }
     private func enqueueMetadata(for item: Item, generation: UInt64) {
         guard let source = item.url.map(ImageSource.Backing.url) ?? item.imageData.map(ImageSource.Backing.data) else { return }
-        _ = metadataContinuation?.yield(.init(
-            itemID: item.id, generation: generation, name: item.displayName, source: source
-        ))
+        guard let metadataContinuation else { return }
+        nextMetadataRequestID &+= 1
+        let request = MetadataRequest(
+            id: nextMetadataRequestID, itemID: item.id, generation: generation,
+            name: item.displayName, source: source
+        )
+        pendingMetadataRequestIDs.insert(request.id)
+        switch metadataContinuation.yield(request) {
+        case .enqueued:
+            break
+        case .dropped, .terminated:
+            pendingMetadataRequestIDs.remove(request.id)
+            finishMetadataWaitersIfIdle()
+        @unknown default:
+            pendingMetadataRequestIDs.remove(request.id)
+            finishMetadataWaitersIfIdle()
+        }
     }
     private nonisolated static func readMetadata(_ source: ImageSource.Backing, name: String) -> MetadataOutcome {
         switch source {
@@ -567,8 +599,14 @@ final class ImageCollectionPresentationModel {
             return .success(ImageMetadata.read(from: data))
         }
     }
-    private func applyMetadata(_ outcome: MetadataOutcome, itemID: PhotoAssetID, generation: UInt64) {
-        guard generation == scanGeneration, let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+    private func applyMetadata(
+        _ outcome: MetadataOutcome, itemID: PhotoAssetID, generation: UInt64, requestID: UInt64
+    ) {
+        pendingMetadataRequestIDs.remove(requestID)
+        guard generation == scanGeneration, let index = items.firstIndex(where: { $0.id == itemID }) else {
+            finishMetadataWaitersIfIdle()
+            return
+        }
         switch outcome {
         case .success(let metadata):
             items[index].metadata = metadata
@@ -579,6 +617,13 @@ final class ImageCollectionPresentationModel {
                 scanWarnings.append(.init(id: warning, message: warning))
             }
         }
+        finishMetadataWaitersIfIdle()
+    }
+    private func finishMetadataWaitersIfIdle() {
+        guard pendingMetadataRequestIDs.isEmpty else { return }
+        let waiters = metadataCompletionWaiters
+        metadataCompletionWaiters.removeAll()
+        waiters.forEach { $0.resume() }
     }
     private func cancelThumbnailWork() {
         thumbnailGeneration &+= 1
