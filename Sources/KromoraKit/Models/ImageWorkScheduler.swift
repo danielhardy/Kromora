@@ -491,7 +491,10 @@ final class ImageWorkScheduler {
                     return runningThumbnailCount < configuration.maxConcurrentThumbnails
                 case .packageIO:
                     return runningPackageIOCount < configuration.maxConcurrentPackageIO
-                        && !isEditorContended
+                        // A user-requested import must be able to finish while a render is
+                        // deliberately gated (for example during a source switch). Background
+                        // index/maintenance work still yields to editor demand below.
+                        && (job.priority == .packageIO || !isEditorContended)
                 }
             }
         if candidates.isEmpty,

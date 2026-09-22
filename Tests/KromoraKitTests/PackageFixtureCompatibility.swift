@@ -30,8 +30,19 @@ extension ImageCollection {
                   ImageDecoder.supportedExtensions.contains(url.pathExtension.lowercased())
             else { return nil }
             return url
-        } ?? []).sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        } ?? []).sorted {
+            let lhs = $0.deletingPathExtension().lastPathComponent
+            let rhs = $1.deletingPathExtension().lastPathComponent
+            let nameOrder = lhs.localizedStandardCompare(rhs)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            return $0.standardizedFileURL.path < $1.standardizedFileURL.path
+        }
         loadPortableAssets(urls.map { PhotoAsset(url: $0) })
+        // The former folder-backed fixture selected the first discovered photo while its scan
+        // settled. Preserve that compatibility contract for tests that enter Edit without an
+        // explicit grid click; the production package path mirrors selection from its query
+        // controller instead.
+        if !items.isEmpty { select(at: 0) }
     }
 
     @discardableResult
