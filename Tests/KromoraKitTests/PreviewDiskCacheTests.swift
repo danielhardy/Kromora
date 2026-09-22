@@ -93,6 +93,43 @@ final class PreviewDiskCacheTests: TempDirectoryTestCase {
         XCTAssertEqual(files.map(\.lastPathComponent), ["version"])
     }
 
+    func testIdentityInvalidationPreservesOtherAssets() async throws {
+        let directory = tempDirectory.appendingPathComponent("identity-cache")
+        let firstIdentity = PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID(),
+            sourceFingerprint: .data(Data("first".utf8), decoderVersion: "test")
+        )
+        let secondIdentity = PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID(),
+            sourceFingerprint: .data(Data("second".utf8), decoderVersion: "test")
+        )
+        let replacementIdentity = PortablePhotoIdentity(
+            assetID: firstIdentity.assetID,
+            sourceFingerprint: .data(Data("replacement".utf8), decoderVersion: "test")
+        )
+        let firstKey = PreviewDiskCache.Key(
+            identity: firstIdentity, documentHash: "document", lookFingerprint: "look", space: .sRGB
+        )
+        let replacementKey = PreviewDiskCache.Key(
+            identity: replacementIdentity, documentHash: "replacement", lookFingerprint: "look",
+            space: .sRGB
+        )
+        let secondKey = PreviewDiskCache.Key(
+            identity: secondIdentity, documentHash: "document", lookFingerprint: "look", space: .sRGB
+        )
+        let cache = PreviewDiskCache(directory: directory)
+        let raster = try image(width: 32, height: 24)
+        cache.write(raster, for: firstKey)
+        cache.write(raster, for: replacementKey)
+        cache.write(raster, for: secondKey)
+
+        await cache.invalidate(identities: [replacementIdentity])
+
+        XCTAssertFalse(cache.contains(firstKey))
+        XCTAssertFalse(cache.contains(replacementKey))
+        XCTAssertTrue(cache.contains(secondKey))
+    }
+
     func testCapEvictsOldestEntryAndKeepsNewest() throws {
         let directory = tempDirectory.appendingPathComponent("cap-cache")
         let uncapped = PreviewDiskCache(directory: directory)

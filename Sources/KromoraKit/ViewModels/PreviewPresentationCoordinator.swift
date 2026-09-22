@@ -18,10 +18,13 @@ final class PreviewPresentationCoordinator {
     private var comparisonPlanner = ResolutionPlanner()
     private var histogramPlanner = ResolutionPlanner()
     private var cacheLookupTask: Task<Void, Never>?
+    private var canonicalWriteTasks: [PreviewDiskCache.Key: Task<Void, Never>] = [:]
     let cache: PreviewDiskCache
+    private let engine: any RenderEngining
 
-    init(cache: PreviewDiskCache) {
+    init(cache: PreviewDiskCache, engine: any RenderEngining = RenderEngine.shared) {
         self.cache = cache
+        self.engine = engine
     }
 
     func advanceDisplayRevision() { displayRevision &+= 1 }
@@ -84,9 +87,7 @@ final class PreviewPresentationCoordinator {
         cancelCacheLookup()
         let cache = self.cache
         cacheLookupTask = Task { [weak self] in
-            let image = await Task.detached(priority: .utility) {
-                cache.read(for: key)
-            }.value
+            let image = await cache.readAsync(for: key)
             guard !Task.isCancelled, let self else { return }
             self.cacheLookupTask = nil
             completion(image)
@@ -100,21 +101,28 @@ final class PreviewPresentationCoordinator {
     }
 
     /// Canonical cache writes are kept here so every settled presentation and every idle build
-    /// applies the same complete-frame/ROI rule. Rasterization still belongs to Core Image's
-    /// existing render owner (`PreviewDiskCache.canonicalRaster`).
+    /// applies the same complete-frame/ROI rule. A key has one cancellable task, so rapid settled
+    /// frames cannot leave a detached rasterization task per document tick.
     func writeCanonical(_ image: CIImage, for request: RenderRequest) {
         guard request.quality == .preview, request.sourceROI == nil else { return }
-        let cache = self.cache
         let key = cacheKey(for: request)
-        Task.detached(priority: .background) {
+        canonicalWriteTasks[key]?.cancel()
+        let cache = self.cache
+        let engine = self.engine
+        canonicalWriteTasks[key] = Task { [weak self] in
             guard !Task.isCancelled,
-                let raster = PreviewDiskCache.canonicalRaster(from: image, space: request.space),
-                !Task.isCancelled else { return }
-            cache.write(raster, for: key)
+                  let raster = await engine.makeCanonicalPreviewRaster(
+                      image, space: request.space, longEdge: PreviewDiskCache.canonicalLongEdge
+                  ), !Task.isCancelled else { return }
+            await cache.enqueueWrite(raster, for: key)
+            guard let self else { return }
+            self.canonicalWriteTasks.removeValue(forKey: key)
         }
     }
 
     func shutdown() {
         cancelCacheLookup()
+        for task in canonicalWriteTasks.values { task.cancel() }
+        canonicalWriteTasks.removeAll()
     }
 }
