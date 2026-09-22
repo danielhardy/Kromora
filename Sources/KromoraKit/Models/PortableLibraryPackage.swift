@@ -514,7 +514,7 @@ struct PortableLibraryPackage {
         rootURL.appendingPathComponent("Catalog/Membership/\(shard).json")
     }
 
-    private func assetRecordURL(for assetID: PortablePhotoAssetID) -> URL {
+    func assetRecordURL(for assetID: PortablePhotoAssetID) -> URL {
         rootURL.appendingPathComponent("Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json")
     }
 

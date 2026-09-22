@@ -198,7 +198,7 @@ public final class KromoraSettings: ObservableObject {
         }
     }
 
-    /// SwiftData may not create the persistent store file until the first successful save. A
+    /// The edit store may not create its persistent file until the first successful save. A
     /// requested on-disk URL is therefore only revealable once the file exists.
     public static func revealableEditDatabaseURL(
         for url: URL?, fileManager: FileManager = .default

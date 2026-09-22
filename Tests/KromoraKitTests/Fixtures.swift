@@ -1,7 +1,6 @@
 import CoreGraphics
 import Foundation
 import ImageIO
-import SwiftData
 import UniformTypeIdentifiers
 import XCTest
 
@@ -9,15 +8,8 @@ import XCTest
 
 /// Builds the same local-only schema used by the edit store without touching the filesystem.
 /// Tests that model a relaunch should retain this container and inject it into both stores.
-func makeInMemoryEditContainer() -> ModelContainer {
-    let schema = Schema([EditRecord.self])
-    let configuration = ModelConfiguration(
-        "KromoraKitTests.EditStore",
-        schema: schema,
-        isStoredInMemoryOnly: true,
-        cloudKitDatabase: .none
-    )
-    return try! ModelContainer(for: schema, configurations: [configuration])
+func makeInMemoryEditContainer() -> UUID {
+    UUID()
 }
 
 @MainActor
@@ -33,7 +25,7 @@ struct ImmediatePortablePackageLeaseRecoveryConfirmer: PortablePackageLeaseRecov
 }
 
 func makeInMemoryEditStore(
-    container: ModelContainer = makeInMemoryEditContainer(),
+    container: UUID = makeInMemoryEditContainer(),
     artificialWriteDelay: Duration = .zero,
     failuresBeforeSuccess: Int = 0,
     writeStartSignal: AsyncStream<Void>.Continuation? = nil
