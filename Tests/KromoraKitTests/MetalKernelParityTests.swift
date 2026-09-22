@@ -76,12 +76,10 @@ final class MetalKernelParityTests: XCTestCase {
         let recorded = try XCTUnwrap(
             KromoraKitResourceBundle.data(forResource: "KromoraPresentation", withExtension: "sha256"))
             .flatMap { String(data: $0, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) }
-        // The script hashes the concatenation PreviewSurface.metal + MaskOverlay.metal, in order.
+        // The script hashes the presentation Metal sources in declaration order.
         let preview = try XCTUnwrap(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
-        let overlay = try XCTUnwrap(KromoraKitResourceBundle.metalSource(named: "MaskOverlay"))
         var hasher = SHA256()
         hasher.update(data: Data(preview.utf8))
-        hasher.update(data: Data(overlay.utf8))
         XCTAssertEqual(
             hasher.finalize().hexString, recorded,
             "KromoraPresentation.metallib is stale — run scripts/build-metal-libraries.sh")
@@ -89,8 +87,7 @@ final class MetalKernelParityTests: XCTestCase {
             throw XCTSkip("no Metal device")
         }
         let library = try device.makeLibrary(URL: url)
-        for name in ["preview_quad_vertex", "preview_quad_fragment",
-                     "mask_overlay_vertex", "mask_overlay_fragment"] {
+        for name in ["preview_quad_vertex", "preview_quad_fragment"] {
             XCTAssertNotNil(
                 library.makeFunction(name: name),
                 "presentation library is missing \(name) — rebuild with scripts/build-metal-libraries.sh")

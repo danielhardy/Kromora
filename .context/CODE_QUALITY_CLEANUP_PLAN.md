@@ -412,20 +412,11 @@ lane. No runtime shader compilation on first frame.
 
 ---
 
-### CQ-10 — Delete the mask-overlay prototype
+### CQ-10 — Delete the unused mask-overlay prototype (completed in KRMA-525)
 
-**Evidence.** `Views/MaskOverlayPrototype.swift` is described as the *"Step 0 prototype … not a
-durable mask model"*. None of its types (`MaskOverlayPrototypeTool`, `MaskOverlayPrototypeSnapshot`,
-`MaskOverlayInteractionState`, `MaskOverlaySurfaceView`, and the renderer) is referenced from
-`Sources/`. The shipped overlay uses `RenderEngine.makeMaskOverlayImage`. `Resources/MaskOverlay.metal`
-is loaded only by that prototype. Its remaining consumers are `MaskOverlayPerformanceBenchmark.swift`
-and one test in `CanvasNavigationTests.swift:706`.
-
-**Implementation.** Delete the Swift file, the `.metal` resource, the benchmark, and the one test
-(or rewrite that test against the shipping overlay if it covers a real invariant). Check
-`scripts/ci-tests.sh` lane lists and `Tests/.../PerformanceBaselines` for references.
-
-**Acceptance.** Build and lanes are green, and `grep -rn MaskOverlayPrototype` is empty.
+The unused presentation prototype, its dedicated Metal source, benchmark, and prototype-only test
+have been removed. Production mask rendering remains covered by `LocalMaskRenderingTests`, and the
+presentation library/build lane now contains only the shipped preview surface.
 
 ---
 

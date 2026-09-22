@@ -36,10 +36,10 @@ vertex PreviewQuadOutput preview_quad_vertex(
         cosine * rotationDelta.x - sine * rotationDelta.y,
         sine * rotationDelta.x + cosine * rotationDelta.y
     );
-    // CanvasNavigation and MaskOverlay are y-down (pixel y=0 is the top of the view). Metal
-    // clip space is y-up, so the top of the view is NDC y=+1 — the same mapping as
-    // MaskOverlay.metal. Mapping y=0 to NDC -1 inverts the presented frame on screen while
-    // still looking upright through CIImage(mtlTexture:) in offscreen tests.
+    // CanvasNavigation and the presentation surface are y-down (pixel y=0 is the top of the
+    // view). Metal clip space is y-up, so the top of the view is NDC y=+1. Mapping y=0 to NDC
+    // -1 inverts the presented frame on screen while still looking upright through
+    // CIImage(mtlTexture:) in offscreen tests.
     float2 ndc = float2(
         pixelPosition.x / uniforms.viewportSize.x * 2.0 - 1.0,
         1.0 - pixelPosition.y / uniforms.viewportSize.y * 2.0

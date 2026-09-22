@@ -699,22 +699,4 @@ final class CanvasObservationTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.canUndo)
         XCTAssertFalse(viewModel.canRedo)
     }
-
-    func testMaskOverlayStateBypassesBroadModelPublisher() {
-        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        let state = MaskOverlayInteractionState()
-        var appChanges = 0
-        var overlayChanges = 0
-        let appSubscription = viewModel.objectWillChange.sink { _ in appChanges += 1 }
-        let overlaySubscription = state.objectWillChange.sink { _ in overlayChanges += 1 }
-
-        state.activate()
-        state.beginPointer(at: CGPoint(x: 0.2, y: 0.3), time: 1)
-        state.dragPointer(to: CGPoint(x: 0.4, y: 0.5), time: 2)
-        state.selectTool(.radial)
-
-        XCTAssertGreaterThan(overlayChanges, 0)
-        XCTAssertEqual(appChanges, 0)
-        withExtendedLifetime((appSubscription, overlaySubscription)) {}
-    }
 }

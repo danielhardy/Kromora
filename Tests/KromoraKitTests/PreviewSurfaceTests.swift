@@ -22,8 +22,6 @@ final class PreviewSurfaceTests: XCTestCase {
     func testBundledMetalSourcesAreResolvable() {
         XCTAssertNotNil(KromoraKitResourceBundle.url(forMetalSource: "PreviewSurface"))
         XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
-        XCTAssertNotNil(KromoraKitResourceBundle.url(forMetalSource: "MaskOverlay"))
-        XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "MaskOverlay"))
     }
 
     func testDoubleClickMouseDownTogglesCanvasAfterLeavingCropTool() throws {
