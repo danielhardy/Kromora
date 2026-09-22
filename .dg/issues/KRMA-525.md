@@ -13,16 +13,10 @@ labels:
   - dead-code
   - masks
 created: 2026-09-21T20:33:06.322Z
-updated: 2026-09-22T15:49:29.255Z
+updated: 2026-09-22T16:21:19.553Z
 estimate: 3
 order: a0
 board: product
-claim:
-  actor: claude
-  session: 01MUCUNPRASU9CPPP3
-  claimed_at: 2026-09-22T15:49:29.254Z
-  expires_at: 2026-09-22T16:49:29.254Z
-  model: sonnet
 ---
 
 ## Objective
