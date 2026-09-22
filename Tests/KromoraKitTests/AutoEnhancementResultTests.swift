@@ -187,9 +187,9 @@ final class AutoEnhancementResultTests: TempDirectoryTestCase {
             adjustments: LocalAdjustments(highlights: -20)
         )
         let document = EditDocument(localAdjustments: [autoLayer, userLayer])
-        let record = try EditRecord(assetID: "asset-1", document: document)
-
-        let reopened = try record.decodeDocument()
+        let reopened = try JSONDecoder().decode(
+            EditDocument.self, from: JSONEncoder().encode(document)
+        )
         XCTAssertEqual(reopened.localAdjustments, document.localAdjustments)
         XCTAssertEqual(reopened.localAdjustments[0].ownership, .auto)
         XCTAssertEqual(reopened.localAdjustments[1].ownership, .user)

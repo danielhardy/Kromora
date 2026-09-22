@@ -23,7 +23,7 @@ public struct KromoraSettingsView: View {
         self.workspace = workspace
     }
 
-    /// SwiftData may not create the persistent store file until the first successful save.
+    /// The edit store may not create its persistent file until the first successful save.
     /// A requested on-disk URL is therefore only revealable once the file exists.
     static func revealableEditDatabaseURL(for url: URL?) -> URL? {
         KromoraSettings.revealableEditDatabaseURL(for: url)

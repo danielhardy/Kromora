@@ -1,442 +1,123 @@
 import Foundation
-import SwiftData
 import XCTest
 
 @testable import KromoraKit
 
 final class EditDocumentStoreTests: TempDirectoryTestCase {
-
-    private func makeStore() -> EditDocumentStore {
-        makeInMemoryEditStore()
-    }
-
-    private func source(named name: String = "photo.jpg") -> EditSourceReference {
-        let url = tempDirectory.appendingPathComponent(name)
-        return EditSourceReference(assetID: .file(url), url: url)
-    }
-
-    private var editedDocument: EditDocument {
-        EditDocument(
-            rawDevelop: RAWDevelopSettings(exposure: 0.75),
-            adjustments: [.exposure(ev: 0.4)],
-            lut: .none
-        )
-    }
-
-    func testRoundTripUsesInMemorySwiftDataStoreAndLeavesSourceUntouched() async throws {
-        let store = makeStore()
-        let photo = source()
-        let original = Data("source bytes stay source bytes".utf8)
-        try original.write(to: try XCTUnwrap(photo.url))
-
-        try await store.save(editedDocument, for: photo)
-        let result = await store.load(for: photo)
-
-        XCTAssertTrue(result.found)
-        XCTAssertEqual(result.document, editedDocument)
-        XCTAssertEqual(try Data(contentsOf: try XCTUnwrap(photo.url)), original)
-    }
-
-    func testEachPhotoIsAnIndependentSwiftDataRecord() async throws {
-        let store = makeStore()
-        let first = source(named: "first.jpg")
-        let second = source(named: "second.jpg")
-        let firstDocument = EditDocument(adjustments: [.exposure(ev: 0.1)])
-        let secondDocument = EditDocument(adjustments: [.exposure(ev: 0.9)])
-
-        try await store.save(firstDocument, for: first)
-        try await store.save(secondDocument, for: second)
-        try await store.save(EditDocument(adjustments: [.exposure(ev: 0.2)]), for: first)
-
-        let restoredFirst = await store.load(for: first)
-        let restoredSecond = await store.load(for: second)
-        let writeCount = await store.writeCount
-        XCTAssertEqual(restoredFirst.document.adjustments, [.exposure(ev: 0.2)])
-        XCTAssertEqual(restoredSecond.document, secondDocument)
-        XCTAssertEqual(writeCount, 3)
-    }
-
-    func testPersistenceUsesOpaqueUUIDAcrossDifferentLegacySourceKeys() async throws {
-        let store = makeStore()
-        let firstURL = tempDirectory.appendingPathComponent("first-location.jpg")
-        let secondURL = tempDirectory.appendingPathComponent("second-location.jpg")
-        let identity = PortablePhotoIdentity(
-            assetID: PortablePhotoAssetID(),
-            sourceFingerprint: .data(
-                Data("same photo bytes".utf8), decoderVersion: "imageio-jpeg-v1"
-            )
-        )
-        let saved = EditSourceReference(
-            assetID: .file(firstURL), portableIdentity: identity, url: firstURL
-        )
-        let reopened = EditSourceReference(
-            assetID: .photos(localIdentifier: "a-different-provider-key"),
-            portableIdentity: identity,
-            url: secondURL
-        )
-
-        try await store.save(editedDocument, for: saved)
-        let result = await store.load(for: reopened)
-
-        XCTAssertTrue(result.found)
-        XCTAssertEqual(result.document, editedDocument)
-        XCTAssertEqual(result.status, .ready)
-    }
-
-    func testEditRecordStoresThePortableUUIDAndNotAPathKey() throws {
-        let identity = PortablePhotoAssetID()
-        let record = try EditRecord(
-            assetID: identity,
-            document: editedDocument,
-            sourcePath: "/synthetic/fixture/photo.jpg"
-        )
-
-        XCTAssertEqual(record.assetID, identity.uuid)
-        XCTAssertEqual(record.portableAssetID, identity)
-        XCTAssertFalse(record.assetID.uuidString.contains("/"))
-    }
-
-    func testPortableStoreUsesExplicitCleanSlateFileBoundary() {
-        XCTAssertNotEqual(
-            EditDocumentStore.defaultFileURL,
-            EditDocumentStore.portableStoreFileURL
-        )
-        XCTAssertEqual(EditDocumentStore.defaultFileURL.lastPathComponent, "EditStore.store")
-        XCTAssertEqual(
-            EditDocumentStore.portableStoreFileURL.lastPathComponent, "EditStore.v2.store"
-        )
-    }
-
-    func testMovedFileRelinksByBookmarkAndRekeysTheRecord() async throws {
-        let container = makeInMemoryEditContainer()
-        let store = EditDocumentStore(modelContainer: container)
-        let oldURL = tempDirectory.appendingPathComponent("old.jpg")
-        let newURL = tempDirectory.appendingPathComponent("new.jpg")
-        try Data("photo".utf8).write(to: oldURL)
-        let oldSource = EditSourceReference(assetID: .file(oldURL), url: oldURL)
-        try await store.save(editedDocument, for: oldSource)
-        try FileManager.default.moveItem(at: oldURL, to: newURL)
-
-        let result = await store.load(
-            for: EditSourceReference(assetID: .file(newURL), url: newURL)
-        )
-        XCTAssertEqual(result.document, editedDocument)
-        XCTAssertEqual(result.status, .relinked)
-
-        let relaunch = EditDocumentStore(modelContainer: container)
-        let relaunched = await relaunch.load(
-            for: EditSourceReference(assetID: .file(newURL), url: newURL)
-        )
-        XCTAssertEqual(relaunched.document, editedDocument)
-    }
-
-    func testPathRelinkUsesPredicateBeforeBookmarkFallbackScan() async throws {
-        let store = makeStore()
-        let url = tempDirectory.appendingPathComponent("path-match.jpg")
-        let savedSource = EditSourceReference(
-            assetID: .photos(localIdentifier: "saved-under-a-different-key"), url: url)
-        try await store.save(editedDocument, for: savedSource)
-
-        let result = await store.load(
-            for: EditSourceReference(assetID: .file(url), url: url))
-
-        XCTAssertTrue(result.found)
-        XCTAssertEqual(result.document, editedDocument)
-        XCTAssertEqual(result.status, .relinked)
-        let fallbackScanCount = await store.relinkFallbackScanCount
-        XCTAssertEqual(
-            fallbackScanCount,
-            0,
-            "an exact source-path match must be resolved by the predicate phase"
-        )
-    }
-
-    func testRelinkOntoOccupiedAssetIDKeepsNewestRecordAndSubsequentLoadsSucceed() async throws {
-        let container = makeInMemoryEditContainer()
-        let store = EditDocumentStore(modelContainer: container)
-        let oldURL = tempDirectory.appendingPathComponent("relink-old.jpg")
-        let occupiedURL = tempDirectory.appendingPathComponent("relink-occupied.jpg")
-        try Data("old source".utf8).write(to: oldURL)
-
-        let occupiedDocument = EditDocument(adjustments: [.exposure(ev: 0.1)])
-        let relinkedDocument = EditDocument(adjustments: [.exposure(ev: 0.9)])
-        let occupiedSource = EditSourceReference(
-            assetID: .file(occupiedURL), url: occupiedURL)
-        let oldSource = EditSourceReference(assetID: .file(oldURL), url: oldURL)
-
-        try await store.save(occupiedDocument, for: occupiedSource)
-        try await store.save(relinkedDocument, for: oldSource)
-
-        // The direct key is occupied by an older/stale record, while the URL identifies the
-        // record being reopened. The relinked record is the newest observation and wins.
-        let result = await store.load(
-            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
-        XCTAssertEqual(result.document, relinkedDocument)
-        XCTAssertEqual(result.status, .relinked)
-
-        let sameStoreRetry = await store.load(
-            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
-        XCTAssertEqual(sameStoreRetry.document, relinkedDocument)
-        XCTAssertTrue(sameStoreRetry.found)
-
-        let relaunched = EditDocumentStore(modelContainer: container)
-        let persistedRetry = await relaunched.load(
-            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
-        XCTAssertEqual(persistedRetry.document, relinkedDocument)
-        XCTAssertTrue(persistedRetry.found)
-    }
-
-    func testRelinkCollisionRollsBackOnPersistFailureSoRetrySucceeds() async throws {
-        let container = makeInMemoryEditContainer()
-        let setupStore = EditDocumentStore(modelContainer: container)
-        let oldURL = tempDirectory.appendingPathComponent("collision-fail-old.jpg")
-        let occupiedURL = tempDirectory.appendingPathComponent("collision-fail-occupied.jpg")
-        try Data("old source".utf8).write(to: oldURL)
-
-        let occupiedDocument = EditDocument(adjustments: [.exposure(ev: 0.1)])
-        let relinkedDocument = EditDocument(adjustments: [.exposure(ev: 0.9)])
-        let occupiedSource = EditSourceReference(assetID: .file(occupiedURL), url: occupiedURL)
-        let oldSource = EditSourceReference(assetID: .file(oldURL), url: oldURL)
-
-        try await setupStore.save(occupiedDocument, for: occupiedSource)
-        try await setupStore.save(relinkedDocument, for: oldSource)
-
-        // A persist failure mid-relink must roll back both the delete of the occupant and the
-        // rekey of the winner, so a retry sees the same collision (not a half-applied state)
-        // and resolves it cleanly.
-        let failingStore = EditDocumentStore(modelContainer: container, failuresBeforeSuccess: 1)
-        let failedLoad = await failingStore.load(
-            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
-        guard case .writeFailure = failedLoad.status else {
-            return XCTFail(
-                "expected the injected failure to surface as writeFailure, got \(failedLoad.status)"
-            )
+    private func makePackage(
+        names: [String] = ["photo.jpg"]
+    ) throws -> (PortableLibraryPackage, PortablePackageLease, [PortablePhotoAssetID]) {
+        let root = tempDirectory.appendingPathComponent("Library.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: root)
+        let urls = try names.map { name -> URL in
+            let url = tempDirectory.appendingPathComponent(name)
+            try Data("source-\(name)".utf8).write(to: url)
+            return url
         }
-        let attemptsAfterFailure = await failingStore.saveAttemptCount
-        let writesAfterFailure = await failingStore.writeCount
-        XCTAssertEqual(attemptsAfterFailure, 1, "expected exactly one persist attempt so far")
-        XCTAssertEqual(writesAfterFailure, 0, "the injected failure must not have written")
-
-        let retry = await failingStore.load(
-            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
-        XCTAssertTrue(retry.found)
-        XCTAssertEqual(retry.document, relinkedDocument)
-        // A load reports the outcome of this relink attempt. The prior failed attempt remains a
-        // store-level diagnostic, but it must not overwrite this successful retry's `.relinked`
-        // result.
-        XCTAssertEqual(retry.status, .relinked)
-
-        let relaunched = EditDocumentStore(modelContainer: container)
-        let persistedRetry = await relaunched.load(
-            for: EditSourceReference(assetID: occupiedSource.assetID, url: oldURL))
-        XCTAssertEqual(persistedRetry.document, relinkedDocument)
-        XCTAssertTrue(persistedRetry.found)
+        let lease = try PortablePackageLease.acquire(at: root)
+        let result = try package.importSources(urls.map { .init(url: $0) }, lease: lease)
+        return (package, lease, result.imported.map(\.assetID))
     }
 
-    func testPlainRelinkRetryReportsItsSuccessfulOutcomeAfterPersistFailure() async throws {
-        let container = makeInMemoryEditContainer()
-        let setupStore = EditDocumentStore(modelContainer: container)
-        let oldURL = tempDirectory.appendingPathComponent("plain-retry-old.jpg")
-        let newURL = tempDirectory.appendingPathComponent("plain-retry-new.jpg")
-        try Data("source".utf8).write(to: oldURL)
+    private func reference(for assetID: PortablePhotoAssetID) -> EditSourceReference {
+        EditSourceReference(
+            assetID: PhotoAssetID(rawValue: "portable:\(assetID.raw)"),
+            portableIdentity: PortablePhotoIdentity(
+                assetID: assetID,
+                sourceFingerprint: .data(Data("source".utf8), decoderVersion: "test")
+            )
+        )
+    }
 
-        let document = EditDocument(adjustments: [.exposure(ev: 0.6)])
-        let oldSource = EditSourceReference(assetID: .file(oldURL), url: oldURL)
-        try await setupStore.save(document, for: oldSource)
-        try FileManager.default.moveItem(at: oldURL, to: newURL)
+    func testPackageRoundTripLeavesOriginalUntouched() async throws {
+        let (package, lease, assets) = try makePackage()
+        defer { try? lease.release() }
+        let store = EditDocumentStore(package: package, lease: lease)
+        let document = EditDocument(adjustments: [.exposure(ev: 0.4)])
 
-        let failingStore = EditDocumentStore(modelContainer: container, failuresBeforeSuccess: 1)
-        let newSource = EditSourceReference(assetID: .file(newURL), url: newURL)
-        let failedLoad = await failingStore.load(for: newSource)
-        guard case .writeFailure = failedLoad.status else {
-            return XCTFail(
-                "expected the injected failure to surface as writeFailure, got \(failedLoad.status)"
+        try await store.save(document, for: reference(for: assets[0]))
+        let loaded = await store.load(for: reference(for: assets[0]))
+
+        XCTAssertTrue(loaded.found)
+        XCTAssertEqual(loaded.document, document)
+        XCTAssertEqual(try package.readEditRevision(for: assets[0]).document, document)
+    }
+
+    func testCacheIsBoundedAndEvictionReadsThePackageAgain() async throws {
+        let (package, lease, assets) = try makePackage(names: ["one.jpg", "two.jpg", "three.jpg"])
+        defer { try? lease.release() }
+        let store = EditDocumentStore(package: package, lease: lease, cacheCapacity: 2)
+
+        for (index, assetID) in assets.enumerated() {
+            try await store.save(
+                EditDocument(adjustments: [.exposure(ev: Double(index))]),
+                for: reference(for: assetID)
             )
         }
 
-        let retry = await failingStore.load(for: newSource)
-        XCTAssertTrue(retry.found)
-        XCTAssertEqual(retry.document, document)
-        XCTAssertEqual(retry.status, .relinked)
+        let cacheCount = await store.cacheCount
+        XCTAssertEqual(cacheCount, 2)
+        let first = await store.load(for: reference(for: assets[0]))
+        XCTAssertEqual(first.document.adjustments, [.exposure(ev: 0)])
+        let finalCacheCount = await store.cacheCount
+        XCTAssertLessThanOrEqual(finalCacheCount, 2)
     }
 
-    func testPersistenceIORunsOffTheMainActor() async throws {
-        let store = makeStore()
-        _ = await store.load(for: source())
-        let lastIOWasMainThread = await store.lastIOWasMainThread
-        XCTAssertFalse(lastIOWasMainThread)
-    }
-
-    func testFailingStoreCanRetryTheCompleteSnapshot() async throws {
-        let container = makeInMemoryEditContainer()
-        let store = makeInMemoryEditStore(container: container, failuresBeforeSuccess: 1)
-        let photo = source()
-
-        do {
-            try await store.save(editedDocument, for: photo)
-            XCTFail("the injected failure should be surfaced")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("injected persistence failure"))
-        }
-        let failedWriteCount = await store.writeCount
-        let failedAttemptCount = await store.saveAttemptCount
-        XCTAssertEqual(failedWriteCount, 0)
-        XCTAssertEqual(failedAttemptCount, 1)
-
-        try await store.save(editedDocument, for: photo)
-        let restored = EditDocumentStore(modelContainer: container)
-        let result = await restored.load(for: photo)
-        XCTAssertEqual(result.document, editedDocument)
-    }
-
-    func testCorruptRecordSurfacesActionableStatusWithoutInventingEdits() async throws {
-        let schema = Schema([EditRecord.self])
-        let configuration = ModelConfiguration(
-            "KromoraKitTests.CorruptEditStore",
-            schema: schema,
-            isStoredInMemoryOnly: true,
-            cloudKitDatabase: .none
+    func testCorruptRevisionReportsCorruptWithoutInventingEdits() async throws {
+        let (package, lease, assets) = try makePackage()
+        defer { try? lease.release() }
+        let store = EditDocumentStore(package: package, lease: lease)
+        try await store.save(
+            EditDocument(adjustments: [.exposure(ev: 0.8)]), for: reference(for: assets[0])
         )
-        let container = try ModelContainer(for: schema, configurations: [configuration])
-        let photo = source()
-        let context = ModelContext(container)
-        let record = try EditRecord(assetID: photo.assetID.description, document: editedDocument)
-        record.documentData = Data("partially written".utf8)
-        context.insert(record)
-        try context.save()
 
-        let store = EditDocumentStore(modelContainer: container)
-        let result = await store.load(for: photo)
+        let record = try package.readAssetRecord(for: assets[0])
+        let pointer = try XCTUnwrap(record.editHistory.edits.first)
+        try Data("corrupt revision".utf8).write(
+            to: package.rootURL.appendingPathComponent(pointer.relativePath)
+        )
+        let freshStore = EditDocumentStore(package: package, lease: lease)
+        let result = await freshStore.load(for: reference(for: assets[0]))
 
-        XCTAssertTrue(result.found)
         XCTAssertTrue(result.document.isIdentity)
-        guard case .corrupt(let detail) = result.status else {
-            return XCTFail("expected an undecodable record to be reported as corrupt")
+        guard case .corrupt = result.status else {
+            return XCTFail("expected a corrupt package revision status")
         }
-        XCTAssertFalse(detail.isEmpty)
-        XCTAssertTrue(result.status.isActionable)
-        XCTAssertTrue(result.status.message?.contains("neutral edits") == true)
-        XCTAssertFalse(result.isUsableForPrefetch,
-                       "a corrupt record must not be prefetched with its neutral fallback")
-        let storeStatus = await store.status
-        XCTAssertEqual(storeStatus, result.status)
+        XCTAssertFalse(result.isUsableForPrefetch)
     }
 
-    func testCorruptLoadBannerIsPhotoScopedWhileWorstDiagnosticStaysSticky() async throws {
-        let schema = Schema([EditRecord.self])
-        let configuration = ModelConfiguration(
-            "KromoraKitTests.PerPhotoLoadStatus",
-            schema: schema,
-            isStoredInMemoryOnly: true,
-            cloudKitDatabase: .none
-        )
-        let container = try ModelContainer(for: schema, configurations: [configuration])
-        let corruptPhoto = source(named: "corrupt.jpg")
-        let healthyPhoto = source(named: "healthy.jpg")
-        let context = ModelContext(container)
-        let corruptRecord = try EditRecord(
-            assetID: corruptPhoto.assetID.description, document: editedDocument
-        )
-        corruptRecord.documentData = Data("partially written".utf8)
-        context.insert(corruptRecord)
-        try context.save()
+    func testPackageFailureLeavesTheLastKnownDocumentInTheCacheOnlyUntilReload() async throws {
+        let (package, lease, assets) = try makePackage()
+        defer { try? lease.release() }
+        let store = EditDocumentStore(package: package, lease: lease)
+        let document = EditDocument(adjustments: [.exposure(ev: 0.3)])
+        try await store.save(document, for: reference(for: assets[0]))
+        let loaded = await store.load(for: reference(for: assets[0]))
+        XCTAssertEqual(loaded.document, document)
 
-        let store = EditDocumentStore(modelContainer: container)
-        try await store.save(editedDocument, for: healthyPhoto)
+        let recordURL = package.assetRecordURL(for: assets[0])
+        try FileManager.default.removeItem(at: recordURL)
+        let result = await store.load(for: reference(for: assets[0]))
 
-        let corruptResult = await store.load(for: corruptPhoto)
-        let healthyResult = await store.load(for: healthyPhoto)
-        let corruptRetry = await store.load(for: corruptPhoto)
-
-        guard case .corrupt = corruptResult.status else {
-            return XCTFail("the corrupt photo must report its own corrupt status")
+        guard case .packageFailure = result.status else {
+            return XCTFail("a missing asset record must be reported as a package failure")
         }
-        XCTAssertEqual(healthyResult.status, .ready)
-        guard case .corrupt = corruptRetry.status else {
-            return XCTFail("loading the corrupt photo again must still report corrupt")
-        }
-        guard case .corrupt = await store.worstActionableStatus else {
-            return XCTFail(
-                "the deliberately sticky store diagnostic should retain the corrupt warning"
-            )
-        }
+        XCTAssertTrue(result.document.isIdentity)
     }
 
-    func testEncodingFailureIsReportedWithoutPersistingAnEmptyRecord() async throws {
-        let store = makeStore()
-        let photo = source()
-        let unencodableDocument = EditDocument(adjustments: [.exposure(ev: .nan)])
+    func testRelaunchReadsTheDurablePackageRevision() async throws {
+        let (package, lease, assets) = try makePackage()
+        let document = EditDocument(adjustments: [.exposure(ev: 0.75)])
+        let first = EditDocumentStore(package: package, lease: lease)
+        try await first.save(document, for: reference(for: assets[0]))
+        try lease.release()
 
-        do {
-            try await store.save(unencodableDocument, for: photo)
-            XCTFail("a non-conforming floating-point value must not be saved")
-        } catch {
-            XCTAssertTrue(error is EncodingError)
-        }
+        let reopenedLease = try PortablePackageLease.acquire(at: package.rootURL)
+        defer { try? reopenedLease.release() }
+        let reopened = EditDocumentStore(package: package, lease: reopenedLease)
+        let result = await reopened.load(for: reference(for: assets[0]))
 
-        let status = await store.status
-        guard case .writeFailure(let detail) = status else {
-            return XCTFail("expected an encoding failure status, got \(status)")
-        }
-        XCTAssertFalse(detail.isEmpty)
-        let writeCount = await store.writeCount
-        let saveAttemptCount = await store.saveAttemptCount
-        XCTAssertEqual(writeCount, 0)
-        XCTAssertEqual(saveAttemptCount, 0)
-
-        let result = await store.load(for: photo)
-        XCTAssertFalse(result.found)
-        XCTAssertEqual(result.status, .ready)
-    }
-
-    func testConcurrentSavesSerializeModelContextAccess() async throws {
-        let store = makeStore()
-        let entries = (0..<8).map { index in
-            (
-                source: source(named: "concurrent-\(index).jpg"),
-                document: EditDocument(adjustments: [.exposure(ev: Double(index) / 10)])
-            )
-        }
-
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            for entry in entries {
-                group.addTask {
-                    try await store.save(entry.document, for: entry.source)
-                }
-            }
-            try await group.waitForAll()
-        }
-
-        for entry in entries {
-            let result = await store.load(for: entry.source)
-            XCTAssertTrue(result.found)
-            XCTAssertEqual(result.document, entry.document)
-        }
-        let saveAttemptCount = await store.saveAttemptCount
-        let writeCount = await store.writeCount
-        XCTAssertEqual(saveAttemptCount, entries.count)
-        XCTAssertEqual(writeCount, entries.count)
-    }
-
-    func testDefaultStoreUsesEditStoreStore() {
-        XCTAssertEqual(EditDocumentStore.defaultFileURL.lastPathComponent, "EditStore.store")
-    }
-
-    func testPersistentStoreExposesItsOnDiskFileURL() async throws {
-        let fileURL = tempDirectory.appendingPathComponent("EditStore.store")
-        let store = try EditDocumentStore.makePersistentStore(fileURL: fileURL)
-        let exposedURL = await store.onDiskFileURL
-
-        XCTAssertEqual(exposedURL, fileURL)
-    }
-
-    func testStoreThatFallsBackToMemoryDoesNotExposeAnOnDiskFileURL() async throws {
-        let parentFile = tempDirectory.appendingPathComponent("not-a-directory")
-        try Data("not a directory".utf8).write(to: parentFile)
-        let requestedURL = parentFile.appendingPathComponent("EditStore.store")
-        let store = EditDocumentStore(fileURL: requestedURL)
-        let exposedURL = await store.onDiskFileURL
-
-        XCTAssertNil(exposedURL)
+        XCTAssertTrue(result.found)
+        XCTAssertEqual(result.document, document)
     }
 }

@@ -39,20 +39,13 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         XCTAssertEqual(sidecar.native.document, document)
         XCTAssertEqual(sidecar.xmp.document, document)
 
-        // Removing the local row simulates deleting the device-local cache. The canonical package
-        // still returns the exact value, and a clean projection can be rebuilt from it.
+        // Evicting the bounded cache does not affect the canonical package.
         try await store.delete(for: reference)
         let fromPackage = await store.load(for: reference)
         XCTAssertEqual(fromPackage.document, document)
         XCTAssertTrue(fromPackage.found)
-
-        let cleanStore = EditDocumentStore(package: package, lease: lease, modelContainer: makeInMemoryEditContainer())
-        let rebuiltCount = try await cleanStore.rebuildProjectionFromPackage()
-        XCTAssertEqual(rebuiltCount, 1)
-        let projectionOnlyStore = EditDocumentStore(modelContainer: container)
-        let rebuilt = await projectionOnlyStore.load(for: reference)
-        XCTAssertEqual(rebuilt.document, document)
-        XCTAssertTrue(rebuilt.found)
+        let cacheCount = await store.cacheCount
+        XCTAssertEqual(cacheCount, 1)
     }
 
     func testPackagePersistenceCoordinatorStillCoalescesToOneRevision() async throws {
