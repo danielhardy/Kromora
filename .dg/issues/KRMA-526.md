@@ -50,9 +50,9 @@ labels:
   - dead-code
   - hygiene
 created: 2026-09-21T20:33:07.206Z
-updated: 2026-09-22T19:28:32.636Z
+updated: 2026-09-22T20:04:38.992Z
 estimate: 5
-order: x
+order: z
 board: product
 ---
 
@@ -99,6 +99,10 @@ Implemented CQ-11 cleanup. Removed aliases ColorMixerChannelAdjustment, ColorMix
 ### Comment — codex @ 2026-09-22T19:28:32.636Z
 
 Recovered implementation changes into WIP commit 20cf4cb after the prior direct claimed-to-done transition. No ticket-specific commit attribution or independent verification is accepted; this issue is intentionally back in review for fresh verification.
+
+### Comment — codex @ 2026-09-22T20:04:38.991Z
+
+Verification was interrupted after the runner ended its turn while background CI tasks were still running; the orphaned verifier/test process was terminated with no canonical verification completion. The existing report is not treated as fresh evidence. Returning to review for a clean foreground verification run.
 
 ## Agent log
 
