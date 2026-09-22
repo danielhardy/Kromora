@@ -643,7 +643,7 @@ final class PortableLibrarySession {
     /// page; stable `PhotoAssetID` identity (`portable:<uuid>`) keeps selection coherent as
     /// further pages fault in.
     func browsingAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
-        try page(at: pageIndex, query: query).items.map { Self.browsingAsset(for: $0, package: package) }
+        page(at: pageIndex, query: query).items.map { Self.browsingAsset(for: $0, package: package) }
     }
 
     /// Canonical source URL for opening, exporting, or editing one asset. The derived browsing

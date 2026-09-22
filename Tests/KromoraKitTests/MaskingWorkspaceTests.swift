@@ -910,7 +910,8 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.maskingState.selectedLayerID, firstLayer.id)
         XCTAssertEqual(viewModel.maskingState.selectedComponentID, firstComponent.id)
 
-        _ = await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         let reopened = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: editContainer)

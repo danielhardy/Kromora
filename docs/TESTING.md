@@ -6,6 +6,7 @@ work is opt-in because it needs a logged-in display or licensed local fixtures.
 ## Required lanes
 
 ```sh
+scripts/ci-tests.sh warning-gate
 swift build
 swift test
 swift build -c release
@@ -15,6 +16,13 @@ scripts/ci-tests.sh identity
 git diff --check
 dg validate
 ```
+
+`warning-gate` builds the package and test target with Swift compiler warnings promoted to errors
+(`swift build --build-tests -Xswiftc -warnings-as-errors`). This is deliberately compiler-enforced
+rather than a grep over build output: SDK/toolchain paths and informational output cannot create
+false positives, while a warning introduced in `Sources/` or `Tests/` fails the build. Keep the
+gate on the supported Xcode/macOS toolchain; do not add warning suppressions or Swift 6 opt-outs
+to make it pass.
 
 `fast` covers deterministic model, coordinator, and fake-engine tests in parallel. `serial` covers
 Core Image, render, and AppKit/UI-sensitive tests. `scripts/ci-tests.sh optional` runs RAW-fixture,

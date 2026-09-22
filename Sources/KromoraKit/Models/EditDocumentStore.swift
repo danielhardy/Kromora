@@ -1,4 +1,5 @@
 import Foundation
+import os.lock
 
 /// The source information needed to address one edit revision.
 struct EditSourceReference: Codable, Sendable, Equatable {
@@ -466,59 +467,68 @@ actor EditDocumentStore {
 /// This backend exists only for legacy headless test composition points. It deliberately has no
 /// file format, URL lookup, or source relinking behavior; package mode above is the sole product
 /// persistence implementation.
-private final class CompatibilityEditBackend: @unchecked Sendable {
-    private let lock = NSLock()
-    private var documents: [PortablePhotoAssetID: EditDocument] = [:]
-    private var revisions: [PortablePhotoAssetID: UInt64] = [:]
-    private var aliases: [String: PortablePhotoAssetID] = [:]
+private final class CompatibilityEditBackend: Sendable {
+    private struct State: Sendable {
+        var documents: [PortablePhotoAssetID: EditDocument] = [:]
+        var revisions: [PortablePhotoAssetID: UInt64] = [:]
+        var aliases: [String: PortablePhotoAssetID] = [:]
+    }
+
+    private let state: OSAllocatedUnfairLock<State>
+
+    init() {
+        state = OSAllocatedUnfairLock(initialState: State())
+    }
 
     func save(_ document: EditDocument, for source: EditSourceReference) {
         let assetID = source.portableAssetID
-        lock.lock()
-        documents[assetID] = document
-        revisions[assetID, default: 0] += 1
-        if let url = source.url {
-            aliases[url.standardizedFileURL.resolvingSymlinksInPath().path] = assetID
+        state.withLock { state in
+            state.documents[assetID] = document
+            state.revisions[assetID, default: 0] += 1
+            if let url = source.url {
+                state.aliases[url.standardizedFileURL.resolvingSymlinksInPath().path] = assetID
+            }
         }
-        lock.unlock()
     }
 
     func load(for source: EditSourceReference) -> (document: EditDocument, revision: UInt64)? {
-        lock.lock()
-        defer { lock.unlock() }
-        let assetID = source.url
-            .flatMap { aliases[$0.standardizedFileURL.resolvingSymlinksInPath().path] }
-            ?? source.portableAssetID
-        guard let document = documents[assetID], let revision = revisions[assetID] else { return nil }
-        return (document, revision)
+        state.withLock { state in
+            let assetID = source.url
+                .flatMap { state.aliases[$0.standardizedFileURL.resolvingSymlinksInPath().path] }
+                ?? source.portableAssetID
+            guard let document = state.documents[assetID], let revision = state.revisions[assetID]
+            else { return nil }
+            return (document, revision)
+        }
     }
 
     func revision(for assetID: PortablePhotoAssetID) -> UInt64 {
-        lock.lock()
-        defer { lock.unlock() }
-        return revisions[assetID] ?? 0
+        state.withLock { $0.revisions[assetID] ?? 0 }
     }
 
     func remove(for assetID: PortablePhotoAssetID) {
-        lock.lock()
-        documents.removeValue(forKey: assetID)
-        revisions.removeValue(forKey: assetID)
-        aliases = aliases.filter { $0.value != assetID }
-        lock.unlock()
+        state.withLock { state in
+            state.documents.removeValue(forKey: assetID)
+            state.revisions.removeValue(forKey: assetID)
+            state.aliases = state.aliases.filter { $0.value != assetID }
+        }
     }
 }
 
-private final class CompatibilityEditBackendRegistry: @unchecked Sendable {
-    private let lock = NSLock()
-    private var values: [String: CompatibilityEditBackend] = [:]
+private final class CompatibilityEditBackendRegistry: Sendable {
+    private let values: OSAllocatedUnfairLock<[String: CompatibilityEditBackend]>
+
+    init() {
+        values = OSAllocatedUnfairLock(initialState: [:])
+    }
 
     func backend(for key: String) -> CompatibilityEditBackend {
-        lock.lock()
-        defer { lock.unlock() }
-        if let value = values[key] { return value }
-        let value = CompatibilityEditBackend()
-        values[key] = value
-        return value
+        values.withLock { values in
+            if let value = values[key] { return value }
+            let value = CompatibilityEditBackend()
+            values[key] = value
+            return value
+        }
     }
 
     static func key(for value: Any) -> String {

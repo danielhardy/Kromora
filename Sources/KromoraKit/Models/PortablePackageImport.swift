@@ -192,7 +192,7 @@ final class PortablePackageImportProgressSink: Sendable {
     }
 
     func yield(_ value: PortablePackageImportProgress) {
-        state.withLock { $0?.yield(value) }
+        _ = state.withLock { $0?.yield(value) }
     }
 
     func finish() {

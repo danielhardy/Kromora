@@ -35,7 +35,8 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             firstLaunch.sourceName == imageURL.lastPathComponent
         }
         firstLaunch.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
-        await firstLaunch.flushPendingWrites()
+        let flushResult = await firstLaunch.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
 
         let secondLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
@@ -65,7 +66,8 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
 
         // This intentionally does not wait for editStore.status. Clean termination must provide
         // the ordering guarantee even when the edit is made immediately before Cmd-Q.
-        await firstLaunch.flushPendingWrites()
+        let flushResult = await firstLaunch.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
 
         let secondLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
@@ -94,7 +96,8 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         }
 
         XCTAssertLessThanOrEqual(viewModel.pendingPersistenceCount, 1)
-        await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
 
         let restored = EditDocumentStore(modelContainer: container)
         let item = try XCTUnwrap(viewModel.collection.items.first)
@@ -123,7 +126,8 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         try await Task.sleep(for: .milliseconds(270))
 
         let started = Date()
-        await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         let elapsed = Date().timeIntervalSince(started)
 
         XCTAssertGreaterThanOrEqual(elapsed, 0.25)
@@ -145,12 +149,16 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         viewModel.openImage(url: imageURL)
         try await waitUntil("the retry image") { viewModel.sourceImage != nil }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.7)] }
-        await viewModel.flushPendingWrites()
+        let firstFlushResult = await viewModel.flushPendingWrites()
+        guard case .failure = firstFlushResult else {
+            return XCTFail("the configured first persistence attempt must fail")
+        }
         XCTAssertEqual(viewModel.pendingPersistenceCount, 1)
         let failedWriteCount = await store.writeCount
         XCTAssertEqual(failedWriteCount, 0)
 
-        await viewModel.flushPendingWrites()
+        let retryResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(retryResult, .success)
         XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
         let writeCount = await store.writeCount
         XCTAssertEqual(writeCount, 1)
@@ -266,7 +274,8 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let intermediateWriteCount = await store.writeCount
         XCTAssertGreaterThan(intermediateWriteCount, 1)
         viewModel.endUndoGrouping()
-        await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
         let finalWriteCount = await store.writeCount
         XCTAssertGreaterThanOrEqual(finalWriteCount, 2)

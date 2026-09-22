@@ -230,8 +230,6 @@ final class SceneEvidenceTests: XCTestCase {
         let contradicted = analyze(
             tone: daylightTone(), color: daylightColor(), classifications: labels
         )
-        let noLabels = analyze(tone: daylightTone(), color: daylightColor())
-
         // Agreement keeps confidence at the no-regions level; contradiction scales it further.
         XCTAssertEqual(agreed.sceneConfidence, 0.8, accuracy: 0.001)
         XCTAssertLessThan(contradicted.sceneConfidence, agreed.sceneConfidence)
