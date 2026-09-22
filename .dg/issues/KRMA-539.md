@@ -2,9 +2,39 @@
 id: KRMA-539
 title: Fix MaskingWorkspaceTests source-switch and mask persistence failures
 type: task
-status: review
+status: done
 priority: high
 agent: codex
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: The focused MaskingWorkspaceTests suite passes without timeout.
+      result: pass
+      notes: swift test --no-parallel --filter KromoraKitTests.MaskingWorkspaceTests passed 36/36.
+    - criterion: Switching photos preserves the active photo and restores its mask document.
+      result: pass
+      notes: The active-photo and masking-tab restoration test passed in the focused suite.
+    - criterion: Persisted semantic masks reopen with their target and source state.
+      result: pass
+      notes: Semantic-mask creation, reuse, persisted target/source identity, and source-switch coverage passed in the focused suite; companion persistence tests passed 11/11.
+    - criterion: The fast lane no longer reports this suite.
+      result: pass
+      notes: scripts/ci-tests.sh fast completed its required lane without a MaskingWorkspaceTests failure. Its exit code was nonzero only for unrelated CopyPasteTests, LibraryDeletionTests, LibraryScanTests, and ThumbnailSwitchLifecycleTests.
+  checks_run:
+    - swift test --no-parallel --filter KromoraKitTests.MaskingWorkspaceTests (36 passed)
+    - swift test --no-parallel --filter KromoraKitTests.SourceSessionCoordinatorTests (4 passed)
+    - swift test --no-parallel --filter KromoraKitTests.EditPersistenceIntegrationTests (11 passed)
+    - swift build -c release (passed with two pre-existing warnings)
+    - scripts/ci-tests.sh fast (MaskingWorkspaceTests passed; unrelated failures listed above)
+    - git diff --check
+  findings:
+    - The fast lane still has unrelated failures in CopyPasteTests, LibraryDeletionTests, LibraryScanTests, and ThumbnailSwitchLifecycleTests.
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: unknown
+  completed_at: 2026-09-22T20:35:47.946Z
+  session: 01MUD4VWSH10B21U92
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -14,9 +44,9 @@ labels:
   - regression
   - masking
 created: 2026-09-22T17:35:55.872Z
-updated: 2026-09-22T19:52:30.749Z
+updated: 2026-09-22T20:35:47.948Z
 estimate: 3
-order: y
+order: n
 board: product
 ---
 
@@ -70,3 +100,28 @@ Actor: codex
 Resolved model: gpt-5.6-luna
 Pickup session: 01MUD0OSEAKUDM9UFV
 Summary: Added a source-load persistence barrier so photo switches wait for the prior edit snapshot to become durable before reading the next photo's document. Mask tab state and per-photo mask documents now survive navigation, and persisted semantic-mask recipes reopen with their target/source identity.
+
+- 2026-09-22T20:35:47.946Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] The focused MaskingWorkspaceTests suite passes without timeout. (pass) — swift test --no-parallel --filter KromoraKitTests.MaskingWorkspaceTests passed 36/36.
+- [x] Switching photos preserves the active photo and restores its mask document. (pass) — The active-photo and masking-tab restoration test passed in the focused suite.
+- [x] Persisted semantic masks reopen with their target and source state. (pass) — Semantic-mask creation, reuse, persisted target/source identity, and source-switch coverage passed in the focused suite; companion persistence tests passed 11/11.
+- [x] The fast lane no longer reports this suite. (pass) — scripts/ci-tests.sh fast completed its required lane without a MaskingWorkspaceTests failure. Its exit code was nonzero only for unrelated CopyPasteTests, LibraryDeletionTests, LibraryScanTests, and ThumbnailSwitchLifecycleTests.
+Checks run:
+- swift test --no-parallel --filter KromoraKitTests.MaskingWorkspaceTests (36 passed)
+- swift test --no-parallel --filter KromoraKitTests.SourceSessionCoordinatorTests (4 passed)
+- swift test --no-parallel --filter KromoraKitTests.EditPersistenceIntegrationTests (11 passed)
+- swift build -c release (passed with two pre-existing warnings)
+- scripts/ci-tests.sh fast (MaskingWorkspaceTests passed; unrelated failures listed above)
+- git diff --check
+Findings:
+- The fast lane still has unrelated failures in CopyPasteTests, LibraryDeletionTests, LibraryScanTests, and ThumbnailSwitchLifecycleTests.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MUD4VWSH10B21U92
+Summary: Fresh foreground verification passed KRMA-539. The focused masking, source-session, and edit-persistence suites pass; the release build passes; the fast lane reports no MaskingWorkspaceTests failure. The fast lane remains nonzero only for unrelated CopyPaste, LibraryDeletion, LibraryScan, and ThumbnailSwitchLifecycle failures.
