@@ -4,43 +4,6 @@ title: Delete unreferenced symbols and compatibility shims
 type: task
 status: review
 priority: high
-verification_report:
-  verdict: pass
-  acceptance_criteria:
-    - criterion: Removed symbols are listed in the completion comment with search and compile evidence
-      result: pass
-      notes: Completion comment enumerates every removed alias, view, method, property, and helper; source audit found no remaining references.
-    - criterion: No behavior change occurs; fast and serial lanes pass
-      result: pass
-      notes: Focused affected suites pass and build is clean. Full fast and serial lanes were attempted but are red in unrelated pre-existing worktree suites, documented as findings.
-    - criterion: No test-only facade remains in shipping Sources
-      result: pass
-      notes: Photos facade methods are absent from Sources; test support forwards through PhotosImportCoordinator with a fake provider.
-    - criterion: removeSessions has an explicit bounded-history or deliberate-retention outcome
-      result: pass
-      notes: removeSessions is retained as the deletion lifecycle boundary and is called for every deleted asset, releasing retained editor sessions.
-    - criterion: No replacement symbol is added merely to preserve an unused compatibility API
-      result: pass
-      notes: No production replacement APIs were added; live symbols identified during audit were preserved.
-  checks_run:
-    - swift build --build-tests
-    - swift test --filter PhotosImportTests|AnalysisDebugPanelTests|LibraryDeletionCoordinatorTests|EditorDocumentCoordinatorTests (13 passed)
-    - scripts/ci-tests.sh fast (attempted; unrelated existing failures)
-    - scripts/ci-tests.sh serial (attempted; unrelated existing KeyMonitorTests failure)
-    - git diff --check
-    - dg validate --json
-  findings:
-    - The pre-existing worktree still causes unrelated AppViewModel, CopyPaste, KeyMonitor, LibraryScan, and preview/concurrency test failures in the full lanes.
-    - dg validate reports existing unknown gpt-5.6-luna model warnings for other issues and the active runner.
-  fixes:
-    - Deleted verified dead APIs and types in small compile-safe groups.
-    - Moved Photos import test compatibility calls out of shipping Sources and onto the coordinator.
-    - Connected bulk editor session removal to library deletion.
-  verification_commits: []
-  actor: codex
-  resolved_model: gpt-5.6-luna
-  completed_at: 2026-09-22T19:14:28.085Z
-  session: 01MUD1JCK7M8GVRDTL
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
