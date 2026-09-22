@@ -43,84 +43,12 @@ final class LocalMaskRenderer {
     var cachedBrushStrokeCount: Int { brushStrokeCache.count }
     var cachedBrushStrokeCostBytes: Int { brushStrokeCacheCostBytes }
 
-    private let analyticKernel: CIKernel? = CIKernel(source: """
-    kernel vec4 localAnalyticMask(
-        sampler image, vec4 geometry, vec4 firstPoint, vec4 secondPoint,
-        vec4 transform, vec4 radial, vec4 controls
-    ) {
-        vec2 coordinate = samplerCoord(image);
-        vec2 normalized = (coordinate - geometry.xy) / max(geometry.zw, vec2(0.00001));
-        normalized.y = 1.0 - normalized.y;
+    // Precompiled Metal kernels (Sources/KromoraKit/Resources/KromoraCIKernels.ci.metal).
+    private let analyticKernel: CIKernel? = CIKernelLibrary.kernel(named: "localAnalyticMask")
 
-        // Transform around the source centre. Translation is normalized source-space movement.
-        vec2 shifted = normalized - vec2(0.5);
-        float cosine = cos(-transform.z);
-        float sine = sin(-transform.z);
-        shifted = vec2(shifted.x * cosine - shifted.y * sine,
-                       shifted.x * sine + shifted.y * cosine);
-        shifted /= max(transform.xy, vec2(0.00001));
-        normalized = shifted + vec2(0.5) - transform.wz;
+    private let invertKernel: CIKernel? = CIKernelLibrary.kernel(named: "localInvertMask")
 
-        float alpha;
-        if (controls.x < 0.5) {
-            vec2 direction = secondPoint.xy - firstPoint.xy;
-            float denominator = max(dot(direction, direction), 0.0000001);
-            float projection = dot(normalized - firstPoint.xy, direction) / denominator;
-            // This is the GPU form of LinearGradientMaskMath.smoothstep(0, 1, projection).
-            // The persisted endpoints encode the falloff width, so no resolution-dependent
-            // feather/raster value is introduced here.
-            alpha = smoothstep(0.0, 1.0, projection);
-            alpha *= controls.y;
-        } else {
-            vec2 delta = normalized - firstPoint.xy;
-            // Rotation is defined in source-pixel space. Scaling normalized x/y by the
-            // requested extent before rotating keeps an ellipse aligned on non-square sources
-            // at interactive, preview, and export resolutions.
-            delta *= geometry.zw;
-            float radialCosine = cos(radial.z);
-            float radialSine = sin(radial.z);
-            delta = vec2(delta.x * radialCosine + delta.y * radialSine,
-                         -delta.x * radialSine + delta.y * radialCosine);
-            float distance = length(delta / max(radial.xy, vec2(0.00001)));
-            float inner = max(0.0, 1.0 - radial.w);
-            if (distance <= inner) {
-                alpha = 1.0;
-            } else if (distance >= 1.0) {
-                alpha = 0.0;
-            } else {
-                alpha = 1.0 - smoothstep(inner, 1.0, distance);
-            }
-            if (controls.z < 0.5) { alpha = 1.0 - alpha; }
-            alpha *= controls.y;
-        }
-        return vec4(0.0, 0.0, 0.0, clamp(alpha, 0.0, 1.0));
-    }
-    """)
-
-    private let invertKernel: CIKernel? = CIKernel(source: """
-    kernel vec4 localInvertMask(sampler image) {
-        vec4 pixel = sample(image, samplerCoord(image));
-        return vec4(0.0, 0.0, 0.0, 1.0 - clamp(pixel.a, 0.0, 1.0));
-    }
-    """)
-
-    private let combineKernel: CIKernel? = CIKernel(source: """
-    kernel vec4 localCombineMask(sampler current, sampler next, vec4 controls) {
-        float a = clamp(sample(current, samplerCoord(current)).a, 0.0, 1.0);
-        float b = clamp(sample(next, samplerCoord(next)).a, 0.0, 1.0);
-        float result;
-        if (controls.x < 0.5) {
-            result = b;                 // replace
-        } else if (controls.x < 1.5) {
-            result = max(a, b);         // add
-        } else if (controls.x < 2.5) {
-            result = a * (1.0 - b);     // subtract
-        } else {
-            result = min(a, b);         // intersect
-        }
-        return vec4(0.0, 0.0, 0.0, clamp(result, 0.0, 1.0));
-    }
-    """)
+    private let combineKernel: CIKernel? = CIKernelLibrary.kernel(named: "localCombineMask")
 
     func image(
         for payload: LocalMaskPayload,

@@ -864,10 +864,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
         }
 
         override init() {
+            // The presentation shaders are precompiled by scripts/build-metal-libraries.sh into
+            // KromoraPresentation.metallib. Loading library data performs no runtime source
+            // compilation, keeping first-frame presentation off the Metal compiler.
             let library: MTLLibrary?
-            if let source = KromoraKitResourceBundle.metalSource(named: "PreviewSurface") {
-                library = try? RenderEngine.presentationDevice.makeLibrary(
-                    source: source, options: nil)
+            if let url = KromoraKitResourceBundle.presentationMetallibURL() {
+                library = try? RenderEngine.presentationDevice.makeLibrary(URL: url)
             } else {
                 library = RenderEngine.presentationDevice.makeDefaultLibrary()
             }

@@ -1,0 +1,148 @@
+{
+  "goldens" : [
+    {
+      "extent" : [
+        0,
+        0,
+        96,
+        64
+      ],
+      "height" : 64,
+      "name" : "vignette-origin",
+      "notes" : "96x64 red-blue gradient, amount -75, origin-zero extent",
+      "width" : 96
+    },
+    {
+      "extent" : [
+        16,
+        12,
+        64,
+        40
+      ],
+      "height" : 40,
+      "name" : "vignette-roi",
+      "notes" : "non-zero-origin ROI with full-frame geometry reference (crop\/ROI edge case)",
+      "width" : 64
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        64,
+        64
+      ],
+      "height" : 64,
+      "name" : "grain-seed",
+      "notes" : "flat 0.45\/0.40\/0.38 field, amount 70 size 40 roughness 60, seed 123456789; sin-hash pattern is compiler-specific (see test header)",
+      "width" : 64
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        8,
+        1
+      ],
+      "height" : 1,
+      "name" : "hsl-mixer",
+      "notes" : "8x1 hue strip, red\/green\/blue channels adjusted, others neutral",
+      "width" : 8
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        32,
+        1
+      ],
+      "height" : 1,
+      "name" : "color-grading",
+      "notes" : "32x1 luminance-chroma ramp, all three wheels set, blending 55 balance -20",
+      "width" : 32
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        8,
+        1
+      ],
+      "height" : 1,
+      "name" : "midtone-mask",
+      "notes" : "8x1 gray ramp, amount 0.8; output is alpha-only mask",
+      "width" : 8
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        64,
+        48
+      ],
+      "height" : 48,
+      "name" : "mask-linear",
+      "notes" : "diagonal linear gradient, density 0.85, origin-zero extent",
+      "width" : 64
+    },
+    {
+      "extent" : [
+        10,
+        8,
+        64,
+        48
+      ],
+      "height" : 48,
+      "name" : "mask-radial-roi",
+      "notes" : "rotated feathered ellipse on non-zero-origin extent",
+      "width" : 64
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        16,
+        16
+      ],
+      "height" : 16,
+      "name" : "mask-invert",
+      "notes" : "uniform alpha 0.6 inverted",
+      "width" : 16
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        16,
+        16
+      ],
+      "height" : 16,
+      "name" : "mask-combine-subtract",
+      "notes" : "alpha 0.6 subtract 0.3",
+      "width" : 16
+    },
+    {
+      "extent" : [
+        0,
+        0,
+        48,
+        8
+      ],
+      "height" : 8,
+      "name" : "tone-curve-origin",
+      "notes" : "S-curve on 48x8 gradient, origin-zero extent",
+      "width" : 48
+    },
+    {
+      "extent" : [
+        8,
+        2,
+        32,
+        4
+      ],
+      "height" : 4,
+      "name" : "tone-curve-roi",
+      "notes" : "same curve on non-zero-origin ROI (kernel origin-shift path)",
+      "width" : 32
+    }
+  ]
+}

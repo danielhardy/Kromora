@@ -30,4 +30,29 @@ enum KromoraKitResourceBundle {
         guard let url = url(forMetalSource: named) else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
     }
+
+    /// Generic resource lookup with the same subdirectory/root fallback as the Metal sources.
+    /// Used for the precompiled `.metallib` libraries and their `.sha256` freshness sidecars.
+    static func url(forResource named: String, withExtension ext: String) -> URL? {
+        if let url = bundle.url(
+            forResource: named, withExtension: ext, subdirectory: "Resources"
+        ) {
+            return url
+        }
+        return bundle.url(forResource: named, withExtension: ext)
+    }
+
+    static func data(forResource named: String, withExtension ext: String) -> Data? {
+        guard let url = url(forResource: named, withExtension: ext) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    /// The precompiled presentation shaders (PreviewSurface + MaskOverlay functions).
+    static func presentationMetallibData() -> Data? {
+        data(forResource: "KromoraPresentation", withExtension: "metallib")
+    }
+
+    static func presentationMetallibURL() -> URL? {
+        url(forResource: "KromoraPresentation", withExtension: "metallib")
+    }
 }

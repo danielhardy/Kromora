@@ -157,11 +157,14 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertEqual(total.height, 30, accuracy: 0.001)
     }
 
-    func testCoordinatorBuildsAPresentationPipelineFromBundledMetalSource() {
+    func testCoordinatorBuildsAPresentationPipelineFromBundledMetallib() {
+        XCTAssertNotNil(
+            KromoraKitResourceBundle.presentationMetallibURL(),
+            "KromoraPresentation.metallib must ship in the bundle — run scripts/build-metal-libraries.sh")
         let coordinator = PreviewSurfaceView.Coordinator()
         XCTAssertTrue(
             coordinator.hasPresentationPipeline,
-            "PreviewSurface.metal must compile into a render pipeline; a nil-function descriptor aborts Metal validation"
+            "KromoraPresentation.metallib must load into a render pipeline; a nil-function descriptor aborts Metal validation"
         )
     }
 

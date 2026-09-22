@@ -1260,136 +1260,30 @@ enum RenderPipeline {
         return blend.outputImage?.cropped(to: extent) ?? image
     }
 
-    private static func midtoneMask(for image: CIImage, amount: CGFloat) -> CIImage {
+    // Internal (not private) so the Metal-kernel golden tests can cover the mask kernel
+    // directly instead of only through the clarity blend that owns it.
+    static func midtoneMask(for image: CIImage, amount: CGFloat) -> CIImage {
         midtoneMaskKernel?.apply(
             extent: image.extent,
             arguments: [image, CIVector(x: amount, y: 0, z: 0, w: 0)]
         ) ?? image
     }
 
-    private static let midtoneMaskKernel = CIColorKernel(source: """
-    kernel vec4 effectsMidtoneMask(__sample pixel, vec4 controls) {
-        if (pixel.a <= 0.00001) { return vec4(0.0); }
-        vec3 rgb = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
-        float luminance = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-        // A smooth bell centred on middle gray, zero at both endpoints.
-        float weight = clamp(4.0 * luminance * (1.0 - luminance), 0.0, 1.0);
-        float alpha = weight * clamp(controls.x, 0.0, 1.0);
-        return vec4(0.0, 0.0, 0.0, alpha);
-    }
-    """)
+    // Precompiled Metal kernels (Sources/KromoraKit/Resources/KromoraCIKernels.ci.metal).
+    private static let midtoneMaskKernel = CIKernelLibrary.colorKernel(named: "effectsMidtoneMask")
 
     /// Vignette is pointwise, and its mask is defined in the complete output frame. A color kernel
     /// keeps `destCoord()` in that frame when Core Image splits a large render into tiles; a
     /// sampler kernel's `samplerCoord(image)` can be reinterpreted in the sampler tile/transform
     /// coordinate space and produce rectangular seams in the completed Metal presentation path.
-    private static let vignetteKernel = CIColorKernel(source: """
-    kernel vec4 effectsVignette(
-        __sample pixel,
-        vec4 geometry,
-        vec4 shape,
-        vec4 highlightControls
-    ) {
-        if (pixel.a <= 0.00001) { return pixel; }
-
-        // Normalize independently by half-width/half-height: crop aspect ratio is part of the
-        // geometry, while the vignette values remain resolution independent.
-        vec2 coordinate = destCoord();
-        vec2 normalized = (coordinate - geometry.xy) / max(geometry.zw, vec2(0.00001));
-        float roundness = clamp(shape.y, -1.0, 1.0);
-        // p=4 is squarer and p=2 is circular. Positive Roundness therefore rounds the corners.
-        float exponent = 3.0 - roundness;
-        float radius = pow(pow(abs(normalized.x), exponent) +
-                            pow(abs(normalized.y), exponent), 1.0 / exponent);
-
-        float midpoint = clamp(shape.x, 0.0, 1.0);
-        float feather = clamp(shape.z, 0.0, 1.0);
-        float transition = max(0.015, 0.08 + feather * 0.42);
-        float edge = smoothstep(max(0.0, midpoint - transition),
-                                min(1.5, midpoint + transition), radius);
-
-        vec3 straight = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
-        float luminance = dot(straight, vec3(0.2126, 0.7152, 0.0722));
-        float highlightWeight = smoothstep(0.55, 1.0, luminance);
-        float preservation = 1.0 - clamp(highlightControls.x, 0.0, 1.0) * highlightWeight;
-        float signedAmount = clamp(shape.w, -1.0, 1.0);
-        float multiplier = 1.0 - signedAmount * edge * preservation;
-        return vec4(pixel.rgb * multiplier, pixel.a);
-    }
-    """)
+    private static let vignetteKernel = CIKernelLibrary.colorKernel(named: "effectsVignette")
 
     /// Grain is a pointwise transform whose noise field is defined in the complete output frame.
     /// Keeping the source pixel as a color-kernel input makes `destCoord()` remain in that frame
     /// when Core Image tiles a large render; `samplerCoord(image)` can instead be reinterpreted in
     /// a sampler tile/transform coordinate space and create rectangular seams in the completed
     /// Metal presentation path.
-    private static let grainKernel = CIColorKernel(source: """
-    float grainHash(vec2 point, float seedHigh, float seedLow) {
-        // Each seed component is a UInt16 supplied as a Float, so both components retain all
-        // their bits exactly. Keep them as separate phase offsets: recombining them into a single
-        // value near 2^32 would recreate the Float mantissa collision this kernel is avoiding.
-        float highPhase = seedHigh * 0.0000152587890625;
-        float lowPhase = seedLow * 0.0000152587890625;
-        vec2 seedOffset = vec2(
-            highPhase * 17.13 + lowPhase * 53.17,
-            highPhase * 31.71 + lowPhase * 97.23
-        );
-        return fract(sin(dot(point + seedOffset,
-                             vec2(127.1, 311.7))) * 43758.5453);
-    }
-
-    float grainValueNoise(vec2 point, float seedHigh, float seedLow) {
-        vec2 cell = floor(point);
-        vec2 local = fract(point);
-        local = local * local * (3.0 - 2.0 * local);
-        float lowerLeft = grainHash(cell, seedHigh, seedLow);
-        float lowerRight = grainHash(cell + vec2(1.0, 0.0), seedHigh, seedLow);
-        float upperLeft = grainHash(cell + vec2(0.0, 1.0), seedHigh, seedLow);
-        float upperRight = grainHash(cell + vec2(1.0, 1.0), seedHigh, seedLow);
-        float lower = mix(lowerLeft, lowerRight, local.x);
-        float upper = mix(upperLeft, upperRight, local.x);
-        return mix(lower, upper, local.y);
-    }
-
-    kernel vec4 effectsGrain(
-        __sample pixel,
-        vec4 geometry,
-        vec4 controls,
-        float seedHigh,
-        float seedLow
-    ) {
-        if (pixel.a <= 0.00001) { return pixel; }
-
-        vec2 coordinate = destCoord();
-        vec2 normalized = (coordinate - geometry.xy) / geometry.z;
-        float frequency = max(1.0, controls.x);
-        float roughness = clamp(controls.y, 0.0, 1.0);
-        float amount = clamp(controls.z, 0.0, 1.0);
-        vec2 grainCoordinate = normalized * frequency;
-
-        // A broad octave creates clumps; blending in finer octaves makes Roughness visibly change
-        // the grain's character. Pairing noise fields keeps the result closer to a bell-shaped
-        // photographic distribution than a flat, independently random digital field.
-        float broad = grainValueNoise(grainCoordinate * 0.45, seedHigh, seedLow + 1.0);
-        float medium = grainValueNoise(grainCoordinate, seedHigh, seedLow + 7.0);
-        float fine = grainValueNoise(grainCoordinate * 2.4, seedHigh, seedLow + 19.0);
-        float paired = grainValueNoise(grainCoordinate * 1.35, seedHigh, seedLow + 43.0);
-        float shaped = mix(broad, fine, roughness);
-        shaped = mix(shaped, medium, 0.35);
-        shaped = (shaped * 0.72 + paired * 0.28 - 0.5) * 2.0;
-
-        vec3 straight = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
-        float luminance = dot(straight, vec3(0.2126, 0.7152, 0.0722));
-        // Grain is more visible in shadows and is predominantly luminance, with restrained chroma
-        // variation so it reads as emulsion texture instead of RGB channel noise.
-        float response = 0.58 + 0.42 * (1.0 - luminance);
-        float amplitude = 0.055 * amount * response;
-        float chroma = (fine - 0.5) * 0.12 * amount * response;
-        vec3 offset = vec3(shaped * amplitude) + vec3(chroma, -chroma * 0.55, chroma * 0.35);
-        vec3 altered = clamp(straight + offset, 0.0, 1.0);
-        return vec4(altered * pixel.a, pixel.a);
-    }
-    """)
+    private static let grainKernel = CIKernelLibrary.colorKernel(named: "effectsGrain")
 
     /// Apply the eight-channel mixer in one Core Image color kernel.
     ///
@@ -1431,119 +1325,8 @@ enum RenderPipeline {
         )
     }
 
-    private static let hslMixerKernel: CIColorKernel? = CIColorKernel(source: hslMixerKernelSource)
-
-    private static let hslMixerKernelSource = """
-    float wrappedHue(float value) {
-        return value - floor(value);
-    }
-
-    float circularDistance(float hue, float center) {
-        float distance = abs(hue - center);
-        return min(distance, 1.0 - distance);
-    }
-
-    float hueWeight(float hue, float center) {
-        // Raised cosine: both the value and its first derivative reach zero at the edge.
-        float radius = 0.125;
-        float distance = circularDistance(hue, center);
-        if (distance >= radius) { return 0.0; }
-        return 0.5 + 0.5 * cos(3.141592653589793 * distance / radius);
-    }
-
-    float hueToRGB(float p, float q, float t) {
-        float wrapped = wrappedHue(t);
-        if (wrapped < 1.0 / 6.0) { return p + (q - p) * 6.0 * wrapped; }
-        if (wrapped < 1.0 / 2.0) { return q; }
-        if (wrapped < 2.0 / 3.0) { return p + (q - p) * (2.0 / 3.0 - wrapped) * 6.0; }
-        return p;
-    }
-
-    vec3 hslToRGB(float hue, float saturation, float luminance) {
-        if (saturation <= 0.00001) {
-            return vec3(luminance, luminance, luminance);
-        }
-        float q = luminance < 0.5
-            ? luminance * (1.0 + saturation)
-            : luminance + saturation - luminance * saturation;
-        float p = 2.0 * luminance - q;
-        return vec3(
-            hueToRGB(p, q, hue + 1.0 / 3.0),
-            hueToRGB(p, q, hue),
-            hueToRGB(p, q, hue - 1.0 / 3.0)
-        );
-    }
-
-    kernel vec4 hslMixer(
-        __sample pixel,
-        vec4 red,
-        vec4 orange,
-        vec4 yellow,
-        vec4 green,
-        vec4 aqua,
-        vec4 blue,
-        vec4 purple,
-        vec4 magenta
-    ) {
-        // Core Image kernel samples are premultiplied. HSL must see the unpremultiplied colour,
-        // then the result is premultiplied again so transparent pixels retain both alpha and the
-        // compositing contract of the input image.
-        if (pixel.a <= 0.00001) { return pixel; }
-        vec3 rgb = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
-        float maximum = max(max(rgb.r, rgb.g), rgb.b);
-        float minimum = min(min(rgb.r, rgb.g), rgb.b);
-        float delta = maximum - minimum;
-
-        // Neutrals have no hue neighborhood. Returning the original sample also avoids assigning
-        // gray pixels an arbitrary red hue when only one channel is adjusted.
-        if (delta <= 0.00001) { return pixel; }
-
-        float luminance = 0.5 * (maximum + minimum);
-        float saturation = delta / (1.0 - abs(2.0 * luminance - 1.0));
-        float hue;
-        if (maximum == rgb.r) {
-            hue = (rgb.g - rgb.b) / delta;
-            if (hue < 0.0) { hue += 6.0; }
-            hue /= 6.0;
-        } else if (maximum == rgb.g) {
-            hue = ((rgb.b - rgb.r) / delta + 2.0) / 6.0;
-        } else {
-            hue = ((rgb.r - rgb.g) / delta + 4.0) / 6.0;
-        }
-        hue = wrappedHue(hue);
-
-        float redWeight = hueWeight(hue, 0.0);
-        float orangeWeight = hueWeight(hue, 1.0 / 12.0);
-        float yellowWeight = hueWeight(hue, 1.0 / 6.0);
-        float greenWeight = hueWeight(hue, 1.0 / 3.0);
-        float aquaWeight = hueWeight(hue, 1.0 / 2.0);
-        float blueWeight = hueWeight(hue, 2.0 / 3.0);
-        float purpleWeight = hueWeight(hue, 3.0 / 4.0);
-        float magentaWeight = hueWeight(hue, 5.0 / 6.0);
-
-        float hueDelta = redWeight * red.x + orangeWeight * orange.x
-            + yellowWeight * yellow.x + greenWeight * green.x
-            + aquaWeight * aqua.x + blueWeight * blue.x
-            + purpleWeight * purple.x + magentaWeight * magenta.x;
-        float saturationDelta = redWeight * red.y + orangeWeight * orange.y
-            + yellowWeight * yellow.y + greenWeight * green.y
-            + aquaWeight * aqua.y + blueWeight * blue.y
-            + purpleWeight * purple.y + magentaWeight * magenta.y;
-        float luminanceDelta = redWeight * red.z + orangeWeight * orange.z
-            + yellowWeight * yellow.z + greenWeight * green.z
-            + aquaWeight * aqua.z + blueWeight * blue.z
-            + purpleWeight * purple.z + magentaWeight * magenta.z;
-
-        return vec4(
-            hslToRGB(
-                wrappedHue(hue + hueDelta),
-                clamp(saturation + saturationDelta, 0.0, 1.0),
-                clamp(luminance + 0.5 * luminanceDelta, 0.0, 1.0)
-            ) * pixel.a,
-            pixel.a
-        );
-    }
-    """
+    private static let hslMixerKernel: CIColorKernel? =
+        CIKernelLibrary.colorKernel(named: "hslMixer")
 
     // MARK: - Three-way color grading
 
@@ -1579,82 +1362,7 @@ enum RenderPipeline {
     }
 
     private static let colorGradingKernel: CIColorKernel? =
-        CIColorKernel(source: colorGradingKernelSource)
-
-    private static let colorGradingKernelSource = """
-    float wrappedGradingHue(float value) {
-        return value - floor(value);
-    }
-
-    float gradingHueToRGB(float p, float q, float t) {
-        float wrapped = wrappedGradingHue(t);
-        if (wrapped < 1.0 / 6.0) { return p + (q - p) * 6.0 * wrapped; }
-        if (wrapped < 1.0 / 2.0) { return q; }
-        if (wrapped < 2.0 / 3.0) { return p + (q - p) * (2.0 / 3.0 - wrapped) * 6.0; }
-        return p;
-    }
-
-    vec3 gradingColor(float hue, float luminance) {
-        // Full-saturation HSL at the source luminance is the wheel's target color. The caller
-        // controls how far toward it to move with the wheel saturation.
-        float q = luminance < 0.5
-            ? luminance * 2.0
-            : luminance + 1.0 - luminance;
-        float p = 2.0 * luminance - q;
-        return vec3(
-            gradingHueToRGB(p, q, hue + 1.0 / 3.0),
-            gradingHueToRGB(p, q, hue),
-            gradingHueToRGB(p, q, hue - 1.0 / 3.0)
-        );
-    }
-
-    float gradingSmoothStep(float edge0, float edge1, float value) {
-        float denominator = max(edge1 - edge0, 0.00001);
-        float t = clamp((value - edge0) / denominator, 0.0, 1.0);
-        return t * t * (3.0 - 2.0 * t);
-    }
-
-    kernel vec4 colorGrading(
-        __sample pixel,
-        vec4 shadows,
-        vec4 midtones,
-        vec4 highlights,
-        vec4 controls
-    ) {
-        if (pixel.a <= 0.00001) { return pixel; }
-        vec3 rgb = clamp(pixel.rgb / pixel.a, 0.0, 1.0);
-        float luminance = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-        float shiftedLuminance = clamp(luminance + controls.y * 0.25, 0.0, 1.0);
-        float blending = clamp(controls.x, 0.0, 1.0);
-
-        // At blending 0 these transitions meet. At blending 1 they overlap by 0.16 of the
-        // normalized luminance range. The normalized weights always sum to one.
-        float shadowEdge = 0.42 + 0.16 * blending;
-        float highlightEdge = 0.58 - 0.16 * blending;
-        float shadowWeight = 1.0 - gradingSmoothStep(0.0, shadowEdge, shiftedLuminance);
-        float highlightWeight = gradingSmoothStep(highlightEdge, 1.0, shiftedLuminance);
-        float midtoneWeight = gradingSmoothStep(0.0, shadowEdge, shiftedLuminance)
-            * (1.0 - gradingSmoothStep(highlightEdge, 1.0, shiftedLuminance));
-        float weightTotal = max(shadowWeight + midtoneWeight + highlightWeight, 0.00001);
-        shadowWeight /= weightTotal;
-        midtoneWeight /= weightTotal;
-        highlightWeight /= weightTotal;
-
-        float shadowAmount = shadowWeight * clamp(shadows.y, 0.0, 1.0);
-        float midtoneAmount = midtoneWeight * clamp(midtones.y, 0.0, 1.0);
-        float highlightAmount = highlightWeight * clamp(highlights.y, 0.0, 1.0);
-        float amountTotal = shadowAmount + midtoneAmount + highlightAmount;
-        if (amountTotal <= 0.00001) { return pixel; }
-
-        vec3 tint = (
-            shadowAmount * gradingColor(shadows.x, luminance)
-            + midtoneAmount * gradingColor(midtones.x, luminance)
-            + highlightAmount * gradingColor(highlights.x, luminance)
-        ) / amountTotal;
-        vec3 graded = mix(rgb, tint, clamp(amountTotal, 0.0, 1.0));
-        return vec4(clamp(graded, 0.0, 1.0) * pixel.a, pixel.a);
-    }
-    """
+        CIKernelLibrary.colorKernel(named: "colorGrading")
 
     private static func applyToneCurve(
         _ curve: LightToneCurve,

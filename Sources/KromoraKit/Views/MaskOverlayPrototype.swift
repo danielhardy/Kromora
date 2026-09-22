@@ -241,9 +241,11 @@ final class MaskOverlayRenderer: NSObject, MTKViewDelegate {
 
     override init() {
         super.init()
+        // Precompiled with the PreviewSurface shaders (see scripts/build-metal-libraries.sh);
+        // loading library data performs no runtime source compilation.
         let library: MTLLibrary?
-        if let source = KromoraKitResourceBundle.metalSource(named: "MaskOverlay") {
-            library = try? device.makeLibrary(source: source, options: nil)
+        if let url = KromoraKitResourceBundle.presentationMetallibURL() {
+            library = try? device.makeLibrary(URL: url)
         } else {
             library = device.makeDefaultLibrary()
         }
