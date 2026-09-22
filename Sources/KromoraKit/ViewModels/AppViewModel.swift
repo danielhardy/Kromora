@@ -1111,11 +1111,35 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         // KRMA-521: High-frequency children (collection/items, import, export, canvas) are
-        // observed directly by their views through Observation. No root objectWillChange fan-in
-        // is kept: thumbnail streaming, metadata, scan ticks, and progress must not reevaluate
+        // @Observable and observed directly by their views through `@Bindable`. They are
+        // intentionally absent from the forwarding list below: thumbnail streaming, metadata,
+        // scan ticks, canvas pointer updates, and import/export progress must not reevaluate
         // unrelated inspector or toolbar views. A Task per child notification also had incorrect
-        // will-change timing, so views that need child state hold the child (`@Bindable`)
-        // instead of relying on AppViewModel forwarding.
+        // will-change timing, so no forwarding path here may spawn a Task.
+        //
+        // Remaining ObservableObject children (settings, library, media workflow, editor
+        // document, derive, look-save) are still consumed via `viewModel.*` by legacy views
+        // (LookInspectorView reads `viewModel.library`, ContentView sheets read
+        // `viewModel.derive`/`viewModel.lookSave`, toolbar menus read removable-media state,
+        // clipboard/undo read `editorDocument`). Forward those synchronously — `send()` in the
+        // same turn preserves will-change timing — until each view holds its child directly
+        // and the corresponding entry can be removed. Delete this loop only when every entry
+        // is gone; removing an entry before its views observe the child directly makes that
+        // surface stale (sheets stop presenting, library scans stop refreshing).
+        for child in [
+            settings.objectWillChange.eraseToAnyPublisher(),
+            library.objectWillChange.eraseToAnyPublisher(),
+            libraryMediaWorkflow.objectWillChange.eraseToAnyPublisher(),
+            editorDocument.objectWillChange.eraseToAnyPublisher(),
+            derive.objectWillChange.eraseToAnyPublisher(),
+            lookSave.objectWillChange.eraseToAnyPublisher(),
+        ] {
+            cancellables.append(
+                child.sink { [weak self] _ in
+                    guard let self, !self.isShuttingDown else { return }
+                    self.objectWillChange.send()
+                })
+        }
 
         // Inspector chrome is observed by its own view subtree. Histogram work still belongs to
         // this model. React to the assigned values (not objectWillChange, which fires before

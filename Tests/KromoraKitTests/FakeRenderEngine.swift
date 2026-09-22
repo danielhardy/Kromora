@@ -386,21 +386,34 @@ actor FakeRenderEngine: RenderEngining {
     /// that cannot be interrupted after it has entered the framework.
     private(set) var sourcePreparationCount = 0
     private var sourcePreparationIsGated = false
-    private var parkedSourcePreparation: CheckedContinuation<Void, Never>?
+    private var parkedSourcePreparations: [UUID: CheckedContinuation<Void, Never>] = [:]
 
-    func gateSourcePreparation() { sourcePreparationIsGated = true }
+    func gateSourcePreparation() {
+        sourcePreparationIsGated = true
+    }
 
     func releaseSourcePreparation() {
         sourcePreparationIsGated = false
-        parkedSourcePreparation?.resume()
-        parkedSourcePreparation = nil
+        let parked = parkedSourcePreparations.values
+        parkedSourcePreparations.removeAll()
+        parked.forEach { $0.resume() }
     }
 
     func prepareSource(_ source: ImageSource) async -> ImageSourcePreparation? {
         sourcePreparationCount += 1
         emit(.sourcePreparationStarted(source))
         if sourcePreparationIsGated {
-            await withCheckedContinuation { parkedSourcePreparation = $0 }
+            let gateID = UUID()
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    parkedSourcePreparations[gateID] = continuation
+                    if Task.isCancelled {
+                        parkedSourcePreparations.removeValue(forKey: gateID)?.resume()
+                    }
+                }
+            } onCancel: {
+                Task { await self.cancelParkedSourcePreparation(gateID) }
+            }
         }
         let preparation: ImageSourcePreparation?
         if source.kind == .raw {
@@ -433,6 +446,10 @@ actor FakeRenderEngine: RenderEngining {
         }
         emit(.sourcePreparationCompleted(source, preparation))
         return preparation
+    }
+
+    private func cancelParkedSourcePreparation(_ gateID: UUID) {
+        parkedSourcePreparations.removeValue(forKey: gateID)?.resume()
     }
 
     /// What the fake reports. `nil` models a standard image.
