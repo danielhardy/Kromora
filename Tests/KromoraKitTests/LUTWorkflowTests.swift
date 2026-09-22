@@ -78,7 +78,8 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         }
         XCTAssertEqual(viewModel.document.lut.lutID, lut.lutID)
 
-        await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
         )
@@ -121,7 +122,8 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
             "a referenced photo with identical bytes inherited the first photo's Look"
         )
 
-        await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container)
@@ -263,7 +265,8 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         )
 
         viewModel.setLookIntensity(0.35)
-        await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
             editStore: EditDocumentStore(modelContainer: container),
@@ -311,7 +314,8 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
 
         // The destinations have never been opened. Their queued records must still be present in a
         // fresh model, otherwise a quit immediately after multi-paste silently loses the Look.
-        await viewModel.flushPendingWrites()
+        let flushResult = await viewModel.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         let secondItem = try XCTUnwrap(
             viewModel.collection.items.first(where: { $0.url == second })
         )

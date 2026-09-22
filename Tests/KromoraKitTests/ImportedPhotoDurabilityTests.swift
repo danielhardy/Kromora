@@ -79,7 +79,8 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
             first.collection.items.count == 1 && first.sourceImage != nil
         }
         first.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
-        _ = await first.flushPendingWrites()
+        let flushResult = await first.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
         await first.shutdown()
 
         let relaunched = makeAppViewModel(

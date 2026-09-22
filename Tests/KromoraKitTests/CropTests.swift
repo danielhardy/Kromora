@@ -1132,7 +1132,8 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         first.beginCrop()
         first.updateCropDraft(CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8))
         first.commitCrop()
-        await first.flushPendingWrites()
+        let flushResult = await first.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
 
         let second = makeAppViewModel(
             engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
@@ -1148,6 +1149,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     }
 }
 
+@MainActor
 final class CropOverlayViewTests: XCTestCase {
     private func makeOverlay() -> CropOverlayView {
         CropOverlayView(

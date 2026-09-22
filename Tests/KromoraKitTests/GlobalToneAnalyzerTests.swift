@@ -26,7 +26,7 @@ final class GlobalToneAnalyzerTests: XCTestCase {
         ))) { error in
             XCTAssertEqual(error as? GlobalToneAnalysisError, .malformedHistogram)
         }
-        var bins = [Int](repeating: 0, count: 256)
+        let bins = [Int](repeating: 0, count: 256)
         XCTAssertThrowsError(try GlobalToneAnalyzer.statistics(from: HistogramData(
             red: bins, green: bins, blue: bins, luma: bins
         ))) { error in

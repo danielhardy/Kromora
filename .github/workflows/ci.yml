@@ -46,6 +46,9 @@ jobs:
           xcodebuild -version
           echo "SDK: $(xcrun --sdk macosx --show-sdk-version) at $(xcrun --sdk macosx --show-sdk-path)"
 
+      - name: Warning budget (Sources and Tests)
+        run: scripts/ci-tests.sh warning-gate
+
       - name: Build (debug)
         run: swift build -v
 

@@ -17,8 +17,9 @@ identity_filter='IdentityRegressionGateTests'
 optional_filter='(ConcurrentExportEditingBenchmark|DeriveInvarianceTests|LibraryScanPerformanceTests|LibraryFolderBaselinePerformanceTests|LibraryScaleRegressionPerformanceTests|SyntheticLibraryGeneratorPerformanceTests|PackedThumbnailPerformanceTests|MaskResamplingPerformanceTests|MetalPresentationBenchmark|PhotoAnalysisPerformanceTests|PhotosImportPerformanceTests|PreviewCostBenchmark|TracingOverheadBenchmark|AutoPerformanceDiagnosticsTests/testAutoEndToEndBenchmark|LocalMaskRenderingTests/testSemanticPreviewMaskWorkingResolutionBenchmark|PreviewCoordinatorTests/testLargePreviewInteractiveLatencyBenchmark|RAWCapabilitiesTests/(testProbingARealRAWReportsItsDecodersFlags|testProbingARealRAWReportsItsDecodersSeeds|testEveryPerImageSeedLandsStrictlyInsideItsSliderRange|testWritingTheAsShotValuesMatchesLeavingThemUnset|testAValueWrittenToAnUnsupportedAdjustmentChangesNothing|testRaisingNeutralTemperatureWarmsTheImage)|RAWDevelopSettingsTests/(testApplyPushesEverySupportedKnobOntoARealFilter|testApplyingNeutralChangesNothingOnARealFilter)|ImageLoadingTests/testLoadingARAWGoesThroughCIRAWFilter|ImageSourceTests/testRAWBytesAreDetectedWithoutAFilename|DevelopInspectorTests/(testARAWStaysOnProbingUntilTheProbeAnswers|testAsShotRestoresTheActualRAWDecoderSeed)|RenderCacheTests/testAboveBudgetRAWSessionDoesNotMaterializeOnEveryEdit|RenderPipelineTests/(testRAWDevelopAndScaleReachTheDecoder|testNeutralRAWMatchesTheExistingNeutralBaseline)|RenderEngineTests/(testCompletedRAWPreviewReflectsDevelopSettings|testInteractiveSessionDoesNotLeakSettingsAcrossTicks|testInteractiveRAWDownstreamEditsReuseTheCompletedOutput)|PreviewCutoverTests/testRAWDevelopReachesThePreview)'
 
 usage() {
-    print -u2 "Usage: $0 {verify|fast|serial|identity|optional}"
+    print -u2 "Usage: $0 {verify|warning-gate|fast|serial|identity|optional}"
     print -u2 "  verify    audit that every discovered test belongs to exactly one lane"
+    print -u2 "  warning-gate  build Sources and Tests with Swift warnings promoted to errors"
     print -u2 "  fast      run required deterministic/model/fake-engine tests in parallel"
     print -u2 "  serial    run required Core Image/render/AppKit/UI tests serially"
     print -u2 "  identity  run the standing Phase 1 relocation/collision/stale-completion gate"
@@ -73,6 +74,11 @@ run_lane() {
 case "${1:-}" in
     verify)
         audit_lanes
+        ;;
+    warning-gate)
+        run_lane "zero-warning-build" \
+            "swift build --build-tests -Xswiftc -warnings-as-errors" \
+            swift build --build-tests -Xswiftc -warnings-as-errors
         ;;
     fast)
         audit_lanes
