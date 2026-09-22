@@ -14,16 +14,6 @@ struct PreviewFrameIdentity: Equatable, Sendable {
 final class PreviewSurface: ObservableObject {
     /// Diagnostic count used by the presentation acceptance tests. A publication is expected to
     /// perform one Core Image materialization; retained-texture redraws must not increment it.
-    @MainActor static private(set) var presentationCoreImageEvaluationCount = 0
-
-    @MainActor static func resetPresentationCoreImageEvaluationCount() {
-        presentationCoreImageEvaluationCount = 0
-    }
-
-    @MainActor static func notePresentationCoreImageEvaluation() {
-        presentationCoreImageEvaluationCount += 1
-    }
-
     @Published private(set) var revision: UInt64 = 0
     private(set) var image: CIImage?
     private(set) var presentationImageExtent: CGRect?
@@ -258,25 +248,6 @@ final class PreviewSurface: ObservableObject {
 
     fileprivate func pendingPresentationRevision() -> UInt64? { pendingGPURevision }
     func pendingDisplayRevision() -> UInt64? { pendingDisplayID }
-
-    /// The quad/layout rectangle for the current texture. A first-frame JPEG is mapped onto
-    /// the native presentation extent; an ROI preview keeps its source-space texture rectangle
-    /// unless the request supplied a planner-space layout (interactive frames can decode smaller
-    /// than that planner size).
-    fileprivate func layoutExtent(forTextureExtent textureExtent: CGRect) -> CGRect {
-        if coversPresentationExtent, let presentationImageExtent,
-            presentationImageExtent.width > 0, presentationImageExtent.height > 0
-        {
-            return presentationImageExtent
-        }
-        if let layoutImageExtent,
-            layoutImageExtent.width > 0, layoutImageExtent.height > 0,
-            layoutImageExtent.width.isFinite, layoutImageExtent.height.isFinite
-        {
-            return layoutImageExtent
-        }
-        return textureExtent
-    }
 
     fileprivate func mappedImageForPresentation(_ image: CIImage) -> CIImage {
         Self.mappedImageForPresentation(
@@ -675,10 +646,6 @@ final class PreviewSurface: ObservableObject {
         return PresentationStack(detail: detail, underlay: underlay)
     }
 
-    fileprivate func presentationFrame(for current: CanvasNavigation) -> PresentationFrame? {
-        presentationStack(for: current)?.detail
-    }
-
     private struct MaterializationSubmission {
         let texture: MTLTexture
         let extent: CGRect
@@ -722,7 +689,7 @@ final class PreviewSurface: ObservableObject {
             bounds: CGRect(origin: .zero, size: extent.size),
             colorSpace: space.cgColorSpace
         )
-        Self.notePresentationCoreImageEvaluation()
+        RenderDiagnostics.notePresentationCoreImageEvaluation()
         return MaterializationSubmission(
             texture: texture, extent: extent,
             commandBuffer: commandBuffer)
@@ -1098,7 +1065,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 context.render(
                     output, to: drawable.texture, commandBuffer: commandBuffer,
                     bounds: destination, colorSpace: frame.space.cgColorSpace)
-                PreviewSurface.notePresentationCoreImageEvaluation()
+                RenderDiagnostics.notePresentationCoreImageEvaluation()
             } else {
                 isDrawing = false
                 return
@@ -1418,7 +1385,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         /// Render one retained presentation texture into an offscreen target using the same
         /// pipeline as the drawable path. This is an acceptance-test seam for geometry and
         /// repaint behavior on hosts without a logged-in display; it never evaluates Core Image.
-        func renderRetainedTextureForTesting(
+        func renderRetainedTexture(
             surface: PreviewSurface, navigation: CanvasNavigation, destinationSize: CGSize,
             viewSpaceRotationAngle: Double = 0,
             appearance: NSAppearance? = nil

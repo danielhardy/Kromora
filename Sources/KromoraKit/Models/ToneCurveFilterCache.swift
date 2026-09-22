@@ -71,5 +71,4 @@ final class ToneCurveFilterCache {
         sampledImage = nil
     }
 
-    var hasCachedCurve: Bool { sampledImage != nil }
 }

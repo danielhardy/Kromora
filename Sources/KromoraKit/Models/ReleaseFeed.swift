@@ -117,5 +117,4 @@ public enum KromoraReleaseFeed {
 }
 
 public typealias Release = KromoraRelease
-public typealias ReleaseFeed = KromoraReleaseFeed
 #endif

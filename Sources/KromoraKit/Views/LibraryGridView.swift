@@ -16,7 +16,7 @@ struct LibraryGridView: View {
     @State private var mosaicCache = LibraryMosaicLayoutCache()
 
     var body: some View {
-        let _ = ViewBodyCounter.noteGridBody()
+        let _ = RenderDiagnostics.noteGridBody()
         let entries = collection.thumbnailEntries
 
         return VStack(spacing: 0) {

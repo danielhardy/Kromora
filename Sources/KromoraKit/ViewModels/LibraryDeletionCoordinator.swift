@@ -11,6 +11,7 @@ final class LibraryDeletionCoordinator {
     private let photoAnalysis: PhotoAnalysisCoordinator
     private let portableLibrary: PortableLibrarySession?
     private let persistenceIdentity: (ImageCollection.Item) -> PortablePhotoIdentity?
+    private let allowsUnregisteredSourceDeletion: Bool
 
     init(
         collection: ImageCollection,
@@ -18,7 +19,8 @@ final class LibraryDeletionCoordinator {
         editStore: EditDocumentStore,
         photoAnalysis: PhotoAnalysisCoordinator,
         portableLibrary: PortableLibrarySession?,
-        persistenceIdentity: @escaping (ImageCollection.Item) -> PortablePhotoIdentity?
+        persistenceIdentity: @escaping (ImageCollection.Item) -> PortablePhotoIdentity?,
+        allowsUnregisteredSourceDeletion: Bool = false
     ) {
         self.collection = collection
         self.persistence = persistence
@@ -26,6 +28,7 @@ final class LibraryDeletionCoordinator {
         self.photoAnalysis = photoAnalysis
         self.portableLibrary = portableLibrary
         self.persistenceIdentity = persistenceIdentity
+        self.allowsUnregisteredSourceDeletion = allowsUnregisteredSourceDeletion
     }
 
     func delete(_ candidates: [ImageCollection.DeletionCandidate]) async -> LibraryDeletionResult {
@@ -70,7 +73,16 @@ final class LibraryDeletionCoordinator {
             }
 
             do {
-                try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
+                do {
+                    try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
+                } catch let error as PortablePackageTrashError
+                    where allowsUnregisteredSourceDeletion && isAssetNotFound(error)
+                {
+                    // Tests and headless clients can inject a legacy/current-folder projection
+                    // while the package session remains a separate, empty package. In that
+                    // compatibility boundary there is no package membership to tombstone: remove
+                    // only the caller-owned edit record and leave the referenced source untouched.
+                }
                 try await editStore.delete(
                     for: EditSourceReference(
                         assetID: candidate.id,
@@ -86,5 +98,10 @@ final class LibraryDeletionCoordinator {
             }
         }
         return LibraryDeletionResult(deletedIDs: deletedIDs, failures: failures)
+    }
+
+    private func isAssetNotFound(_ error: PortablePackageTrashError) -> Bool {
+        if case .assetNotFound = error { return true }
+        return false
     }
 }

@@ -557,9 +557,16 @@ class TempDirectoryTestCase: XCTestCase {
         defaults: UserDefaults? = nil,
         libraryFolderURL: URL? = nil
     ) -> ImageCollection {
-        ImageCollection(
+        let collection = ImageCollection(
             scheduler: scheduler ?? ImageWorkScheduler()
         )
+        collection.configureCompatibilityLibraryFolder(
+            libraryFolderURL
+                ?? tempDirectory.appendingPathComponent(
+                    "managed-library-\(UUID().uuidString)", isDirectory: true
+                )
+        )
+        return collection
     }
 
     @MainActor

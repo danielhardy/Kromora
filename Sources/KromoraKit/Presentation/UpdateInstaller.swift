@@ -240,5 +240,4 @@ public enum KromoraUpdateInstaller {
     }
 }
 
-public typealias UpdateInstaller = KromoraUpdateInstaller
 #endif

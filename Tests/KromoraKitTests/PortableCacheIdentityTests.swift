@@ -75,8 +75,8 @@ final class PortableCacheIdentityTests: TempDirectoryTestCase {
         let movedReference = await store.mask(for: movedMaskKey, quality: .preview)
         XCTAssertNotNil(movedReference)
         XCTAssertEqual(
-            MaskStore.filenameForTesting(for: maskKey),
-            MaskStore.filenameForTesting(for: movedMaskKey)
+            MaskStoreTestSupport.filename(for: maskKey),
+            MaskStoreTestSupport.filename(for: movedMaskKey)
         )
 
         let previewA = PreviewDiskCache.Key(

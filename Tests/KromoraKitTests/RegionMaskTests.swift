@@ -241,7 +241,7 @@ final class RegionMaskTests: XCTestCase {
         let exactKey = key.with(quality: .analysis)
         let data = try JSONEncoder().encode(LegacyFile(key: exactKey, mask: pixels))
         try data.write(to: directory.appendingPathComponent(
-            MaskStore.filenameForTesting(for: exactKey)
+            MaskStoreTestSupport.filename(for: exactKey)
         ))
 
         let store = MaskStore(directory: directory)

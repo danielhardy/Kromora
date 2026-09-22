@@ -14,7 +14,7 @@ struct StatusBar: View {
     var onCancelAuto: () -> Void = {}
 
     var body: some View {
-        let _ = ViewBodyCounter.noteToolbarBody()
+        let _ = RenderDiagnostics.noteToolbarBody()
         return HStack(spacing: 0) {
             // Status message
             if let progress = photosImportCoordinator.progress {

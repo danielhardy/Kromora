@@ -3,57 +3,11 @@ import Foundation
 import ImageIO
 import UniformTypeIdentifiers
 
-/// Renderer-backed Auto candidate evaluation (KRMA-342).
-///
-/// This is the trust foundation for every later Auto decision: instead of a CSS or synthetic
-/// approximation, candidates are rendered through the real `RenderEngine` seam
-/// (`RenderEngining.makeCGImage`, which shares `buildImage` with preview and export) at an
-/// evaluation scale, then compared as actual pixels.
-///
-/// What this ticket owns:
-/// - an analysis-view document transform that temporarily excludes LUTs, grading, grain, and
-///   decorative vignette for correction proposals (the complete edit is retained for final
-///   candidate evaluation);
-/// - a reusable evaluation seam that renders unchanged / proposed / complete documents with
-///   matching orientation, crop geometry, and color-space handling;
-/// - real before/after pixels, a difference image, and actual mask overlays;
-/// - a value-only report (fixture identity, revision, scale, changed controls, measurements,
-///   render failures) written outside the committed source tree.
-///
-/// What this ticket does NOT own: Auto policy or candidate selection (KRMA-345/347), scene
-/// evidence (KRMA-344), or measurements of the current render (KRMA-343).
-enum AutoCandidateEvaluation {
-    /// Long edge used for evaluation renders. Matches the analysis default (768px) so later
-    /// measurement and policy tickets evaluate what analysis actually saw.
-    static let evaluationLongEdge = 768
+@testable import KromoraKit
 
-    /// Target box that fits `nativeExtent` inside the evaluation long edge without upscaling.
-    static func targetSize(for nativeExtent: CGSize, longEdge: Int = evaluationLongEdge) -> CGSize {
-        guard nativeExtent.width > 0, nativeExtent.height > 0,
-              nativeExtent.width.isFinite, nativeExtent.height.isFinite,
-              longEdge > 0
-        else { return nativeExtent }
-        let longest = max(nativeExtent.width, nativeExtent.height)
-        let scale = min(1, CGFloat(longEdge) / longest)
-        return CGSize(width: nativeExtent.width * scale, height: nativeExtent.height * scale)
-    }
-
-    /// The Auto analysis view of a complete edit: LUT, color grading, grain, and decorative
-    /// vignette are excluded so correction proposals are fit against photographic tone/color
-    /// rather than a creative finish. Crop, rotation, RAW develop, light, vibrance/saturation,
-    /// mixer, detail effects (texture/clarity/dehaze), curves, ordered adjustments, and local
-    /// masks are retained so geometry and photographic intent survive the view transform.
-    static func analysisDocument(from complete: EditDocument) -> EditDocument {
-        var view = complete
-        view.lut = .none
-        view.color.grading = .neutral
-        view.effects.grain = .neutral
-        view.effects.vignette = .neutral
-        return view
-    }
-
-    /// Names of the photographer-facing controls that differ between two documents, for the
-    /// human/agent-readable report. Order is stable; empty means the proposal is a no-op.
+extension AutoCandidateEvaluation {
+    /// Names of the photographer-facing controls that differ between two documents. This is
+    /// report metadata and intentionally belongs to the evaluation harness, not the app target.
     static func changedControls(baseline: EditDocument, candidate: EditDocument) -> [String] {
         var changed: [String] = []
         if baseline.rawDevelop != candidate.rawDevelop { changed.append("rawDevelop") }

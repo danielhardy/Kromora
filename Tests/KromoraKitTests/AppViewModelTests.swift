@@ -655,7 +655,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
         viewModel.presentRecipeExtractor()
         XCTAssertTrue(viewModel.derive.isSheetPresented)
 
-        viewModel.dismissRecipeExtractor()
+        viewModel.derive.dismiss()
         XCTAssertFalse(viewModel.derive.isSheetPresented)
     }
 

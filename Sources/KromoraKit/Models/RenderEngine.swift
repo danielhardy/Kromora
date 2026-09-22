@@ -1975,9 +1975,11 @@ actor RenderEngine: RenderEngining {
         }
     }
 
-    /// Internal inspection seam for the source-supersession eviction test. The production
-    /// renderer never needs to expose its bounded state.
-    var trackedMaskSourceKeysForTesting: [String] { maskSourceOrder }
+    /// Current bounded semantic-mask source keys retained by the renderer. This snapshot is
+    /// intentionally value-only so diagnostics cannot expose renderer internals.
+    var diagnosticsSnapshot: RenderEngineDiagnosticsSnapshot {
+        RenderEngineDiagnosticsSnapshot(trackedMaskSourceKeys: maskSourceOrder)
+    }
 
     private func isCurrentMaskRequest(
         source: ImageSource, revision: UInt64,

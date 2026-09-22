@@ -573,13 +573,6 @@ extension AppViewModel {
         }
     }
 
-    func updateSelectedMask(
-        debounced: Bool = false, _ transform: (inout LocalAdjustmentLayer) -> Void
-    ) {
-        guard let id = maskInteractionState.selectedLayerID else { return }
-        updateMask(id, debounced: debounced, transform)
-    }
-
     /// Value-only access for a local control. Draft layers are included so a control never lags
     /// behind an in-progress mask creation gesture.
     func localAdjustmentValue(
@@ -1263,16 +1256,6 @@ extension AppViewModel {
             })?.id
         }
         maskInteractionState.select(layerID: selected, componentID: component)
-    }
-
-    func resetMaskingWorkspace() {
-        if maskInteractionState.hasDraft {
-            cancelMaskGesture()
-        }
-        endUndoGrouping()
-        updateDocument { $0.localAdjustments.removeAll() }
-        maskInteractionState.select(layerID: nil)
-        maskInteractionState.clearSolo()
     }
 
     func closeMaskingWorkspace() {

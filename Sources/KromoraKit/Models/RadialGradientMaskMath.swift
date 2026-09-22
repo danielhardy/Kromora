@@ -37,18 +37,6 @@ enum RadialGradientMaskMath {
         return definition.isInside ? inside : 1 - inside
     }
 
-    static func outerPoint(
-        _ parameter: Double,
-        definition: RadialGradientDefinition,
-        sourceSize: CGSize = CGSize(width: 1, height: 1)
-    ) -> CGPoint {
-        point(
-            parameter, horizontalRadius: definition.horizontalRadius,
-            verticalRadius: definition.verticalRadius, center: definition.center,
-            rotation: definition.rotation, sourceSize: sourceSize
-        )
-    }
-
     static func innerPoint(
         _ parameter: Double,
         definition: RadialGradientDefinition,

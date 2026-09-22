@@ -113,7 +113,3 @@ struct ColorMixerAdjustments: Codable, Equatable, Sendable {
         )
     }
 }
-
-/// Compatibility spellings for callers that describe the value as a channel adjustment.
-typealias ColorMixerChannelAdjustment = ColorMixerChannel
-typealias ColorMixerChannelAdjustments = ColorMixerChannel

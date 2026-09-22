@@ -1,6 +1,4 @@
-import CoreGraphics
 import Foundation
-import Vision
 
 /// Bounded per-stage latency record for one content-aware Auto run (KRMA-352).
 ///
@@ -109,38 +107,5 @@ enum AutoTimingClock {
             + seconds(timings.saliency)
             + seconds(timings.foregroundMasking)
             + seconds(timings.personSegmentation)
-    }
-}
-
-/// Diagnostic-only Vision image-aesthetics scores (KRMA-352).
-///
-/// `VNCalculateImageAestheticsScoresRequest` is macOS 15+. This helper is `#available`-guarded,
-/// fixture/diagnostics-only, and never an optimization target: no production selection path —
-/// policy, scoring, or coordinator — references this type or its scores. The score is recorded
-/// beside renderer output so a later review can correlate human-perceived quality with the
-/// renderer's own measurements; it must never steer a candidate decision.
-struct VisionAestheticsScores: Sendable, Equatable {
-    /// Overall aesthetic score in [-1, 1], where 1 is most desirable.
-    let overallScore: Double
-    /// Utility images are not poor quality, only unexciting; recorded, never penalized.
-    let isUtility: Bool
-}
-
-enum VisionAestheticsDiagnostics {
-    /// Collect aesthetics scores for diagnostics. Returns nil on macOS 14, on request failure,
-    /// or when Vision produces no observation — a missing diagnostic never fails a run.
-    static func scores(for image: CGImage) -> VisionAestheticsScores? {
-        guard #available(macOS 15, *) else { return nil }
-        let request = VNCalculateImageAestheticsScoresRequest()
-        let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        do {
-            try handler.perform([request])
-        } catch {
-            return nil
-        }
-        guard let observation = request.results?.first else { return nil }
-        let score = Double(observation.overallScore)
-        guard score.isFinite else { return nil }
-        return VisionAestheticsScores(overallScore: score, isUtility: observation.isUtility)
     }
 }

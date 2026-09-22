@@ -222,25 +222,32 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
 
     // MARK: - Body-evaluation instrumentation
 
-    func testViewBodyCountersTrackEvaluations() {
-        ViewBodyCounter.reset()
-        XCTAssertEqual(ViewBodyCounter.contentViewEvaluations, 0)
-        XCTAssertEqual(ViewBodyCounter.inspectorEvaluations, 0)
-        XCTAssertEqual(ViewBodyCounter.gridEvaluations, 0)
+    func testRenderDiagnosticsSnapshotTracksEvaluations() {
+        RenderDiagnostics.reset()
+        XCTAssertEqual(RenderDiagnostics.snapshot, .init(
+            contentViewBodyEvaluations: 0,
+            inspectorBodyEvaluations: 0,
+            gridBodyEvaluations: 0,
+            toolbarBodyEvaluations: 0,
+            presentationCoreImageEvaluations: 0
+        ))
 
-        ViewBodyCounter.noteContentViewBody()
-        ViewBodyCounter.noteInspectorBody()
-        ViewBodyCounter.noteGridBody()
-        ViewBodyCounter.noteToolbarBody()
+        RenderDiagnostics.noteContentViewBody()
+        RenderDiagnostics.noteInspectorBody()
+        RenderDiagnostics.noteGridBody()
+        RenderDiagnostics.noteToolbarBody()
+        RenderDiagnostics.notePresentationCoreImageEvaluation()
 
-        let snapshot = ViewBodyCounter.snapshot
-        XCTAssertEqual(snapshot.content, 1)
-        XCTAssertEqual(snapshot.inspector, 1)
-        XCTAssertEqual(snapshot.grid, 1)
-        XCTAssertEqual(snapshot.toolbar, 1)
+        XCTAssertEqual(RenderDiagnostics.snapshot, .init(
+            contentViewBodyEvaluations: 1,
+            inspectorBodyEvaluations: 1,
+            gridBodyEvaluations: 1,
+            toolbarBodyEvaluations: 1,
+            presentationCoreImageEvaluations: 1
+        ))
 
-        ViewBodyCounter.reset()
-        XCTAssertEqual(ViewBodyCounter.snapshot.content, 0)
+        RenderDiagnostics.reset()
+        XCTAssertEqual(RenderDiagnostics.snapshot.presentationCoreImageEvaluations, 0)
     }
 
     // MARK: - Navigation / slider p95 (same-host, no regression)

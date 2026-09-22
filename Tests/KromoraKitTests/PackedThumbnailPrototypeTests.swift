@@ -24,7 +24,7 @@ final class PackedThumbnailPrototypeTests: XCTestCase {
 
         try store.remove(keys: ["01-deleted"])
         XCTAssertEqual(try store.lookup("01-deleted"), .missing)
-        try store.injectStaleEntryForTesting(key: "02-stale")
+        try store.injectStalePackedThumbnailEntry(key: "02-stale")
         XCTAssertEqual(try store.lookup("02-stale"), .stale)
 
         let scan = try store.coldScan()
@@ -47,7 +47,7 @@ final class PackedThumbnailPrototypeTests: XCTestCase {
         ])
         try store.append(.init(key: "10-first", data: replacement))
         try store.remove(keys: ["20-second"])
-        try store.injectStaleEntryForTesting(key: "40-corrupt")
+        try store.injectStalePackedThumbnailEntry(key: "40-corrupt")
 
         let before = store.physicalByteCount
         let result = try store.compact()

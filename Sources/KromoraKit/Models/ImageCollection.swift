@@ -56,6 +56,7 @@ final class ImageCollectionPresentationModel {
         var thumbnail: NSImage?
         var metadata: ImageMetadata?
         var subfolder: String
+        private var displayNameOverride: String?
         private var originalThumbnail: NSImage?
         private var editedThumbnailUsesFallback = false
         private(set) var editedThumbnailRevision: String?
@@ -63,7 +64,7 @@ final class ImageCollectionPresentationModel {
 
         var id: PhotoAssetID { asset.id }
         var url: URL? { asset.url }
-        var displayName: String { asset.displayName }
+        var displayName: String { displayNameOverride ?? asset.displayName }
         var imageData: Data? { asset.source.data }
         var dataFingerprint: String? { asset.source.fingerprint.sampleDigest }
         var thumbnailNativeExtent: CGSize {
@@ -113,6 +114,12 @@ final class ImageCollectionPresentationModel {
         func setOriginalThumbnail(_ thumbnail: NSImage?) {
             originalThumbnail = thumbnail
             if editedThumbnailRevision == nil || editedThumbnailUsesFallback { self.thumbnail = thumbnail }
+        }
+
+        /// Open Image… historically presents selected files without their extensions. Keep that
+        /// presentation-only convention separate from the package's durable source filename.
+        func setDisplayNameOverride(_ name: String?) {
+            displayNameOverride = name
         }
 
         func invalidateEditedThumbnail() {
@@ -262,7 +269,6 @@ final class ImageCollectionPresentationModel {
         return true
     }
 
-    var canUndoCulling: Bool { !cullingUndoStack.isEmpty }
     @discardableResult
     func undoLastCullingChange() -> Bool {
         guard let change = cullingUndoStack.popLast(),

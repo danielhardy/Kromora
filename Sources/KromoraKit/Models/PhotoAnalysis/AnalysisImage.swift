@@ -53,7 +53,6 @@ struct NormalizedRect: Codable, Sendable, Equatable, Hashable {
                        width: rect.width, height: rect.height)
     }
 
-    var cgRect: CGRect { CGRect(x: x, y: y, width: width, height: height) }
     var minX: Double { x }
     var minY: Double { y }
     var maxX: Double { x + width }

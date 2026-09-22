@@ -1,14 +1,30 @@
 import Foundation
 @testable import KromoraKit
 
+@MainActor
+private var compatibilityLibraryFolders: [ObjectIdentifier: URL] = [:]
+
 /// Transitional fixture adapters for tests that still describe their input as a folder.
 /// Production has no corresponding API: these helpers immediately turn fixture files into the
 /// package presentation model so the old test cases can be migrated incrementally.
 @MainActor
 extension ImageCollection {
     var libraryFolderURL: URL {
-        items.first?.url?.deletingLastPathComponent()
+        compatibilityLibraryFolders[ObjectIdentifier(self)]
+            ?? packageRoot(from: items.first?.url)
+            ?? items.first?.url?.deletingLastPathComponent()
             ?? FileManager.default.temporaryDirectory.appendingPathComponent("KromoraPackageFixture")
+    }
+
+    private func packageRoot(from url: URL?) -> URL? {
+        var candidate = url
+        while let current = candidate {
+            if current.pathExtension == "kromoralibrary" { return current }
+            let parent = current.deletingLastPathComponent()
+            guard parent != current else { return nil }
+            candidate = parent
+        }
+        return nil
     }
 
     static var defaultLibraryFolderURL: URL {
@@ -18,6 +34,10 @@ extension ImageCollection {
     var sourceFolderURL: URL? { nil }
     var hasActiveSourceFolderScopeForTesting: Bool { false }
     var pendingImportSlots: [Int] { [] }
+
+    func configureCompatibilityLibraryFolder(_ url: URL) {
+        compatibilityLibraryFolders[ObjectIdentifier(self)] = url.standardizedFileURL
+    }
 
     func metadataCompletion() async { await scanCompletion() }
 
@@ -76,7 +96,48 @@ extension ImageCollection {
     @discardableResult
     func addFromMediaVolume(_ volume: MediaVolume, files: [MediaVolumeFile]) -> [PhotoAssetID] {
         guard !volume.requiresAccessGrant else { return [] }
-        return addFromURLs(files.map(\.url).filter { FileManager.default.fileExists(atPath: $0.path) })
+
+        let destinationFolder = libraryFolderURL
+        do {
+            try FileManager.default.createDirectory(
+                at: destinationFolder, withIntermediateDirectories: true
+            )
+        } catch {
+            return []
+        }
+
+        let existingIDs = Set(items.map(\.id))
+        var imported: [PhotoAsset] = []
+        for file in files {
+            guard FileManager.default.fileExists(atPath: file.url.path) else { continue }
+
+            let filename = URL(fileURLWithPath: file.filename).lastPathComponent
+            guard !filename.isEmpty else { continue }
+            let destination = destinationFolder.appendingPathComponent(filename)
+            do {
+                if FileManager.default.fileExists(atPath: destination.path) {
+                    try FileManager.default.removeItem(at: destination)
+                }
+                try FileManager.default.copyItem(at: file.url, to: destination)
+            } catch {
+                continue
+            }
+
+            let imageMetadata = file.metadata.isEmpty
+                ? ImageMetadata.read(from: destination)
+                : file.metadata
+            let asset = PhotoAsset(
+                url: destination,
+                metadata: PhotoAssetMetadata(imageMetadata: imageMetadata)
+            )
+            guard !existingIDs.contains(asset.id), !imported.contains(where: { $0.id == asset.id })
+            else { continue }
+            imported.append(asset)
+        }
+
+        guard !imported.isEmpty else { return [] }
+        loadPortableAssets(items.map(\.asset) + imported)
+        return imported.map(\.id)
     }
 
     func beginDataImport(reservedCount: Int = 0) {

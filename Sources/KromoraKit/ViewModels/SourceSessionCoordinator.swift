@@ -62,6 +62,7 @@ final class SourceSessionCoordinator {
     private var metadataTask: Task<Void, Never>?
     private var capabilitiesTask: Task<Void, Never>?
     private var firstFrameTask: Task<Void, Never>?
+    private var storedDocumentBarrier: Task<PersistenceFlushResult, Never>?
     private(set) var sourceRevision: UInt64 = 0
     /// The request whose preparation was last published to the application model. A newer
     /// request may be pending while this source is still on screen; probes belong to this request
@@ -96,7 +97,8 @@ final class SourceSessionCoordinator {
     func begin(
         plan: SourceImportPlan,
         editSessionRevision: UInt64,
-        hadInMemorySession: Bool
+        hadInMemorySession: Bool,
+        persistenceBarrier: Task<PersistenceFlushResult, Never>? = nil
     ) -> UInt64 {
         guard !isShutdown else { return sourceRevision }
         sourceRevision &+= 1
@@ -107,6 +109,7 @@ final class SourceSessionCoordinator {
         )
         activeRequest = request
         pendingRequest = request
+        storedDocumentBarrier = persistenceBarrier
         firstFrameTask?.cancel()
         firstFrameTask = nil
         storedLoadTask?.cancel()
@@ -120,6 +123,7 @@ final class SourceSessionCoordinator {
         activeRequest = nil
         publishedRequest = nil
         pendingRequest = nil
+        storedDocumentBarrier = nil
         firstFrameTask?.cancel()
         firstFrameTask = nil
         metadataTask?.cancel()
@@ -137,6 +141,7 @@ final class SourceSessionCoordinator {
         activeRequest = nil
         publishedRequest = nil
         pendingRequest = nil
+        storedDocumentBarrier = nil
         firstFrameTask?.cancel()
         storedLoadTask?.cancel()
         metadataTask?.cancel()
@@ -177,7 +182,13 @@ final class SourceSessionCoordinator {
     }
 
     private func prepare(_ request: Request) async {
-        let storedTask = Task { await editStore.load(for: request.sourceReference) }
+        let persistenceBarrier = storedDocumentBarrier
+        let storedTask = Task {
+            if let persistenceBarrier {
+                _ = await persistenceBarrier.value
+            }
+            return await editStore.load(for: request.sourceReference)
+        }
         storedLoadTask = storedTask
         let preparation = await engine.prepareSource(request.plan.source)
         guard isExpected(request) else {

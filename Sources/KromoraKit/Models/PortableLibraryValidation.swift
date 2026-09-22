@@ -92,9 +92,6 @@ struct PortableLibraryValidationReport: Codable, Equatable, Sendable {
     let rebuildableGaps: [PortableLibraryValidationIssue]
 
     var isValid: Bool { criticalFailures.isEmpty }
-    var isClean: Bool { criticalFailures.isEmpty && rebuildableGaps.isEmpty }
-    var hasCriticalFailures: Bool { !criticalFailures.isEmpty }
-
     /// Short aliases make the two intentional buckets easy to consume at call sites.
     var critical: [PortableLibraryValidationIssue] { criticalFailures }
     var rebuildable: [PortableLibraryValidationIssue] { rebuildableGaps }
