@@ -396,7 +396,7 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
             ))
         }
 
-        let trackedSources = await engine.trackedMaskSourceKeysForTesting
+        let trackedSources = await engine.diagnosticsSnapshot.trackedMaskSourceKeys
         XCTAssertEqual(trackedSources.count, 16)
         XCTAssertEqual(trackedSources, sources.dropFirst().map(\.cacheFingerprint))
         XCTAssertFalse(trackedSources.contains(sources[0].cacheFingerprint))
@@ -414,11 +414,11 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
             output: .raster,
             requestRevision: 1
         ))
-        let trackedAfterFirst = await engine.trackedMaskSourceKeysForTesting
+        let trackedAfterFirst = await engine.diagnosticsSnapshot.trackedMaskSourceKeys
         XCTAssertEqual(trackedAfterFirst, [firstSource.cacheFingerprint])
 
         await engine.invalidateSourceCache()
-        let trackedAfterInvalidate = await engine.trackedMaskSourceKeysForTesting
+        let trackedAfterInvalidate = await engine.diagnosticsSnapshot.trackedMaskSourceKeys
         XCTAssertEqual(
             trackedAfterInvalidate, [],
             "invalidateSourceCache must clear mask source order along with the recipe table"
@@ -433,7 +433,7 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
             output: .raster,
             requestRevision: 1
         ))
-        let trackedAfterSecond = await engine.trackedMaskSourceKeysForTesting
+        let trackedAfterSecond = await engine.diagnosticsSnapshot.trackedMaskSourceKeys
         XCTAssertEqual(trackedAfterSecond, [secondSource.cacheFingerprint])
     }
 

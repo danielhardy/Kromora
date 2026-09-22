@@ -44,7 +44,7 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        let _ = ViewBodyCounter.noteContentViewBody()
+        let _ = RenderDiagnostics.noteContentViewBody()
         return mainContent
             .navigationTitle("")
             .toolbar {

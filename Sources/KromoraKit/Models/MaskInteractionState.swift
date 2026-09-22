@@ -334,17 +334,6 @@ final class MaskInteractionState: ObservableObject {
     func markRadialCreationPending() { radialCreationPending = true }
     func consumeRadialCreationPending() { radialCreationPending = false }
 
-    func clearGestureHandle() {
-        activeLinearHandle = nil
-        activeRadialHandle = nil
-        linearCreationPending = false
-        radialCreationPending = false
-        gestureStartPoint = nil
-        gestureStartDefinition = nil
-        gestureStartRadialDefinition = nil
-        gestureSourceSize = CGSize(width: 1, height: 1)
-    }
-
     func toggleSolo(layerID: UUID) {
         soloLayerID = soloLayerID == layerID ? nil : layerID
         soloComponentID = nil
@@ -360,7 +349,6 @@ final class MaskInteractionState: ObservableObject {
         }
     }
 
-    func clearComponentSolo() { soloComponentID = nil }
     func clearSolo() {
         soloLayerID = nil
         soloComponentID = nil

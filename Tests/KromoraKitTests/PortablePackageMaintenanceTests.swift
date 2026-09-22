@@ -59,12 +59,18 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
         ])
         try store.append(.init(key: "10-live", data: Data(repeating: 0x44, count: 31)))
         try store.remove(keys: ["20-deleted"])
-        try store.injectStaleEntryForTesting(key: "40-stale")
+        try injectStalePackedThumbnailEntry(
+            at: packageURL.appendingPathComponent("Derived/Thumbnails/index.json"),
+            key: "40-stale"
+        )
+        let compactionStore = try PortablePackagePackedThumbnailStore(
+            at: packageURL.appendingPathComponent("Derived/Thumbnails")
+        )
 
         let lease = try PortablePackageLease.acquire(at: packageURL)
         defer { try? lease.release() }
-        let before = store.physicalByteCount
-        let result = try store.compact(
+        let before = compactionStore.physicalByteCount
+        let result = try compactionStore.compact(
             package: try PortableLibraryPackage.open(at: packageURL), lease: lease
         )
 
@@ -73,16 +79,16 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
         XCTAssertEqual(result.staleEntriesRemoved, 1)
         XCTAssertLessThan(result.bytesAfter, before)
         XCTAssertEqual(
-            try store.lookup("10-live"),
+            try compactionStore.lookup("10-live"),
             .found(Data(repeating: 0x44, count: 31))
         )
         XCTAssertEqual(
-            try store.lookup("30-live"),
+            try compactionStore.lookup("30-live"),
             .found(Data(repeating: 0x33, count: 23))
         )
-        XCTAssertEqual(try store.lookup("20-deleted"), .missing)
-        XCTAssertEqual(try store.lookup("40-stale"), .missing)
-        XCTAssertEqual(try store.coldScan(), .init(indexedEntries: 2, validEntries: 2, staleEntries: 0))
+        XCTAssertEqual(try compactionStore.lookup("20-deleted"), .missing)
+        XCTAssertEqual(try compactionStore.lookup("40-stale"), .missing)
+        XCTAssertEqual(try compactionStore.coldScan(), .init(indexedEntries: 2, validEntries: 2, staleEntries: 0))
     }
 
     func testRevisionCompactionRetainsCurrentNewestAndProtectedRevisions() throws {
@@ -260,4 +266,24 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
     }
+}
+
+private func injectStalePackedThumbnailEntry(at indexURL: URL, key: String) throws {
+    struct Entry: Codable {
+        let key: String
+        let shard: Int
+        let offset: UInt64
+        let length: UInt64
+    }
+    struct IndexFile: Codable {
+        let schemaVersion: Int
+        var entries: [Entry]
+    }
+
+    let data = try Data(contentsOf: indexURL)
+    var index = try JSONDecoder().decode(IndexFile.self, from: data)
+    index.entries.append(Entry(key: key, shard: 0x40, offset: UInt64.max, length: 1))
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    try encoder.encode(index).write(to: indexURL, options: .atomic)
 }

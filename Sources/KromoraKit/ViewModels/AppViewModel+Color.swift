@@ -157,16 +157,6 @@ extension AppViewModel {
         return adjustmentBinding(for: control)
     }
 
-    func whiteBalanceValue(for control: AdjustmentControl) -> Double {
-        precondition(control == .temperature || control == .tint)
-        if sourceIsRAW {
-            return control == .temperature
-                ? developValue(for: .whiteBalance)
-                : (document.rawDevelop.neutralTint ?? rawCapabilities?.asShotTint ?? 0)
-        }
-        return adjustmentValue(for: control)
-    }
-
     /// Reset one white-balance row. RAW decoders expose the pair as one neutral/default operation;
     /// standard images can reset the temperature and tint nodes independently.
     func resetWhiteBalance(_ control: AdjustmentControl) {

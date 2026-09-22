@@ -70,14 +70,6 @@ actor MaskStore {
         return RegionMaskReference(cacheKey: persisted.key, size: persisted.mask.size, quality: quality)
     }
 
-    /// Finds the least expensive cached quality that satisfies the requested minimum.
-    func bestAvailable(for key: MaskCacheKey, minimumQuality: MaskQuality) -> RegionMaskReference? {
-        for quality in MaskQuality.allCases where quality >= minimumQuality {
-            if let reference = mask(for: key, quality: quality) { return reference }
-        }
-        return nil
-    }
-
     @discardableResult
     func store(
         _ pixels: NormalizedMask,
@@ -189,9 +181,6 @@ actor MaskStore {
         }
         return values
     }
-
-    /// Internal so the legacy-compatibility test can place a pre-sidecar file at its real location.
-    static func filenameForTesting(for key: MaskCacheKey) -> String { filename(for: key) }
 
     private static func filename(for key: MaskCacheKey, extension ext: String = "json") -> String {
         let identity = [key.identity.cacheKey, String(describing: key.kind),

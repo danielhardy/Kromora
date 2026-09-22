@@ -180,7 +180,8 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         await viewModel.collection.scanCompletion()
         XCTAssertTrue(viewModel.navigate(to: .grid))
 
-        viewModel.toggleSourceBrowser()
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        viewModel.isSourceBrowserPresented = true
 
         XCTAssertEqual(viewModel.navigation.mode, .edit)
         XCTAssertTrue(viewModel.isSourceBrowserPresented)

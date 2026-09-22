@@ -15,7 +15,6 @@ struct EditHistory: Sendable, Equatable {
     var canRedo: Bool { !redoSnapshots.isEmpty }
     var isGrouping: Bool { groupingStart != nil }
     var undoCount: Int { undoSnapshots.count }
-    var redoCount: Int { redoSnapshots.count }
 
     mutating func beginGrouping(document: EditDocument) {
         if groupingStart == nil { groupingStart = document }

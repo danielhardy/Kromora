@@ -228,7 +228,7 @@ final class PackedThumbnailStore {
     }
 
     /// Test-only corruption hook for deterministic stale-offset coverage.
-    func injectStaleEntryForTesting(key: String) throws {
+    func injectStalePackedThumbnailEntry(key: String) throws {
         let shard = Self.shard(for: key)
         entries[key] = Entry(key: key, shard: shard, offset: UInt64.max, length: 1)
         try saveIndex()

@@ -15,7 +15,7 @@ struct InfoInspectorView: View {
     }
 
     var body: some View {
-        let _ = ViewBodyCounter.noteInspectorBody()
+        let _ = RenderDiagnostics.noteInspectorBody()
         return VStack(spacing: 0) {
             if canvasState.isCropToolActive {
                 CropInspectorView(

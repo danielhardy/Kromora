@@ -195,7 +195,7 @@ final class PreviewSurfaceTests: XCTestCase {
 
         let coordinator = PreviewSurfaceView.Coordinator()
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: CGSize(width: 40, height: 30),
                 viewSpaceRotationAngle: 24
             ))
@@ -567,7 +567,7 @@ final class PreviewSurfaceTests: XCTestCase {
             "the last complete photo must fill edges the ROI has not covered yet"
         )
         XCTAssertNotNil(
-            PreviewSurfaceView.Coordinator().renderRetainedTextureForTesting(
+            PreviewSurfaceView.Coordinator().renderRetainedTexture(
                 surface: surface, navigation: pannedNavigation,
                 destinationSize: CGSize(width: 80, height: 60)
             ),
@@ -627,19 +627,19 @@ final class PreviewSurfaceTests: XCTestCase {
         _ = try await waitForPresentationTexture(surface)
         let coordinator = PreviewSurfaceView.Coordinator()
 
-        PreviewSurface.resetPresentationCoreImageEvaluationCount()
+        RenderDiagnostics.reset()
         var navigation = CanvasNavigation()
         for zoom in [1.0, 1.5, 2.5, 0.75] {
             navigation.setZoom(zoom)
             XCTAssertNotNil(
-                coordinator.renderRetainedTextureForTesting(
+                coordinator.renderRetainedTexture(
                     surface: surface, navigation: navigation,
                     destinationSize: CGSize(width: 31, height: 19)
                 ))
         }
 
         XCTAssertEqual(
-            PreviewSurface.presentationCoreImageEvaluationCount, 0,
+            RenderDiagnostics.snapshot.presentationCoreImageEvaluations, 0,
             "pan/zoom repainting must not evaluate the Core Image presentation graph")
     }
 
@@ -668,7 +668,7 @@ final class PreviewSurfaceTests: XCTestCase {
                 )
             )
             let actualTexture = try XCTUnwrap(
-                coordinator.renderRetainedTextureForTesting(
+                coordinator.renderRetainedTexture(
                     surface: surface, navigation: navigation, destinationSize: size
                 ))
             let width = Int(size.width)
@@ -747,12 +747,12 @@ final class PreviewSurfaceTests: XCTestCase {
         let destination = CGRect(x: 0, y: 0, width: 24, height: 12)
 
         let darkMetal = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: destination.size,
                 appearance: darkAppearance
             ))
         let lightMetal = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: destination.size,
                 appearance: lightAppearance
             ))
@@ -801,7 +801,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let size = CGSize(width: 16, height: 16)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: size
             ))
         let width = texture.width
@@ -858,7 +858,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let size = CGSize(width: 32, height: 16)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: size
             ))
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
@@ -897,7 +897,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let dest = CGSize(width: 40, height: 30)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: dest
             ))
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
@@ -936,7 +936,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let dest = CGSize(width: 40, height: 30)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: dest
             ))
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
@@ -974,7 +974,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let dest = CGSize(width: 40, height: 30)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: dest
             ))
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
@@ -1013,7 +1013,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let dest = CGSize(width: 40, height: 30)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: dest
             ))
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
@@ -1055,7 +1055,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let dest = CGSize(width: 24, height: 12)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(), destinationSize: dest
             ))
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
@@ -1095,7 +1095,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         let dest = CGSize(width: 24, height: 12)
         let texture = try XCTUnwrap(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: navigation, destinationSize: dest
             ))
         var bytes = [UInt8](repeating: 0, count: texture.width * texture.height * 4)
@@ -1160,7 +1160,7 @@ final class PreviewSurfaceTests: XCTestCase {
         let coordinator = PreviewSurfaceView.Coordinator()
         var quadRenderCount = 0
         XCTAssertNotNil(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(),
                 destinationSize: CGSize(width: 20, height: 12)
             ))
@@ -1170,7 +1170,7 @@ final class PreviewSurfaceTests: XCTestCase {
 
         coordinator.visibilityDidChange()
         XCTAssertNotNil(
-            coordinator.renderRetainedTextureForTesting(
+            coordinator.renderRetainedTexture(
                 surface: surface, navigation: CanvasNavigation(),
                 destinationSize: CGSize(width: 20, height: 12)
             ))
@@ -1240,7 +1240,7 @@ final class PreviewSurfaceTests: XCTestCase {
             "async presentation texture did not complete")
     }
 
-    /// `renderRetainedTextureForTesting` targets are `.bgra8Unorm`. Channel 0 is blue.
+    /// `renderRetainedTexture` targets are `.bgra8Unorm`. Channel 0 is blue.
     private func bgraPixel(in bytes: [UInt8], width: Int, at point: (Int, Int)) -> (
         UInt8, UInt8, UInt8
     ) {

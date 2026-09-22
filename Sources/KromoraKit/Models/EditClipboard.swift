@@ -276,5 +276,3 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
             .sorted { $0.slot < $1.slot }
     }
 }
-
-typealias EditClipboard = EditClipboardPayload

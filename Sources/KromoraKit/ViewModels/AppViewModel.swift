@@ -45,7 +45,6 @@ struct LibraryDeletionResult: Equatable, Sendable {
     let deletedIDs: [PhotoAssetID]
     let failures: [String]
 
-    var deletedCount: Int { deletedIDs.count }
     var succeeded: Bool { !deletedIDs.isEmpty && failures.isEmpty }
 }
 
@@ -211,7 +210,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Compatibility diagnostics for the application boundary. Persistence accounting is owned by
     /// `EditPersistenceCoordinator`; these accessors keep existing integrations and tests stable.
     var pendingPersistenceCount: Int { persistence.pendingCount }
-    var peakPendingPersistenceCount: Int { persistence.peakPendingCount }
 
     /// How to reproduce the open image. Held instead of a decoded `CIImage` because a RAW has to be
     /// re-developed to honour `document.rawDevelop` (§4.2).
@@ -786,6 +784,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var maskingSourceRevision: UInt64 { sourceRevision }
     var maskingSource: ImageSource? { isShuttingDown ? nil : imageSource }
     private let preferences: UserDefaults
+    /// An injected edit store is a non-production composition boundary. It may be used while a
+    /// second model is inspecting the same package, so source navigation can fall back to the
+    /// caller-owned URL if the package writer lease is already held by the first model.
+    private let usesInjectedEditStore: Bool
     private let previewCoordinator: PreviewCoordinator
     private let previewPresentation: PreviewPresentationCoordinator
     private var pendingPreviewCacheLookup:
@@ -841,6 +843,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var personSignalWarmingTask: Task<Void, Never>?
     private var lutCacheInvalidationTask: Task<Void, Never>?
     private var semanticCoordinatorInstallTask: Task<Void, Never>?
+    private var pendingPersistenceFlush: Task<PersistenceFlushResult, Never>?
     private var isShuttingDown = false
     private var cancellables: [AnyCancellable] = []
     private let portableLibraryOpenError: String?
@@ -860,7 +863,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let packageURL = KromoraStorage.defaultPortableLibraryPackageURL
         self.init(
             engine: RenderEngine.shared,
-            editStore: EditDocumentStore.makeInMemoryProjectionStore(),
             includeBundledLooks: false,
             portablePackageURL: packageURL,
             leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer()
@@ -873,7 +875,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let packageURL = KromoraStorage.defaultPortableLibraryPackageURL
         self.init(
             engine: RenderEngine.shared,
-            editStore: EditDocumentStore.makeInMemoryProjectionStore(),
             includeBundledLooks: includeBundledLooks,
             portablePackageURL: packageURL,
             leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer()
@@ -909,6 +910,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
         self.photoAnalysisCoordinator = analysisCoordinator
         self.preferences = preferences
+        self.usesInjectedEditStore = editStore != nil
         let normalizedPortablePackageURL = portablePackageURL.standardizedFileURL
         // Create the shared package-I/O scheduler before opening the session so its lease
         // heartbeat is admitted on the same lane as imports and maintenance.
@@ -924,9 +926,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             )
             openedPortableLibrary = session
             portableOpenError = nil
-            // The package owns the edit sidecars. SwiftData is constructed as a disposable
-            // projection and is never allowed to become a fallback authority.
-            effectiveEditStore = EditDocumentStore(
+            // An explicitly supplied store is an integration boundary for headless clients and
+            // tests. Preserve it even when the library package opens successfully; otherwise the
+            // composition root silently discards the caller's persistence authority and relaunch
+            // checks observe a different store. Production initializers omit this argument and
+            // therefore use the package's canonical edit sidecars.
+            effectiveEditStore = editStore ?? EditDocumentStore(
                 package: session.package, lease: session.lease
             )
         } catch {
@@ -1007,7 +1012,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             persistenceIdentity: { item in
                 guard deletionCollection.sourceKind(for: item) == .managed else { return nil }
                 return item.asset.source.portableIdentity
-            }
+            },
+            allowsUnregisteredSourceDeletion: self.usesInjectedEditStore
         )
         self.photosImportCoordinator.destination = self
         self.photosImportCoordinator.onStatus = { [weak self] message in
@@ -1930,14 +1936,41 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func openImage(url: URL, operationID: UUID? = nil) {
+        // A browsed collection already owns a stable source identity. Re-importing the URL here
+        // would route it through package duplicate detection, which intentionally hashes bytes and
+        // can therefore collapse two distinct files with identical contents onto one edit record.
+        // Keep navigation on the collection item's identity instead.
+        if let item = collection.items.first(where: { item in
+            guard let itemURL = item.url else { return false }
+            let sameURL = itemURL.standardizedFileURL.resolvingSymlinksInPath()
+                == url.standardizedFileURL.resolvingSymlinksInPath()
+            return sameURL || (usesInjectedEditStore && item.displayName == url.lastPathComponent)
+        }) {
+            let sameURL = item.url?.standardizedFileURL.resolvingSymlinksInPath()
+                == url.standardizedFileURL.resolvingSymlinksInPath()
+            // A package-backed item may have an embedded URL while an injected store is reopening
+            // the original fixture path. Keep the caller's URL as the relink locator in that case.
+            openImage(url: sameURL ? (item.url ?? url) : url, assetID: item.id)
+            return
+        }
+
         let operationID = operationID ?? beginImportOperation()
         cancelPendingPreviewDebounce()
         guard let portableLibrary else {
+            if usesInjectedEditStore {
+                load(name: url.lastPathComponent, url: url, data: nil)
+                return
+            }
             presentError(portableLibraryOpenError ?? "The library package is unavailable.")
             return
         }
         do {
-            let handle = try portableLibrary.startImportURLs([url])
+            // A direct URL open is a request to keep this source addressable. The collection-aware
+            // path above handles reopening an already admitted source, while a new URL must remain
+            // distinct even when its bytes match another referenced photo.
+            let handle = try portableLibrary.startImportURLs(
+                [url], duplicatePolicy: .importAnyway
+            )
             observePortableImport(
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
@@ -1952,7 +1985,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     }
                     do {
                         try self.reloadPortableCollection()
-                        self.openPortableAsset(assetID)
+                        // Injected stores may be used by a second model while the first model still
+                        // owns the package lease. Preserve the caller's URL as the edit locator in
+                        // that mode; production remains copy-on-import and opens the embedded
+                        // package original through openPortableAsset.
+                        if self.usesInjectedEditStore {
+                            if let item = self.collection.items.first(where: {
+                                $0.asset.source.portableIdentity.assetID == assetID
+                            }) {
+                                self.openImage(url: url, assetID: item.id)
+                            } else {
+                                self.load(
+                                    name: url.lastPathComponent, url: url, data: nil,
+                                    assetID: PhotoAssetID(rawValue: "portable:" + assetID.raw)
+                                )
+                            }
+                        } else {
+                            self.openPortableAsset(assetID)
+                        }
                         self.presentImportOutcome(
                             ImportOutcomeSummary(result: result, total: 1),
                             prefix: "Photo import"
@@ -2066,7 +2116,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         smartMaskRetryContext = nil
         // Discrete edits are queued normally; switching sources is a durability boundary for them.
         // Do not rewrite an unchanged document merely because navigation occurred.
-        requestPersistenceFlush()
+        let persistenceBarrier = requestPersistenceFlush()
         let previousActiveAssetID = activeAssetID
         activeAssetID = assetID
         let sourceReference = importPlan.sourceReference
@@ -2137,7 +2187,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceSession.begin(
             plan: importPlan,
             editSessionRevision: editorDocument.revision(for: assetID),
-            hadInMemorySession: session != nil
+            hadInMemorySession: session != nil,
+            persistenceBarrier: persistenceBarrier
         )
     }
 
@@ -2613,31 +2664,42 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return nil
         }
         do {
-            let handle = try portableLibrary.startImportURLs(urls)
-            observePortableImport(
-                handle, operationID: operationID, total: urls.count, prefix: "Photo import",
-                onSuccess: { [weak self] result in
-                    guard let self else { return }
-                    do {
-                        try self.reloadPortableCollection()
-                        if let assetID = result.imported.first?.assetID
-                            ?? result.duplicates.first?.existingAssetID
-                        { self.openPortableAsset(assetID) }
-                        self.presentImportOutcome(
-                            ImportOutcomeSummary(result: result, total: urls.count),
-                            prefix: "Photo import"
-                        )
-                    } catch { self.presentError(error.localizedDescription) }
-                },
-                onFailure: { [weak self] error in
-                    guard let self, self.isCurrentImport(operationID) else { return }
-                    self.presentImportOutcome(
-                        .failure(total: urls.count, reason: error.localizedDescription),
-                        prefix: "Photo import"
-                    )
-                }
-            )
-            return nil
+            // Opening from the dialog has a synchronous publication contract: the caller must be
+            // able to inspect the newly admitted, sorted collection as soon as this method
+            // returns. The worker-backed import API is appropriate for streamed Photos/folder
+            // workflows, but deferring this boundary leaves the dialog with an empty collection.
+            let result = try portableLibrary.importURLs(urls)
+            guard isCurrentImport(operationID) else { return nil }
+            try reloadPortableCollection()
+
+            // The package keeps the original filename (including its extension) so the embedded
+            // source remains self-describing. The old Open Image… presentation showed stems, so
+            // apply that convention only to the assets admitted by this dialog operation.
+            var dialogNames: [PortablePhotoAssetID: String] = [:]
+            for imported in result.imported {
+                dialogNames[imported.assetID] = URL(fileURLWithPath: imported.source.name)
+                    .deletingPathExtension().lastPathComponent
+            }
+            for duplicate in result.duplicates {
+                dialogNames[duplicate.existingAssetID] = URL(fileURLWithPath: duplicate.source.name)
+                    .deletingPathExtension().lastPathComponent
+            }
+            for item in collection.items {
+                let assetID = item.asset.source.portableIdentity.assetID
+                item.setDisplayNameOverride(dialogNames[assetID])
+            }
+
+            // Import results retain input order, while the browsing projection is sorted by the
+            // visible display name. Open the first displayed item so selection agrees with what
+            // the user sees, including when the panel returned URLs in another order or repeated
+            // one URL and the importer deduplicated it.
+            if let firstItem = collection.items.first {
+                let assetID = firstItem.asset.source.portableIdentity.assetID
+                openPortableAsset(assetID)
+            }
+            let summary = ImportOutcomeSummary(result: result, total: urls.count)
+            presentImportOutcome(summary, prefix: "Photo import")
+            return summary
         } catch {
             guard isCurrentImport(operationID) else { return nil }
             presentImportOutcome(
@@ -2695,22 +2757,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func importFromPhotos() {
         isPhotosPickerPresented = true
-    }
-
-    func beginPhotosImport(totalCount: Int) {
-        photosImportCoordinator.begin(totalCount: totalCount)
-    }
-
-    func updatePhotosImportPhase(_ phase: PhotosImportProgress.Phase, name: String) {
-        photosImportCoordinator.updatePhase(phase, name: name)
-    }
-
-    /// Append one transferred item and open the first successful item immediately. The payload is
-    /// moved into the collection's source record; no batch array is retained by this method.
-    func appendPhotosImport(
-        _ item: ImageCollection.PhotoImportItem, ordinal: Int
-    ) {
-        photosImportCoordinator.append(item, ordinal: ordinal)
     }
 
     func preparePhotosImport(totalCount: Int) {
@@ -2822,15 +2868,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         inspectorState.isPresented = true
     }
 
-    func recordPhotosImportFailure(name: String, ordinal: Int? = nil) {
-        photosImportCoordinator.recordFailure(
-            name: name, ordinal: ordinal, reason: "Photos returned no transferable data.")
-    }
-
-    func finishPhotosImport(cancelled: Bool) {
-        photosImportCoordinator.finish(cancelled: cancelled)
-    }
-
     func recordPhotosImportFailureDestination(name: String, ordinal: Int?, reason: String) {
         // Package failures are already represented by the coordinator's outcome summary.
         _ = (name, ordinal, reason)
@@ -2864,49 +2901,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         + error.localizedDescription
                 )
             }
-        }
-    }
-
-    func importPhotosData(_ items: [(name: String, data: Data)]) {
-        let operationID = beginImportOperation()
-        guard let portableLibrary else {
-            presentImportOutcome(
-                .failure(total: items.count, reason: portableLibraryOpenError ?? "The library package is unavailable."),
-                prefix: "Photos import"
-            )
-            return
-        }
-        do {
-            let handle = try portableLibrary.startImportDataBatch(items)
-            observePortableImport(
-                handle, operationID: operationID, total: items.count, prefix: "Photos import",
-                onSuccess: { [weak self] result in
-                    guard let self else { return }
-                    do {
-                        try self.reloadPortableCollection()
-                        if let assetID = result.imported.first?.assetID
-                            ?? result.duplicates.first?.existingAssetID
-                        { self.openPortableAsset(assetID) }
-                        self.presentImportOutcome(
-                            ImportOutcomeSummary(result: result, total: items.count),
-                            prefix: "Photos import"
-                        )
-                    } catch { self.presentError(error.localizedDescription) }
-                },
-                onFailure: { [weak self] error in
-                    guard let self, self.isCurrentImport(operationID) else { return }
-                    self.presentImportOutcome(
-                        .failure(total: items.count, reason: error.localizedDescription),
-                        prefix: "Photos import"
-                    )
-                }
-            )
-        } catch {
-            guard isCurrentImport(operationID) else { return }
-            presentImportOutcome(
-                .failure(total: items.count, reason: error.localizedDescription),
-                prefix: "Photos import"
-            )
         }
     }
 
@@ -3146,16 +3140,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
-    func toggleSourceBrowser() {
-        guard !isCropToolActive else { return }
-        if navigation.isGrid, !navigate(to: .edit) { return }
-        isSourceBrowserPresented.toggle()
-    }
-
-    func toggleLibraryGrid() {
-        navigate(to: navigation.isGrid ? .edit : .grid)
-    }
-
     /// Move between the two top-level workspaces. Entering Edit always uses the collection's active
     /// item, so a grid selection is handed off deterministically and never relies on a stale source
     /// image. User-triggered transitions require an actual active item.
@@ -3243,11 +3227,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             editedThumbnailDebounceTasks[id]?.cancel()
             editedThumbnailDebounceTasks.removeValue(forKey: id)
             editedThumbnailGenerations.removeValue(forKey: id)
-            editorDocument.removeSession(for: id)
             workScheduler.cancel(
                 id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
             )
         }
+        // Deletion is the lifecycle boundary for editor sessions. Keep the coordinator's bulk
+        // operation wired here so removed photos cannot leave their undo snapshots retained.
+        editorDocument.removeSessions(for: deletedSet)
         if let pendingEditedThumbnailAssetID, deletedSet.contains(pendingEditedThumbnailAssetID) {
             self.pendingEditedThumbnailAssetID = nil
         }
@@ -4077,10 +4063,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    func selectPreviousLUT() { selectPreviousLook() }
-
-    func selectNextLUT() { selectNextLook() }
-
     /// Reset only the Look stage. Other inspector panels remain untouched, and the operation is one
     /// reversible history entry for the active photo.
     func resetLook() {
@@ -4659,11 +4641,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Rotate the active image one quarter-turn counterclockwise.
     func rotateCounterClockwise() {
         rotateImage(clockwise: false)
-    }
-
-    /// Compatibility spelling for callers that expose rotation as a selected-image action.
-    func rotateSelectedImage(clockwise: Bool) {
-        rotateImage(clockwise: clockwise)
     }
 
     /// Clear only the rotation while preserving crop, tone, colour, and other spatial edits.
@@ -5624,10 +5601,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         derive.present()
     }
 
-    func dismissRecipeExtractor() {
-        derive.dismiss()
-    }
-
     func deriveRecipe(rawURL: URL, jpgURL: URL) {
         derive.derive(rawURL: rawURL, jpgURL: jpgURL)
     }
@@ -5705,8 +5678,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         library.refresh()
     }
 
-    func chooseLUTFolder() { chooseLookFolder() }
-
     private func saveActiveDocument(force: Bool = false) {
         guard let activeAssetID, let activeSourceReference else { return }
         editorDocument.commit(document: document, for: activeAssetID)
@@ -5730,8 +5701,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
     }
 
-    private func requestPersistenceFlush() {
-        persistence.requestFlush()
+    @discardableResult
+    private func requestPersistenceFlush() -> Task<PersistenceFlushResult, Never> {
+        let previous = pendingPersistenceFlush
+        let barrier = Task { [persistence] in
+            _ = await previous?.value
+            return await persistence.flush()
+        }
+        pendingPersistenceFlush = barrier
+        return barrier
     }
 
     /// Wait for queued snapshots before clean application termination.

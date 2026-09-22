@@ -361,16 +361,6 @@ final class PortablePackagePackedThumbnailStore {
     }
 }
 
-extension PortablePackagePackedThumbnailStore {
-    /// A test and migration seam for malformed offsets. It remains internal to the package module;
-    /// production callers can only create offsets by appending data.
-    func injectStaleEntryForTesting(key: String) throws {
-        let shard = Self.shard(for: key)
-        entries[key] = .init(key: key, shard: shard, offset: UInt64.max, length: 1)
-        try saveIndex()
-    }
-}
-
 /// Coordinates rebuildable package maintenance. The coordinator itself is main-actor isolated,
 /// while every filesystem pass is admitted to ImageWorkScheduler's detached package-I/O lane.
 @MainActor

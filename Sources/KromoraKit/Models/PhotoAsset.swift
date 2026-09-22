@@ -357,9 +357,14 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
             decoderVersion: existing?.sourceFingerprint.decoderVersion ?? "legacy-fallback-v1",
             geometry: existing?.sourceFingerprint.geometry
         )
+        // A file URL is a referenced source, not a data-only import. Two different files can have
+        // identical bytes and still require independent edit documents, so their compatibility
+        // identity must follow the file asset identity rather than the content fingerprint. The
+        // fingerprint remains content-addressed for cache/source-change purposes; it is not the
+        // ownership key for per-photo edits.
         return PortablePhotoIdentity(
             assetID: existing?.assetID
-                ?? PortablePhotoAssetID.compatibility(from: fingerprint),
+                ?? PortablePhotoAssetID.compatibility(from: assetID),
             sourceFingerprint: fingerprint
         )
     }
@@ -553,5 +558,4 @@ struct PhotoAsset: Identifiable, Codable, Hashable, Sendable, Equatable {
     }
 }
 
-typealias PhotoAssetState = PhotoAssetLibraryState
 typealias PixelDimensions = PhotoPixelDimensions

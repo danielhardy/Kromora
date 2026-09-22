@@ -122,8 +122,4 @@ final class EditorDocumentCoordinator: ObservableObject {
         clipboardCategories = categories
     }
 
-    func clearClipboard() {
-        clipboard = nil
-        clipboardCategories = Set(EditClipboardPayload.Category.allCases)
-    }
 }

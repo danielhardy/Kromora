@@ -164,9 +164,6 @@ actor EditDocumentStore {
     /// supplied an in-memory container).
     var onDiskFileURL: URL? { persistentFileURL }
 
-    /// The package backing this store, when the store is operating in projection mode.
-    var canonicalPackageURL: URL? { canonicalPackageRoot }
-
     /// Update the in-memory Look resolver used only when a canonical package edit is committed.
     /// Missing data is safe: the document remains durable and the next save can retry embedding it.
     func setEmbeddedLookBytes(_ values: [String: Data]) {
@@ -600,12 +597,6 @@ actor EditDocumentStore {
             retainWorstActionableStatus(failure)
             throw error
         }
-    }
-
-    /// Short alias used by package-open/rebuild callers.
-    @discardableResult
-    func rebuildFromPackage() throws -> Int {
-        try rebuildProjectionFromPackage()
     }
 
     private func loadFromCanonicalPackage(for source: EditSourceReference)

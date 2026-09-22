@@ -148,6 +148,10 @@ final class LUTLibrary: ObservableObject {
 
     private static let settingsKey = "lutFolderBookmark"
     private static let importedBookmarksKey = "kromora.importedLUTBookmarks"
+    /// A plain path is only a fallback for environments that cannot create or resolve a security
+    /// scoped bookmark (notably headless/test filesystems). The bookmark remains authoritative
+    /// whenever it is available, while the path keeps an imported Look durable before relaunch.
+    private static let importedPathsKey = "kromora.importedLUTPaths"
     private static let legacyImportedBookmarksKey = "lumo.importedLUTBookmarks"
 
     /// Folder whose security scope we hold open, so it can be released when we
@@ -438,9 +442,7 @@ final class LUTLibrary: ObservableObject {
     }
 
     private func restoreImportedLUTs() {
-        guard let records = preferences.array(forKey: Self.importedBookmarksKey) as? [Data] else {
-            return
-        }
+        let records = preferences.array(forKey: Self.importedBookmarksKey) as? [Data] ?? []
         for data in records {
             var isStale = false
             guard let url = try? URL(
@@ -455,6 +457,15 @@ final class LUTLibrary: ObservableObject {
                 importedSourceURLs.append(url)
             }
         }
+        let paths = preferences.array(forKey: Self.importedPathsKey) as? [String] ?? []
+        for path in paths {
+            let url = URL(fileURLWithPath: path)
+            guard FileManager.default.fileExists(atPath: url.path),
+                !importedSourceURLs.contains(where: { Self.canonicalPath($0) == Self.canonicalPath(url) })
+            else { continue }
+            importedSourceURLs.append(url)
+        }
+        guard !importedSourceURLs.isEmpty else { return }
         reloadImportedLUTs()
     }
 
@@ -467,6 +478,7 @@ final class LUTLibrary: ObservableObject {
             )
         }
         preferences.set(bookmarks, forKey: Self.importedBookmarksKey)
+        preferences.set(importedSourceURLs.map { Self.canonicalPath($0) }, forKey: Self.importedPathsKey)
     }
 
     private enum ScanOutcome {

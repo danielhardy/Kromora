@@ -470,7 +470,6 @@ struct LibraryQueryPage: Codable, Equatable, Sendable {
     let items: [LibraryQueryItem]
 
     var isEmpty: Bool { items.isEmpty }
-    var hasPreviousPage: Bool { pageIndex > 0 }
     var hasNextPage: Bool { (pageIndex + 1) * pageSize < totalCount }
     var selectedIDs: Set<PortablePhotoAssetID> {
         Set(items.filter(\.isSelected).map(\.assetID))
@@ -484,11 +483,6 @@ struct LibraryQueryPage: Codable, Equatable, Sendable {
 /// through the package when an editor actually needs the full record.
 struct LibraryQueryController: Sendable {
     typealias Index = LibraryIndexProjection
-    typealias SortKey = LibraryQuerySortKey
-    typealias SortDirection = LibraryQuerySortDirection
-    typealias Sort = LibraryQuerySort
-    typealias Query = LibraryQuery
-    typealias Page = LibraryQueryPage
     typealias Item = LibraryQueryItem
 
     let index: LibraryIndexProjection

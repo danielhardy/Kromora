@@ -175,7 +175,13 @@ struct PortablePhotoIdentity: Codable, Hashable, Sendable, Equatable {
 
 extension PortablePhotoAssetID {
     static func compatibility(from legacy: PhotoAssetID) -> Self {
-        Self(uuid: UUID.deterministic(from: Data(("asset:" + legacy.raw).utf8)))
+        if let rawUUID = legacy.raw.split(separator: ":", maxSplits: 1).last,
+            legacy.raw.hasPrefix("portable:"),
+            let uuid = UUID(uuidString: String(rawUUID))
+        {
+            return Self(uuid: uuid)
+        }
+        return Self(uuid: UUID.deterministic(from: Data(("asset:" + legacy.raw).utf8)))
     }
 
     /// Stable bridge for a legacy source record that has no persisted UUID yet. The bridge is
@@ -211,10 +217,3 @@ private extension UUID {
         ))
     }
 }
-
-// These aliases make the intent explicit at migration call sites while retaining one canonical
-// implementation. The existing PhotoAssetID/PhotoSourceFingerprint types remain legacy-compatible
-// until the remaining persistence consumers switch.
-typealias OpaquePhotoAssetID = PortablePhotoAssetID
-typealias OpaquePhotoSourceFingerprint = PortablePhotoSourceFingerprint
-typealias OpaquePhotoIdentity = PortablePhotoIdentity
