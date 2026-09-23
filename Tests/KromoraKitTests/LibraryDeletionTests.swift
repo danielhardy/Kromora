@@ -27,7 +27,7 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: source.path))
     }
 
-    func testReferencedDeletionRemovesEditsAndDoesNotReturnAfterRescan() async throws {
+    func testReferencedDeletionRetainsImmutableEditsAcrossCollectionRescan() async throws {
         let defaults = makeTestUserDefaults()
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         let managedFolder = tempDirectory.appendingPathComponent("managed", isDirectory: true)
@@ -68,12 +68,14 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         let storedAfterDelete = await store.load(
             for: EditSourceReference(assetID: item.id, url: source)
         )
-        XCTAssertFalse(storedAfterDelete.found, "the edit record is removed")
+        XCTAssertTrue(storedAfterDelete.found, "immutable package revisions remain recoverable")
+        XCTAssertEqual(storedAfterDelete.document.adjustments, [.exposure(ev: 0.5)])
 
         let relaunchedCollection = ImageCollection()
         relaunchedCollection.loadFromFolder(sourceFolder)
         await relaunchedCollection.scanCompletion()
-        XCTAssertTrue(relaunchedCollection.items.isEmpty, "the tombstone survives a rescan")
+        XCTAssertEqual(
+            relaunchedCollection.items.count, 1, "folder projections do not own package membership")
         await relaunchedCollection.shutdown()
     }
 
@@ -130,7 +132,11 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         let source = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "managed-source.jpg", in: tempDirectory
         )
-        let importedID = try XCTUnwrap(viewModel.collection.addFromURLs([source]).first)
+        let library = try XCTUnwrap(viewModel.portableLibrary)
+        _ = try library.importURLs([source])
+        viewModel.collection.loadPortableAssets(try library.materializedAssets())
+        viewModel.collection.select(at: 0)
+        let importedID = try XCTUnwrap(viewModel.collection.items.first?.id)
         let managedURL = try XCTUnwrap(
             viewModel.collection.items.first(where: { $0.id == importedID })?.url
         )
@@ -175,6 +181,8 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         )
         viewModel.collection.loadFromFolder(sourceFolder)
         await viewModel.collection.scanCompletion()
+        viewModel.openImage(url: source)
+        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
 
         let result = await viewModel.deleteSelectedLibraryItems()
         XCTAssertTrue(result.deletedIDs.isEmpty)

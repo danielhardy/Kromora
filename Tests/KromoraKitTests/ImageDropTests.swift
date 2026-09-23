@@ -6,6 +6,16 @@ import XCTest
 
 @MainActor
 final class ImageDropTests: TempDirectoryTestCase {
+    private func waitUntil(_ description: String, _ condition: @MainActor () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !condition() {
+            if Date() >= deadline {
+                throw TestSynchronizationError.timedOut(
+                    description, "published state did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
     @MainActor
     private final class PromiseDelegate: NSObject, NSFilePromiseProviderDelegate {
         func filePromiseProvider(
@@ -66,9 +76,10 @@ final class ImageDropTests: TempDirectoryTestCase {
             fileType: UTType.data.identifier, delegate: delegate
         )
         let pasteboard = makePasteboard()
-        XCTAssertTrue(pasteboard.writeObjects([
+        XCTAssertTrue(
+            pasteboard.writeObjects([
             provider,
-            NSURL(fileURLWithPath: "/tmp/Photos-derivative.jpeg")
+                NSURL(fileURLWithPath: "/tmp/Photos-derivative.jpeg"),
         ]))
         pasteboard.setData(Data([0x89, 0x50, 0x4E, 0x47]), forType: .png)
 
@@ -100,16 +111,18 @@ final class ImageDropTests: TempDirectoryTestCase {
         XCTAssertEqual(name, "Dropped Image.png")
     }
 
-    func testBitmapDropUsesTheExistingDataImportPath() throws {
+    func testBitmapDropUsesTheExistingDataImportPath() async throws {
         let source = try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "source.png", in: tempDirectory
         )
         let data = try Data(contentsOf: source)
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.handleDrop(.image(data: data, name: "Dropped Image.png"))
+        try await waitUntil("bitmap drop import") { viewModel.collection.items.count == 1 }
 
         XCTAssertEqual(viewModel.collection.items.map(\.displayName), ["Dropped Image.png"])
-        XCTAssertEqual(viewModel.collection.items.first?.imageData, data)
+        let importedURL = try XCTUnwrap(viewModel.collection.items.first?.url)
+        XCTAssertEqual(try Data(contentsOf: importedURL), data)
     }
 
     func testWebURLsAreNotAcceptedAsFileDrops() {

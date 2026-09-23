@@ -1,6 +1,7 @@
-import XCTest
 import CoreImage
+import XCTest
 import simd
+
 @testable import KromoraKit
 
 /// The coordinators report *what* happened; `AppViewModel` decides how it's
@@ -10,37 +11,50 @@ import simd
 @MainActor
 final class AppViewModelTests: TempDirectoryTestCase {
 
-    func testUnreadableSourceBookmarkDoesNotFallBackToManagedLibrary() throws {
-        let libraryFolder = tempDirectory.appendingPathComponent("managed-library", isDirectory: true)
-        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+    private func waitUntil(
+        _ description: String, _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !condition() {
+            if Date() >= deadline {
+                throw TestSynchronizationError.timedOut(
+                    description, "published state did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    func testLegacySourceBookmarkIsIgnoredByThePackageLibrary() throws {
+        let libraryFolder = tempDirectory.appendingPathComponent(
+            "managed-library", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: libraryFolder, withIntermediateDirectories: true)
         _ = try Fixtures.writeGradientPNG(
             width: 12, height: 8, named: "managed.png", in: libraryFolder
         )
         let defaults = makeTestUserDefaults()
-        defaults.set(Data("sandboxed-bookmark-from-another-process".utf8), forKey: "imageSourceFolderBookmark")
+        defaults.set(
+            Data("sandboxed-bookmark-from-another-process".utf8),
+            forKey: "imageSourceFolderBookmark")
 
         let viewModel = makeAppViewModel(
             preferences: defaults,
             libraryFolderURL: libraryFolder
         )
 
-        let message = "Kromora could not restore the source folder. Choose Open Source Folder… to select it again."
         XCTAssertTrue(viewModel.collection.items.isEmpty)
-        XCTAssertEqual(viewModel.statusMessage, message)
-        XCTAssertEqual(viewModel.errorMessage, message)
+        XCTAssertEqual(viewModel.statusMessage, "Open an image to get started")
+        XCTAssertNil(viewModel.errorMessage)
     }
 
-    func testOpeningSourceFolderSurfacesBookmarkPersistenceFailure() {
+    func testOpeningUnsupportedSourceURLReportsNoSupportedImages() {
         let viewModel = makeAppViewModel()
 
-        // Security-scoped bookmarks are only valid for file URLs, so this deterministically
-        // exercises the bookmark-creation failure path while still allowing the current-session
-        // source-folder selection to proceed.
+        // Package import accepts image files and does not persist source-folder bookmarks.
         viewModel.openSourceFolder(url: URL(string: "https://example.com")!)
 
-        let message = "Kromora could not save the source folder. It will not be restored on next launch."
-        XCTAssertEqual(viewModel.statusMessage, message)
-        XCTAssertEqual(viewModel.errorMessage, message)
+        XCTAssertEqual(viewModel.statusMessage, "No supported images were found in .")
+        XCTAssertNil(viewModel.errorMessage)
     }
 
     func testPackageBackedStoreDoesNotExposeASeparateEditDatabase() async {
@@ -121,7 +135,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         )
         let viewModel = makeAppViewModel(
             portablePackageURL: packageURL,
-            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(allowBreak: false)
+            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(
+                allowBreak: false)
         )
 
         XCTAssertNil(viewModel.errorMessage)
@@ -143,7 +158,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         )
         let viewModel = makeAppViewModel(
             portablePackageURL: packageURL,
-            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(allowBreak: false)
+            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(
+                allowBreak: false)
         )
 
         XCTAssertTrue(viewModel.collection.items.isEmpty)
@@ -166,9 +182,11 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
         viewModel.export.onError?("Export failed: disk full")
 
-        XCTAssertEqual(viewModel.errorMessage, "Export failed: disk full",
+        XCTAssertEqual(
+            viewModel.errorMessage, "Export failed: disk full",
                        "a hard failure should raise the alert")
-        XCTAssertEqual(viewModel.statusMessage, "Export failed: disk full",
+        XCTAssertEqual(
+            viewModel.statusMessage, "Export failed: disk full",
                        "...and also land in the status bar")
     }
 
@@ -233,7 +251,9 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// Going through `makeDerivedLUT` is the point. The version of this suite that used
     /// `CubeLUT(cube:size:name:)` directly was green against a live resolution bug, purely because
     /// its fixture produced a `derived://` ID where production produced a temp-file path.
-    private func makeProductionShapedDerive(named name: String = "shot_recipe_2_Rec709") throws -> CubeLUT {
+    private func makeProductionShapedDerive(named name: String = "shot_recipe_2_Rec709") throws
+        -> CubeLUT
+    {
         let cube = [SIMD3<Float>](repeating: SIMD3(0.25, 0.5, 0.75), count: 8)
         // The scratch file is written because production writes one, and because the save path
         // copies it. It is deliberately not what names the LUT.
@@ -276,10 +296,12 @@ final class AppViewModelTests: TempDirectoryTestCase {
         let lut = try makeProductionShapedDerive()
         viewModel.derive.onDerived?(lut)
 
-        XCTAssertEqual(viewModel.selectedLUT, lut,
+        XCTAssertEqual(
+            viewModel.selectedLUT, lut,
                        "a fresh derive must resolve; it is in no library, so only the registry can")
         XCTAssertEqual(viewModel.document.lut.lutID, lut.lutID)
-        XCTAssertTrue(lut.lutID.isDerived,
+        XCTAssertTrue(
+            lut.lutID.isDerived,
                       "the derived LUT must carry a derived:// identity, not a temp-file path")
     }
 
@@ -297,17 +319,19 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
         XCTAssertTrue(viewModel.isLookNoneSelected)
         XCTAssertEqual(viewModel.document.lut, .none)
-        XCTAssertEqual(viewModel.document.adjustments, [.exposure(ev: 0.75)],
+        XCTAssertEqual(
+            viewModel.document.adjustments, [.exposure(ev: 0.75)],
                        "resetting Look must not reset an unrelated panel")
 
         viewModel.undo()
-        XCTAssertEqual(viewModel.document.lut.lutID, lut.lutID,
+        XCTAssertEqual(
+            viewModel.document.lut.lutID, lut.lutID,
                        "a Look reset should be one reversible operation")
         XCTAssertEqual(viewModel.document.lut.intensity, 0.4)
         XCTAssertEqual(viewModel.document.adjustments, [.exposure(ev: 0.75)])
     }
 
-    func testLookSelectionAndIntensityStayWithTheirPhoto() throws {
+    func testLookSelectionAndIntensityStayWithTheirPhoto() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "first.png", in: tempDirectory
         )
@@ -323,14 +347,18 @@ final class AppViewModelTests: TempDirectoryTestCase {
         let lut = TestImages.warmLUT()
 
         viewModel.openImage(url: first)
+        try await waitUntil("first photo") { viewModel.sourceURL == first }
         viewModel.selectLUT(lut)
         viewModel.setLUTIntensity(0.35)
 
         viewModel.openImage(url: second)
-        XCTAssertTrue(viewModel.isLookNoneSelected,
+        try await waitUntil("second photo") { viewModel.sourceURL == second }
+        XCTAssertTrue(
+            viewModel.isLookNoneSelected,
                       "a new photo must start without the previous photo's Look")
 
         viewModel.openImage(url: first)
+        try await waitUntil("first photo again") { viewModel.sourceURL == first }
         XCTAssertEqual(viewModel.selectedLUT, lut)
         XCTAssertEqual(viewModel.lutIntensity, 0.35)
     }
@@ -340,7 +368,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertNil(viewModel.derive.libraryFolder?(), "no folder configured yet")
 
         viewModel.library.setFolder(tempDirectory)
-        XCTAssertEqual(viewModel.derive.libraryFolder?(), tempDirectory,
+        XCTAssertEqual(
+            viewModel.derive.libraryFolder?(), tempDirectory,
                        "Save should open in the user's LUT folder")
     }
 
@@ -359,7 +388,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         viewModel.derive.onSaved?(saved)
 
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(viewModel.library.allLUTs.map(\.name), ["Derived"],
+        XCTAssertEqual(
+            viewModel.library.allLUTs.map(\.name), ["Derived"],
                        "the sidebar should pick up a just-saved LUT without a relaunch")
     }
 
@@ -397,10 +427,12 @@ final class AppViewModelTests: TempDirectoryTestCase {
         try viewModel.derive.performSave(to: destination)
         viewModel.derive.onSaved?(destination)
 
-        XCTAssertEqual(viewModel.document.lut.lutID?.raw, destination.path,
+        XCTAssertEqual(
+            viewModel.document.lut.lutID?.raw, destination.path,
                        "after the save the document should reference the file, not the scratch identity")
         XCTAssertNotEqual(viewModel.document.lut.lutID, lut.lutID)
-        XCTAssertEqual(viewModel.selectedLUT?.id, destination.path,
+        XCTAssertEqual(
+            viewModel.selectedLUT?.id, destination.path,
                        "and it must still resolve — to the saved file")
     }
 
@@ -414,7 +446,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         for folder in [libraryFolder, elsewhere] {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         }
-        try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "Other.cube", in: libraryFolder)
+        try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "Other.cube", in: libraryFolder)
         viewModel.library.setFolder(libraryFolder)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
@@ -424,9 +457,11 @@ final class AppViewModelTests: TempDirectoryTestCase {
         viewModel.derive.onSaved?(destination)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
-        XCTAssertNil(viewModel.library.allLUTs.first(matching: LUTID(raw: destination.path)),
+        XCTAssertNil(
+            viewModel.library.allLUTs.first(matching: LUTID(raw: destination.path)),
                      "precondition: the library does not scan this folder")
-        XCTAssertEqual(viewModel.selectedLUT?.id, destination.path,
+        XCTAssertEqual(
+            viewModel.selectedLUT?.id, destination.path,
                        "the registry has to cover the save the rescan cannot see")
     }
 
@@ -449,7 +484,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
         let newContents = try XCTUnwrap(viewModel.selectedLUT?.tableFloats)
-        XCTAssertNotEqual(oldContents, newContents,
+        XCTAssertNotEqual(
+            oldContents, newContents,
                           "a rescanned file must replace the registry's earlier saved value")
         XCTAssertEqual(newContents[0], 0)
         XCTAssertEqual(newContents[1], 0)
@@ -468,7 +504,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
     func testRepointingAfterASaveRendersAgain() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        viewModel.openImage(url: try Fixtures.writeGradientPNG(
+        viewModel.openImage(
+            url: try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "shot.png", in: tempDirectory
         ))
         let opened = Date().addingTimeInterval(5)
@@ -507,11 +544,14 @@ final class AppViewModelTests: TempDirectoryTestCase {
         let before = await fake.invalidateCount
         viewModel.library.setFolder(empty)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertNotNil(viewModel.library.scanError, "precondition: an empty folder is a scan failure")
+        XCTAssertNotNil(
+            viewModel.library.scanError, "precondition: an empty folder is a scan failure")
 
         let deadline = Date().addingTimeInterval(2)
         while await fake.invalidateCount == before {
-            if Date() > deadline { return XCTFail("a failed scan did not invalidate the LUT cache") }
+            if Date() > deadline {
+                return XCTFail("a failed scan did not invalidate the LUT cache")
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -519,7 +559,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
     func testACompletedScanReResolvesTheOpenDocumentAndReportsMissingLUTsOnce() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        viewModel.openImage(url: try Fixtures.writeGradientPNG(
+        viewModel.openImage(
+            url: try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "source.png", in: tempDirectory
         ))
         let opened = Date().addingTimeInterval(2)
@@ -530,7 +571,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
         let missing = LUTID(raw: tempDirectory.appendingPathComponent("Gone.cube").path)
         viewModel.updateDocument { $0.lut.lutID = missing }
-        XCTAssertEqual(viewModel.lutResolutionStatus,
+        XCTAssertEqual(
+            viewModel.lutResolutionStatus,
                        "Look “Gone.cube” is unavailable; the stored reference was kept.")
         let requestsBeforeRescan = await fake.previewRequests.count
 
@@ -540,7 +582,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         viewModel.library.setFolder(tempDirectory)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
-        XCTAssertEqual(viewModel.document.lut.lutID, LUTID(raw: url.path),
+        XCTAssertEqual(
+            viewModel.document.lut.lutID, LUTID(raw: url.path),
                        "resolving a missing LUT must not rewrite its stored reference")
         XCTAssertNil(viewModel.lutResolutionStatus)
         let deadline = Date().addingTimeInterval(2)
@@ -556,7 +599,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
     /// sheet.
     func testSavingDoesNotRepointADocumentShowingADifferentLUT() async throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
-        try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "Library.cube", in: tempDirectory)
+        try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "Library.cube", in: tempDirectory)
         viewModel.library.setFolder(tempDirectory)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
@@ -568,7 +612,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
         try viewModel.derive.performSave(to: destination)
         viewModel.derive.onSaved?(destination)
 
-        XCTAssertEqual(viewModel.document.lut.lutID, fromLibrary.lutID,
+        XCTAssertEqual(
+            viewModel.document.lut.lutID, fromLibrary.lutID,
                        "saving the derive must not steal the selection from the LUT on screen")
     }
 
@@ -586,7 +631,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
     func testALibraryScanInvalidatesTheEngineLUTCache() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        try Fixtures.writeCube(Fixtures.identityCubeText(size: 2), named: "A.cube", in: tempDirectory)
+        try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "A.cube", in: tempDirectory)
 
         let before = await fake.invalidateCount
         viewModel.library.setFolder(tempDirectory)
@@ -595,7 +641,9 @@ final class AppViewModelTests: TempDirectoryTestCase {
         // The invalidation is dispatched from the scan's completion, so let it land.
         let deadline = Date().addingTimeInterval(2)
         while await fake.invalidateCount == before {
-            if Date() > deadline { return XCTFail("a library scan never invalidated the LUT cache") }
+            if Date() > deadline {
+                return XCTFail("a library scan never invalidated the LUT cache")
+            }
             try await Task.sleep(for: .milliseconds(10))
         }
     }
@@ -605,7 +653,8 @@ final class AppViewModelTests: TempDirectoryTestCase {
     func testRenderingDoesNotInvalidateTheLUTCache() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        viewModel.openImage(url: try Fixtures.writeGradientPNG(
+        viewModel.openImage(
+            url: try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "shot.png", in: tempDirectory
         ))
         let deadline = Date().addingTimeInterval(5)

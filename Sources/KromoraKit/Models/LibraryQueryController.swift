@@ -127,7 +127,8 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
 
     /// Rebuild the projection from the package's membership summaries only.
     init(package: PortableLibraryPackage) throws {
-        try self.init(libraryID: package.manifest.libraryID, entries: Self.readEntries(from: package))
+        try self.init(
+            libraryID: package.manifest.libraryID, entries: Self.readEntries(from: package))
     }
 
     /// Applies a transaction's membership delta while retaining the projection's current
@@ -163,14 +164,16 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         for (offset, shard) in PortableLibraryPackage.allShards.enumerated() {
             try Task.checkCancellation()
             let membership = try package.readMembershipShard(shard)
-            entries.append(contentsOf: membership.entries
+            entries.append(
+                contentsOf: membership.entries
                 .filter { !$0.isTombstone }
                 .map(LibraryIndexEntry.init(from:)))
 
             guard !publishedFirstPage, entries.count >= effectivePageSize else { continue }
             let partial = try Self(libraryID: package.manifest.libraryID, entries: entries)
             let controller = LibraryQueryController(index: partial, pageSize: effectivePageSize)
-            await progress?(.init(
+            await progress?(
+                .init(
                 projection: partial,
                 page: controller.page(at: 0),
                 shardsRead: offset + 1,
@@ -183,7 +186,8 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         let projection = try Self(libraryID: package.manifest.libraryID, entries: entries)
         try projection.write(to: indexURL)
         let controller = LibraryQueryController(index: projection, pageSize: effectivePageSize)
-        await progress?(.init(
+        await progress?(
+            .init(
             projection: projection,
             page: controller.page(at: 0),
             shardsRead: PortableLibraryPackage.allShards.count,
@@ -215,7 +219,8 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         let decoder = JSONDecoder()
         let value = try decoder.decode(Self.self, from: Data(contentsOf: url))
         guard value.schemaVersion == Self.currentSchemaVersion else {
-            throw LibraryQueryError.invalidIndex("unsupported schema version \(value.schemaVersion)")
+            throw LibraryQueryError.invalidIndex(
+                "unsupported schema version \(value.schemaVersion)")
         }
         return try Self(libraryID: value.libraryID, entries: value.entries)
     }
@@ -227,11 +232,14 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         return try Self(libraryID: libraryID, entries: entries)
     }
 
-    private static func readEntries(from package: PortableLibraryPackage) throws -> [LibraryIndexEntry] {
+    private static func readEntries(from package: PortableLibraryPackage) throws
+        -> [LibraryIndexEntry]
+    {
         var entries: [LibraryIndexEntry] = []
         for shard in PortableLibraryPackage.allShards {
             let membership = try package.readMembershipShard(shard)
-            entries.append(contentsOf: membership.entries
+            entries.append(
+                contentsOf: membership.entries
                 .filter { !$0.isTombstone }
                 .map(LibraryIndexEntry.init(from:)))
         }
@@ -244,9 +252,11 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
             guard ids.insert(entry.assetID).inserted else {
                 throw LibraryQueryError.duplicateAsset(entry.assetID.raw)
             }
-            let expectedPath = "Assets/\(PortableLibraryPackage.shard(for: entry.assetID))/\(entry.assetID.raw)/asset.json"
+            let expectedPath =
+                "Assets/\(PortableLibraryPackage.shard(for: entry.assetID))/\(entry.assetID.raw)/asset.json"
             guard entry.recordPath == expectedPath else {
-                throw LibraryQueryError.invalidIndex("record path does not match asset \(entry.assetID)")
+                throw LibraryQueryError.invalidIndex(
+                    "record path does not match asset \(entry.assetID)")
             }
         }
         return entries.sorted { $0.assetID.raw < $1.assetID.raw }
@@ -325,7 +335,8 @@ actor LibraryIndexSession {
         query: LibraryQuery = .all
     ) async throws -> Self {
         if let loaded = try? LibraryIndexProjection.load(from: indexURL),
-           let valid = try? loaded.validated(for: package) {
+            let valid = try? loaded.validated(for: package)
+        {
             let controller = LibraryQueryController(index: valid, pageSize: pageSize)
             return Self(
                 controller: controller,
@@ -364,7 +375,8 @@ actor LibraryIndexSession {
     /// The default local index location used by the application-support projection.
     static func defaultIndexURL(for libraryID: UUID, applicationSupportURL: URL? = nil) -> URL {
         if let applicationSupportURL {
-            return applicationSupportURL
+            return
+                applicationSupportURL
                 .appendingPathComponent("Kromora/Indexes", isDirectory: true)
                 .appendingPathComponent(libraryID.uuidString.lowercased(), isDirectory: true)
                 .appendingPathComponent("LibraryIndex.store")
@@ -418,7 +430,9 @@ actor LibraryIndexSession {
             firstPublishedPage = controller.page(at: 0, query: initialQuery)
             let waiters = firstPageWaiters
             firstPageWaiters.removeAll()
-            waiters.forEach { $0.resume(returning: firstPublishedPage!) }
+            for waiter in waiters {
+                waiter.resume(returning: firstPublishedPage!)
+            }
         }
         if progress.isComplete { rebuildTask = nil }
     }
@@ -428,7 +442,9 @@ actor LibraryIndexSession {
         rebuildTask = nil
         let waiters = firstPageWaiters
         firstPageWaiters.removeAll()
-        waiters.forEach { $0.resume(throwing: error) }
+        for waiter in waiters {
+            waiter.resume(throwing: error)
+        }
     }
 }
 
@@ -501,7 +517,8 @@ struct LibraryQueryController: Sendable {
         let validIDs = Set(index.entries.map(\.assetID))
         let validSelectedIDs = selectedAssetIDs.intersection(validIDs)
         self.selectedAssetIDs = validSelectedIDs
-        self.activeAssetID = activeAssetID.flatMap {
+        self.activeAssetID =
+            activeAssetID.flatMap {
             validIDs.contains($0) && validSelectedIDs.contains($0) ? $0 : nil
         } ?? validSelectedIDs.first
     }
@@ -575,6 +592,15 @@ struct LibraryQueryController: Sendable {
         additive ? toggleSelection(assetID) : select(assetID)
     }
 
+    mutating func setSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?)
+    {
+        let available = Set(index.entries.map(\.assetID))
+        selectedAssetIDs = Set(assetIDs.filter(available.contains))
+        self.activeAssetID =
+            activeID.flatMap { selectedAssetIDs.contains($0) ? $0 : nil }
+            ?? selectedAssetIDs.first
+    }
+
     mutating func selectAll(query: LibraryQuery = .all) {
         let foldedSearchText = query.searchText?.foldedForLibrarySearch
         let matching = index.entries.filter {
@@ -594,7 +620,8 @@ struct LibraryQueryController: Sendable {
         selectedAssetIDs = selectedAssetIDs.intersection(validIDs)
         if let activeAssetID,
            validIDs.contains(activeAssetID),
-           selectedAssetIDs.contains(activeAssetID) {
+            selectedAssetIDs.contains(activeAssetID)
+        {
             self.activeAssetID = activeAssetID
         } else {
             self.activeAssetID = selectedAssetIDs.first
@@ -651,8 +678,10 @@ struct LibraryQueryController: Sendable {
             return compareOptional(left.label, right.label)
         case .camera:
             return compareOptional(
-                [left.cameraMake, left.cameraModel].compactMap { $0 }.joined(separator: " ").nilIfEmpty,
-                [right.cameraMake, right.cameraModel].compactMap { $0 }.joined(separator: " ").nilIfEmpty
+                [left.cameraMake, left.cameraModel].compactMap { $0 }.joined(separator: " ")
+                    .nilIfEmpty,
+                [right.cameraMake, right.cameraModel].compactMap { $0 }.joined(separator: " ")
+                    .nilIfEmpty
             )
         case .lens:
             return compareOptional(left.lens, right.lens)
@@ -667,8 +696,10 @@ struct LibraryQueryController: Sendable {
     }
 
     private func compare(_ lhs: String, _ rhs: String) -> ComparisonResult {
-        let left = lhs.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-        let right = rhs.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let left = lhs.folding(
+            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        let right = rhs.folding(
+            options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
         let folded: ComparisonResult
         if left == right {
             folded = .orderedSame
@@ -683,15 +714,15 @@ struct LibraryQueryController: Sendable {
         case (nil, nil): .orderedSame
         case (nil, _): .orderedDescending
         case (_, nil): .orderedAscending
-        case let (left?, right?): compare(left, right)
+        case (let left?, let right?): compare(left, right)
         }
     }
 }
 
-private extension String {
-    var foldedForLibrarySearch: String {
+extension String {
+    fileprivate var foldedForLibrarySearch: String {
         folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
     }
 
-    var nilIfEmpty: String? { isEmpty ? nil : self }
+    fileprivate var nilIfEmpty: String? { isEmpty ? nil : self }
 }
