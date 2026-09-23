@@ -67,12 +67,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     var packageImportDoesNotNeedDigest: Bool { true }
 
-    private struct CropPresentationSnapshot {
-        let isInspectorPresented: Bool
-        let inspectorTab: InspectorTab
-        let isSourceBrowserPresented: Bool
-    }
-
     /// Inspector presentation state has its own observation boundary. The editor model still
     /// owns histogram scheduling and tab validity, but changing the inspector chrome does not
     /// need to publish through the model observed by the library and canvas shells.
@@ -429,7 +423,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// High-frequency canvas and transient crop state live outside the broad application
     /// publisher. Only the views that observe `canvasState` reevaluate for pointer interaction.
-    let canvasState = CanvasInteractionState()
+    private lazy var canvasWorkflow: CanvasWorkflowCoordinator = {
+        let coordinator = CanvasWorkflowCoordinator(destination: self)
+        return coordinator
+    }()
+    var canvasState: CanvasInteractionState { canvasWorkflow.interactionState }
     /// Selection, transient creation, and smart-mask analysis state for the masking workspace,
     /// owned by `MaskingWorkflowCoordinator`. AppViewModel remains the document/undo/preview owner
     /// that coordinator's commands commit through.
@@ -439,7 +437,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// keeps compatibility accessors below so existing commands and tests retain their API while
     /// SwiftUI views can observe the narrow state object directly.
     let inspectorState = InspectorState()
-    private var cropPresentationSnapshot: CropPresentationSnapshot?
 
     var canvasNavigation: CanvasNavigation { canvasState.navigation }
     var isCropToolActive: Bool { canvasState.isCropToolActive }
@@ -452,7 +449,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var cropFlipVertical: Bool { canvasState.cropFlipVertical }
     var cropVerticalPerspective: Double { canvasState.cropVerticalPerspective }
     var cropHorizontalPerspective: Double { canvasState.cropHorizontalPerspective }
-    var cropSourceSize: CGSize { canvasState.cropImageSize(from: sourceSize) }
+    var cropSourceSize: CGSize { canvasWorkflow.cropSourceSize }
 
     var isInspectorPresented: Bool {
         get { inspectorState.isPresented }
@@ -1928,10 +1925,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewSurface.clear()
         originalPreviewSurface.clear()
         if canvasState.isCropToolActive {
-            canvasState.finishCrop()
-            restoreCropPresentation()
+            canvasWorkflow.discardCropForSourceChange()
         }
-        canvasState.resetForSource()
+        canvasWorkflow.resetForSource()
         maskInteractionState.resetForSource()
         restoreMaskSelection()
         resetResolutionPlanners()
@@ -4274,297 +4270,44 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    // MARK: - Crop
+    // MARK: - Crop and rotation workflow façade
 
-    /// Enter the crop tool. The first draft is the committed crop, or the full image when this is a
-    /// new crop. Crop interaction uses a fit canvas so screen coordinates map directly to the
-    /// oriented source image and are not confused with presentation zoom/pan.
-    func beginCrop() {
-        guard sourceImage != nil else {
-            statusMessage = "Open an image first"
-            return
-        }
-        guard !canvasState.isCropToolActive else { return }
-        endUndoGrouping()
-        cropPresentationSnapshot = CropPresentationSnapshot(
-            isInspectorPresented: inspectorState.isPresented,
-            inspectorTab: inspectorState.tab,
-            isSourceBrowserPresented: isSourceBrowserPresented
-        )
-        isSourceBrowserPresented = false
-        inspectorState.isPresented = true
-        isShowingOriginal = false
-        canvasState.beginCrop(using: document.crop, sourceSize: sourceSize)
-        statusMessage = "Adjust crop, then Save"
-        // The committed preview may already be cropped. Ask for the same adjusted stage without
-        // the composition crop so the full-source overlay has actual pixels underneath it. The
-        // entry lane is interactive-first: the prior raster remains retained under the chrome,
-        // while the coordinator promotes this full-source request to settled preview quality.
-        scheduleCropEntryPreview()
-    }
+    func beginCrop() { canvasWorkflow.beginCrop() }
+    func toggleCropTool() { canvasWorkflow.toggleCropTool() }
+    func updateCropDraft(_ normalizedRect: CGRect) { canvasWorkflow.updateCropDraft(normalizedRect) }
 
-    func toggleCropTool() {
-        if isCropToolActive { cancelCrop() } else { beginCrop() }
-    }
-
-    /// Update only the transient framing rectangle. The model clamps it to image bounds and rejects
-    /// invalid/degenerate values, so every pointer update remains safe to display.
-    func updateCropDraft(_ normalizedRect: CGRect) {
-        canvasState.updateCropDraft(normalizedRect, sourceSize: sourceSize)
-    }
-
-    /// Select a crop ratio in the transient tool state. The current crop center and approximate
-    /// area are preserved, while the resulting frame is clamped to the source image bounds.
     func selectCropAspectRatio(
         _ aspectRatio: CropAspectRatio,
         orientation: CropAspectRatioOrientation = .automatic
     ) {
-        guard sourceSize != .zero else { return }
-        canvasState.selectCropAspectRatio(
-            aspectRatio, orientation: orientation, imageSize: cropSourceSize, sourceSize: sourceSize
-        )
+        canvasWorkflow.selectCropAspectRatio(aspectRatio, orientation: orientation)
     }
 
-    func setCropStraightenAngle(_ angle: Double) {
-        canvasState.setCropStraightenAngle(angle, sourceSize: sourceSize)
-        scheduleInteractivePreview()
-    }
+    func setCropStraightenAngle(_ angle: Double) { canvasWorkflow.setCropStraightenAngle(angle) }
+    func setCropVerticalPerspective(_ value: Double) { canvasWorkflow.setCropVerticalPerspective(value) }
+    func setCropHorizontalPerspective(_ value: Double) { canvasWorkflow.setCropHorizontalPerspective(value) }
+    func runCropAuto() { canvasWorkflow.runCropAuto() }
+    func toggleCropFlip(horizontal: Bool) { canvasWorkflow.toggleCropFlip(horizontal: horizontal) }
+    func commitCrop() { canvasWorkflow.commitCrop() }
+    func cancelCrop() { canvasWorkflow.cancelCrop() }
+    func resetCrop() { canvasWorkflow.resetCrop() }
+    func rotateClockwise() { canvasWorkflow.rotateClockwise() }
+    func rotateCounterClockwise() { canvasWorkflow.rotateCounterClockwise() }
+    func resetRotation() { canvasWorkflow.resetRotation() }
 
-    func setCropVerticalPerspective(_ value: Double) {
-        canvasState.setCropVerticalPerspective(value)
-        scheduleInteractivePreview()
-    }
+    // MARK: - Canvas navigation façade
 
-    func setCropHorizontalPerspective(_ value: Double) {
-        canvasState.setCropHorizontalPerspective(value)
-        scheduleInteractivePreview()
-    }
-
-    /// Crop-workspace Auto is intentionally separate from the global Light/Color Auto engine.
-    /// Until a reliable horizon signal is available from photo analysis, the safe result is an
-    /// explicit no-op rather than a guessed crop or straighten.
-    func runCropAuto() {
-        guard canvasState.isCropToolActive else { return }
-        statusMessage = "Auto crop: no reliable horizon detected"
-    }
-
-    func toggleCropFlip(horizontal: Bool) {
-        canvasState.toggleCropFlip(horizontal: horizontal)
-        schedulePreview()
-    }
-
-    /// Commit the current draft as one ordinary document mutation, giving it persistence, undo,
-    /// copy/paste, cache invalidation, and preview/export parity automatically.
-    func commitCrop() {
-        guard canvasState.isCropToolActive else { return }
-        let committed = canvasState.cropDraft ?? CropAdjustments.unitRect
-        let aspectRatio = canvasState.cropAspectRatio
-        let orientation = canvasState.cropOrientation
-        let cropRotation = canvasState.cropRotation
-        let straightenAngle = canvasState.cropStraightenAngle
-        let flipHorizontal = canvasState.cropFlipHorizontal
-        let flipVertical = canvasState.cropFlipVertical
-        let verticalPerspective = canvasState.cropVerticalPerspective
-        let horizontalPerspective = canvasState.cropHorizontalPerspective
-        canvasState.finishCrop()
-        restoreCropPresentation()
-        let previousDocument = document
-        updateDocument {
-            $0.rotation = $0.rotation.addingClockwiseQuarterTurns(cropRotation.rawValue / 90)
-            $0.crop = CropAdjustments(
-                normalizedRect: committed, aspectRatio: aspectRatio, orientation: orientation,
-                straightenAngle: straightenAngle,
-                flipHorizontal: flipHorizontal,
-                flipVertical: flipVertical,
-                verticalPerspective: verticalPerspective,
-                horizontalPerspective: horizontalPerspective
-            )
-        }
-        canvasState.fit()
-        // Applying an unchanged draft is still a composition transition: updateDocument quite
-        // correctly records no history entry, but the temporary uncropped preview must be replaced
-        // by the committed framing.
-        if document == previousDocument {
-            schedulePreview()
-        }
-        statusMessage = "Crop applied"
-    }
-
-    /// Abandon the draft and restore the committed framing without adding an undo entry.
-    func cancelCrop() {
-        guard canvasState.isCropToolActive else { return }
-        canvasState.finishCrop()
-        restoreCropPresentation()
-        canvasState.fit()
-        // Restore the committed framing without touching history or persistence.
-        schedulePreview()
-        statusMessage = hasCropAdjustments ? "Crop unchanged" : "Crop cancelled"
-    }
-
-    private func restoreCropPresentation() {
-        guard let snapshot = cropPresentationSnapshot else { return }
-        cropPresentationSnapshot = nil
-        isSourceBrowserPresented = snapshot.isSourceBrowserPresented
-        inspectorState.tab = snapshot.inspectorTab
-        inspectorState.isPresented = snapshot.isInspectorPresented
-    }
-
-    /// While editing, Reset returns the draft to the full image. Outside the tool it clears the
-    /// committed crop through the normal history/persistence path.
-    func resetCrop() {
-        if canvasState.isCropToolActive {
-            canvasState.resetCropDraft()
-            statusMessage = "Crop reset"
-        } else {
-            endUndoGrouping()
-            updateDocument { $0.crop = .neutral }
-            canvasState.fit()
-        }
-    }
-
-    // MARK: - Rotation
-
-    /// Rotate the active image one quarter-turn clockwise. The edit is value state, so it is
-    /// persisted with the photo and participates in the ordinary document history.
-    func rotateClockwise() {
-        rotateImage(clockwise: true)
-    }
-
-    /// Rotate the active image one quarter-turn counterclockwise.
-    func rotateCounterClockwise() {
-        rotateImage(clockwise: false)
-    }
-
-    /// Clear only the rotation while preserving crop, tone, colour, and other spatial edits.
-    func resetRotation() {
-        guard sourceImage != nil else {
-            statusMessage = "Open an image first"
-            return
-        }
-        endUndoGrouping()
-        updateDocument { document in
-            let turnsToUndo = document.rotation.rawValue / 90
-            document.crop = document.crop.rotated(byClockwiseQuarterTurns: -turnsToUndo)
-            document.rotation = .zero
-        }
-        canvasState.fit()
-        statusMessage = "Rotation reset"
-    }
-
-    private func rotateImage(clockwise: Bool) {
-        guard sourceImage != nil else {
-            statusMessage = "Open an image first"
-            return
-        }
-        if canvasState.isCropToolActive {
-            // Crop owns rotation while it is open. Remap the transient frame and render the
-            // effective orientation without touching the durable document or leaving Crop.
-            guard canvasState.rotateCrop(clockwise: clockwise) else { return }
-            schedulePreview()
-            statusMessage = "Rotated \(clockwise ? "clockwise" : "counterclockwise")"
-            return
-        }
-        endUndoGrouping()
-        updateDocument { document in
-            document.rotation = document.rotation.addingClockwiseQuarterTurns(clockwise ? 1 : -1)
-            document.crop = document.crop.rotated(byClockwiseQuarterTurns: clockwise ? 1 : -1)
-        }
-        canvasState.fit()
-        statusMessage = "Rotated \(clockwise ? "clockwise" : "counterclockwise")"
-    }
-
-    // MARK: - Canvas navigation
-
-    /// Apply a presentation-only navigation change. Canvas navigation must never pass through
-    /// `updateDocument`, because the edit history describes photo content rather than how that
-    /// content is currently framed in the viewport.
-    private func applyCanvasNavigation(_ change: () -> Void) {
-        change()
-        schedulePreview()
-    }
-
-    func fitCanvas() {
-        applyCanvasNavigation { canvasState.fit() }
-    }
-
-    func fillCanvas() {
-        applyCanvasNavigation { canvasState.fill() }
-    }
-
-    func resetCanvas() {
-        applyCanvasNavigation { canvasState.reset() }
-    }
-
-    func toggleCanvasZoom() {
-        applyCanvasNavigation { canvasState.toggleFitAndRememberedZoom() }
-    }
-
+    func fitCanvas() { canvasWorkflow.fitCanvas() }
+    func fillCanvas() { canvasWorkflow.fillCanvas() }
+    func resetCanvas() { canvasWorkflow.resetCanvas() }
+    func toggleCanvasZoom() { canvasWorkflow.toggleCanvasZoom() }
     func toggleCanvasZoom(at viewportPoint: CGPoint, viewportSize: CGSize) {
-        guard let imageExtent = canvasImageExtent else {
-            toggleCanvasZoom()
-            return
-        }
-        applyCanvasNavigation {
-            canvasState.toggleFitAndRememberedZoom(
-                at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
-        }
+        canvasWorkflow.toggleCanvasZoom(at: viewportPoint, viewportSize: viewportSize)
     }
-
-    /// Set the canvas presentation zoom without touching the document or its undo/redo history.
-    func setCanvasZoom(_ value: CGFloat) {
-        let oldValue = canvasState.navigation.zoom
-        canvasState.setZoom(value)
-        guard canvasState.navigation.zoom != oldValue else { return }
-        if !isPreviewInteractionActive {
-            previewPresentation.advanceDisplayRevision()
-        }
-        cancelHistogram(clear: false, pump: false)
-        if isPreviewInteractionActive {
-            scheduleInteractivePreview()
-        } else {
-            scheduleSettledPreviewAfterDebounce()
-        }
-    }
-
-    func zoomCanvas(by factor: CGFloat) {
-        guard factor.isFinite, factor > 0 else { return }
-        setCanvasZoom(canvasState.navigation.zoom * factor)
-    }
-
+    func setCanvasZoom(_ value: CGFloat) { canvasWorkflow.setCanvasZoom(value) }
+    func zoomCanvas(by factor: CGFloat) { canvasWorkflow.zoomCanvas(by: factor) }
     func zoomCanvas(by factor: CGFloat, at viewportPoint: CGPoint, viewportSize: CGSize) {
-        guard factor.isFinite, factor > 0, let imageExtent = canvasImageExtent else { return }
-        let oldNavigation = canvasState.navigation
-        canvasState.zoom(
-            by: factor, at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
-        finishCanvasZoomChange(from: oldNavigation)
-    }
-
-    private var canvasImageExtent: CGRect? {
-        guard let imageSource else { return nil }
-        // Straighten enlarges the geometry frame before the crop rect applies, exactly as
-        // ResolutionPlanner and RenderPipeline size the presented image; ignoring it would
-        // anchor zoom and pan against the wrong aspect for a straightened crop.
-        let oriented = RenderPipeline.geometryExtent(
-            of: document.rotation.orientedExtent(imageSource.nativeExtent), for: document.crop)
-        let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
-        let size = CGSize(width: oriented.width * crop.width, height: oriented.height * crop.height)
-        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
-            return nil
-        }
-        return CGRect(origin: .zero, size: size)
-    }
-
-    private func finishCanvasZoomChange(from oldNavigation: CanvasNavigation) {
-        guard canvasState.navigation != oldNavigation else { return }
-        if !isPreviewInteractionActive {
-            previewPresentation.advanceDisplayRevision()
-        }
-        cancelHistogram(clear: false, pump: false)
-        if isPreviewInteractionActive {
-            scheduleInteractivePreview()
-        } else {
-            scheduleSettledPreviewAfterDebounce()
-        }
+        canvasWorkflow.zoomCanvas(by: factor, at: viewportPoint, viewportSize: viewportSize)
     }
 
     /// Pinch-zoom is presentation-only, unlike a slider drag, so this deliberately does not call
@@ -4582,22 +4325,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.endInteraction()
     }
 
-    /// Pan is a presentation-only operation. The caller supplies a viewport-space pointer delta,
-    /// so the image follows that delta on both axes. The Metal presenter moves the current frame
-    /// immediately; a matching ROI is requested so newly exposed edges refine to full detail.
+    /// Pan is presentation-only and is coordinated with the current rendered image extent.
     func panCanvas(by delta: CGSize, viewportSize: CGSize) {
-        guard let imageExtent = canvasImageExtent else { return }
-        let previousNavigation = canvasState.navigation
-        canvasState.pan(by: delta, imageExtent: imageExtent, viewportSize: viewportSize)
-        guard canvasState.navigation != previousNavigation else { return }
-
-        // A render planned for the previous focal point must not publish against this newer pan.
-        // During an explicit canvas gesture the interaction generation is kept stable for edit
-        // coalescing, so advance the display fence here for every changed pan position.
-        if isPreviewInteractionActive {
-            previewPresentation.advanceDisplayRevision()
-        }
-        scheduleInteractivePreview()
+        canvasWorkflow.panCanvas(by: delta, viewportSize: viewportSize)
     }
 
     /// Read-only seam for controls implemented in extensions. Keeping the stored interaction flag
@@ -4700,7 +4430,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceSize = restored.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
         let cropToolRemainsActive = canvasState.isCropToolActive
         if cropToolRemainsActive {
-            canvasState.reseedCrop(using: restored.crop, sourceSize: sourceSize)
+            canvasWorkflow.reseedCrop(using: restored.crop, sourceSize: sourceSize)
         }
         if !document.hasVisibleLookEdits {
             // Space is a transient single-view state. Undoing/redoing to identity must not leave
@@ -5597,6 +5327,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         await library.shutdown()
         await export.shutdown()
+        canvasWorkflow.shutdown()
         await photosImportCoordinator.shutdown()
         await derive.shutdown()
         await lookSave.shutdown()
@@ -5612,5 +5343,78 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             if let task { await task.value }
         }
         await persistence.discard()
+    }
+}
+
+
+extension AppViewModel: CanvasWorkflowDestination {
+    var canvasWorkflowHasSource: Bool { sourceImage != nil }
+    var canvasWorkflowDocument: EditDocument { document }
+    var canvasWorkflowSourceSize: CGSize { sourceSize }
+    var canvasWorkflowHasCropAdjustments: Bool { hasCropAdjustments }
+
+    var canvasWorkflowImageExtent: CGRect? {
+        guard let imageSource else { return nil }
+        let oriented = RenderPipeline.geometryExtent(
+            of: document.rotation.orientedExtent(imageSource.nativeExtent), for: document.crop
+        )
+        let crop = document.crop.normalizedRect ?? CropAdjustments.unitRect
+        let size = CGSize(width: oriented.width * crop.width, height: oriented.height * crop.height)
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
+            return nil
+        }
+        return CGRect(origin: .zero, size: size)
+    }
+
+    func updateCanvasWorkflowDocument(_ transform: (inout EditDocument) -> Void) {
+        updateDocument(transform)
+    }
+
+    func endCanvasWorkflowUndoGrouping() { endUndoGrouping() }
+    func setCanvasWorkflowStatus(_ message: String) { statusMessage = message }
+
+    func captureCropWorkflowPresentation() -> CropWorkflowPresentation {
+        CropWorkflowPresentation(
+            isInspectorPresented: inspectorState.isPresented,
+            inspectorTab: inspectorState.tab.rawValue,
+            isSourceBrowserPresented: isSourceBrowserPresented
+        )
+    }
+
+    func prepareCropWorkflowPresentation() {
+        isSourceBrowserPresented = false
+        inspectorState.isPresented = true
+    }
+
+    func restoreCropWorkflowPresentation(_ presentation: CropWorkflowPresentation) {
+        isSourceBrowserPresented = presentation.isSourceBrowserPresented
+        if let tab = InspectorTab(rawValue: presentation.inspectorTab) {
+            inspectorState.tab = tab
+        }
+        inspectorState.isPresented = presentation.isInspectorPresented
+    }
+
+    func scheduleCanvasWorkflowPreview() { schedulePreview() }
+    func scheduleCanvasWorkflowCropEntryPreview() { scheduleCropEntryPreview() }
+    func scheduleCanvasWorkflowInteractivePreview() { scheduleInteractivePreview() }
+
+    func canvasNavigationDidChange(_ change: CanvasNavigationChange) {
+        switch change {
+        case .zoom:
+            if !isPreviewInteractionActive { previewPresentation.advanceDisplayRevision() }
+            cancelHistogram(clear: false, pump: false)
+            if isPreviewInteractionActive {
+                scheduleInteractivePreview()
+            } else {
+                scheduleSettledPreviewAfterDebounce()
+            }
+        case .pan:
+            if isPreviewInteractionActive { previewPresentation.advanceDisplayRevision() }
+            scheduleInteractivePreview()
+        }
+    }
+
+    func setCanvasWorkflowOriginalVisible(_ visible: Bool) {
+        isShowingOriginal = visible
     }
 }
