@@ -4942,7 +4942,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         histogramTaskAssetID = nil
         if isHistogramLoading { isHistogramLoading = false }
         if histogramErrorMessage != nil { histogramErrorMessage = nil }
-        if clear { histogram = nil }
+        if clear, histogram != nil { histogram = nil }
     }
 
     /// Inspector-presentation gate for histogram work (KRMA-521). Called synchronously from the
