@@ -24,7 +24,7 @@ fences. Feature workflows do not reach into one another's private state.
 
 | Workflow | Owner | Values crossing the boundary |
 | --- | --- | --- |
-| Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
+| Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions, undo/redo, revisions, and clipboard | `EditDocument`, `PhotoEditSession`, `EditClipboardPayload`, revision numbers |
 | Preview and comparison | `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render admission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
 | Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
@@ -71,6 +71,16 @@ callbacks are refresh signals only. `AppViewModel` retains the compatibility fa√
 shutdown by disconnecting callbacks, stopping the shell and media workflow, stopping collection and
 provider work, awaiting editor/render collaborators, cancelling the shared scheduler, and then
 discarding only explicitly abandoned persistence snapshots.
+
+`LibraryImportCoordinator` is the shared package-write boundary for URL and in-memory imports from
+Open, folders, Photos, and removable media. It owns the replaceable import generation, active
+worker handle, progress observation task, and progress publication; starting or adopting a newer
+operation cancels the previous worker and fences its late callbacks. Its command surface is limited
+to the package session's import and batch-finish entry points. `AppViewModel` remains responsible
+for collection refresh, active-asset selection, display-name overrides, outcome presentation, and
+the compatibility entry points used by views and provider coordinators. Worker cancellation is
+cooperative and shutdown cancels and awaits the progress observer; the package session's shared
+scheduler continues to bound actual I/O admission.
 
 ## Masking-workflow ownership
 

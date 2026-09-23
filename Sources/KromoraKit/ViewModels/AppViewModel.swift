@@ -643,8 +643,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var droppedPromiseTask: Task<Void, Never>?
     /// Every asynchronous import handoff captures this token. A late provider result can never
     /// publish into a newer import operation.
-    private var importOperationID = UUID()
-    private var portableImportTask: PortablePackageImportHandle?
     @Published private(set) var portableImportProgress: PortablePackageImportProgress?
 
     /// Removable volumes are discovered independently of the selector so the Import menu can name
@@ -690,6 +688,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Provider interaction and progress belong to the application composition root, while this
     /// model remains the narrow destination for durable collection admission and source loading.
     let photosImportCoordinator: PhotosImportCoordinator
+    /// Shared package-write generation, cancellation, and progress owner for every import source.
+    private lazy var libraryImportCoordinator = LibraryImportCoordinator(
+        package: portableLibrary,
+        isShuttingDown: { [weak self] in self?.isShuttingDown ?? true },
+        publishProgress: { [weak self] progress in self?.portableImportProgress = progress },
+        publishStatus: { [weak self] status in self?.statusMessage = status }
+    )
     /// Coalesced durable edit snapshots. The application model routes persistence policy here;
     /// file I/O remains inside `EditDocumentStore`.
     let persistence: EditPersistenceCoordinator
@@ -1496,16 +1501,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     // MARK: - Image loading
 
     private func beginImportOperation() -> UUID {
-        portableImportTask?.cancel()
-        portableImportTask = nil
-        portableImportProgress = nil
-        let id = UUID()
-        importOperationID = id
-        return id
+        libraryImportCoordinator.beginOperation()
     }
 
     private func isCurrentImport(_ id: UUID) -> Bool {
-        importOperationID == id && !isShuttingDown
+        libraryImportCoordinator.isCurrent(id)
     }
 
     private func presentImportOutcome(_ summary: ImportOutcomeSummary, prefix: String) {
@@ -1536,28 +1536,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         onSuccess: @escaping @MainActor (PortablePackageImportResult) -> Void,
         onFailure: @escaping @MainActor (Error) -> Void
     ) {
-        portableImportTask = handle
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            for await progress in handle.progress {
-                guard self.isCurrentImport(operationID) else { return }
-                self.portableImportProgress = progress
-                self.statusMessage = "(prefix) (progress.processed)/(progress.total)…"
-            }
-            do {
-                let result = try await handle.value()
-                guard self.isCurrentImport(operationID) else { return }
-                self.portableImportTask = nil
-                self.portableImportProgress = nil
-                _ = total
-                onSuccess(result)
-            } catch {
-                guard self.isCurrentImport(operationID) else { return }
-                self.portableImportTask = nil
-                self.portableImportProgress = nil
-                onFailure(error)
-            }
-        }
+        _ = total
+        libraryImportCoordinator.observe(
+            handle, operationID: operationID, prefix: prefix,
+            onSuccess: onSuccess, onFailure: onFailure
+        )
     }
 
     private func reloadPortableCollection() throws {
@@ -1764,7 +1747,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         let operationID = operationID ?? beginImportOperation()
         cancelPendingPreviewDebounce()
-        guard let portableLibrary else {
+        guard portableLibrary != nil else {
             if usesInjectedEditStore {
                 load(name: url.lastPathComponent, url: url, data: nil)
                 return
@@ -1776,7 +1759,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // A direct URL open is a request to keep this source addressable. The collection-aware
             // path above handles reopening an already admitted source, while a new URL must remain
             // distinct even when its bytes match another referenced photo.
-            let handle = try portableLibrary.startImportURLs(
+            let handle = try libraryImportCoordinator.startImportURLs(
                 [url], duplicatePolicy: .importAnyway
             )
             observePortableImport(
@@ -2462,7 +2445,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func openImages(urls: [URL], operationID: UUID? = nil) -> ImportOutcomeSummary? {
         guard !urls.isEmpty else { return nil }
         let operationID = operationID ?? beginImportOperation()
-        guard let portableLibrary else {
+        guard portableLibrary != nil else {
             presentImportOutcome(
                 .failure(total: urls.count, reason: portableLibraryOpenError ?? "The library package is unavailable."),
                 prefix: "Photo import"
@@ -2474,7 +2457,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // able to inspect the newly admitted, sorted collection as soon as this method
             // returns. The worker-backed import API is appropriate for streamed Photos/folder
             // workflows, but deferring this boundary leaves the dialog with an empty collection.
-            let result = try portableLibrary.importURLs(urls)
+            let result = try libraryImportCoordinator.importURLs(urls)
             guard isCurrentImport(operationID) else { return nil }
             try reloadPortableCollection()
 
@@ -2520,7 +2503,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func openImage(data: Data, name: String) {
         let operationID = beginImportOperation()
-        guard let portableLibrary else {
+        guard portableLibrary != nil else {
             presentImportOutcome(
                 .failure(total: 1, reason: portableLibraryOpenError ?? "The library package is unavailable."),
                 prefix: "Photo import"
@@ -2528,7 +2511,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return
         }
         do {
-            let handle = try portableLibrary.startImportData(data, name: name)
+            let handle = try libraryImportCoordinator.startImportData(data, name: name)
             observePortableImport(
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
@@ -2578,11 +2561,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func insertPhotosImport(
         _ item: ImageCollection.PhotoImportItem, ordinal: Int
     ) -> PhotosImportInsertionOutcome {
-        guard let portableLibrary else {
+        guard portableLibrary != nil else {
             return .failed(portableLibraryOpenError ?? "The library package is unavailable.")
         }
         do {
-            let result = try portableLibrary.importData(
+            let result = try libraryImportCoordinator.importData(
                 item.data,
                 name: item.name,
                 rebuildIndex: !isPortablePhotosImportActive
@@ -2623,11 +2606,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func insertPhotosImportAsync(
         _ item: ImageCollection.PhotoImportItem, ordinal: Int
     ) async -> PhotosImportInsertionOutcome {
-        guard let portableLibrary else {
+        guard portableLibrary != nil else {
             return .failed(portableLibraryOpenError ?? "The library package is unavailable.")
         }
         do {
-            let result = try portableLibrary.startImportData(
+            let result = try libraryImportCoordinator.startImportData(
                 item.data,
                 name: item.name,
                 rebuildIndex: !isPortablePhotosImportActive
@@ -2681,7 +2664,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func finishPhotosImportDestination(summary: ImportOutcomeSummary) {
         _ = summary
-        guard isPortablePhotosImportActive, let portableLibrary else { return }
+        guard isPortablePhotosImportActive, portableLibrary != nil else { return }
         do {
             defer {
                 isPortablePhotosImportActive = false
@@ -2693,7 +2676,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             do {
                 // Publish the coalesced membership delta before materializing the presentation
                 // bridge; otherwise the bridge would snapshot the previous index generation.
-                portableLibrary.finishImportBatch()
+                libraryImportCoordinator.finishImportBatch()
                 try reloadPortableCollection()
                 if portablePhotosImportWasEmpty,
                    let assetID = portablePhotosImportFirstAssetID
@@ -2752,9 +2735,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func importRemovableMedia(_ request: RemovableMediaImportRequest) {
         let files = request.files
         guard !isShuttingDown else { return }
-        importOperationID = request.operationID
+        libraryImportCoordinator.adoptOperation(request.operationID)
         let operationID = request.operationID
-        guard let portableLibrary else {
+        guard portableLibrary != nil else {
             libraryMediaWorkflow.finishImport(
                 summary: .failure(
                     total: request.totalSelected,
@@ -2765,7 +2748,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return
         }
         do {
-            let handle = try portableLibrary.startImportURLs(files.map(\.url))
+            let handle = try libraryImportCoordinator.startImportURLs(files.map(\.url))
             observePortableImport(
                 handle, operationID: operationID, total: files.count,
                 prefix: "Removable media import",
@@ -2885,7 +2868,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func openSourceFolder(url: URL) -> ImportOutcomeSummary? {
         let operationID = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
-        guard let portableLibrary else {
+        guard portableLibrary != nil else {
             let summary = ImportOutcomeSummary.failure(
                 total: 0, reason: portableLibraryOpenError ?? "The library package is unavailable."
             )
@@ -2898,7 +2881,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return nil
         }
         do {
-            let handle = try portableLibrary.startImportURLs(files)
+            let handle = try libraryImportCoordinator.startImportURLs(files)
             observePortableImport(
                 handle, operationID: operationID, total: files.count, prefix: "Folder import",
                 onSuccess: { [weak self] result in
@@ -5609,6 +5592,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         droppedPromiseTask = nil
         await maskingWorkflow.shutdown()
         await libraryMediaWorkflow.shutdown()
+        await libraryImportCoordinator.shutdown()
         await sourceSession.shutdown()
 
         await library.shutdown()
