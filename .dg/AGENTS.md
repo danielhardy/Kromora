@@ -11,7 +11,7 @@ This project is managed with DispatchGraph: markdown issues, YAML boards, and an
 - Pickup is enabled (`dg pickup`) with runner `codex` (model `gpt-5.6-luna`).
 - Yolo mode is enabled: pickup skips the human review gate by automatically promoting successful `review` handoffs to `verification`. Agents should still hand off to `review` normally.
 - Worktree isolation is disabled; `dg pickup` permits only one active claim in this shared working tree and waits for it to be released or expire before starting another.
-- Counterpoint verification is enabled; default verifier: `pi`.
+- Counterpoint verification is enabled; default verifier: `claude` (model `sonnet`).
 - Pickup automatically moves successful implementation handoffs from `review` to `verification`, releases the implementation lease, and launches the verifier.
 - Verification uses its own process pool (max 1), independent from implementation pickup (max 1); worktrees isolate checkouts, but API spend and local services remain shared.
 - Verifiers review correctness, maintainability, security, and performance; apply only localized safe fixes; create `verification`-labeled child tickets for broader findings; return blockers to `review`; pass by completing to `done`.
