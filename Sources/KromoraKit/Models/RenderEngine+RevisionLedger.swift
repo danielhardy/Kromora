@@ -214,6 +214,9 @@ extension RenderEngine {
         var trackedRenderSourceCount: Int { latestRenderRequestRevisions.count }
         var trackedMaskRequestCount: Int { latestMaskRequestRevisions.count }
         var trackedMaskSourceCount: Int { latestMaskRecipeIdentities.count }
+        /// Length of the overlay recency queue itself (not just the table it orders), so a
+        /// stress test can prove recipe-table eviction keeps the queue bounded too.
+        var trackedOverlayMaskOrderCount: Int { overlayMaskOrder.count }
 
         // MARK: - Resets
 
@@ -265,6 +268,7 @@ extension RenderEngine {
                     continue
                 }
                 latestOverlayMaskRequestRevisions.removeValue(forKey: oldestSource)
+                overlayMaskOrder.removeAll { $0 == oldestSource }
                 removeMaskRequests(withSourcePrefix: oldestSource)
             }
             // Bounded FIFO eviction. Array removal can shift entries, but the table has a strict

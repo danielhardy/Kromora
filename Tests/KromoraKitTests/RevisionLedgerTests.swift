@@ -136,6 +136,36 @@ final class RevisionLedgerTests: XCTestCase {
         )
     }
 
+    func testOverlayMaskRecencyQueueStaysBoundedWhenRecipeAndOverlayRecencyDiverge() {
+        var ledger = RenderEngine.RevisionLedger(
+            maximumTrackedRenderSources: 64, maximumTrackedMaskSources: 2,
+            maximumTrackedMaskRequests: 64
+        )
+        _ = ledger.noteMaskRequest(
+            sourceKey: "a", revision: 1, maskIdentity: "recipe-a", documentIdentity: "doc-a"
+        )
+        _ = ledger.noteMaskRequest(
+            sourceKey: "b", revision: 2, maskIdentity: "recipe-b", documentIdentity: "doc-b"
+        )
+        // Same-recipe re-notes refresh overlay recency without touching recipe recency, so
+        // the two queues disagree about which source is oldest from here on.
+        _ = ledger.noteMaskRequest(
+            sourceKey: "a", revision: 3, maskIdentity: "recipe-a", documentIdentity: "doc-a2"
+        )
+        _ = ledger.noteMaskRequest(
+            sourceKey: "c", revision: 4, maskIdentity: "recipe-c", documentIdentity: "doc-c"
+        )
+        _ = ledger.noteMaskRequest(
+            sourceKey: "b", revision: 5, maskIdentity: "recipe-b", documentIdentity: "doc-b2"
+        )
+        XCTAssertEqual(ledger.trackedMaskSourceCount, 2)
+        XCTAssertLessThanOrEqual(
+            ledger.trackedOverlayMaskOrderCount, 2,
+            "recipe-table eviction must also drop the evicted source's overlay recency " +
+                "entry, or the queue outgrows its cap and touch() stops being O(capacity)"
+        )
+    }
+
     func testRemoveAllClearsRenderAndMaskState() {
         var ledger = RenderEngine.RevisionLedger()
         ledger.beginRenderRequest(sourceKey: "s", revision: 1)
