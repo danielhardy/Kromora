@@ -30,7 +30,7 @@ Extract CanvasInteractionState/crop workflow coordinator (crop, rotation, canvas
 
 ## Acceptance criteria
 
-- [ ] 
+- [ ]
 
 ## Implementation notes
 
