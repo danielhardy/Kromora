@@ -322,7 +322,7 @@ enum PortablePackageError: Error, Equatable, CustomStringConvertible {
 /// This type owns no transaction journal, lease, import pipeline, or UI integration. Writes use
 /// Foundation's atomic single-file write as a convenience, but commit ordering and crash recovery
 /// belong to the sibling transaction ticket.
-struct PortableLibraryPackage {
+struct PortableLibraryPackage: Sendable {
     let rootURL: URL
     private(set) var manifest: PortablePackageManifest
 

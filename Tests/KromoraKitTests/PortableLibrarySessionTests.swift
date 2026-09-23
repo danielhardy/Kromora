@@ -391,4 +391,107 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         await scheduler.cancelAllAndWait()
         await session.shutdown()
     }
+
+    func testAsynchronousStartupRebuildPublishesFirstPageAndReleasesLeaseOnShutdown() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("AsyncStartup.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("AsyncStartup.index")
+        let initial = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let generatedPackage = initial.package
+        await initial.shutdown()
+
+        // Make a representative cold catalog without generating hundreds of image files. The
+        // query projection only reads these canonical membership summaries.
+        var generatedEntries: [String: [PortablePackageMembershipEntry]] = [:]
+        for number in 0..<550 {
+            let assetID = PortablePhotoAssetID()
+            let shard = PortableLibraryPackage.shard(for: assetID)
+            generatedEntries[shard, default: []].append(
+                PortablePackageMembershipEntry(
+                    assetID: assetID,
+                    recordPath: "Assets/\(shard)/\(assetID.raw)/asset.json",
+                    summary: PortablePackageAssetSummary(displayName: "generated-\(number)")
+                )
+            )
+        }
+        for shard in PortableLibraryPackage.allShards {
+            try generatedPackage.writeMembershipShard(
+                try PortablePackageMembershipShard(
+                    shard: shard, entries: generatedEntries[shard, default: []]
+                )
+            )
+        }
+        try Data("broken index".utf8).write(to: indexURL)
+
+        let scheduler = ImageWorkScheduler()
+        let blockerStarted = OSAllocatedUnfairLock(initialState: false)
+        let blockerRelease = OSAllocatedUnfairLock(initialState: false)
+        XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("startup-test-blocker"), lane: .maintenance) {
+            blockerStarted.withLock { $0 = true }
+            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+        })
+        for _ in 0..<1_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        XCTAssertTrue(blockerStarted.withLock { $0 })
+
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, pageSize: 25,
+            scheduler: scheduler, asynchronousIndexLoading: true
+        )
+        XCTAssertEqual(session.assetCount, 0)
+        var states: [LibraryIndexLoadingState] = []
+        session.onIndexLoadingStateChange = { states.append($0) }
+        blockerRelease.withLock { $0 = true }
+
+        for _ in 0..<20_000 {
+            if session.indexLoadingState?.isComplete == true { break }
+            await Task.yield()
+        }
+        XCTAssertTrue(states.contains { !$0.isComplete })
+        XCTAssertEqual(session.assetCount, 550)
+        XCTAssertEqual(session.page(at: 0).items.count, 25)
+        XCTAssertEqual(session.indexLoadingState?.errorMessage, nil)
+
+        await session.shutdown()
+        let reopened = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        XCTAssertEqual(reopened.assetCount, 550)
+        await reopened.shutdown()
+
+        let warm = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, pageSize: 25,
+            asynchronousIndexLoading: true
+        )
+        for _ in 0..<20_000 where warm.isLoadingIndex { await Task.yield() }
+        XCTAssertFalse(warm.isLoadingIndex)
+        XCTAssertEqual(warm.assetCount, 550)
+        XCTAssertEqual(warm.indexLoadingState?.errorMessage, nil)
+        await warm.shutdown()
+    }
+
+    func testAsynchronousStartupShutdownCancelsQueuedIndexWorkAndReleasesLease() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("CancelledStartup.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("CancelledStartup.index")
+        let initial = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        await initial.shutdown()
+        try? FileManager.default.removeItem(at: indexURL)
+
+        let scheduler = ImageWorkScheduler()
+        let blockerStarted = OSAllocatedUnfairLock(initialState: false)
+        let blockerRelease = OSAllocatedUnfairLock(initialState: false)
+        XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("cancel-startup-blocker"), lane: .maintenance) {
+            blockerStarted.withLock { $0 = true }
+            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+        })
+        for _ in 0..<1_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        XCTAssertTrue(blockerStarted.withLock { $0 })
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, scheduler: scheduler,
+            asynchronousIndexLoading: true
+        )
+
+        let shutdown = Task { await session.shutdown() }
+        blockerRelease.withLock { $0 = true }
+        await shutdown.value
+
+        let reopened = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        try reopened.lease.release()
+    }
 }

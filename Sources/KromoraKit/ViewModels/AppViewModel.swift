@@ -850,7 +850,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: RenderEngine.shared,
             includeBundledLooks: false,
             portablePackageURL: packageURL,
-            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer()
+            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer(),
+            asynchronousPortableLibraryIndexLoading: true
         )
     }
 
@@ -862,7 +863,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: RenderEngine.shared,
             includeBundledLooks: includeBundledLooks,
             portablePackageURL: packageURL,
-            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer()
+            leaseRecoveryConfirmer: AppKitPortablePackageLeaseRecoveryConfirmer(),
+            asynchronousPortableLibraryIndexLoading: true
         )
     }
 
@@ -886,7 +888,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
         leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
-        portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil
+        portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil,
+        asynchronousPortableLibraryIndexLoading: Bool = false
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -913,7 +916,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 let opened = try Self.openPortableLibrarySession(
                     at: normalizedPortablePackageURL,
                     confirmer: leaseRecoveryConfirmer,
-                    scheduler: packageIOScheduler
+                    scheduler: packageIOScheduler,
+                    asynchronousIndexLoading: asynchronousPortableLibraryIndexLoading
                 )
                 session = opened.session
                 recoveredPreviousWriter = opened.recoveredPreviousWriter
@@ -1183,6 +1187,33 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
+        if let portableLibrary, portableLibrary.isLoadingIndex {
+            statusMessage = "Opening library index…"
+        }
+        portableLibrary?.onIndexLoadingStateChange = { [weak self] state in
+            guard let self, !self.isShuttingDown else { return }
+            if let error = state.errorMessage {
+                self.presentError("Could not open the library index: \(error)")
+                return
+            }
+            if state.isComplete {
+                if self.statusMessage.hasPrefix("Opening library index")
+                    || self.statusMessage.hasPrefix("Rebuilding library index") {
+                    self.statusMessage = ""
+                }
+            } else {
+                self.statusMessage =
+                    "Rebuilding library index… \(state.shardsRead) of \(state.totalShards) sections"
+            }
+            do {
+                try self.reloadPortableWindow(pageIndex: 0)
+            } catch {
+                self.presentError("Could not read the library package: \(error.localizedDescription)")
+            }
+        }
+        if let state = portableLibrary?.indexLoadingState {
+            portableLibrary?.onIndexLoadingStateChange?(state)
+        }
         if recoveredPreviousWriter {
             statusMessage = "Recovered interrupted writes from the previous library session."
         }
@@ -1350,15 +1381,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private static func openPortableLibrarySession(
         at url: URL,
         confirmer: (any PortablePackageLeaseRecoveryConfirming)?,
-        scheduler: ImageWorkScheduler
+        scheduler: ImageWorkScheduler,
+        asynchronousIndexLoading: Bool = false
     ) throws -> (session: PortableLibrarySession, recoveredPreviousWriter: Bool) {
         do {
-            return (try PortableLibrarySession(at: url, scheduler: scheduler), false)
+            return (try PortableLibrarySession(
+                at: url, scheduler: scheduler,
+                asynchronousIndexLoading: asynchronousIndexLoading
+            ), false)
         } catch let error as PortablePackageLeaseError {
             switch error {
             case .contended(let info) where info.localWriterState == .dead:
                 try PortablePackageLease.recoverDeadWriter(at: url)
-                return (try PortableLibrarySession(at: url, scheduler: scheduler), true)
+                return (try PortableLibrarySession(
+                    at: url, scheduler: scheduler,
+                    asynchronousIndexLoading: asynchronousIndexLoading
+                ), true)
             case .expired(let info):
                 let shouldRecover: Bool
                 switch info.localWriterState {
@@ -1371,7 +1409,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 guard shouldRecover else { throw error }
                 return (
                     try PortableLibrarySession(
-                        at: url, recoverExpiredLease: true, scheduler: scheduler
+                        at: url, recoverExpiredLease: true, scheduler: scheduler,
+                        asynchronousIndexLoading: asynchronousIndexLoading
                     ),
                     true
                 )
