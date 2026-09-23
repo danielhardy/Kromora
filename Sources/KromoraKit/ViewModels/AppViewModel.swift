@@ -904,14 +904,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let openedPortableLibrary: PortableLibrarySession?
         let portableOpenError: String?
         let effectiveEditStore: EditDocumentStore
+        var recoveredPreviousWriter = false
         do {
-            let session =
-                try injectedPortableLibrarySession
-                ?? Self.openPortableLibrarySession(
-                at: normalizedPortablePackageURL,
-                confirmer: leaseRecoveryConfirmer,
-                scheduler: packageIOScheduler
-            )
+            let session: PortableLibrarySession
+            if let injectedPortableLibrarySession {
+                session = injectedPortableLibrarySession
+            } else {
+                let opened = try Self.openPortableLibrarySession(
+                    at: normalizedPortablePackageURL,
+                    confirmer: leaseRecoveryConfirmer,
+                    scheduler: packageIOScheduler
+                )
+                session = opened.session
+                recoveredPreviousWriter = opened.recoveredPreviousWriter
+            }
             openedPortableLibrary = session
             portableOpenError = nil
             // An explicitly supplied store is an integration boundary for headless clients and
@@ -1177,6 +1183,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
+        if recoveredPreviousWriter {
+            statusMessage = "Recovered interrupted writes from the previous library session."
+        }
         guard case .some = portableLibrary else {
             presentError(
                 portableLibraryOpenError
@@ -1342,25 +1351,33 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         at url: URL,
         confirmer: (any PortablePackageLeaseRecoveryConfirming)?,
         scheduler: ImageWorkScheduler
-    ) throws -> PortableLibrarySession {
+    ) throws -> (session: PortableLibrarySession, recoveredPreviousWriter: Bool) {
         do {
-            return try PortableLibrarySession(at: url, scheduler: scheduler)
+            return (try PortableLibrarySession(at: url, scheduler: scheduler), false)
         } catch let error as PortablePackageLeaseError {
-            guard case .expired(let info) = error else { throw error }
-            let shouldRecover: Bool
-            if info.writerProcessIsGone {
-                // Ctrl+C / crash of `swift run` leaves an expired lock whose owner is dead. Do not
-                // block launch on an NSAlert that an unbundled process cannot show.
-                shouldRecover = true
-            } else {
-                shouldRecover =
-                    confirmer?.confirmBreakExpiredWriterLease(packageURL: url, info: info)
-                    == true
+            switch error {
+            case .contended(let info) where info.localWriterState == .dead:
+                try PortablePackageLease.recoverDeadWriter(at: url)
+                return (try PortableLibrarySession(at: url, scheduler: scheduler), true)
+            case .expired(let info):
+                let shouldRecover: Bool
+                switch info.localWriterState {
+                case .dead:
+                    shouldRecover = true
+                case .live, .remoteOrUnknown:
+                    shouldRecover = confirmer?.confirmBreakExpiredWriterLease(
+                        packageURL: url, info: info) == true
+                }
+                guard shouldRecover else { throw error }
+                return (
+                    try PortableLibrarySession(
+                        at: url, recoverExpiredLease: true, scheduler: scheduler
+                    ),
+                    true
+                )
+            default:
+                throw error
             }
-            guard shouldRecover else { throw error }
-            return try PortableLibrarySession(
-                at: url, recoverExpiredLease: true, scheduler: scheduler
-            )
         }
     }
 

@@ -141,6 +141,63 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         _ = stale
     }
 
+    func testDeadLocalWriterRecoversBeforeLeaseExpiryAndRollsBackFirst() throws {
+        let packageURL = try makePackage()
+        let stateURL = packageURL.appendingPathComponent("State/value.txt")
+        try FileManager.default.createDirectory(
+            at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: stateURL)
+        let hostID = try XCTUnwrap(PortablePackageLeaseInfo.currentProcessIdentity.hostID)
+        let deadLease = try PortablePackageLease.acquire(
+            at: packageURL, deviceName: "same-mac", processID: .max,
+            writerHostID: hostID, processStartedAt: "1:0", now: now, duration: 180
+        )
+        XCTAssertGreaterThan(deadLease.info.expiresAt, now)
+        XCTAssertEqual(deadLease.info.localWriterState, .dead)
+
+        let injector = PortablePackageFaultInjector(failingAt: .publish)
+        var transaction = try PortablePackageTransaction.begin(
+            at: packageURL, lease: deadLease, now: now, faultInjector: injector
+        )
+        try transaction.stage(data: Data("new".utf8), at: "State/value.txt")
+        XCTAssertThrowsError(try transaction.commit(now: now))
+
+        try PortablePackageLease.recoverDeadWriter(at: packageURL)
+        XCTAssertEqual(try String(contentsOf: stateURL), "old")
+        let replacement = try PortablePackageLease.acquire(at: packageURL, now: now)
+        try replacement.release()
+        _ = deadLease
+    }
+
+    func testLiveRemoteAndReusedPIDIdentityClassification() throws {
+        let packageURL = try makePackage()
+        let hostID = try XCTUnwrap(PortablePackageLeaseInfo.currentProcessIdentity.hostID)
+        let currentStart = try XCTUnwrap(PortablePackageLeaseInfo.currentProcessIdentity.startedAt)
+        let live = try PortablePackageLease.acquire(
+            at: packageURL, writerHostID: hostID, processStartedAt: currentStart, now: now)
+        XCTAssertEqual(live.info.localWriterState, .live)
+        XCTAssertThrowsError(try PortablePackageLease.acquire(at: packageURL, now: now)) { error in
+            guard case .contended(let info) = error as? PortablePackageLeaseError else {
+                return XCTFail("expected live writer contention, got \(error)")
+            }
+            XCTAssertEqual(info.localWriterState, .live)
+        }
+        try live.release()
+
+        let remote = try PortablePackageLease.acquire(
+            at: packageURL, processID: .max, writerHostID: "another-host",
+            processStartedAt: "1:0", now: now
+        )
+        XCTAssertEqual(remote.info.localWriterState, .remoteOrUnknown)
+        try remote.release()
+
+        let reusedPID = try PortablePackageLease.acquire(
+            at: packageURL, writerHostID: hostID, processStartedAt: "1:0", now: now
+        )
+        XCTAssertEqual(reusedPID.info.localWriterState, .dead)
+        try reusedPID.release()
+    }
+
     func testLeaseLossPreventsPublishAndRecoveryCanRollBack() throws {
         let packageURL = try makePackage()
         let lease = try PortablePackageLease.acquire(at: packageURL, now: now)
