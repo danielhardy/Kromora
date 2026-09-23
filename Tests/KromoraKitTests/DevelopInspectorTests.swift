@@ -1,5 +1,6 @@
-import XCTest
 import CoreImage
+import XCTest
+
 @testable import KromoraKit
 
 /// Phase 2 Step 10a. The ship gate is "the inspector drives live re-render", which is a claim about
@@ -20,7 +21,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     }
 
     private func openStandardImage(_ viewModel: AppViewModel) async throws {
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "shot.png", in: tempDirectory)
+        let url = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "shot.png", in: tempDirectory)
         viewModel.openImage(url: url)
         try await waitUntil("the image to load") { viewModel.sourceImage != nil }
     }
@@ -88,7 +90,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         // was never consulted at all." Assert the probe count too, so the test can only pass if the
         // engine actually ran.
         let probeCount = await fake.capabilityProbeCount
-        XCTAssertEqual(probeCount, 1, "the engine must still be consulted even with no develop stage")
+        XCTAssertEqual(
+            probeCount, 1, "the engine must still be consulted even with no develop stage")
         XCTAssertNil(viewModel.rawCapabilities)
     }
 
@@ -278,7 +281,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         }
 
         let issued = await fake.previewRequests.count - atRest
-        XCTAssertLessThan(issued, 10, "20 ticks issued \(issued) renders — the debounce is not working")
+        XCTAssertLessThan(
+            issued, 10, "20 ticks issued \(issued) renders — the debounce is not working")
         XCTAssertGreaterThan(issued, 0)
     }
 
@@ -297,7 +301,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         try await waitUntil("the final value to render") {
             await fake.previewRequests.contains { $0.document.rawDevelop.exposure == 10.0 }
         }
-        XCTAssertEqual(viewModel.document.rawDevelop.exposure, 10.0,
+        XCTAssertEqual(
+            viewModel.document.rawDevelop.exposure, 10.0,
                        "the document must hold the released value immediately, debounce or not")
     }
 
@@ -334,14 +339,16 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             if sawUndebounced { break }
             await Task.yield()
         }
-        XCTAssertTrue(sawUndebounced, "the undebounced edit must render without waiting for the debounce")
+        XCTAssertTrue(
+            sawUndebounced, "the undebounced edit must render without waiting for the debounce")
 
         // The debounced edit's value must never have rendered by itself (i.e. before the undebounced
         // edit's mutation had also landed) — it should have been pre-empted, not raced.
         let requestsSoFar = await fake.previewRequests
         XCTAssertFalse(
             requestsSoFar.contains {
-                $0.document.rawDevelop.exposure == 0.42 && $0.document.rawDevelop.gamutMappingEnabled != false
+                $0.document.rawDevelop.exposure == 0.42
+                    && $0.document.rawDevelop.gamutMappingEnabled != false
             },
             "the debounced edit's own timer must not have fired independently"
         )
@@ -370,7 +377,9 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         let expectedBaseline = viewModel.document.originalForComparison
 
         try await waitUntil("the comparison baseline to re-render") {
-            await fake.previewRequests.contains { $0.document == expectedBaseline && $0.lutID == nil }
+            await fake.previewRequests.contains {
+                $0.document == expectedBaseline && $0.lutID == nil
+            }
         }
     }
 
@@ -453,7 +462,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         try await Task.sleep(for: .milliseconds(150))
 
         let requests = await fake.histogramRequests
-        XCTAssertTrue(requests.isEmpty,
+        XCTAssertTrue(
+            requests.isEmpty,
                       "the Develop tab has no histogram; \(requests.count) tallies were issued for a "
                       + "chart nobody can see")
         XCTAssertNil(viewModel.histogram)
@@ -538,7 +548,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             await fake.histogramRequests.count == beforeEdits + 1
         }
         let requests = await fake.histogramRequests
-        XCTAssertEqual(requests.last?.document.adjustments, [.exposure(ev: 1.0)],
+        XCTAssertEqual(
+            requests.last?.document.adjustments, [.exposure(ev: 1.0)],
                        "the coalesced tally must use the final slider value")
 
         await fake.releaseHistograms()
@@ -558,7 +569,9 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         try await waitUntil("the first histogram") { await fake.histogramRequests.count == 1 }
 
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
-        try await waitUntil("the newer histogram request") { await fake.histogramRequests.count == 2 }
+        try await waitUntil("the newer histogram request") {
+            await fake.histogramRequests.count == 2
+        }
 
         // Finish the old request first. The current request is still gated, so any publication here
         // would prove that the revision guard is missing.
@@ -568,7 +581,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         await fake.releaseHistograms()
         try await waitUntil("the current histogram") { viewModel.histogram != nil }
-        XCTAssertEqual(viewModel.histogram?.red[105], 1,
+        XCTAssertEqual(
+            viewModel.histogram?.red[105], 1,
                        "the published tally must describe the newer 0.5 EV edit")
     }
 
@@ -576,22 +590,41 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// the temporary developed-only before state while Space comparison is active.
     func testHistogramFollowsTheDisplayedComparisonRequest() async throws {
         let fake = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await fake.eventStream())
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         viewModel.isInspectorPresented = true
         try await waitUntil("the opening histogram") { await fake.histogramRequests.count == 1 }
 
-        viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
+        viewModel.updateDocument { $0.adjustments = [.vibrance(amount: 0.8)] }
         try await waitUntil("the edited render") {
             await fake.previewRequests.contains { !$0.document.adjustments.isEmpty }
         }
         try await waitUntil("the edited histogram") { await fake.histogramRequests.count == 2 }
 
-        viewModel.showOriginal(true)
-        try await waitUntil("the comparison histogram") { await fake.histogramRequests.count == 3 }
+        XCTAssertTrue(viewModel.showOriginal(true))
+        XCTAssertTrue(viewModel.isShowingOriginal)
+        let comparisonBaseline = viewModel.document.comparisonBaseline
+        try await waitUntil("the comparison render") {
+            await fake.previewRequests.contains { $0.document == comparisonBaseline }
+        }
+        _ = try await TestSynchronization.nextEvent(from: reader, "the displayed comparison render")
+        {
+            if case .previewCompleted(let request) = $0 {
+                return request.document == comparisonBaseline
+            }
+            return false
+        } diagnostics: {
+            "previews=\(await fake.previewRequests.count)"
+        }
+        try await waitUntil("the comparison histogram") {
+            let requests = await fake.histogramRequests
+            return requests.count >= 3
+                && requests.last?.document == comparisonBaseline
+        }
         let comparison = await fake.histogramRequests.last
-        XCTAssertEqual(comparison?.document, viewModel.document.comparisonBaseline)
+        XCTAssertEqual(comparison?.document, comparisonBaseline)
         XCTAssertNil(comparison?.lutID)
     }
 
@@ -614,15 +647,18 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// white balance on a real file is ~5842 K; a slider opening at 0 K would be nonsense.
     func testAnUnsetControlReadsBackTheSeedRatherThanZero() async throws {
         let fake = FakeRenderEngine()
-        await fake.setStubbedCapabilities(RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
+        await fake.setStubbedCapabilities(
+            RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
 
         XCTAssertNil(viewModel.document.rawDevelop.neutralTemperature, "nothing written yet")
-        XCTAssertEqual(viewModel.developBinding(for: .whiteBalance).wrappedValue, 5842.2, accuracy: 0.01,
+        XCTAssertEqual(
+            viewModel.developBinding(for: .whiteBalance).wrappedValue, 5842.2, accuracy: 0.01,
                        "an unset white balance must display the file's as-shot value")
-        XCTAssertEqual(viewModel.developBinding(for: .exposure).wrappedValue, 0,
+        XCTAssertEqual(
+            viewModel.developBinding(for: .exposure).wrappedValue, 0,
                        "exposure has a fixed decoder default of 0")
     }
 
@@ -639,7 +675,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             _ = viewModel.developBinding(for: control).wrappedValue
         }
 
-        XCTAssertTrue(viewModel.document.rawDevelop.isNeutral,
+        XCTAssertTrue(
+            viewModel.document.rawDevelop.isNeutral,
                       "opening the panel must not write settings")
     }
 
@@ -673,7 +710,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         // Distinctness is what gives the table its power: two rows sharing a value would let a
         // getter read the wrong field and still pass.
-        XCTAssertEqual(Set(seeded.map(\.1)).count, seeded.count,
+        XCTAssertEqual(
+            Set(seeded.map(\.1)).count, seeded.count,
                        "the seed values must all differ, or a mis-wired getter can pass by accident")
 
         for (control, expected) in seeded {
@@ -684,7 +722,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         }
 
         // Tint travels on its own binding, so it needs its own row.
-        XCTAssertEqual(viewModel.developTintBinding().wrappedValue, caps.asShotTint, accuracy: 0.0001)
+        XCTAssertEqual(
+            viewModel.developTintBinding().wrappedValue, caps.asShotTint, accuracy: 0.0001)
 
         // And the controls that genuinely *do* have a fixed documented default keep it — a blanket
         // "read a seed for everything" would have broken these.
@@ -747,7 +786,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// you set is what you read back.
     func testTheTintBindingRoundTripsAndNeverWritesOnRead() async throws {
         let fake = FakeRenderEngine()
-        await fake.setStubbedCapabilities(RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
+        await fake.setStubbedCapabilities(
+            RAWCapabilities(asShotTemperature: 5842.2, asShotTint: 14.04))
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
@@ -755,7 +795,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         // Read, repeatedly. `.neutral` is byte-identical to `developRAWNeutral` *because it sets
         // nothing*; a getter that seeded on read would quietly end that and move the derive baseline.
         for _ in 0..<3 {
-            XCTAssertEqual(viewModel.developTintBinding().wrappedValue, 14.04, accuracy: 0.0001,
+            XCTAssertEqual(
+                viewModel.developTintBinding().wrappedValue, 14.04, accuracy: 0.0001,
                            "an unset tint must display the file's as-shot value")
         }
         XCTAssertNil(viewModel.document.rawDevelop.neutralTint, "reading must not write")
@@ -765,7 +806,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         // the stored value and always returned the seed fails here.
         viewModel.developTintBinding().wrappedValue = -87.5
         XCTAssertEqual(viewModel.document.rawDevelop.neutralTint, -87.5)
-        XCTAssertEqual(viewModel.developTintBinding().wrappedValue, -87.5, accuracy: 0.0001,
+        XCTAssertEqual(
+            viewModel.developTintBinding().wrappedValue, -87.5, accuracy: 0.0001,
                        "a written tint must win over the seed")
 
         // And the write reaches the renderer.
@@ -843,7 +885,8 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         }
 
         let issued = await fake.previewRequests.count - atRest
-        XCTAssertLessThan(issued, 10,
+        XCTAssertLessThan(
+            issued, 10,
                           "20 slider ticks issued \(issued) renders — developBinding stopped debouncing")
     }
 
@@ -882,12 +925,15 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         viewModel.resetDevelop(.whiteBalance)
 
-        XCTAssertNil(viewModel.document.rawDevelop.neutralTemperature, "reset means unset, not zero")
-        XCTAssertNil(viewModel.document.rawDevelop.neutralTint,
+        XCTAssertNil(
+            viewModel.document.rawDevelop.neutralTemperature, "reset means unset, not zero")
+        XCTAssertNil(
+            viewModel.document.rawDevelop.neutralTint,
                      "the tint half of white balance has no reset of its own — this one must clear it")
         // Both halves gone means the document is untouched again, which is the observable
         // consequence: a stranded tint would keep it non-neutral and keep the develop stage running.
-        XCTAssertTrue(viewModel.document.rawDevelop.isNeutral,
+        XCTAssertTrue(
+            viewModel.document.rawDevelop.isNeutral,
                       "resetting the only edited control must return the document to neutral")
     }
 
@@ -934,9 +980,11 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         XCTAssertNil(viewModel.document.rawDevelop.neutralTemperature)
         XCTAssertNil(viewModel.document.rawDevelop.neutralTint)
-        XCTAssertEqual(viewModel.developBinding(for: .whiteBalance).wrappedValue,
+        XCTAssertEqual(
+            viewModel.developBinding(for: .whiteBalance).wrappedValue,
                        seed.asShotTemperature, accuracy: 0.01)
-        XCTAssertEqual(viewModel.developTintBinding().wrappedValue,
+        XCTAssertEqual(
+            viewModel.developTintBinding().wrappedValue,
                        seed.asShotTint, accuracy: 0.01)
     }
 
@@ -944,8 +992,10 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     /// direct-open path used when a user steps through two different files without requiring a
     /// licensed RAW fixture in CI.
     func testWhiteBalanceOverridesDoNotTravelBetweenPhotoAssets() async throws {
-        let first = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "first.png", in: tempDirectory)
-        let second = try Fixtures.writeGradientPNG(width: 32, height: 24, named: "second.png", in: tempDirectory)
+        let first = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "first.png", in: tempDirectory)
+        let second = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "second.png", in: tempDirectory)
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
 
@@ -955,13 +1005,15 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         viewModel.openImage(url: second)
         try await waitUntil("second image") { viewModel.sourceName == "second.png" }
-        XCTAssertNil(viewModel.document.rawDevelop.neutralTemperature,
+        XCTAssertNil(
+            viewModel.document.rawDevelop.neutralTemperature,
                      "the second asset must start from its own As Shot baseline")
 
         viewModel.updateDocument { $0.rawDevelop.neutralTemperature = 9000 }
         viewModel.openImage(url: first)
         try await waitUntil("first image again") { viewModel.sourceName == "first.png" }
-        XCTAssertEqual(viewModel.document.rawDevelop.neutralTemperature, 3200,
+        XCTAssertEqual(
+            viewModel.document.rawDevelop.neutralTemperature, 3200,
                        "returning to the first asset must restore its own white-balance edit")
     }
 
@@ -978,11 +1030,13 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             // A value the seed cannot coincide with, so the write genuinely changes the document.
             let written: Double = control.isToggle ? 0 : (control.range.lowerBound + 0.03)
             viewModel.developBinding(for: control).wrappedValue = written
-            XCTAssertFalse(viewModel.document.rawDevelop.isNeutral,
+            XCTAssertFalse(
+                viewModel.document.rawDevelop.isNeutral,
                            "writing \(control.rawValue) should have left the document non-neutral")
 
             viewModel.resetDevelop(control)
-            XCTAssertTrue(viewModel.document.rawDevelop.isNeutral,
+            XCTAssertTrue(
+                viewModel.document.rawDevelop.isNeutral,
                           "resetDevelop(.\(control.rawValue)) left something set — it is clearing "
                           + "the wrong field, or not every field it writes")
         }

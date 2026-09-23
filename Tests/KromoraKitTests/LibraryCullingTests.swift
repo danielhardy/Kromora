@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import KromoraKit
 
 @MainActor
@@ -63,14 +64,16 @@ final class LibraryCullingTests: TempDirectoryTestCase {
         XCTAssertTrue(collection.setRating(5, for: thirdID))
 
         collection.setFilter(LibraryFilter(rating: .minimum(4)))
-        XCTAssertEqual(collection.selectedItem?.id, secondID, "focus should move to the first visible item")
+        XCTAssertEqual(
+            collection.selectedItem?.id, secondID, "focus should move to the first visible item")
         collection.selectNext()
         XCTAssertEqual(collection.selectedItem?.id, thirdID)
         collection.selectPrevious()
         XCTAssertEqual(collection.selectedItem?.id, secondID)
 
         collection.select(at: 0)
-        XCTAssertEqual(collection.selectedItem?.id, secondID, "an invisible item cannot be selected")
+        XCTAssertEqual(
+            collection.selectedItem?.id, secondID, "an invisible item cannot be selected")
     }
 
     func testPickRejectAdvanceAndUndoRestoreFocusAndState() async throws {
@@ -92,7 +95,8 @@ final class LibraryCullingTests: TempDirectoryTestCase {
             engine: FakeRenderEngine(),
             editStore: makeInMemoryEditStore(),
             preferences: defaults,
-            libraryFolderURL: tempDirectory.appendingPathComponent("managed-library", isDirectory: true)
+            libraryFolderURL: tempDirectory.appendingPathComponent(
+                "managed-library", isDirectory: true)
         )
         for name in ["a.jpg", "b.jpg", "c.jpg"] {
             try Fixtures.writeJPEG(
@@ -109,20 +113,34 @@ final class LibraryCullingTests: TempDirectoryTestCase {
 
         XCTAssertTrue(viewModel.setFocusedFlag(.reject, advance: true))
         XCTAssertEqual(viewModel.collection.selectedItem?.id, secondID)
-        XCTAssertEqual(viewModel.maskingAssetID, secondID, "the Edit canvas target must advance with browsing focus")
+        XCTAssertEqual(
+            viewModel.maskingAssetID, secondID,
+            "the Edit canvas target must advance with browsing focus")
     }
 
     func testCullingStateSurvivesACollectionRecreation() async throws {
         let defaults = makeDefaults()
-        let collection = try await makeCollection(defaults: defaults)
-        let firstID = try XCTUnwrap(collection.items.first?.id)
-        XCTAssertTrue(collection.setRating(4, for: firstID))
-        XCTAssertTrue(collection.setFlag(.pick, for: firstID))
+        for name in ["a.jpg", "b.jpg", "c.jpg"] {
+            try Fixtures.writeJPEG(
+                width: 16, height: 12, orientation: 1, named: name, in: tempDirectory
+            )
+        }
+        let packageURL = tempDirectory.appendingPathComponent("culling.kromoralibrary")
+        let original = makeAppViewModel(preferences: defaults, portablePackageURL: packageURL)
+        let library = try XCTUnwrap(original.portableLibrary)
+        let urls = ["a.jpg", "b.jpg", "c.jpg"].map { tempDirectory.appendingPathComponent($0) }
+        _ = try library.importURLs(urls)
+        original.collection.loadPortableAssets(try library.materializedAssets())
+        original.collection.select(at: 0)
+        let firstID = try XCTUnwrap(original.collection.items.first?.id)
+        XCTAssertTrue(original.setFocusedRating(4))
+        XCTAssertTrue(original.setFocusedFlag(.pick))
+        await original.shutdown()
 
-        let restored = makeTestCollection(defaults: defaults)
-        restored.loadFromFolder(tempDirectory)
-        await restored.scanCompletion()
-        let item = try XCTUnwrap(restored.items.first { $0.id == firstID })
+        let restored = makeAppViewModel(preferences: defaults, portablePackageURL: packageURL)
+        await restored.collection.scanCompletion()
+        restored.collection.select(at: 0)
+        let item = try XCTUnwrap(restored.collection.items.first { $0.id == firstID })
         XCTAssertEqual(item.asset.rating, 4)
         XCTAssertEqual(item.asset.flag, .pick)
     }

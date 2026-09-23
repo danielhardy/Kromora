@@ -219,7 +219,8 @@ final class PortablePackageEndToEndRegressionTests: TempDirectoryTestCase {
         try unrelatedData.write(to: unrelatedDataURL)
 
         let defaults = makeTestUserDefaults()
-        let editStore = makeInMemoryEditStore()
+        let editPackage = makeEditPackageFixture()
+        let editStore = editPackage.store()
         let viewModel = makeAppViewModel(
             editStore: editStore,
             preferences: defaults,
@@ -228,6 +229,7 @@ final class PortablePackageEndToEndRegressionTests: TempDirectoryTestCase {
         viewModel.collection.loadFromFolder(sourceFolder)
         await viewModel.collection.scanCompletion()
         let currentItem = try XCTUnwrap(viewModel.collection.items.first)
+        try editPackage.register(currentItem)
         try await editStore.save(
             EditDocument(adjustments: [.exposure(ev: 0.2)]),
             for: EditSourceReference(assetID: currentItem.id, url: currentSource)
@@ -259,7 +261,8 @@ final class PortablePackageEndToEndRegressionTests: TempDirectoryTestCase {
         let storedAfterDelete = await editStore.load(
             for: EditSourceReference(assetID: currentItem.id, url: currentSource)
         )
-        XCTAssertFalse(storedAfterDelete.found)
+        XCTAssertTrue(storedAfterDelete.found)
+        XCTAssertEqual(storedAfterDelete.document.adjustments, [.exposure(ev: 0.2)])
     }
 
     func testOlderReaderDecodesCurrentPackageRecordAndIgnoresNewerFields() throws {

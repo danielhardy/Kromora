@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+
 @testable import KromoraKit
 
 @MainActor
@@ -50,9 +51,11 @@ final class CoordinatorBoundaryTests: TempDirectoryTestCase {
     }
 
     func testPersistenceCoordinatorCoalescesSnapshotsAndPreservesFlushCompatibility() async throws {
-        let store = makeInMemoryEditStore()
+        let package = makeEditPackageFixture()
+        let store = package.store()
         let coordinator = EditPersistenceCoordinator(store: store)
         let sourceURL = tempDirectory.appendingPathComponent("photo.png")
+        try package.register(sourceURL)
         let reference = EditSourceReference(assetID: .file(sourceURL), url: sourceURL)
 
         coordinator.enqueue(
@@ -120,10 +123,12 @@ final class CoordinatorBoundaryTests: TempDirectoryTestCase {
         var whiteBalanceOnly = EditDocument()
         whiteBalanceOnly.rawDevelop.neutralTemperature = 5600
         whiteBalanceOnly.rawDevelop.neutralTint = 8
-        XCTAssertFalse(ComparisonFramePolicy.changesBaseline(from: EditDocument(), to: whiteBalanceOnly))
+        XCTAssertFalse(
+            ComparisonFramePolicy.changesBaseline(from: EditDocument(), to: whiteBalanceOnly))
 
         var developChanged = whiteBalanceOnly
         developChanged.rawDevelop.exposure = 0.5
-        XCTAssertTrue(ComparisonFramePolicy.changesBaseline(from: whiteBalanceOnly, to: developChanged))
+        XCTAssertTrue(
+            ComparisonFramePolicy.changesBaseline(from: whiteBalanceOnly, to: developChanged))
     }
 }

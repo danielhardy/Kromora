@@ -63,7 +63,8 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 /// Central state for the Kromora app.
 @MainActor
 public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination,
-    AsyncPhotosImportDestination, MaskingWorkflowDestination {
+    AsyncPhotosImportDestination, MaskingWorkflowDestination
+{
 
     var packageImportDoesNotNeedDigest: Bool { true }
 
@@ -904,7 +905,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let portableOpenError: String?
         let effectiveEditStore: EditDocumentStore
         do {
-            let session = try injectedPortableLibrarySession ?? Self.openPortableLibrarySession(
+            let session =
+                try injectedPortableLibrarySession
+                ?? Self.openPortableLibrarySession(
                 at: normalizedPortablePackageURL,
                 confirmer: leaseRecoveryConfirmer,
                 scheduler: packageIOScheduler
@@ -916,7 +919,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // composition root silently discards the caller's persistence authority and relaunch
             // checks observe a different store. Production initializers omit this argument and
             // therefore use the package's canonical edit sidecars.
-            effectiveEditStore = editStore ?? EditDocumentStore(
+            effectiveEditStore =
+                editStore
+                ?? EditDocumentStore(
                 package: session.package, lease: session.lease
             )
         } catch {
@@ -969,7 +974,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 ?? PreviewDiskCache.packageDirectory(for: normalizedPortablePackageURL),
             capBytes: previewDiskCacheCapBytes
         )
-        self.previewPresentation = PreviewPresentationCoordinator(cache: previewCache, engine: engine)
+        self.previewPresentation = PreviewPresentationCoordinator(
+            cache: previewCache, engine: engine)
         self.sourceSession = SourceSessionCoordinator(
             engine: engine, editStore: effectiveEditStore,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider
@@ -1088,13 +1094,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceSession.onMetadata = { [weak self] publication in
             guard let self, !self.isShuttingDown,
                 publication.request.sourceRevision == self.sourceRevision,
-                publication.request.assetID == self.activeAssetID else { return }
+                publication.request.assetID == self.activeAssetID
+            else { return }
             self.metadata = publication.metadata
         }
         sourceSession.onCapabilities = { [weak self] publication in
             guard let self, !self.isShuttingDown,
                 publication.request.sourceRevision == self.sourceRevision,
-                publication.request.assetID == self.activeAssetID else { return }
+                publication.request.assetID == self.activeAssetID
+            else { return }
             self.rawCapabilities = publication.capabilities
             self.capabilitiesProbeCompleted = true
             self.keepInspectorTabValid()
@@ -1106,7 +1114,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceSession.onFailure = { [weak self] request, message in
             guard let self, !self.isShuttingDown,
                 request.sourceRevision == self.sourceRevision,
-                request.assetID == self.activeAssetID else { return }
+                request.assetID == self.activeAssetID
+            else { return }
             self.isLoading = false
             self.previewState = .failed
             self.presentError(message)
@@ -1507,6 +1516,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func presentImportOutcome(_ summary: ImportOutcomeSummary, prefix: String) {
+        // Opening an imported photo immediately enters the source-loading state. The operation's
+        // terminal summary can arrive after that transition, but it must not replace the more
+        // useful loading status for the photo now on screen.
+        if statusMessage.hasPrefix("Loading ") { return }
         statusMessage = summary.status(prefix: prefix)
     }
 
@@ -1573,15 +1586,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// from `onAppear` of trailing cells so scrolling never materializes the full library.
     func loadMorePortableIfNeeded(currentIndex: Int) {
         guard let portableLibrary, collection.isPortableWindowed,
-              collection.portableHasMorePages else { return }
+            collection.portableHasMorePages
+        else { return }
         // Prefetch when within two pages of the tail; the grid's LazyVStack only materializes
         // near-visible cells, so this stays proportional to the viewport, not the library.
         let loaded = collection.items.count
         guard currentIndex >= loaded - collection.portablePageSize else { return }
         let nextPage = collection.portablePageIndex + 1
-        guard let window = try? portableLibrary.browsingWindow(
+        guard
+            let window = try? portableLibrary.browsingWindow(
             pageIndex: nextPage, query: portableQuery
-        ) else { return }
+            )
+        else { return }
         collection.appendPortableWindow(assets: window.assets, pageIndex: nextPage)
     }
 
@@ -1614,12 +1630,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard let portableLibrary, collection.items.indices.contains(index) else { return }
         let photoID = collection.items[index].id
         guard let portableID = Self.portableID(for: photoID) else { return }
-        if modifiers.contains(.command) {
+        if modifiers.contains(.shift) {
+            collection.select(at: index, modifiers: modifiers)
+            let selectedIDs = collection.selectedItems.compactMap { Self.portableID(for: $0.id) }
+            let activeID = collection.selectedItem.flatMap { Self.portableID(for: $0.id) }
+            portableLibrary.setPortableSelection(selectedIDs, activeID: activeID)
+        } else if modifiers.contains(.command) {
             portableLibrary.togglePortableSelection(portableID)
+            collection.select(at: index, modifiers: modifiers)
         } else {
             portableLibrary.select(portableID)
-        }
         collection.select(at: index, modifiers: modifiers)
+        }
         collection.syncPortableSelection(
             selectedIDs: portableLibrary.portableSelectedIDs,
             activeID: portableLibrary.portableActiveID
@@ -1632,7 +1654,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// covers the full query without materializing it.
     func selectNextPortableInGrid() {
         if collection.portableHasMorePages,
-           collection.selectedIndex >= collection.items.count - 1 {
+            collection.selectedIndex >= collection.items.count - 1
+        {
             loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
         }
         let target = min(collection.selectedIndex + 1, collection.items.count - 1)
@@ -1705,9 +1728,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         )
                         if let item = collection.items.first(where: {
                             $0.asset.source.portableIdentity.assetID == assetID
-                        }), let verified = try? portableLibrary.resolveEmbeddedSourceURL(
+                        }),
+                            let verified = try? portableLibrary.resolveEmbeddedSourceURL(
                             for: assetID
-                        ) {
+                            )
+                        {
                             openImage(url: verified, assetID: item.id)
                             return
                         }
@@ -1731,11 +1756,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Keep navigation on the collection item's identity instead.
         if let item = collection.items.first(where: { item in
             guard let itemURL = item.url else { return false }
-            let sameURL = itemURL.standardizedFileURL.resolvingSymlinksInPath()
+            let sameURL =
+                itemURL.standardizedFileURL.resolvingSymlinksInPath()
                 == url.standardizedFileURL.resolvingSymlinksInPath()
             return sameURL || (usesInjectedEditStore && item.displayName == url.lastPathComponent)
         }) {
-            let sameURL = item.url?.standardizedFileURL.resolvingSymlinksInPath()
+            let sameURL =
+                item.url?.standardizedFileURL.resolvingSymlinksInPath()
                 == url.standardizedFileURL.resolvingSymlinksInPath()
             // A package-backed item may have an embedded URL while an injected store is reopening
             // the original fixture path. Keep the caller's URL as the relink locator in that case.
@@ -1764,8 +1791,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
                     guard let self else { return }
-                    guard let assetID = result.imported.first?.assetID
-                        ?? result.duplicates.first?.existingAssetID else {
+                    guard
+                        let assetID = result.imported.first?.assetID
+                            ?? result.duplicates.first?.existingAssetID
+                    else {
                         self.failOpenImage(
                             url,
                             reason: result.failures.first?.reason ?? "The import produced no asset."
@@ -2017,7 +2046,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             lastPublishedVisibleRequest == nil,
             let cgImage = publication.image.cgImage(
                 forProposedRect: nil, context: nil, hints: nil
-            ) else { return }
+            )
+        else { return }
 
             // The camera JPEG is a stand-in for the whole photo. Do not rasterize it at
             // native RAW size — that is a 24–60MP GPU upload on every filmstrip click and
@@ -2444,7 +2474,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let operationID = operationID ?? beginImportOperation()
         guard portableLibrary != nil else {
             presentImportOutcome(
-                .failure(total: urls.count, reason: portableLibraryOpenError ?? "The library package is unavailable."),
+                .failure(
+                    total: urls.count,
+                    reason: portableLibraryOpenError ?? "The library package is unavailable."),
                 prefix: "Photo import"
             )
             return nil
@@ -2463,11 +2495,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // apply that convention only to the assets admitted by this dialog operation.
             var dialogNames: [PortablePhotoAssetID: String] = [:]
             for imported in result.imported {
-                dialogNames[imported.assetID] = URL(fileURLWithPath: imported.source.name)
+                dialogNames[imported.assetID] =
+                    URL(fileURLWithPath: imported.source.name)
                     .deletingPathExtension().lastPathComponent
             }
             for duplicate in result.duplicates {
-                dialogNames[duplicate.existingAssetID] = URL(fileURLWithPath: duplicate.source.name)
+                dialogNames[duplicate.existingAssetID] =
+                    URL(fileURLWithPath: duplicate.source.name)
                     .deletingPathExtension().lastPathComponent
             }
             for item in collection.items {
@@ -2502,7 +2536,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let operationID = beginImportOperation()
         guard portableLibrary != nil else {
             presentImportOutcome(
-                .failure(total: 1, reason: portableLibraryOpenError ?? "The library package is unavailable."),
+                .failure(
+                    total: 1,
+                    reason: portableLibraryOpenError ?? "The library package is unavailable."),
                 prefix: "Photo import"
             )
             return
@@ -2517,7 +2553,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         try self.reloadPortableCollection()
                         if let assetID = result.imported.first?.assetID
                             ?? result.duplicates.first?.existingAssetID
-                        { self.openPortableAsset(assetID) }
+                        {
+                            self.openPortableAsset(assetID)
+                        }
                         self.presentImportOutcome(
                             ImportOutcomeSummary(result: result, total: 1),
                             prefix: "Photo import"
@@ -2567,7 +2605,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 name: item.name,
                 rebuildIndex: !isPortablePhotosImportActive
             )
-            let assetID = result.imported.first?.assetID
+            let assetID =
+                result.imported.first?.assetID
                 ?? result.duplicates.first?.existingAssetID
             if isPortablePhotosImportActive {
                 if let assetID, portablePhotosImportFirstAssetID == nil {
@@ -2613,7 +2652,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 rebuildIndex: !isPortablePhotosImportActive
             )
             let outcome = try await result.value()
-            let assetID = outcome.imported.first?.assetID
+            let assetID =
+                outcome.imported.first?.assetID
                 ?? outcome.duplicates.first?.existingAssetID
             if isPortablePhotosImportActive {
                 if let assetID, portablePhotosImportFirstAssetID == nil {
@@ -2728,7 +2768,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryMediaWorkflow.importSelectedRemovableMedia()
     }
 
-
     private func importRemovableMedia(_ request: RemovableMediaImportRequest) {
         let files = request.files
         guard !isShuttingDown else { return }
@@ -2755,7 +2794,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         try self.reloadPortableCollection()
                         if let assetID = result.imported.first?.assetID
                             ?? result.duplicates.first?.existingAssetID
-                        { self.openPortableAsset(assetID) }
+                        {
+                            self.openPortableAsset(assetID)
+                        }
                         self.libraryMediaWorkflow.finishImport(
                             summary: ImportOutcomeSummary(
                                 result: result,
@@ -2852,7 +2893,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 } else if let summary {
                     self.presentImportOutcome(summary, prefix: "Photos drop")
                 } else {
-                    self.statusMessage = "Photos drop complete — 0 imported, 0 duplicate, 0 skipped, 0 failed"
+                    self.statusMessage =
+                        "Photos drop complete — 0 imported, 0 duplicate, 0 skipped, 0 failed"
                 }
                 self.droppedPromiseTask = nil
             }
@@ -2887,7 +2929,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         try self.reloadPortableCollection()
                         if let assetID = result.imported.first?.assetID
                             ?? result.duplicates.first?.existingAssetID
-                        { self.openPortableAsset(assetID) }
+                        {
+                            self.openPortableAsset(assetID)
+                        }
                         self.presentImportOutcome(
                             ImportOutcomeSummary(result: result, total: files.count),
                             prefix: "Folder import"
@@ -2914,14 +2958,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func supportedImageURLs(in folder: URL) -> [URL] {
-        guard let enumerator = FileManager.default.enumerator(
-            at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]
-        ) else { return [] }
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: folder, includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else { return [] }
         return enumerator.compactMap { value in
             guard let url = value as? URL,
                   (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
                   ImageDecoder.supportedExtensions.contains(url.pathExtension.lowercased()),
-                  FileManager.default.isReadableFile(atPath: url.path) else { return nil }
+                FileManager.default.isReadableFile(atPath: url.path)
+            else { return nil }
             return url
         }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
@@ -3054,13 +3102,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     + result.failures.joined(separator: " ")
             )
         } else {
-            statusMessage = result.deletedIDs.count == 1
+            statusMessage =
+                result.deletedIDs.count == 1
                 ? "Photo removed from Library"
                 : "Removed \(result.deletedIDs.count) photos from Library"
         }
         return result
     }
-
 
     private func clearActiveSourceAfterLibraryDeletion() {
         sourceSession.cancel()
@@ -3487,7 +3535,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         if editClipboardCategories == Set(EditClipboardPayload.Category.allCases) {
             return "edits"
         }
-        return editClipboardCategories
+        return
+            editClipboardCategories
             .sorted { $0.title < $1.title }
             .map(\.title)
             .joined(separator: ", ")
@@ -3496,7 +3545,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func copiedEditsMessage(
         categories: Set<EditClipboardPayload.Category>
     ) -> String {
-        let summary = categories == Set(EditClipboardPayload.Category.allCases)
+        let summary =
+            categories == Set(EditClipboardPayload.Category.allCases)
             ? "all edits"
             : categories.sorted { $0.title < $1.title }.map(\.title).joined(separator: ", ")
         return "Copied \(summary) from \(sourceName)"
@@ -3553,7 +3603,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     private func persistPortableLibraryStateIfNeeded() {
         guard let portableLibrary, let assetID = collection.lastCullingAssetID,
-              let item = collection.items.first(where: { $0.id == assetID }) else { return }
+            let item = collection.items.first(where: { $0.id == assetID })
+        else { return }
         do {
             try portableLibrary.updateLibraryState(
                 for: item.asset.source.portableIdentity.assetID,
@@ -3561,7 +3612,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 flag: item.asset.flag
             )
         } catch {
-            presentError("Kromora could not update the library catalog: \(error.localizedDescription)")
+            presentError(
+                "Kromora could not update the library catalog: \(error.localizedDescription)")
         }
     }
 
@@ -3628,7 +3680,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func selectNextImage() {
         guard collection.isActive else { return }
         if collection.portableHasMorePages,
-           collection.selectedIndex >= collection.items.count - 1 {
+            collection.selectedIndex >= collection.items.count - 1
+        {
             loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
         }
         let prev = collection.selectedIndex
@@ -4275,7 +4328,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func beginCrop() { canvasWorkflow.beginCrop() }
     func toggleCropTool() { canvasWorkflow.toggleCropTool() }
-    func updateCropDraft(_ normalizedRect: CGRect) { canvasWorkflow.updateCropDraft(normalizedRect) }
+    func updateCropDraft(_ normalizedRect: CGRect) {
+        canvasWorkflow.updateCropDraft(normalizedRect)
+    }
 
     func selectCropAspectRatio(
         _ aspectRatio: CropAspectRatio,
@@ -4285,8 +4340,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func setCropStraightenAngle(_ angle: Double) { canvasWorkflow.setCropStraightenAngle(angle) }
-    func setCropVerticalPerspective(_ value: Double) { canvasWorkflow.setCropVerticalPerspective(value) }
-    func setCropHorizontalPerspective(_ value: Double) { canvasWorkflow.setCropHorizontalPerspective(value) }
+    func setCropVerticalPerspective(_ value: Double) {
+        canvasWorkflow.setCropVerticalPerspective(value)
+    }
+    func setCropHorizontalPerspective(_ value: Double) {
+        canvasWorkflow.setCropHorizontalPerspective(value)
+    }
     func runCropAuto() { canvasWorkflow.runCropAuto() }
     func toggleCropFlip(horizontal: Bool) { canvasWorkflow.toggleCropFlip(horizontal: horizontal) }
     func commitCrop() { canvasWorkflow.commitCrop() }
@@ -4952,7 +5011,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard !isShuttingDown else { return }
         if inspectorState.isPresented,
             !isCropToolActive,
-            inspectorState.tab == .info {
+            inspectorState.tab == .info
+        {
             updateHistogram()
         } else {
             cancelHistogram(clear: true)
@@ -5346,7 +5406,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await persistence.discard()
     }
 }
-
 
 extension AppViewModel: CanvasWorkflowDestination {
     var canvasWorkflowHasSource: Bool { sourceImage != nil }

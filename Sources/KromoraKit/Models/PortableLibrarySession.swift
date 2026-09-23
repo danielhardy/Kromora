@@ -76,7 +76,8 @@ final class PortableLibrarySession {
             self.package = package
             self.lease = lease
             self.rootURL = normalizedRoot
-            self.indexURL = indexURL?.standardizedFileURL
+            self.indexURL =
+                indexURL?.standardizedFileURL
                 ?? LibraryIndexSession.defaultIndexURL(for: package.manifest.libraryID)
 
             // A warm projection is preferred, but every mismatch/corruption is recoverable from
@@ -239,6 +240,10 @@ final class PortableLibrarySession {
 
     func select(_ assetID: PortablePhotoAssetID, additive: Bool = false) {
         queryController.select(assetID, additive: additive)
+    }
+
+    func setPortableSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?) {
+        queryController.setSelection(assetIDs, activeID: activeID)
     }
 
     func togglePortableSelection(_ assetID: PortablePhotoAssetID) {
@@ -471,7 +476,8 @@ final class PortableLibrarySession {
                     }
                     handle?.finish(outcome)
                 case .cancelled, .evicted, .rejected:
-                    handle?.finish(.failure(
+                    handle?.finish(
+                        .failure(
                         outcome == .rejected
                             ? PortablePackageImportWorkerError.notAdmitted
                             : CancellationError()
@@ -556,7 +562,8 @@ final class PortableLibrarySession {
     ) throws -> PortablePackageImportResult {
         try ensureWritableLease()
         let temporaryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Kromora-import-\(UUID().uuidString)-\(PortableLibraryPackage.safeFilename(name))")
+            .appendingPathComponent(
+                "Kromora-import-\(UUID().uuidString)-\(PortableLibraryPackage.safeFilename(name))")
         try data.write(to: temporaryURL, options: .atomic)
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
         let result: PortablePackageImportResult
@@ -637,7 +644,9 @@ final class PortableLibrarySession {
         var pageIndex = 0
         while true {
             let page = self.page(at: pageIndex, query: query)
-            assets.append(contentsOf: try page.items.map { try Self.browsingAsset(for: $0, package: package) })
+            assets.append(
+                contentsOf: try page.items.map { try Self.browsingAsset(for: $0, package: package) }
+            )
             guard page.hasNextPage else { return assets }
             pageIndex += 1
         }
@@ -647,7 +656,9 @@ final class PortableLibrarySession {
     /// page; stable `PhotoAssetID` identity (`portable:<uuid>`) keeps selection coherent as
     /// further pages fault in.
     func browsingAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
-        try page(at: pageIndex, query: query).items.map { try Self.browsingAsset(for: $0, package: package) }
+        try page(at: pageIndex, query: query).items.map {
+            try Self.browsingAsset(for: $0, package: package)
+        }
     }
 
     /// Canonical source URL for opening, exporting, or editing one asset. The derived browsing
@@ -761,13 +772,17 @@ final class PortableLibrarySession {
         try ensureWritableLease()
         let shardName = PortableLibraryPackage.shard(for: assetID)
         var shard = try package.readMembershipShard(shardName)
-        guard let index = shard.entries.firstIndex(where: {
+        guard
+            let index = shard.entries.firstIndex(where: {
             $0.assetID == assetID && !$0.isTombstone
-        }) else {
+            })
+        else {
             throw PortablePackageTrashError.assetNotFound(assetID)
         }
-        guard shard.entries[index].summary.rating != rating
-            || shard.entries[index].summary.flag != flag.rawValue else { return }
+        guard
+            shard.entries[index].summary.rating != rating
+                || shard.entries[index].summary.flag != flag.rawValue
+        else { return }
         shard.entries[index].summary.rating = min(max(rating, 0), 5)
         shard.entries[index].summary.flag = flag.rawValue
         shard.entries[index].summary.assetRevision &+= 1

@@ -84,7 +84,9 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
     private func measureDeterministic(_ shape: DocumentShape) async throws -> Measurement {
         let directory = tempDirectory.appendingPathComponent(shape.rawValue, isDirectory: true)
         let source = try makeSource(named: shape.rawValue + ".png", in: directory)
-        let store = makeInMemoryEditStore()
+        let package = makeEditPackageFixture()
+        let store = package.store()
+        try package.register(source)
         let expectedDocument = document(for: shape)
         try await store.save(
             expectedDocument,
@@ -162,7 +164,9 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
                 expectedPolicies = [[.resolved], [.resolved, .resolved]]
             case .masked:
                 expectedPreviewRange = 2...3
-                expectedPolicies = [[.deferSemantic, .resolved], [.resolved, .deferSemantic, .resolved]]
+                expectedPolicies = [
+                    [.deferSemantic, .resolved], [.resolved, .deferSemantic, .resolved],
+                ]
             }
             XCTAssertTrue(
                 expectedPreviewRange.contains(measurement.settledPreviewSubmissions),
@@ -227,7 +231,9 @@ final class SingleViewLatencyBenchmark: TempDirectoryTestCase {
                     .appendingPathComponent(
                         "real-\(iteration)-\(shape.rawValue)", isDirectory: true)
                 let source = try makeSource(named: "source.png", in: directory)
-                let store = makeInMemoryEditStore()
+                let package = makeEditPackageFixture()
+                let store = package.store()
+                try package.register(source)
                 try await store.save(
                     document(for: shape),
                     for: EditSourceReference(assetID: .file(source), url: source)

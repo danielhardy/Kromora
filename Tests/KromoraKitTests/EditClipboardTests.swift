@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import KromoraKit
 
 final class EditClipboardTests: XCTestCase {
@@ -59,14 +60,16 @@ final class EditClipboardTests: XCTestCase {
         )
         let rawResult = clipboard.applying(to: rawDestination, destinationIsRAW: true)
         XCTAssertEqual(rawResult.rawDevelop, clipboard.develop)
-        XCTAssertNil(rawResult.rawDevelop.baselineExposure,
+        XCTAssertNil(
+            rawResult.rawDevelop.baselineExposure,
                      "a source nil means decoder default, not a source-specific seed")
 
         let jpegDestination = EditDocument(
             rawDevelop: RAWDevelopSettings(baselineExposure: 0.42)
         )
         let jpegResult = clipboard.applying(to: jpegDestination, destinationIsRAW: false)
-        XCTAssertEqual(jpegResult.rawDevelop, jpegDestination.rawDevelop,
+        XCTAssertEqual(
+            jpegResult.rawDevelop, jpegDestination.rawDevelop,
                        "RAW controls must not be written to a JPEG destination")
     }
 
@@ -103,26 +106,36 @@ final class CopyPasteTests: TempDirectoryTestCase {
     }
 
     private func photoData(named name: String) throws -> (name: String, data: Data) {
-        let url = try Fixtures.writeGradientPNG(width: 32, height: 24, named: name, in: tempDirectory)
+        // Portable import deduplicates identical bytes, so each logical photo needs distinct
+        // pixels even when the test only cares about edit behavior.
+        let width = 32 + Data(name.utf8).reduce(0) { ($0 * 31 + Int($1)) % 251 }
+        let url = try Fixtures.writeGradientPNG(
+            width: width, height: 24, named: name, in: tempDirectory)
         return (name, try Data(contentsOf: url))
     }
 
     func testSinglePasteIsUndoableAndDoesNotChangeTheSource() async throws {
+        let package = makeEditPackageFixture()
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: makeInMemoryEditStore()
+            editStore: package.store()
         )
         viewModel.importPhotosData([
             try photoData(named: "one.png"),
             try photoData(named: "two.png"),
         ])
         try await waitUntil("the first photo") { viewModel.sourceName == "one.png" }
+        try await waitUntil("both imported photos") { viewModel.collection.items.count == 2 }
+        for item in viewModel.collection.items { try package.register(item) }
 
         let sourceEdits = EditDocument(adjustments: [.exposure(ev: 0.8)])
         viewModel.updateDocument { $0 = sourceEdits }
         viewModel.copyAllEdits()
 
-        viewModel.selectCollectionImage(at: 1)
+        let destinationIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == "two.png" }
+        )
+        viewModel.selectCollectionImage(at: destinationIndex)
         try await waitUntil("the second photo") { viewModel.sourceName == "two.png" }
         XCTAssertTrue(viewModel.document.isIdentity)
         viewModel.pasteEdits()
@@ -134,19 +147,23 @@ final class CopyPasteTests: TempDirectoryTestCase {
 
         viewModel.selectCollectionImage(at: 0)
         try await waitUntil("the source photo again") { viewModel.sourceName == "one.png" }
-        XCTAssertEqual(viewModel.document, sourceEdits, "pasting must not consume or alter the source")
+        XCTAssertEqual(
+            viewModel.document, sourceEdits, "pasting must not consume or alter the source")
     }
 
     func testSelectiveCopyMaskLeavesUncheckedDestinationStagesIntact() async throws {
+        let package = makeEditPackageFixture()
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: makeInMemoryEditStore()
+            editStore: package.store()
         )
         viewModel.importPhotosData([
             try photoData(named: "source.png"),
             try photoData(named: "destination.png"),
         ])
         try await waitUntil("the source photo") { viewModel.sourceName == "source.png" }
+        try await waitUntil("both imported photos") { viewModel.collection.items.count == 2 }
+        for item in viewModel.collection.items { try package.register(item) }
 
         let sourceEdits = EditDocument(
             adjustments: [.exposure(ev: 0.8), .vibrance(amount: 0.7)],
@@ -155,7 +172,10 @@ final class CopyPasteTests: TempDirectoryTestCase {
         viewModel.updateDocument { $0 = sourceEdits }
         viewModel.editorDocument.copy(document: sourceEdits, categories: [.light])
 
-        viewModel.selectCollectionImage(at: 1)
+        let destinationIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == "destination.png" }
+        )
+        viewModel.selectCollectionImage(at: destinationIndex)
         try await waitUntil("the destination photo") { viewModel.sourceName == "destination.png" }
         let destinationLook = LUTSettings(lutID: LUTID(raw: "destination.cube"), intensity: 0.2)
         viewModel.updateDocument {
@@ -167,7 +187,8 @@ final class CopyPasteTests: TempDirectoryTestCase {
 
         viewModel.pasteEdits()
 
-        XCTAssertEqual(viewModel.document.adjustments, [.exposure(ev: 0.8), .vibrance(amount: -0.3)])
+        XCTAssertEqual(
+            viewModel.document.adjustments, [.exposure(ev: 0.8), .vibrance(amount: -0.3)])
         XCTAssertEqual(viewModel.document.lut, destinationLook)
         XCTAssertTrue(viewModel.statusMessage.contains("Light"))
     }
@@ -209,9 +230,10 @@ final class CopyPasteTests: TempDirectoryTestCase {
     }
 
     func testMultiPasteUpdatesOnlySelectedPhotosAndEachDestinationCanUndo() async throws {
+        let package = makeEditPackageFixture()
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: makeInMemoryEditStore()
+            editStore: package.store()
         )
         viewModel.importPhotosData([
             try photoData(named: "one.png"),
@@ -220,6 +242,8 @@ final class CopyPasteTests: TempDirectoryTestCase {
             try photoData(named: "four.png"),
         ])
         try await waitUntil("the first photo") { viewModel.sourceName == "one.png" }
+        try await waitUntil("all imported photos") { viewModel.collection.items.count == 4 }
+        for item in viewModel.collection.items { try package.register(item) }
 
         let sourceEdits = EditDocument(
             adjustments: [.vibrance(amount: 0.6)]
@@ -229,38 +253,54 @@ final class CopyPasteTests: TempDirectoryTestCase {
 
         // Keep the source out of the destination set. This models command-click selection in the
         // source browser/filmstrip without depending on AppKit event delivery in a unit test.
-        viewModel.collection.setSelection(at: 1)
-        viewModel.collection.setSelection(at: 2, additive: true)
-        XCTAssertEqual(viewModel.collection.selectedIndices, [1, 2])
+        let secondIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == "two.png" }
+        )
+        let thirdIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == "three.png" }
+        )
+        let fourthIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == "four.png" }
+        )
+        let firstIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == "one.png" }
+        )
+        viewModel.selectCollectionImage(at: secondIndex)
+        viewModel.selectCollectionImage(at: thirdIndex, modifiers: [.command])
+        XCTAssertEqual(
+            Set(viewModel.collection.selectedItems.map(\.displayName)),
+            Set(["two.png", "three.png"])
+        )
         viewModel.pasteEdits()
 
-        viewModel.selectCollectionImage(at: 1)
+        viewModel.selectCollectionImage(at: secondIndex)
         try await waitUntil("the second photo") { viewModel.sourceName == "two.png" }
         XCTAssertEqual(viewModel.document, sourceEdits)
         XCTAssertEqual(viewModel.undoDepth, 1)
         viewModel.undo()
         XCTAssertTrue(viewModel.document.isIdentity)
 
-        viewModel.selectCollectionImage(at: 2)
+        viewModel.selectCollectionImage(at: thirdIndex)
         try await waitUntil("the third photo") { viewModel.sourceName == "three.png" }
         XCTAssertEqual(viewModel.document, sourceEdits)
         XCTAssertEqual(viewModel.undoDepth, 1)
         viewModel.undo()
         XCTAssertTrue(viewModel.document.isIdentity)
 
-        viewModel.selectCollectionImage(at: 3)
+        viewModel.selectCollectionImage(at: fourthIndex)
         try await waitUntil("the unselected photo") { viewModel.sourceName == "four.png" }
         XCTAssertTrue(viewModel.document.isIdentity, "an unselected destination must not change")
 
-        viewModel.selectCollectionImage(at: 0)
+        viewModel.selectCollectionImage(at: firstIndex)
         try await waitUntil("the source photo") { viewModel.sourceName == "one.png" }
         XCTAssertEqual(viewModel.document, sourceEdits)
     }
 
     func testFilmstripShiftSelectionBuildsRangeThatPasteCovers() async throws {
+        let package = makeEditPackageFixture()
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: makeInMemoryEditStore()
+            editStore: package.store()
         )
         viewModel.importPhotosData([
             try photoData(named: "filmstrip-one.png"),
@@ -271,6 +311,8 @@ final class CopyPasteTests: TempDirectoryTestCase {
         try await waitUntil("the first filmstrip photo") {
             viewModel.sourceName == "filmstrip-one.png"
         }
+        try await waitUntil("all imported photos") { viewModel.collection.items.count == 4 }
+        for item in viewModel.collection.items { try package.register(item) }
 
         let sourceEdits = EditDocument(adjustments: [.exposure(ev: 0.85)])
         viewModel.updateDocument { $0 = sourceEdits }
@@ -278,6 +320,9 @@ final class CopyPasteTests: TempDirectoryTestCase {
 
         // This is the callback path used by FilmstripView: the first click establishes the
         // anchor and the Shift-click extends the selection in display/source order.
+        viewModel.selectCollectionImage(at: 0)
+        let firstVisibleName = viewModel.collection.items[0].displayName
+        try await waitUntil("the range anchor photo") { viewModel.sourceName == firstVisibleName }
         viewModel.selectCollectionImage(at: 3, modifiers: [.shift])
         try await waitUntil("the Shift-clicked filmstrip photo") {
             viewModel.sourceName == "filmstrip-four.png"

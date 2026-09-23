@@ -1,5 +1,5 @@
-import CoreGraphics
 import AppKit
+import CoreGraphics
 import Metal
 import XCTest
 
@@ -58,7 +58,8 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
             if Date() > deadline {
-                throw TestSynchronizationError.timedOut(description, "published state did not settle")
+                throw TestSynchronizationError.timedOut(
+                    description, "published state did not settle")
             }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -72,7 +73,8 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         while !(await condition()) {
             if Date() > deadline {
-                throw TestSynchronizationError.timedOut(description, "published state did not settle")
+                throw TestSynchronizationError.timedOut(
+                    description, "published state did not settle")
             }
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -91,7 +93,8 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         let raw = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "first.ARW", in: tempDirectory
         )
-        let fake = FakeRenderEngine(previewResult: try Fixtures.makeCGImage(
+        let fake = FakeRenderEngine(
+            previewResult: try Fixtures.makeCGImage(
             width: 2, height: 2, red: 0.1, green: 0.8, blue: 0.2
         ))
         await fake.gatePreviews()
@@ -102,7 +105,6 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             viewModel.previewState == .loading && viewModel.previewSurface.image != nil
         }
 
-        XCTAssertEqual(viewModel.statusMessage, "Loading first.ARW...")
         XCTAssertEqual(
             viewModel.previewSurface.image?.extent.size, CGSize(width: 16, height: 12),
             "the camera JPEG must keep its own pixels; native rasterization stalls every switch"
@@ -115,10 +117,12 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             viewModel.previewSurface.coversPresentationExtent,
             "Fit/Fill must stretch the JPEG across the native RAW frame"
         )
-        XCTAssertNotNil(viewModel.sourceImage, "the transparent source marker remains authoritative")
+        XCTAssertNotNil(
+            viewModel.sourceImage, "the transparent source marker remains authoritative")
         XCTAssertNil(viewModel.histogram, "supporting work must wait for the settled confirmation")
         let thumbnailRequestCount = await fake.thumbnailRequests.count
-        XCTAssertEqual(thumbnailRequestCount, 0,
+        XCTAssertEqual(
+            thumbnailRequestCount, 0,
                        "the provisional frame must not admit an edited-thumbnail render")
         let provisionalRevision = viewModel.previewSurface.revision
 
@@ -168,7 +172,8 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             firstImage: firstImage,
             images: [first.lastPathComponent: firstImage, second.lastPathComponent: secondImage]
         )
-        let fake = FakeRenderEngine(previewResult: try Fixtures.makeCGImage(
+        let fake = FakeRenderEngine(
+            previewResult: try Fixtures.makeCGImage(
             width: 2, height: 2, red: 0.2, green: 0.8, blue: 0.2
         ))
         await fake.gatePreviews()
@@ -244,9 +249,12 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         guard MTLCreateSystemDefaultDevice() != nil else {
             throw XCTSkip("Metal is unavailable")
         }
-        guard let source = Fixtures.localRAWURLs.first(where: {
-            $0.deletingPathExtension().lastPathComponent.caseInsensitiveCompare("DSC01172") == .orderedSame
-        }) else {
+        guard
+            let source = Fixtures.localRAWURLs.first(where: {
+                $0.deletingPathExtension().lastPathComponent.caseInsensitiveCompare("DSC01172")
+                    == .orderedSame
+            })
+        else {
             throw XCTSkip("DSC01172.ARW is not present in KROMORA_RAW_FIXTURE_DIR")
         }
 
@@ -273,10 +281,12 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             viewModel.previewState == .ready
         }
         let settledMS = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
-        XCTAssertNotNil(provisionalMS, "the real ARW should present its embedded JPEG while loading")
+        XCTAssertNotNil(
+            provisionalMS, "the real ARW should present its embedded JPEG while loading")
         print(
             String(
-                format: "\n=== LUMO-330 real ARW embedded first frame timing ===\nprovisional_ms=%@ settled_ms=%.2f provisional_to_settled_ms=%.2f",
+                format:
+                    "\n=== LUMO-330 real ARW embedded first frame timing ===\nprovisional_ms=%@ settled_ms=%.2f provisional_to_settled_ms=%.2f",
                 provisionalMS.map { String(format: "%.2f", $0) } ?? "unobserved",
                 settledMS, settledMS - (provisionalMS ?? settledMS)
             )

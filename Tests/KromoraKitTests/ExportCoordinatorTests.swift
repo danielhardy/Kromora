@@ -1,5 +1,6 @@
-import XCTest
 import CoreImage
+import XCTest
+
 @testable import KromoraKit
 
 /// Export used to be untestable: the work was welded to `NSSavePanel` inside
@@ -74,13 +75,17 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
             format: .png, to: try destinationFolder()
         )
         XCTAssertEqual(coordinator.lastUsedFormat, .png)
-        XCTAssertEqual(ExportCoordinator().lastUsedFormat, .jpeg,
+        XCTAssertEqual(
+            ExportCoordinator().lastUsedFormat, .jpeg,
                        "the remembered format belongs to one coordinator session")
     }
 
     /// An `ImageSource` for a real file on disk, so the engine has something to decode.
-    private func makeSource(width: Int = 16, height: Int = 16, named name: String = "src.png") throws -> ImageSource {
-        let url = try Fixtures.writeGradientPNG(width: width, height: height, named: name, in: tempDirectory)
+    private func makeSource(width: Int = 16, height: Int = 16, named name: String = "src.png")
+        throws -> ImageSource
+    {
+        let url = try Fixtures.writeGradientPNG(
+            width: width, height: height, named: name, in: tempDirectory)
         return ImageSource(url: url, nativeExtent: CGSize(width: width, height: height))
     }
 
@@ -92,7 +97,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
 
         let destination = tempDirectory.appendingPathComponent("out.jpg")
         coordinator.performExport(
-            source: try makeSource(), document: EditDocument(), lut: nil, format: .jpeg, to: destination
+            source: try makeSource(), document: EditDocument(), lut: nil, format: .jpeg,
+            to: destination
         )
 
         try await waitUntil { !coordinator.isExporting }
@@ -107,11 +113,13 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         coordinator.onError = { errors.append($0) }
 
         // A directory that doesn't exist — the encode succeeds, the write fails.
-        let destination = tempDirectory
+        let destination =
+            tempDirectory
             .appendingPathComponent("no-such-folder")
             .appendingPathComponent("out.jpg")
         coordinator.performExport(
-            source: try makeSource(), document: EditDocument(), lut: nil, format: .jpeg, to: destination
+            source: try makeSource(), document: EditDocument(), lut: nil, format: .jpeg,
+            to: destination
         )
 
         try await waitUntil { !coordinator.isExporting }
@@ -119,7 +127,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertTrue(errors[0].hasPrefix("Export failed:"), errors[0])
         // Not merely "an error appeared": a *write* failure has to be distinguishable from the
         // encode failure below, or one message would satisfy both tests.
-        XCTAssertNotEqual(errors[0], "Export failed: Export failed",
+        XCTAssertNotEqual(
+            errors[0], "Export failed: Export failed",
                           "this path should report the filesystem's error, not the encoder's")
     }
 
@@ -136,13 +145,16 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
 
         let destination = tempDirectory.appendingPathComponent("out.jpg")
         coordinator.performExport(
-            source: try makeSource(), document: EditDocument(), lut: nil, format: .jpeg, to: destination
+            source: try makeSource(), document: EditDocument(), lut: nil, format: .jpeg,
+            to: destination
         )
 
         try await waitUntil { !coordinator.isExporting }
-        XCTAssertEqual(errors, ["Export failed: Export failed"],
+        XCTAssertEqual(
+            errors, ["Export failed: Export failed"],
                        "a failed encode must surface with the engine's own error")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path),
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: destination.path),
                        "a failed encode must not leave a file behind")
     }
 
@@ -162,7 +174,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(outcome, .init(exported: 3, failed: 0, total: 3))
         for name in ["a", "b", "c"] {
             XCTAssertTrue(
-                FileManager.default.fileExists(atPath: folder.appendingPathComponent("\(name).png").path),
+                FileManager.default.fileExists(
+                    atPath: folder.appendingPathComponent("\(name).png").path),
                 "\(name).png should have been written"
             )
         }
@@ -184,7 +197,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         )
 
         XCTAssertTrue(
-            FileManager.default.fileExists(atPath: folder.appendingPathComponent("shot_My_Look.jpg").path),
+            FileManager.default.fileExists(
+                atPath: folder.appendingPathComponent("shot_My_Look.jpg").path),
             "the LUT name should be in the exported filename"
         )
     }
@@ -209,7 +223,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         )
 
         XCTAssertEqual(outcome, .init(exported: 2, failed: 1, total: 3))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("good1.jpg").path))
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: folder.appendingPathComponent("good1.jpg").path))
         XCTAssertTrue(
             FileManager.default.fileExists(atPath: folder.appendingPathComponent("good2.jpg").path),
             "the item after the failure must still be exported"
@@ -257,11 +272,14 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         let subB = tempDirectory.appendingPathComponent("b")
         for sub in [subA, subB] {
             try FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
-            try Fixtures.writeJPEG(width: 16, height: 16, orientation: 1, named: "DSC001.jpg", in: sub)
+            try Fixtures.writeJPEG(
+                width: 16, height: 16, orientation: 1, named: "DSC001.jpg", in: sub)
         }
         let items = [
-            ExportCoordinator.BatchItem(url: subA.appendingPathComponent("DSC001.jpg"), data: nil, name: "DSC001"),
-            ExportCoordinator.BatchItem(url: subB.appendingPathComponent("DSC001.jpg"), data: nil, name: "DSC001"),
+            ExportCoordinator.BatchItem(
+                url: subA.appendingPathComponent("DSC001.jpg"), data: nil, name: "DSC001"),
+            ExportCoordinator.BatchItem(
+                url: subB.appendingPathComponent("DSC001.jpg"), data: nil, name: "DSC001"),
         ]
 
         let folder = try destinationFolder()
@@ -270,9 +288,12 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         )
 
         XCTAssertEqual(outcome.exported, 2)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: folder.appendingPathComponent("DSC001.jpg").path))
         XCTAssertTrue(
-            FileManager.default.fileExists(atPath: folder.appendingPathComponent("DSC001 2.jpg").path),
+            FileManager.default.fileExists(atPath: folder.appendingPathComponent("DSC001.jpg").path)
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: folder.appendingPathComponent("DSC001 2.jpg").path),
             "the second file must not overwrite the first"
         )
     }
@@ -311,7 +332,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         }
 
         try await waitUntil { coordinator.batchCurrentItem == "second" }
-        XCTAssertTrue(FileManager.default.fileExists(
+        XCTAssertTrue(
+            FileManager.default.fileExists(
             atPath: folder.appendingPathComponent("first.png").path
         ))
         coordinator.cancelBatchExport()
@@ -319,13 +341,16 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
 
         let outcome = await task.value
         XCTAssertEqual(outcome, .init(exported: 1, failed: 0, total: 3, cancelled: true))
-        XCTAssertTrue(FileManager.default.fileExists(
+        XCTAssertTrue(
+            FileManager.default.fileExists(
             atPath: folder.appendingPathComponent("first.png").path
         ))
-        XCTAssertFalse(FileManager.default.fileExists(
+        XCTAssertFalse(
+            FileManager.default.fileExists(
             atPath: folder.appendingPathComponent("second.png").path
         ))
-        XCTAssertFalse(FileManager.default.fileExists(
+        XCTAssertFalse(
+            FileManager.default.fileExists(
             atPath: folder.appendingPathComponent("third.png").path
         ))
         XCTAssertFalse(
@@ -353,7 +378,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
     /// written file: at full strength the export must be black, at zero it must not. Asserting only
     /// the zero end would pass against a batch that ignored the LUT entirely.
     func testBatchExportHonorsTheDocumentsIntensity() async throws {
-        let lut = CubeLUT(cube: [SIMD3<Float>](repeating: .zero, count: 8), size: 2, name: "toBlack")
+        let lut = CubeLUT(
+            cube: [SIMD3<Float>](repeating: .zero, count: 8), size: 2, name: "toBlack")
         let folder = try destinationFolder()
 
         func exportSum(intensity: Double, named name: String) async throws -> CGFloat {
@@ -379,9 +405,12 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         let sourceFolder = tempDirectory.appendingPathComponent("sources")
         try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
         let urls = try ["first", "second"].map {
-            try Fixtures.writeGradientPNG(width: 48, height: 32, named: "\($0).png", in: sourceFolder)
+            try Fixtures.writeGradientPNG(
+                width: 48, height: 32, named: "\($0).png", in: sourceFolder)
         }
-        let store = makeInMemoryEditStore()
+        let package = makeEditPackageFixture()
+        let store = package.store()
+        for url in urls { try package.register(url) }
         let firstDocument = EditDocument(adjustments: [.exposure(ev: 0.25)])
         let secondDocument = EditDocument(adjustments: [.vibrance(amount: 0.75)])
         for (url, document) in zip(urls, [firstDocument, secondDocument]) {
@@ -394,7 +423,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let coordinator = ExportCoordinator(engine: fake, editStore: store)
         let items = urls.map {
-            ExportCoordinator.BatchItem(url: $0, data: nil, name: $0.deletingPathExtension().lastPathComponent)
+            ExportCoordinator.BatchItem(
+                url: $0, data: nil, name: $0.deletingPathExtension().lastPathComponent)
         }
         let outcome = await coordinator.performBatchExport(
             items, document: EditDocument(), lut: nil, format: .png, to: try destinationFolder()
@@ -403,18 +433,30 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2))
         let requests = await fake.encodeRequests
         XCTAssertEqual(requests.count, 2)
-        XCTAssertTrue(requests.contains { $0.source?.backing == .url(urls[0]) && $0.document == firstDocument })
-        XCTAssertTrue(requests.contains { $0.source?.backing == .url(urls[1]) && $0.document == secondDocument })
-        XCTAssertTrue(requests.allSatisfy { $0.scale == .full }, "batch export must never use a preview scale")
+        XCTAssertTrue(
+            requests.contains {
+                $0.source?.backing == .url(urls[0]) && $0.document == firstDocument
+            })
+        XCTAssertTrue(
+            requests.contains {
+                $0.source?.backing == .url(urls[1]) && $0.document == secondDocument
+            })
+        XCTAssertTrue(
+            requests.allSatisfy { $0.scale == .full }, "batch export must never use a preview scale"
+        )
     }
 
     func testSelectedExportContainsExactlyTheLibrarySelectionAndUsesOriginals() async throws {
         let libraryFolder = tempDirectory.appendingPathComponent("selected-library")
-        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: libraryFolder, withIntermediateDirectories: true)
         let urls = try ["one", "two", "three"].map {
-            try Fixtures.writeGradientPNG(width: 40, height: 24, named: "\($0).png", in: libraryFolder)
+            try Fixtures.writeGradientPNG(
+                width: 40, height: 24, named: "\($0).png", in: libraryFolder)
         }
-        let store = makeInMemoryEditStore()
+        let package = makeEditPackageFixture()
+        let store = package.store()
+        for url in urls { try package.register(url) }
         let documents = [
             EditDocument(adjustments: [.exposure(ev: 0.1)]),
             EditDocument(adjustments: [.exposure(ev: 0.2)]),
@@ -468,7 +510,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         )
 
         let expectedIDs = Set(request.items.compactMap(\.assetID))
-        let exportedIDs = Set(requests.compactMap { request -> PhotoAssetID? in
+        let exportedIDs = Set(
+            requests.compactMap { request -> PhotoAssetID? in
             guard case .url(let url)? = request.source?.backing else { return nil }
             return PhotoAssetID.file(url)
         })
@@ -476,7 +519,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
             exportedIDs, expectedIDs,
             "exported asset IDs differ from the selection; requests=\(diagnostics)"
         )
-        let exportedURLs = Set(requests.compactMap { request -> URL? in
+        let exportedURLs = Set(
+            requests.compactMap { request -> URL? in
             guard case .url(let url)? = request.source?.backing else { return nil }
             return url
         })
@@ -489,9 +533,11 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
 
     func testSelectedExportSnapshotsMembershipBeforeSelectionChangesInFlight() async throws {
         let libraryFolder = tempDirectory.appendingPathComponent("selection-snapshot")
-        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(
+            at: libraryFolder, withIntermediateDirectories: true)
         let urls = try ["one", "two", "three"].map {
-            try Fixtures.writeGradientPNG(width: 40, height: 24, named: "\($0).png", in: libraryFolder)
+            try Fixtures.writeGradientPNG(
+                width: 40, height: 24, named: "\($0).png", in: libraryFolder)
         }
         let fake = FakeRenderEngine()
         await fake.gateEncodeAfterFirst()
@@ -526,8 +572,10 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(outcome, .init(exported: 2, failed: 0, total: 2))
         let requests = await fake.encodeRequests
         let diagnostics = requests.map(Self.exportRequestDiagnostics).joined(separator: ", ")
-        XCTAssertEqual(requests.count, 2, "selection changed the batch membership; requests=\(diagnostics)")
-        let exportedURLs = Set(requests.compactMap { request -> URL? in
+        XCTAssertEqual(
+            requests.count, 2, "selection changed the batch membership; requests=\(diagnostics)")
+        let exportedURLs = Set(
+            requests.compactMap { request -> URL? in
             guard case .url(let url)? = request.source?.backing else { return nil }
             return url
         })
@@ -555,7 +603,8 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         case .data(let data): source = "data:\(data.count)-bytes"
         case nil: source = "missing-source"
         }
-        return "asset=\(asset),source=\(source),document=\(request.document.editHash),scale=\(request.scale)"
+        return
+            "asset=\(asset),source=\(source),document=\(request.document.editHash),scale=\(request.scale)"
     }
 
     // MARK: - Summary text
