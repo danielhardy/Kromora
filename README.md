@@ -162,16 +162,16 @@ library Look; the stable derived identity keeps the edit resolving across rescan
 
 ## Persistence and editing state
 
-Edits are isolated per photo and survive navigation and relaunch. Kromora stores one SwiftData
-`EditRecord` per photo in the local `EditStore.store` container under Application Support. The edit
-document is encoded as versioned JSON data inside that record; writes are serialized and coalesced
-during slider activity, while source paths and security-scoped bookmarks support relinking moved
-files. The store also supports:
+Edits are isolated per photo and survive navigation and relaunch. Kromora appends one versioned
+JSON `EditDocument` per edit revision to the package asset's `Edits/` sidecar; the sidecar is
+canonical and `EditDocumentStore` is a bounded in-memory cache, so cache eviction never discards
+an edit. Writes are serialized and coalesced during slider activity. Existing standalone
+`EditStore*.store` files are left untouched and are not opened as a fallback. Editing state also
+supports:
 
 - Up to 100 undo and redo snapshots per photo, containing only value-state documents.
 - Copy/paste of all edits between photos, including destinations that were never opened.
-- Per-record corruption reporting without replacing the photo with an unmarked blank edit.
-- Relinking a moved source through its stored bookmark/locator and updating the source locator.
+- Per-revision corruption reporting without replacing the photo with an unmarked blank edit.
 - Schema-version checks that refuse to decode documents written by a newer Kromora build.
 - A termination flush so queued edits are durable before the app exits.
 
@@ -378,10 +378,12 @@ Useful starting points are [`EditDocument`](Sources/KromoraKit/Models/EditDocume
 [`RenderEngine`](Sources/KromoraKit/Models/RenderEngine.swift), and
 [`EditDocumentStore`](Sources/KromoraKit/Models/EditDocumentStore.swift).
 
-The remaining architecture roadmap is intentionally narrow: review and sequence the portable
-library package in KRMA-384 before changing source identity, import ownership, or the current
-SwiftData edit store. The ready coordinator-extraction follow-ups (native dialogs, view-owned state,
-and platform/domain model separation) are tracked in KRMA-380, KRMA-381, and KRMA-383.
+The portable library package is the implemented product: the open package owns library membership,
+originals, metadata, and edit revisions, with package edit sidecars as the canonical edit store.
+Folder, Photos, and removable-volume choices are import sources; the local index and device caches
+are rebuildable projections. See [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) and
+[`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for the storage contract and ownership
+boundaries. KRMA-384 remains only as the historical planning record.
 
 ## Preparing for the App Store
 

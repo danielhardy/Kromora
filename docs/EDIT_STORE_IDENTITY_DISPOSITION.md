@@ -1,5 +1,11 @@
 # EditStore identity cutover and current-data disposition
 
+> **Superseded in production by KRMA-531.** This record describes the KRMA-399
+> `EditStore.v2.store` cutover. Production code no longer opens a SwiftData edit store:
+> package edit sidecars are canonical and `EditDocumentStore` is a bounded in-memory cache.
+> Standalone `EditStore*.store` files remain untouched and are not opened as a fallback.
+> Current contract: [STORAGE_POLICY.md](STORAGE_POLICY.md).
+
 Status: implemented for KRMA-399. The decision below is governed by
 [ADR-001](../.dg/decisions/ADR-001-portable-library-package-sequencing-and-safety-b.md).
 
