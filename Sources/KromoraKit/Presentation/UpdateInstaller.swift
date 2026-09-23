@@ -74,9 +74,11 @@ public enum KromoraUpdateInstaller {
     }
 
     public static var canInstallInPlace: Bool {
-        // App Sandbox write access to /Applications and hdiutil Process execution have not
-        // been validated in a signed release build. Keep the action on the release page until
-        // that end-to-end path is confirmed; a valid signature alone does not prove installability.
+        // Confirmed permanently false, not pending validation: a signed, sandboxed, provisioned
+        // build tested against a real Developer ID identity shows `hdiutil attach` fails under
+        // App Sandbox ("Device not configured") — Seatbelt denies the block-device access it
+        // needs, with no entitlement able to grant it. See docs/PACKAGING.md's "Sandboxed
+        // updater validation" section for the full test method and result.
         false
     }
 
