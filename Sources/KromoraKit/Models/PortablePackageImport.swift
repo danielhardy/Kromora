@@ -183,20 +183,28 @@ final class PortablePackageImportResultBox: Sendable {
 }
 
 final class PortablePackageImportProgressSink: Sendable {
-    private let state = OSAllocatedUnfairLock<
-        AsyncStream<PortablePackageImportProgress>.Continuation?
-    >(initialState: nil)
+    private struct State: Sendable {
+        var continuation: AsyncStream<PortablePackageImportProgress>.Continuation?
+        var finished = false
+    }
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
     func install(_ continuation: AsyncStream<PortablePackageImportProgress>.Continuation) {
-        state.withLock { $0 = continuation }
+        state.withLock {
+            $0.continuation = continuation
+            if $0.finished { continuation.finish() }
+        }
     }
 
     func yield(_ value: PortablePackageImportProgress) {
-        _ = state.withLock { $0?.yield(value) }
+        _ = state.withLock { $0.continuation?.yield(value) }
     }
 
     func finish() {
-        state.withLock { $0?.finish() }
+        state.withLock {
+            $0.finished = true
+            $0.continuation?.finish()
+        }
     }
 }
 
@@ -351,7 +359,7 @@ struct PortablePackageImporter: Sendable {
 
             let assetID = PortablePhotoAssetID()
             let shardName = PortableLibraryPackage.shard(for: assetID)
-            let filename = Self.safeFilename(source.name)
+            let filename = PortableLibraryPackage.safeFilename(source.name)
             let sourcePath = "Assets/\(shardName)/\(assetID.raw)/Original/\(filename)"
             let recordPath = "Assets/\(shardName)/\(assetID.raw)/asset.json"
             var transaction: PortablePackageTransaction
@@ -530,15 +538,8 @@ struct PortablePackageImporter: Sendable {
         return total
     }
 
-    private static func safeFilename(_ name: String) -> String {
-        PortableLibraryPackage.safeFilename(name)
-    }
-
     private static func encode<T: Encodable>(_ value: T) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(value)
+        try PackageJSONCoder.encode(value)
     }
 
     private static func requireShard(

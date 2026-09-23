@@ -260,7 +260,7 @@ final class PortableLibrarySession {
         pageIndex: Int, query: LibraryQuery = .all
     ) throws -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
         let page = self.page(at: pageIndex, query: query)
-        let assets = page.items.map { Self.browsingAsset(for: $0, package: package) }
+        let assets = try page.items.map { try Self.browsingAsset(for: $0, package: package) }
         return (assets, page.totalCount, page.pageSize)
     }
 
@@ -443,9 +443,13 @@ final class PortableLibrarySession {
         let admitted = scheduler.enqueuePackageIO(
             id: jobID,
             lane: .importCopyHash,
-            onTerminal: { [weak self, weak handle] outcome in
+            onTerminal: { [weak self, weak handle, progressSink] outcome in
                 guard let self else { return }
                 self.activeImportJobIDs.remove(jobID)
+                // A queued job cancelled before its operation runs never reaches the defer
+                // below, so end the progress stream on every terminal outcome. Otherwise a
+                // `for await` consumer would wait forever; finishing twice is a no-op.
+                progressSink.finish()
                 switch outcome {
                 case .completed:
                     guard let outcome = workerResultBox.outcomeIfFinished() else {
@@ -552,7 +556,7 @@ final class PortableLibrarySession {
     ) throws -> PortablePackageImportResult {
         try ensureWritableLease()
         let temporaryURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("Kromora-import-\(UUID().uuidString)-\(safeFilename(name))")
+            .appendingPathComponent("Kromora-import-\(UUID().uuidString)-\(PortableLibraryPackage.safeFilename(name))")
         try data.write(to: temporaryURL, options: .atomic)
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
         let result: PortablePackageImportResult
@@ -633,7 +637,7 @@ final class PortableLibrarySession {
         var pageIndex = 0
         while true {
             let page = self.page(at: pageIndex, query: query)
-            assets.append(contentsOf: page.items.map { Self.browsingAsset(for: $0, package: package) })
+            assets.append(contentsOf: try page.items.map { try Self.browsingAsset(for: $0, package: package) })
             guard page.hasNextPage else { return assets }
             pageIndex += 1
         }
@@ -643,7 +647,7 @@ final class PortableLibrarySession {
     /// page; stable `PhotoAssetID` identity (`portable:<uuid>`) keeps selection coherent as
     /// further pages fault in.
     func browsingAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
-        page(at: pageIndex, query: query).items.map { Self.browsingAsset(for: $0, package: package) }
+        try page(at: pageIndex, query: query).items.map { try Self.browsingAsset(for: $0, package: package) }
     }
 
     /// Canonical source URL for opening, exporting, or editing one asset. The derived browsing
@@ -654,7 +658,7 @@ final class PortableLibrarySession {
             // Keep the observer honest: `verifiedEmbeddedSourceURL` opens the record when the
             // derived file is missing, so check the cheap derived path first and only count
             // the fallback when a record is actually opened. The returned URL is identical.
-            let derived = package.browsingOriginalURL(
+            let derived = try package.browsingOriginalURL(
                 for: assetID, displayName: entry.summary.displayName
             )
             if FileManager.default.fileExists(atPath: derived.path) { return derived }
@@ -669,9 +673,9 @@ final class PortableLibrarySession {
 
     private static func browsingAsset(
         for item: LibraryQueryItem, package: PortableLibraryPackage
-    ) -> PhotoAsset {
+    ) throws -> PhotoAsset {
         let summary = item.summary
-        let embeddedURL = package.browsingOriginalURL(
+        let embeddedURL = try package.browsingOriginalURL(
             for: item.assetID, displayName: summary.displayName
         )
         let source = PhotoAssetSource(
@@ -784,8 +788,4 @@ final class PortableLibrarySession {
         )
     }
 
-    private func safeFilename(_ name: String) -> String {
-        let component = URL(fileURLWithPath: name).lastPathComponent
-        return component.isEmpty ? "original" : component.replacingOccurrences(of: "/", with: "_")
-    }
 }

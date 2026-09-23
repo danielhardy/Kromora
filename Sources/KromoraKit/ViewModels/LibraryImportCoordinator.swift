@@ -134,12 +134,6 @@ final class LibraryImportCoordinator {
         }
     }
 
-    func cancelCurrent() {
-        handle?.cancel()
-        handle = nil
-        publishProgress(nil)
-    }
-
     func shutdown() async {
         operationID = UUID()
         handle?.cancel()
