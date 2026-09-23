@@ -27,7 +27,7 @@ fences. Feature workflows do not reach into one another's private state.
 | Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions, undo/redo, revisions, and clipboard | `EditDocument`, `PhotoEditSession`, `EditClipboardPayload`, revision numbers |
 | Preview and comparison | `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render admission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
-| Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; masking state and presentation remain in the masking boundary | analysis value results, mask recipes, asset/source revisions |
+| Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
 | Export and Looks | `ExportCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, and `LUTLibrary` | render requests, export items, LUT IDs/values, status/error callbacks |
 | Lifecycle and shutdown | `ApplicationShellCoordinator` owns process observers and package-maintenance admission; `AppViewModel` remains the shutdown composition root; each collaborator owns cancellation and resource release within its boundary | explicit `shutdown()`/flush calls; observer tokens, maintenance triggers, and provider tasks do not escape their owner |
 
@@ -71,6 +71,28 @@ callbacks are refresh signals only. `AppViewModel` retains the compatibility fa�
 shutdown by disconnecting callbacks, stopping the shell and media workflow, stopping collection and
 provider work, awaiting editor/render collaborators, cancelling the shared scheduler, and then
 discarding only explicitly abandoned persistence snapshots.
+
+## Masking-workflow ownership
+
+`MaskingWorkflowCoordinator` owns the masking workspace: layer/component selection and transient
+creation state (`MaskInteractionState`, an `ObservableObject` this coordinator constructs and
+exposes), plus smart-mask analysis invocation, cancellation, retry context, and the person-signal
+warm-up task. `AppViewModel` remains the owner of the published `EditDocument`, undo grouping,
+preview scheduling, and inspector chrome; the coordinator reaches into that state only through
+`MaskingWorkflowDestination`, a narrow `@MainActor` protocol (`document`/`updateDocument`, status
+message, undo grouping, preview interaction begin/end, retry-preview, and masking-workspace
+present/dismiss). `PhotoAnalysisCoordinator` is injected behind `MaskAnalysisProviding` — a
+three-method async boundary (`analyze`, `mask`, `preparePersonSignals`) — so smart-mask creation,
+cancellation, and supersession are covered by fake-runner tests
+(`MaskingWorkflowCoordinatorTests`) without a renderer, Vision, or an `AppViewModel`.
+
+A masking command commits through `MaskingWorkflowDestination.updateDocument`, which gives it the
+normal persistence/undo/copy-paste path automatically — the coordinator never becomes a second
+document store. `AppViewModel` keeps every masking entry point (`createMask`, `createSmartMask`,
+`beginMaskGesture`, …) as a one-line forwarder in `AppViewModel+Masking.swift` so existing View and
+`KeyboardShortcuts` call sites are unaffected. Smart-mask and person-signal-warming tasks are owned
+and cancelled by the coordinator's own `shutdown()`, called once from `AppViewModel.shutdown`,
+rather than living in `AppViewModel`'s task-cancellation array.
 
 ## Boundary rules
 
