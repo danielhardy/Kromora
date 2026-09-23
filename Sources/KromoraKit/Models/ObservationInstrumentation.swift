@@ -15,6 +15,26 @@ struct RenderDiagnosticsSnapshot: Sendable, Equatable {
 
 struct RenderEngineDiagnosticsSnapshot: Sendable, Equatable {
     let trackedMaskSourceKeys: [String]
+    /// Count of sources with a live render-request supersession fence. Exists so a long
+    /// source-navigation stress test can assert this stays bounded (KRMA-530) rather than
+    /// growing one entry per source fingerprint visited in a session.
+    let trackedRenderSourceCount: Int
+    /// Count of document-revision keys retained by the mask ledger, for the same reason.
+    let trackedMaskRequestCount: Int
+    /// Number of LUT filters currently retained by the renderer. This belongs in the snapshot
+    /// rather than as a standalone test seam so cache-observation callers cannot couple to the
+    /// actor's storage layout.
+    let cachedFilterCount: Int
+
+    init(
+        trackedMaskSourceKeys: [String], trackedRenderSourceCount: Int = 0,
+        trackedMaskRequestCount: Int = 0, cachedFilterCount: Int = 0
+    ) {
+        self.trackedMaskSourceKeys = trackedMaskSourceKeys
+        self.trackedRenderSourceCount = trackedRenderSourceCount
+        self.trackedMaskRequestCount = trackedMaskRequestCount
+        self.cachedFilterCount = cachedFilterCount
+    }
 }
 
 @MainActor

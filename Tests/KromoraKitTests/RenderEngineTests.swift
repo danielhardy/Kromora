@@ -935,7 +935,7 @@ final class RenderEngineTests: TempDirectoryTestCase {
         let lut = TestImages.warmLUT()
         let document = EditDocument(lut: LUTSettings(lutID: lut.lutID, intensity: 1))
 
-        let initialCount = await engine.cachedFilterCount
+        let initialCount = await engine.diagnosticsSnapshot.cachedFilterCount
         XCTAssertEqual(initialCount, 0)
 
         for _ in 0..<5 {
@@ -943,18 +943,18 @@ final class RenderEngineTests: TempDirectoryTestCase {
                 source: source, document: document, lut: lut, scale: .full, space: .current
             )
         }
-        let afterFive = await engine.cachedFilterCount
+        let afterFive = await engine.diagnosticsSnapshot.cachedFilterCount
         XCTAssertEqual(afterFive, 1, "five renders of one LUT should build one filter")
 
         // A second space is a second entry — the cube is interpolated in the space.
         _ = await engine.makeCGImage(
             source: source, document: document, lut: lut, scale: .full, space: .displayP3
         )
-        let afterP3 = await engine.cachedFilterCount
+        let afterP3 = await engine.diagnosticsSnapshot.cachedFilterCount
         XCTAssertEqual(afterP3, 2)
 
         await engine.invalidateLUTCache()
-        let afterFlush = await engine.cachedFilterCount
+        let afterFlush = await engine.diagnosticsSnapshot.cachedFilterCount
         XCTAssertEqual(afterFlush, 0, "a rescan must be able to drop stale cubes")
     }
 
@@ -1047,7 +1047,7 @@ final class RenderEngineTests: TempDirectoryTestCase {
         for (index, bytes) in results.enumerated() {
             assertPixelsEqual(bytes, expected, "concurrent render \(index) diverged")
         }
-        let filterCount = await engine.cachedFilterCount
+        let filterCount = await engine.diagnosticsSnapshot.cachedFilterCount
         XCTAssertEqual(filterCount, 1, "concurrent renders should still share one cached filter")
     }
 

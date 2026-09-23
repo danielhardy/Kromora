@@ -538,12 +538,14 @@ actor RenderEngine: RenderEngining {
     static let shared = RenderEngine()
 
     /// All non-Sendable GPU and cache resources live in this actor-confined storage boundary.
-    private let resources: RenderEngineResources
+    let resources: RenderEngineResources
 
     // These narrow aliases keep the render algorithm readable while making ownership explicit in
-    // `RenderEngineResources`. They are actor-isolated through their enclosing engine.
-    private var context: CIContext { resources.context }
-    private var commandQueue: MTLCommandQueue? { resources.commandQueue }
+    // `RenderEngineResources`. They are actor-isolated through their enclosing engine. Not
+    // `private`: the RAW-capability and histogram extensions in their own files (KRMA-530) read
+    // them too, and `private` is file-scoped rather than type-scoped.
+    var context: CIContext { resources.context }
+    var commandQueue: MTLCommandQueue? { resources.commandQueue }
     private var lutCache: LUTFilterCache { resources.lutCache }
     private var toneCurveCache: ToneCurveFilterCache { resources.toneCurveCache }
     private var toneCurveSource: RenderSourceFingerprint? {
@@ -576,11 +578,13 @@ actor RenderEngine: RenderEngining {
     /// and is only safe behind this actor; retaining one filter for the visible source avoids
     /// rebuilding its immutable source/decode setup on every pointer tick. It is discarded at the
     /// source boundary, so a replaced URL or a different photo can never reuse decoder state.
-    private var interactiveRAWSession: InteractiveRAWFilterSession?
-    /// Latest request revision admitted for each source. This is independent of mask revisions:
-    /// an unmasked interactive render still needs a pre-submit supersession fence.
-    private var latestRenderRequestRevisions: [String: UInt64] = [:]
-    private var rawFilterConstructionCount = 0
+    /// Not `private`: `RenderEngine+RAWCapabilities.swift` owns the session accessor in its own
+    /// file, and `private` is file-scoped rather than type-scoped (KRMA-530).
+    var interactiveRAWSession: InteractiveRAWFilterSession?
+    /// Bounded render/mask supersession bookkeeping. See `RenderEngine.RevisionLedger` for why this
+    /// is a separate value type rather than plain dictionaries on the actor.
+    private var revisionLedger = RevisionLedger()
+    var rawFilterConstructionCount = 0
     private var rawPropertyWriteCount = 0
     private var rawOutputRequestCount = 0
     private var processingPrefixMaterializationCount = 0
@@ -630,18 +634,6 @@ actor RenderEngine: RenderEngining {
             }
         }
     }
-    /// Render-domain supersession is keyed by source and full document identity. This lets a
-    /// global-only edit keep an older local-mask resolution alive while still rejecting a lagging
-    /// render of the same document revision. Local-mask recipe changes invalidate every older
-    /// document entry for that source.
-    private var latestMaskRequestRevisions: [String: UInt64] = [:]
-    private var latestMaskRecipeIdentities: [String: String] = [:]
-    /// Dictionary iteration order is undefined, so keep the source insertion order separately for
-    /// the bounded supersession table. A recipe replacement makes that source the newest entry.
-    private var maskSourceOrder: [String] = []
-    /// Overlay requests intentionally remain source-wide: the overlay has no document identity and
-    /// must still reject a stale nonzero revision after a preview render has started.
-    private var latestOverlayMaskRequestRevisions: [String: UInt64] = [:]
     /// A revisioned preview owns one waiter on the coordinator for every semantic component it is
     /// currently resolving. Keeping the waiter task here lets a later source or mask recipe cancel
     /// it immediately; cancelling that task runs `PhotoAnalysisCoordinator.maskWaiterCancelled`
@@ -653,8 +645,6 @@ actor RenderEngine: RenderEngining {
     }
     private var inFlightSemanticMaskResolutions: [UUID: InFlightSemanticMaskResolution] = [:]
     private var activeRevisionedMaskSource: String?
-    private let maximumTrackedMaskSources = 16
-    private let maximumTrackedMaskRequests = 64
 
     init(
         maskResolver: any LocalMaskResolving = DefaultLocalMaskResolver(),
@@ -1088,197 +1078,6 @@ actor RenderEngine: RenderEngining {
         return metadata.isEmpty ? nil : metadata
     }
 
-    // MARK: - Histogram
-
-    /// Tally the rendered document into 256 bins per channel.
-    ///
-    /// The image is rendered to a downscaled RGBA8 buffer first — `maxDimension` caps the longest
-    /// side so this stays a few milliseconds even for a 60 MP source, while staying representative.
-    ///
-    /// `scale` is the caller's *display* scale on purpose. The developed-source memo is keyed on it
-    /// (§6, "the cutover's one real trap"), so asking for a histogram at some private 512 px scale
-    /// would evict the preview's entry on every tally and re-develop the RAW on the next frame —
-    /// turning a cheap panel into a per-frame decode. Rendering the same graph the preview renders
-    /// and shrinking only the tally buffer keeps both on one memo entry.
-    ///
-    /// The buffer is rendered in `space` for the same reason `makeCGImage` is: the histogram should
-    /// describe the pixels the user is looking at, not a differently-encoded copy of them.
-    func histogram(
-        source: ImageSource,
-        document: EditDocument,
-        lut: CubeLUT?,
-        scale: RenderScale,
-        space: WorkingSpace = .current,
-        maxDimension: Int = 512
-    ) async -> HistogramData? {
-        var interval = KromoraObservability.begin(.histogram, source: source, quality: .preview)
-        defer { interval.end() }
-
-        guard !Task.isCancelled, maxDimension > 0 else {
-            return nil
-        }
-        let image: CIImage?
-        do {
-            image = try await buildImage(source, document, lut, scale, space, quality: .preview,
-                                         assetID: nil, requestRevision: 0)
-        } catch {
-            return nil
-        }
-        guard let image else { return nil }
-        return tallyHistogram(from: image, space: space, maxDimension: maxDimension)
-    }
-
-    /// Tally the completed preview texture without rebuilding the render graph.
-    func histogram(
-        presentedImage: sending CIImage,
-        space: WorkingSpace = .current,
-        maxDimension: Int = 512
-    ) async -> HistogramData? {
-        var interval = KromoraObservability.begin(.histogram, source: nil, quality: .preview)
-        defer { interval.end() }
-        return tallyHistogram(from: presentedImage, space: space, maxDimension: maxDimension)
-    }
-
-    private func tallyHistogram(
-        from image: CIImage,
-        space: WorkingSpace,
-        maxDimension: Int
-    ) -> HistogramData? {
-        guard !Task.isCancelled, maxDimension > 0 else { return nil }
-        guard !Task.isCancelled else { return nil }
-        let extent = image.extent
-        guard extent.isRasterizable else { return nil }
-
-        let factor = min(
-            CGFloat(maxDimension) / extent.width,
-            CGFloat(maxDimension) / extent.height,
-            1.0
-        )
-        let scaled = image.transformed(by: CGAffineTransform(scaleX: factor, y: factor))
-        let rect = scaled.extent.integral
-        guard rect.isRasterizable else { return nil }
-
-        let width = Int(rect.width)
-        let height = Int(rect.height)
-        guard !Task.isCancelled, width > 0, height > 0 else { return nil }
-        let bytesPerRow = width * 4
-        var bytes = [UInt8](repeating: 0, count: height * bytesPerRow)
-        guard !Task.isCancelled else { return nil }
-        bytes.withUnsafeMutableBytes { ptr in
-            guard let base = ptr.baseAddress else { return }
-            guard !Task.isCancelled else { return }
-            context.render(
-                scaled, toBitmap: base, rowBytes: bytesPerRow, bounds: rect,
-                format: .RGBA8, colorSpace: space.cgColorSpace
-            )
-        }
-        guard !Task.isCancelled else { return nil }
-        return HistogramData(rgba8: bytes, width: width, height: height, bytesPerRow: bytesPerRow)
-    }
-
-    // MARK: - RAW capabilities
-
-    /// Admit a source using decoder-owned geometry. Standard-image dimensions come from ImageIO;
-    /// RAW dimensions come from the renderer-owned session, which also rejects a filter whose
-    /// output cannot be rasterized before publishing a prepared source.
-    func prepareSource(_ source: ImageSource) -> ImageSourcePreparation? {
-        switch source.kind {
-        case .standard:
-            guard let prepared = try? standardPreparation(for: source) else { return nil }
-            return prepared
-        case .raw:
-            guard let session = session(for: source) else { return nil }
-            // The session's filter size is sensor-native; the orientation tag decides the
-            // display axes (quarter-turns swap them). The canvas, crop math, and scale
-            // factors all work in display space, matching the standard-image path.
-            let preparedSource = ImageSource(
-                backing: source.backing, kind: .raw, nativeExtent: session.orientedNativeSize,
-                portableIdentity: source.cacheIdentity.with(
-                    geometry: PhotoPixelDimensions(
-                        width: Int(session.orientedNativeSize.width),
-                        height: Int(session.orientedNativeSize.height)
-                    )
-                )
-            )
-            return ImageSourcePreparation(source: preparedSource)
-        }
-    }
-
-    private func standardPreparation(for source: ImageSource) throws -> ImageSourcePreparation {
-        let extent: CGSize
-        switch source.backing {
-        case .url(let url):
-            extent = try ImageDecoder.prepareStandard(from: url)
-        case .data(let data):
-            extent = try ImageDecoder.prepareStandard(from: data, name: "import")
-        }
-        return ImageSourcePreparation(source: ImageSource(
-            backing: source.backing, kind: .standard, nativeExtent: extent,
-            portableIdentity: source.cacheIdentity.with(
-                geometry: PhotoPixelDimensions(width: Int(extent.width), height: Int(extent.height))
-            )
-        ))
-    }
-
-    /// Read capabilities from the same renderer-owned session used for preparation and preview.
-    ///
-    /// **`outputImage` is deliberately never touched.** That is the difference between ~25 ms and
-    /// ~183 ms on a 30 MB DNG (measured; see the Step 10a design doc), and it is why this can run on
-    /// every image open without being felt. It also leaves the developed-source memo alone — a
-    /// capability question must not evict the image the user is looking at.
-    ///
-    /// **A gated seed is read only when its gate is open.** Every property below the `is*Supported`
-    /// line is a knob this particular decoder may not offer, and what an unoffered property returns is
-    /// not a default the panel should show — it is nothing at all. Where the gate is shut the seed
-    /// stays at `RAWCapabilities`' own default, which no control can reach anyway: `supports(_:)`
-    /// withdraws the control on the same flag.
-    func rawCapabilities(for source: ImageSource) -> RAWCapabilities? {
-        guard case .raw = source.kind else { return nil }
-        guard let session = session(for: source) else { return nil }
-        let captured = session.capabilities()
-        // Keep the capability-to-seed relationship explicit at this API boundary. The session has
-        // already captured these values before any mutable development output can change them.
-        return RAWCapabilities(
-            isSharpnessSupported: captured.isSharpnessSupported,
-            isContrastSupported: captured.isContrastSupported,
-            isDetailSupported: captured.isDetailSupported,
-            isMoireReductionSupported: captured.isMoireReductionSupported,
-            isLocalToneMapSupported: captured.isLocalToneMapSupported,
-            isLuminanceNoiseReductionSupported: captured.isLuminanceNoiseReductionSupported,
-            isColorNoiseReductionSupported: captured.isColorNoiseReductionSupported,
-            isLensCorrectionSupported: captured.isLensCorrectionSupported,
-            isHighlightRecoverySupported: captured.isHighlightRecoverySupported,
-            asShotTemperature: captured.asShotTemperature,
-            asShotTint: captured.asShotTint,
-            baselineExposure: captured.baselineExposure,
-            shadowBias: captured.shadowBias,
-            sharpnessAmount: captured.isSharpnessSupported ? captured.sharpnessAmount : 0,
-            contrastAmount: captured.isContrastSupported ? captured.contrastAmount : 0,
-            detailAmount: captured.isDetailSupported ? captured.detailAmount : 0,
-            moireReductionAmount:
-                captured.isMoireReductionSupported ? captured.moireReductionAmount : 0,
-            localToneMapAmount:
-                captured.isLocalToneMapSupported ? captured.localToneMapAmount : 0,
-            luminanceNoiseReductionAmount: captured.isLuminanceNoiseReductionSupported
-                ? captured.luminanceNoiseReductionAmount : 0,
-            colorNoiseReductionAmount: captured.isColorNoiseReductionSupported
-                ? captured.colorNoiseReductionAmount : 0,
-            lensCorrectionEnabled:
-                captured.isLensCorrectionSupported ? captured.lensCorrectionEnabled : false
-        )
-    }
-
-    private func session(for source: ImageSource) -> InteractiveRAWFilterSession? {
-        let fingerprint = source.decoderFingerprint
-        if interactiveRAWSession?.fingerprint != fingerprint {
-            // This is the one renderer-owned RAW session. Replacing it releases the old source
-            // graph before the new source is admitted, keeping rapid navigation bounded.
-            interactiveRAWSession = InteractiveRAWFilterSession(source: source)
-            if interactiveRAWSession != nil { rawFilterConstructionCount += 1 }
-        }
-        return interactiveRAWSession
-    }
-
     // MARK: - Cache
 
     /// Drop every cached LUT-dependent render resource. For a library rescan: a `LUTID` is a file
@@ -1327,10 +1126,7 @@ actor RenderEngine: RenderEngining {
         cancelProcessingPrefixFlights()
         resources.evictAll()
         interactiveRAWSession = nil
-        latestMaskRequestRevisions.removeAll(keepingCapacity: true)
-        latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
-        maskSourceOrder.removeAll(keepingCapacity: true)
-        latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
+        revisionLedger.clearMaskRequestState()
         Thumbnails.evictForMemoryPressure()
     }
 
@@ -1340,17 +1136,9 @@ actor RenderEngine: RenderEngining {
         cancelProcessingPrefixFlights()
         resources.invalidateAll()
         interactiveRAWSession = nil
-        latestMaskRequestRevisions.removeAll(keepingCapacity: true)
-        latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
-        maskSourceOrder.removeAll(keepingCapacity: true)
-        latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
+        revisionLedger.clearMaskRequestState()
         Thumbnails.invalidateCache()
     }
-
-    /// How many cube filters are held. Internal for the tests that prove the cache is actually being
-    /// used across renders rather than rebuilt each time — there is no other way to observe it from
-    /// outside, and a silently-bypassed cache is invisible in the output.
-    var cachedFilterCount: Int { lutCache.count }
 
     // MARK: - Private
 
@@ -1379,8 +1167,9 @@ actor RenderEngine: RenderEngining {
     }
 
     /// One funnel, so preview and export cannot diverge in how they build the graph — only in the
-    /// scale they ask for.
-    private func buildImage(
+    /// scale they ask for. Not `private`: the histogram extension file (KRMA-530) calls this too,
+    /// and `private` is file-scoped rather than type-scoped.
+    func buildImage(
         _ source: ImageSource,
         _ document: EditDocument,
         _ lut: CubeLUT?,
@@ -1494,7 +1283,7 @@ actor RenderEngine: RenderEngining {
         await Task.yield()
         try Task.checkCancellation()
         if requestRevision > 0,
-           latestRenderRequestRevisions[source.cacheFingerprint, default: 0] > requestRevision {
+           revisionLedger.latestRenderRevision(sourceKey: source.cacheFingerprint) > requestRevision {
             throw CancellationError()
         }
         let localAdjustedGraph = RenderPipeline.applyLocalAdjustments(
@@ -1871,25 +1660,19 @@ actor RenderEngine: RenderEngining {
     }
 
     private func noteMaskRequest(source: ImageSource, revision: UInt64) {
-        guard revision > 0 else { return }
-        let key = source.cacheFingerprint
-        if latestOverlayMaskRequestRevisions[key, default: 0] < revision {
-            latestOverlayMaskRequestRevisions[key] = revision
-        }
+        revisionLedger.noteOverlayMaskRequest(sourceKey: source.cacheFingerprint, revision: revision)
     }
 
     private func noteRenderRequest(_ request: RenderRequest) {
-        guard request.requestRevision > 0 else { return }
-        let key = request.source.cacheFingerprint
-        if latestRenderRequestRevisions[key, default: 0] < request.requestRevision {
-            latestRenderRequestRevisions[key] = request.requestRevision
-        }
+        revisionLedger.noteRenderRequest(
+            sourceKey: request.source.cacheFingerprint, revision: request.requestRevision
+        )
     }
 
     private func isCurrentRenderRequest(_ request: RenderRequest) -> Bool {
-        guard request.requestRevision > 0 else { return true }
-        return latestRenderRequestRevisions[request.source.cacheFingerprint, default: 0]
-            <= request.requestRevision
+        revisionLedger.isCurrentRenderRequest(
+            sourceKey: request.source.cacheFingerprint, revision: request.requestRevision
+        )
     }
 
     private func noteMaskRequest(
@@ -1901,23 +1684,15 @@ actor RenderEngine: RenderEngining {
             cancelSemanticMaskResolutions { $0.sourceKey != sourceKey }
             activeRevisionedMaskSource = sourceKey
         }
-        if latestMaskRecipeIdentities[sourceKey] != maskIdentity {
+        let recipeChanged = revisionLedger.noteMaskRequest(
+            sourceKey: sourceKey, revision: revision,
+            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+        )
+        if recipeChanged {
             cancelSemanticMaskResolutions {
                 $0.sourceKey == sourceKey && $0.maskIdentity != maskIdentity
             }
-            latestMaskRecipeIdentities[sourceKey] = maskIdentity
-            maskSourceOrder.removeAll { $0 == sourceKey }
-            maskSourceOrder.append(sourceKey)
-            latestMaskRequestRevisions.keys
-                .filter { $0.hasPrefix(sourceKey + "|") }
-                .forEach { latestMaskRequestRevisions.removeValue(forKey: $0) }
         }
-        let documentKey = sourceKey + "|" + documentIdentity
-        if latestMaskRequestRevisions[documentKey, default: 0] < revision {
-            latestMaskRequestRevisions[documentKey] = revision
-        }
-        noteMaskRequest(source: source, revision: revision)
-        trimMaskRequestState()
     }
 
     /// Run a revisioned semantic resolve in an explicitly cancellable waiter task. A global-look
@@ -1957,41 +1732,29 @@ actor RenderEngine: RenderEngining {
         activeRevisionedMaskSource = nil
     }
 
-    private func trimMaskRequestState() {
-        while latestMaskRecipeIdentities.count > maximumTrackedMaskSources {
-            guard let oldestSource = maskSourceOrder.first else { return }
-            maskSourceOrder.removeFirst()
-            guard latestMaskRecipeIdentities.removeValue(forKey: oldestSource) != nil else {
-                continue
-            }
-            latestOverlayMaskRequestRevisions.removeValue(forKey: oldestSource)
-            latestMaskRequestRevisions.keys
-                .filter { $0.hasPrefix(oldestSource + "|") }
-                .forEach { latestMaskRequestRevisions.removeValue(forKey: $0) }
-        }
-        while latestMaskRequestRevisions.count > maximumTrackedMaskRequests,
-              let oldestRequest = latestMaskRequestRevisions.min(by: { $0.value < $1.value })?.key {
-            latestMaskRequestRevisions.removeValue(forKey: oldestRequest)
-        }
-    }
-
     /// Current bounded semantic-mask source keys retained by the renderer. This snapshot is
     /// intentionally value-only so diagnostics cannot expose renderer internals.
     var diagnosticsSnapshot: RenderEngineDiagnosticsSnapshot {
-        RenderEngineDiagnosticsSnapshot(trackedMaskSourceKeys: maskSourceOrder)
+        RenderEngineDiagnosticsSnapshot(
+            trackedMaskSourceKeys: revisionLedger.trackedMaskSourceKeys,
+            trackedRenderSourceCount: revisionLedger.trackedRenderSourceCount,
+            trackedMaskRequestCount: revisionLedger.trackedMaskRequestCount,
+            cachedFilterCount: lutCache.count
+        )
     }
 
     private func isCurrentMaskRequest(
         source: ImageSource, revision: UInt64,
         maskIdentity: String? = nil, documentIdentity: String? = nil
     ) -> Bool {
-        guard revision > 0 else { return true }
         let sourceKey = source.cacheFingerprint
         guard let maskIdentity, let documentIdentity else {
-            return latestOverlayMaskRequestRevisions[sourceKey] == revision
+            return revisionLedger.isCurrentOverlayMaskRequest(sourceKey: sourceKey, revision: revision)
         }
-        return latestMaskRecipeIdentities[sourceKey] == maskIdentity
-            && latestMaskRequestRevisions[sourceKey + "|" + documentIdentity] == revision
+        return revisionLedger.isCurrentMaskRequest(
+            sourceKey: sourceKey, revision: revision,
+            maskIdentity: maskIdentity, documentIdentity: documentIdentity
+        )
     }
 
     private struct MaterializedImage {
@@ -2425,16 +2188,12 @@ actor RenderEngine: RenderEngining {
     func invalidateSourceCache() {
         cancelAllSemanticMaskResolutions()
         cancelProcessingPrefixFlights()
-        latestRenderRequestRevisions.removeAll(keepingCapacity: true)
+        revisionLedger.removeAll()
         developedSourceCache.removeAll()
         thumbnailDevelopedSourceCache.removeAll()
         processingPrefixCache.removeAll()
         localMaskCache.removeAll()
         localMaskRenderer.removeAllCachedBrushStrokes()
-        latestMaskRequestRevisions.removeAll(keepingCapacity: true)
-        latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
-        maskSourceOrder.removeAll(keepingCapacity: true)
-        latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
         interactiveRAWSession = nil
         toneCurveCache.removeAll()
         toneCurveSource = nil
@@ -2444,7 +2203,10 @@ actor RenderEngine: RenderEngining {
     /// A reusable actor-local RAW filter for the short-lived interactive tier. The baseline values
     /// are captured once because applying an optional setting cannot undo a value written on the
     /// previous tick (`nil` means decoder default, not "clear this mutable filter property").
-    private final class InteractiveRAWFilterSession {
+    ///
+    /// Not `private`: `RenderEngine+RAWCapabilities.swift` (KRMA-530) constructs and reads this
+    /// type too, and `private` is file-scoped rather than type-scoped.
+    final class InteractiveRAWFilterSession {
         struct OutputResult {
             let image: CIImage?
             let propertyWrites: Int
@@ -2457,6 +2219,7 @@ actor RenderEngine: RenderEngining {
             let scale: RenderScaleKey
         }
 
+        // Not `private`: read from `RenderEngine+RAWCapabilities.swift`'s `session(for:)`.
         let fingerprint: String
         private let filter: CIRAWFilter
         private let baseline: RAWFilterBaseline
