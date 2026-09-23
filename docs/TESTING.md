@@ -47,6 +47,11 @@ with a provenance manifest recording generator, model, date, and prompt. Procedu
 remain generated at test time. Licensed RAW / non-redistributable camera files still stay outside
 the checkout via `KROMORA_RAW_FIXTURE_DIR`.
 
+The Auto pixel evaluator, report value, artifact writer, and Vision-aesthetics probe are test-target
+support code under `Tests/KromoraKitTests/Support`. `KromoraKit` keeps only the small
+`AutoCandidateEvaluation` document/geometry transform needed by runtime measurement; a package
+settings test guards this shipping boundary.
+
 The standing Phase 1 identity gate is IdentityRegressionGateTests. It generates a disposable
 1,000-asset library and verifies full-library relocation, duplicate/collision handling, render and
 thumbnail mask supersession, preview publication supersession, and direct edit-store recovery. It
