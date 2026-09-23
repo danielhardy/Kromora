@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import CoreImage
 import MetalKit
+import SwiftUI
 import UniformTypeIdentifiers
 import XCTest
 
@@ -22,6 +23,57 @@ final class PreviewSurfaceTests: XCTestCase {
     func testBundledMetalSourcesAreResolvable() {
         XCTAssertNotNil(KromoraKitResourceBundle.url(forMetalSource: "PreviewSurface"))
         XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
+    }
+
+    func testPreviewSurfaceLayoutUsesProposedSizeWithoutIntrinsicMeasurement() throws {
+        XCTAssertEqual(
+            PreviewSurfaceView.layoutSize(for: ProposedViewSize(width: 320, height: 240)),
+            CGSize(width: 320, height: 240)
+        )
+        XCTAssertEqual(
+            PreviewSurfaceView.layoutSize(for: ProposedViewSize(width: nil, height: nil)),
+            CGSize(width: 1, height: 1)
+        )
+        XCTAssertEqual(
+            PreviewSurfaceView.layoutSize(for: ProposedViewSize(width: 280, height: nil)),
+            CGSize(width: 280, height: 1)
+        )
+
+        let surface = PreviewSurface()
+        let canvasHosting = NSHostingView(
+            rootView: PreviewSurfaceView(surface: surface)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(width: 320, height: 240)
+        )
+        XCTAssertEqual(
+            try hostedPreviewView(in: canvasHosting, size: CGSize(width: 320, height: 240)).frame.size,
+            CGSize(width: 320, height: 240)
+        )
+
+        let overlayHosting = NSHostingView(
+            rootView: PreviewSurfaceView(surface: surface).frame(height: 130)
+        )
+        XCTAssertEqual(
+            try hostedPreviewView(in: overlayHosting, size: CGSize(width: 280, height: 130)).frame.size,
+            CGSize(width: 280, height: 130)
+        )
+    }
+
+    private func hostedPreviewView(
+        in hostingView: NSHostingView<some View>, size: CGSize
+    ) throws -> MTKView {
+        hostingView.frame = CGRect(origin: .zero, size: size)
+        hostingView.layoutSubtreeIfNeeded()
+
+        func findPreview(in view: NSView) -> MTKView? {
+            if let preview = view as? MTKView { return preview }
+            for child in view.subviews {
+                if let preview = findPreview(in: child) { return preview }
+            }
+            return nil
+        }
+
+        return try XCTUnwrap(findPreview(in: hostingView), "hosting layout should create PreviewMTKView")
     }
 
     func testDoubleClickMouseDownTogglesCanvasAfterLeavingCropTool() throws {
