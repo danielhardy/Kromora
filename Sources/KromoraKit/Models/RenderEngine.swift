@@ -472,7 +472,8 @@ actor RenderEngine: RenderEngining {
 
     func makeCIImage(_ request: RenderRequest) async -> sending CIImage? {
         guard request.output == .raster, !Task.isCancelled else { return nil }
-        noteRenderRequest(request)
+        beginRenderRequest(request)
+        defer { endRenderRequest(request) }
         let image: CIImage?
         do {
             image = try await buildImage(request.source, request.document, request.lut,
@@ -687,7 +688,8 @@ actor RenderEngine: RenderEngining {
     /// Sendable value for exports and other renderer clients.
     func makeCGImage(_ request: RenderRequest) async -> sending CGImage? {
         guard request.output == .raster, !Task.isCancelled else { return nil }
-        noteRenderRequest(request)
+        beginRenderRequest(request)
+        defer { endRenderRequest(request) }
 
         var interval = KromoraObservability.begin(
             .render, source: request.source, quality: request.quality
@@ -740,7 +742,8 @@ actor RenderEngine: RenderEngining {
               !Task.isCancelled else { return nil }
 
         let renderRequest = request.renderRequest
-        noteRenderRequest(renderRequest)
+        beginRenderRequest(renderRequest)
+        defer { endRenderRequest(renderRequest) }
         let image: CIImage?
         do {
             image = try await buildImage(
@@ -767,6 +770,14 @@ actor RenderEngine: RenderEngining {
               !Task.isCancelled
         else { return nil }
 
+        revisionLedger.beginOverlayMaskRequest(
+            sourceKey: request.source.cacheFingerprint, revision: request.requestRevision
+        )
+        defer {
+            revisionLedger.endOverlayMaskRequest(
+                sourceKey: request.source.cacheFingerprint, revision: request.requestRevision
+            )
+        }
         noteMaskRequest(source: request.source, revision: request.requestRevision)
 
         let extent = CGRect(
@@ -849,7 +860,8 @@ actor RenderEngine: RenderEngining {
         // before doing any work so cancellation drops queued superseded values instead of making
         // the coordinator wait for an obsolete graph to rasterize.
         try Task.checkCancellation()
-        noteRenderRequest(request)
+        beginRenderRequest(request)
+        defer { endRenderRequest(request) }
         if let options = request.exportOptions {
             try options.validate()
             guard case .encoded(let format, _) = request.output else {
@@ -1198,6 +1210,9 @@ actor RenderEngine: RenderEngining {
             source: source, revision: requestRevision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity
         )
+        defer {
+            revisionLedger.endMaskRequest(sourceKey: source.cacheFingerprint, revision: requestRevision)
+        }
         // These are explicit Core Image resource boundaries even though the transfer function is
         // mathematically source/space independent. A replaced source or working-space switch must
         // not retain a resource from the prior render session.
@@ -1663,8 +1678,14 @@ actor RenderEngine: RenderEngining {
         revisionLedger.noteOverlayMaskRequest(sourceKey: source.cacheFingerprint, revision: revision)
     }
 
-    private func noteRenderRequest(_ request: RenderRequest) {
-        revisionLedger.noteRenderRequest(
+    private func beginRenderRequest(_ request: RenderRequest) {
+        revisionLedger.beginRenderRequest(
+            sourceKey: request.source.cacheFingerprint, revision: request.requestRevision
+        )
+    }
+
+    private func endRenderRequest(_ request: RenderRequest) {
+        revisionLedger.endRenderRequest(
             sourceKey: request.source.cacheFingerprint, revision: request.requestRevision
         )
     }
@@ -1684,7 +1705,7 @@ actor RenderEngine: RenderEngining {
             cancelSemanticMaskResolutions { $0.sourceKey != sourceKey }
             activeRevisionedMaskSource = sourceKey
         }
-        let recipeChanged = revisionLedger.noteMaskRequest(
+        let recipeChanged = revisionLedger.beginMaskRequest(
             sourceKey: sourceKey, revision: revision,
             maskIdentity: maskIdentity, documentIdentity: documentIdentity
         )
