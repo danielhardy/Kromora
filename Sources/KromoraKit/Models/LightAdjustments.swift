@@ -10,13 +10,8 @@ struct LightCurvePoint: Codable, Equatable, Sendable {
     let output: Double
 
     init(input: Double, output: Double) {
-        self.input = Self.clamp(input, to: 0...1, default: 0)
-        self.output = Self.clamp(output, to: 0...1, default: 0)
-    }
-
-    private static func clamp(_ value: Double, to range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
+        self.input = input.clamped(to: 0...1, default: 0)
+        self.output = output.clamped(to: 0...1, default: 0)
     }
 
     private enum CodingKeys: String, CodingKey { case input, output }
@@ -250,22 +245,22 @@ struct LightAdjustments: Codable, Equatable, Sendable {
     static let blacksRange = -100.0...100.0
 
     var exposure: Double {
-        didSet { exposure = Self.clamp(exposure, to: Self.exposureRange, default: 0) }
+        didSet { exposure = exposure.clamped(to: Self.exposureRange, default: 0) }
     }
     var contrast: Double {
-        didSet { contrast = Self.clamp(contrast, to: Self.contrastRange, default: 0) }
+        didSet { contrast = contrast.clamped(to: Self.contrastRange, default: 0) }
     }
     var highlights: Double {
-        didSet { highlights = Self.clamp(highlights, to: Self.highlightsRange, default: 0) }
+        didSet { highlights = highlights.clamped(to: Self.highlightsRange, default: 0) }
     }
     var shadows: Double {
-        didSet { shadows = Self.clamp(shadows, to: Self.shadowsRange, default: 0) }
+        didSet { shadows = shadows.clamped(to: Self.shadowsRange, default: 0) }
     }
     var whites: Double {
-        didSet { whites = Self.clamp(whites, to: Self.whitesRange, default: 0) }
+        didSet { whites = whites.clamped(to: Self.whitesRange, default: 0) }
     }
     var blacks: Double {
-        didSet { blacks = Self.clamp(blacks, to: Self.blacksRange, default: 0) }
+        didSet { blacks = blacks.clamped(to: Self.blacksRange, default: 0) }
     }
     var toneCurve: LightToneCurve {
         didSet { toneCurve = LightToneCurve(version: toneCurve.version, points: toneCurve.points) }
@@ -280,23 +275,18 @@ struct LightAdjustments: Codable, Equatable, Sendable {
         blacks: Double = 0,
         toneCurve: LightToneCurve = .identity
     ) {
-        self.exposure = Self.clamp(exposure, to: Self.exposureRange, default: 0)
-        self.contrast = Self.clamp(contrast, to: Self.contrastRange, default: 0)
-        self.highlights = Self.clamp(highlights, to: Self.highlightsRange, default: 0)
-        self.shadows = Self.clamp(shadows, to: Self.shadowsRange, default: 0)
-        self.whites = Self.clamp(whites, to: Self.whitesRange, default: 0)
-        self.blacks = Self.clamp(blacks, to: Self.blacksRange, default: 0)
+        self.exposure = exposure.clamped(to: Self.exposureRange, default: 0)
+        self.contrast = contrast.clamped(to: Self.contrastRange, default: 0)
+        self.highlights = highlights.clamped(to: Self.highlightsRange, default: 0)
+        self.shadows = shadows.clamped(to: Self.shadowsRange, default: 0)
+        self.whites = whites.clamped(to: Self.whitesRange, default: 0)
+        self.blacks = blacks.clamped(to: Self.blacksRange, default: 0)
         self.toneCurve = LightToneCurve(version: toneCurve.version, points: toneCurve.points)
     }
 
     var isIdentity: Bool {
         exposure == 0 && contrast == 0 && highlights == 0 && shadows == 0 &&
             whites == 0 && blacks == 0 && toneCurve.isIdentity
-    }
-
-    private static func clamp(_ value: Double, to range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
     }
 
     private enum CodingKeys: String, CodingKey {

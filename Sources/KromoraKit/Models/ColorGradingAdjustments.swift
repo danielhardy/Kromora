@@ -10,30 +10,21 @@ struct ColorGradingWheel: Codable, Equatable, Sendable {
     static let saturationRange = 0.0...100.0
 
     var hue: Double {
-        didSet { hue = Self.clamp(hue, to: Self.hueRange, default: 0) }
+        didSet { hue = hue.clamped(to: Self.hueRange, default: 0) }
     }
     var saturation: Double {
-        didSet { saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0) }
+        didSet { saturation = saturation.clamped(to: Self.saturationRange, default: 0) }
     }
 
     static let neutral = ColorGradingWheel()
 
     init(hue: Double = 0, saturation: Double = 0) {
-        self.hue = Self.clamp(hue, to: Self.hueRange, default: 0)
-        self.saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0)
+        self.hue = hue.clamped(to: Self.hueRange, default: 0)
+        self.saturation = saturation.clamped(to: Self.saturationRange, default: 0)
     }
 
     /// Hue is deliberately omitted: a wheel at zero saturation is an exact no-op for any hue.
     var isIdentity: Bool { saturation == 0 }
-
-    private static func clamp(
-        _ value: Double,
-        to range: ClosedRange<Double>,
-        default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
 
     private enum CodingKeys: String, CodingKey { case hue, saturation }
 
@@ -109,12 +100,12 @@ struct ColorGradingAdjustments: Codable, Equatable, Sendable {
 
     /// 0 is the narrowest separation and 100 gives the widest tonal overlap.
     var blending: Double {
-        didSet { blending = Self.clamp(blending, to: Self.blendingRange, default: 50) }
+        didSet { blending = blending.clamped(to: Self.blendingRange, default: 50) }
     }
 
     /// Negative values favor shadows; positive values favor highlights.
     var balance: Double {
-        didSet { balance = Self.clamp(balance, to: Self.balanceRange, default: 0) }
+        didSet { balance = balance.clamped(to: Self.balanceRange, default: 0) }
     }
 
     init(
@@ -127,23 +118,14 @@ struct ColorGradingAdjustments: Codable, Equatable, Sendable {
         self.shadows = shadows
         self.midtones = midtones
         self.highlights = highlights
-        self.blending = Self.clamp(blending, to: Self.blendingRange, default: 50)
-        self.balance = Self.clamp(balance, to: Self.balanceRange, default: 0)
+        self.blending = blending.clamped(to: Self.blendingRange, default: 50)
+        self.balance = balance.clamped(to: Self.balanceRange, default: 0)
     }
 
     /// Blending and balance are only weighting controls; without wheel saturation they cannot
     /// change a pixel and therefore do not prevent the grading stage from being skipped.
     var isIdentity: Bool {
         shadows.isIdentity && midtones.isIdentity && highlights.isIdentity
-    }
-
-    private static func clamp(
-        _ value: Double,
-        to range: ClosedRange<Double>,
-        default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
     }
 
     private enum CodingKeys: String, CodingKey { case shadows, midtones, highlights, blending, balance }

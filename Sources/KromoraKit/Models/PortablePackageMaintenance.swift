@@ -135,7 +135,7 @@ final class PortablePackagePackedThumbnailStore {
         self.indexURL = self.rootURL.appendingPathComponent("index.json")
         try fileManager.createDirectory(at: self.rootURL, withIntermediateDirectories: true)
         if fileManager.fileExists(atPath: indexURL.path) {
-            let index = try JSONDecoder().decode(IndexFile.self, from: Data(contentsOf: indexURL))
+            let index = try PackageJSONCoder.decode(IndexFile.self, from: Data(contentsOf: indexURL))
             guard index.schemaVersion == Self.schemaVersion else {
                 throw PortablePackageError.invalidRelativePath("unsupported thumbnail index schema")
             }
@@ -306,9 +306,7 @@ final class PortablePackagePackedThumbnailStore {
             schemaVersion: Self.schemaVersion,
             entries: entries.values.sorted { $0.key < $1.key }
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        try encoder.encode(index).write(to: indexURL, options: .atomic)
+        try PackageJSONCoder.encode(index).write(to: indexURL, options: .atomic)
     }
 
     private func encodedIndex(_ values: [String: Entry]) throws -> Data {
@@ -316,9 +314,7 @@ final class PortablePackagePackedThumbnailStore {
             schemaVersion: Self.schemaVersion,
             entries: values.values.sorted { $0.key < $1.key }
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(index)
+        return try PackageJSONCoder.encode(index)
     }
 
     private func packSize(for shard: Int) throws -> UInt64 {

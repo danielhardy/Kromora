@@ -202,7 +202,7 @@ struct PortableLibraryBackup {
             try checkCancellation(isCancelled)
             try lease.renew(now: now())
             totalBytes += sourceFile.byteCount
-            let sourceURL = sourceRoot.appendingPathComponent(sourceFile.relativePath)
+            let sourceURL = try safePackageURL(sourceFile.relativePath, under: sourceRoot)
             let digest = try hashFile(at: sourceURL, chunkSize: options.chunkSize, isCancelled: isCancelled)
             let snapshotFile = PortableLibraryBackupFile(
                 relativePath: sourceFile.relativePath, byteCount: digest.byteCount,
@@ -210,17 +210,17 @@ struct PortableLibraryBackup {
             )
 
             let existingState = state.files.first { $0.relativePath == snapshotFile.relativePath }
-            let stagingFile = staging.appendingPathComponent(snapshotFile.relativePath)
+            let stagingFile = try safePackageURL(snapshotFile.relativePath, under: staging)
             if existingState == snapshotFile,
                regularFileExists(at: stagingFile),
                (try? verify(snapshotFile, at: stagingFile)) != nil
             {
                 reusedFiles += 1
             } else if let old = previousByPath[snapshotFile.relativePath], old == snapshotFile,
-                      regularFileExists(at: previous.appendingPathComponent(snapshotFile.relativePath))
+                      regularFileExists(at: try safePackageURL(snapshotFile.relativePath, under: previous))
             {
                 try cloneOrLink(
-                    from: previous.appendingPathComponent(snapshotFile.relativePath), to: stagingFile
+                    from: try safePackageURL(snapshotFile.relativePath, under: previous), to: stagingFile
                 )
                 reusedFiles += 1
             } else {
@@ -261,7 +261,7 @@ struct PortableLibraryBackup {
         ))
         for (index, file) in orderedStateFiles.enumerated() {
             try checkCancellation(isCancelled)
-            let url = staging.appendingPathComponent(file.relativePath)
+            let url = try safePackageURL(file.relativePath, under: staging)
             guard regularFileExists(at: url) else {
                 if file.rebuildable { continue }
                 throw PortableLibraryBackupError.missingCanonicalComponent(file.relativePath)
@@ -381,7 +381,7 @@ struct PortableLibraryBackup {
         let marker = destinationURL.appendingPathComponent("\(recoveryDirectory)/\(completeName)")
         let completed: PortableLibraryBackupMetadata
         do {
-            completed = try JSONDecoder.backup.decode(
+            completed = try PackageJSONCoder.decode(
                 PortableLibraryBackupMetadata.self, from: Data(contentsOf: marker)
             )
         } catch {
@@ -395,7 +395,7 @@ struct PortableLibraryBackup {
             )
         }
         for file in metadata.files {
-            try verify(file, at: destinationURL.appendingPathComponent(file.relativePath))
+            try verify(file, at: try safePackageURL(file.relativePath, under: destinationURL))
         }
     }
 
@@ -406,7 +406,7 @@ struct PortableLibraryBackup {
     }
 
     private static func canonicalFiles(under root: URL, includeDerived: Bool) throws -> [SourceFile] {
-        guard regularFileExists(at: root.appendingPathComponent("manifest.json")) else {
+        guard regularFileExists(at: try safePackageURL("manifest.json", under: root)) else {
             throw PortableLibraryBackupError.missingCanonicalComponent("manifest.json")
         }
         guard let enumerator = FileManager.default.enumerator(
@@ -422,7 +422,11 @@ struct PortableLibraryBackup {
             if relative == "Derived" || relative.hasPrefix("Derived/") {
                 if !includeDerived { enumerator.skipDescendants(); continue }
             }
-            let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            let relativeURL = try safePackageURL(relative, under: root)
+            let values = try relativeURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
+            guard values.isSymbolicLink != true else {
+                throw PortableLibraryBackupError.sourceIsNotPackage
+            }
             guard values.isRegularFile == true else { continue }
             result.append(SourceFile(
                 relativePath: relative, byteCount: UInt64(values.fileSize ?? 0),
@@ -505,7 +509,7 @@ struct PortableLibraryBackup {
     }
 
     private static func readProgressState(at staging: URL) throws -> PortableLibraryBackupProgressState {
-        try JSONDecoder.backup.decode(
+        try PackageJSONCoder.decode(
             PortableLibraryBackupProgressState.self,
             from: Data(contentsOf: staging.appendingPathComponent(stateName))
         )
@@ -513,14 +517,14 @@ struct PortableLibraryBackup {
 
     private static func readMetadata(at package: URL) throws -> PortableLibraryBackupMetadata {
         let url = package.appendingPathComponent("\(recoveryDirectory)/\(metadataName)")
-        return try JSONDecoder.backup.decode(
+        return try PackageJSONCoder.decode(
             PortableLibraryBackupMetadata.self, from: Data(contentsOf: url)
         )
     }
 
     private static func metadataFiles(at package: URL) throws -> [PortableLibraryBackupFile] {
         try canonicalFiles(under: package, includeDerived: true).map {
-            let digest = try hashFile(at: package.appendingPathComponent($0.relativePath), chunkSize: 1 << 20, isCancelled: { false })
+            let digest = try hashFile(at: safePackageURL($0.relativePath, under: package), chunkSize: 1 << 20, isCancelled: { false })
             return PortableLibraryBackupFile(
                 relativePath: $0.relativePath, byteCount: digest.byteCount,
                 checksum: digest.checksum, rebuildable: $0.rebuildable
@@ -662,6 +666,14 @@ struct PortableLibraryBackup {
         return String(url.standardizedFileURL.path.dropFirst(rootPath.count))
     }
 
+    private static func safePackageURL(_ relativePath: String, under root: URL) throws -> URL {
+        do {
+            return try PackagePath(relativePath).url(in: root)
+        } catch {
+            throw PortableLibraryBackupError.sourceIsNotPackage
+        }
+    }
+
     private static func syncDirectory(_ url: URL) throws {
         let descriptor = open(url.path, O_RDONLY)
         guard descriptor >= 0 else { return }
@@ -679,8 +691,7 @@ struct PortableLibraryBackup {
 
     private static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder.backup
-        try encoder.encode(value).write(to: url, options: .atomic)
+        try PackageJSONCoder.encode(value).write(to: url, options: .atomic)
     }
 }
 
@@ -732,17 +743,6 @@ extension PortableLibraryPackage {
             isCancelled: isCancelled, progress: progress, now: now
         )
     }
-}
-
-private extension JSONEncoder {
-    static var backup: JSONEncoder {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601; encoder.outputFormatting = [.sortedKeys]
-        return encoder
-    }
-}
-
-private extension JSONDecoder {
-    static var backup: JSONDecoder { let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601; return decoder }
 }
 
 private extension SHA256.Digest {

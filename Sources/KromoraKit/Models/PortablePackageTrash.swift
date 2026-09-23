@@ -126,8 +126,8 @@ extension PortableLibraryPackage {
         }
 
         let activeRecordPath = recordPath(for: assetID)
-        let activeURL = rootURL.appendingPathComponent(activeRecordPath)
-        let quarantineURL = quarantineDirectoryURL(for: assetID)
+        let activeURL = try packageURL(for: activeRecordPath)
+        let quarantineURL = try packageURL(for: "Recovery/Quarantine/\(assetID.raw)")
         let referenced: Bool
         let record: PortablePackageAssetRecord
         if FileManager.default.fileExists(atPath: activeURL.path) {

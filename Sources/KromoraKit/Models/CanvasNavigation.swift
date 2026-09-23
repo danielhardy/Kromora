@@ -202,8 +202,10 @@ final class CanvasInteractionState {
     }
 
     private static func clampPerspective(_ value: Double) -> Double {
-        guard value.isFinite else { return 0 }
-        return min(max(value, -CropAdjustments.maximumPerspective), CropAdjustments.maximumPerspective)
+        value.clamped(
+            to: -CropAdjustments.maximumPerspective...CropAdjustments.maximumPerspective,
+            default: 0
+        )
     }
 
     func toggleCropFlip(horizontal: Bool) {
@@ -469,8 +471,7 @@ struct CanvasNavigation: Equatable, Sendable {
     static let center = CGPoint(x: 0.5, y: 0.5)
 
     static func clampZoom(_ value: CGFloat) -> CGFloat {
-        guard value.isFinite else { return 1 }
-        return min(max(value, minimumZoom), maximumZoom)
+        value.clamped(to: minimumZoom...maximumZoom, default: 1)
     }
 
     private static func transform(

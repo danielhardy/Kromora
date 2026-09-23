@@ -174,7 +174,13 @@ struct PortableLibraryValidation {
             return report(root: root, result: result)
         }
 
-        let manifestURL = root.appendingPathComponent("manifest.json")
+        guard let manifestURL = safePackageURL("manifest.json", under: root) else {
+            result.critical.append(issue(
+                .manifest, .corrupt, "manifest.json",
+                "manifest path is unsafe or escapes the package root"
+            ))
+            return report(root: root, result: result)
+        }
         progress(.init(phase: .manifest, path: "manifest.json", completed: 0, total: 1))
         var package: PortableLibraryPackage?
         if let decoded = tryDecodeManifest(at: manifestURL) {
@@ -203,7 +209,8 @@ struct PortableLibraryValidation {
         for (offset, shardName) in PortableLibraryPackage.allShards.enumerated() {
             try checkCancellation(isCancelled)
             let shardPath = "Catalog/Membership/\(shardName).json"
-            guard let decoded = tryDecodeShard(at: root.appendingPathComponent(shardPath), expected: shardName) else {
+            guard let shardURL = safePackageURL(shardPath, under: root),
+                  let decoded = tryDecodeShard(at: shardURL, expected: shardName) else {
                 result.critical.append(issue(
                     .membershipShard, .missing, shardPath, "membership shard is missing, unreadable, or malformed"
                 ))
@@ -309,7 +316,13 @@ struct PortableLibraryValidation {
         options: PortableLibraryValidationOptions,
         isCancelled: @Sendable () -> Bool
     ) throws {
-        let recordURL = root.appendingPathComponent(entry.recordPath)
+        guard let recordURL = safePackageURL(entry.recordPath, under: root) else {
+            result.critical.append(issue(
+                .assetRecord, .corrupt, entry.recordPath,
+                "asset record path is unsafe or escapes the package root"
+            ))
+            return
+        }
         guard let data = try? Data(contentsOf: recordURL) else {
             result.critical.append(issue(.assetRecord, .missing, entry.recordPath, "asset record is unreadable or missing"))
             return
@@ -332,8 +345,15 @@ struct PortableLibraryValidation {
 
         let source = record.source
         if source.storage == .embedded, let relativePath = source.relativePath {
+            guard let sourceURL = safePackageURL(relativePath, under: root) else {
+                result.critical.append(issue(
+                    .original, .unreadable, relativePath,
+                    "embedded original path is unsafe or escapes the package root"
+                ))
+                return
+            }
             try validateOriginal(
-                at: root.appendingPathComponent(relativePath), relativePath: relativePath,
+                at: sourceURL, relativePath: relativePath,
                 expectedHash: record.identity.sourceFingerprint.contentHash,
                 result: &result, options: options, isCancelled: isCancelled
             )
@@ -393,7 +413,13 @@ struct PortableLibraryValidation {
         options: PortableLibraryValidationOptions,
         isCancelled: @Sendable () -> Bool
     ) throws {
-        let nativeURL = root.appendingPathComponent(pointer.relativePath)
+        guard let nativeURL = safePackageURL(pointer.relativePath, under: root) else {
+            result.critical.append(issue(
+                .editRevision, .corrupt, pointer.relativePath,
+                "native edit revision path is unsafe or escapes the package root"
+            ))
+            return
+        }
         guard let nativeData = try? Data(contentsOf: nativeURL) else {
             result.critical.append(issue(.editRevision, .missing, pointer.relativePath, "native edit revision is missing"))
             return
@@ -419,7 +445,13 @@ struct PortableLibraryValidation {
             result.critical.append(issue(.editSidecar, .missing, pointer.relativePath, "edit revision has no XMP sidecar pointer"))
             return
         }
-        let xmpURL = root.appendingPathComponent(xmpPath)
+        guard let xmpURL = safePackageURL(xmpPath, under: root) else {
+            result.critical.append(issue(
+                .editSidecar, .corrupt, xmpPath,
+                "edit XMP path is unsafe or escapes the package root"
+            ))
+            return
+        }
         guard let xmpData = try? Data(contentsOf: xmpURL) else {
             result.critical.append(issue(.editSidecar, .missing, xmpPath, "edit XMP sidecar is missing"))
             return
@@ -455,7 +487,13 @@ struct PortableLibraryValidation {
         options: PortableLibraryValidationOptions,
         isCancelled: @Sendable () -> Bool
     ) throws {
-        let url = root.appendingPathComponent(reference.relativePath)
+        guard let url = safePackageURL(reference.relativePath, under: root) else {
+            result.critical.append(issue(
+                .embeddedLook, .corrupt, reference.relativePath,
+                "embedded Look path is unsafe or escapes the package root"
+            ))
+            return
+        }
         guard regularFileExists(at: url) else {
             result.critical.append(issue(.embeddedLook, .missing, reference.relativePath, "embedded Look blob is missing"))
             return
@@ -494,6 +532,13 @@ struct PortableLibraryValidation {
         for case let url as URL in enumerator {
             try checkCancellation(isCancelled)
             let relative = relativePath(from: root, to: url)
+            guard safePackageURL(relative, under: root) != nil else {
+                result.critical.append(issue(
+                    .assetRecord, .corrupt, relative,
+                    "asset record path is unsafe or escapes the package root"
+                ))
+                continue
+            }
             guard relative.hasSuffix("/asset.json") else { continue }
             guard regularFileExists(at: url) else {
                 result.critical.append(issue(.assetRecord, .unreadable, relative, "asset record is not a regular file"))
@@ -809,6 +854,10 @@ struct PortableLibraryValidation {
             ? root.standardizedFileURL.path
             : root.standardizedFileURL.path + "/"
         return String(url.standardizedFileURL.path.dropFirst(rootPath.count))
+    }
+
+    private static func safePackageURL(_ relativePath: String, under root: URL) -> URL? {
+        try? PackagePath(relativePath).url(in: root)
     }
 }
 

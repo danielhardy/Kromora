@@ -26,19 +26,19 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
     static let clarityRange = EffectsAdjustments.clarityRange
     static let dehazeRange = EffectsAdjustments.dehazeRange
 
-    var exposure: Double { didSet { exposure = Self.clamp(exposure, to: Self.exposureRange, default: 0) } }
-    var contrast: Double { didSet { contrast = Self.clamp(contrast, to: Self.contrastRange, default: 0) } }
-    var highlights: Double { didSet { highlights = Self.clamp(highlights, to: Self.highlightsRange, default: 0) } }
-    var shadows: Double { didSet { shadows = Self.clamp(shadows, to: Self.shadowsRange, default: 0) } }
-    var whites: Double { didSet { whites = Self.clamp(whites, to: Self.whitesRange, default: 0) } }
-    var blacks: Double { didSet { blacks = Self.clamp(blacks, to: Self.blacksRange, default: 0) } }
-    var temperature: Double { didSet { temperature = Self.clamp(temperature, to: Self.temperatureRange, default: 6500) } }
-    var tint: Double { didSet { tint = Self.clamp(tint, to: Self.tintRange, default: 0) } }
-    var saturation: Double { didSet { saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0) } }
-    var vibrance: Double { didSet { vibrance = Self.clamp(vibrance, to: Self.vibranceRange, default: 0) } }
-    var texture: Double { didSet { texture = Self.clamp(texture, to: Self.textureRange, default: 0) } }
-    var clarity: Double { didSet { clarity = Self.clamp(clarity, to: Self.clarityRange, default: 0) } }
-    var dehaze: Double { didSet { dehaze = Self.clamp(dehaze, to: Self.dehazeRange, default: 0) } }
+    var exposure: Double { didSet { exposure = Self.quantized(exposure.clamped(to: Self.exposureRange, default: 0)) } }
+    var contrast: Double { didSet { contrast = Self.quantized(contrast.clamped(to: Self.contrastRange, default: 0)) } }
+    var highlights: Double { didSet { highlights = Self.quantized(highlights.clamped(to: Self.highlightsRange, default: 0)) } }
+    var shadows: Double { didSet { shadows = Self.quantized(shadows.clamped(to: Self.shadowsRange, default: 0)) } }
+    var whites: Double { didSet { whites = Self.quantized(whites.clamped(to: Self.whitesRange, default: 0)) } }
+    var blacks: Double { didSet { blacks = Self.quantized(blacks.clamped(to: Self.blacksRange, default: 0)) } }
+    var temperature: Double { didSet { temperature = Self.quantized(temperature.clamped(to: Self.temperatureRange, default: 6500)) } }
+    var tint: Double { didSet { tint = Self.quantized(tint.clamped(to: Self.tintRange, default: 0)) } }
+    var saturation: Double { didSet { saturation = Self.quantized(saturation.clamped(to: Self.saturationRange, default: 0)) } }
+    var vibrance: Double { didSet { vibrance = Self.quantized(vibrance.clamped(to: Self.vibranceRange, default: 0)) } }
+    var texture: Double { didSet { texture = Self.quantized(texture.clamped(to: Self.textureRange, default: 0)) } }
+    var clarity: Double { didSet { clarity = Self.quantized(clarity.clamped(to: Self.clarityRange, default: 0)) } }
+    var dehaze: Double { didSet { dehaze = Self.quantized(dehaze.clamped(to: Self.dehazeRange, default: 0)) } }
 
     init(
         exposure: Double = 0, contrast: Double = 0, highlights: Double = 0,
@@ -47,19 +47,19 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
         vibrance: Double = 0, texture: Double = 0, clarity: Double = 0,
         dehaze: Double = 0
     ) {
-        self.exposure = Self.clamp(exposure, to: Self.exposureRange, default: 0)
-        self.contrast = Self.clamp(contrast, to: Self.contrastRange, default: 0)
-        self.highlights = Self.clamp(highlights, to: Self.highlightsRange, default: 0)
-        self.shadows = Self.clamp(shadows, to: Self.shadowsRange, default: 0)
-        self.whites = Self.clamp(whites, to: Self.whitesRange, default: 0)
-        self.blacks = Self.clamp(blacks, to: Self.blacksRange, default: 0)
-        self.temperature = Self.clamp(temperature, to: Self.temperatureRange, default: 6500)
-        self.tint = Self.clamp(tint, to: Self.tintRange, default: 0)
-        self.saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0)
-        self.vibrance = Self.clamp(vibrance, to: Self.vibranceRange, default: 0)
-        self.texture = Self.clamp(texture, to: Self.textureRange, default: 0)
-        self.clarity = Self.clamp(clarity, to: Self.clarityRange, default: 0)
-        self.dehaze = Self.clamp(dehaze, to: Self.dehazeRange, default: 0)
+        self.exposure = Self.quantized(exposure.clamped(to: Self.exposureRange, default: 0))
+        self.contrast = Self.quantized(contrast.clamped(to: Self.contrastRange, default: 0))
+        self.highlights = Self.quantized(highlights.clamped(to: Self.highlightsRange, default: 0))
+        self.shadows = Self.quantized(shadows.clamped(to: Self.shadowsRange, default: 0))
+        self.whites = Self.quantized(whites.clamped(to: Self.whitesRange, default: 0))
+        self.blacks = Self.quantized(blacks.clamped(to: Self.blacksRange, default: 0))
+        self.temperature = Self.quantized(temperature.clamped(to: Self.temperatureRange, default: 6500))
+        self.tint = Self.quantized(tint.clamped(to: Self.tintRange, default: 0))
+        self.saturation = Self.quantized(saturation.clamped(to: Self.saturationRange, default: 0))
+        self.vibrance = Self.quantized(vibrance.clamped(to: Self.vibranceRange, default: 0))
+        self.texture = Self.quantized(texture.clamped(to: Self.textureRange, default: 0))
+        self.clarity = Self.quantized(clarity.clamped(to: Self.clarityRange, default: 0))
+        self.dehaze = Self.quantized(dehaze.clamped(to: Self.dehazeRange, default: 0))
     }
 
     var isIdentity: Bool {
@@ -107,12 +107,6 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
         return (value / Self.precision).rounded(.toNearestOrAwayFromZero) * Self.precision
     }
 
-    private static func clamp(
-        _ value: Double, to range: ClosedRange<Double>, default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return Self.quantized(min(max(value, range.lowerBound), range.upperBound))
-    }
 }
 
 // MARK: - Mask definitions
@@ -134,7 +128,7 @@ struct SemanticMaskDefinition: Codable, Sendable, Equatable {
     ) {
         self.target = target
         self.edgeFeather = Self.unit(edgeFeather)
-        self.edgeShift = Self.clamp(edgeShift, -1...1, default: 0)
+        self.edgeShift = edgeShift.clamped(to: -1...1, default: 0)
         self.density = Self.unit(density)
         self.generationVersion = max(1, generationVersion)
     }
@@ -151,11 +145,7 @@ struct SemanticMaskDefinition: Codable, Sendable, Equatable {
         )
     }
 
-    private static func unit(_ value: Double) -> Double { clamp(value, 0...1, default: 0) }
-    private static func clamp(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
+    private static func unit(_ value: Double) -> Double { value.clamped(to: 0...1, default: 0) }
 }
 
 struct BrushSample: Codable, Sendable, Equatable {
@@ -165,7 +155,7 @@ struct BrushSample: Codable, Sendable, Equatable {
 
     init(point: CGPoint, pressure: Double? = nil) {
         self.point = Self.normalized(point)
-        self.pressure = pressure.map { Self.clamp($0, 0...1, default: 1) }
+        self.pressure = pressure.map { $0.clamped(to: 0...1, default: 1) }
     }
 
     private enum CodingKeys: String, CodingKey { case point, pressure }
@@ -178,11 +168,7 @@ struct BrushSample: Codable, Sendable, Equatable {
     }
 
     private static func normalized(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: clamp(point.x, 0...1, default: 0), y: clamp(point.y, 0...1, default: 0))
-    }
-    private static func clamp(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
+        CGPoint(x: point.x.clamped(to: 0...1, default: 0), y: point.y.clamped(to: 0...1, default: 0))
     }
 }
 
@@ -190,10 +176,10 @@ struct BrushStroke: Codable, Sendable, Equatable, Identifiable {
     var id: UUID
     var samples: [BrushSample]
     /// Fraction of the source's shorter side.
-    var radius: Double { didSet { radius = Self.clamp(radius, 0...1, default: 0.05) } }
-    var feather: Double { didSet { feather = Self.clamp(feather, 0...1, default: 0.5) } }
-    var flow: Double { didSet { flow = Self.clamp(flow, 0...1, default: 1) } }
-    var density: Double { didSet { density = Self.clamp(density, 0...1, default: 1) } }
+    var radius: Double { didSet { radius = radius.clamped(to: 0...1, default: 0.05) } }
+    var feather: Double { didSet { feather = feather.clamped(to: 0...1, default: 0.5) } }
+    var flow: Double { didSet { flow = flow.clamped(to: 0...1, default: 1) } }
+    var density: Double { didSet { density = density.clamped(to: 0...1, default: 1) } }
 
     init(
         id: UUID = UUID(), samples: [BrushSample] = [], radius: Double = 0.05,
@@ -201,10 +187,10 @@ struct BrushStroke: Codable, Sendable, Equatable, Identifiable {
     ) {
         self.id = id
         self.samples = samples
-        self.radius = Self.clamp(radius, 0...1, default: 0.05)
-        self.feather = Self.clamp(feather, 0...1, default: 0.5)
-        self.flow = Self.clamp(flow, 0...1, default: 1)
-        self.density = Self.clamp(density, 0...1, default: 1)
+        self.radius = radius.clamped(to: 0...1, default: 0.05)
+        self.feather = feather.clamped(to: 0...1, default: 0.5)
+        self.flow = flow.clamped(to: 0...1, default: 1)
+        self.density = density.clamped(to: 0...1, default: 1)
     }
 
     private enum CodingKeys: String, CodingKey { case id, samples, radius, feather, flow, density }
@@ -220,10 +206,6 @@ struct BrushStroke: Codable, Sendable, Equatable, Identifiable {
         )
     }
 
-    private static func clamp(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
 }
 
 struct BrushMaskDefinition: Codable, Sendable, Equatable {
@@ -235,7 +217,7 @@ struct LinearGradientDefinition: Codable, Sendable, Equatable {
     /// The zero-strength and full-strength edges in upper-left oriented-source coordinates.
     var zeroStrengthPoint: CGPoint
     var fullStrengthPoint: CGPoint
-    var density: Double { didSet { density = Self.clamp(density, 0...1, default: 1) } }
+    var density: Double { didSet { density = density.clamped(to: 0...1, default: 1) } }
 
     /// New gradients run from the top edge to the bottom edge. These are still stored as the
     /// zero/full-strength endpoint pair, so changing the default does not reinterpret any
@@ -243,13 +225,13 @@ struct LinearGradientDefinition: Codable, Sendable, Equatable {
     init(zeroStrengthPoint: CGPoint = CGPoint(x: 0.5, y: 0), fullStrengthPoint: CGPoint = CGPoint(x: 0.5, y: 1), density: Double = 1) {
         self.zeroStrengthPoint = Self.point(zeroStrengthPoint)
         self.fullStrengthPoint = Self.point(fullStrengthPoint)
-        self.density = Self.clamp(density, 0...1, default: 1)
+        self.density = density.clamped(to: 0...1, default: 1)
     }
 
     init(center: CGPoint, angle: Double, falloff: Double = 1, density: Double = 1) {
         let normalizedCenter = CGPoint(
-            x: Self.clamp(center.x, 0...1, default: 0.5),
-            y: Self.clamp(center.y, 0...1, default: 0.5)
+            x: center.x.clamped(to: 0...1, default: 0.5),
+            y: center.y.clamped(to: 0...1, default: 0.5)
         )
         let boundedFalloff = min(max(falloff.isFinite ? falloff : 1, 0), sqrt(2.0))
         let safeAngle = angle.isFinite ? angle : 0
@@ -371,11 +353,7 @@ struct LinearGradientDefinition: Codable, Sendable, Equatable {
             density: try c.decodeIfPresent(Double.self, forKey: .density) ?? 1
         )
     }
-    private static func point(_ p: CGPoint) -> CGPoint { CGPoint(x: clamp(p.x, 0...1, default: 0), y: clamp(p.y, 0...1, default: 0)) }
-    private static func clamp(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
+    private static func point(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x.clamped(to: 0...1, default: 0), y: p.y.clamped(to: 0...1, default: 0)) }
 }
 
 enum LinearGradientEdge: String, Codable, Sendable, Equatable {
@@ -385,20 +363,20 @@ enum LinearGradientEdge: String, Codable, Sendable, Equatable {
 
 struct RadialGradientDefinition: Codable, Sendable, Equatable {
     var center: CGPoint
-    var horizontalRadius: Double { didSet { horizontalRadius = Self.clamp(horizontalRadius, 0...1, default: 0.5) } }
-    var verticalRadius: Double { didSet { verticalRadius = Self.clamp(verticalRadius, 0...1, default: 0.5) } }
+    var horizontalRadius: Double { didSet { horizontalRadius = horizontalRadius.clamped(to: 0...1, default: 0.5) } }
+    var verticalRadius: Double { didSet { verticalRadius = verticalRadius.clamped(to: 0...1, default: 0.5) } }
     var rotation: Double { didSet { rotation = rotation.isFinite ? rotation : 0 } }
-    var feather: Double { didSet { feather = Self.clamp(feather, 0...1, default: 0.5) } }
-    var density: Double { didSet { density = Self.clamp(density, 0...1, default: 1) } }
+    var feather: Double { didSet { feather = feather.clamped(to: 0...1, default: 0.5) } }
+    var density: Double { didSet { density = density.clamped(to: 0...1, default: 1) } }
     var isInside: Bool
 
     init(center: CGPoint = CGPoint(x: 0.5, y: 0.5), horizontalRadius: Double = 0.5, verticalRadius: Double = 0.5, rotation: Double = 0, feather: Double = 0.5, density: Double = 1, isInside: Bool = true) {
-        self.center = CGPoint(x: Self.clamp(center.x, 0...1, default: 0.5), y: Self.clamp(center.y, 0...1, default: 0.5))
-        self.horizontalRadius = Self.clamp(horizontalRadius, 0...1, default: 0.5)
-        self.verticalRadius = Self.clamp(verticalRadius, 0...1, default: 0.5)
+        self.center = CGPoint(x: center.x.clamped(to: 0...1, default: 0.5), y: center.y.clamped(to: 0...1, default: 0.5))
+        self.horizontalRadius = horizontalRadius.clamped(to: 0...1, default: 0.5)
+        self.verticalRadius = verticalRadius.clamped(to: 0...1, default: 0.5)
         self.rotation = rotation.isFinite ? rotation : 0
-        self.feather = Self.clamp(feather, 0...1, default: 0.5)
-        self.density = Self.clamp(density, 0...1, default: 1)
+        self.feather = feather.clamped(to: 0...1, default: 0.5)
+        self.density = density.clamped(to: 0...1, default: 1)
         self.isInside = isInside
     }
 
@@ -414,10 +392,6 @@ struct RadialGradientDefinition: Codable, Sendable, Equatable {
             density: try c.decodeIfPresent(Double.self, forKey: .density) ?? 1,
             isInside: try c.decodeIfPresent(Bool.self, forKey: .isInside) ?? true
         )
-    }
-    private static func clamp(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
     }
 }
 
@@ -538,7 +512,7 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
     var name: String
     var isEnabled: Bool
     var isInverted: Bool
-    var amount: Double { didSet { amount = Self.clamp(amount, 0...1, default: 1) } }
+    var amount: Double { didSet { amount = amount.clamped(to: 0...1, default: 1) } }
     var components: [MaskComponent]
     var adjustments: LocalAdjustments
     /// Explicit ownership keeps Auto replacement separate from normal user editing.
@@ -547,7 +521,7 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
 
     init(id: UUID = UUID(), name: String = "Local Adjustment", isEnabled: Bool = true, isInverted: Bool = false, amount: Double = 1, components: [MaskComponent] = [], adjustments: LocalAdjustments = .neutral, ownership: AutoLayerOwnership = .user, autoProvenance: AutoLayerProvenance? = nil) {
         self.id = id; self.name = name; self.isEnabled = isEnabled; self.isInverted = isInverted
-        self.amount = Self.clamp(amount, 0...1, default: 1); self.components = components; self.adjustments = adjustments
+        self.amount = amount.clamped(to: 0...1, default: 1); self.components = components; self.adjustments = adjustments
         self.ownership = ownership
         // Keep provenance after a manual edit. Ownership is the replacement guard; provenance is
         // the stable purpose identity that lets a later Auto run recognize the protected layer
@@ -600,10 +574,6 @@ struct LocalAdjustmentLayer: Codable, Sendable, Equatable, Identifiable {
             ownership: try c.decodeIfPresent(AutoLayerOwnership.self, forKey: .ownership) ?? .user,
             autoProvenance: try c.decodeIfPresent(AutoLayerProvenance.self, forKey: .autoProvenance)
         )
-    }
-    private static func clamp(_ value: Double, _ range: ClosedRange<Double>, default fallback: Double) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
     }
 }
 

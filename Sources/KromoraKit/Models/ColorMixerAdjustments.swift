@@ -12,33 +12,24 @@ struct ColorMixerChannel: Codable, Equatable, Sendable {
     static let luminanceRange = -100.0...100.0
 
     var hue: Double {
-        didSet { hue = Self.clamp(hue, to: Self.hueRange, default: 0) }
+        didSet { hue = hue.clamped(to: Self.hueRange, default: 0) }
     }
     var saturation: Double {
-        didSet { saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0) }
+        didSet { saturation = saturation.clamped(to: Self.saturationRange, default: 0) }
     }
     var luminance: Double {
-        didSet { luminance = Self.clamp(luminance, to: Self.luminanceRange, default: 0) }
+        didSet { luminance = luminance.clamped(to: Self.luminanceRange, default: 0) }
     }
 
     static let neutral = ColorMixerChannel()
 
     init(hue: Double = 0, saturation: Double = 0, luminance: Double = 0) {
-        self.hue = Self.clamp(hue, to: Self.hueRange, default: 0)
-        self.saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0)
-        self.luminance = Self.clamp(luminance, to: Self.luminanceRange, default: 0)
+        self.hue = hue.clamped(to: Self.hueRange, default: 0)
+        self.saturation = saturation.clamped(to: Self.saturationRange, default: 0)
+        self.luminance = luminance.clamped(to: Self.luminanceRange, default: 0)
     }
 
     var isIdentity: Bool { hue == 0 && saturation == 0 && luminance == 0 }
-
-    private static func clamp(
-        _ value: Double,
-        to range: ClosedRange<Double>,
-        default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
 
     private enum CodingKeys: String, CodingKey { case hue, saturation, luminance }
 

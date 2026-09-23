@@ -91,10 +91,7 @@ enum PortablePackageXMPCodec {
         revision: UInt64,
         document: EditDocument
     ) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        let documentData = try encoder.encode(document)
+        let documentData = try PackageJSONCoder.encode(document)
         let payload = documentData.base64EncodedString()
         let asset = escape(assetID.raw)
         let encodedRevision = escape(String(revision))
@@ -141,11 +138,9 @@ enum PortablePackageXMPCodec {
         guard let revision = UInt64(values.revision) else {
             throw PortablePackageError.malformedXMP("revision is not an unsigned integer")
         }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
         let document: EditDocument
         do {
-            document = try decoder.decode(EditDocument.self, from: documentData)
+            document = try PackageJSONCoder.decode(EditDocument.self, from: documentData)
         } catch {
             throw PortablePackageError.malformedXMP("editDocument JSON is invalid: \(error.localizedDescription)")
         }
@@ -216,8 +211,8 @@ extension PortableLibraryPackage {
         let base = "Assets/\(shard)/\(assetID.raw)"
         let nativePath = "\(base)/Edits/\(nextRevision).json"
         let xmpPath = "\(base)/Metadata/\(nextRevision).xmp"
-        guard !FileManager.default.fileExists(atPath: rootURL.appendingPathComponent(nativePath).path),
-              !FileManager.default.fileExists(atPath: rootURL.appendingPathComponent(xmpPath).path) else {
+        guard !FileManager.default.fileExists(atPath: try packageURL(for: nativePath).path),
+              !FileManager.default.fileExists(atPath: try packageURL(for: xmpPath).path) else {
             throw PortablePackageError.immutableRevisionExists(nativePath)
         }
 
@@ -226,7 +221,7 @@ extension PortableLibraryPackage {
         for bytes in lookBytes {
             let reference = PortablePackageLookReference(data: bytes)
             guard seenHashes.insert(reference.contentHash).inserted else { continue }
-            let blobURL = rootURL.appendingPathComponent(reference.relativePath)
+            let blobURL = try packageURL(for: reference.relativePath)
             if FileManager.default.fileExists(atPath: blobURL.path) {
                 let existing = try Data(contentsOf: blobURL)
                 let actual = SHA256.hash(data: existing).portableHexString
@@ -266,7 +261,7 @@ extension PortableLibraryPackage {
                 guard references.contains(reference), stagedLookHashes.insert(reference.contentHash).inserted else {
                     continue
                 }
-                let blobURL = rootURL.appendingPathComponent(reference.relativePath)
+                let blobURL = try packageURL(for: reference.relativePath)
                 if !FileManager.default.fileExists(atPath: blobURL.path) {
                     try transaction.stage(data: bytes, at: reference.relativePath)
                 }
@@ -295,10 +290,8 @@ extension PortableLibraryPackage {
         revision requestedRevision: UInt64? = nil
     ) throws -> PortablePackageEditRevision {
         let pointer = try editPointer(for: assetID, revision: requestedRevision)
-        let data = try Data(contentsOf: rootURL.appendingPathComponent(pointer.relativePath))
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let revision = try decoder.decode(PortablePackageEditRevision.self, from: data)
+        let data = try Data(contentsOf: packageURL(for: pointer.relativePath))
+        let revision = try PackageJSONCoder.decode(PortablePackageEditRevision.self, from: data)
         guard revision.assetID == assetID, revision.revision == pointer.revision else {
             throw PortablePackageError.invalidEditRevision(pointer.relativePath)
         }
@@ -317,7 +310,7 @@ extension PortableLibraryPackage {
         }
         let xmpData: Data
         do {
-            xmpData = try Data(contentsOf: rootURL.appendingPathComponent(xmpRelativePath))
+            xmpData = try Data(contentsOf: packageURL(for: xmpRelativePath))
         } catch {
             throw PortablePackageError.malformedXMP("XMP sidecar is unreadable: \(error.localizedDescription)")
         }
@@ -340,12 +333,12 @@ extension PortableLibraryPackage {
         guard let xmpPath = pointer.xmpRelativePath else {
             throw PortablePackageError.malformedXMP("revision has no XMP pointer")
         }
-        let source = rootURL.appendingPathComponent(xmpPath)
+        let source = try packageURL(for: xmpPath)
         guard FileManager.default.fileExists(atPath: source.path) else {
             throw PortablePackageError.malformedXMP("XMP sidecar is missing")
         }
-        let quarantine = rootURL.appendingPathComponent(
-            "Recovery/Quarantine/\(assetID.raw)-\(pointer.revision)-\(UUID().uuidString).xmp"
+        let quarantine = try packageURL(
+            for: "Recovery/Quarantine/\(assetID.raw)-\(pointer.revision)-\(UUID().uuidString).xmp"
         )
         try FileManager.default.createDirectory(
             at: quarantine.deletingLastPathComponent(), withIntermediateDirectories: true
@@ -356,7 +349,7 @@ extension PortableLibraryPackage {
 
     func readEmbeddedLook(_ reference: PortablePackageLookReference) throws -> Data {
         try validateLookReference(reference)
-        let url = rootURL.appendingPathComponent(reference.relativePath)
+        let url = try packageURL(for: reference.relativePath)
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw PortablePackageError.missingLook(reference.contentHash)
         }
@@ -396,18 +389,13 @@ extension PortableLibraryPackage {
     }
 
     private func encodePackageJSON<T: Encodable>(_ value: T) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(value)
+        try PackageJSONCoder.encode(value)
     }
 }
 
 private extension PortablePackageEditRevision {
     static func decode(from data: Data) throws -> Self {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(Self.self, from: data)
+        try PackageJSONCoder.decode(Self.self, from: data)
     }
 }
 

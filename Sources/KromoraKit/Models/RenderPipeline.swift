@@ -1404,7 +1404,7 @@ enum RenderPipeline {
     }
 
     private static func clampedToneValue(_ value: CGFloat) -> CGFloat {
-        min(max(value, 0), 1)
+        value.clamped(to: 0...1, default: 0)
     }
 
     /// `CIToneCurve` interpolates in a gamma-2/perceptual domain. Specify the curve in linear-light

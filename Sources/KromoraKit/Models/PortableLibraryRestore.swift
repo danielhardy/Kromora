@@ -155,9 +155,9 @@ struct PortableLibraryRestore {
             var copiedBytes: UInt64 = 0
             for (index, file) in files.enumerated() {
                 try checkCancellation(isCancelled)
-                let destination = staging.appendingPathComponent(file.relativePath)
+                let destination = try safePackageURL(file.relativePath, under: staging)
                 try copy(
-                    from: backup.appendingPathComponent(file.relativePath), to: destination,
+                    from: try safePackageURL(file.relativePath, under: backup), to: destination,
                     chunkSize: options.chunkSize, copyMode: options.copyMode,
                     isCancelled: isCancelled, faultInjector: options.faultInjector
                 )
@@ -314,6 +314,7 @@ struct PortableLibraryRestore {
         for case let url as URL in enumerator {
             let relative = relativePath(from: root, to: url)
             if relative == "manifest.lock" { continue }
+            _ = try safePackageURL(relative, under: root)
             let values = try url.resourceValues(
                 forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey]
             )
@@ -409,6 +410,16 @@ struct PortableLibraryRestore {
             throw PortableLibraryRestoreError.invalidProfile("profile must not be inside a package")
         }
         return profile
+    }
+
+    private static func safePackageURL(_ relativePath: String, under root: URL) throws -> URL {
+        do {
+            return try PackagePath(relativePath).url(in: root)
+        } catch {
+            throw PortableLibraryRestoreError.invalidSource(
+                "unsafe package-relative path '\(relativePath)'"
+            )
+        }
     }
 
     private static func publish(staging: URL, active: URL, previous: URL) throws {

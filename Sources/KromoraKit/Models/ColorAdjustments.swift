@@ -13,10 +13,10 @@ struct ColorAdjustments: Codable, Equatable, Sendable {
     static let saturationRange = -100.0...100.0
 
     var vibrance: Double {
-        didSet { vibrance = Self.clamp(vibrance, to: Self.vibranceRange, default: 0) }
+        didSet { vibrance = vibrance.clamped(to: Self.vibranceRange, default: 0) }
     }
     var saturation: Double {
-        didSet { saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0) }
+        didSet { saturation = saturation.clamped(to: Self.saturationRange, default: 0) }
     }
     var mixer: ColorMixerAdjustments
     var grading: ColorGradingAdjustments
@@ -27,8 +27,8 @@ struct ColorAdjustments: Codable, Equatable, Sendable {
         mixer: ColorMixerAdjustments = .neutral,
         grading: ColorGradingAdjustments = .neutral
     ) {
-        self.vibrance = Self.clamp(vibrance, to: Self.vibranceRange, default: 0)
-        self.saturation = Self.clamp(saturation, to: Self.saturationRange, default: 0)
+        self.vibrance = vibrance.clamped(to: Self.vibranceRange, default: 0)
+        self.saturation = saturation.clamped(to: Self.saturationRange, default: 0)
         self.mixer = mixer
         self.grading = grading
     }
@@ -43,15 +43,6 @@ struct ColorAdjustments: Codable, Equatable, Sendable {
     /// `CIColorControls.inputSaturation` is a multiplier whose identity is 1.
     /// Therefore -100 is exactly zero saturation and +100 is 2× saturation.
     var normalizedSaturation: Double { 1 + saturation / 100 }
-
-    private static func clamp(
-        _ value: Double,
-        to range: ClosedRange<Double>,
-        default fallback: Double
-    ) -> Double {
-        guard value.isFinite else { return fallback }
-        return min(max(value, range.lowerBound), range.upperBound)
-    }
 
     private enum CodingKeys: String, CodingKey { case vibrance, saturation, mixer, grading }
 

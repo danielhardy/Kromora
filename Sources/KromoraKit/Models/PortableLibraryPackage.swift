@@ -332,8 +332,14 @@ struct PortableLibraryPackage {
     ) throws -> Self {
         let fm = FileManager.default
         try fm.createDirectory(at: rootURL, withIntermediateDirectories: true)
-        try fm.createDirectory(at: rootURL.appendingPathComponent("Catalog/Membership"), withIntermediateDirectories: true)
-        try fm.createDirectory(at: rootURL.appendingPathComponent("Assets"), withIntermediateDirectories: true)
+        try fm.createDirectory(
+            at: try PackagePath("Catalog/Membership").url(in: rootURL),
+            withIntermediateDirectories: true
+        )
+        try fm.createDirectory(
+            at: try PackagePath("Assets").url(in: rootURL),
+            withIntermediateDirectories: true
+        )
         var package = try Self(validatingRoot: rootURL, manifest: manifest)
         try package.validateManifest(manifest)
         package.manifest = manifest
@@ -365,7 +371,7 @@ struct PortableLibraryPackage {
     /// records, parsing XMP, or reading originals. Callers that need eager membership validation
     /// should use `open(at:)`; asset records are validated when their records are read.
     static func openForQuery(at rootURL: URL) throws -> Self {
-        let manifestURL = rootURL.appendingPathComponent("manifest.json")
+        let manifestURL = try PackagePath("manifest.json").url(in: rootURL)
         let data = try Data(contentsOf: manifestURL)
         let manifest = try PortablePackageJSON.decode(PortablePackageManifest.self, from: data)
         var package = try Self(validatingRoot: rootURL, manifest: manifest)
@@ -384,7 +390,7 @@ struct PortableLibraryPackage {
 
     func readMembershipShard(_ shard: String) throws -> PortablePackageMembershipShard {
         guard Self.isValidShard(shard) else { throw PortablePackageError.invalidShard(shard) }
-        let data = try Data(contentsOf: membershipURL(for: shard))
+        let data = try Data(contentsOf: packageURL(for: "Catalog/Membership/\(shard).json"))
         var value = try PortablePackageJSON.decode(PortablePackageMembershipShard.self, from: data)
         guard value.shard == shard else { throw PortablePackageError.invalidShard(value.shard) }
         value.unknownJSONFields = PortablePackageJSON.unknownFields(
@@ -396,7 +402,7 @@ struct PortableLibraryPackage {
 
     func writeMembershipShard(_ shard: PortablePackageMembershipShard) throws {
         try validate(shard)
-        try writeJSON(shard, to: membershipURL(for: shard.shard))
+        try writeJSON(shard, to: packageURL(for: "Catalog/Membership/\(shard.shard).json"))
     }
 
     /// Encodes a shard with the same forward-compatible writer used by direct package writes.
@@ -407,7 +413,7 @@ struct PortableLibraryPackage {
     }
 
     func readAssetRecord(for assetID: PortablePhotoAssetID) throws -> PortablePackageAssetRecord {
-        let url = assetRecordURL(for: assetID)
+        let url = try packageURL(for: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json")
         let data = try Data(contentsOf: url)
         var record = try PortablePackageJSON.decode(PortablePackageAssetRecord.self, from: data)
         guard record.identity.assetID == assetID else {
@@ -422,7 +428,9 @@ struct PortableLibraryPackage {
 
     func writeAssetRecord(_ record: PortablePackageAssetRecord) throws {
         try validate(record)
-        let url = assetRecordURL(for: record.identity.assetID)
+        let url = try packageURL(
+            for: "Assets/\(Self.shard(for: record.identity.assetID))/\(record.identity.assetID.raw)/asset.json"
+        )
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
@@ -443,9 +451,7 @@ struct PortableLibraryPackage {
         guard record.source.storage == .embedded, let relativePath = record.source.relativePath else {
             throw PortablePackageError.invalidRelativePath(record.source.relativePath ?? "<referenced>")
         }
-        return try RenderBoundarySourceResolver.resolve(
-            packageRelativePath: relativePath, packageRoot: rootURL
-        )
+        return try packageURL(for: relativePath)
     }
 
     /// The writer's filename rule, shared so the browsing derivation below cannot drift from the
@@ -464,12 +470,10 @@ struct PortableLibraryPackage {
     /// `verifiedEmbeddedSourceURL(for:displayName:)` (record fallback) or resolve the record.
     func browsingOriginalURL(
         for assetID: PortablePhotoAssetID, displayName: String
-    ) -> URL {
+    ) throws -> URL {
         let shard = Self.shard(for: assetID)
         let filename = Self.safeFilename(displayName)
-        return rootURL.appendingPathComponent(
-            "Assets/\(shard)/\(assetID.raw)/Original/\(filename)"
-        ).standardizedFileURL
+        return try packageURL(for: "Assets/\(shard)/\(assetID.raw)/Original/\(filename)")
     }
 
     /// Canonical source URL for one asset with a cheap fast path: the derived browsing locator
@@ -479,7 +483,7 @@ struct PortableLibraryPackage {
     func verifiedEmbeddedSourceURL(
         for assetID: PortablePhotoAssetID, displayName: String
     ) throws -> URL {
-        let derived = browsingOriginalURL(for: assetID, displayName: displayName)
+        let derived = try browsingOriginalURL(for: assetID, displayName: displayName)
         if FileManager.default.fileExists(atPath: derived.path) { return derived }
         return try embeddedSourceURL(for: readAssetRecord(for: assetID))
     }
@@ -505,34 +509,32 @@ struct PortableLibraryPackage {
     }
 
     private func writeManifest() throws {
-        try writeJSON(manifest, to: rootURL.appendingPathComponent("manifest.json"))
+        try writeJSON(manifest, to: packageURL(for: "manifest.json"))
     }
 
     // internal (not private): LibraryQueryControllerTests corrupts a specific shard file on disk
     // to exercise the rebuild-failure path.
     func membershipURL(for shard: String) -> URL {
-        rootURL.appendingPathComponent("Catalog/Membership/\(shard).json")
+        try! packageURL(for: "Catalog/Membership/\(shard).json")
     }
 
     func assetRecordURL(for assetID: PortablePhotoAssetID) -> URL {
-        rootURL.appendingPathComponent("Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json")
+        try! packageURL(for: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json")
     }
 
     // Internal package-native trash helpers. The active asset directory is moved as one unit so
     // originals and their edit sidecars have one recoverable location.
     func assetDirectoryURL(for assetID: PortablePhotoAssetID) -> URL {
-        rootURL.appendingPathComponent("Assets/\(Self.shard(for: assetID))/\(assetID.raw)")
+        try! packageURL(for: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)")
     }
 
     func quarantineDirectoryURL(for assetID: PortablePhotoAssetID) -> URL {
-        rootURL.appendingPathComponent("Recovery/Quarantine/\(assetID.raw)")
+        try! packageURL(for: "Recovery/Quarantine/\(assetID.raw)")
     }
 
     func readAssetRecord(atRelativePath relativePath: String) throws -> PortablePackageAssetRecord {
-        guard Self.isSafeRelativePath(relativePath) else {
-            throw PortablePackageError.invalidRelativePath(relativePath)
-        }
-        let data = try Data(contentsOf: rootURL.appendingPathComponent(relativePath))
+        let url = try packageURL(for: relativePath)
+        let data = try Data(contentsOf: url)
         var record = try PortablePackageJSON.decode(PortablePackageAssetRecord.self, from: data)
         record.unknownJSONFields = PortablePackageJSON.unknownFields(
             in: data, excluding: PortablePackageAssetRecord.knownJSONKeys
@@ -565,7 +567,7 @@ struct PortableLibraryPackage {
             guard entry.recordPath == expectedPath else {
                 throw PortablePackageError.recordPathMismatch(entry.recordPath)
             }
-            guard Self.isSafeRelativePath(entry.recordPath) else {
+            guard (try? packageURL(for: entry.recordPath)) != nil else {
                 throw PortablePackageError.recordPathMismatch(entry.recordPath)
             }
         }
@@ -574,7 +576,7 @@ struct PortableLibraryPackage {
     private func validate(_ record: PortablePackageAssetRecord) throws {
         switch record.source.storage {
         case .embedded:
-            guard let path = record.source.relativePath, Self.isSafeRelativePath(path) else {
+            guard let path = record.source.relativePath, (try? packageURL(for: path)) != nil else {
                 throw PortablePackageError.invalidRelativePath(record.source.relativePath ?? "<missing>")
             }
         case .referenced:
@@ -582,20 +584,27 @@ struct PortableLibraryPackage {
                 throw PortablePackageError.invalidRelativePath(record.source.relativePath ?? "<referenced>")
             }
         }
-        for pointer in record.editHistory.edits where !Self.isSafeRelativePath(pointer.relativePath) {
+        for pointer in record.editHistory.edits where (try? packageURL(for: pointer.relativePath)) == nil {
             throw PortablePackageError.invalidRelativePath(pointer.relativePath)
         }
         for pointer in record.editHistory.edits {
-            if let xmpPath = pointer.xmpRelativePath, !Self.isSafeRelativePath(xmpPath) {
+            if let xmpPath = pointer.xmpRelativePath, (try? packageURL(for: xmpPath)) == nil {
                 throw PortablePackageError.invalidRelativePath(xmpPath)
             }
         }
     }
 
-    private static func isSafeRelativePath(_ path: String) -> Bool {
-        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\") else { return false }
-        let components = path.split(separator: "/", omittingEmptySubsequences: false)
-        return !components.contains("..") && !components.contains("")
+    static func isSafeRelativePath(_ path: String) -> Bool {
+        (try? PackagePath(path)) != nil
+    }
+
+    /// Resolves a package-relative path and rejects symlink escapes from the package root.
+    func packageURL(for relativePath: String) throws -> URL {
+        do {
+            return try PackagePath(relativePath).url(in: rootURL)
+        } catch {
+            throw PortablePackageError.invalidRelativePath(relativePath)
+        }
     }
 
     private func writeJSON<T: PortablePackageJSONRecord>(_ value: T, to url: URL) throws {
@@ -610,21 +619,8 @@ private protocol PortablePackageJSONRecord: Codable {
 }
 
 private enum PortablePackageJSON {
-    private static func encoder() -> JSONEncoder {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        return encoder
-    }
-
-    private static func decoder() -> JSONDecoder {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return decoder
-    }
-
     static func decode<T: PortablePackageJSONRecord>(_ type: T.Type, from data: Data) throws -> T {
-        var value = try decoder().decode(type, from: data)
+        var value = try PackageJSONCoder.decode(type, from: data)
         value.unknownJSONFields = unknownFields(in: data, excluding: type.knownJSONKeys)
         return value
     }
@@ -635,7 +631,7 @@ private enum PortablePackageJSON {
     }
 
     static func encoded<T: PortablePackageJSONRecord>(_ value: T) throws -> Data {
-        var data = try encoder().encode(value)
+        var data = try PackageJSONCoder.encode(value)
         let unknown = value.unknownJSONFields
         if !unknown.isEmpty {
             guard data.first == 123, data.last == 125 else { throw PortablePackageError.invalidManifest("JSON record is not an object") }
