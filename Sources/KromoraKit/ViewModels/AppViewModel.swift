@@ -48,32 +48,6 @@ struct LibraryDeletionResult: Equatable, Sendable {
     var succeeded: Bool { !deletedIDs.isEmpty && failures.isEmpty }
 }
 
-/// Lifecycle state for the source-statistics-driven Auto action.
-enum AutoAdjustmentState: Equatable, Sendable {
-    case unavailable(String)
-    case ready
-    case analyzing
-    case renderingCandidates
-    case validating
-    case applying
-    case cancelled
-    case failed(String)
-
-    var message: String {
-        switch self {
-        case .unavailable(let message), .failed(let message): return message
-        case .ready:
-            return
-                "Analyze the source and replace global Light and Color with a conservative baseline."
-        case .analyzing: return "Analyzing the source for Auto adjustments…"
-        case .renderingCandidates: return "Rendering Auto candidates…"
-        case .validating: return "Validating Auto candidates…"
-        case .applying: return "Applying Auto adjustments…"
-        case .cancelled: return "Auto cancelled; nothing was changed."
-        }
-    }
-}
-
 /// The outcome of attempting to make all queued edit snapshots durable.
 public enum PersistenceFlushResult: Equatable, Sendable {
     case success
@@ -626,11 +600,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Determinate progress for the Auto lifecycle. `nil` means Auto is settled; unlike the Info
     /// histogram flag, this value belongs only to the active Auto invocation.
     @Published private(set) var autoAdjustmentProgress: Double?
-    private var autoAdjustmentTask: Task<Void, Never>?
-    /// A second Auto invocation, a manual edit, or navigation invalidates the previous invocation
-    /// even when the source and document values happen to compare equal. This closes the late
-    /// completion window left by a renderer that can only observe cancellation cooperatively.
-    private var autoInvocationRevision: UInt64 = 0
+    private let autoWorkflowCoordinator = AutoWorkflowCoordinator()
     /// Smart-mask creation performs provider work before inserting the durable recipe. This keeps
     /// unsupported sources and failed analysis from leaving an inert component in the document.
     var smartMaskCreationTask: Task<Void, Never>?
@@ -1386,7 +1356,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// work, and photo-intelligence availability are not prerequisites; the action has a histogram
     /// fallback for those cases.
     var canRunAutoAdjustment: Bool {
-        sourceImage != nil && imageSource != nil && previewState == .ready
+        sourceImage != nil && imageSource != nil && previewState == .ready && !isLoading
             && !isAutoAdjustmentInProgress
     }
 
@@ -1420,111 +1390,63 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         autoAdjustmentProgress = progress.map { min(max($0, 0), 1) }
     }
 
-    private func setAutoAdjustmentProgress(
-        _ phase: AutoEnhancementPhase, invocationRevision: UInt64
-    ) {
-        guard self.autoInvocationRevision == invocationRevision else { return }
-        switch phase {
-        case .analyzing:
-            publishAutoAdjustmentState(.analyzing, progress: 0)
-            statusMessage = "Analyzing \(sourceName) for Auto adjustments…"
-        case .renderingCandidates:
-            publishAutoAdjustmentState(.renderingCandidates, progress: 0.5)
-            statusMessage = "Rendering Auto candidates…"
-        case .validating:
-            publishAutoAdjustmentState(.validating, progress: 0.75)
-            statusMessage = "Validating Auto candidates…"
-        }
-    }
-
-    /// Analyze the current source, then atomically replace the accepted document. The result
-    /// enters `updateDocument`, so it receives normal per-photo persistence and one undo
-    /// operation. RAW/develop, legacy nodes, Looks, Effects, crop, mixer, and grading are retained.
+    /// Start Auto and apply its value-only result through the normal document commit path.
     func runAutoAdjustment() {
-        guard sourceImage != nil, previewState == .ready, let imageSource else { return }
+        guard sourceImage != nil, previewState == .ready, !isLoading, let imageSource else {
+            return
+        }
         endUndoGrouping()
-
-        // The toolbar is disabled while work is active, but this method is also an action seam
-        // used by keyboard commands and tests. A direct second invocation supersedes the first.
-        autoAdjustmentTask?.cancel()
-        autoInvocationRevision &+= 1
-        let invocationRevision = self.autoInvocationRevision
-
         let sourceRevision = self.sourceRevision
         let documentRevision = self.documentRevision
         let assetID = self.activeAssetID
         let currentDocument = document
-        let currentLUT = resolvedLUT(document.lut.lutID)
-        var analysisDocument = document.autoAdjustmentBaseline
-        // Do not compensate for an existing Look. Auto is a source baseline; applying it also
-        // preserves the active Look on the document below.
-        analysisDocument.lut = .none
-        let engine = self.engine
-        let photoAnalysisCoordinator = self.photoAnalysisCoordinator
-
-        if let fingerprint = currentDocument.lastAutoRunFingerprint,
-            fingerprint.matches(source: imageSource, document: currentDocument)
-        {
-            publishAutoAdjustmentState(.ready)
-            statusMessage = "No further improvement found"
-            autoAdjustmentTask = nil
-            return
-        }
-
-        publishAutoAdjustmentState(.analyzing, progress: 0)
-        statusMessage = "Analyzing \(sourceName) for Auto adjustments…"
-        let onProgress: @MainActor @Sendable (AutoEnhancementPhase) -> Void = {
-            [weak self] phase in
-            self?.setAutoAdjustmentProgress(phase, invocationRevision: invocationRevision)
-        }
-        autoAdjustmentTask = Task { @MainActor [weak self, engine] in
-            // The content-aware path is capability-gated only by the sampling seam. Engines that
-            // expose only histogram rendering continue through the established global-only
-            // fallback below; a missing optional semantic signal never blocks that fallback.
-            if let assetID,
-                let contentEngine = engine as? any RenderEngining & CurrentEditSampling,
-                contentEngine is RenderEngine
-            {
-                let maskStore = photoAnalysisCoordinator.maskStore
-                let result = await ContentAwareAutoEngine(
-                    engine: contentEngine,
-                    analysisCoordinator: photoAnalysisCoordinator,
-                    maskStore: maskStore
-                ).run(
-                    source: imageSource,
-                    assetID: assetID,
-                    current: currentDocument,
-                    lut: currentLUT,
-                    onProgress: onProgress
-                )
-                guard !Task.isCancelled, let self,
-                    self.autoInvocationRevision == invocationRevision
-                else { return }
-                let isSamePhoto =
-                    self.activeAssetID == assetID
-                    && self.sourceRevision == sourceRevision
-                    && self.imageSource == imageSource
-                guard isSamePhoto, self.documentRevision == documentRevision else {
-                    if isSamePhoto { self.publishAutoAdjustmentState(.ready) }
+        let request = AutoWorkflowRequest(
+            source: imageSource, assetID: assetID, document: currentDocument,
+            lut: resolvedLUT(document.lut.lutID)
+        )
+        let runner = ProductionAutoWorkflow(engine: engine, analysis: photoAnalysisCoordinator)
+        _ = autoWorkflowCoordinator.start(
+            request: request, previewReady: previewState == .ready, runner: runner,
+            isFenceCurrent: { [weak self] in
+                guard let self else { return false }
+                return self.activeAssetID == assetID && self.sourceRevision == sourceRevision
+                    && self.imageSource == imageSource && self.documentRevision == documentRevision
+            },
+            onState: { [weak self] state, progress in
+                self?.publishAutoAdjustmentState(state, progress: progress)
+                if state == .analyzing {
+                    self?.statusMessage =
+                        "Analyzing \(self?.sourceName ?? "photo") for Auto adjustments…"
+                }
+                if state == .renderingCandidates {
+                    self?.statusMessage = "Rendering Auto candidates…"
+                }
+                if state == .validating { self?.statusMessage = "Validating Auto candidates…" }
+            },
+            completion: { [weak self] invocationRevision, outcome in
+                guard let self, self.autoWorkflowCoordinator.isCurrent(invocationRevision) else {
                     return
                 }
-                switch result.status {
+                let samePhoto =
+                    self.activeAssetID == assetID
+                    && self.sourceRevision == sourceRevision && self.imageSource == imageSource
+                guard samePhoto, self.documentRevision == documentRevision else {
+                    if samePhoto { self.publishAutoAdjustmentState(.ready) }
+                    return
+                }
+                switch outcome.result.status {
                 case .improved:
-                    let applied = EditDocument.applyingAutoResult(result, to: self.document)
+                    let applied = EditDocument.applyingAutoResult(outcome.result, to: self.document)
                     self.publishAutoAdjustmentState(.applying, progress: 0.9)
                     self.statusMessage = "Applying Auto adjustments…"
-                    self.updateDocument(preservingAutoResult: true) { document in
-                        document = applied
-                    }
+                    self.updateDocument(preservingAutoResult: true) { $0 = applied }
                     self.publishAutoAdjustmentState(.ready)
-                    let count = result.changedControls.count
-                    self.statusMessage =
-                        "Auto applied — \(count) coordinated control\(count == 1 ? "" : "s") (undo to restore previous edits)"
+                    self.statusMessage = outcome.message
                 case .unchanged:
                     self.publishAutoAdjustmentState(.ready)
-                    self.statusMessage = "No further improvement found"
-                case .noCandidate:
-                    let message = result.reasons.first ?? "Auto found no acceptable improvement."
+                    self.statusMessage = outcome.message
+                case .noCandidate, .renderUnavailable:
+                    let message = outcome.message
                     self.publishAutoAdjustmentState(.failed(message))
                     self.statusMessage = message
                 case .cancelled:
@@ -1533,156 +1455,28 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 case .staleRevision:
                     self.publishAutoAdjustmentState(.ready)
                     self.statusMessage = "Auto was superseded; nothing was changed."
-                case .renderUnavailable:
-                    // A renderer failure is recoverable and must not mutate the document. Keep
-                    // the action available so a later retry can use a healthy render surface.
-                    self.publishAutoAdjustmentState(
-                        .failed(result.reasons.first ?? "Auto could not render the current edit."))
-                    self.statusMessage = self.autoAdjustmentState.message
                 }
-                return
             }
-
-            let photoAnalysis: PhotoAnalysis?
-            if let assetID {
-                photoAnalysis = try? await photoAnalysisCoordinator.analyze(
-                    assetID: assetID, source: imageSource, level: .standard
-                )
-            } else {
-                photoAnalysis = nil
-            }
-
-            guard !Task.isCancelled, let self,
-                self.autoInvocationRevision == invocationRevision
-            else { return }
-            let isSamePhoto =
-                self.activeAssetID == assetID
-                && self.sourceRevision == sourceRevision
-                && self.imageSource == imageSource
-            guard isSamePhoto, self.documentRevision == documentRevision else {
-                // A user edit can supersede an Auto request without changing the photo. Clear
-                // only that photo's in-progress state; a navigation completion must not make the
-                // newly selected photo look ready before its own preview is presented.
-                if isSamePhoto { self.publishAutoAdjustmentState(.ready) }
-                return
-            }
-
-            if let photoAnalysis,
-                photoAnalysis.quality.globalToneAvailable,
-                photoAnalysis.quality.overallConfidence
-                    >= AutoLightConfiguration.default.confidenceFloor
-            {
-                let result = AutoLightEngine.evaluate(
-                    analysis: photoAnalysis,
-                    currentEdits: analysisDocument,
-                    configuration: .default
-                )
-                var proposed = self.document
-                proposed.light = result.light
-                proposed.color.vibrance = result.color.vibrance
-                proposed.color.saturation = result.color.saturation
-                guard proposed.renderingHash != self.document.renderingHash else {
-                    self.publishAutoAdjustmentState(.ready)
-                    self.statusMessage = "No further improvement found"
-                    return
-                }
-                let autoResult = AutoEnhancementResult(
-                    proposedDocument: proposed,
-                    fingerprint: AutoRunFingerprint.make(source: imageSource, document: proposed)
-                )
-                let applied = EditDocument.applyingAutoResult(autoResult, to: self.document)
-                self.publishAutoAdjustmentState(.applying, progress: 0.9)
-                self.statusMessage = "Applying Auto adjustments…"
-                self.updateDocument(preservingAutoResult: true) { document in
-                    document = applied
-                }
-                self.publishAutoAdjustmentState(.ready)
-                self.statusMessage =
-                    "Auto applied — subject-aware Light baseline (undo to restore previous edits)"
-                return
-            }
-
-            self.setAutoAdjustmentProgress(
-                .renderingCandidates, invocationRevision: invocationRevision)
-            let histogram = await engine.histogram(
-                source: imageSource,
-                document: analysisDocument,
-                lut: nil,
-                scale: .preview(maxSize: CGSize(width: 1600, height: 1200)),
-                space: .current,
-                maxDimension: AutoAdjustmentSettings.default.histogramMaxDimension
-            )
-
-            guard !Task.isCancelled,
-                self.autoInvocationRevision == invocationRevision
-            else { return }
-            let isSamePhotoAfterAnalysis =
-                self.activeAssetID == assetID
-                && self.sourceRevision == sourceRevision
-                && self.imageSource == imageSource
-            guard isSamePhotoAfterAnalysis, self.documentRevision == documentRevision else {
-                if isSamePhotoAfterAnalysis { self.publishAutoAdjustmentState(.ready) }
-                return
-            }
-            guard let histogram,
-                let result = AutoAdjustmentAnalyzer.analyze(histogram: histogram)
-            else {
-                let message = "Auto could not analyze \(self.sourceName). Try reloading the photo."
-                self.publishAutoAdjustmentState(.failed(message))
-                self.statusMessage = message
-                return
-            }
-
-            self.setAutoAdjustmentProgress(.validating, invocationRevision: invocationRevision)
-            var proposed = self.document
-            proposed.light = result.light
-            proposed.color.vibrance = result.color.vibrance
-            proposed.color.saturation = result.color.saturation
-            guard proposed.renderingHash != self.document.renderingHash else {
-                self.publishAutoAdjustmentState(.ready)
-                self.statusMessage = "No further improvement found"
-                return
-            }
-            let autoResult = AutoEnhancementResult(
-                proposedDocument: proposed,
-                fingerprint: AutoRunFingerprint.make(source: imageSource, document: proposed)
-            )
-            let applied = EditDocument.applyingAutoResult(autoResult, to: self.document)
-            self.publishAutoAdjustmentState(.applying, progress: 0.9)
-            self.statusMessage = "Applying Auto adjustments…"
-            self.updateDocument(preservingAutoResult: true) { document in
-                document = applied
-            }
-            self.publishAutoAdjustmentState(.ready)
-            self.statusMessage =
-                "Auto applied — Light and Color baseline (undo to restore previous edits)"
-        }
+        )
     }
 
-    /// Cancel the active Auto operation without giving a late renderer result a chance to commit.
-    /// The cancelled state remains visible until the next settled preview or Auto attempt.
+    /// Cancel the active Auto operation without allowing a late result to commit.
     func cancelAutoAdjustment() {
         guard isAutoAdjustmentInProgress else { return }
-        autoInvocationRevision &+= 1
-        autoAdjustmentTask?.cancel()
-        autoAdjustmentTask = nil
-        publishAutoAdjustmentState(.cancelled)
+        autoWorkflowCoordinator.cancel { [weak self] state, progress in
+            self?.publishAutoAdjustmentState(state, progress: progress)
+        }
         statusMessage = "Auto cancelled; nothing was changed."
     }
 
-    /// Await the active Auto task in tests and lifecycle owners without polling published state.
-    /// The task is retained after completion until the next invocation so a caller can join a
-    /// completion that already crossed its final renderer milestone.
     func waitForAutoAdjustmentCompletion() async {
-        await autoAdjustmentTask?.value
+        await autoWorkflowCoordinator.waitForCompletion()
     }
 
     private func resetAutoAdjustmentForLifecycle() {
-        autoInvocationRevision &+= 1
-        autoAdjustmentTask?.cancel()
-        autoAdjustmentTask = nil
-        publishAutoAdjustmentState(
-            .unavailable("Auto is available when the photo preview is ready."))
+        autoWorkflowCoordinator.invalidate { [weak self] state, progress in
+            self?.publishAutoAdjustmentState(state, progress: progress)
+        }
     }
 
     // MARK: - Image loading
@@ -3278,6 +3072,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     private func clearActiveSourceAfterLibraryDeletion() {
         sourceSession.cancel()
+        autoWorkflowCoordinator.invalidate { [weak self] state, progress in
+            self?.publishAutoAdjustmentState(state, progress: progress)
+        }
         documentRevision &+= 1
         previewPresentation.advanceDisplayRevision()
         cancelPendingPreviewDebounce()
@@ -5735,9 +5532,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
         sourceSession.cancel()
+        autoWorkflowCoordinator.invalidate { [weak self] state, progress in
+            self?.publishAutoAdjustmentState(state, progress: progress)
+        }
         documentRevision &+= 1
         previewPresentation.resetForSource()
-        autoInvocationRevision &+= 1
         previewDebounceGeneration &+= 1
         comparisonPreviewRetryTask?.cancel()
         comparisonPreviewRetryTask = nil
@@ -5782,13 +5581,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelIdlePreviewBuild(resetCursor: true)
         let tasks: [Task<Void, Never>?] =
             [
-                autoAdjustmentTask, smartMaskCreationTask, prefetchDelayTask, previewDebounceTask,
+                smartMaskCreationTask, prefetchDelayTask, previewDebounceTask,
                 idleBuild, personSignalWarmingTask, lutCacheInvalidationTask,
                 semanticCoordinatorInstallTask,
                 droppedPromiseTask,
             ] + thumbnailDebounceTasks
         for task in tasks { task?.cancel() }
-        autoAdjustmentTask = nil
         smartMaskCreationTask = nil
         prefetchDelayTask = nil
         previewDebounceTask = nil
