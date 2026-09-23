@@ -70,9 +70,9 @@ shard placement and reject absolute paths, backslashes, empty path components, a
 
 ## Package-native trash
 
-Package-native trash is separate from KRMA-371's existing folder-backed Library deletion workflow.
-KRMA-371 continues to manage the current referenced-folder/managed-copy library, including its
-existing macOS Trash behavior; this package lifecycle does not call that workflow or change it.
+Package-native trash is the production deletion boundary; KRMA-371's earlier folder-backed Library
+deletion behavior is historical. This package lifecycle operates only inside a `.kromoralibrary`
+package and does not call that workflow.
 
 For a package-owned embedded asset, **Remove from library** atomically tombstones the membership
 entry, marks the asset record removed, and moves the complete `Assets/<shard>/<assetID>/` directory
