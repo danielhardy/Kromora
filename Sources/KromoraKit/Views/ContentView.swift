@@ -355,13 +355,16 @@ public struct ContentView: View {
                         Button("Open Image...") {
                             viewModel.openImageDialog()
                         }
+                        .disabled(!viewModel.canImportIntoPortableLibrary)
                         Divider()
                         Button("Import from Photos...") {
                             viewModel.importFromPhotos()
                         }
+                        .disabled(!viewModel.canImportIntoPortableLibrary)
                         Button("Open Source Folder...") {
                             viewModel.chooseSourceFolder()
                         }
+                        .disabled(!viewModel.canImportIntoPortableLibrary)
                         Menu("Removable Media") {
                             if viewModel.removableMediaVolumes.isEmpty {
                                 Text("No supported media mounted")
@@ -370,6 +373,7 @@ public struct ContentView: View {
                                     Button(volume.menuLabel) {
                                         viewModel.openRemovableMedia(volume)
                                     }
+                                    .disabled(!viewModel.canImportIntoPortableLibrary)
                                 }
                             }
                             Divider()
@@ -377,6 +381,7 @@ public struct ContentView: View {
                                 viewModel.refreshRemovableMedia()
                             }
                         }
+                        .disabled(!viewModel.canImportIntoPortableLibrary)
                         if !collection.items.isEmpty {
                             Button("Refresh Source Folder") {
                                 viewModel.refreshSource()

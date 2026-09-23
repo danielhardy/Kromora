@@ -57,6 +57,63 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testOpeningSourceFolderWithoutLibraryReportsUnavailableErrorWithoutImportSummary() throws {
+        let unavailablePackageURL = tempDirectory.appendingPathComponent("not-a-package")
+        try Data("not a library package".utf8).write(to: unavailablePackageURL)
+        let emptyFolder = tempDirectory.appendingPathComponent("empty-source", isDirectory: true)
+        let populatedFolder = tempDirectory.appendingPathComponent(
+            "populated-source", isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: emptyFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: populatedFolder, withIntermediateDirectories: true)
+        let imageURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "source.jpg", in: populatedFolder
+        )
+        let viewModel = makeAppViewModel(portablePackageURL: unavailablePackageURL)
+        let startupReason = try XCTUnwrap(viewModel.errorMessage)
+
+        for folder in [emptyFolder, populatedFolder] {
+            viewModel.errorMessage = nil
+
+            let result = viewModel.openSourceFolder(url: folder)
+
+            XCTAssertNil(result)
+            let message = try XCTUnwrap(viewModel.errorMessage)
+            XCTAssertTrue(message.contains(startupReason))
+            XCTAssertTrue(message.contains("relaunch Kromora before importing"))
+            XCTAssertEqual(viewModel.statusMessage, message)
+            XCTAssertFalse(message.localizedCaseInsensitiveContains("complete"))
+            XCTAssertFalse(message.contains("0 imported"))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: imageURL.path))
+            XCTAssertTrue(viewModel.collection.items.isEmpty)
+        }
+    }
+
+    func testImportEntryPointsAreGatedWhenLibraryFailedToOpen() throws {
+        let unavailablePackageURL = tempDirectory.appendingPathComponent("not-a-package")
+        try Data("not a library package".utf8).write(to: unavailablePackageURL)
+        let viewModel = makeAppViewModel(portablePackageURL: unavailablePackageURL)
+        let startupReason = try XCTUnwrap(viewModel.errorMessage)
+
+        XCTAssertFalse(viewModel.canImportIntoPortableLibrary)
+        viewModel.importFromPhotos()
+        XCTAssertFalse(viewModel.isPhotosPickerPresented)
+        XCTAssertTrue(try XCTUnwrap(viewModel.errorMessage).contains(startupReason))
+
+        viewModel.errorMessage = nil
+        viewModel.importFromRemovableMedia()
+        XCTAssertTrue(try XCTUnwrap(viewModel.errorMessage).contains(startupReason))
+
+        viewModel.errorMessage = nil
+        viewModel.openRemovableMedia(MediaVolume(name: "Camera Card", url: tempDirectory))
+        XCTAssertFalse(viewModel.isRemovableMediaSelectorPresented)
+        XCTAssertTrue(try XCTUnwrap(viewModel.errorMessage).contains(startupReason))
+
+        viewModel.errorMessage = nil
+        viewModel.handleDrop(.urls([tempDirectory]))
+        XCTAssertTrue(try XCTUnwrap(viewModel.errorMessage).contains(startupReason))
+    }
+
     func testPackageBackedStoreDoesNotExposeASeparateEditDatabase() async {
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),

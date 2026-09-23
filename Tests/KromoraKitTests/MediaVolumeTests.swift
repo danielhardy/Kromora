@@ -77,7 +77,12 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         let failing = FixtureMediaVolumeProvider(
             volumes: [volume], result: .failure(.volumeRemoved("Camera Card"))
         )
-        let failingViewModel = makeAppViewModel(engine: FakeRenderEngine(), mediaVolumeProvider: failing)
+        let failingViewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), mediaVolumeProvider: failing,
+            portablePackageURL: tempDirectory.appendingPathComponent(
+                "Failure Test Library.kromoralibrary", isDirectory: true
+            )
+        )
         failingViewModel.openRemovableMedia(volume)
         try await waitUntil { !failingViewModel.isRemovableMediaScanning }
         XCTAssertTrue(failingViewModel.removableMediaWarnings.contains("Camera Card is no longer available."))
