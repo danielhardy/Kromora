@@ -1123,26 +1123,34 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     func testCommittedCropSurvivesRelaunch() async throws {
         let url = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "persisted.png", in: tempDirectory)
-        let container = makeEditPackageFixture()
-        try container.register(url)
+        let packageURL = tempDirectory.appendingPathComponent("CropRelaunch.kromoralibrary")
+        let firstSession = try PortableLibrarySession(at: packageURL)
+        _ = try firstSession.importURLs([url])
         let first = makeAppViewModel(
-            engine: FakeRenderEngine(), editStore: container.store()
+            engine: FakeRenderEngine(), portablePackageURL: packageURL,
+            portableLibrarySession: firstSession
         )
-        first.openImage(url: url)
+        first.collection.loadPortableAssets(try firstSession.materializedAssets())
+        await first.collection.scanCompletion()
+        first.collection.setSelection(at: 0)
+        first.openActiveCollectionImage()
         try await waitUntil("the first source") { first.sourceImage != nil }
-        if let assetID = first.maskingAssetID {
-            try container.register(assetID: assetID, url: url)
-        }
         first.beginCrop()
         first.updateCropDraft(CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8))
         first.commitCrop()
         let flushResult = await first.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await first.shutdown()
 
+        let secondSession = try PortableLibrarySession(at: packageURL)
         let second = makeAppViewModel(
-            engine: FakeRenderEngine(), editStore: container.store()
+            engine: FakeRenderEngine(), portablePackageURL: packageURL,
+            portableLibrarySession: secondSession
         )
-        second.openImage(url: url)
+        second.collection.loadPortableAssets(try secondSession.materializedAssets())
+        await second.collection.scanCompletion()
+        second.collection.setSelection(at: 0)
+        second.openActiveCollectionImage()
         try await waitUntil("the restored crop") {
             second.sourceImage != nil
                 && second.document.crop
