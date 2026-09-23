@@ -29,8 +29,36 @@ open the release page.
 
 Before an in-place install, the updater mounts the DMG read-only and verifies the embedded
 `Kromora.app` against the running app's Developer ID Team ID and bundle identifier with strict
-nested code-signature validation. Unsigned development builds cannot replace themselves and are
-offered the release page instead.
+nested code-signature validation. After copying the app to a sibling staging directory, it repeats
+that verification on the staged copy before moving the running app, so a failed copy is discarded
+without changing the installed app. Unsigned development builds cannot replace themselves.
+
+The updater passes `-noverify` to `hdiutil attach` to skip hdiutil's DMG-level verification. The
+installer independently verifies the app inside the image with `SecStaticCode`, requiring Apple
+Developer ID signing and matching the running app's Team ID and bundle identifier, with strict
+nested-code validation. The DMG container itself is not treated as the trust boundary.
+
+### Sandboxed updater validation
+
+In-place installation is currently disabled for all builds: signature presence does not establish
+that App Sandbox permits launching `hdiutil`, staging files, and replacing an app under
+`/Applications`. Until the signed release-build test below passes, the update sheet opens the
+release page so the user can install the update manually. No signed sandboxed result is recorded
+yet: this checkout has no Developer ID signing identity (`security find-identity -v -p codesigning`
+reported zero valid identities), provisioning profile, or notary credential, so a valid manual
+test could not be run here.
+
+To complete the test on a machine with the distribution credentials listed below:
+
+1. Build a signed, sandboxed, direct-distribution release using the `release-dmg.sh` command below.
+2. Copy the resulting DMG to a separate location and mount it read-only with `hdiutil attach`.
+3. Launch the signed app from the mounted image, confirm the update feed finds a release, and
+   trigger install. Observe whether the app can start its `hdiutil attach` child process, mount and
+   validate the downloaded DMG, copy and re-verify the staged app, and replace its copy in
+   `/Applications`.
+4. Record the macOS version, exact build identity/version, and each stage's pass/fail result here.
+   If all stages pass, enable `canInstallInPlace` only after this result is reproducible; if any
+   stage fails, retain the release-page fallback and record the failing sandbox operation.
 
 The GitHub updater is compiled only for direct-download releases. `release-dmg.sh` sets
 `KROMORA_DIRECT_DISTRIBUTION=1` before invoking the app build; ordinary SwiftPM/Xcode builds omit
