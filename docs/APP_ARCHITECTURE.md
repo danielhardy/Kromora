@@ -27,6 +27,7 @@ fences. Feature workflows do not reach into one another's private state.
 | Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions, undo/redo, revisions, and clipboard | `EditDocument`, `PhotoEditSession`, `EditClipboardPayload`, revision numbers |
 | Preview and comparison | `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render admission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
+| Crop, rotation, and canvas navigation | `CanvasWorkflowCoordinator` owns crop-session commands and presentation snapshot, crop/rotation commands, and fit/fill/zoom/pan navigation; `CanvasInteractionState` owns observable draft and viewport values; `AppViewModel` owns document history, persistence, and render scheduling | crop presentation snapshot, `EditDocument` mutation closures, source size, image extent, and render/navigation callbacks |
 | Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
 | Export and Looks | `ExportCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, and `LUTLibrary` | render requests, export items, LUT IDs/values, status/error callbacks |
 | Lifecycle and shutdown | `ApplicationShellCoordinator` owns process observers and package-maintenance admission; `AppViewModel` remains the shutdown composition root; each collaborator owns cancellation and resource release within its boundary | explicit `shutdown()`/flush calls; observer tokens, maintenance triggers, and provider tasks do not escape their owner |
@@ -55,6 +56,23 @@ writes. `PreviewCoordinator` remains the only render-admission owner. The root s
 value-only document/source/navigation inputs and retains the compatibility methods plus the
 `PreviewSurface` instances, so there is no second document store or broad root reference in either
 collaborator.
+
+## Canvas workflow ownership
+
+`CanvasWorkflowCoordinator` owns crop entry, commit, cancel, reset, transient straighten/flip/
+perspective updates, quarter-turn behavior, and viewport fit/fill/zoom/pan commands. Its
+`CanvasInteractionState` owns the observable crop draft and viewport navigation values so
+pointer-frequency changes continue to invalidate only the canvas. Crop presentation restoration
+crosses the `CanvasWorkflowDestination` seam as a value snapshot; the coordinator has no inspector
+or source-browser references. The destination provides the active document/source geometry and
+callbacks for ordinary document updates, undo-group completion, status, and preview scheduling.
+
+`AppViewModel` remains the sole owner of `EditDocument`, history, persistence, preview/revision
+fences, and compatibility entry points. Canvas navigation never enters document history. The
+coordinator has no asynchronous work or retained external resources; `shutdown()` clears a draft
+and its presentation snapshot, and source replacement resets the interaction state. Fake-only
+`CanvasWorkflowCoordinatorTests` cover crop cancellation and commit, document rotation, and
+presentation-only navigation without constructing `AppViewModel`.
 
 ## Library/media and application-shell ownership
 
