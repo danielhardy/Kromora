@@ -717,6 +717,21 @@ struct PreviewSurfaceView: NSViewRepresentable {
     /// still participates in the NSView hit-test walk.
     var ignoresHits: Bool = false
 
+    /// The canvas is sized by its surrounding SwiftUI frames. Supplying that proposal directly
+    /// avoids asking AppKit to infer an intrinsic size for MTKView during layout.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: MTKView, context: Context) -> CGSize? {
+        Self.layoutSize(for: proposal)
+    }
+
+    static func layoutSize(for proposal: ProposedViewSize) -> CGSize {
+        CGSize(width: proposedDimension(proposal.width), height: proposedDimension(proposal.height))
+    }
+
+    private static func proposedDimension(_ dimension: CGFloat?) -> CGFloat {
+        guard let dimension, dimension.isFinite else { return 1 }
+        return dimension
+    }
+
     func makeNSView(context: Context) -> MTKView {
         let view = PreviewMTKView(frame: .zero, device: context.coordinator.device)
         surface.attachPresentationLifecycle()
