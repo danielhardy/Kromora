@@ -30,7 +30,7 @@ Extract LibraryImportCoordinator for package import entry points
 
 ## Acceptance criteria
 
-- [ ] 
+- [ ]
 
 ## Implementation notes
 
