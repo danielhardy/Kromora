@@ -85,4 +85,29 @@ final class PackageSettingsTests: XCTestCase {
         XCTAssertGreaterThan(scanned, 20, "expected to scan the whole module, saw \(scanned) files")
         XCTAssertEqual(offenders, [], "Swift 6 mode is only worth having without opt-outs")
     }
+
+    func testEvaluationHarnessStaysOutOfShippingSources() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let sources = root.appendingPathComponent("Sources")
+        let forbidden = [
+            "AutoCandidateEvaluator", "AutoEvaluatedRender", "AutoEvaluationReport",
+            "VisionAestheticsDiagnostics", "writeArtifact("
+        ]
+        var offenders: [String] = []
+        let enumerator = try XCTUnwrap(
+            FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        )
+        while let url = enumerator.nextObject() as? URL {
+            guard url.pathExtension == "swift" else { continue }
+            let text = try String(contentsOf: url, encoding: .utf8)
+            for symbol in forbidden where text.contains(symbol) {
+                offenders.append("\(url.path): \(symbol)")
+            }
+        }
+        XCTAssertEqual(
+            offenders, [],
+            "file-writing evaluation and Vision-aesthetics harnesses belong to KromoraKitTests"
+        )
+    }
 }
