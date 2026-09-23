@@ -8,6 +8,15 @@ used by preview and export. The selected document, including any measured region
 layers, is applied as one normal Auto history operation. Auto is shipped in the current editor;
 this document records its behavior, not a future proposal.
 
+## Availability and degraded mode
+
+After a preview is ready, the shipping `RenderEngine` and imported photo identity select
+`ContentAwareAutoEngine`; optional subject or semantic evidence may be missing without changing
+that path. `ProductionAutoWorkflow` retains the versioned global histogram analyzer only for
+alternate renderers that lack the sampling seam or requests without a photo identity. That mode
+is explicitly degraded: its completion message names the histogram fallback and its reason. It
+keeps the conservative global Light/Color behavior for renderer integrations and test doubles.
+
 ## Neutral target
 
 The default neutral target is a perceptual luminance median of `0.48` in the renderer's sRGB
