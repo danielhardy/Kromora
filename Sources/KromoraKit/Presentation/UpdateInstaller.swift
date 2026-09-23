@@ -74,8 +74,10 @@ public enum KromoraUpdateInstaller {
     }
 
     public static var canInstallInPlace: Bool {
-        guard let app = runningAppBundle else { return false }
-        return signingIdentity(of: app) != nil
+        // App Sandbox write access to /Applications and hdiutil Process execution have not
+        // been validated in a signed release build. Keep the action on the release page until
+        // that end-to-end path is confirmed; a valid signature alone does not prove installability.
+        false
     }
 
     public static func download(_ url: URL, session: URLSession = .shared) async throws -> URL {
@@ -146,7 +148,19 @@ public enum KromoraUpdateInstaller {
         }
     }
 
-    public static func swap(newApp: URL, into currentApp: URL) throws {
+    static func swap(newApp: URL, into currentApp: URL, identity: SigningIdentity) throws {
+        try swap(newApp: newApp, into: currentApp) { staged in
+            try verify(staged, against: identity)
+        }
+    }
+
+    /// The verifier seam lets tests exercise the failure boundary without manufacturing a
+    /// Developer ID signed app bundle. Production callers use the identity-based overload.
+    static func swap(
+        newApp: URL,
+        into currentApp: URL,
+        verifyStaged: (URL) throws -> Void
+    ) throws {
         let fileManager = FileManager.default
         let parent = currentApp.deletingLastPathComponent()
         guard fileManager.isWritableFile(atPath: parent.path) else {
@@ -157,6 +171,23 @@ public enum KromoraUpdateInstaller {
         let retired = parent.appendingPathComponent(".Kromora-old-\(token).app")
         do {
             try fileManager.copyItem(at: newApp, to: staged)
+        } catch {
+            try? fileManager.removeItem(at: staged)
+            throw InstallError.swapFailed(error.localizedDescription)
+        }
+
+        do {
+            try verifyStaged(staged)
+        } catch {
+            try? fileManager.removeItem(at: staged)
+            if let installError = error as? InstallError,
+               case .signatureRejected = installError {
+                throw installError
+            }
+            throw InstallError.signatureRejected(error.localizedDescription)
+        }
+
+        do {
             try fileManager.moveItem(at: currentApp, to: retired)
             try fileManager.moveItem(at: staged, to: currentApp)
         } catch {
@@ -198,7 +229,7 @@ public enum KromoraUpdateInstaller {
             let newApp = try findApp(in: mountPoint)
             try verify(newApp, against: identity)
             UpdateCoordinator.log.info("signature verified for team \(identity.teamID)")
-            try swap(newApp: newApp, into: currentApp)
+            try swap(newApp: newApp, into: currentApp, identity: identity)
             UpdateCoordinator.log.info("swapped update into place")
         } catch {
             await detach(mountPoint)

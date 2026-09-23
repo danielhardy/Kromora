@@ -141,5 +141,30 @@ final class UpdateTests: XCTestCase {
         XCTAssertNil(unsigned.phase)
         XCTAssertFalse(unsigned.isSheetPresented)
     }
+
+    func testStagedCopyVerificationFailureLeavesCurrentAppUntouched() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraSwapTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let current = root.appendingPathComponent("Kromora.app", isDirectory: true)
+        let incoming = root.appendingPathComponent("Incoming.app", isDirectory: true)
+        try FileManager.default.createDirectory(at: current, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: incoming, withIntermediateDirectories: true)
+        let currentMarker = current.appendingPathComponent("marker.txt")
+        try Data("installed version".utf8).write(to: currentMarker)
+        try Data("candidate version".utf8).write(to: incoming.appendingPathComponent("marker.txt"))
+
+        XCTAssertThrowsError(try KromoraUpdateInstaller.swap(newApp: incoming, into: current) { staged in
+            XCTAssertTrue(FileManager.default.fileExists(atPath: staged.appendingPathComponent("marker.txt").path))
+            throw KromoraUpdateInstaller.InstallError.signatureRejected("staged copy rejected")
+        }) { error in
+            XCTAssertEqual(error as? KromoraUpdateInstaller.InstallError, .signatureRejected("staged copy rejected"))
+        }
+
+        XCTAssertEqual(try String(contentsOf: currentMarker, encoding: .utf8), "installed version")
+        let remaining = try FileManager.default.contentsOfDirectory(atPath: root.path)
+        XCTAssertEqual(Set(remaining), Set(["Kromora.app", "Incoming.app"]))
+    }
 }
 #endif
