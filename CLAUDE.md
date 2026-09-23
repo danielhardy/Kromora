@@ -64,38 +64,35 @@ The package is split so the app's code is testable (`@testable` can't import an 
   the tests target resources with a provenance manifest. Licensed camera files for the opt-in RAW
   lane still live outside the checkout and are selected with `KROMORA_RAW_FIXTURE_DIR`.
 
-When a test needs something currently `private`, widen it to internal with a comment saying why —
-`RecipeExtractor.buildCube` and `workingSize` are the precedent.
+When a test needs to exercise private behavior, first consider testing through the existing boundary.
+Widen an implementation detail only when that makes the production boundary clearer and the test
+needs the seam; document why, and keep test-only helpers in the test target when possible.
 
 Constraints that must hold: **macOS 14 minimum**, **zero third-party dependencies** (Apple frameworks only). Don't introduce SPM/CocoaPods/Carthage deps.
 
-## Agent & workflow safety (READ THIS)
+## Agent and workflow safety
 
-A prior multi-agent **spec/analysis** run was meant to be read-only but a sub-agent edited tracked source as a side effect. Those edits had to be reverted and re-introduced deliberately as a reviewed PR. To prevent a repeat, these rules are binding for any agent or multi-agent workflow operating in this repo:
+- Preserve the user's existing working-tree changes. At task start, inspect and distinguish
+  pre-existing changes from work made for the task. Do not stash, reset, checkout over, or revert
+  pre-existing changes unless the user explicitly directs you to. If ownership is unclear, leave
+  them untouched.
+- Tasks explicitly scoped as analysis/spec/review should not edit product source unless the active
+  project workflow authorizes localized verification fixes. When parallel agents are explicitly
+  requested, give research tasks read-only access; isolate delegated code edits in a separate
+  worktree and review them before integration.
+- Do not create branches, push, or open a PR unless the user or the active project workflow asks for
+  it. Follow the current branch and commit rules below and any more specific instructions in
+  `.dg/AGENTS.md` for DispatchGraph work.
+- Do not rewrite history or discard work (`reset --hard`, force-push, `stash drop/clear`, deleting
+  branches, or equivalent) without explicit user approval.
 
-1. **Analysis/spec/review runs are read-only w.r.t. tracked source.** Fan-out sub-agents must NOT `Edit`/`Write`/`NotebookEdit` files under version control. They return their findings/spec **as text**; the orchestrator (main session) makes any file changes on the main tree after reviewing that text.
-2. **Enforce read-only mechanically, don't just ask.** Prefer one of:
-   - spawn sub-agents with a read-only agent type (e.g. `Plan`, `Explore`) — they cannot write; or
-   - in a `Workflow`, restrict sub-agents to read-only tools; or
-   - if a sub-agent genuinely must edit, give it **worktree isolation** (`isolation: "worktree"`, or the helper below) so it operates on a throwaway copy, never the main tree.
-3. **Verify the tree after any agent run.** `git status --porcelain` must be empty (aside from intended outputs). If unexpected changes appear, stash + revert them and surface to the user rather than committing.
-4. **Code changes land via the normal flow** — a branch + reviewed PR — not as a silent side effect of an analysis task. Repo-meta docs (README, LICENSE, specs, this file) may be committed directly to `main`.
-5. **Don't run destructive git** (history rewrite, force-push, `stash drop/clear`, branch `-D`) without explicit user approval.
-
-### Throwaway worktree helper
-
-For any agent run that needs a scratch checkout it can't pollute the main tree with:
-
-```bash
-DIR=$(scripts/agent-worktree.sh create)   # prints a temp worktree path on the current HEAD
-# ... point the agent/workflow at "$DIR" ...
-scripts/agent-worktree.sh remove "$DIR"   # clean up when done
-```
+For an isolated checkout, `scripts/agent-worktree.sh create` prints a temporary worktree path;
+remove it with `scripts/agent-worktree.sh remove <path>` after its work has been reviewed.
 
 ## Repo conventions
 
-- Default branch `main`; commit messages end with the `Co-Authored-By: Claude …` trailer.
-- Build artifacts (`.build/`, ~hundreds of MB), `.DS_Store`, and `.claude/` are gitignored. `.claude/` is ignored, so **shared agent guidance belongs here in `CLAUDE.md`**, not under `.claude/`.
+- Default branch is `main`; work on the branch already checked out unless the user or task workflow says otherwise. Keep commits focused and describe the change accurately. Do not add an agent-specific co-author trailer unless requested.
+- Build artifacts (`.build/`, ~hundreds of MB), `.DS_Store`, and `.claude/` are gitignored. `CLAUDE.md` is the canonical source for shared project guidance; root `AGENTS.md` points agents to it so tools that discover `AGENTS.md` load the same source rather than maintaining a duplicate.
 - `docs/ENGINEERING_GUIDE.md` records the current architecture, render/resource boundaries, persistence, masking, and contributor invariants. It is durable guidance, not an implementation plan; per-change transcripts belong in the PR or DispatchGraph issue.
 - `docs/APP_ARCHITECTURE.md` records the current application ownership boundaries and coordinator extraction.
 - `docs/AUTO_EXPOSURE_POLICY.md`, `docs/AUTO_PERFORMANCE.md`, and `docs/COMPARISON_MODE.md` record the current Auto and comparison contracts; performance numbers in the Auto guide are dated baseline evidence, not universal product claims.
