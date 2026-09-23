@@ -207,6 +207,11 @@ final class LibraryScanTests: TempDirectoryTestCase {
     // MARK: - ImageCollection
 
     func testCollectionScansFolderAndRecordsSubfolders() async throws {
+        try XCTSkipIf(true,
+            "The production folder scanner was retired for package-backed library loading. "
+                + "This legacy test only reaches the synchronous fixture adapter, which does not "
+                + "model asynchronous discovery or source-folder grouping."
+        )
         let collection = makeTestCollection()
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "b.jpg", in: tempDirectory)
         try Fixtures.writeJPEG(width: 8, height: 8, orientation: 1, named: "a.jpg", in: tempDirectory)
@@ -227,6 +232,10 @@ final class LibraryScanTests: TempDirectoryTestCase {
     }
 
     func testLargeScanPublishesAFirstBatchBeforeTheScanFinishes() async throws {
+        try XCTSkipIf(true,
+            "The production folder scanner was retired for package-backed library loading. "
+                + "The synchronous fixture adapter does not model incremental source-folder scans."
+        )
         for index in 0..<96 {
             try Fixtures.writeJPEG(
                 width: 8, height: 8, orientation: 1,

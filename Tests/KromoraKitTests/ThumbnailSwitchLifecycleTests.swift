@@ -525,21 +525,25 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         // One-off opens are copied into the managed library before rendering. Assert the durable
         // source identity while retaining the original filename as the photo under test.
-        guard let firstManagedURL = viewModel.collection.items.first(where: {
+        guard let firstItem = viewModel.collection.items.first(where: {
             $0.displayName == "sequential-first.png"
-        })?.url else {
+        }) else {
             return XCTFail("one-off open should add the first managed-library item")
         }
+        let firstAssetID = firstItem.id
         let firstPreview = try await TestSynchronization.nextEvent(from: reader, "the first preview") {
             if case .previewCompleted(let request) = $0 {
-                return request.source?.backing == .url(firstManagedURL)
+                return request.assetID == firstAssetID
             }
             return false
         } diagnostics: {
-            "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
+            let requests = await engine.previewRequests
+            let revisions = await engine.renderRequests.map(\.requestRevision)
+            let sources = requests.compactMap(\.source).map(\.backing)
+            return "previews=\(requests.count), revisions=\(revisions), sources=\(sources)"
         }
         if case .previewCompleted(let request) = firstPreview {
-            XCTAssertEqual(request.source?.backing, .url(firstManagedURL))
+            XCTAssertEqual(request.assetID, firstAssetID)
         }
 
         // Keep the replacement renderer in flight. The test releases only B and never performs a
@@ -549,14 +553,15 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         try await waitUntil("the second managed import") {
             viewModel.collection.items.contains { $0.displayName == "sequential-second.png" }
         }
-        guard let secondManagedURL = viewModel.collection.items.first(where: {
+        guard let secondItem = viewModel.collection.items.first(where: {
             $0.displayName == "sequential-second.png"
-        })?.url else {
+        }) else {
             return XCTFail("one-off open should add the second managed-library item")
         }
+        let secondAssetID = secondItem.id
         _ = try await TestSynchronization.nextEvent(from: reader, "the second preview request") {
             if case .previewRequested(let request) = $0 {
-                return request.source?.backing == .url(secondManagedURL)
+                return request.assetID == secondAssetID
             }
             return false
         } diagnostics: {
@@ -568,7 +573,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         await engine.releaseNextPreview()
         _ = try await TestSynchronization.nextEvent(from: reader, "the second preview completion") {
             if case .previewCompleted(let request) = $0 {
-                return request.source?.backing == .url(secondManagedURL)
+                return request.assetID == secondAssetID
             }
             return false
         } diagnostics: {

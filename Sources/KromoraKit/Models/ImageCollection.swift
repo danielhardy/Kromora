@@ -362,6 +362,11 @@ final class ImageCollectionPresentationModel {
         }
     }
 
+    func recordScanWarning(_ message: String) {
+        guard !scanWarnings.contains(where: { $0.message == message }) else { return }
+        scanWarnings.append(.init(id: message, message: message))
+    }
+
     func shutdown() async {
         scanGeneration &+= 1
         cancelThumbnailWork()

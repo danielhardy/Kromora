@@ -1,4 +1,5 @@
 import Foundation
+import ImageIO
 @testable import KromoraKit
 
 @MainActor
@@ -42,7 +43,7 @@ extension ImageCollection {
     func metadataCompletion() async { await scanCompletion() }
 
     func loadFromFolder(_ folder: URL) {
-        let urls = (FileManager.default.enumerator(
+        let candidates = (FileManager.default.enumerator(
             at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]
         )?.compactMap { value -> URL? in
             guard let url = value as? URL,
@@ -57,7 +58,26 @@ extension ImageCollection {
             if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
             return $0.standardizedFileURL.path < $1.standardizedFileURL.path
         }
+        var unreadableNames: [String] = []
+        let urls = candidates.filter { url in
+            let isReadableImage: Bool
+            if ImageDecoder.rawExtensions.contains(url.pathExtension.lowercased()) {
+                if let source = CGImageSourceCreateWithURL(url as CFURL, nil) {
+                    isReadableImage = CGImageSourceGetCount(source) > 0
+                } else {
+                    isReadableImage = false
+                }
+            } else {
+                isReadableImage = (try? ImageDecoder.prepareStandard(from: url)) != nil
+            }
+            guard !isReadableImage else { return true }
+            unreadableNames.append(url.lastPathComponent)
+            return false
+        }
         loadPortableAssets(urls.map { PhotoAsset(url: $0) })
+        for name in unreadableNames {
+            recordScanWarning("Could not read metadata for \(name).")
+        }
         // The former folder-backed fixture selected the first discovered photo while its scan
         // settled. Preserve that compatibility contract for tests that enter Edit without an
         // explicit grid click; the production package path mirrors selection from its query
