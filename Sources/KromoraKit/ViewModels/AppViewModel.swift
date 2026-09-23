@@ -63,7 +63,7 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 /// Central state for the Kromora app.
 @MainActor
 public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination,
-    AsyncPhotosImportDestination {
+    AsyncPhotosImportDestination, MaskingWorkflowDestination {
 
     var packageImportDoesNotNeedDigest: Bool { true }
 
@@ -430,7 +430,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// High-frequency canvas and transient crop state live outside the broad application
     /// publisher. Only the views that observe `canvasState` reevaluate for pointer interaction.
     let canvasState = CanvasInteractionState()
-    let maskInteractionState = MaskInteractionState()
+    /// Selection, transient creation, and smart-mask analysis state for the masking workspace,
+    /// owned by `MaskingWorkflowCoordinator`. AppViewModel remains the document/undo/preview owner
+    /// that coordinator's commands commit through.
+    var maskInteractionState: MaskInteractionState { maskingWorkflow.interactionState }
 
     /// Inspector chrome has a separate observation boundary for the same reason. The view model
     /// keeps compatibility accessors below so existing commands and tests retain their API while
@@ -601,10 +604,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// histogram flag, this value belongs only to the active Auto invocation.
     @Published private(set) var autoAdjustmentProgress: Double?
     private let autoWorkflowCoordinator = AutoWorkflowCoordinator()
-    /// Smart-mask creation performs provider work before inserting the durable recipe. This keeps
-    /// unsupported sources and failed analysis from leaving an inert component in the document.
-    var smartMaskCreationTask: Task<Void, Never>?
-    var smartMaskRetryContext: SmartMaskRetryContext?
 
     @Published var isLoading: Bool = false
     enum PreviewState: Equatable, Sendable {
@@ -749,10 +748,25 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Shared photo-understanding coordinator. Auto consumes its scalar result; it never reaches
     /// through to Vision, Core Image, or mask pixels.
     let photoAnalysisCoordinator: PhotoAnalysisCoordinator
+    /// Owns masking workspace selection, transient creation, and smart-mask analysis lifecycle.
+    let maskingWorkflow: MaskingWorkflowCoordinator
 
     var maskingAssetID: PhotoAssetID? { isShuttingDown ? nil : activeAssetID }
     var maskingSourceRevision: UInt64 { sourceRevision }
     var maskingSource: ImageSource? { isShuttingDown ? nil : imageSource }
+    var hasOpenSource: Bool { sourceImage != nil }
+
+    func setMaskingStatusMessage(_ message: String) { statusMessage = message }
+
+    func presentMaskingWorkspace() {
+        inspectorState.select(.masking)
+        inspectorState.isPresented = true
+        isMaskingPanelPresented = false
+    }
+
+    func dismissMaskingWorkspace() {
+        inspectorState.isMaskingWorkspacePresented = false
+    }
     private let preferences: UserDefaults
     /// An injected edit store is a non-production composition boundary. It may be used while a
     /// second model is inspecting the same package, so source navigation can fall back to the
@@ -809,8 +823,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var previewDebounceTask: Task<Void, Never>?
     private var previewDebounceGeneration: UInt64 = 0
     private let sourceSession: SourceSessionCoordinator
-    // Internal so the masking extension can register its retry warm-up with lifecycle shutdown.
-    var personSignalWarmingTask: Task<Void, Never>?
     private var lutCacheInvalidationTask: Task<Void, Never>?
     private var semanticCoordinatorInstallTask: Task<Void, Never>?
     private var pendingPersistenceFlush: Task<PersistenceFlushResult, Never>?
@@ -919,6 +931,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.editStore = effectiveEditStore
         self.editorDocument = EditorDocumentCoordinator()
         self.photosImportCoordinator = PhotosImportCoordinator()
+        self.maskingWorkflow = MaskingWorkflowCoordinator(analysis: analysisCoordinator)
         self.settings = KromoraSettings(
             preferences: preferences,
             userLookFolderURL: userLookFolderURL
@@ -989,6 +1002,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.photosImportCoordinator.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
+        self.maskingWorkflow.destination = self
 
         collection.onThumbnailDemand = { [weak self] assetID, priority in
             self?.requestEditedThumbnail(for: assetID, priority: priority)
@@ -1905,9 +1919,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let assetID = importPlan.assetID
         endUndoGrouping()
         resetAutoAdjustmentForLifecycle()
-        smartMaskCreationTask?.cancel()
-        smartMaskCreationTask = nil
-        smartMaskRetryContext = nil
+        maskingWorkflow.cancelInFlightSmartMask()
         // Discrete edits are queued normally; switching sources is a durability boundary for them.
         // Do not rewrite an unchanged document merely because navigation occurred.
         let persistenceBarrier = requestPersistenceFlush()
@@ -5581,22 +5593,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelIdlePreviewBuild(resetCursor: true)
         let tasks: [Task<Void, Never>?] =
             [
-                smartMaskCreationTask, prefetchDelayTask, previewDebounceTask,
-                idleBuild, personSignalWarmingTask, lutCacheInvalidationTask,
+                prefetchDelayTask, previewDebounceTask,
+                idleBuild, lutCacheInvalidationTask,
                 semanticCoordinatorInstallTask,
                 droppedPromiseTask,
             ] + thumbnailDebounceTasks
         for task in tasks { task?.cancel() }
-        smartMaskCreationTask = nil
         prefetchDelayTask = nil
         previewDebounceTask = nil
         idleBuildTask = nil
         editedThumbnailDebounceTasks.removeAll()
         pendingEditedThumbnailAssetID = nil
-        personSignalWarmingTask = nil
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
         droppedPromiseTask = nil
+        await maskingWorkflow.shutdown()
         await libraryMediaWorkflow.shutdown()
         await sourceSession.shutdown()
 
