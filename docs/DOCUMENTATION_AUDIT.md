@@ -1,12 +1,13 @@
 # Documentation audit — 2026-09-12
 
 KRMA-340 first reduced the original `docs/` tree to a small durable set. KRMA-378 re-audited that
-set and the repository's other tracked documentation against the current `Sources/`, `Tests/`,
-`README.md`, `CLAUDE.md`, scripts, package manifest, and recent DispatchGraph records. The current
-product is the folder-backed Library/Edit workflow with SwiftData edit records; Auto/photo analysis,
-comparison, culling/deletion, RAW support, Looks, masking, Photos import orchestration, and the
-coordinator boundaries are shipped. The portable library package remains a future design tracked by
-KRMA-384.
+set; this update reconciles it with the package-backed product and the decisions in KRMA-517,
+KRMA-519, KRMA-520, and KRMA-531. The current product uses a portable library package as the
+authoritative owner of library membership, originals, metadata, and edit revisions. Folder, Photos,
+and removable-volume selection are import sources. The local query index and device caches are
+rebuildable projections. Existing standalone edit-store files are left untouched and are not opened
+as a fallback. See [APP_ARCHITECTURE.md](APP_ARCHITECTURE.md),
+[STORAGE_POLICY.md](STORAGE_POLICY.md), and [EDIT_STORE_IDENTITY_DISPOSITION.md](EDIT_STORE_IDENTITY_DISPOSITION.md).
 
 ## Current documentation map
 
@@ -21,7 +22,7 @@ KRMA-384.
 | `docs/AUTO_PERFORMANCE.md` | Current, updated | Diagnostic contract plus explicitly dated baseline evidence and limitations. |
 | `docs/COMPARISON_MODE.md` | Current, retained | Accepted always-both comparison interaction contract. |
 | `docs/LOOKS.md` | Current, retained | LUT interchange, starter Looks, derive/save, and storage behavior. |
-| `docs/LIBRARY_PACKAGE_PLAN.md` | Future plan, updated | Unimplemented portable-library design; KRMA-384 is ready for review/sequencing. |
+| `docs/LIBRARY_PACKAGE_PLAN.md` | Historical plan and format reference | Package product is implemented. The original phase sketch is retained as history; current behavior and migration boundaries are stated at the top and in `APP_ARCHITECTURE.md`. |
 | `docs/PACKAGING.md` | Current, retained | Bundle, icon, signing, entitlement, and release workflow. |
 | `docs/TESTING.md` | Current, retained | Required/optional test lanes, profiling, and manual UI checks. |
 | `scripts/README.md` | Current, retained | Script entry points and their requirements. |
@@ -33,9 +34,10 @@ KRMA-384.
 | `.context/initial_concept.md` | Superseded historical provenance | Clearly marked as the pre-Kromora concept; current readers should use `README.md` and `docs/`. |
 
 The retained `docs/` tree is intentionally larger than the five-file post-KRMA-340 baseline because
-the shipped Auto, comparison, coordinator, and future-library decisions now have distinct current
+the shipped Auto, comparison, coordinator, and package-library decisions have distinct current
 roles. Volatile implementation transcripts and dated reports remain excluded unless they explain a
-current constraint or supported workflow.
+current constraint or supported workflow. The old folder-backed and SwiftData descriptions above
+are superseded historical statements, not the current product contract.
 
 ## Disposition
 

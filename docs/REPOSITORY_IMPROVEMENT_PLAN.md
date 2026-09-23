@@ -1,5 +1,30 @@
 # Stability, performance, and architecture improvement plan
 
+> **Superseded as an execution plan (2026-09-22).** This file preserves the 2026-09-12 baseline
+> findings and acceptance ideas; its original R1–R8 ordering is no longer the live backlog. Use the
+> current issue records and architecture docs for present ownership. Status below is intentionally
+> conservative: a related completed issue closes only the named overlap, not every original acceptance
+> item. Reopen or create a scoped issue before treating any remaining historical acceptance text as
+> current work.
+
+## Historical work-package status
+
+| Item | Status | Current record / disposition |
+| --- | --- | --- |
+| R1 import durability and truthful outcomes | Superseded/implemented | [KRMA-517](../.dg/issues/KRMA-517.md) completed truthful outcomes across import entry points. |
+| R2 cancellation and lifecycle ownership | Open for re-triage | [KRMA-517](../.dg/issues/KRMA-517.md) and [KRMA-520](../.dg/issues/KRMA-520.md) cover import outcomes and removal of the legacy mode; this does not certify every cancellation scenario in the historical acceptance list. |
+| R3 bounded import work and memory | Partially implemented | [KRMA-518](../.dg/issues/KRMA-518.md) moved package hashing/index refresh off the main actor; [KRMA-519](../.dg/issues/KRMA-519.md) records paged production-path work. Peak memory and the historical 1/10/50 import benchmark remain unclaimed here. |
+| R4 ROI mask work bounds and parity | Open for re-triage | The old proposed implementation/measurements are not a current verified contract. Re-scope from current mask code and tests before scheduling. |
+| R5 AppViewModel ownership decomposition | Partially implemented | Current ownership is documented in [APP_ARCHITECTURE.md](APP_ARCHITECTURE.md); [KRMA-521](../.dg/issues/KRMA-521.md) covers Observation fan-in. Further decomposition is not asserted complete by this document. |
+| R6 observation and repeated projection work | Partially implemented | [KRMA-521](../.dg/issues/KRMA-521.md) completed the root publisher fan-in change. Any remaining projection optimization needs a current measured issue. |
+| R7 executable boundaries and evidence discipline | Open/ongoing | [KRMA-535](../.dg/issues/KRMA-535.md) reconciles documentation; [KRMA-542](../.dg/issues/KRMA-542.md) and [KRMA-547](../.dg/issues/KRMA-547.md) track observed test-lane failures. The historical R7 acceptance list is not a single active ticket. |
+| R8 real crop/slider interaction coverage | Open for re-triage | No completion is claimed here. Reassess against current UI and test lanes before creating scoped work. |
+
+The portable-library work in this historical review has its own shipped sequence: [KRMA-519](../.dg/issues/KRMA-519.md)
+records the production query/window path, [KRMA-520](../.dg/issues/KRMA-520.md) records the package-only
+product and migration boundary, and [KRMA-531](../.dg/issues/KRMA-531.md) records package-backed edit
+cache persistence. This plan does not supersede those decisions.
+
 Reviewed 2026-09-12. Primary baseline: **`a29b4ee`**, covering the ten commits
 `74d4cfb..a29b4ee`. This is a recommendations and implementation handoff document.
 No application source was changed during this review.

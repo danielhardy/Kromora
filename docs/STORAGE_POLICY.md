@@ -4,6 +4,12 @@ This is the runtime storage contract for the portable library cutover. A path is
 because it happens to be under a familiar directory: the owner and lifecycle below determine what a
 backup must preserve.
 
+The portable package is the only production library source of truth. Folder selection, Photos, and
+removable-volume selection are import sources. The local index and device caches are projections.
+Existing standalone `EditStore*.store` files and legacy standalone locations are left untouched and
+are not opened as a fallback or alternate authority; see
+[`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md).
+
 | Artifact | Canonical owner | Location | Lifecycle | Backup / restore |
 | --- | --- | --- | --- | --- |
 | Package manifest, membership/catalog summaries, asset records | `PortableLibraryPackage` | `~/Pictures/Kromora Library.kromoralibrary/manifest.json`, `Catalog/`, `Assets/` | Durable; transactionally committed | Required and checksum-verified; restored before the local index is rebuilt |
