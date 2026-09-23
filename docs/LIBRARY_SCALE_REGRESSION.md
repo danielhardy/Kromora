@@ -5,13 +5,18 @@ at 1,000, 10,000, and 100,000 assets, writes only membership summaries and a loc
 measures the package-backed query path. The fixture deliberately has no asset records, originals,
 or thumbnail files in the package; an accidental eager read therefore fails loudly.
 
-Since KRMA-519 the fixture also measures the production path: each sample opens a real
+Since KRMA-519 the fixture also measures the production query/window path: each sample opens a real
 `PortableLibrarySession` on a private copy of the fixture package and walks the exact
 AppViewModel launch sequence — session open (`production-launch`), first query page via
 `browsingWindow(pageIndex: 0)` (`production-reload`), first grid frame through the real
 `ImageCollection` window adapter (`production-first-grid`), and one delta-based library-state
 write followed by reload (`production-mutation-reload`) — with a read observer gating
-`production-record-reads` to zero and a page-size bound gating retained Items. The copy keeps
+`production-record-reads` to zero and a page-size bound gating retained Items. This is a production
+component-path benchmark, not a launch-time measurement of the packaged app or a SwiftUI frame-time
+benchmark: it exercises `PortableLibrarySession`, the AppViewModel sequence represented by the probe,
+and the real `ImageCollection` adapter using generated membership summaries. The fixture intentionally
+has no asset records, originals, or thumbnail files, so it does not measure record-backed import,
+thumbnail decode/render, real-library I/O, or end-to-end visible UI latency. The copy keeps
 lease acquisition and disposable-index writes off the shared fixture. This closes the KRMA-519
 false assurance gap where the benchmark measured only the bare index session while production
 materialized every record (slice 1) and then every `PhotoAsset`+`Item` (slice 2 windows to the

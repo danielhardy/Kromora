@@ -5,23 +5,30 @@
 > import sources, not persisted referenced-folder browsing. Existing `EditStore*.store` files
 > remain untouched. If referenced assets return, they will use package `.referenced` records.
 
-**Status:** the Pictures-backed package and storage boundary are active. This remains design input
-for future scale/format work; the sequenced implementation issues began with KRMA-389
-(phase 0), KRMA-390 (phase 1), KRMA-391 (phase 2), KRMA-392 (phase 3), and KRMA-393 (phase 4).
-The sequencing and safety boundaries are recorded in [ADR-001](../.dg/decisions/ADR-001-portable-library-package-sequencing-and-safety-b.md).
-Time-bound.
+> **Historical-plan notice:** the package product and its core phases have shipped. Sections below
+> preserve the original design rationale and proposed sequence; normative current behavior is in
+> [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md) and [`STORAGE_POLICY.md`](STORAGE_POLICY.md). Where
+> this proposal conflicts with those documents or the shipped code, the current architecture and
+> tests take precedence. In particular, referenced-folder browsing has no product mode and the
+> package sidecars, not `EditDocumentStore`, own durable edits.
+
+**Status:** the Pictures-backed package and storage boundary are active. The original sequenced
+implementation records were KRMA-389 (phase 0), KRMA-390 (phase 1), KRMA-391 (phase 2), KRMA-392
+(phase 3), and KRMA-393 (phase 4); this phase sketch is historical, not an open execution queue.
+Current follow-up lives in DispatchGraph. The sequencing and safety boundaries are recorded in
+[ADR-001](../.dg/decisions/ADR-001-portable-library-package-sequencing-and-safety-b.md).
 **Scope:** local-only. iCloud sync is explicitly out of scope (see [Deliberately out of scope](#deliberately-out-of-scope)).
 **Target scale:** 100,000 assets on a single Mac.
 
-This document is a sequenced implementation plan and format history. Durable current architecture
+This document is a historical implementation plan and format reference. Durable current architecture
 belongs in [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md); completed package work below remains as
-historical context for compatibility and future scale work.
+historical context for compatibility and later format work.
 
 The current product uses a Pictures-backed portable package for managed library data. The local
 index and device caches are projections, while package edit sidecars are canonical. The approved
 legacy-data disposition is documented in
-[`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md); implementing later
-package phases must not silently migrate or delete current library data.
+[`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md); maintenance work must
+not silently migrate or delete current library data.
 
 ---
 
@@ -273,16 +280,16 @@ Whole-package file count target: **under 400,000 at 100,000 assets** (1 asset.js
 
 ### 4.1 Paged library model
 
-`ImageCollection` currently publishes `items: [Item]` where each `Item` is itself an
-`ObservableObject`. At 100,000 assets that is 100,000 observable objects. It must not survive.
-
-Introduce `LibraryQueryController`, backed by the local index:
+The current production path uses `LibraryQueryController` with the local membership projection.
+`ImageCollection` adapts the active window; launch and reload do not create one observable `Item`
+per library asset. The paged/windowed path shipped under KRMA-519:
 
 - Queries lightweight **value** summaries in pages of ~500.
 - Materialises only visible, prefetched, selected and actively-edited pages.
 - **Selection is stored by asset UUID, not array index.**
 - Rating, flag, date, camera and text filters run in the index, not over a materialised array.
-- Publishes the first page immediately while later pages (or a cold rebuild) continue.
+- Publishes a bounded first page immediately while the local projection rebuild continues; more
+  pages load as needed.
 - Decoded thumbnails are retained only for visible cells plus the existing bounded neighbourhood.
 - Existing memoised projections (`CollectionProjection`) are preserved so a thumbnail completion does
   not recompute the whole collection.
@@ -294,7 +301,7 @@ membership shards (§3.3).
 
 `Application Support/Kromora/Indexes/<library-uuid>/LibraryIndex.store`
 
-- SwiftData, `cloudKitDatabase: .none`.
+- A local rebuildable value projection serialized outside the package; it is not a SwiftData store.
 - Flattened searchable metadata, sort keys, aspect ratio, observed package revisions.
 - **Never the sole copy of any edit or metadata value.**
 - Paged fetches only.
@@ -303,10 +310,10 @@ membership shards (§3.3).
 - Deletable at any time with no data loss.
 - Never inside the package.
 
-**Note this inverts today's design.** `EditDocumentStore` is currently the *canonical* edit store;
-`EditRecord` holds the only copy of a document. Phase 3 demotes it to a projection, with the package
-becoming the source of truth. That is a real rewrite of `EditDocumentStore` and
-`EditPersistenceCoordinator`, not an additive index — budget it accordingly.
+**Package edit persistence (implemented):** package edit sidecars are the canonical edit store.
+`EditDocumentStore` is a bounded in-memory cache keyed by `PortablePhotoAssetID`; cache eviction
+reloads the package revision. `EditRecord` and the former SwiftData projection are retired from
+production code (KRMA-531). This paragraph replaces the proposal's original pre-package assumption.
 
 ### 4.3 One scheduler, not two
 
@@ -405,9 +412,9 @@ from resurrecting deleted photos.
 
 No other code path may delete an original. Recovery quarantines; it does not delete (§6.3).
 
-This package-native lifecycle is intentionally distinct from KRMA-371. KRMA-371 remains the
-current folder-backed Library deletion workflow and its behavior is unchanged. Package APIs operate
-only inside a `.kromoralibrary` package: embedded originals are moved to
+This package-native lifecycle is the production deletion boundary. KRMA-371's earlier
+folder-backed behavior is historical; production package APIs operate only inside a
+`.kromoralibrary` package: embedded originals are moved to
 `Recovery/Quarantine/<assetID>` and can be restored, while referenced records are tombstoned
 without touching the external source. Only an explicitly confirmed package reclaim transaction may
 permanently remove a quarantined directory.
@@ -578,7 +585,7 @@ Without a locked pre-package baseline, every later number is unfalsifiable.
 The original sketch was one atomic deliverable, which is how work of this size stalls. Each phase
 below is independently shippable and de-risks the next.
 
-### Phase 0 — Spike and baseline *(throwaway; nothing ships)*
+### Phase 0 — Spike and baseline *(historical; completed)*
 
 - Synthetic library generator: 1k / 10k / 100k assets with plausible metadata distributions. This is
   the single most reused artefact in the whole project — build it properly, and keep it.
@@ -588,7 +595,7 @@ below is independently shippable and de-risks the next.
 
 **Exit:** committed baseline numbers, a working generator, and a thumbnail-packing decision.
 
-### Phase 1 — Portable identity *(no format work)*
+### Phase 1 — Portable identity *(historical; completed)*
 
 Replace path/inode identity with UUIDs across `PhotoAssetID`, `PhotoSourceFingerprint`,
 `RenderCacheKey`, `MaskStore`, `PreviewDiskCache` and `EditRecord`. Existing local edits are
@@ -598,7 +605,7 @@ Self-contained, mechanical, highly testable, and it unblocks everything else. Re
 
 **Exit:** relocating a source folder preserves cache identity; §8.1 relocation gate passes.
 
-### Phase 2 — Package format, transactions, import
+### Phase 2 — Package format, transactions, import *(historical; implemented)*
 
 Manifest, membership shards with summaries, asset records, edit revisions, XMP, transactions, lease,
 copy-on-import with dedup and `clonefile`, referenced-asset fields written but unexposed.
@@ -608,17 +615,19 @@ the format without entangling the SwiftData rewrite.
 
 **Exit:** a real library that survives copy to another disk; fault-injection suite green.
 
-### Phase 3 — Paged library model and index demotion
+### Phase 3 — Paged library model and index demotion *(historical; implemented)*
 
 `LibraryQueryController`, paged summaries, UUID-keyed selection, index-side filtering. `EditRecord` /
-`EditDocumentStore` demoted from truth to projection (§4.2). Scheduler unification (§4.3).
+`EditDocumentStore` replaced by package sidecars plus a bounded in-memory cache (§4.2). Scheduler
+coordination uses the current `ImageWorkScheduler`; this phase text is not a specification of every
+current lane or concurrency limit.
 
 The largest and riskiest phase. It is also the one that only pays off at scale, which is why it comes
 after the format is stable.
 
 **Exit:** §8.1 scale invariants pass at 100,000 assets.
 
-### Phase 4 — Backup, restore, validation, maintenance
+### Phase 4 — Backup, restore, validation, maintenance *(historical; implemented)*
 
 Verified backup, restore, explicit validation, trash and reclaim-space (§4.7), revision compaction,
 thumbnail pack compaction.

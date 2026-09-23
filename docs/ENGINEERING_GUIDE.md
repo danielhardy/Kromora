@@ -13,10 +13,10 @@ otherwise make the composition root a resource owner:
 
 | Concern | Current owner | Contract |
 | --- | --- | --- |
-| Library scanning and projections | `ImageCollection` and `PhotosImportCoordinator` | Scanning/membership mutates the collection; Photos provider interaction, transfer, progress, and failures stay in the coordinator. Selection, filtering, and ordering are deterministic projections. |
+| Library queries and imports | `PortableLibrarySession`, `LibraryQueryController`, `ImageCollection`, and `PhotosImportCoordinator` | The package owns membership and records; its local index drives paged queries. `ImageCollection` adapts visible windows and thumbnails. Folder, Photos, and removable-volume inputs import into the open package. |
 | Editor document and history | `AppViewModel` and `EditorDocumentCoordinator` | AppViewModel publishes the active document; the coordinator owns per-photo sessions, history, revisions, and clipboard values. |
 | Preview scheduling and presentation | `PreviewCoordinator`, `PreviewSurface`, and `ComparisonFramePolicy` | Only a completion matching the current source and document revision may become visible; pure comparison-baseline rules stay outside the renderer. |
-| Persistence | `EditPersistenceCoordinator` and `EditDocumentStore` | Dirty snapshots are coalesced per asset, serialized through the SwiftData actor, and flushed on termination. |
+| Persistence | `EditPersistenceCoordinator`, `EditDocumentStore`, and `PortableLibraryPackage` | Dirty snapshots are coalesced per asset and appended as package edit revisions. The package sidecar is canonical; `EditDocumentStore` is a bounded in-memory cache. Writes flush on termination. |
 | Export and Look derivation | `ExportCoordinator` and `DeriveCoordinator` | Export and derivation use value snapshots and never mutate the active document. |
 | Look previews and saves | `LookPreviewCoordinator` and `LookSaveCoordinator` | Sheet-specific task and result state stays out of the editor. |
 | Photo analysis, Auto, and masks | `PhotoAnalysisCoordinator`, `ContentAwareAutoEngine`, and `MaskStore` | Analysis and Auto are cancellable and source-keyed; Auto returns a value-only result and durable mask pixels remain disposable sidecar data. |
@@ -60,8 +60,9 @@ for the behavior and dated diagnostic baseline.
 
 ## Persistence and masks
 
-In portable-library mode, package edit sidecars are canonical and `EditDocumentStore` is an in-memory
-SwiftData projection. Each package revision stores one versioned JSON-encoded `EditDocument` and
+The package-backed library is the only production mode. Package edit sidecars are canonical and
+`EditDocumentStore` is a bounded in-memory cache keyed by `PortablePhotoAssetID`, not a SwiftData
+projection. Each package revision stores one versioned JSON-encoded `EditDocument` and
 uses an opaque `PortablePhotoAssetID` UUID as its persistence key; resolved Look bytes are embedded
 with the revision. `EditPersistenceCoordinator` serializes and coalesces writes and flushes them on
 termination. Per-photo history is in-memory and bounded to 100 undo and redo snapshots; copy/paste,
