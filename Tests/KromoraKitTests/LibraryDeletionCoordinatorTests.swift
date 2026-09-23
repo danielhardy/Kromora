@@ -162,7 +162,7 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         let id = try XCTUnwrap(collection.addFromURLs([source]).first)
         let item = try XCTUnwrap(collection.items.first { $0.id == id })
         let managedURL = try XCTUnwrap(item.url)
-        let editFixture = try EditPackageFixture()
+        let editFixture = makeEditPackageFixture()
         let reference = EditSourceReference(assetID: item.id, url: managedURL)
         try editFixture.register(reference)
         let initialStore = editFixture.store()
