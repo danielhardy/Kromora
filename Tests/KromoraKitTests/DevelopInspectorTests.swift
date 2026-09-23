@@ -591,7 +591,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     func testHistogramFollowsTheDisplayedComparisonRequest() async throws {
         let fake = FakeRenderEngine()
         let reader = FakeRenderEventReader(await fake.eventStream())
-        let viewModel = makeAppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(engine: fake, previewDiskCacheCapBytes: 0)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         viewModel.isInspectorPresented = true
@@ -603,16 +603,20 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         }
         try await waitUntil("the edited histogram") { await fake.histogramRequests.count == 2 }
 
+        let previousDisplayRevision = viewModel.displayRevision
         XCTAssertTrue(viewModel.showOriginal(true))
         XCTAssertTrue(viewModel.isShowingOriginal)
         let comparisonBaseline = viewModel.document.comparisonBaseline
         try await waitUntil("the comparison render") {
-            await fake.previewRequests.contains { $0.document == comparisonBaseline }
+            await fake.previewRequests.contains {
+                $0.document == comparisonBaseline && $0.requestRevision > previousDisplayRevision
+            }
         }
         _ = try await TestSynchronization.nextEvent(from: reader, "the displayed comparison render")
         {
             if case .previewCompleted(let request) = $0 {
                 return request.document == comparisonBaseline
+                    && request.requestRevision > previousDisplayRevision
             }
             return false
         } diagnostics: {
