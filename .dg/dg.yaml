@@ -54,9 +54,10 @@ agents:
   verification:
     enabled: true
     max_concurrency: 1
-    default_actor: pi
+    default_actor: claude
     runner:
-      kind: pi
+      kind: claude
+      model: sonnet
     action_mode: safe_fixes
     completion: auto
     different_agent: warn
