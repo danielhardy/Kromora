@@ -402,6 +402,49 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertFalse(trackedSources.contains(sources[0].cacheFingerprint))
     }
 
+    /// KRMA-530: `latestRenderRequestRevisions` used to grow one entry per distinct source
+    /// fingerprint visited in a session and was pruned only by a full cache invalidation. Navigate
+    /// through many more sources than any single cap, and require every tracked-count diagnostic to
+    /// stay bounded, so a long browsing session cannot leak one ledger entry per photo.
+    func testLongSourceNavigationKeepsRevisionLedgerBounded() async throws {
+        let engine = RenderEngine()
+        let visitedSourceCount = 500
+
+        for index in 0..<visitedSourceCount {
+            // A distinct width per index gives each navigated photo its own cache fingerprint —
+            // the ledger keys on identity, not on how many *calls* were made.
+            let navigatedSource = try source(width: 8 + index, height: 4)
+            _ = try await engine.render(RenderRequest(
+                source: navigatedSource,
+                document: EditDocument(),
+                targetSize: CGSize(width: 8, height: 4),
+                quality: .preview,
+                output: .raster,
+                requestRevision: UInt64(index + 1)
+            ))
+
+            let snapshot = await engine.diagnosticsSnapshot
+            XCTAssertLessThanOrEqual(
+                snapshot.trackedRenderSourceCount, 64,
+                "render-revision ledger must stay bounded, not grow with navigation length"
+            )
+            XCTAssertLessThanOrEqual(
+                snapshot.trackedMaskSourceKeys.count, 16,
+                "mask-recipe ledger must stay bounded, not grow with navigation length"
+            )
+            XCTAssertLessThanOrEqual(
+                snapshot.trackedMaskRequestCount, 64,
+                "mask-request ledger must stay bounded, not grow with navigation length"
+            )
+        }
+
+        let finalSnapshot = await engine.diagnosticsSnapshot
+        XCTAssertGreaterThan(
+            finalSnapshot.trackedRenderSourceCount, 0,
+            "the most recently visited sources should still be tracked"
+        )
+    }
+
     func testInvalidateSourceCacheClearsMaskSourceOrder() async throws {
         let engine = RenderEngine()
         let firstSource = try source(width: 8, height: 4)
@@ -666,20 +709,22 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         }
 
         _ = renderer.image(for: payload(at: CGPoint(x: 0.25, y: 0.5)), extent: extent, transform: .identity)
-        XCTAssertEqual(renderer.cachedBrushStrokeCount, 1)
+        XCTAssertEqual(renderer.diagnosticsSnapshot.cachedBrushStrokeCount, 1)
         XCTAssertLessThan(
-            renderer.cachedBrushStrokeCostBytes, 8 * 8 * MemoryLayout<Float>.size,
+            renderer.diagnosticsSnapshot.cachedBrushStrokeCostBytes,
+            8 * 8 * MemoryLayout<Float>.size,
             "a small dab should cache only its touched tile"
         )
 
         _ = renderer.image(for: payload(at: CGPoint(x: 0.75, y: 0.5)), extent: extent, transform: .identity)
-        XCTAssertGreaterThanOrEqual(renderer.cachedBrushStrokeCount, 1)
+        XCTAssertGreaterThanOrEqual(renderer.diagnosticsSnapshot.cachedBrushStrokeCount, 1)
         XCTAssertLessThanOrEqual(
-            renderer.cachedBrushStrokeCostBytes, 8 * 8 * MemoryLayout<Float>.size)
+            renderer.diagnosticsSnapshot.cachedBrushStrokeCostBytes,
+            8 * 8 * MemoryLayout<Float>.size)
 
         renderer.removeAllCachedBrushStrokes()
-        XCTAssertEqual(renderer.cachedBrushStrokeCount, 0)
-        XCTAssertEqual(renderer.cachedBrushStrokeCostBytes, 0)
+        XCTAssertEqual(renderer.diagnosticsSnapshot.cachedBrushStrokeCount, 0)
+        XCTAssertEqual(renderer.diagnosticsSnapshot.cachedBrushStrokeCostBytes, 0)
     }
 
     func testBrushRasterUsesTouchedTileAndPreservesNonZeroExtentCoordinates() throws {
@@ -703,7 +748,7 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         }
 
         XCTAssertLessThan(
-            renderer.cachedBrushStrokeCostBytes,
+            renderer.diagnosticsSnapshot.cachedBrushStrokeCostBytes,
             dimensions.width * dimensions.height * MemoryLayout<Float>.size / 16,
             "a small stroke should not retain a full-frame raster"
         )
