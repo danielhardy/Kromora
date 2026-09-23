@@ -40,25 +40,46 @@ nested-code validation. The DMG container itself is not treated as the trust bou
 
 ### Sandboxed updater validation
 
-In-place installation is currently disabled for all builds: signature presence does not establish
-that App Sandbox permits launching `hdiutil`, staging files, and replacing an app under
-`/Applications`. Until the signed release-build test below passes, the update sheet opens the
-release page so the user can install the update manually. No signed sandboxed result is recorded
-yet: this checkout has no Developer ID signing identity (`security find-identity -v -p codesigning`
-reported zero valid identities), provisioning profile, or notary credential, so a valid manual
-test could not be run here.
+**Result: in-place install does not work under App Sandbox. This is permanent, not a missing
+credential.** `canInstallInPlace` returns `false` unconditionally and must stay that way; the
+update sheet always opens the release page for the user to install manually.
 
-To complete the test on a machine with the distribution credentials listed below:
+Tested 2026-09-23 on macOS (Team ID `FNB49PXFFU`, bundle identifier `com.last8.kromora.photo`)
+with a real Developer ID Application identity, a matching Developer ID provisioning profile, and
+a notarization credential all configured and working (confirmed by a full, real
+`scripts/release-dmg.sh` run: signed, notarized, stapled, and verified end to end).
 
-1. Build a signed, sandboxed, direct-distribution release using the `release-dmg.sh` command below.
-2. Copy the resulting DMG to a separate location and mount it read-only with `hdiutil attach`.
-3. Launch the signed app from the mounted image, confirm the update feed finds a release, and
-   trigger install. Observe whether the app can start its `hdiutil attach` child process, mount and
-   validate the downloaded DMG, copy and re-verify the staged app, and replace its copy in
-   `/Applications`.
-4. Record the macOS version, exact build identity/version, and each stage's pass/fail result here.
-   If all stages pass, enable `canInstallInPlace` only after this result is reproducible; if any
-   stage fails, retain the release-page fallback and record the failing sandbox operation.
+Test method: a minimal signed, sandboxed, entitled macOS app (same entitlements as
+`Kromora.entitlements`, same Developer ID identity, embedded provisioning profile, installed at
+`/Applications`, launched normally via `open` so App Sandbox is actually enforced) called the
+production `KromoraUpdateInstaller.mount(_:)` against a real release DMG bundled in its own
+Resources. Result, reproduced twice:
+
+```
+mountFailed("hdiutil: attach failed - Device not configured")
+```
+
+The same DMG mounts successfully with the identical `hdiutil attach` invocation run unsandboxed
+from a normal Terminal session, isolating the cause to App Sandbox itself: `hdiutil attach`
+requires opening a block device node, which Seatbelt denies to sandboxed processes. This is a
+platform-level restriction with no matching entitlement to request — there is no sandbox
+temporary-exception entitlement that grants disk-image attach. Apple's own guidance treats
+disk-image mounting as outside what App Sandbox permits; this is consistent with why sandboxed
+apps distributed via Developer ID direct-download conventionally rely on the user dragging the
+`.app` from the mounted DMG rather than any self-updating in-place install.
+
+Because the failure occurs at `hdiutil attach` — the very first step of `install(_:)`, before the
+staged-copy verification or the `/Applications` writability check are ever reached — those two
+questions (whether App Sandbox would separately permit writing into `/Applications`) are moot:
+the update path cannot get far enough to test them, and no entitlement change can fix the
+`hdiutil` restriction. Shipping behavior is and should remain: the update sheet always routes to
+the release page, and the user drags the new `Kromora.app` from the mounted DMG onto the
+`Applications` shortcut, same as first install.
+
+If a future macOS release changes this restriction, or if the updater is redesigned to avoid
+`hdiutil attach` entirely (for example, verifying and copying the app directly out of a
+downloaded `.zip` instead of a `.dmg`, which needs no block device), re-run this test before
+re-enabling `canInstallInPlace`.
 
 The GitHub updater is compiled only for direct-download releases. `release-dmg.sh` sets
 `KROMORA_DIRECT_DISTRIBUTION=1` before invoking the app build; ordinary SwiftPM/Xcode builds omit
