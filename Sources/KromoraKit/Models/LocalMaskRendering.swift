@@ -111,15 +111,11 @@ struct MaskOverlayStyle: Sendable, Equatable {
 
     init(inspection: Inspection = .colorWash, red: Double, green: Double, blue: Double) {
         self.inspection = inspection
-        self.red = Self.clamp(red)
-        self.green = Self.clamp(green)
-        self.blue = Self.clamp(blue)
+        self.red = red.clamped(to: 0...1, default: 0)
+        self.green = green.clamped(to: 0...1, default: 0)
+        self.blue = blue.clamped(to: 0...1, default: 0)
     }
 
-    private static func clamp(_ value: Double) -> Double {
-        guard value.isFinite else { return 0 }
-        return min(max(value, 0), 1)
-    }
 }
 
 /// Presentation opacity policy for the inspection surface. Coverage is intentionally the only

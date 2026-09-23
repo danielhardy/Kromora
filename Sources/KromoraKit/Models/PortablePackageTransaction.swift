@@ -289,16 +289,13 @@ final class PortablePackageLease: Sendable {
     private var lockURL: URL { packageRoot.appendingPathComponent("manifest.lock") }
 
     private static func readInfo(at url: URL) throws -> PortablePackageLeaseInfo {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(PortablePackageLeaseInfo.self, from: Data(contentsOf: url))
+        return try PackageJSONCoder.decode(
+            PortablePackageLeaseInfo.self, from: Data(contentsOf: url)
+        )
     }
 
     private static func encode(_ info: PortablePackageLeaseInfo) throws -> Data {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(info)
+        return try PackageJSONCoder.encode(info)
     }
 
     private static func write(_ data: Data, to descriptor: Int32) throws {
@@ -473,10 +470,11 @@ struct PortablePackageTransaction {
         // Fault injection starts at the first transaction boundary after the journal exists;
         // beginning a transaction itself must always be able to validate the existing lease.
         try lease.assertOwnership(at: now)
-        let recoveryURL = packageRoot.appendingPathComponent("Recovery", isDirectory: true)
-        let transactionsURL = recoveryURL.appendingPathComponent("Transactions", isDirectory: true)
-        let stagingURL = recoveryURL.appendingPathComponent(
-            "Staging/\(transactionID.uuidString)", isDirectory: true)
+        _ = try PackagePath("Recovery").url(in: packageRoot)
+        let transactionsURL = try PackagePath("Recovery/Transactions").url(in: packageRoot)
+        let stagingURL = try PackagePath(
+            "Recovery/Staging/\(transactionID.uuidString)"
+        ).url(in: packageRoot)
         try FileManager.default.createDirectory(
             at: transactionsURL, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: stagingURL, withIntermediateDirectories: true)
@@ -485,7 +483,9 @@ struct PortablePackageTransaction {
             stagingDirectory: "Recovery/Staging/\(transactionID.uuidString)", files: [],
             state: .prepared
         )
-        let journalURL = transactionsURL.appendingPathComponent("\(transactionID.uuidString).json")
+        let journalURL = try PackagePath(
+            "Recovery/Transactions/\(transactionID.uuidString).json"
+        ).url(in: packageRoot)
         let transaction = Self(
             packageRoot: packageRoot, transactionID: transactionID, journalURL: journalURL,
             stagingURL: stagingURL, lease: lease, faultInjector: faultInjector, journal: journal
@@ -522,7 +522,7 @@ struct PortablePackageTransaction {
         }
         try faultInjector?.check(.diskFull)
         let stagingPath = "\(journal.stagingDirectory)/\(relativePath)"
-        let destination = packageRoot.appendingPathComponent(stagingPath)
+        let destination = try packageURL(for: stagingPath)
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         let output = try FileHandle(forWritingTo: destinationURLCreatingIfNeeded(destination))
@@ -577,8 +577,8 @@ struct PortablePackageTransaction {
         }) else {
             throw PortablePackageTransactionError.duplicateStagedPath(targetPath)
         }
-        let source = packageRoot.appendingPathComponent(sourcePath)
-        let target = packageRoot.appendingPathComponent(targetPath)
+        let source = try packageURL(for: sourcePath)
+        let target = try packageURL(for: targetPath)
         guard FileManager.default.fileExists(atPath: source.path) else {
             throw PortablePackageTransactionError.moveSourceMissing(sourcePath)
         }
@@ -602,7 +602,7 @@ struct PortablePackageTransaction {
         guard !journal.removals.contains(where: { $0.relativePath == relativePath }) else {
             throw PortablePackageTransactionError.duplicateStagedPath(relativePath)
         }
-        let source = packageRoot.appendingPathComponent(relativePath)
+        let source = try packageURL(for: relativePath)
         guard FileManager.default.fileExists(atPath: source.path) else {
             throw PortablePackageTransactionError.moveSourceMissing(relativePath)
         }
@@ -629,7 +629,7 @@ struct PortablePackageTransaction {
             throw PortablePackageTransactionError.duplicateStagedPath(relativePath)
         }
         let stagingPath = "\(journal.stagingDirectory)/\(relativePath)"
-        let destination = packageRoot.appendingPathComponent(stagingPath)
+        let destination = try packageURL(for: stagingPath)
         try FileManager.default.createDirectory(
             at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
         try faultInjector?.check(.diskFull)
@@ -715,7 +715,7 @@ struct PortablePackageTransaction {
         try persistJournal()
         for file in journal.files {
             if isCancelled() { throw CancellationError() }
-            let url = packageRoot.appendingPathComponent(file.stagingPath)
+            let url = try packageURL(for: file.stagingPath)
             let handle = try FileHandle(forWritingTo: url)
             try handle.synchronize()
             try fullSync(handle.fileDescriptor)
@@ -727,7 +727,7 @@ struct PortablePackageTransaction {
         try persistJournal()
         for file in journal.files {
             if isCancelled() { throw CancellationError() }
-            let url = packageRoot.appendingPathComponent(file.stagingPath)
+            let url = try packageURL(for: file.stagingPath)
             let data = try Data(contentsOf: url)
             let actual = Self.sha256(data)
             guard UInt64(data.count) == file.byteCount else {
@@ -741,9 +741,9 @@ struct PortablePackageTransaction {
             try faultInjector?.check(.checksum)
         }
 
-        journal.files = journal.files.map { file in
+        journal.files = try journal.files.map { file in
             var prepared = file
-            let target = packageRoot.appendingPathComponent(file.relativePath)
+            let target = try packageURL(for: file.relativePath)
             if FileManager.default.fileExists(atPath: target.path) {
                 var backup = stagingURL.appendingPathComponent(
                     "Backups/\(journal.files.firstIndex(of: file) ?? 0)/\(target.lastPathComponent)"
@@ -772,7 +772,7 @@ struct PortablePackageTransaction {
             try lease.assertOwnership(at: now, faultInjector: faultInjector)
             journal.removals[index].publicationState = .started
             try persistJournal()
-            let target = packageRoot.appendingPathComponent(journal.removals[index].relativePath)
+            let target = try packageURL(for: journal.removals[index].relativePath)
             let backup = URL(fileURLWithPath: journal.removals[index].backupPath!)
             try FileManager.default.createDirectory(
                 at: backup.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -793,8 +793,8 @@ struct PortablePackageTransaction {
             try lease.assertOwnership(at: now, faultInjector: faultInjector)
             journal.moves[index].publicationState = .started
             try persistJournal()
-            let source = packageRoot.appendingPathComponent(journal.moves[index].sourcePath)
-            let target = packageRoot.appendingPathComponent(journal.moves[index].targetPath)
+            let source = try packageURL(for: journal.moves[index].sourcePath)
+            let target = try packageURL(for: journal.moves[index].targetPath)
             guard FileManager.default.fileExists(atPath: source.path) else {
                 throw PortablePackageTransactionError.moveSourceMissing(
                     journal.moves[index].sourcePath)
@@ -828,7 +828,7 @@ struct PortablePackageTransaction {
             }
             journal.files[currentIndex].publicationState = .started
             try persistJournal()
-            let target = packageRoot.appendingPathComponent(item.relativePath)
+            let target = try packageURL(for: item.relativePath)
             if let backupPath = journal.files[currentIndex].backupPath {
                 let backup = URL(fileURLWithPath: backupPath)
                 try FileManager.default.createDirectory(
@@ -858,7 +858,7 @@ struct PortablePackageTransaction {
             }
             try FileManager.default.createDirectory(
                 at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let staged = packageRoot.appendingPathComponent(item.stagingPath)
+            let staged = try packageURL(for: item.stagingPath)
             try FileManager.default.moveItem(at: staged, to: target)
             try fullSyncDirectory(target.deletingLastPathComponent())
             journal.files[currentIndex].publicationState = .published
@@ -916,10 +916,7 @@ struct PortablePackageTransaction {
     }
 
     private func persistJournal() throws {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        encoder.outputFormatting = [.sortedKeys]
-        try writeDurably(encoder.encode(journal), to: journalURL)
+        try writeDurably(PackageJSONCoder.encode(journal), to: journalURL)
     }
 
     private func cleanupCommittedArtifacts() {
@@ -932,8 +929,8 @@ struct PortablePackageTransaction {
     {
         let fm = FileManager.default
         for file in journal.files.reversed() {
-            let target = packageRoot.appendingPathComponent(file.relativePath)
-            let staged = packageRoot.appendingPathComponent(file.stagingPath)
+            let target = try packageURL(file.relativePath, in: packageRoot)
+            let staged = try packageURL(file.stagingPath, in: packageRoot)
             if let backupPath = file.backupPath {
                 let backup = URL(fileURLWithPath: backupPath)
                 if fm.fileExists(atPath: backup.path) {
@@ -956,7 +953,7 @@ struct PortablePackageTransaction {
         for removal in journal.removals.reversed() {
             guard let backupPath = removal.backupPath else { continue }
             let backup = URL(fileURLWithPath: backupPath)
-            let target = packageRoot.appendingPathComponent(removal.relativePath)
+            let target = try packageURL(removal.relativePath, in: packageRoot)
             if fm.fileExists(atPath: backup.path) {
                 if fm.fileExists(atPath: target.path) { try? fm.removeItem(at: target) }
                 try fm.createDirectory(
@@ -966,8 +963,8 @@ struct PortablePackageTransaction {
             }
         }
         for move in journal.moves.reversed() {
-            let source = packageRoot.appendingPathComponent(move.sourcePath)
-            let target = packageRoot.appendingPathComponent(move.targetPath)
+            let source = try packageURL(move.sourcePath, in: packageRoot)
+            let target = try packageURL(move.targetPath, in: packageRoot)
             // If the process stopped after rename but before the journal state was flushed, the
             // filesystem is the source of truth: target exists and source does not.
             if fm.fileExists(atPath: target.path) && !fm.fileExists(atPath: source.path) {
@@ -980,40 +977,34 @@ struct PortablePackageTransaction {
     }
 
     private static func decodeJournal(from data: Data) throws -> PortablePackageTransactionJournal {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(PortablePackageTransactionJournal.self, from: data)
+        try PackageJSONCoder.decode(PortablePackageTransactionJournal.self, from: data)
     }
 
-    private static func validateRelativePath(_ path: String) throws {
-        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\") else {
-            throw PortablePackageTransactionError.invalidRelativePath(path)
-        }
-        let components = path.split(separator: "/", omittingEmptySubsequences: false)
-        guard !components.contains(".."), !components.contains(""),
-              !path.hasPrefix("Recovery/") || path.hasPrefix("Recovery/Quarantine/")
-        else {
-            throw PortablePackageTransactionError.invalidRelativePath(path)
-        }
+    private func packageURL(for path: String) throws -> URL {
+        try Self.packageURL(path, in: packageRoot)
     }
 
-    private func validateRelativePath(_ path: String) throws { try Self.validateRelativePath(path) }
-
-    private static func validateMovePath(_ path: String) throws {
-        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("\\") else {
-            throw PortablePackageTransactionError.invalidRelativePath(path)
-        }
-        let components = path.split(separator: "/", omittingEmptySubsequences: false)
-        guard !components.contains(".."), !components.contains("") else {
-            throw PortablePackageTransactionError.invalidRelativePath(path)
-        }
-        guard !path.hasPrefix("Recovery/Transactions/"), !path.hasPrefix("Recovery/Staging/")
-        else {
+    private static func packageURL(_ path: String, in root: URL) throws -> URL {
+        do {
+            return try PackagePath(path).url(in: root)
+        } catch {
             throw PortablePackageTransactionError.invalidRelativePath(path)
         }
     }
 
-    private func validateMovePath(_ path: String) throws { try Self.validateMovePath(path) }
+    private func validateRelativePath(_ path: String) throws {
+        guard !path.hasPrefix("Recovery/") || path.hasPrefix("Recovery/Quarantine/") else {
+            throw PortablePackageTransactionError.invalidRelativePath(path)
+        }
+        _ = try packageURL(for: path)
+    }
+
+    private func validateMovePath(_ path: String) throws {
+        guard !path.hasPrefix("Recovery/Transactions/"), !path.hasPrefix("Recovery/Staging/") else {
+            throw PortablePackageTransactionError.invalidRelativePath(path)
+        }
+        _ = try packageURL(for: path)
+    }
 
     private static func publishRank(_ path: String) -> Int {
         if path.hasSuffix("/asset.json") { return 2 }

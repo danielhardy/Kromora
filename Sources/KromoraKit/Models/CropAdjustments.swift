@@ -318,15 +318,13 @@ struct CropAdjustments: Codable, Equatable, Sendable {
     }
 
     private static func clampedAngle(_ value: Double) -> Double {
-        guard value.isFinite else { return 0 }
-        return min(max(value, -45), 45)
+        value.clamped(to: -45...45, default: 0)
     }
 
     static let maximumPerspective = 0.8
 
     private static func clampedPerspective(_ value: Double) -> Double {
-        guard value.isFinite else { return 0 }
-        return min(max(value, -maximumPerspective), maximumPerspective)
+        value.clamped(to: -maximumPerspective...maximumPerspective, default: 0)
     }
 }
 

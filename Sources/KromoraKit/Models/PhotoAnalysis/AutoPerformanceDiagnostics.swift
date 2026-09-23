@@ -81,8 +81,7 @@ struct AutoRunTimings: Codable, Sendable, Equatable {
     }
 
     private static func clamped(_ value: Double) -> Double {
-        guard value.isFinite else { return 0 }
-        return min(max(value, 0), 3_600)
+        value.clamped(to: 0...3_600, default: 0)
     }
 }
 

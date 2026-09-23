@@ -14,20 +14,15 @@ enum RenderBoundarySourceResolver {
         packageRelativePath: String,
         packageRoot: URL
     ) throws -> URL {
-        guard !packageRelativePath.isEmpty,
-              !packageRelativePath.hasPrefix("/"),
-              !packageRelativePath.hasPrefix("~") else {
+        guard !packageRelativePath.hasPrefix("~") else {
             throw ResolutionError.absolutePathNotAllowed
         }
-
-        let root = packageRoot.standardizedFileURL.resolvingSymlinksInPath()
-        let candidate = root
-            .appendingPathComponent(packageRelativePath, isDirectory: false)
-            .standardizedFileURL
-        let rootPath = root.path.hasSuffix("/") ? root.path : root.path + "/"
-        guard candidate.path == root.path || candidate.path.hasPrefix(rootPath) else {
+        do {
+            return try PackagePath(packageRelativePath).url(in: packageRoot)
+        } catch PackagePathError.invalid(let path) where path.hasPrefix("/") {
+            throw ResolutionError.absolutePathNotAllowed
+        } catch {
             throw ResolutionError.escapesPackage
         }
-        return candidate
     }
 }

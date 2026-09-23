@@ -146,9 +146,7 @@ struct PortablePhotoIdentity: Codable, Hashable, Sendable, Equatable {
     /// Canonical bytes are useful for relocation tests and future content-addressed indexes.
     /// Identity is still the opaque UUID; this is only a deterministic serialization of the value.
     var canonicalData: Data {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        return (try? encoder.encode(self)) ?? Data()
+        (try? PackageJSONCoder.encode(self)) ?? Data()
     }
 
     func with(geometry: PhotoPixelDimensions?) -> Self {
