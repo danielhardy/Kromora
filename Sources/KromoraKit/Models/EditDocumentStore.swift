@@ -1,5 +1,4 @@
 import Foundation
-import os.lock
 
 /// The source information needed to address one edit revision.
 struct EditSourceReference: Codable, Sendable, Equatable {
@@ -153,7 +152,7 @@ actor EditDocumentStore {
 
     // These compatibility values are used only by old headless test composition points while
     // those tests move to package fixtures. Production always constructs the package initializer.
-    private let compatibilityBackend: CompatibilityEditBackend?
+    private let compatibilityBackendKey: String?
     private let compatibilityFileURL: URL?
 
     /// Opens the canonical package edit store.
@@ -172,7 +171,7 @@ actor EditDocumentStore {
         self.cacheCapacity = max(1, cacheCapacity)
         self.artificialWriteDelay = artificialWriteDelay
         self.failuresRemaining = max(0, failuresBeforeSuccess)
-        compatibilityBackend = nil
+        compatibilityBackendKey = nil
         compatibilityFileURL = nil
         self.writeStartSignal = writeStartSignal
     }
@@ -209,7 +208,7 @@ actor EditDocumentStore {
         self.artificialWriteDelay = artificialWriteDelay
         self.failuresRemaining = max(0, failuresBeforeSuccess)
         let key = CompatibilityEditBackendRegistry.key(for: modelContainer)
-        compatibilityBackend = compatibilityBackends.backend(for: key)
+        compatibilityBackendKey = key
         compatibilityFileURL = nil
         self.writeStartSignal = writeStartSignal
     }
@@ -229,7 +228,7 @@ actor EditDocumentStore {
         self.artificialWriteDelay = artificialWriteDelay
         self.failuresRemaining = max(0, failuresBeforeSuccess)
         let key = "file:\(fileURL.standardizedFileURL.path)"
-        compatibilityBackend = compatibilityBackends.backend(for: key)
+        compatibilityBackendKey = key
         compatibilityFileURL = fileURL
         self.writeStartSignal = writeStartSignal
     }
@@ -247,10 +246,11 @@ actor EditDocumentStore {
         embeddedLookBytes = values
     }
 
-    func load(for source: EditSourceReference) -> EditDocumentLoadResult {
+    func load(for source: EditSourceReference) async -> EditDocumentLoadResult {
         markIO()
-        if let compatibilityBackend {
-            let result = compatibilityBackend.load(for: source)
+        if let compatibilityBackendKey {
+            let backend = await compatibilityBackends.backend(for: compatibilityBackendKey)
+            let result = await backend.load(for: source)
             return finishLoad(
                 document: result?.document ?? EditDocument(), found: result != nil, status: .ready
             )
@@ -288,16 +288,21 @@ actor EditDocumentStore {
         }
     }
 
-    func load(for assetID: PhotoAssetID) -> EditDocumentLoadResult {
-        load(for: EditSourceReference(assetID: assetID))
+    func load(for assetID: PhotoAssetID) async -> EditDocumentLoadResult {
+        await load(for: EditSourceReference(assetID: assetID))
     }
 
-    func load(for sources: [EditSourceReference]) -> [EditDocumentLoadResult] {
-        sources.map { load(for: $0) }
+    func load(for sources: [EditSourceReference]) async -> [EditDocumentLoadResult] {
+        var results: [EditDocumentLoadResult] = []
+        results.reserveCapacity(sources.count)
+        for source in sources {
+            results.append(await load(for: source))
+        }
+        return results
     }
 
-    func document(for source: EditSourceReference) -> EditDocument? {
-        let result = load(for: source)
+    func document(for source: EditSourceReference) async -> EditDocument? {
+        let result = await load(for: source)
         return result.found ? result.document : nil
     }
 
@@ -306,9 +311,10 @@ actor EditDocumentStore {
         // Encode before incrementing attempt counters or changing the cache. An invalid value must
         // not make a failed save look like a dirty durable revision.
         let encodedDocument = try JSONEncoder().encode(document)
-        if let compatibilityBackend {
+        if let compatibilityBackendKey {
+            let backend = await compatibilityBackends.backend(for: compatibilityBackendKey)
             try await saveToCompatibilityBackend(
-                document, encoded: encodedDocument, for: source, backend: compatibilityBackend
+                document, encoded: encodedDocument, for: source, backend: backend
             )
             return
         }
@@ -346,17 +352,20 @@ actor EditDocumentStore {
     }
 
     /// Removes only the memory entry. Package edit revisions are immutable and remain recoverable.
-    func delete(for source: EditSourceReference) throws {
+    func delete(for source: EditSourceReference) async throws {
         markIO()
         cache.removeValue(forKey: source.portableAssetID)
         lru.removeAll { $0 == source.portableAssetID }
         cacheCount = cache.count
-        compatibilityBackend?.remove(for: source.portableAssetID)
+        if let compatibilityBackendKey {
+            let backend = await compatibilityBackends.backend(for: compatibilityBackendKey)
+            await backend.remove(for: source.portableAssetID)
+        }
         status = .ready
     }
 
-    func delete(for assetID: PhotoAssetID, url: URL? = nil) throws {
-        try delete(for: EditSourceReference(assetID: assetID, url: url))
+    func delete(for assetID: PhotoAssetID, url: URL? = nil) async throws {
+        try await delete(for: EditSourceReference(assetID: assetID, url: url))
     }
 
     private(set) var writeStartSignal: AsyncStream<Void>.Continuation?
@@ -374,9 +383,9 @@ actor EditDocumentStore {
                 failuresRemaining -= 1
                 throw StoreError.cannotWrite("injected persistence failure")
             }
-            backend.save(document, for: source)
+            await backend.save(document, for: source)
             insert(
-                document, revision: backend.revision(for: source.portableAssetID),
+                document, revision: await backend.revision(for: source.portableAssetID),
                 for: source.portableAssetID
             )
             writeCount += 1
@@ -467,68 +476,52 @@ actor EditDocumentStore {
 /// This backend exists only for legacy headless test composition points. It deliberately has no
 /// file format, URL lookup, or source relinking behavior; package mode above is the sole product
 /// persistence implementation.
-private final class CompatibilityEditBackend: Sendable {
-    private struct State: Sendable {
+private actor CompatibilityEditBackend {
+    private struct State {
         var documents: [PortablePhotoAssetID: EditDocument] = [:]
         var revisions: [PortablePhotoAssetID: UInt64] = [:]
         var aliases: [String: PortablePhotoAssetID] = [:]
     }
 
-    private let state: OSAllocatedUnfairLock<State>
-
-    init() {
-        state = OSAllocatedUnfairLock(initialState: State())
-    }
+    private var state = State()
 
     func save(_ document: EditDocument, for source: EditSourceReference) {
         let assetID = source.portableAssetID
-        state.withLock { state in
-            state.documents[assetID] = document
-            state.revisions[assetID, default: 0] += 1
-            if let url = source.url {
-                state.aliases[url.standardizedFileURL.resolvingSymlinksInPath().path] = assetID
-            }
+        state.documents[assetID] = document
+        state.revisions[assetID, default: 0] += 1
+        if let url = source.url {
+            state.aliases[url.standardizedFileURL.resolvingSymlinksInPath().path] = assetID
         }
     }
 
     func load(for source: EditSourceReference) -> (document: EditDocument, revision: UInt64)? {
-        state.withLock { state in
-            let assetID = source.url
-                .flatMap { state.aliases[$0.standardizedFileURL.resolvingSymlinksInPath().path] }
-                ?? source.portableAssetID
-            guard let document = state.documents[assetID], let revision = state.revisions[assetID]
-            else { return nil }
-            return (document, revision)
-        }
+        let assetID = source.url
+            .flatMap { state.aliases[$0.standardizedFileURL.resolvingSymlinksInPath().path] }
+            ?? source.portableAssetID
+        guard let document = state.documents[assetID], let revision = state.revisions[assetID]
+        else { return nil }
+        return (document, revision)
     }
 
     func revision(for assetID: PortablePhotoAssetID) -> UInt64 {
-        state.withLock { $0.revisions[assetID] ?? 0 }
+        state.revisions[assetID] ?? 0
     }
 
     func remove(for assetID: PortablePhotoAssetID) {
-        state.withLock { state in
-            state.documents.removeValue(forKey: assetID)
-            state.revisions.removeValue(forKey: assetID)
-            state.aliases = state.aliases.filter { $0.value != assetID }
-        }
+        state.documents.removeValue(forKey: assetID)
+        state.revisions.removeValue(forKey: assetID)
+        state.aliases = state.aliases.filter { $0.value != assetID }
     }
 }
 
-private final class CompatibilityEditBackendRegistry: Sendable {
-    private let values: OSAllocatedUnfairLock<[String: CompatibilityEditBackend]>
-
-    init() {
-        values = OSAllocatedUnfairLock(initialState: [:])
-    }
+private actor CompatibilityEditBackendRegistry {
+    private var values: [String: CompatibilityEditBackend] = [:]
 
     func backend(for key: String) -> CompatibilityEditBackend {
-        values.withLock { values in
-            if let value = values[key] { return value }
-            let value = CompatibilityEditBackend()
-            values[key] = value
-            return value
-        }
+        if let value = values[key] { return value }
+        let value = CompatibilityEditBackend()
+        values[key] = value
+        return value
     }
 
     static func key(for value: Any) -> String {
