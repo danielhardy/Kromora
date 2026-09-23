@@ -6,10 +6,65 @@ import XCTest
 
 @testable import KromoraKit
 
-/// Builds the same local-only schema used by the edit store without touching the filesystem.
-/// Tests that model a relaunch should retain this container and inject it into both stores.
-func makeInMemoryEditContainer() -> UUID {
-    UUID()
+/// A real package and writer lease for tests that compose an edit store directly.
+final class EditPackageFixture {
+    let package: PortableLibraryPackage
+    let lease: PortablePackageLease
+
+    init(at root: URL? = nil) throws {
+        let packageURL = root ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("KromoraEditFixture-\(UUID().uuidString).kromoralibrary")
+        package = FileManager.default.fileExists(atPath: packageURL.path)
+            ? try PortableLibraryPackage.open(at: packageURL)
+            : try PortableLibraryPackage.create(at: packageURL)
+        lease = try PortablePackageLease.acquire(at: packageURL)
+    }
+
+    func register(_ source: EditSourceReference) throws {
+        let id = source.portableAssetID
+        guard (try? package.readAssetRecord(for: id)) == nil else { return }
+        let fingerprint = PortablePhotoSourceFingerprint(
+            contentHash: PortablePhotoSourceFingerprint.contentHash(of: Data(id.raw.utf8)),
+            decoderVersion: "test-fixture"
+        )
+        try package.writeAssetRecord(PortablePackageAssetRecord(
+            identity: PortablePhotoIdentity(assetID: id, sourceFingerprint: fingerprint),
+            source: .referenced()
+        ))
+    }
+
+    func register(_ url: URL) throws {
+        try register(EditSourceReference(assetID: .file(url), url: url))
+    }
+
+    func register(assetID: PhotoAssetID, url: URL) throws {
+        try register(EditSourceReference(assetID: assetID, url: url))
+    }
+
+    func register(_ item: ImageCollection.Item) throws {
+        try register(EditSourceReference(
+            assetID: item.id,
+            portableIdentity: item.asset.source.portableIdentity,
+            url: item.url
+        ))
+    }
+
+    func store(
+        artificialWriteDelay: Duration = .zero,
+        failuresBeforeSuccess: Int = 0,
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+    ) -> EditDocumentStore {
+        EditDocumentStore(
+            package: package, lease: lease,
+            artificialWriteDelay: artificialWriteDelay,
+            failuresBeforeSuccess: failuresBeforeSuccess,
+            writeStartSignal: writeStartSignal
+        )
+    }
+}
+
+func makeEditPackageFixture() -> EditPackageFixture {
+    try! EditPackageFixture()
 }
 
 @MainActor
@@ -25,13 +80,12 @@ struct ImmediatePortablePackageLeaseRecoveryConfirmer: PortablePackageLeaseRecov
 }
 
 func makeInMemoryEditStore(
-    container: UUID = makeInMemoryEditContainer(),
+    container: EditPackageFixture = makeEditPackageFixture(),
     artificialWriteDelay: Duration = .zero,
     failuresBeforeSuccess: Int = 0,
     writeStartSignal: AsyncStream<Void>.Continuation? = nil
 ) -> EditDocumentStore {
-    EditDocumentStore(
-        modelContainer: container,
+    return container.store(
         artificialWriteDelay: artificialWriteDelay,
         failuresBeforeSuccess: failuresBeforeSuccess,
         writeStartSignal: writeStartSignal
@@ -585,6 +639,7 @@ class TempDirectoryTestCase: XCTestCase {
         previewDiskCacheDirectory: URL? = nil,
         previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
         portablePackageURL: URL? = nil,
+        portableLibrarySession: PortableLibrarySession? = nil,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
@@ -602,7 +657,7 @@ class TempDirectoryTestCase: XCTestCase {
 
         let viewModel = AppViewModel(
             engine: engine,
-            editStore: editStore ?? makeInMemoryEditStore(),
+            editStore: editStore ?? (portablePackageURL == nil ? makeInMemoryEditStore() : nil),
             preferences: isolatedPreferences,
             mediaVolumeProvider: mediaVolumeProvider,
             mediaVolumeNotificationCenter: mediaVolumeNotificationCenter,
@@ -620,7 +675,8 @@ class TempDirectoryTestCase: XCTestCase {
             embeddedFirstFrameProvider: embeddedFirstFrameProvider,
             fileDialog: fileDialog,
             fileDropActionPolicy: fileDropActionPolicy,
-            leaseRecoveryConfirmer: leaseRecoveryConfirmer
+            leaseRecoveryConfirmer: leaseRecoveryConfirmer,
+            portableLibrarySession: portableLibrarySession
         )
         appViewModels.append(viewModel)
         return viewModel

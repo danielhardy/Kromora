@@ -35,7 +35,8 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         let source = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "referenced.jpg", in: sourceFolder
         )
-        let store = makeInMemoryEditStore()
+        let editFixture = try EditPackageFixture()
+        let store = editFixture.store()
         let viewModel = makeAppViewModel(
             editStore: store,
             preferences: defaults,
@@ -51,6 +52,7 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         viewModel.collection.loadFromFolder(sourceFolder)
         await viewModel.collection.scanCompletion()
         let item = try XCTUnwrap(viewModel.collection.items.first)
+        try editFixture.register(item)
         try await store.save(
             EditDocument(adjustments: [.exposure(ev: 0.5)]),
             for: EditSourceReference(assetID: item.id, url: source)
@@ -145,18 +147,20 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
     func testPersistenceFailureLeavesTheReferencedItemAndOriginalIntact() async throws {
         let defaults = makeTestUserDefaults()
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
-        let storeURL = tempDirectory.appendingPathComponent("edits.store")
         try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
         let source = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "blocked.jpg", in: sourceFolder
         )
-        let initialStore = EditDocumentStore(fileURL: storeURL)
         let id = PhotoAssetID.file(source)
+        let reference = EditSourceReference(assetID: id, url: source)
+        let editFixture = try EditPackageFixture()
+        try editFixture.register(reference)
+        let initialStore = editFixture.store()
         try await initialStore.save(
             EditDocument(adjustments: [.exposure(ev: 0.2)]),
-            for: EditSourceReference(assetID: id, url: source)
+            for: reference
         )
-        let failingStore = EditDocumentStore(fileURL: storeURL, failuresBeforeSuccess: 1)
+        let failingStore = editFixture.store(failuresBeforeSuccess: 1)
         let viewModel = makeAppViewModel(
             editStore: failingStore,
             preferences: defaults,

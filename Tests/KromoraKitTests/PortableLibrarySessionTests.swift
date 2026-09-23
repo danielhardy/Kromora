@@ -110,8 +110,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             try session.updateLibraryState(for: assetID, rating: 4, flag: .pick)
             let store = EditDocumentStore(
                 package: session.package,
-                lease: session.lease,
-                modelContainer: makeInMemoryEditContainer()
+                lease: session.lease
             )
             let reference = EditSourceReference(
                 assetID: .file(materializedURL),
@@ -140,8 +139,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         )
         let reopenedStore = EditDocumentStore(
             package: reopened.package,
-            lease: reopened.lease,
-            modelContainer: makeInMemoryEditContainer()
+            lease: reopened.lease
         )
         let loaded = await reopenedStore.load(for: reopenedReference)
         XCTAssertEqual(loaded.document.adjustments, [.exposure(ev: 0.75)])

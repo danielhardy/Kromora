@@ -54,25 +54,39 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
     func testLUTSurvivesNavigationAndRelaunchForItsPhoto() async throws {
         let (first, second) = try makePhotoFolder()
         let (lookFolder, lut) = try makeLUTFolder()
-        let container = makeInMemoryEditContainer()
+        let packageURL = tempDirectory.appendingPathComponent("LUTWorkflow.kromoralibrary")
+        let firstSession = try PortableLibrarySession(at: packageURL)
+        _ = try firstSession.importURLs([first, second], duplicatePolicy: .importAnyway)
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(
-            engine: fake, editStore: EditDocumentStore(modelContainer: container)
+            engine: fake, portablePackageURL: packageURL,
+            portableLibrarySession: firstSession
         )
 
         viewModel.library.setFolder(lookFolder)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
-        viewModel.openImage(url: first)
+        viewModel.collection.loadPortableAssets(try firstSession.materializedAssets())
+        await viewModel.collection.scanCompletion()
+        let firstIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == first.lastPathComponent }
+        )
+        viewModel.collection.setSelection(at: firstIndex)
+        viewModel.openActiveCollectionImage()
         try await waitUntil("the first photo") { viewModel.sourceName == "one.png" }
 
         viewModel.selectLook(lut)
         viewModel.setLookIntensity(0.35)
         try await waitForLUTRequest(fake, id: lut.lutID, intensity: 0.35)
 
-        viewModel.openImage(url: second)
+        let secondIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == second.lastPathComponent }
+        )
+        viewModel.collection.setSelection(at: secondIndex)
+        viewModel.openActiveCollectionImage()
         try await waitUntil("the second photo") { viewModel.sourceName == "two.png" }
         XCTAssertTrue(viewModel.document.lut.isIdentity)
-        viewModel.openImage(url: first)
+        viewModel.collection.setSelection(at: firstIndex)
+        viewModel.openActiveCollectionImage()
         try await waitUntil("the first photo again") {
             viewModel.sourceName == "one.png" && viewModel.document.lut.intensity == 0.35
         }
@@ -80,12 +94,21 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
 
         let flushResult = await viewModel.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await viewModel.shutdown()
+        let relaunchedSession = try PortableLibrarySession(at: packageURL)
         let relaunched = makeAppViewModel(
-            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
+            engine: FakeRenderEngine(), portablePackageURL: packageURL,
+            portableLibrarySession: relaunchedSession
         )
         relaunched.library.setFolder(lookFolder)
         while relaunched.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
-        relaunched.openImage(url: first)
+        relaunched.collection.loadPortableAssets(try relaunchedSession.materializedAssets())
+        await relaunched.collection.scanCompletion()
+        let relaunchedFirstIndex = try XCTUnwrap(
+            relaunched.collection.items.firstIndex { $0.displayName == first.lastPathComponent }
+        )
+        relaunched.collection.setSelection(at: relaunchedFirstIndex)
+        relaunched.openActiveCollectionImage()
         try await waitUntil("the relaunched Look") {
             relaunched.sourceName == "one.png"
                 && relaunched.document.lut.lutID == lut.lutID
@@ -97,20 +120,26 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
     func testLUTDoesNotCrossReferenceIdenticalReferencedPhotos() async throws {
         let (first, second) = try makePhotoFolder()
         let (lookFolder, lut) = try makeLUTFolder()
-        let container = makeInMemoryEditContainer()
+        let container = makeEditPackageFixture()
+        try container.register(first)
+        try container.register(second)
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(modelContainer: container)
+            editStore: container.store()
         )
 
         viewModel.collection.loadFromFolder(first.deletingLastPathComponent())
         await viewModel.collection.scanCompletion()
+        for item in viewModel.collection.items { try container.register(item) }
         viewModel.library.setFolder(lookFolder)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
         viewModel.openImage(url: first)
         try await waitUntil("the first referenced photo") { viewModel.sourceName == "one.png" }
+        if let assetID = viewModel.maskingAssetID {
+            try container.register(assetID: assetID, url: first)
+        }
         viewModel.selectLook(lut)
         viewModel.setLookIntensity(0.35)
         try await waitForLUTRequest(fake, id: lut.lutID, intensity: 0.35)
@@ -126,7 +155,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(flushResult, .success)
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container)
+            editStore: container.store()
         )
         relaunched.collection.loadFromFolder(first.deletingLastPathComponent())
         await relaunched.collection.scanCompletion()
@@ -216,15 +245,21 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         let lookURL = try Fixtures.writeCube(
             Fixtures.identityCubeText(size: 2), named: "External Look.cube", in: tempDirectory
         )
-        let container = makeInMemoryEditContainer()
+        let packageURL = tempDirectory.appendingPathComponent("ImportedLook.kromoralibrary")
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs([source])
         let fake = FakeRenderEngine()
         let preferences = makeTestUserDefaults()
         let viewModel = makeAppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(modelContainer: container),
-            preferences: preferences
+            preferences: preferences,
+            portablePackageURL: packageURL,
+            portableLibrarySession: session
         )
-        viewModel.openImage(url: source)
+        viewModel.collection.loadPortableAssets(try session.materializedAssets())
+        await viewModel.collection.scanCompletion()
+        viewModel.collection.setSelection(at: 0)
+        viewModel.openActiveCollectionImage()
         try await waitUntil("the source image") { viewModel.sourceName == "import-source.png" }
 
         viewModel.importLook(from: lookURL)
@@ -267,13 +302,19 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         viewModel.setLookIntensity(0.35)
         let flushResult = await viewModel.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await viewModel.shutdown()
+        let relaunchedSession = try PortableLibrarySession(at: packageURL)
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container),
-            preferences: preferences
+            preferences: preferences,
+            portablePackageURL: packageURL,
+            portableLibrarySession: relaunchedSession
         )
         while relaunched.library.isImporting { try await Task.sleep(for: .milliseconds(10)) }
-        relaunched.openImage(url: source)
+        relaunched.collection.loadPortableAssets(try relaunchedSession.materializedAssets())
+        await relaunched.collection.scanCompletion()
+        relaunched.collection.setSelection(at: 0)
+        relaunched.openActiveCollectionImage()
         try await waitUntil("the persisted imported Look") {
             relaunched.sourceName == "import-source.png"
                 && relaunched.selectedLookID == imported.lutID
@@ -286,13 +327,17 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         let (first, second) = try makePhotoFolder()
         let third = try Fixtures.writeGradientPNG(width: 24, height: 16, named: "three.png", in: first.deletingLastPathComponent())
         let (lookFolder, lut) = try makeLUTFolder()
-        let container = makeInMemoryEditContainer()
+        let container = makeEditPackageFixture()
+        try container.register(first)
+        try container.register(second)
+        try container.register(third)
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container)
+            editStore: container.store()
         )
         viewModel.collection.loadFromFolder(first.deletingLastPathComponent())
         await viewModel.collection.scanCompletion()
+        for item in viewModel.collection.items { try container.register(item) }
         viewModel.library.setFolder(lookFolder)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
         guard let firstIndex = viewModel.collection.items.firstIndex(where: { $0.url == first }) else {
@@ -332,7 +377,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
         )
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container)
+            editStore: container.store()
         )
         relaunched.collection.loadFromFolder(first.deletingLastPathComponent())
         await relaunched.collection.scanCompletion()

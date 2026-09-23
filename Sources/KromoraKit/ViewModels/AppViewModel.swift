@@ -884,7 +884,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         },
         fileDialog: any FileDialogProviding = AppKitFileDialog(),
         fileDropActionPolicy: FileDropActionPolicy = FileDropActionPolicy(),
-        leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil
+        leaseRecoveryConfirmer: (any PortablePackageLeaseRecoveryConfirming)? = nil,
+        portableLibrarySession injectedPortableLibrarySession: PortableLibrarySession? = nil
     ) {
         var interval = KromoraSignpostInterval(.launch, context: .unknown)
         defer { interval.end() }
@@ -903,7 +904,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let portableOpenError: String?
         let effectiveEditStore: EditDocumentStore
         do {
-            let session = try Self.openPortableLibrarySession(
+            let session = try injectedPortableLibrarySession ?? Self.openPortableLibrarySession(
                 at: normalizedPortablePackageURL,
                 confirmer: leaseRecoveryConfirmer,
                 scheduler: packageIOScheduler

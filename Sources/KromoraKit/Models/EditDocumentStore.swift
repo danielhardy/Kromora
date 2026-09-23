@@ -150,29 +150,29 @@ actor EditDocumentStore {
     private var artificialWriteDelay: Duration
     private var failuresRemaining: Int
 
-    // These compatibility values are used only by old headless test composition points while
-    // those tests move to package fixtures. Production always constructs the package initializer.
-    private let compatibilityBackendKey: String?
-    private let compatibilityFileURL: URL?
+    private init() {
+        packageRoot = nil
+        packageLease = nil
+        cacheCapacity = Self.defaultCacheCapacity
+        artificialWriteDelay = .zero
+        failuresRemaining = 0
+        writeStartSignal = nil
+    }
 
     /// Opens the canonical package edit store.
     init(
         package: PortableLibraryPackage,
         lease: PortablePackageLease,
-        modelContainer: Any? = nil,
         cacheCapacity: Int = EditDocumentStore.defaultCacheCapacity,
         artificialWriteDelay: Duration = .zero,
         failuresBeforeSuccess: Int = 0,
         writeStartSignal: AsyncStream<Void>.Continuation? = nil
     ) {
-        _ = modelContainer
         packageRoot = package.rootURL
         packageLease = lease
         self.cacheCapacity = max(1, cacheCapacity)
         self.artificialWriteDelay = artificialWriteDelay
         self.failuresRemaining = max(0, failuresBeforeSuccess)
-        compatibilityBackendKey = nil
-        compatibilityFileURL = nil
         self.writeStartSignal = writeStartSignal
     }
 
@@ -187,60 +187,19 @@ actor EditDocumentStore {
     ) throws {
         try self.init(
             package: PortableLibraryPackage.openForQuery(at: packageRoot), lease: lease,
-            modelContainer: nil,
             cacheCapacity: cacheCapacity, artificialWriteDelay: artificialWriteDelay,
             failuresBeforeSuccess: failuresBeforeSuccess, writeStartSignal: writeStartSignal
         )
     }
 
-    /// Compatibility constructor for headless clients that have not yet adopted a package
-    /// fixture. It is an in-memory cache backend, not a production persistence path.
-    init(
-        modelContainer: sending Any,
-        cacheCapacity: Int = EditDocumentStore.defaultCacheCapacity,
-        artificialWriteDelay: Duration = .zero,
-        failuresBeforeSuccess: Int = 0,
-        writeStartSignal: AsyncStream<Void>.Continuation? = nil
-    ) {
-        packageRoot = nil
-        packageLease = nil
-        self.cacheCapacity = max(1, cacheCapacity)
-        self.artificialWriteDelay = artificialWriteDelay
-        self.failuresRemaining = max(0, failuresBeforeSuccess)
-        let key = CompatibilityEditBackendRegistry.key(for: modelContainer)
-        compatibilityBackendKey = key
-        compatibilityFileURL = nil
-        self.writeStartSignal = writeStartSignal
-    }
+    /// A package-backed store has no separate edit database.
+    var onDiskFileURL: URL? { nil }
 
-    /// Compatibility constructor for old support tests. It does not create or open a standalone
-    /// edit database; the URL only scopes a disposable in-memory backend.
-    init(
-        fileURL: URL,
-        cacheCapacity: Int = EditDocumentStore.defaultCacheCapacity,
-        artificialWriteDelay: Duration = .zero,
-        failuresBeforeSuccess: Int = 0,
-        writeStartSignal: AsyncStream<Void>.Continuation? = nil
-    ) {
-        packageRoot = nil
-        packageLease = nil
-        self.cacheCapacity = max(1, cacheCapacity)
-        self.artificialWriteDelay = artificialWriteDelay
-        self.failuresRemaining = max(0, failuresBeforeSuccess)
-        let key = "file:\(fileURL.standardizedFileURL.path)"
-        compatibilityBackendKey = key
-        compatibilityFileURL = fileURL
-        self.writeStartSignal = writeStartSignal
-    }
-
-    /// Empty disposable store used by isolated coordinator tests. It has no package authority.
+    /// Unavailable projection store for isolated coordinator composition. It holds no persistence
+    /// authority and reports the same actionable package failure as a failed package open.
     static func makeInMemoryProjectionStore() -> EditDocumentStore {
-        EditDocumentStore(modelContainer: UUID())
+        EditDocumentStore()
     }
-
-    /// A package-backed store has no separate edit database. The URL is exposed only for old
-    /// headless clients that still inject a disposable compatibility backend.
-    var onDiskFileURL: URL? { compatibilityFileURL }
 
     func setEmbeddedLookBytes(_ values: [String: Data]) {
         embeddedLookBytes = values
@@ -248,14 +207,6 @@ actor EditDocumentStore {
 
     func load(for source: EditSourceReference) async -> EditDocumentLoadResult {
         markIO()
-        if let compatibilityBackendKey {
-            let backend = await compatibilityBackends.backend(for: compatibilityBackendKey)
-            let result = await backend.load(for: source)
-            return finishLoad(
-                document: result?.document ?? EditDocument(), found: result != nil, status: .ready
-            )
-        }
-
         guard let packageRoot else {
             return finishLoad(document: EditDocument(), found: false, status: .packageFailure(
                 "the canonical edit package is unavailable"
@@ -310,15 +261,7 @@ actor EditDocumentStore {
         markIO()
         // Encode before incrementing attempt counters or changing the cache. An invalid value must
         // not make a failed save look like a dirty durable revision.
-        let encodedDocument = try JSONEncoder().encode(document)
-        if let compatibilityBackendKey {
-            let backend = await compatibilityBackends.backend(for: compatibilityBackendKey)
-            try await saveToCompatibilityBackend(
-                document, encoded: encodedDocument, for: source, backend: backend
-            )
-            return
-        }
-
+        _ = try JSONEncoder().encode(document)
         guard let packageRoot, let packageLease else {
             let failure = StoreError.cannotWrite("the canonical edit package is unavailable")
             status = .writeFailure(failure.localizedDescription)
@@ -357,10 +300,6 @@ actor EditDocumentStore {
         cache.removeValue(forKey: source.portableAssetID)
         lru.removeAll { $0 == source.portableAssetID }
         cacheCount = cache.count
-        if let compatibilityBackendKey {
-            let backend = await compatibilityBackends.backend(for: compatibilityBackendKey)
-            await backend.remove(for: source.portableAssetID)
-        }
         status = .ready
     }
 
@@ -369,34 +308,6 @@ actor EditDocumentStore {
     }
 
     private(set) var writeStartSignal: AsyncStream<Void>.Continuation?
-
-    private func saveToCompatibilityBackend(
-        _ document: EditDocument,
-        encoded: Data,
-        for source: EditSourceReference,
-        backend: CompatibilityEditBackend
-    ) async throws {
-        _ = encoded
-        saveAttemptCount += 1
-        do {
-            if failuresRemaining > 0 {
-                failuresRemaining -= 1
-                throw StoreError.cannotWrite("injected persistence failure")
-            }
-            await backend.save(document, for: source)
-            insert(
-                document, revision: await backend.revision(for: source.portableAssetID),
-                for: source.portableAssetID
-            )
-            writeCount += 1
-            status = .ready
-            writeStartSignal?.yield(())
-            await delayIfNeeded()
-        } catch {
-            status = .writeFailure(error.localizedDescription)
-            throw error
-        }
-    }
 
     private func sourceLookBytes(for document: EditDocument) -> [Data] {
         guard let lutID = document.lut.lutID, let bytes = embeddedLookBytes[lutID.raw] else {
@@ -470,67 +381,3 @@ actor EditDocumentStore {
         }
     }
 }
-
-// MARK: - Disposable compatibility backend
-
-/// This backend exists only for legacy headless test composition points. It deliberately has no
-/// file format, URL lookup, or source relinking behavior; package mode above is the sole product
-/// persistence implementation.
-private actor CompatibilityEditBackend {
-    private struct State {
-        var documents: [PortablePhotoAssetID: EditDocument] = [:]
-        var revisions: [PortablePhotoAssetID: UInt64] = [:]
-        var aliases: [String: PortablePhotoAssetID] = [:]
-    }
-
-    private var state = State()
-
-    func save(_ document: EditDocument, for source: EditSourceReference) {
-        let assetID = source.portableAssetID
-        state.documents[assetID] = document
-        state.revisions[assetID, default: 0] += 1
-        if let url = source.url {
-            state.aliases[url.standardizedFileURL.resolvingSymlinksInPath().path] = assetID
-        }
-    }
-
-    func load(for source: EditSourceReference) -> (document: EditDocument, revision: UInt64)? {
-        let assetID = source.url
-            .flatMap { state.aliases[$0.standardizedFileURL.resolvingSymlinksInPath().path] }
-            ?? source.portableAssetID
-        guard let document = state.documents[assetID], let revision = state.revisions[assetID]
-        else { return nil }
-        return (document, revision)
-    }
-
-    func revision(for assetID: PortablePhotoAssetID) -> UInt64 {
-        state.revisions[assetID] ?? 0
-    }
-
-    func remove(for assetID: PortablePhotoAssetID) {
-        state.documents.removeValue(forKey: assetID)
-        state.revisions.removeValue(forKey: assetID)
-        state.aliases = state.aliases.filter { $0.value != assetID }
-    }
-}
-
-private actor CompatibilityEditBackendRegistry {
-    private var values: [String: CompatibilityEditBackend] = [:]
-
-    func backend(for key: String) -> CompatibilityEditBackend {
-        if let value = values[key] { return value }
-        let value = CompatibilityEditBackend()
-        values[key] = value
-        return value
-    }
-
-    static func key(for value: Any) -> String {
-        if let uuid = value as? UUID {
-            return "uuid:\(uuid.uuidString)"
-        }
-        let object = value as AnyObject
-        return "object:\(ObjectIdentifier(object))"
-    }
-}
-
-private let compatibilityBackends = CompatibilityEditBackendRegistry()

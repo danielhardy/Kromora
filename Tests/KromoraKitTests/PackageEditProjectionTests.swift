@@ -31,8 +31,7 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
             aspectRatio: .freeform
         )
 
-        let container = makeInMemoryEditContainer()
-        let store = EditDocumentStore(package: package, lease: lease, modelContainer: container)
+        let store = EditDocumentStore(package: package, lease: lease)
         try await store.save(document, for: reference)
 
         let sidecar = try package.readEditSidecar(for: asset.assetID)
@@ -65,9 +64,7 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
             ),
             url: sourceURL
         )
-        let store = EditDocumentStore(
-            package: package, lease: lease, modelContainer: makeInMemoryEditContainer()
-        )
+        let store = EditDocumentStore(package: package, lease: lease)
         let coordinator = await MainActor.run { EditPersistenceCoordinator(store: store) }
         let first = EditDocument(adjustments: [.exposure(ev: 0.1)])
         let latest = EditDocument(adjustments: [.exposure(ev: 0.9)])
