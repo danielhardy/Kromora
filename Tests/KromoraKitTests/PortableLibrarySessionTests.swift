@@ -341,4 +341,56 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         }
         await session.shutdown()
     }
+
+    func testCancellingQueuedImportTerminatesProgressStream() async throws {
+        // A job cancelled while still queued never runs its operation body, so the progress
+        // sink must be finished from the terminal callback. Otherwise a `for await` consumer
+        // (including LibraryImportCoordinator.shutdown) would wait on the stream forever.
+        let packageURL = tempDirectory.appendingPathComponent("QueuedCancel.kromoralibrary")
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(at: packageURL, scheduler: scheduler)
+
+        // Occupy the single package-I/O slot so the import below stays queued.
+        let blockerStarted = OSAllocatedUnfairLock(initialState: false)
+        let blockerRelease = OSAllocatedUnfairLock(initialState: false)
+        XCTAssertTrue(scheduler.enqueuePackageIO(id: .init("verification-blocker"), lane: .maintenance) {
+            blockerStarted.withLock { $0 = true }
+            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+        })
+        for _ in 0..<1_000 {
+            if blockerStarted.withLock({ $0 }) { break }
+            await Task.yield()
+        }
+        XCTAssertTrue(blockerStarted.withLock { $0 })
+        XCTAssertEqual(scheduler.runningPackageIOCount, 1)
+
+        let handle = try session.startImportData(
+            Data(repeating: 0xA5, count: 1024), name: "queued.raw"
+        )
+        for _ in 0..<1_000 {
+            if scheduler.pendingPackageIOCount > 0 { break }
+            await Task.yield()
+        }
+        XCTAssertEqual(scheduler.runningPackageIOCount, 1)
+        XCTAssertGreaterThanOrEqual(scheduler.pendingPackageIOCount, 1)
+
+        handle.cancel()
+
+        var progressCount = 0
+        for await _ in handle.progress { progressCount += 1 }
+        // The queued operation never ran, so no phase was ever yielded; the stream still
+        // has to terminate instead of suspending the loop above forever.
+        XCTAssertEqual(progressCount, 0)
+        do {
+            _ = try await handle.value()
+            XCTFail("expected cancellation")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+        XCTAssertEqual(session.assetCount, 0)
+
+        blockerRelease.withLock { $0 = true }
+        await scheduler.cancelAllAndWait()
+        await session.shutdown()
+    }
 }
