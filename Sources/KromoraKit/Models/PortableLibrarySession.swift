@@ -18,12 +18,18 @@ struct PortableLibrarySessionClock: Sendable {
     }
 }
 
+struct LibraryIndexLoadingState: Sendable {
+    let shardsRead: Int
+    let totalShards: Int
+    let isComplete: Bool
+    let errorMessage: String?
+}
+
 /// The application boundary for the portable library package.
 ///
-/// Opening this value is intentionally synchronous: AppViewModel does not publish a library until
-/// the package manifest, membership shards, writer lease, and rebuildable query projection have
-/// been established. A failure is thrown to the composition root, where it becomes an empty,
-/// actionable failure state; there is no legacy-library fallback.
+/// Opening the package and acquiring its writer lease are synchronous. Production startup opts
+/// into asynchronous index loading so a cold shard walk or large index decode never occupies the
+/// main actor. Tests and explicit maintenance callers can retain the synchronous boundary.
 @MainActor
 final class PortableLibrarySession {
     let package: PortableLibraryPackage
@@ -32,16 +38,22 @@ final class PortableLibrarySession {
     let indexURL: URL
 
     private(set) var queryController: LibraryQueryController
+    private var startupFirstPage: LibraryQueryPage?
     private var importCatalog: PortablePackageImportCatalog?
     private let leaseDuration: TimeInterval
     private let clock: PortableLibrarySessionClock
     private let scheduler: ImageWorkScheduler?
     private let heartbeatJobID: ImageWorkScheduler.JobID
     private let indexWriteJobID: ImageWorkScheduler.JobID
+    private let indexLoadJobID: ImageWorkScheduler.JobID
+    private(set) var indexLoadingState: LibraryIndexLoadingState?
+    private(set) var isLoadingIndex = false
+    var onIndexLoadingStateChange: (@MainActor (LibraryIndexLoadingState) -> Void)?
     private var activeImportJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var asyncImportCatalog: ImportCatalogState?
     private var pendingImportIndexDelta = LibraryIndexDelta.empty
     private var heartbeatTask: Task<Void, Never>?
+    private var detachedIndexLoadTask: Task<Void, Never>?
     private var isShuttingDown = false
     private var lostDuringSession = false
 
@@ -53,7 +65,8 @@ final class PortableLibrarySession {
         recoverExpiredLease: Bool = false,
         leaseDuration: TimeInterval = PortablePackageLease.defaultDuration,
         clock: PortableLibrarySessionClock = .init(),
-        scheduler: ImageWorkScheduler? = nil
+        scheduler: ImageWorkScheduler? = nil,
+        asynchronousIndexLoading: Bool = false
     ) throws {
         let normalizedRoot = rootURL.standardizedFileURL
         let acquisitionNow = now ?? clock.now()
@@ -63,7 +76,9 @@ final class PortableLibrarySession {
         // A missing path is the only create case. An existing placeholder, file, or malformed
         // package is opened and rejected; it is never replaced with an empty library.
         if fileManager.fileExists(atPath: normalizedRoot.path) {
-            package = try PortableLibraryPackage.open(at: normalizedRoot)
+            package = try asynchronousIndexLoading
+                ? PortableLibraryPackage.openForQuery(at: normalizedRoot)
+                : PortableLibraryPackage.open(at: normalizedRoot)
         } else {
             package = try PortableLibraryPackage.create(at: normalizedRoot)
         }
@@ -84,9 +99,11 @@ final class PortableLibrarySession {
             // package membership summaries. This keeps the package canonical and the index
             // disposable without making the launch path silently empty.
             let projection: LibraryIndexProjection
-            if let loaded = try? LibraryIndexProjection.load(from: self.indexURL),
-               let valid = try? loaded.validated(for: package)
-            {
+            if asynchronousIndexLoading {
+                projection = try LibraryIndexProjection(
+                    libraryID: package.manifest.libraryID, entries: [])
+            } else if let loaded = try? LibraryIndexProjection.load(from: self.indexURL),
+                      let valid = try? loaded.validated(for: package) {
                 projection = valid
             } else {
                 projection = try LibraryIndexProjection(package: package)
@@ -102,7 +119,14 @@ final class PortableLibrarySession {
             self.indexWriteJobID = ImageWorkScheduler.JobID(
                 "portable-package-index-write-\(lease.ownerID.uuidString)"
             )
+            self.indexLoadJobID = ImageWorkScheduler.JobID(
+                "portable-package-index-load-\(lease.ownerID.uuidString)"
+            )
             if scheduler != nil { startLeaseHeartbeat() }
+            if asynchronousIndexLoading {
+                self.isLoadingIndex = true
+                startIndexLoading(package: package)
+            }
         } catch {
             try? lease.release()
             throw error
@@ -126,6 +150,76 @@ final class PortableLibrarySession {
     deinit {
         heartbeatTask?.cancel()
         try? lease.release()
+    }
+
+    private func startIndexLoading(package: PortableLibraryPackage) {
+        let indexURL = self.indexURL
+        let pageSize = queryController.pageSize
+        let publish: @Sendable (LibraryIndexProjection?, LibraryQueryPage?, Int, Int, Bool, String?) async -> Void = {
+            [weak self] projection, page, shardsRead, totalShards, isComplete, error in
+            await MainActor.run {
+                guard let self, !self.isShuttingDown else { return }
+                if let projection {
+                    self.queryController = LibraryQueryController(
+                        index: projection, pageSize: pageSize,
+                        selectedAssetIDs: self.queryController.selectedIDs,
+                        activeAssetID: self.queryController.activeID
+                    )
+                    self.startupFirstPage = page
+                }
+                let state = LibraryIndexLoadingState(
+                    shardsRead: shardsRead, totalShards: totalShards,
+                    isComplete: isComplete, errorMessage: error
+                )
+                self.indexLoadingState = state
+                if state.isComplete { self.isLoadingIndex = false }
+                self.onIndexLoadingStateChange?(state)
+            }
+        }
+        let operation: @Sendable () async -> Void = {
+            var interval = KromoraSignpostInterval(
+                .libraryIndex,
+                context: KromoraTraceContext(sourceToken: "library-index", quality: "startup")
+            )
+            defer { interval.end() }
+            do {
+                if let loaded = try? LibraryIndexProjection.load(from: indexURL),
+                   let valid = try? loaded.validated(for: package) {
+                    KromoraObservability.event(.libraryIndexWarm)
+                    let controller = LibraryQueryController(index: valid, pageSize: pageSize)
+                    await publish(valid, controller.page(at: 0), 0, 0, true, nil)
+                    return
+                }
+                KromoraObservability.event(.libraryIndexRebuild)
+                _ = try await LibraryIndexProjection.rebuild(
+                    from: package, to: indexURL, pageSize: pageSize,
+                    progress: { progress in
+                        await publish(progress.projection, progress.page, progress.shardsRead,
+                                      progress.totalShards, progress.isComplete, nil)
+                    }
+                )
+            } catch {
+                await publish(nil, nil, 0, PortableLibraryPackage.allShards.count, true,
+                              error.localizedDescription)
+            }
+        }
+        if let scheduler {
+            _ = scheduler.enqueuePackageIO(
+                id: indexLoadJobID, lane: .indexRebuild, priority: .packageIO,
+                onTerminal: { outcome in
+                    guard outcome != .completed else { return }
+                    Task {
+                        await publish(
+                            nil, nil, 0, PortableLibraryPackage.allShards.count, true,
+                            "The package I/O scheduler could not start the library index task."
+                        )
+                    }
+                },
+                operation: operation
+            )
+        } else {
+            detachedIndexLoadTask = Task.detached(operation: operation)
+        }
     }
 
     /// Begins the session-owned renewal loop on the shared package-I/O lane. The loop is started
@@ -191,6 +285,10 @@ final class PortableLibrarySession {
         }
         activeImportJobIDs.removeAll()
         await scheduler?.cancelAndWait(id: indexWriteJobID)
+        await scheduler?.cancelAndWait(id: indexLoadJobID)
+        detachedIndexLoadTask?.cancel()
+        await detachedIndexLoadTask?.value
+        detachedIndexLoadTask = nil
         try? lease.release()
     }
 
@@ -229,7 +327,10 @@ final class PortableLibrarySession {
     }
 
     func page(at pageIndex: Int, query: LibraryQuery = .all) -> LibraryQueryPage {
-        queryController.page(at: pageIndex, query: query)
+        if pageIndex == 0, query == .all, let startupFirstPage {
+            return startupFirstPage
+        }
+        return queryController.page(at: pageIndex, query: query)
     }
 
     /// Single selection authority for the portable path. Grid, filmstrip, keyboard navigation,
@@ -239,22 +340,27 @@ final class PortableLibrarySession {
     var portableActiveID: PortablePhotoAssetID? { queryController.activeID }
 
     func select(_ assetID: PortablePhotoAssetID, additive: Bool = false) {
+        startupFirstPage = nil
         queryController.select(assetID, additive: additive)
     }
 
     func setPortableSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?) {
+        startupFirstPage = nil
         queryController.setSelection(assetIDs, activeID: activeID)
     }
 
     func togglePortableSelection(_ assetID: PortablePhotoAssetID) {
+        startupFirstPage = nil
         queryController.toggleSelection(assetID)
     }
 
     func clearPortableSelection() {
+        startupFirstPage = nil
         queryController.clearSelection()
     }
 
     func selectAllPortable(query: LibraryQuery = .all) {
+        startupFirstPage = nil
         queryController.selectAll(query: query)
     }
 
@@ -273,6 +379,7 @@ final class PortableLibrarySession {
     /// opaque UUID, never by a page or array offset.
     @discardableResult
     func refreshIndex() throws -> LibraryIndexProjection {
+        startupFirstPage = nil
         let projection = try LibraryIndexProjection(package: package)
         try projection.write(to: indexURL)
         queryController = LibraryQueryController(
@@ -292,6 +399,7 @@ final class PortableLibrarySession {
     private func applyIndexDelta(_ delta: LibraryIndexDelta, persistSynchronously: Bool = false)
         throws -> LibraryIndexProjection
     {
+        startupFirstPage = nil
         let projection = try queryController.index.applying(delta)
         let selectedAssetIDs = queryController.selectedIDs
         let activeAssetID = queryController.activeID

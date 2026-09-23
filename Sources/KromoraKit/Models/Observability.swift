@@ -9,6 +9,7 @@ import CryptoKit
 /// coarse and private-safe; they never contain a filename, URL, or metadata dictionary.
 enum KromoraWorkflowStage: CaseIterable {
     case launch
+    case libraryIndex
     case scan
     case decode
     case render
@@ -37,6 +38,7 @@ enum KromoraWorkflowStage: CaseIterable {
     var name: StaticString {
         switch self {
         case .launch: return "Launch"
+        case .libraryIndex: return "LibraryIndex"
         case .scan: return "Scan"
         case .decode: return "Decode"
         case .render: return "Render"
@@ -82,6 +84,8 @@ enum KromoraWorkflowEvent: CaseIterable {
     case maskOverlayPresentationEncoded
     case maskOverlayGPUComplete
     case maskOverlayDrawablePresented
+    case libraryIndexWarm
+    case libraryIndexRebuild
 
     var name: StaticString {
         switch self {
@@ -101,6 +105,8 @@ enum KromoraWorkflowEvent: CaseIterable {
         case .maskOverlayPresentationEncoded: return "MaskOverlayPresentationEncoded"
         case .maskOverlayGPUComplete: return "MaskOverlayGPUComplete"
         case .maskOverlayDrawablePresented: return "MaskOverlayDrawablePresented"
+        case .libraryIndexWarm: return "LibraryIndexWarm"
+        case .libraryIndexRebuild: return "LibraryIndexRebuild"
         }
     }
 }
