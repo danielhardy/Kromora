@@ -471,7 +471,7 @@ final class RAWCapabilitiesTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()                       // package root
-            .appendingPathComponent("Sources/KromoraKit/Models/RenderEngine.swift")
+            .appendingPathComponent("Sources/KromoraKit/Models/RenderEngine+RAWCapabilities.swift")
         let text = try String(contentsOf: source, encoding: .utf8)
 
         let signature = "func rawCapabilities(for source: ImageSource) -> RAWCapabilities? {"
