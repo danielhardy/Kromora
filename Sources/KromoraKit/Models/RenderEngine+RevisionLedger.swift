@@ -3,10 +3,10 @@ import Foundation
 extension RenderEngine {
     /// Bounded bookkeeping for render/mask request supersession, owned by `RenderEngine` but kept
     /// as a plain `Sendable` value so its eviction arithmetic is unit-testable without an actor or
-    /// a GPU. Every dictionary here is paired with an insertion/recency-ordered array so eviction
-    /// never has to rescan the dictionary for the oldest entry (KRMA-530): unbounded navigation
-    /// through many sources previously grew `latestRenderRequestRevisions` forever, and the mask
-    /// ledger's cap enforcement repeatedly called `.min(by:)`, which is O(n) per evicted entry.
+    /// a GPU. The persistent tables have fixed capacities; array bookkeeping is O(capacity) per
+    /// touch/eviction, with a small explicit upper bound (64 render requests, 16 mask sources, and
+    /// 64 mask requests). Separate in-flight fences preserve supersession while actor work awaits,
+    /// without making completed navigation accumulate in the bounded tables.
     struct RevisionLedger: Sendable {
         /// Latest request revision admitted for each source. Independent of mask revisions: an
         /// unmasked interactive render still needs a pre-submit supersession fence.
@@ -15,6 +15,8 @@ extension RenderEngine {
         /// end whenever its revision is touched, so eviction always drops the least-recently-seen
         /// source rather than rescanning for a minimum.
         private var renderRequestOrder: [String] = []
+        private var activeRenderCounts: [String: Int] = [:]
+        private var activeRenderFences: [String: UInt64] = [:]
         private let maximumTrackedRenderSources: Int
 
         /// Render-domain supersession is keyed by source and full document identity. This lets a
@@ -32,6 +34,12 @@ extension RenderEngine {
         /// Overlay requests intentionally remain source-wide: the overlay has no document identity
         /// and must still reject a stale nonzero revision after a preview render has started.
         private var latestOverlayMaskRequestRevisions: [String: UInt64] = [:]
+        private var overlayMaskOrder: [String] = []
+        private var activeOverlayMaskCounts: [String: Int] = [:]
+        private var activeOverlayMaskFences: [String: UInt64] = [:]
+        private var activeMaskSourceCounts: [String: Int] = [:]
+        private var activeMaskRecipeFences: [String: String] = [:]
+        private var activeMaskRequestFences: [String: UInt64] = [:]
         private let maximumTrackedMaskSources: Int
         private let maximumTrackedMaskRequests: Int
 
@@ -60,13 +68,31 @@ extension RenderEngine {
             }
         }
 
+        mutating func beginRenderRequest(sourceKey: String, revision: UInt64) {
+            guard revision > 0 else { return }
+            noteRenderRequest(sourceKey: sourceKey, revision: revision)
+            activeRenderCounts[sourceKey, default: 0] += 1
+            activeRenderFences[sourceKey] = max(activeRenderFences[sourceKey, default: 0], revision)
+        }
+
+        mutating func endRenderRequest(sourceKey: String, revision: UInt64) {
+            guard revision > 0, let count = activeRenderCounts[sourceKey] else { return }
+            if count <= 1 {
+                activeRenderCounts.removeValue(forKey: sourceKey)
+                activeRenderFences.removeValue(forKey: sourceKey)
+            } else {
+                activeRenderCounts[sourceKey] = count - 1
+            }
+        }
+
         func latestRenderRevision(sourceKey: String) -> UInt64 {
             latestRenderRequestRevisions[sourceKey, default: 0]
         }
 
         func isCurrentRenderRequest(sourceKey: String, revision: UInt64) -> Bool {
             guard revision > 0 else { return true }
-            return latestRenderRequestRevisions[sourceKey, default: 0] <= revision
+            return max(latestRenderRequestRevisions[sourceKey, default: 0],
+                       activeRenderFences[sourceKey, default: 0]) <= revision
         }
 
         // MARK: - Overlay mask revisions
@@ -76,11 +102,34 @@ extension RenderEngine {
             if latestOverlayMaskRequestRevisions[sourceKey, default: 0] < revision {
                 latestOverlayMaskRequestRevisions[sourceKey] = revision
             }
+            touch(sourceKey, in: &overlayMaskOrder)
+            while latestOverlayMaskRequestRevisions.count > maximumTrackedMaskSources,
+                  !overlayMaskOrder.isEmpty {
+                latestOverlayMaskRequestRevisions.removeValue(forKey: overlayMaskOrder.removeFirst())
+            }
+        }
+
+        mutating func beginOverlayMaskRequest(sourceKey: String, revision: UInt64) {
+            guard revision > 0 else { return }
+            noteOverlayMaskRequest(sourceKey: sourceKey, revision: revision)
+            activeOverlayMaskCounts[sourceKey, default: 0] += 1
+            activeOverlayMaskFences[sourceKey] = max(activeOverlayMaskFences[sourceKey, default: 0], revision)
+        }
+
+        mutating func endOverlayMaskRequest(sourceKey: String, revision: UInt64) {
+            guard revision > 0, let count = activeOverlayMaskCounts[sourceKey] else { return }
+            if count <= 1 {
+                activeOverlayMaskCounts.removeValue(forKey: sourceKey)
+                activeOverlayMaskFences.removeValue(forKey: sourceKey)
+            } else {
+                activeOverlayMaskCounts[sourceKey] = count - 1
+            }
         }
 
         func isCurrentOverlayMaskRequest(sourceKey: String, revision: UInt64) -> Bool {
             guard revision > 0 else { return true }
-            return latestOverlayMaskRequestRevisions[sourceKey] == revision
+            return max(latestOverlayMaskRequestRevisions[sourceKey, default: 0],
+                       activeOverlayMaskFences[sourceKey, default: 0]) == revision
         }
 
         // MARK: - Recipe-scoped mask revisions
@@ -111,12 +160,51 @@ extension RenderEngine {
             return recipeChanged
         }
 
+        mutating func beginMaskRequest(
+            sourceKey: String, revision: UInt64, maskIdentity: String, documentIdentity: String
+        ) -> Bool {
+            guard revision > 0 else { return false }
+            let recipeChanged = noteMaskRequest(
+                sourceKey: sourceKey, revision: revision,
+                maskIdentity: maskIdentity, documentIdentity: documentIdentity
+            )
+            activeMaskSourceCounts[sourceKey, default: 0] += 1
+            if activeMaskRecipeFences[sourceKey] != nil,
+               activeMaskRecipeFences[sourceKey] != maskIdentity {
+                activeMaskRequestFences = activeMaskRequestFences.filter {
+                    !$0.key.hasPrefix(sourceKey + "|")
+                }
+            }
+            activeMaskRecipeFences[sourceKey] = maskIdentity
+            let documentKey = sourceKey + "|" + documentIdentity
+            activeMaskRequestFences[documentKey] = max(
+                activeMaskRequestFences[documentKey, default: 0], revision
+            )
+            return recipeChanged
+        }
+
+        mutating func endMaskRequest(sourceKey: String, revision: UInt64) {
+            guard revision > 0, let count = activeMaskSourceCounts[sourceKey] else { return }
+            if count <= 1 {
+                activeMaskSourceCounts.removeValue(forKey: sourceKey)
+                activeMaskRecipeFences.removeValue(forKey: sourceKey)
+                activeMaskRequestFences = activeMaskRequestFences.filter {
+                    !$0.key.hasPrefix(sourceKey + "|")
+                }
+            } else {
+                activeMaskSourceCounts[sourceKey] = count - 1
+            }
+        }
+
         func isCurrentMaskRequest(
             sourceKey: String, revision: UInt64, maskIdentity: String, documentIdentity: String
         ) -> Bool {
             guard revision > 0 else { return true }
             return latestMaskRecipeIdentities[sourceKey] == maskIdentity
-                && latestMaskRequestRevisions[sourceKey + "|" + documentIdentity] == revision
+                && (activeMaskRecipeFences[sourceKey] == nil
+                    || activeMaskRecipeFences[sourceKey] == maskIdentity)
+                && max(latestMaskRequestRevisions[sourceKey + "|" + documentIdentity, default: 0],
+                       activeMaskRequestFences[sourceKey + "|" + documentIdentity, default: 0]) == revision
         }
 
         var trackedMaskSourceKeys: [String] { maskSourceOrder }
@@ -138,6 +226,7 @@ extension RenderEngine {
             latestMaskRecipeIdentities.removeAll(keepingCapacity: true)
             maskSourceOrder.removeAll(keepingCapacity: true)
             latestOverlayMaskRequestRevisions.removeAll(keepingCapacity: true)
+            overlayMaskOrder.removeAll(keepingCapacity: true)
         }
 
         /// Clears every ledger, including render-request supersession. Used by a full source-cache
@@ -145,7 +234,16 @@ extension RenderEngine {
         mutating func removeAll() {
             latestRenderRequestRevisions.removeAll(keepingCapacity: true)
             renderRequestOrder.removeAll(keepingCapacity: true)
+            for sourceKey in activeRenderCounts.keys {
+                activeRenderFences[sourceKey] = .max
+            }
             clearMaskRequestState()
+            for sourceKey in activeOverlayMaskCounts.keys {
+                activeOverlayMaskFences[sourceKey] = .max
+            }
+            activeMaskRequestFences = activeMaskRequestFences.mapValues { _ in .max }
+            // An empty recipe table makes every active recipe-scoped request fail its identity
+            // check. Retain the active records until their suspended actor work returns and exits.
         }
 
         // MARK: - Private
@@ -169,8 +267,8 @@ extension RenderEngine {
                 latestOverlayMaskRequestRevisions.removeValue(forKey: oldestSource)
                 removeMaskRequests(withSourcePrefix: oldestSource)
             }
-            // Bounded FIFO eviction: each iteration removes the oldest tracked document key in
-            // O(1) amortized time rather than rescanning the whole table for a minimum revision.
+            // Bounded FIFO eviction. Array removal can shift entries, but the table has a strict
+            // maximum capacity of 64, so this work has a fixed upper bound.
             while latestMaskRequestRevisions.count > maximumTrackedMaskRequests,
                   !maskRequestOrder.isEmpty {
                 let oldest = maskRequestOrder.removeFirst()
@@ -179,6 +277,7 @@ extension RenderEngine {
         }
 
         private func touch(_ key: String, in order: inout [String]) {
+            // Recency maintenance scans at most the configured table capacity.
             order.removeAll { $0 == key }
             order.append(key)
         }

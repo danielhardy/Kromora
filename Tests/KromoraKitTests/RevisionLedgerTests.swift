@@ -34,6 +34,46 @@ final class RevisionLedgerTests: XCTestCase {
                         "a request behind the latest admitted revision must not be current")
     }
 
+    func testActiveRenderFenceSurvivesSourceEvictionAndLaterSupersession() {
+        var ledger = RenderEngine.RevisionLedger(maximumTrackedRenderSources: 2)
+        ledger.beginRenderRequest(sourceKey: "a", revision: 1)
+        ledger.noteRenderRequest(sourceKey: "b", revision: 1)
+        ledger.noteRenderRequest(sourceKey: "c", revision: 1)
+        XCTAssertEqual(ledger.trackedRenderSourceCount, 2)
+        XCTAssertTrue(ledger.isCurrentRenderRequest(sourceKey: "a", revision: 1))
+
+        ledger.beginRenderRequest(sourceKey: "a", revision: 2)
+        XCTAssertFalse(ledger.isCurrentRenderRequest(sourceKey: "a", revision: 1))
+        ledger.endRenderRequest(sourceKey: "a", revision: 2)
+        XCTAssertFalse(ledger.isCurrentRenderRequest(sourceKey: "a", revision: 1),
+                       "the newer active request's fence remains until the older work exits")
+        ledger.endRenderRequest(sourceKey: "a", revision: 1)
+        XCTAssertFalse(ledger.isCurrentRenderRequest(sourceKey: "a", revision: 1),
+                       "the bounded latest revision remains after its in-flight fence is released")
+    }
+
+    func testActiveMaskFenceSurvivesRecipeAndSourceEviction() {
+        var ledger = RenderEngine.RevisionLedger(
+            maximumTrackedRenderSources: 2, maximumTrackedMaskSources: 1,
+            maximumTrackedMaskRequests: 1
+        )
+        _ = ledger.beginMaskRequest(
+            sourceKey: "a", revision: 1, maskIdentity: "recipe-a", documentIdentity: "doc-a"
+        )
+        // Keep A in flight, then age it out of every capped table.
+        _ = ledger.noteMaskRequest(
+            sourceKey: "b", revision: 2, maskIdentity: "recipe-b", documentIdentity: "doc-b"
+        )
+        _ = ledger.beginMaskRequest(
+            sourceKey: "a", revision: 2, maskIdentity: "recipe-a", documentIdentity: "doc-a"
+        )
+        XCTAssertFalse(ledger.isCurrentMaskRequest(
+            sourceKey: "a", revision: 1, maskIdentity: "recipe-a", documentIdentity: "doc-a"
+        ), "an evicted active recipe cannot restore an old document's fence")
+        ledger.endMaskRequest(sourceKey: "a", revision: 1)
+        ledger.endMaskRequest(sourceKey: "a", revision: 2)
+    }
+
     func testMaskRequestRevisionsEvictOldestDocumentKeyFirstRegardlessOfRevisionValue() {
         var ledger = RenderEngine.RevisionLedger(
             maximumTrackedRenderSources: 64, maximumTrackedMaskSources: 16,
@@ -98,7 +138,7 @@ final class RevisionLedgerTests: XCTestCase {
 
     func testRemoveAllClearsRenderAndMaskState() {
         var ledger = RenderEngine.RevisionLedger()
-        ledger.noteRenderRequest(sourceKey: "s", revision: 1)
+        ledger.beginRenderRequest(sourceKey: "s", revision: 1)
         _ = ledger.noteMaskRequest(
             sourceKey: "s", revision: 1, maskIdentity: "r", documentIdentity: "d"
         )
@@ -106,8 +146,11 @@ final class RevisionLedgerTests: XCTestCase {
         XCTAssertEqual(ledger.trackedRenderSourceCount, 0)
         XCTAssertEqual(ledger.trackedMaskRequestCount, 0)
         XCTAssertEqual(ledger.trackedMaskSourceKeys, [])
+        XCTAssertFalse(ledger.isCurrentRenderRequest(sourceKey: "s", revision: 1),
+                       "full invalidation must reject active work even after clearing the ledger")
+        ledger.endRenderRequest(sourceKey: "s", revision: 1)
         XCTAssertTrue(ledger.isCurrentRenderRequest(sourceKey: "s", revision: 1),
-                      "a cleared ledger has no fence to reject a fresh request")
+                      "an exited request releases its temporary in-flight fence")
     }
 
     func testClearMaskRequestStateLeavesRenderRevisionsIntact() {

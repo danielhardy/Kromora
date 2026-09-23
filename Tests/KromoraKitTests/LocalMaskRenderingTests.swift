@@ -281,6 +281,82 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertEqual(firstError, .cancelled)
     }
 
+    func testSuspendedRenderFenceSurvivesNavigationPastRenderLedgerCapacity() async throws {
+        let source = try source()
+        let resolver = SupersedingMaskResolver(sourceFingerprint: source.cacheFingerprint)
+        let engine = RenderEngine(maskResolver: resolver)
+        let document = EditDocument(localAdjustments: [layer()])
+        let first = Task {
+            try await engine.render(RenderRequest(
+                source: source, document: document, targetSize: CGSize(width: 8, height: 4),
+                quality: .preview, output: .raster, requestRevision: 1
+            ))
+        }
+        await resolver.waitForFirstCall()
+
+        for index in 0..<70 {
+            let visited = try self.source(width: 20 + index, height: 4)
+            _ = try await engine.render(RenderRequest(
+                source: visited, document: EditDocument(), targetSize: CGSize(width: 8, height: 4),
+                quality: .preview, output: .raster, requestRevision: UInt64(index + 1)
+            ))
+        }
+
+        _ = try await engine.render(RenderRequest(
+            source: source, document: document, targetSize: CGSize(width: 8, height: 4),
+            quality: .preview, output: .raster, requestRevision: 2
+        ))
+        await resolver.releaseFirstCall()
+        do {
+            _ = try await first.value
+            XCTFail("the suspended revision 1 render must not publish after revision 2")
+        } catch let error as LocalMaskResolutionError {
+            XCTAssertEqual(error, .cancelled,
+                           "the active fence survives eviction of the source's ledger entry")
+        }
+    }
+
+    func testSuspendedMaskOverlayFenceSurvivesSourceEviction() async throws {
+        let source = try source()
+        let resolver = SupersedingMaskResolver(sourceFingerprint: source.cacheFingerprint)
+        let engine = RenderEngine(maskResolver: resolver)
+        let semanticLayer = LocalAdjustmentLayer(
+            components: [MaskComponent(source: .semantic(
+                SemanticMaskDefinition(target: .person)
+            ))]
+        )
+        let style = MaskOverlayStyle(red: 1, green: 0, blue: 0)
+        let first = Task {
+            await engine.makeMaskOverlayImage(MaskOverlayRequest(
+                source: source, layers: [semanticLayer], selectedLayerID: semanticLayer.id,
+                soloLayerID: nil, targetSize: PixelDimensions(width: 8, height: 4),
+                style: style, requestRevision: 1
+            ))
+        }
+        await resolver.waitForFirstCall()
+
+        for index in 0..<18 {
+            let visited = try self.source(width: 40 + index, height: 4)
+            let visitedLayer = layer()
+            _ = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+                source: visited, layers: [visitedLayer], selectedLayerID: visitedLayer.id,
+                soloLayerID: nil, targetSize: PixelDimensions(width: 8, height: 4),
+                style: style, requestRevision: UInt64(index + 1)
+            ))
+        }
+
+        let replacement = await engine.makeMaskOverlayImage(MaskOverlayRequest(
+            source: source, layers: [semanticLayer], selectedLayerID: semanticLayer.id,
+            soloLayerID: nil, targetSize: PixelDimensions(width: 8, height: 4),
+            style: style, requestRevision: 2
+        ))
+        XCTAssertNotNil(replacement)
+        await resolver.releaseFirstCall()
+        let staleOverlay = await first.value
+        XCTAssertNil(staleOverlay,
+                     "the old mask overlay must not publish after its source fence was evicted")
+    }
+
     func testNavigatingToAnotherMaskedSourceCancelsTheSupersededCoordinatorWaiter() async throws {
         let firstSource = try source(width: 8, height: 4)
         let secondSource = try source(width: 10, height: 4)
