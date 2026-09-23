@@ -431,7 +431,7 @@ final class AppViewModelTests: TempDirectoryTestCase {
         let second = try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "second.png", in: tempDirectory
         )
-        let editFixture = try EditPackageFixture()
+        let editFixture = makeEditPackageFixture()
         try editFixture.register(first)
         try editFixture.register(second)
         let viewModel = makeAppViewModel(

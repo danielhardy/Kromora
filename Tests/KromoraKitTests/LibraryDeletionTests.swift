@@ -35,7 +35,7 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         let source = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "referenced.jpg", in: sourceFolder
         )
-        let editFixture = try EditPackageFixture()
+        let editFixture = makeEditPackageFixture()
         let store = editFixture.store()
         let viewModel = makeAppViewModel(
             editStore: store,
@@ -159,7 +159,7 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         )
         let id = PhotoAssetID.file(source)
         let reference = EditSourceReference(assetID: id, url: source)
-        let editFixture = try EditPackageFixture()
+        let editFixture = makeEditPackageFixture()
         try editFixture.register(reference)
         let initialStore = editFixture.store()
         try await initialStore.save(

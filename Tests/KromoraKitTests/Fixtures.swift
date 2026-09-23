@@ -11,9 +11,7 @@ final class EditPackageFixture {
     let package: PortableLibraryPackage
     let lease: PortablePackageLease
 
-    init(at root: URL? = nil) throws {
-        let packageURL = root ?? FileManager.default.temporaryDirectory
-            .appendingPathComponent("KromoraEditFixture-\(UUID().uuidString).kromoralibrary")
+    init(at packageURL: URL) throws {
         package = FileManager.default.fileExists(atPath: packageURL.path)
             ? try PortableLibraryPackage.open(at: packageURL)
             : try PortableLibraryPackage.create(at: packageURL)
@@ -63,10 +61,6 @@ final class EditPackageFixture {
     }
 }
 
-func makeEditPackageFixture() -> EditPackageFixture {
-    try! EditPackageFixture()
-}
-
 @MainActor
 struct ImmediatePortablePackageLeaseRecoveryConfirmer: PortablePackageLeaseRecoveryConfirming {
     var allowBreak: Bool
@@ -77,19 +71,6 @@ struct ImmediatePortablePackageLeaseRecoveryConfirmer: PortablePackageLeaseRecov
     ) -> Bool {
         allowBreak
     }
-}
-
-func makeInMemoryEditStore(
-    container: EditPackageFixture = makeEditPackageFixture(),
-    artificialWriteDelay: Duration = .zero,
-    failuresBeforeSuccess: Int = 0,
-    writeStartSignal: AsyncStream<Void>.Continuation? = nil
-) -> EditDocumentStore {
-    return container.store(
-        artificialWriteDelay: artificialWriteDelay,
-        failuresBeforeSuccess: failuresBeforeSuccess,
-        writeStartSignal: writeStartSignal
-    )
 }
 
 /// Test fixtures are **generated**, never checked in: Kromora's inputs are RAWs
@@ -581,6 +562,29 @@ class TempDirectoryTestCase: XCTestCase {
     /// Every model created by a test is retained until teardown so its explicit async lifecycle
     /// barrier runs before the fixture directory is removed.
     private var appViewModels: [AppViewModel] = []
+
+    /// Creates an edit package inside this test's scratch directory so teardown removes
+    /// the package and its writer lease together with the rest of the test fixtures.
+    func makeEditPackageFixture() -> EditPackageFixture {
+        let packageURL = tempDirectory.appendingPathComponent(
+            "KromoraEditFixture-\(UUID().uuidString).kromoralibrary",
+            isDirectory: true
+        )
+        return try! EditPackageFixture(at: packageURL)
+    }
+
+    func makeInMemoryEditStore(
+        container: EditPackageFixture? = nil,
+        artificialWriteDelay: Duration = .zero,
+        failuresBeforeSuccess: Int = 0,
+        writeStartSignal: AsyncStream<Void>.Continuation? = nil
+    ) -> EditDocumentStore {
+        (container ?? makeEditPackageFixture()).store(
+            artificialWriteDelay: artificialWriteDelay,
+            failuresBeforeSuccess: failuresBeforeSuccess,
+            writeStartSignal: writeStartSignal
+        )
+    }
 
     /// Creates an AppViewModel whose persisted state is private to this test and whose managed
     /// library lives beside the test's generated fixtures. Tests that exercise relaunch behavior

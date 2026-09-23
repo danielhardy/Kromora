@@ -797,7 +797,7 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "smart.png", in: directory)
         let store = MaskStore(directory: directory.appendingPathComponent("masks"))
-        let editFixture = try EditPackageFixture()
+        let editFixture = makeEditPackageFixture()
         try editFixture.register(imageURL)
         let coordinator = PhotoAnalysisCoordinator(
             maskStore: store,
@@ -832,7 +832,7 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "retry.png", in: directory)
         let store = MaskStore(directory: directory.appendingPathComponent("masks"))
-        let editFixture = try EditPackageFixture()
+        let editFixture = makeEditPackageFixture()
         try editFixture.register(imageURL)
         let provider = RetryingSmartMaskProvider(store: store)
         let coordinator = PhotoAnalysisCoordinator(
