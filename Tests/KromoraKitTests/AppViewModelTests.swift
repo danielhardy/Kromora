@@ -131,7 +131,9 @@ final class AppViewModelTests: TempDirectoryTestCase {
         try session.lease.release()
 
         let stale = try PortablePackageLease.acquire(
-            at: packageURL, deviceName: "killed-swift-run", processID: .max, duration: -1
+            at: packageURL, deviceName: "killed-swift-run", processID: .max,
+            writerHostID: try XCTUnwrap(PortablePackageLeaseInfo.currentProcessIdentity.hostID),
+            processStartedAt: "1:0", duration: -1
         )
         let viewModel = makeAppViewModel(
             portablePackageURL: packageURL,
@@ -141,6 +143,40 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
         XCTAssertNil(viewModel.errorMessage)
         XCTAssertEqual(viewModel.collection.items.count, 1)
+        XCTAssertEqual(
+            viewModel.statusMessage,
+            "Recovered interrupted writes from the previous library session."
+        )
+        _ = stale
+    }
+
+    func testDeadLocalWriterWithUnexpiredLeaseOpensImmediately() throws {
+        let packageURL = tempDirectory.appendingPathComponent("RecentlyKilled.kromoralibrary")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "keep.jpg", in: tempDirectory
+        )
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs([sourceURL])
+        try session.lease.release()
+
+        let stale = try PortablePackageLease.acquire(
+            at: packageURL, deviceName: "same-mac", processID: .max,
+            writerHostID: try XCTUnwrap(PortablePackageLeaseInfo.currentProcessIdentity.hostID),
+            processStartedAt: "1:0", duration: 180
+        )
+        XCTAssertGreaterThan(stale.info.expiresAt, Date())
+        let viewModel = makeAppViewModel(
+            portablePackageURL: packageURL,
+            leaseRecoveryConfirmer: ImmediatePortablePackageLeaseRecoveryConfirmer(
+                allowBreak: false)
+        )
+
+        XCTAssertNil(viewModel.errorMessage)
+        XCTAssertEqual(viewModel.collection.items.count, 1)
+        XCTAssertEqual(
+            viewModel.statusMessage,
+            "Recovered interrupted writes from the previous library session."
+        )
         _ = stale
     }
 

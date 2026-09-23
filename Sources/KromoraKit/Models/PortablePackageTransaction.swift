@@ -88,15 +88,55 @@ struct PortablePackageLeaseInfo: Codable, Equatable, Sendable {
     let ownerID: UUID
     let deviceName: String
     let processID: Int32
+    /// Opaque machine identity. Optional so lock files written by older versions remain readable.
+    let hostID: String?
+    /// Process start time protects against a different process reusing `processID`.
+    let processStartedAt: String?
     let acquiredAt: Date
     var heartbeatAt: Date
     var expiresAt: Date
 
-    /// True when this lock's recorded PID is not a live process on this Mac. Used to auto-recover
-    /// expired leases left by a killed `swift run` without presenting an unshowable launch alert.
-    var writerProcessIsGone: Bool {
-        if kill(processID, 0) == 0 { return false }
-        return errno == ESRCH
+    enum LocalWriterState: Equatable {
+        case dead
+        case live
+        case remoteOrUnknown
+    }
+
+    /// A PID is meaningful only on the host that issued it. Compare the process start timestamp
+    /// too, since the kernel may have reused a terminated writer's PID.
+    var localWriterState: LocalWriterState {
+        guard let hostID, hostID == Self.currentHostID(), let processStartedAt else {
+            return .remoteOrUnknown
+        }
+        guard let currentStart = Self.processStartTime(processID) else {
+            return errno == ESRCH ? .dead : .remoteOrUnknown
+        }
+        return currentStart == processStartedAt ? .live : .dead
+    }
+
+    private static func currentHostID() -> String? {
+        var bytes = [CChar](repeating: 0, count: 128)
+        var length = bytes.count
+        let result = bytes.withUnsafeMutableBufferPointer { buffer in
+            sysctlbyname("kern.uuid", buffer.baseAddress, &length, nil, 0)
+        }
+        guard result == 0 else { return nil }
+        let utf8 = bytes.prefix(length).prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return String(decoding: utf8, as: UTF8.self)
+    }
+
+    private static func processStartTime(_ pid: Int32) -> String? {
+        var info = proc_bsdinfo()
+        errno = 0
+        let infoSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+        let count = proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info,
+                                 infoSize)
+        guard count == infoSize else { return nil }
+        return "\(info.pbi_start_tvsec):\(info.pbi_start_tvusec)"
+    }
+
+    static var currentProcessIdentity: (hostID: String?, startedAt: String?) {
+        (currentHostID(), processStartTime(ProcessInfo.processInfo.processIdentifier))
     }
 }
 
@@ -115,7 +155,12 @@ enum PortablePackageLeaseError: Error, Equatable, LocalizedError, CustomStringCo
     var description: String {
         switch self {
         case .contended(let info):
-            return "Package is already being written by \(info.deviceName) (pid \(info.processID))"
+            switch info.localWriterState {
+            case .remoteOrUnknown:
+                return "Kromora cannot verify whether the package writer on \(info.deviceName) (pid \(info.processID)) has stopped. Check that device before taking over, or wait for its lease to expire."
+            case .live, .dead:
+                return "Package is already being written by \(info.deviceName) (pid \(info.processID))"
+            }
         case .expired(let info):
             return "The previous session on \(info.deviceName) (pid \(info.processID)) did not close cleanly, so the package writer lease has expired"
         case .lostDuringSession:
@@ -167,14 +212,20 @@ final class PortablePackageLease: Sendable {
         ownerID: UUID = UUID(),
         deviceName: String = Host.current().localizedName ?? ProcessInfo.processInfo.hostName,
         processID: Int32 = ProcessInfo.processInfo.processIdentifier,
+        writerHostID: String? = nil,
+        processStartedAt: String? = nil,
         now: Date = Date(),
         duration: TimeInterval = PortablePackageLease.defaultDuration
     ) throws -> Self {
         let fm = FileManager.default
         try fm.createDirectory(at: packageRoot, withIntermediateDirectories: true)
         let lockURL = packageRoot.appendingPathComponent("manifest.lock")
+        let currentIdentity = PortablePackageLeaseInfo.currentProcessIdentity
         let info = PortablePackageLeaseInfo(
             ownerID: ownerID, deviceName: deviceName, processID: processID,
+            hostID: writerHostID ?? currentIdentity.hostID,
+            processStartedAt: processStartedAt ?? (processID == ProcessInfo.processInfo.processIdentifier
+                ? currentIdentity.startedAt : nil),
             acquiredAt: now, heartbeatAt: now, expiresAt: now.addingTimeInterval(duration)
         )
         let data = try Self.encode(info)
@@ -214,6 +265,25 @@ final class PortablePackageLease: Sendable {
     static func recoverExpiredWriter(at packageRoot: URL, now: Date = Date()) throws {
         _ = try PortablePackageTransaction.recover(at: packageRoot)
         try breakExpired(at: packageRoot, now: now)
+    }
+
+    /// Rolls back transactions from a conclusively dead same-host writer, even when its lease
+    /// timestamp is still in the future. The lock remains present during rollback, so ordinary
+    /// acquisition continues to report contention until recovery has finished.
+    static func recoverDeadWriter(at packageRoot: URL) throws {
+        let lockURL = packageRoot.appendingPathComponent("manifest.lock")
+        guard let initial = try? readInfo(at: lockURL), initial.localWriterState == .dead else {
+            throw PortablePackageLeaseError.invalid
+        }
+        _ = try PortablePackageTransaction.recover(at: packageRoot)
+        guard let current = try? readInfo(at: lockURL),
+              current.ownerID == initial.ownerID,
+              current.localWriterState == .dead
+        else { throw PortablePackageLeaseError.contended(initial) }
+        let quarantine = packageRoot.appendingPathComponent(
+            "manifest.lock.recovered-\(UUID().uuidString)")
+        try FileManager.default.moveItem(at: lockURL, to: quarantine)
+        try? FileManager.default.removeItem(at: quarantine)
     }
 
     var isExpired: Bool { isExpired(at: Date()) }
