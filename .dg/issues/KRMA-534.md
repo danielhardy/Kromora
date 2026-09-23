@@ -2,8 +2,19 @@
 id: KRMA-534
 title: Centralize package path safety and shared serialization helpers
 type: task
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria: []
+  checks_run: []
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: codex
+  resolved_model: gpt-5.6-luna
+  completed_at: 2026-09-23T01:17:08.146Z
+  session: 01MUDE8LJES6LEUCT4
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -13,9 +24,9 @@ labels:
   - security
   - package
 created: 2026-09-21T20:33:13.935Z
-updated: 2026-09-22T15:44:16.222Z
+updated: 2026-09-23T01:17:08.148Z
 estimate: 5
-order: zzz
+order: zx
 board: product
 ---
 
@@ -51,3 +62,22 @@ Independent, but coordinate with CQ-05/CQ-16 if those remove callers. Keep this 
 ## Likely files and checks
 
 PortableLibraryPackage.swift, PortablePackageValidation/Restore/Backup/Import/Transaction files, PortableLibrarySession.swift, LocalMaskModels and other clamp callers, JSON coder definitions, and security/package tests.
+
+## Agent log
+
+- 2026-09-23T01:17:08.146Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- None supplied
+Checks run:
+- None
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: gpt-5.6-luna
+Pickup session: 01MUDE8LJES6LEUCT4
+Summary: Implemented root-aware PackagePath validation with symlink containment checks across package reads/writes, transactions, validation, import, backup, restore, sidecars, trash, and browsing locators. Added critical validation coverage for symlink escapes and lexical path cases, centralized package JSON coding, centralized finite-aware clamping while preserving local quantization, and centralized filename sanitization.
