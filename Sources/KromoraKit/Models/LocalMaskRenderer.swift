@@ -2,6 +2,11 @@ import CoreImage
 import CoreGraphics
 import Foundation
 
+struct LocalMaskRendererDiagnosticsSnapshot: Sendable, Equatable {
+    let cachedBrushStrokeCount: Int
+    let cachedBrushStrokeCostBytes: Int
+}
+
 /// Actor-confined conversion of sendable mask payloads into Core Image. The resolver never sees
 /// this type and no `CIContext` is created here; RenderEngineResources owns the instance and the
 /// engine's one processing context evaluates the returned graphs.
@@ -39,9 +44,14 @@ final class LocalMaskRenderer {
         self.maxBrushStrokeCacheCostBytes = max(0, maxBrushStrokeCacheCostBytes)
     }
 
-    /// Diagnostics exposed to the package tests so the byte bound is testable, not aspirational.
-    var cachedBrushStrokeCount: Int { brushStrokeCache.count }
-    var cachedBrushStrokeCostBytes: Int { brushStrokeCacheCostBytes }
+    /// One value-only diagnostics boundary for the bounded brush cache. Callers do not receive
+    /// access to the cache's mutable counters individually.
+    var diagnosticsSnapshot: LocalMaskRendererDiagnosticsSnapshot {
+        LocalMaskRendererDiagnosticsSnapshot(
+            cachedBrushStrokeCount: brushStrokeCache.count,
+            cachedBrushStrokeCostBytes: brushStrokeCacheCostBytes
+        )
+    }
 
     // Precompiled Metal kernels (Sources/KromoraKit/Resources/KromoraCIKernels.ci.metal).
     private let analyticKernel: CIKernel? = CIKernelLibrary.kernel(named: "localAnalyticMask")
