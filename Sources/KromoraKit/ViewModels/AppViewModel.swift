@@ -833,6 +833,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private var cancellables: [AnyCancellable] = []
     private let portableLibraryOpenError: String?
 
+    var canImportIntoPortableLibrary: Bool { portableLibrary != nil }
+
+    private var portableLibraryUnavailableMessage: String {
+        let reason = portableLibraryOpenError ?? "The library package is unavailable."
+        return "\(reason) Resolve the library issue and relaunch Kromora before importing."
+    }
+
+    private func reportPortableLibraryUnavailable() {
+        presentError(portableLibraryUnavailableMessage)
+    }
+
     /// Changes whenever a Look thumbnail's source or edit recipe can change. Look rows use this as
     /// their task identity so a source switch or restored per-photo document refreshes thumbnails
     /// even when the library itself did not change.
@@ -1218,10 +1229,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             statusMessage = "Recovered interrupted writes from the previous library session."
         }
         guard case .some = portableLibrary else {
-            presentError(
-                portableLibraryOpenError
-                    ?? "Kromora could not open its library package. The library is unavailable."
-            )
+            reportPortableLibraryUnavailable()
             configureEmbeddedLooks()
             return
         }
@@ -1833,7 +1841,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 load(name: url.lastPathComponent, url: url, data: nil)
                 return
             }
-            presentError(portableLibraryOpenError ?? "The library package is unavailable.")
+            reportPortableLibraryUnavailable()
             return
         }
         do {
@@ -2515,6 +2523,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func openImageDialog() {
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            return
+        }
         guard let urls = fileDialog.chooseImages(startingAt: settings.defaultSourceFolderURL) else {
             return
         }
@@ -2529,12 +2541,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard !urls.isEmpty else { return nil }
         let operationID = operationID ?? beginImportOperation()
         guard portableLibrary != nil else {
-            presentImportOutcome(
-                .failure(
-                    total: urls.count,
-                    reason: portableLibraryOpenError ?? "The library package is unavailable."),
-                prefix: "Photo import"
-            )
+            reportPortableLibraryUnavailable()
             return nil
         }
         do {
@@ -2591,12 +2598,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func openImage(data: Data, name: String) {
         let operationID = beginImportOperation()
         guard portableLibrary != nil else {
-            presentImportOutcome(
-                .failure(
-                    total: 1,
-                    reason: portableLibraryOpenError ?? "The library package is unavailable."),
-                prefix: "Photo import"
-            )
+            reportPortableLibraryUnavailable()
             return
         }
         do {
@@ -2636,6 +2638,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func importFromPhotos() {
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            return
+        }
         isPhotosPickerPresented = true
     }
 
@@ -2643,6 +2649,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         _ = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
         didPresentInspectorForPhotosImport = false
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            isPortablePhotosImportActive = false
+            return
+        }
         isPortablePhotosImportActive = true
         portablePhotosImportNeedsRefresh = false
         portablePhotosImportWasEmpty = collection.items.isEmpty
@@ -2653,7 +2664,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         _ item: ImageCollection.PhotoImportItem, ordinal: Int
     ) -> PhotosImportInsertionOutcome {
         guard portableLibrary != nil else {
-            return .failed(portableLibraryOpenError ?? "The library package is unavailable.")
+            reportPortableLibraryUnavailable()
+            return .failed(portableLibraryUnavailableMessage)
         }
         do {
             let result = try libraryImportCoordinator.importData(
@@ -2699,7 +2711,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         _ item: ImageCollection.PhotoImportItem, ordinal: Int
     ) async -> PhotosImportInsertionOutcome {
         guard portableLibrary != nil else {
-            return .failed(portableLibraryOpenError ?? "The library package is unavailable.")
+            reportPortableLibraryUnavailable()
+            return .failed(portableLibraryUnavailableMessage)
         }
         do {
             let result = try libraryImportCoordinator.startImportData(
@@ -2797,10 +2810,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func importFromRemovableMedia() {
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            return
+        }
         libraryMediaWorkflow.importFromRemovableMedia()
     }
 
     func openRemovableMedia(_ volume: MediaVolume) {
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            return
+        }
         libraryMediaWorkflow.openRemovableMedia(volume)
     }
 
@@ -2821,6 +2842,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func importSelectedRemovableMedia() {
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            return
+        }
         libraryMediaWorkflow.importSelectedRemovableMedia()
     }
 
@@ -2830,13 +2855,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryImportCoordinator.adoptOperation(request.operationID)
         let operationID = request.operationID
         guard portableLibrary != nil else {
-            libraryMediaWorkflow.finishImport(
-                summary: .failure(
-                    total: request.totalSelected,
-                    reason: portableLibraryOpenError ?? "The library package is unavailable."
-                ),
-                operationID: request.operationID
-            )
+            reportPortableLibraryUnavailable()
+            libraryMediaWorkflow.cancelRemovableMediaImport()
             return
         }
         do {
@@ -2894,6 +2914,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Choose a folder to import into the portable library, reveal the library browser, and open
     /// the first imported image.
     func chooseSourceFolder() {
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            return
+        }
         libraryMediaWorkflow.chooseSourceFolder(startingAt: settings.defaultSourceFolderURL)
     }
 
@@ -2904,6 +2928,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func handleDrop(_ payload: ImageDrop.Payload) {
+        guard portableLibrary != nil else {
+            reportPortableLibraryUnavailable()
+            return
+        }
         switch payload {
         case .urls(let urls):
             libraryMediaWorkflow.handleDroppedURLs(urls)
@@ -2964,11 +2992,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let operationID = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
         guard portableLibrary != nil else {
-            let summary = ImportOutcomeSummary.failure(
-                total: 0, reason: portableLibraryOpenError ?? "The library package is unavailable."
-            )
-            presentImportOutcome(summary, prefix: "Folder import")
-            return summary
+            reportPortableLibraryUnavailable()
+            return nil
         }
         let files = supportedImageURLs(in: url)
         guard !files.isEmpty else {
