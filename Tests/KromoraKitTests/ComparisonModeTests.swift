@@ -184,8 +184,9 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let image = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "empty-record.png", in: tempDirectory
         )
-        let container = makeInMemoryEditContainer()
-        let store = EditDocumentStore(modelContainer: container)
+        let container = makeEditPackageFixture()
+        try container.register(image)
+        let store = container.store()
         try await store.save(
             EditDocument(),
             for: EditSourceReference(assetID: .file(image), url: image)
@@ -194,7 +195,7 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(
             engine: fake,
-            editStore: EditDocumentStore(modelContainer: container),
+            editStore: container.store(),
             preferences: defaults
         )
         enableSideBySide(on: viewModel)

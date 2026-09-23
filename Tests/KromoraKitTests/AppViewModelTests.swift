@@ -43,15 +43,14 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.errorMessage, message)
     }
 
-    func testEditDatabaseURLIsExposedWithoutExposingTheStore() async {
-        let storeURL = tempDirectory.appendingPathComponent("EditStore.store")
+    func testPackageBackedStoreDoesNotExposeASeparateEditDatabase() async {
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: storeURL)
+            editStore: makeInMemoryEditStore()
         )
 
         let editDatabaseURL = await viewModel.editDatabaseURL
-        XCTAssertEqual(editDatabaseURL, storeURL)
+        XCTAssertNil(editDatabaseURL)
     }
 
     func testAppActivationTriggersConfiguredPortableMaintenance() async throws {
@@ -309,12 +308,17 @@ final class AppViewModelTests: TempDirectoryTestCase {
     }
 
     func testLookSelectionAndIntensityStayWithTheirPhoto() throws {
-        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let first = try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "first.png", in: tempDirectory
         )
         let second = try Fixtures.writeGradientPNG(
             width: 8, height: 8, named: "second.png", in: tempDirectory
+        )
+        let editFixture = try EditPackageFixture()
+        try editFixture.register(first)
+        try editFixture.register(second)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: editFixture.store()
         )
         let lut = TestImages.warmLUT()
 

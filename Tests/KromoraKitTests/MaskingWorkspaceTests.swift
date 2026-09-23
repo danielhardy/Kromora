@@ -797,6 +797,8 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "smart.png", in: directory)
         let store = MaskStore(directory: directory.appendingPathComponent("masks"))
+        let editFixture = try EditPackageFixture()
+        try editFixture.register(imageURL)
         let coordinator = PhotoAnalysisCoordinator(
             maskStore: store,
             maskProvider: ProductionSmartMaskProvider(store: store),
@@ -804,12 +806,15 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         )
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json")),
+            editStore: editFixture.store(),
             photoAnalysisCoordinator: coordinator
         )
 
         viewModel.openImage(url: imageURL)
         try await waitUntil("the photo to load") { viewModel.sourceImage != nil }
+        if let assetID = viewModel.maskingAssetID {
+            try editFixture.register(assetID: assetID, url: imageURL)
+        }
         viewModel.createSmartMask(.subject)
         try await waitUntil("the smart mask to be created") {
             viewModel.document.localAdjustments.count == 1
@@ -827,18 +832,23 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "retry.png", in: directory)
         let store = MaskStore(directory: directory.appendingPathComponent("masks"))
+        let editFixture = try EditPackageFixture()
+        try editFixture.register(imageURL)
         let provider = RetryingSmartMaskProvider(store: store)
         let coordinator = PhotoAnalysisCoordinator(
             maskStore: store, maskProvider: provider, stages: [:]
         )
         let viewModel = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(fileURL: directory.appendingPathComponent("edits.json")),
+            editStore: editFixture.store(),
             photoAnalysisCoordinator: coordinator
         )
 
         viewModel.openImage(url: imageURL)
         try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
+        if let assetID = viewModel.maskingAssetID {
+            try editFixture.register(assetID: assetID, url: imageURL)
+        }
         viewModel.createMask(.brush)
         let layerID = try XCTUnwrap(viewModel.document.localAdjustments.first?.id)
 
@@ -871,13 +881,23 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         let directory = tempDirectory!
         let imageURL = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "info.png", in: directory)
-        let editContainer = makeInMemoryEditContainer()
+        let secondURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "other.png", in: directory)
+        let packageURL = directory.appendingPathComponent("InfoMask.kromoralibrary")
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs([imageURL, secondURL], duplicatePolicy: .importAnyway)
         let viewModel = makeAppViewModel(
-            engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: editContainer)
+            engine: FakeRenderEngine(), portablePackageURL: packageURL,
+            portableLibrarySession: session
         )
 
-        viewModel.openImage(url: imageURL)
+        viewModel.collection.loadPortableAssets(try session.materializedAssets())
+        await viewModel.collection.scanCompletion()
+        let initialIndex = try XCTUnwrap(
+            viewModel.collection.items.firstIndex { $0.displayName == imageURL.lastPathComponent }
+        )
+        viewModel.collection.setSelection(at: initialIndex)
+        viewModel.openActiveCollectionImage()
         try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
         let source = try XCTUnwrap(viewModel.maskingSource)
         let assetID = try XCTUnwrap(viewModel.maskingAssetID)
@@ -912,11 +932,19 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
 
         let flushResult = await viewModel.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await viewModel.shutdown()
+        let relaunchedSession = try PortableLibrarySession(at: packageURL)
         let reopened = makeAppViewModel(
-            engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: editContainer)
+            engine: FakeRenderEngine(), portablePackageURL: packageURL,
+            portableLibrarySession: relaunchedSession
         )
-        reopened.openImage(url: imageURL)
+        reopened.collection.loadPortableAssets(try relaunchedSession.materializedAssets())
+        await reopened.collection.scanCompletion()
+        let reopenedInitialIndex = try XCTUnwrap(
+            reopened.collection.items.firstIndex { $0.displayName == imageURL.lastPathComponent }
+        )
+        reopened.collection.setSelection(at: reopenedInitialIndex)
+        reopened.openActiveCollectionImage()
         try await waitUntil("the persisted mask to reopen") {
             reopened.document.localAdjustments.count == 1
         }
@@ -925,25 +953,27 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
             .subject
         )
 
-        let secondURL = try Fixtures.writeGradientPNG(
-            width: 16, height: 12, named: "other.png", in: directory)
-        let firstSourceRevision = viewModel.maskingSourceRevision
-        viewModel.openImage(url: secondURL)
+        let firstSourceRevision = reopened.maskingSourceRevision
+        let secondIndex = try XCTUnwrap(
+            reopened.collection.items.firstIndex { $0.displayName == secondURL.lastPathComponent }
+        )
+        reopened.collection.setSelection(at: secondIndex)
+        reopened.openActiveCollectionImage()
         try await waitUntil("the second source to publish") {
-            viewModel.maskingSource != nil
-                && viewModel.maskingSource?.cacheFingerprint != source.cacheFingerprint
-                && viewModel.sourceImage != nil
-                && viewModel.sourceName == secondURL.lastPathComponent
-                && viewModel.maskingSourceRevision > firstSourceRevision
+            reopened.maskingSource != nil
+                && reopened.maskingSource?.cacheFingerprint != source.cacheFingerprint
+                && reopened.sourceImage != nil
+                && reopened.sourceName == secondURL.lastPathComponent
+                && reopened.maskingSourceRevision > firstSourceRevision
         } diagnostics: {
-            "sourceName=\(viewModel.sourceName), sourceRevision=\(viewModel.maskingSourceRevision), "
-                + "hasSource=\(viewModel.maskingSource != nil), hasImage=\(viewModel.sourceImage != nil), "
-                + "editStoreStatus=\(viewModel.editStoreStatus ?? "nil"), status=\(viewModel.statusMessage)"
+            "sourceName=\(reopened.sourceName), sourceRevision=\(reopened.maskingSourceRevision), "
+                + "hasSource=\(reopened.maskingSource != nil), hasImage=\(reopened.sourceImage != nil), "
+                + "editStoreStatus=\(reopened.editStoreStatus ?? "nil"), status=\(reopened.statusMessage)"
         }
-        XCTAssertTrue(viewModel.document.localAdjustments.isEmpty)
+        XCTAssertTrue(reopened.document.localAdjustments.isEmpty)
 
-        let secondSource = try XCTUnwrap(viewModel.maskingSource)
-        let secondAssetID = try XCTUnwrap(viewModel.maskingAssetID)
+        let secondSource = try XCTUnwrap(reopened.maskingSource)
+        let secondAssetID = try XCTUnwrap(reopened.maskingAssetID)
         let secondKey = MaskCacheKey(
             assetID: secondAssetID,
             sourceFingerprint: PhotoAnalysisCoordinator.sourceFingerprint(for: secondSource),
@@ -957,20 +987,21 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
             confidence: 1,
             coverage: pixels.coverage
         )
-        viewModel.useInfoAnalysisMask(.subject, demonstrated: secondResult, pixels: pixels)
+        reopened.useInfoAnalysisMask(.subject, demonstrated: secondResult, pixels: pixels)
         XCTAssertEqual(
-            viewModel.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
+            reopened.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
             .subject
         )
 
-        viewModel.openImage(url: imageURL)
+        reopened.collection.setSelection(at: reopenedInitialIndex)
+        reopened.openActiveCollectionImage()
         try await waitUntil("the first source mask to restore") {
-            viewModel.sourceName == imageURL.lastPathComponent
-                && viewModel.maskingSource?.cacheFingerprint == source.cacheFingerprint
-                && viewModel.document.localAdjustments.count == 1
+            reopened.sourceName == imageURL.lastPathComponent
+                && reopened.maskingSource?.cacheFingerprint == source.cacheFingerprint
+                && reopened.document.localAdjustments.count == 1
         }
         XCTAssertEqual(
-            viewModel.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
+            reopened.document.localAdjustments.first?.components.first?.source.semanticDefinition?.target,
             .subject
         )
     }

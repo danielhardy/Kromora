@@ -63,14 +63,12 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
         let packageURL = tempDirectory.appendingPathComponent(
             "Library.kromoralibrary", isDirectory: true
         )
-        let container = makeInMemoryEditContainer()
         let defaults = UserDefaults(suiteName: "KromoraImportedPhotoDurability-\(UUID().uuidString)")!
         let source = try Fixtures.writeGradientPNG(
             width: 20, height: 12, named: "edited.png", in: tempDirectory
         )
         let first = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults,
             portablePackageURL: packageURL
         )
@@ -85,7 +83,6 @@ final class ImportedPhotoDurabilityTests: TempDirectoryTestCase {
 
         let relaunched = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container),
             preferences: defaults,
             portablePackageURL: packageURL
         )

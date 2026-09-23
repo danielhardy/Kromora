@@ -6,6 +6,17 @@ import XCTest
 @MainActor
 final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
 
+    private func registerLoadedPhotos(
+        in viewModel: AppViewModel, url: URL, with fixture: EditPackageFixture
+    ) throws {
+        if let assetID = viewModel.maskingAssetID {
+            try fixture.register(assetID: assetID, url: url)
+        }
+        for item in viewModel.collection.items {
+            try fixture.register(item)
+        }
+    }
+
     private func waitUntil(
         _ description: String,
         timeout: TimeInterval = 5,
@@ -24,25 +35,37 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "relaunch.png", in: tempDirectory
         )
-        let container = makeInMemoryEditContainer()
+        let packageURL = tempDirectory.appendingPathComponent("Relaunch.kromoralibrary")
+        let firstSession = try PortableLibrarySession(at: packageURL)
+        _ = try firstSession.importURLs([imageURL])
 
         let firstLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container)
+            portablePackageURL: packageURL,
+            portableLibrarySession: firstSession
         )
-        firstLaunch.openImage(url: imageURL)
+        firstLaunch.collection.loadPortableAssets(try firstSession.materializedAssets())
+        await firstLaunch.collection.scanCompletion()
+        firstLaunch.collection.setSelection(at: 0)
+        firstLaunch.openActiveCollectionImage()
         try await waitUntil("the first image") {
             firstLaunch.sourceName == imageURL.lastPathComponent
         }
         firstLaunch.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
         let flushResult = await firstLaunch.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await firstLaunch.shutdown()
 
+        let secondSession = try PortableLibrarySession(at: packageURL)
         let secondLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container)
+            portablePackageURL: packageURL,
+            portableLibrarySession: secondSession
         )
-        secondLaunch.openImage(url: imageURL)
+        secondLaunch.collection.loadPortableAssets(try secondSession.materializedAssets())
+        await secondLaunch.collection.scanCompletion()
+        secondLaunch.collection.setSelection(at: 0)
+        secondLaunch.openActiveCollectionImage()
         try await waitUntil("the restored image") {
             secondLaunch.sourceName == imageURL.lastPathComponent
                 && secondLaunch.document.adjustments == [.exposure(ev: 0.8)]
@@ -53,12 +76,18 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "immediate.png", in: tempDirectory
         )
-        let container = makeInMemoryEditContainer()
+        let packageURL = tempDirectory.appendingPathComponent("Immediate.kromoralibrary")
+        let firstSession = try PortableLibrarySession(at: packageURL)
+        _ = try firstSession.importURLs([imageURL])
         let firstLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container)
+            portablePackageURL: packageURL,
+            portableLibrarySession: firstSession
         )
-        firstLaunch.openImage(url: imageURL)
+        firstLaunch.collection.loadPortableAssets(try firstSession.materializedAssets())
+        await firstLaunch.collection.scanCompletion()
+        firstLaunch.collection.setSelection(at: 0)
+        firstLaunch.openActiveCollectionImage()
         try await waitUntil("the first image") { firstLaunch.sourceImage != nil }
         firstLaunch.updateDocument {
             $0.lut = LUTSettings(lutID: LUTID(raw: "look.cube"), intensity: 0.42)
@@ -68,12 +97,18 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         // the ordering guarantee even when the edit is made immediately before Cmd-Q.
         let flushResult = await firstLaunch.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await firstLaunch.shutdown()
 
+        let secondSession = try PortableLibrarySession(at: packageURL)
         let secondLaunch = makeAppViewModel(
             engine: FakeRenderEngine(),
-            editStore: EditDocumentStore(modelContainer: container)
+            portablePackageURL: packageURL,
+            portableLibrarySession: secondSession
         )
-        secondLaunch.openImage(url: imageURL)
+        secondLaunch.collection.loadPortableAssets(try secondSession.materializedAssets())
+        await secondLaunch.collection.scanCompletion()
+        secondLaunch.collection.setSelection(at: 0)
+        secondLaunch.openActiveCollectionImage()
         try await waitUntil("the flushed Look") {
             secondLaunch.sourceName == imageURL.lastPathComponent
                 && secondLaunch.document.lut.intensity == 0.42
@@ -85,11 +120,13 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "coalesced.png", in: tempDirectory
         )
-        let container = makeInMemoryEditContainer()
-        let store = EditDocumentStore(modelContainer: container)
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
+        let store = container.store()
         let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the coalesced image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
 
         for value in stride(from: 0.0, through: 1.0, by: 0.05) {
             viewModel.updateDocument { $0.adjustments = [.exposure(ev: value)] }
@@ -99,7 +136,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let flushResult = await viewModel.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
 
-        let restored = EditDocumentStore(modelContainer: container)
+        let restored = container.store()
         let item = try XCTUnwrap(viewModel.collection.items.first)
         let result = await restored.load(
             for: EditSourceReference(assetID: item.id, url: item.url)
@@ -113,13 +150,15 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "slow-flush.png", in: tempDirectory
         )
-        let container = makeInMemoryEditContainer()
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
         let store = makeInMemoryEditStore(
             container: container, artificialWriteDelay: .milliseconds(400)
         )
         let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the slow-flush image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.6)] }
         // The normal worker waits 250 ms before its first checkpoint. Yield just after that
         // checkpoint so the forced flush has to chain behind the deliberately slow write.
@@ -134,7 +173,7 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.pendingPersistenceCount, 0)
         let writeCount = await store.writeCount
         XCTAssertEqual(writeCount, 1)
-        let restored = EditDocumentStore(modelContainer: container)
+        let restored = container.store()
         let item = try XCTUnwrap(viewModel.collection.items.first)
         let result = await restored.load(for: EditSourceReference(assetID: item.id, url: item.url))
         XCTAssertEqual(result.document.adjustments, [.exposure(ev: 0.6)])
@@ -144,10 +183,13 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "retry.png", in: tempDirectory
         )
-        let store = makeInMemoryEditStore(failuresBeforeSuccess: 1)
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
+        let store = container.store(failuresBeforeSuccess: 1)
         let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the retry image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.7)] }
         let firstFlushResult = await viewModel.flushPendingWrites()
         guard case .failure = firstFlushResult else {
@@ -168,10 +210,13 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "failed-termination.png", in: tempDirectory
         )
-        let store = makeInMemoryEditStore(failuresBeforeSuccess: 1)
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
+        let store = container.store(failuresBeforeSuccess: 1)
         let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the failed-termination image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
 
         let result = await viewModel.flushPendingWrites()
@@ -193,10 +238,13 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "cancelled-flush.png", in: tempDirectory
         )
-        let store = makeInMemoryEditStore(artificialWriteDelay: .milliseconds(250))
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
+        let store = container.store(artificialWriteDelay: .milliseconds(250))
         let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the cancelled-flush image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.2)] }
 
         let flush = Task { @MainActor in await viewModel.flushPendingWrites() }
@@ -213,13 +261,16 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
             width: 32, height: 24, named: "raced-flush.png", in: tempDirectory
         )
         let (writeStarted, writeStartedContinuation) = AsyncStream<Void>.makeStream()
-        let store = makeInMemoryEditStore(
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
+        let store = container.store(
             artificialWriteDelay: .milliseconds(100),
             writeStartSignal: writeStartedContinuation
         )
         let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the raced-flush image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.4)] }
 
         let firstFlush = Task { @MainActor in await viewModel.flushPendingWrites() }
@@ -260,10 +311,13 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "long-gesture.png", in: tempDirectory
         )
-        let store = makeInMemoryEditStore()
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
+        let store = container.store()
         let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: store)
         viewModel.openImage(url: imageURL)
         try await waitUntil("the long-gesture image") { viewModel.sourceImage != nil }
+        try registerLoadedPhotos(in: viewModel, url: imageURL, with: container)
 
         viewModel.beginUndoGrouping()
         for value in [0.1, 0.2, 0.3] {
@@ -299,7 +353,9 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "late-store.png", in: tempDirectory
         )
-        let store = makeInMemoryEditStore()
+        let container = makeEditPackageFixture()
+        try container.register(imageURL)
+        let store = container.store()
         try await store.save(
             EditDocument(adjustments: [.exposure(ev: 0.1)]),
             for: EditSourceReference(assetID: .file(imageURL), url: imageURL)

@@ -162,13 +162,15 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         let id = try XCTUnwrap(collection.addFromURLs([source]).first)
         let item = try XCTUnwrap(collection.items.first { $0.id == id })
         let managedURL = try XCTUnwrap(item.url)
-        let storeURL = tempDirectory.appendingPathComponent("rollback-edits.store")
-        let initialStore = EditDocumentStore(fileURL: storeURL)
+        let editFixture = try EditPackageFixture()
+        let reference = EditSourceReference(assetID: item.id, url: managedURL)
+        try editFixture.register(reference)
+        let initialStore = editFixture.store()
         try await initialStore.save(
             EditDocument(adjustments: [.exposure(ev: 0.25)]),
-            for: EditSourceReference(assetID: item.id, url: managedURL)
+            for: reference
         )
-        let failingStore = EditDocumentStore(fileURL: storeURL, failuresBeforeSuccess: 1)
+        let failingStore = editFixture.store(failuresBeforeSuccess: 1)
         let analysis = makeAnalysisCoordinator()
         let coordinator = makeCoordinator(
             collection: collection, persistence: EditPersistenceCoordinator(store: failingStore),

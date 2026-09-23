@@ -1123,12 +1123,16 @@ final class CropWorkflowTests: TempDirectoryTestCase {
     func testCommittedCropSurvivesRelaunch() async throws {
         let url = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "persisted.png", in: tempDirectory)
-        let container = makeInMemoryEditContainer()
+        let container = makeEditPackageFixture()
+        try container.register(url)
         let first = makeAppViewModel(
-            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
+            engine: FakeRenderEngine(), editStore: container.store()
         )
         first.openImage(url: url)
         try await waitUntil("the first source") { first.sourceImage != nil }
+        if let assetID = first.maskingAssetID {
+            try container.register(assetID: assetID, url: url)
+        }
         first.beginCrop()
         first.updateCropDraft(CGRect(x: 0.2, y: 0.1, width: 0.6, height: 0.8))
         first.commitCrop()
@@ -1136,7 +1140,7 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertEqual(flushResult, .success)
 
         let second = makeAppViewModel(
-            engine: FakeRenderEngine(), editStore: EditDocumentStore(modelContainer: container)
+            engine: FakeRenderEngine(), editStore: container.store()
         )
         second.openImage(url: url)
         try await waitUntil("the restored crop") {
