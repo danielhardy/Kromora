@@ -96,7 +96,7 @@ arm64 + x86_64 release. It sets the requested version in `CFBundleShortVersionSt
 `CFBundleVersion` from the git commit count unless overridden, signs with Developer ID Application
 and hardened runtime, creates `Kromora-<version>.dmg`, and prints the exact asset path when complete.
 The DMG contains `Kromora.app` and an `Applications` shortcut. The bundle identifier remains the
-project value (`com.kromora.photo`) unless `KROMORA_BUNDLE_IDENTIFIER` is explicitly set.
+project value (`com.last8.kromora.photo`) unless `KROMORA_BUNDLE_IDENTIFIER` is explicitly set.
 
 Prerequisites:
 

@@ -11,7 +11,7 @@
 	<key>CFBundleIconName</key>
 	<string>Kromora</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.kromora.photo</string>
+	<string>com.last8.kromora.photo</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
