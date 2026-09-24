@@ -48,8 +48,17 @@ public struct ContentView: View {
         return mainContent
             .navigationTitle("")
             .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    toolbarContent
+                if #available(macOS 26.0, *) {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        toolbarContent
+                    }
+                    // The native toolbar owns the full-width surface. macOS 26 otherwise adds
+                    // a separate shared glass plate behind this trailing action group.
+                    .sharedBackgroundVisibility(.hidden)
+                } else {
+                    ToolbarItemGroup(placement: .primaryAction) {
+                        toolbarContent
+                    }
                 }
             }
             // The inspector is a sibling column of the navigation content. Explicitly keep the
