@@ -498,6 +498,13 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         )
     }
 
+    func testMaskAdjustmentGroupsListEveryControlExactlyOnce() {
+        // A control missing from the groups would silently disappear from the mask inspector.
+        let grouped = LocalAdjustmentControl.inspectorGroups.flatMap(\.controls)
+        XCTAssertEqual(grouped.count, LocalAdjustmentControl.allCases.count)
+        XCTAssertEqual(Set(grouped), Set(LocalAdjustmentControl.allCases))
+    }
+
     func testCanvasToolsAreOnlyPointerToolsAndSmartMasksLeaveTheCanvasNavigable() throws {
         // Smart masks never respond to the pointer, so offering them as tools captured the canvas
         // (blocking pan/zoom) while a drag did nothing.

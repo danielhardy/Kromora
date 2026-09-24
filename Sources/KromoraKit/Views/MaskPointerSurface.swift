@@ -9,6 +9,8 @@ enum MaskNativePointerEvent: Sendable {
     case began([MaskNativePointerSample])
     case dragged([MaskNativePointerSample])
     case ended(MaskNativePointerSample?)
+    /// The pointer left the canvas; hover-only presentation such as the brush ring should go.
+    case exited
 }
 
 struct MaskNativePointerSample: Sendable {
@@ -19,24 +21,46 @@ struct MaskNativePointerSample: Sendable {
 
 struct MaskPointerSurface: NSViewRepresentable {
     let isInteractive: Bool
+    /// The system cursor while the pointer is over an interactive surface. Drawing tools use a
+    /// precise crosshair so it sits inside the brush ring rather than an arrow tip beside it.
+    var cursor: NSCursor = .crosshair
     let onPointer: (MaskNativePointerEvent) -> Void
 
     func makeNSView(context: Context) -> MaskPointerNSView {
         let view = MaskPointerNSView(frame: .zero)
         view.onPointer = onPointer
         view.isInteractive = isInteractive
+        view.cursor = cursor
         return view
     }
 
     func updateNSView(_ view: MaskPointerNSView, context: Context) {
         view.onPointer = onPointer
         view.isInteractive = isInteractive
+        view.cursor = cursor
     }
 }
 
 final class MaskPointerNSView: NSView {
     var onPointer: ((MaskNativePointerEvent) -> Void)?
-    var isInteractive = false { didSet { updateTrackingAreas() } }
+    var isInteractive = false {
+        didSet {
+            guard isInteractive != oldValue else { return }
+            updateTrackingAreas()
+            window?.invalidateCursorRects(for: self)
+        }
+    }
+    var cursor: NSCursor = .crosshair {
+        didSet {
+            guard cursor != oldValue else { return }
+            window?.invalidateCursorRects(for: self)
+            // Cursor rects are only re-evaluated on movement; apply a change made under a
+            // stationary pointer (Space pressed to pan) immediately.
+            guard isInteractive, let window else { return }
+            let pointer = convert(window.mouseLocationOutsideOfEventStream, from: nil)
+            if bounds.contains(pointer) { cursor.set() }
+        }
+    }
     private var trackingArea: NSTrackingArea?
 
     override var isFlipped: Bool { true }
@@ -44,6 +68,11 @@ final class MaskPointerNSView: NSView {
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         isInteractive ? self : nil
+    }
+
+    override func resetCursorRects() {
+        guard isInteractive else { return }
+        addCursorRect(bounds, cursor: cursor)
     }
 
     override func updateTrackingAreas() {
@@ -58,6 +87,7 @@ final class MaskPointerNSView: NSView {
     }
 
     override func mouseMoved(with event: NSEvent) { send(.moved(samples(for: event))) }
+    override func mouseExited(with event: NSEvent) { send(.exited) }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         send(.began(samples(for: event)))
