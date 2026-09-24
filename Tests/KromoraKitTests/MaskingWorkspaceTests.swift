@@ -498,6 +498,22 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         )
     }
 
+    func testOptionScrollResizesTheBrushProportionallyWithinTheSliderRange() {
+        let state = MaskInteractionState()
+        state.brushRadius = 0.1
+        state.scaleBrushRadius(by: 1.5)
+        XCTAssertEqual(state.brushRadius, 0.15, accuracy: 0.000_001)
+        state.scaleBrushRadius(by: 1 / 1.5)
+        XCTAssertEqual(state.brushRadius, 0.1, accuracy: 0.000_001)
+
+        state.scaleBrushRadius(by: 100)
+        XCTAssertEqual(state.brushRadius, 0.5, "matches the Size slider's upper bound")
+        state.scaleBrushRadius(by: 0.000_01)
+        XCTAssertEqual(state.brushRadius, 0.001)
+        state.scaleBrushRadius(by: .nan)
+        XCTAssertEqual(state.brushRadius, 0.001)
+    }
+
     func testMaskAdjustmentGroupsListEveryControlExactlyOnce() {
         // A control missing from the groups would silently disappear from the mask inspector.
         let grouped = LocalAdjustmentControl.inspectorGroups.flatMap(\.controls)

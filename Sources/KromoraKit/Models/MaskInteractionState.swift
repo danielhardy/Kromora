@@ -225,6 +225,13 @@ final class MaskInteractionState: ObservableObject {
         brushRadius = min(max(brushRadius + delta, 0.001), 1)
     }
 
+    /// Proportional resize for continuous input (Option-scroll), so each step feels the same at
+    /// any brush size. Bounded like the Size slider.
+    func scaleBrushRadius(by factor: Double) {
+        guard factor.isFinite, factor > 0 else { return }
+        brushRadius = min(max(brushRadius * factor, 0.001), 0.5)
+    }
+
     func adjustBrushFeather(by delta: Double) {
         brushFeather = min(max(brushFeather + delta, 0), 1)
     }
