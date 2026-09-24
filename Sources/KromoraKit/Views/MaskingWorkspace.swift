@@ -312,6 +312,20 @@ struct MaskingWorkspace: View {
                             $0.id == layer.id
                         })
                     )
+                    // A mask built from several parts lists them beneath it, so what the mask
+                    // is made of — and what an erase stroke belongs to — is visible in place.
+                    if layer.components.count > 1 {
+                        ForEach(Array(layer.components.enumerated()), id: \.element.id) {
+                            partIndex, component in
+                            MaskPartRow(
+                                viewModel: viewModel,
+                                maskingState: maskingState,
+                                layer: layer,
+                                component: component,
+                                index: partIndex
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -412,30 +426,43 @@ struct MaskingWorkspace: View {
         return viewModel.document.localAdjustments.first(where: { $0.id == id })
     }
 
-    /// A mask with one source shows that source's controls directly. The part list, with its
-    /// combine modes, solo, and ordering, only appears once a mask actually combines several
-    /// sources — that is the only time those controls have anything to act on.
+    /// Controls for the part the photographer is working on. A single-source mask shows its one
+    /// source; a multi-part mask shows the part selected in the Masks list, where the parts, their
+    /// combine modes, and their actions already live — so they are never listed twice.
     private func maskShapeSection(_ layer: LocalAdjustmentLayer) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Toggle("Invert mask", isOn: layerBinding(id: layer.id, keyPath: \.isInverted))
                 .help("Apply the adjustments everywhere this mask does not select")
 
-            if layer.components.count == 1, let component = layer.components.first {
+            if let index = selectedPartIndex(in: layer) {
+                let component = layer.components[index]
                 HStack(spacing: 6) {
-                    Label(component.source.maskingTypeTitle, systemImage: component.source.iconName)
+                    Label(partTitle(component, index: index), systemImage: component.source.iconName)
                         .font(.caption.weight(.semibold))
                     Spacer()
                 }
-                componentControls(component, layerID: layer.id, allowsInvert: false)
-            } else {
-                ForEach(Array(layer.components.enumerated()), id: \.element.id) {
-                    index, component in
-                    componentRow(component, index: index, layer: layer)
-                }
+                componentControls(
+                    component, layerID: layer.id, allowsInvert: layer.components.count > 1)
             }
 
             addToMaskMenu(layer)
         }
+    }
+
+    /// The part the canvas and inspector act on: the selected part when it belongs to this mask,
+    /// otherwise the part a canvas gesture would target, otherwise the first.
+    private func selectedPartIndex(in layer: LocalAdjustmentLayer) -> Int? {
+        if let id = maskingState.selectedComponentID,
+            let index = layer.components.firstIndex(where: { $0.id == id })
+        {
+            return index
+        }
+        return layer.targetComponentIndex(selected: nil) ?? (layer.components.isEmpty ? nil : 0)
+    }
+
+    private func partTitle(_ component: MaskComponent, index: Int) -> String {
+        guard index > 0 else { return component.displayName }
+        return "\(component.displayName) — \(component.mode.summaryWord)"
     }
 
     private func addToMaskMenu(_ layer: LocalAdjustmentLayer) -> some View {
@@ -461,90 +488,6 @@ struct MaskingWorkspace: View {
         .fixedSize()
         .accessibilityLabel("Add mask component")
         .help("Combine another selection with this mask")
-    }
-
-    private func componentRow(
-        _ component: MaskComponent, index: Int, layer: LocalAdjustmentLayer
-    ) -> some View {
-        DisclosureGroup(
-            isExpanded: Binding(
-                get: { maskingState.selectedComponentID == component.id },
-                set: { expanded in
-                    if expanded {
-                        viewModel.selectMaskComponent(component.id, in: layer.id)
-                    } else if maskingState.selectedComponentID == component.id {
-                        viewModel.selectMaskLayer(layer.id)
-                    }
-                }
-            )
-        ) {
-            componentControls(component, layerID: layer.id, allowsInvert: true)
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: component.source.iconName)
-                    .foregroundStyle(.secondary)
-                    .accessibilityHidden(true)
-                TextField(
-                    component.source.maskingTypeTitle,
-                    text: Binding(
-                        get: { component.displayName },
-                        set: { viewModel.renameMaskComponent(component.id, in: layer.id, name: $0) }
-                    )
-                )
-                .textFieldStyle(.plain)
-                .font(.caption)
-                // The first part defines the starting selection; only later parts combine.
-                if index > 0 {
-                    componentModeMenu(component, layerID: layer.id)
-                }
-                Spacer()
-                Button {
-                    maskingState.toggleSolo(componentID: component.id, layerID: layer.id)
-                } label: {
-                    Image(systemName: maskingState.soloComponentID == component.id
-                        ? "eye.fill" : "eye")
-                }
-                .buttonStyle(.borderless)
-                .help("Show only this part in the overlay")
-                .accessibilityLabel("Solo \(component.displayName)")
-                .accessibilityValue(
-                    maskingState.soloComponentID == component.id ? "On" : "Off")
-                Toggle(
-                    "Enabled",
-                    isOn: componentBinding(
-                        component.id, layerID: layer.id, keyPath: \.isEnabled)
-                )
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .controlSize(.mini)
-                .accessibilityLabel("Enable \(component.displayName)")
-                Menu {
-                    Button("Move up") {
-                        viewModel.moveMaskComponent(component.id, in: layer.id, by: -1)
-                    }
-                    .disabled(index == 0)
-                    Button("Move down") {
-                        viewModel.moveMaskComponent(component.id, in: layer.id, by: 1)
-                    }
-                    .disabled(index == layer.components.count - 1)
-                    Divider()
-                    Button("Delete", role: .destructive) {
-                        viewModel.deleteMaskComponent(component.id, from: layer.id)
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .accessibilityLabel("Actions for \(component.displayName)")
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                viewModel.selectMaskComponent(component.id, in: layer.id)
-            }
-        }
-        .padding(7)
-        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: Overlay
@@ -590,25 +533,6 @@ struct MaskingWorkspace: View {
             }
             .padding(.top, 10)
         }
-    }
-
-    private func componentModeMenu(_ component: MaskComponent, layerID: UUID) -> some View {
-        Menu {
-            ForEach([MaskCombineMode.replace, .add, .subtract, .intersect], id: \.self) { mode in
-                Button {
-                    viewModel.setMaskComponentMode(component.id, in: layerID, mode: mode)
-                } label: {
-                    Label(mode.title, systemImage: component.mode == mode ? "checkmark" : "")
-                }
-            }
-        } label: {
-            Text(component.mode.title)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-        .menuStyle(.borderlessButton)
-        .accessibilityLabel("Component combine mode")
-        .accessibilityValue(component.mode.title)
     }
 
     /// - Parameter allowsInvert: A single-source mask is inverted by the mask-level toggle; a
@@ -1041,7 +965,7 @@ private struct MaskLayerRow: View {
                 )
                 .textFieldStyle(.plain)
                 .font(.caption.weight(.medium))
-                if layer.maskingSummary != layer.name {
+                if layer.components.count <= 1, layer.maskingSummary != layer.name {
                     Text(layer.maskingSummary)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
@@ -1117,6 +1041,156 @@ private struct MaskLayerRow: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityAction(named: "Select mask layer \(layer.name)") {
             viewModel.selectMaskLayer(layer.id)
+        }
+    }
+}
+
+/// One part of a multi-part mask, indented beneath its mask. The leading glyph says how the part
+/// combines with the parts above it (the first part is the starting selection); selecting a part
+/// shows its controls in the Mask section and points canvas gestures at it.
+private struct MaskPartRow: View {
+    @ObservedObject var viewModel: AppViewModel
+    @ObservedObject var maskingState: MaskInteractionState
+    let layer: LocalAdjustmentLayer
+    let component: MaskComponent
+    let index: Int
+
+    private var isSelected: Bool {
+        guard maskingState.selectedLayerID == layer.id else { return false }
+        if let id = maskingState.selectedComponentID,
+            layer.components.contains(where: { $0.id == id })
+        {
+            return id == component.id
+        }
+        return layer.targetComponentIndex(selected: nil) == index
+    }
+
+    private var isSoloed: Bool { maskingState.soloComponentID == component.id }
+
+    private var partAccessibilityLabel: String {
+        let combine = index == 0 ? "" : ", \(component.mode.summaryWord),"
+        return "Part \(component.displayName)\(combine) of \(layer.name)"
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if index == 0 {
+                    Color.clear
+                } else {
+                    Image(systemName: component.mode.symbolName)
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .help(component.mode.summaryWord)
+                }
+            }
+            .frame(width: 12)
+            .accessibilityHidden(true)
+
+            Image(systemName: component.source.iconName)
+                .font(.caption)
+                .frame(width: 14)
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .accessibilityHidden(true)
+
+            TextField(
+                component.source.maskingTypeTitle,
+                text: Binding(
+                    get: { component.displayName },
+                    set: { viewModel.renameMaskComponent(component.id, in: layer.id, name: $0) }
+                )
+            )
+            .textFieldStyle(.plain)
+            .font(.caption)
+            .foregroundStyle(component.isEnabled ? .primary : .tertiary)
+
+            Spacer(minLength: 4)
+
+            if isSoloed {
+                Image(systemName: "eye.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .help("Overlay shows only this part")
+            }
+            if !component.isEnabled {
+                Text("Off")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Menu {
+                Button(component.isEnabled ? "Turn Off" : "Turn On") {
+                    viewModel.updateMaskComponent(component.id, in: layer.id) {
+                        $0.isEnabled.toggle()
+                    }
+                }
+                Button(isSoloed ? "Show All in Overlay" : "Solo in Overlay") {
+                    maskingState.toggleSolo(componentID: component.id, layerID: layer.id)
+                }
+                .accessibilityLabel("Solo \(component.displayName)")
+                .accessibilityValue(isSoloed ? "On" : "Off")
+                if index > 0 {
+                    Picker(
+                        "Combine",
+                        selection: Binding(
+                            get: { component.mode },
+                            set: {
+                                viewModel.setMaskComponentMode(
+                                    component.id, in: layer.id, mode: $0)
+                            }
+                        )
+                    ) {
+                        ForEach([MaskCombineMode.add, .subtract, .intersect], id: \.self) {
+                            Text($0.summaryWord).tag($0)
+                        }
+                    }
+                }
+                Divider()
+                Button("Move Up") {
+                    viewModel.moveMaskComponent(component.id, in: layer.id, by: -1)
+                }
+                .disabled(index == 0)
+                Button("Move Down") {
+                    viewModel.moveMaskComponent(component.id, in: layer.id, by: 1)
+                }
+                .disabled(index == layer.components.count - 1)
+                Divider()
+                Button("Delete", role: .destructive) {
+                    viewModel.deleteMaskComponent(component.id, from: layer.id)
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel("Actions for \(component.displayName)")
+        }
+        .padding(.vertical, 3)
+        .padding(.leading, 22)
+        .padding(.trailing, 6)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.08) : .clear,
+            in: RoundedRectangle(cornerRadius: 5)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { viewModel.selectMaskComponent(component.id, in: layer.id) }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(partAccessibilityLabel)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(named: "Select part \(component.displayName)") {
+            viewModel.selectMaskComponent(component.id, in: layer.id)
+        }
+    }
+}
+
+extension MaskCombineMode {
+    /// Glyph for how a part combines with the parts above it.
+    fileprivate var symbolName: String {
+        switch self {
+        case .replace, .add: return "plus"
+        case .subtract: return "minus"
+        case .intersect: return "multiply"
         }
     }
 }
