@@ -1160,6 +1160,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self?.refreshHistogramGate()
         }
 
+        // The overlay's look is a Settings preference; the masking canvas reads it from its own
+        // interaction state. @Published delivers the stored value immediately, then each change.
+        cancellables.append(
+            settings.$maskOverlayAppearance.sink { [weak self] appearance in
+                self?.maskInteractionState.apply(appearance)
+            })
+
         previewCoordinator.onPublication = { [weak self] publication in
             self?.publishPreview(publication)
         }

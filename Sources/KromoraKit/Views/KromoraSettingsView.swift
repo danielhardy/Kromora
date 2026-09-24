@@ -23,6 +23,42 @@ public struct KromoraSettingsView: View {
         self.workspace = workspace
     }
 
+    private var maskOverlaySection: some View {
+        Section {
+            Picker("Overlay style", selection: $settings.maskOverlayAppearance.inspection) {
+                ForEach(MaskInteractionState.OverlayInspection.allCases, id: \.self) {
+                    Text($0.title).tag($0)
+                }
+            }
+            ColorPicker(
+                "Overlay color",
+                selection: Binding(
+                    get: { settings.maskOverlayAppearance.color.color },
+                    set: { color in
+                        if let value = MaskOverlayColor(color) {
+                            settings.maskOverlayAppearance.color = value
+                        }
+                    }),
+                supportsOpacity: false
+            )
+            .disabled(settings.maskOverlayAppearance.inspection == .grayscale)
+            LabeledContent("Overlay opacity") {
+                HStack {
+                    Slider(value: $settings.maskOverlayAppearance.opacity, in: 0.05...1)
+                    Text("\(Int((settings.maskOverlayAppearance.opacity * 100).rounded()))%")
+                        .monospacedDigit()
+                        .frame(width: 40, alignment: .trailing)
+                }
+            }
+        } header: {
+            Text("Masking")
+        } footer: {
+            Text(
+                "The overlay shows what a mask selects. It is for viewing only and never changes "
+                    + "your edit or export. Press O while masking to show or hide it.")
+        }
+    }
+
     /// The edit store may not create its persistent file until the first successful save.
     /// A requested on-disk URL is therefore only revealable once the file exists.
     static func revealableEditDatabaseURL(for url: URL?) -> URL? {
@@ -40,6 +76,8 @@ public struct KromoraSettingsView: View {
             } footer: {
                 Text("When off, Kromora follows the macOS appearance setting.")
             }
+
+            maskOverlaySection
 
 #if KROMORA_DIRECT_DISTRIBUTION
             Section {

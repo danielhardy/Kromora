@@ -453,6 +453,12 @@ final class KeyMonitor {
             }
             if vm.navigate(to: .edit) { return nil }
             return event
+        case "o":
+            // Lightroom's key for the mask overlay: show or hide it while masking.
+            guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
+            guard KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods) else { return event }
+            vm.maskInteractionState.toggleOverlay()
+            return nil
         case "b":
             guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
             vm.setMaskTool(.brush)

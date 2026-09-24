@@ -4,13 +4,34 @@ import Foundation
 
 /// Platform-neutral color payload for the mask overlay controls. SwiftUI's `Color` is reconstructed
 /// by `MaskInteractionPresentationBridge` at the presentation boundary.
-struct MaskOverlayColor: Equatable, Sendable {
+struct MaskOverlayColor: Codable, Equatable, Sendable {
     var red: Double
     var green: Double
     var blue: Double
     var alpha: Double
 
     static let orange = Self(red: 1, green: 0.5, blue: 0, alpha: 1)
+}
+
+/// How the mask overlay looks on screen. It is a preference, not part of any edit: it lives in
+/// Settings, applies to every photo, and never reaches a render request or export.
+struct MaskOverlayAppearance: Codable, Equatable, Sendable {
+    var inspection: MaskInteractionState.OverlayInspection
+    var color: MaskOverlayColor
+    var opacity: Double
+
+    static let standard = Self(inspection: .colorWash, color: .orange, opacity: 0.35)
+
+    init(
+        inspection: MaskInteractionState.OverlayInspection, color: MaskOverlayColor,
+        opacity: Double
+    ) {
+        self.inspection = inspection
+        self.color = color
+        self.opacity = opacity.isFinite ? min(max(opacity, 0), 1) : Self.standardOpacity
+    }
+
+    private static let standardOpacity = 0.35
 }
 
 /// Presentation state for the selected semantic mask. An empty result is different from an
@@ -76,7 +97,7 @@ final class MaskInteractionState: ObservableObject {
         }
     }
 
-    enum OverlayInspection: String, CaseIterable, Sendable {
+    enum OverlayInspection: String, CaseIterable, Codable, Sendable {
         case colorWash, grayscale
 
         var title: String {
@@ -356,6 +377,15 @@ final class MaskInteractionState: ObservableObject {
     func consumeLinearCreationPending() { linearCreationPending = false }
     func markRadialCreationPending() { radialCreationPending = true }
     func consumeRadialCreationPending() { radialCreationPending = false }
+
+    /// Adopt the overlay appearance chosen in Settings.
+    func apply(_ appearance: MaskOverlayAppearance) {
+        overlayInspection = appearance.inspection
+        overlayColorValue = appearance.color
+        overlayOpacity = appearance.opacity
+    }
+
+    func toggleOverlay() { showOverlay.toggle() }
 
     func toggleSolo(layerID: UUID) {
         soloLayerID = soloLayerID == layerID ? nil : layerID

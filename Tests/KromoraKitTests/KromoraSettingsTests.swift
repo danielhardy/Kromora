@@ -36,6 +36,21 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
         XCTAssertTrue(relaunched.showPhotoNames)
     }
 
+    func testMaskOverlayAppearancePersistsAcrossRelaunch() {
+        let defaults = makeDefaults()
+        let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+        XCTAssertEqual(first.maskOverlayAppearance, .standard)
+
+        let chosen = MaskOverlayAppearance(
+            inspection: .grayscale,
+            color: MaskOverlayColor(red: 0.2, green: 0.6, blue: 1, alpha: 1),
+            opacity: 0.6)
+        first.maskOverlayAppearance = chosen
+
+        let relaunched = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+        XCTAssertEqual(relaunched.maskOverlayAppearance, chosen)
+    }
+
     func testLastCopyCategoriesPersistAcrossRelaunch() {
         let defaults = makeDefaults()
         let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)

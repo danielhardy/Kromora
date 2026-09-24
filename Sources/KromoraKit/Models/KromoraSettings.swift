@@ -71,6 +71,7 @@ public final class KromoraSettings: ObservableObject {
         static let sourceFolder = "Kromora.settings.defaultSourceFolder"
         static let exportFolder = "Kromora.settings.defaultExportFolder"
         static let lastCopyCategories = "Kromora.settings.lastCopyCategories"
+        static let maskOverlayAppearance = "Kromora.settings.maskOverlayAppearance"
         static let legacyDarkMode = "Lumo.alwaysDarkMode"
     }
 
@@ -106,6 +107,25 @@ public final class KromoraSettings: ObservableObject {
         set {
             preferences.set(newValue.map(\.rawValue).sorted(), forKey: Key.lastCopyCategories)
         }
+    }
+
+    /// How mask overlays look in the Masking inspector. A display preference shared by every
+    /// photo; it never changes an edit or an export.
+    @Published var maskOverlayAppearance: MaskOverlayAppearance {
+        didSet {
+            guard maskOverlayAppearance != oldValue else { return }
+            guard let data = try? JSONEncoder().encode(maskOverlayAppearance) else { return }
+            preferences.set(data, forKey: Key.maskOverlayAppearance)
+        }
+    }
+
+    private static func storedMaskOverlayAppearance(in preferences: UserDefaults)
+        -> MaskOverlayAppearance
+    {
+        guard let data = preferences.data(forKey: Key.maskOverlayAppearance) else {
+            return .standard
+        }
+        return (try? JSONDecoder().decode(MaskOverlayAppearance.self, from: data)) ?? .standard
     }
 
 #if KROMORA_DIRECT_DISTRIBUTION
@@ -146,6 +166,7 @@ public final class KromoraSettings: ObservableObject {
         // An absent key means the user has never chosen a value. Keep an explicit stored choice,
         // including `true`, so changing the default does not override an opt-in.
         self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
+        self.maskOverlayAppearance = Self.storedMaskOverlayAppearance(in: preferences)
 #if KROMORA_DIRECT_DISTRIBUTION
         self.automaticUpdateChecks = preferences.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true
 #endif
