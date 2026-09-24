@@ -448,12 +448,8 @@ final class MaskingWorkflowCoordinator {
                 )
             )
         }
-        interactionState.setTool(
-            kind == .foreground
-                ? .foreground
-                : kind == .background
-                    ? .background : MaskInteractionState.Tool(rawValue: kind.rawValue) ?? .selection
-        )
+        // Smart masks have no canvas tool; returning to Select keeps the canvas navigable.
+        interactionState.setTool(MaskInteractionState.Tool(rawValue: kind.rawValue) ?? .selection)
         interactionState.select(componentID: component.id, in: layerID)
         if kind == .linear {
             interactionState.markLinearCreationPending()
@@ -985,12 +981,17 @@ final class MaskingWorkflowCoordinator {
            draft.id == interactionState.selectedLayerID {
             layer = draft
         } else if let id = interactionState.selectedLayerID,
-                  let existing = destination.document.localAdjustments.first(where: { $0.id == id }) {
+                  let existing = destination.document.localAdjustments.first(where: { $0.id == id }),
+                  gradientToolCanEdit(existing) {
             layer = existing
         } else if interactionState.activeTool == .linear
                     || interactionState.activeTool == .radial {
             // A drag with a gradient tool is also a creation gesture. Keep the new layer
             // transient until mouse-up so Escape/cancel leaves no empty durable layer behind.
+            // A selected mask whose target is not this kind of gradient cannot be edited by the
+            // drag, so the drag draws a new gradient instead of silently doing nothing; the prior
+            // selection is remembered so a click that never becomes a gradient restores it.
+            interactionState.rememberSelectionBeforeCreation()
             let source: MaskSource = interactionState.activeTool == .radial
                 ? .radial(RadialGradientDefinition(center: clamped,
                                                    horizontalRadius: 0, verticalRadius: 0))
@@ -1090,6 +1091,21 @@ final class MaskingWorkflowCoordinator {
         }
         updateMaskGesture(to: point, modifiers: modifiers)
         destination.beginPreviewInteraction()
+    }
+
+    /// Brush and erase always paint into the selected layer. A gradient tool edits the selected
+    /// layer only when its target component is that same gradient; the handles on the canvas
+    /// belong to that component, and nothing else in the layer can respond to the drag.
+    private func gradientToolCanEdit(_ layer: LocalAdjustmentLayer) -> Bool {
+        let tool = interactionState.activeTool
+        guard tool == .linear || tool == .radial else { return true }
+        guard let index = layer.targetComponentIndex(
+            selected: interactionState.selectedComponentID) else { return false }
+        switch layer.components[index].source {
+        case .linear: return tool == .linear
+        case .radial: return tool == .radial
+        case .brush, .semantic: return false
+        }
     }
 
     func updateMaskGesture(
