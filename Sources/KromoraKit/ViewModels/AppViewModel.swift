@@ -326,14 +326,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Keeping the snapshot outside the persisted edit document lets ordinary Temperature/Tint edits
     /// remain undoable without moving the comparison reference.
     private var comparisonBaselineDocument = EditDocument().comparisonBaseline
-    /// The baseline revision already queued or published for the Original surface. A visible
-    /// adjusted render can follow every Temperature/Tint tick, but it must not enqueue the same
-    /// Original request again when the baseline revision is unchanged.
-    private var comparisonPreviewScheduledRevision: UInt64?
-    /// A failed Original render gets one retry after the scheduler has retired the failed attempt.
-    /// The revision key prevents a persistent renderer failure from spinning the editor lane.
-    private var comparisonPreviewRetriedRevision: UInt64?
-    private var comparisonPreviewRetryTask: Task<Void, Never>?
     /// The last settled request confirmed by the presentation surface. Supporting work is never
     /// admitted before this lifecycle boundary.
     private var lastPresentedVisibleRequest: RenderRequest?
@@ -809,7 +801,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// such as histogram and edited-thumbnail generation is admitted only after this source's
     /// stored document has been reconciled.
     private var storedEditsResolvedSourceRevision: UInt64?
-    private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
     /// The embedded camera JPEG is a presentation-only first frame. It never enters the render
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
@@ -2022,9 +2013,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         isShowingOriginal = false
         metadata = ImageMetadata()
         cancelComparisonPreview(pump: false)
-        comparisonPreviewRetryTask?.cancel()
-        comparisonPreviewRetryTask = nil
-        comparisonPreviewScheduledRevision = nil
+        previewAdmissionCoordinator.resetComparisonPreviewAdmission()
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         cancelPendingPreviewDebounce()
         rawCapabilities = nil
@@ -3335,7 +3324,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         if comparisonChanged {
             comparisonBaselineDocument = updated.comparisonBaseline
             previewPresentation.advanceComparisonRevision()
-            comparisonPreviewScheduledRevision = nil
+            previewAdmissionCoordinator.resetComparisonPreviewAdmission()
             cancelComparisonPreview(pump: false)
             originalPreviewSurface.clear()
         }
@@ -3638,9 +3627,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // develop-frame comparison check.
         comparisonBaselineDocument = document.comparisonBaseline
         previewPresentation.advanceComparisonRevision()
-        comparisonPreviewScheduledRevision = nil
-        comparisonPreviewRetryTask?.cancel()
-        comparisonPreviewRetryTask = nil
+        previewAdmissionCoordinator.resetComparisonPreviewAdmission()
         cancelComparisonPreview(pump: false)
         originalPreviewSurface.clear()
         pendingDevelopChange = true
@@ -3698,7 +3685,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         if comparisonChanged {
             comparisonBaselineDocument = restored.comparisonBaseline
-            comparisonPreviewScheduledRevision = nil
+            previewAdmissionCoordinator.resetComparisonPreviewAdmission()
         }
         refreshLUTResolutionStatus()
         saveActiveDocument(force: true)
@@ -3708,7 +3695,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         if comparisonChanged {
             previewPresentation.advanceComparisonRevision()
-            comparisonPreviewScheduledRevision = nil
+            previewAdmissionCoordinator.resetComparisonPreviewAdmission()
             cancelComparisonPreview(pump: false)
             originalPreviewSurface.clear()
         }
@@ -3892,163 +3879,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         allowHiddenPreparation: Bool = false,
         allowBeforePresentationConfirmation: Bool = false
     ) {
-        let hasCurrentPreviewCandidate =
-            allowBeforePresentationConfirmation
-            && previewSurface.image != nil
-            && lastPublishedVisibleRequest?.source == imageSource
-            && lastPublishedVisibleRequest?.document == document
-        guard lastPresentedVisibleRequest != nil || hasCurrentPreviewCandidate,
-            isSideBySideVisible || allowHiddenPreparation,
-            let imageSource
-        else {
-            comparisonPreviewScheduledRevision = nil
-            cancelComparisonPreview()
-            originalPreviewSurface.clear()
-            return
-        }
-        guard comparisonPreviewScheduledRevision != comparisonRevision else { return }
-        let baseline = comparisonBaselineDocument
-        let plan = resolutionPlan(
-            for: baseline,
-            nativeExtent: imageSource.nativeExtent,
-            viewportSize: previewAdmissionCoordinator.previewBackingSize,
-            surface: .comparisonBaseline
+        previewAdmissionCoordinator.scheduleOriginalPreview(
+            allowHiddenPreparation: allowHiddenPreparation,
+            allowBeforePresentationConfirmation: allowBeforePresentationConfirmation
         )
-        let sourceRevision = self.sourceRevision
-        let comparisonRevision = self.comparisonRevision
-        let assetID = self.activeAssetID
-        let sourceReference = self.activeSourceReference
-        comparisonPreviewScheduledRevision = comparisonRevision
-
-        let accepted = workScheduler.enqueue(
-            id: comparisonPreviewJobID, lane: .editor, priority: .comparison,
-            onTerminal: { [weak self] outcome in
-                guard outcome != .completed,
-                    let self,
-                    assetID == self.activeAssetID,
-                    sourceReference == self.activeSourceReference,
-                    sourceRevision == self.sourceRevision,
-                    comparisonRevision == self.comparisonRevision,
-                    self.comparisonPreviewScheduledRevision == comparisonRevision
-                else { return }
-                // A queued comparison can be evicted by a newer active-editor render. Leave the
-                // revision retryable so the next settled publication can re-admit it; otherwise a
-                // valid selected image could keep the Original pane blank forever.
-                self.comparisonPreviewScheduledRevision = nil
-            },
-            operation: { [weak self, engine] in
-                guard !Task.isCancelled, let self else { return }
-                // Cancellation can arrive after this job has been admitted to the scheduler but
-                // before the renderer call begins. Check the same source/revision fence before asking
-                // the engine, otherwise an obsolete baseline still consumes a render and looks like a
-                // cross-photo comparison request even though its eventual publication is discarded.
-                guard assetID == self.activeAssetID,
-                    sourceReference == self.activeSourceReference,
-                    sourceRevision == self.sourceRevision,
-                    comparisonRevision == self.comparisonRevision,
-                    self.imageSource == imageSource
-                else { return }
-                let request = self.admissionSettledRequest(
-                    source: imageSource,
-                    assetID: assetID,
-                    document: baseline,
-                    lut: nil,
-                    plan: plan, canonical: false
-                )
-                let gpuImage = await engine.makeCIImage(request)
-                if let gpuImage {
-                    guard !Task.isCancelled,
-                        assetID == self.activeAssetID,
-                        sourceReference == self.activeSourceReference,
-                        sourceRevision == self.sourceRevision,
-                        comparisonRevision == self.comparisonRevision,
-                        self.imageSource == imageSource
-                    else { return }
-                    let hadValidOriginal = self.originalPreviewSurface.image != nil
-                    guard
-                        self.originalPreviewSurface.present(
-                            gpuImage,
-                            space: request.space,
-                            presentationImageExtent: request.presentationImageExtent,
-                            coversPresentationExtent: request.coversPresentationExtent,
-                            layoutImageExtent: request.presentationLayoutExtent,
-                            presentationNavigation: request.presentationNavigation
-                        ) || hadValidOriginal
-                    else {
-                        self.comparisonPreviewDidFail(
-                            sourceReference: sourceReference,
-                            sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
-                        )
-                        return
-                    }
-                    return
-                }
-                let cgImage = await engine.makeCGImage(request)
-                guard !Task.isCancelled,
-                    assetID == self.activeAssetID,
-                    sourceReference == self.activeSourceReference,
-                    sourceRevision == self.sourceRevision,
-                    comparisonRevision == self.comparisonRevision,
-                    self.imageSource == imageSource,
-                    let cgImage
-                else { return }
-                let hadValidOriginal = self.originalPreviewSurface.image != nil
-                guard
-                    self.originalPreviewSurface.present(
-                        CIImage(cgImage: cgImage),
-                        space: request.space,
-                        presentationImageExtent: request.presentationImageExtent,
-                        coversPresentationExtent: request.coversPresentationExtent,
-                        layoutImageExtent: request.presentationLayoutExtent,
-                        presentationNavigation: request.presentationNavigation
-                    ) || hadValidOriginal
-                else {
-                    self.comparisonPreviewDidFail(
-                        sourceReference: sourceReference,
-                        sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
-                    )
-                    return
-                }
-            }
-        )
-        if !accepted, comparisonPreviewScheduledRevision == comparisonRevision {
-            comparisonPreviewScheduledRevision = nil
-        }
     }
 
     private func comparisonPreviewDidFail(
-        sourceReference: EditSourceReference?,
-        sourceRevision: UInt64, comparisonRevision: UInt64
+        sourceReference: EditSourceReference?, sourceRevision: UInt64,
+        comparisonRevision: UInt64
     ) {
-        guard activeAssetID != nil,
-            sourceReference == activeSourceReference,
-            sourceRevision == self.sourceRevision,
-            comparisonRevision == self.comparisonRevision,
-            isSideBySideVisible,
-            comparisonPreviewScheduledRevision == comparisonRevision
-        else { return }
-        comparisonPreviewScheduledRevision = nil
-        originalPreviewSurface.clear()
-        statusMessage = "Could not display the comparison preview. Retrying…"
-        guard comparisonPreviewRetriedRevision != comparisonRevision else { return }
-        comparisonPreviewRetriedRevision = comparisonRevision
-        comparisonPreviewRetryTask?.cancel()
-        comparisonPreviewRetryTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(25))
-            guard !Task.isCancelled, let self,
-                sourceReference == self.activeSourceReference,
-                sourceRevision == self.sourceRevision,
-                comparisonRevision == self.comparisonRevision,
-                self.isSideBySideVisible,
-                self.comparisonPreviewScheduledRevision != comparisonRevision
-            else { return }
-            self.comparisonPreviewRetryTask = nil
-            self.scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
-        }
+        previewAdmissionCoordinator.comparisonPreviewDidFail(
+            sourceReference: sourceReference, sourceRevision: sourceRevision,
+            comparisonRevision: comparisonRevision
+        )
     }
 
     private func cancelComparisonPreview(pump: Bool = true) {
-        workScheduler.cancel(id: comparisonPreviewJobID, pump: pump)
+        previewAdmissionCoordinator.cancelComparisonPreview(pump: pump)
     }
 
     /// Toggle between original and LUT preview (for Space-hold comparison).
@@ -4088,7 +3936,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
         } else {
             cancelComparisonPreview()
-            comparisonPreviewScheduledRevision = nil
+            previewAdmissionCoordinator.resetComparisonPreviewAdmission()
             originalPreviewSurface.clear()
         }
         return true
@@ -4447,8 +4295,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         documentRevision &+= 1
         previewPresentation.resetForSource()
         previewAdmissionCoordinator.cancelPreviewDebounce()
-        comparisonPreviewRetryTask?.cancel()
-        comparisonPreviewRetryTask = nil
+        previewAdmissionCoordinator.cancelComparisonRetry()
 
         // Disconnect callbacks first so a child that finishes while shutdown is re-entrant cannot
         // schedule new work or publish into the model.
@@ -4619,7 +4466,15 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionPreviewBackingSize: CGSize { previewAdmissionCoordinator.previewBackingSize }
     var admissionDocument: EditDocument { document }
     var admissionComparisonBaselineDocument: EditDocument { comparisonBaselineDocument }
+    var admissionComparisonRevision: UInt64 { comparisonRevision }
+    var admissionActiveSourceReference: EditSourceReference? { activeSourceReference }
     var admissionIsShowingOriginal: Bool { isShowingOriginal }
+    var admissionIsSideBySideVisible: Bool { isSideBySideVisible }
+    var admissionHasComparisonPreviewCandidate: Bool {
+        previewSurface.image != nil
+            && lastPublishedVisibleRequest?.source == imageSource
+            && lastPublishedVisibleRequest?.document == document
+    }
     var admissionSelectedLook: CubeLUT? { selectedLook }
     var admissionCropToolActive: Bool { canvasState.isCropToolActive }
     var admissionCanvasNavigation: CanvasNavigation { canvasState.navigation }
@@ -4690,4 +4545,16 @@ extension AppViewModel: PreviewAdmissionDestination {
     func publishAdmissionHistogramLoading(_ isLoading: Bool) { isHistogramLoading = isLoading }
     func publishAdmissionHistogramError(_ message: String?) { histogramErrorMessage = message }
     func publishAdmissionStatus(_ message: String) { statusMessage = message }
+    func admissionPresentOriginalPreview(_ image: CIImage, request: RenderRequest) -> Bool {
+        let hadValidOriginal = originalPreviewSurface.image != nil
+        return originalPreviewSurface.present(
+            image,
+            space: request.space,
+            presentationImageExtent: request.presentationImageExtent,
+            coversPresentationExtent: request.coversPresentationExtent,
+            layoutImageExtent: request.presentationLayoutExtent,
+            presentationNavigation: request.presentationNavigation
+        ) || hadValidOriginal
+    }
+    func admissionClearOriginalPreview() { originalPreviewSurface.clear() }
 }

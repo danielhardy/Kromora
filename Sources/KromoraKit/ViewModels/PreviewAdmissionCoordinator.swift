@@ -28,7 +28,11 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionPreviewBackingSize: CGSize { get }
     var admissionDocument: EditDocument { get }
     var admissionComparisonBaselineDocument: EditDocument { get }
+    var admissionComparisonRevision: UInt64 { get }
+    var admissionActiveSourceReference: EditSourceReference? { get }
     var admissionIsShowingOriginal: Bool { get }
+    var admissionIsSideBySideVisible: Bool { get }
+    var admissionHasComparisonPreviewCandidate: Bool { get }
     var admissionSelectedLook: CubeLUT? { get }
     var admissionCropToolActive: Bool { get }
     var admissionCanvasNavigation: CanvasNavigation { get }
@@ -58,6 +62,8 @@ protocol PreviewAdmissionDestination: AnyObject {
     func publishAdmissionHistogramLoading(_ isLoading: Bool)
     func publishAdmissionHistogramError(_ message: String?)
     func publishAdmissionStatus(_ message: String)
+    func admissionPresentOriginalPreview(_ image: CIImage, request: RenderRequest) -> Bool
+    func admissionClearOriginalPreview()
 }
 
 /// Admission policy for preview and supporting work. Render execution remains in
@@ -94,6 +100,10 @@ final class PreviewAdmissionCoordinator {
     private var pendingPreviewCacheLookup:
         (request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64, displayRevision: UInt64)?
     private var previewScheduledSourceRevision: UInt64?
+    private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
+    private var comparisonPreviewScheduledRevision: UInt64?
+    private var comparisonPreviewRetriedRevision: UInt64?
+    private var comparisonPreviewRetryTask: Task<Void, Never>?
     var previewBackingSize = CGSize(width: 1600, height: 1200)
     private static let intensityDebounceMs = 60
     private var previewDebounceTask: Task<Void, Never>?
@@ -213,7 +223,150 @@ final class PreviewAdmissionCoordinator {
         previewDebounceTask?.cancel()
         previewDebounceTask = nil
         pendingPreviewCacheLookup = nil
+        comparisonPreviewRetryTask?.cancel()
+        comparisonPreviewRetryTask = nil
         destination = nil
+    }
+
+    func cancelComparisonRetry() {
+        comparisonPreviewRetryTask?.cancel()
+        comparisonPreviewRetryTask = nil
+    }
+
+    func resetComparisonPreviewAdmission() {
+        comparisonPreviewScheduledRevision = nil
+        cancelComparisonRetry()
+    }
+
+    func scheduleOriginalPreview(
+        allowHiddenPreparation: Bool = false,
+        allowBeforePresentationConfirmation: Bool = false
+    ) {
+        guard let destination else { return }
+        let hasCurrentPreviewCandidate = allowBeforePresentationConfirmation
+            && destination.admissionHasComparisonPreviewCandidate
+        guard destination.admissionLastPresentedRequest != nil || hasCurrentPreviewCandidate,
+            destination.admissionIsSideBySideVisible || allowHiddenPreparation,
+            let imageSource = destination.admissionImageSource
+        else {
+            comparisonPreviewScheduledRevision = nil
+            cancelComparisonPreview()
+            destination.admissionClearOriginalPreview()
+            return
+        }
+        let comparisonRevision = destination.admissionComparisonRevision
+        guard comparisonPreviewScheduledRevision != comparisonRevision else { return }
+        let baseline = destination.admissionComparisonBaselineDocument
+        let plan = destination.admissionPresentation.plan(
+            for: baseline,
+            nativeExtent: imageSource.nativeExtent,
+            viewportSize: destination.admissionPreviewBackingSize,
+            surface: .comparisonBaseline,
+            navigation: destination.admissionCanvasNavigation
+        )
+        let sourceRevision = destination.admissionSourceRevision
+        let assetID = destination.admissionActiveAssetID
+        let sourceReference = destination.admissionActiveSourceReference
+        comparisonPreviewScheduledRevision = comparisonRevision
+
+        let accepted = workScheduler.enqueue(
+            id: comparisonPreviewJobID, lane: .editor, priority: .comparison,
+            onTerminal: { [weak self, weak destination] outcome in
+                guard outcome != .completed, let self, let destination,
+                    assetID == destination.admissionActiveAssetID,
+                    sourceReference == destination.admissionActiveSourceReference,
+                    sourceRevision == destination.admissionSourceRevision,
+                    comparisonRevision == destination.admissionComparisonRevision,
+                    self.comparisonPreviewScheduledRevision == comparisonRevision
+                else { return }
+                // A queued comparison can be evicted by a newer active-editor render. Leave the
+                // revision retryable so the next settled publication can re-admit it.
+                self.comparisonPreviewScheduledRevision = nil
+            },
+            operation: { [weak self, weak destination, engine] in
+                guard !Task.isCancelled, let self, let destination,
+                    assetID == destination.admissionActiveAssetID,
+                    sourceReference == destination.admissionActiveSourceReference,
+                    sourceRevision == destination.admissionSourceRevision,
+                    comparisonRevision == destination.admissionComparisonRevision,
+                    destination.admissionImageSource == imageSource
+                else { return }
+                let request = destination.admissionSettledRequest(
+                    source: imageSource, assetID: assetID, document: baseline, lut: nil,
+                    plan: plan, canonical: false
+                )
+                let gpuImage = await engine.makeCIImage(request)
+                if let gpuImage {
+                    guard !Task.isCancelled,
+                        assetID == destination.admissionActiveAssetID,
+                        sourceReference == destination.admissionActiveSourceReference,
+                        sourceRevision == destination.admissionSourceRevision,
+                        comparisonRevision == destination.admissionComparisonRevision,
+                        destination.admissionImageSource == imageSource
+                    else { return }
+                    if !destination.admissionPresentOriginalPreview(gpuImage, request: request) {
+                        self.comparisonPreviewDidFail(
+                            sourceReference: sourceReference,
+                            sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
+                        )
+                    }
+                    return
+                }
+                let cgImage = await engine.makeCGImage(request)
+                guard !Task.isCancelled,
+                    assetID == destination.admissionActiveAssetID,
+                    sourceReference == destination.admissionActiveSourceReference,
+                    sourceRevision == destination.admissionSourceRevision,
+                    comparisonRevision == destination.admissionComparisonRevision,
+                    destination.admissionImageSource == imageSource,
+                    let cgImage
+                else { return }
+                if !destination.admissionPresentOriginalPreview(CIImage(cgImage: cgImage), request: request) {
+                    self.comparisonPreviewDidFail(
+                        sourceReference: sourceReference,
+                        sourceRevision: sourceRevision, comparisonRevision: comparisonRevision
+                    )
+                }
+            }
+        )
+        if !accepted, comparisonPreviewScheduledRevision == comparisonRevision {
+            comparisonPreviewScheduledRevision = nil
+        }
+    }
+
+    func comparisonPreviewDidFail(
+        sourceReference: EditSourceReference?,
+        sourceRevision: UInt64, comparisonRevision: UInt64
+    ) {
+        guard let destination, destination.admissionActiveAssetID != nil,
+            sourceReference == destination.admissionActiveSourceReference,
+            sourceRevision == destination.admissionSourceRevision,
+            comparisonRevision == destination.admissionComparisonRevision,
+            destination.admissionIsSideBySideVisible,
+            comparisonPreviewScheduledRevision == comparisonRevision
+        else { return }
+        comparisonPreviewScheduledRevision = nil
+        destination.admissionClearOriginalPreview()
+        destination.publishAdmissionStatus("Could not display the comparison preview. Retrying…")
+        guard comparisonPreviewRetriedRevision != comparisonRevision else { return }
+        comparisonPreviewRetriedRevision = comparisonRevision
+        comparisonPreviewRetryTask?.cancel()
+        comparisonPreviewRetryTask = Task { [weak self, weak destination] in
+            try? await Task.sleep(for: .milliseconds(25))
+            guard !Task.isCancelled, let self, let destination,
+                sourceReference == destination.admissionActiveSourceReference,
+                sourceRevision == destination.admissionSourceRevision,
+                comparisonRevision == destination.admissionComparisonRevision,
+                destination.admissionIsSideBySideVisible,
+                self.comparisonPreviewScheduledRevision != comparisonRevision
+            else { return }
+            self.comparisonPreviewRetryTask = nil
+            self.scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
+        }
+    }
+
+    func cancelComparisonPreview(pump: Bool = true) {
+        workScheduler.cancel(id: comparisonPreviewJobID, pump: pump)
     }
 
     var isPreviewDebouncing: Bool { previewDebounceTask != nil }
