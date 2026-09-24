@@ -104,6 +104,7 @@ cleanup() {
     /usr/bin/hdiutil detach "$mount_dir" -force >/dev/null 2>&1 || true
   fi
   rm -rf "$staging_dir" "$mount_dir" "$work_dmg"
+  rm -f "$app_notarize_zip"
   if [[ "$success" != 1 ]]; then
     rm -f "$release_dmg"
   fi
