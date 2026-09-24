@@ -34,7 +34,9 @@ struct LibraryGridView: View {
                 .accessibilityHint(
                     "Move managed originals to the macOS Trash; keep referenced originals"
                 )
-                .disabled(collection.deletionCandidates.isEmpty)
+                // `deletionCandidates` copies asset names for the confirmation sheet. The
+                // button only needs to know whether a selection exists.
+                .disabled(collection.selection.selectedIDs.isEmpty && collection.selection.activeID == nil)
                 .padding(.horizontal, 12)
             }
             Divider()

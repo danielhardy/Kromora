@@ -165,7 +165,7 @@ final class ImageCollectionPresentationModel {
 
     private var collectionRevision: UInt64 = 0
     private var filterRevision: UInt64 = 0
-    private var projectionCache = CollectionProjection.Cache()
+    private let projectionCache = CollectionProjection.Cache()
     private struct CullingChange {
         let itemID: PhotoAssetID
         let oldState: PhotoAssetLibraryState
@@ -215,6 +215,10 @@ final class ImageCollectionPresentationModel {
     var deletionCandidates: [DeletionCandidate] {
         let ids = selection.selectedIDs.isEmpty
             ? (selection.activeID.map { Set([$0]) } ?? []) : selection.selectedIDs
+        // An empty selection must not walk `items`. Each item's id/name reads its observable
+        // asset, and a view that only needed `.isEmpty` would subscribe to every photo and
+        // keep the library update from finishing.
+        guard !ids.isEmpty else { return [] }
         return items.filter { ids.contains($0.id) }.map {
             DeletionCandidate(id: $0.id, displayName: $0.displayName, url: $0.url, sourceKind: .managed)
         }

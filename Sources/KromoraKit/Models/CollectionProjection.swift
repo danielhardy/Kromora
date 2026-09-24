@@ -7,7 +7,13 @@ enum CollectionProjection {
         let thumbnailEntries: [ImageCollection.ThumbnailEntry]
     }
 
-    struct Cache {
+    /// A class so a hit does not write the property that stores this cache.
+    ///
+    /// `ImageCollection` is `@Observable`. A struct cache's `mutating` method is written back
+    /// on every call, including a hit. The library grid reads that projection from its body, so
+    /// the write schedules another update inside the same transaction and the window never
+    /// returns to the event loop.
+    final class Cache {
         private var key: Key?
         private var value: Snapshot?
         private(set) var rebuildCount = 0
@@ -17,7 +23,7 @@ enum CollectionProjection {
             let filterRevision: UInt64
         }
 
-        mutating func snapshot(
+        func snapshot(
             items: [ImageCollection.Item], filter: LibraryFilter,
             collectionRevision: UInt64, filterRevision: UInt64
         ) -> Snapshot {
