@@ -12,16 +12,35 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-09-23T15:47:02.359Z
+updated: 2026-09-24T01:13:35.039Z
 depends_on:
   - KRMA-465
   - KRMA-466
   - KRMA-467
   - KRMA-468
   - KRMA-469
+blockers: []
 order: f
 board: product
 ---
+
+## Current disposition (reviewed 2026-09-23)
+
+This remains a **backlog tracking parent**. Do not claim it, do not `dg issue prepare` it, and do not implement several stages in one session.
+
+`AppViewModel.swift` is **5,561 lines** as of this review. Later tickets already finished part of the plan below. A follow-on agent should execute only the open children:
+
+| Child | Original stage | Disposition |
+| --- | --- | --- |
+| KRMA-461, KRMA-462, KRMA-463 | Unrelated UI bugs filed beside this plan | Already `done`. Ignore. |
+| KRMA-464 | Stage 0, optional façade file moves | **Withdrawn.** Crop/canvas forwarders already exist (KRMA-552). The “Look folder” MARK also contains `shutdown()`. A file split here does not change ownership. |
+| KRMA-465 | Stage 1, Auto invocation | **Superseded by KRMA-528.** `AutoWorkflowCoordinator` owns invocation, progress, and cancellation. The remaining Auto MARK (`runAutoAdjustment`, about lines 1441–1571) is the apply façade and stays on the root. |
+| KRMA-466 | Stage 2, edited thumbnails | **Still open.** This is the next implementation ticket. |
+| KRMA-467 | Stage 3, preview and histogram scheduling | **Still open.** Start only after KRMA-466. The preview MARK is still about 365 lines, and idle/prefetch/histogram admission is still on the root. |
+| KRMA-468 | Stage 4, masking workspace | **Superseded by KRMA-529.** `MaskingWorkflowCoordinator` owns the workspace. `AppViewModel+Masking.swift` is 172 lines of forwarders. |
+| KRMA-469 | Stage 5, re-inventory and docs | **Still open, last.** Start only after KRMA-466 and KRMA-467. `docs/APP_ARCHITECTURE.md` already documents source session, preview presentation, canvas, library import, and masking. |
+
+The inventory table and stage write-ups under “Remaining inventory (2026-09-19)” are the original plan. Where they disagree with the table above, follow the table above.
 
 ## Objective
 
@@ -156,3 +175,8 @@ After stages 1–4, list remaining root methods. Expected leftover: `init`/wirin
 ### Comment — codex @ 2026-09-19T16:28:35.439Z
 
 Plan decomposition recorded: KRMA-464 is the optional Stage 0 façade-only cleanup; KRMA-465 through KRMA-468 are the ownership extractions for Auto, edited thumbnails, preview/histogram scheduling, and masking; KRMA-469 is the final root re-inventory/documentation stage. KRMA-460 depends on the required ownership/re-inventory children and remains a backlog tracking parent.
+
+
+### Comment — cursor @ 2026-09-24T01:13:35.038Z
+
+Triage 2026-09-23: parent stays backlog. KRMA-464 withdrawn. KRMA-465 superseded by KRMA-528. KRMA-468 superseded by KRMA-529. Remaining execution is KRMA-466, then KRMA-467, then KRMA-469.
