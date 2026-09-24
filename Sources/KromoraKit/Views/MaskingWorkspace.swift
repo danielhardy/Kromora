@@ -2,10 +2,18 @@ import AppKit
 import SwiftUI
 
 /// Persistent local-mask editor. The workspace is an inspector tab, so it stays beside the canvas
-/// while the photographer changes layers, reopens saved recipes, or switches tools.
+/// while the photographer changes masks, reopens saved recipes, or switches tools.
+///
+/// The panel reads top to bottom in task order: choose what a canvas drag does, choose (or add) a
+/// mask, then shape it and set its adjustments. Overlay inspection is presentation-only, so its
+/// settings sit collapsed at the bottom and only the show/hide switch stays in the header.
 struct MaskingWorkspace: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject private var maskingState: MaskInteractionState
+
+    @State private var adjustmentsExpanded = true
+    @State private var maskShapeExpanded = true
+    @State private var overlayExpanded = false
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
@@ -14,16 +22,23 @@ struct MaskingWorkspace: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 12) {
                 header
-                toolPicker
-                creationPrompt
-                overlayControls
-                renderStatus
-                layerList
-                selectedInspector
+                if viewModel.sourceImage == nil {
+                    ContentUnavailableView(
+                        "No photo", systemImage: "photo",
+                        description: Text("Open a photo to edit masks."))
+                } else {
+                    toolPicker
+                    creationPrompt
+                    renderStatus
+                    maskList
+                    selectedInspector
+                    Divider()
+                    overlaySection
+                }
             }
-            .padding(12)
+            .padding(16)
         }
         .frame(minWidth: 280, idealWidth: 320)
         .onAppear { viewModel.restoreMaskSelection() }
@@ -32,62 +47,154 @@ struct MaskingWorkspace: View {
         }
     }
 
+    // MARK: Header
+
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Label("Masking", systemImage: "wand.and.rays")
-                .font(.title3.weight(.semibold))
+        HStack(spacing: 10) {
+            Text("Masking")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
             Spacer()
+            Toggle(isOn: $maskingState.showOverlay) {
+                Image(systemName: maskingState.showOverlay ? "eye" : "eye.slash")
+            }
+            .toggleStyle(.button)
+            .buttonStyle(.borderless)
+            .help("Show or hide the mask overlay. Display only; the edit is unchanged.")
+            .accessibilityLabel("Show overlay")
+            .accessibilityValue(maskingState.showOverlay ? "On" : "Off")
+            .accessibilityHint("Presentation only; does not change the saved mask or export")
+            addMaskMenu
             Button("Done") { viewModel.closeMaskingWorkspace() }
                 .buttonStyle(.borderless)
                 .accessibilityLabel("Close masking workspace")
-            Menu {
-                Section("Smart masks") {
-                    ForEach(MaskCreationKind.smartKinds, id: \.self) { kind in
-                        Button {
-                            viewModel.createSmartMask(kind)
-                        } label: {
-                            Label(kind.title, systemImage: kind.iconName)
-                        }
-                    }
-                }
-                Section("Paint and gradients") {
-                    ForEach(MaskCreationKind.allCases.filter { !$0.isSmart }, id: \.self) { kind in
-                        Button {
-                            viewModel.createMask(kind)
-                        } label: {
-                            Label(kind.title, systemImage: kind.iconName)
-                        }
-                    }
-                }
-            } label: {
-                Label("Add mask", systemImage: "plus")
-            }
-            .accessibilityLabel("Add mask layer")
-            .help("Create a new mask layer")
         }
     }
 
-    private var toolPicker: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text("Tools")
-                .font(.subheadline.weight(.semibold))
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 72), spacing: 5)], spacing: 5) {
-                ForEach(MaskInteractionState.Tool.allCases, id: \.self) { tool in
+    private var addMaskMenu: some View {
+        Menu {
+            Section("Smart masks") {
+                ForEach(MaskCreationKind.smartKinds, id: \.self) { kind in
                     Button {
-                        viewModel.setMaskTool(tool)
+                        create(kind)
                     } label: {
-                        Label(tool.title, systemImage: tool.iconName)
-                            .labelStyle(.titleAndIcon)
-                            .font(.caption)
+                        Label(kind.title, systemImage: kind.iconName)
                     }
-                    .buttonStyle(.bordered)
-                    .tint(maskingState.activeTool == tool ? .accentColor : .secondary)
-                    .accessibilityLabel("Mask tool \(tool.title)")
-                    .accessibilityValue(
-                        maskingState.activeTool == tool ? "Selected" : "Not selected")
                 }
             }
+            Section("Paint and gradients") {
+                ForEach(MaskCreationKind.canvasKinds, id: \.self) { kind in
+                    Button {
+                        create(kind)
+                    } label: {
+                        Label(kind.title, systemImage: kind.iconName)
+                    }
+                }
+            }
+        } label: {
+            Label("Add Mask", systemImage: "plus")
         }
+        .fixedSize()
+        .accessibilityLabel("Add mask layer")
+        .help("Create a new mask")
+    }
+
+    /// Smart masks are preflighted by the analysis provider before they enter the document; the
+    /// paint and gradient kinds are created directly.
+    private func create(_ kind: MaskCreationKind) {
+        if kind.isSmart {
+            viewModel.createSmartMask(kind)
+        } else {
+            viewModel.createMask(kind)
+        }
+    }
+
+    // MARK: Canvas tool
+
+    private var toolPicker: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Picker(
+                "Canvas tool",
+                selection: Binding(
+                    get: { maskingState.activeTool },
+                    set: { viewModel.setMaskTool($0) }
+                )
+            ) {
+                ForEach(MaskInteractionState.Tool.allCases, id: \.self) { tool in
+                    Label(tool.title, systemImage: tool.iconName)
+                        .labelStyle(.iconOnly)
+                        .accessibilityLabel("Mask tool \(tool.title)")
+                        .help(tool.helpText)
+                        .tag(tool)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .accessibilityLabel("Canvas tool")
+            .accessibilityValue(maskingState.activeTool.title)
+
+            Text(toolGuidance)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if maskingState.activeTool == .brush || maskingState.activeTool == .erase {
+                brushControls
+            }
+        }
+    }
+
+    /// One sentence describing what a canvas drag will do right now, so the tool, the selected
+    /// mask, and the result are never left for the photographer to infer.
+    private var toolGuidance: String {
+        let selected = maskingState.selectedLayerID.flatMap(inspectorLayer(id:))
+        switch maskingState.activeTool {
+        case .selection:
+            return selected == nil
+                ? "Add a mask, or pick a tool to paint or draw one on the photo."
+                : "Pick a tool to paint or draw on the photo."
+        case .brush:
+            return selected.map { "Paint on the photo to add to \($0.name)." }
+                ?? "Select a mask below, or add a Brush mask, to start painting."
+        case .erase:
+            return selected.map { "Paint on the photo to remove from \($0.name)." }
+                ?? "Select a mask below to erase from it."
+        case .linear:
+            return selectedGradientKind == .linear
+                ? "Drag the bars to move, resize, or rotate. Drag elsewhere to redraw."
+                : "Drag across the photo to draw a new linear gradient mask."
+        case .radial:
+            return selectedGradientKind == .radial
+                ? "Drag the handles to move, resize, or rotate. Drag elsewhere to redraw."
+                : "Drag on the photo to draw a new radial gradient mask."
+        }
+    }
+
+    private var selectedGradientKind: MaskInteractionState.Tool? {
+        guard let id = maskingState.selectedLayerID, let layer = inspectorLayer(id: id),
+              let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID)
+        else { return nil }
+        switch layer.components[index].source {
+        case .linear: return .linear
+        case .radial: return .radial
+        case .brush, .semantic: return nil
+        }
+    }
+
+    private var brushControls: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            brushSlider("Size", value: $maskingState.brushRadius, range: 0.001...0.5)
+            brushSlider("Feather", value: $maskingState.brushFeather, range: 0...1)
+            brushSlider("Flow", value: $maskingState.brushFlow, range: 0...1)
+            brushSlider("Density", value: $maskingState.brushDensity, range: 0...1)
+            Text("[ ] size · Shift-[ ] feather · Space pan")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .padding(9)
+        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Brush settings")
     }
 
     @ViewBuilder
@@ -119,42 +226,6 @@ struct MaskingWorkspace: View {
         }
     }
 
-    private var overlayControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Toggle("Show overlay", isOn: $maskingState.showOverlay)
-                .accessibilityHint("Presentation only; does not change the saved mask or export")
-            HStack {
-                Picker("Inspection", selection: $maskingState.overlayInspection) {
-                    ForEach(MaskInteractionState.OverlayInspection.allCases, id: \.self) {
-                        Text($0.title).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                ColorPicker(
-                    "Overlay color", selection: $maskingState.overlayColor, supportsOpacity: false
-                )
-                .labelsHidden()
-                .accessibilityLabel("Overlay color")
-            }
-            HStack {
-                Text("Opacity")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                NeutralOriginSlider(
-                    value: $maskingState.overlayOpacity, in: 0...1, neutral: 0,
-                    accessibilityTitle: "Opacity",
-                    accessibilityReadout: "\(Int(maskingState.overlayOpacity * 100)) percent")
-                    .accessibilityValue("\(Int(maskingState.overlayOpacity * 100)) percent")
-                Text(percentage(maskingState.overlayOpacity))
-                    .font(.caption.monospacedDigit())
-                    .frame(width: 38, alignment: .trailing)
-            }
-        }
-        .padding(9)
-        .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
-    }
-
     @ViewBuilder
     private var renderStatus: some View {
         switch maskingState.resolutionState {
@@ -172,33 +243,13 @@ struct MaskingWorkspace: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Selected mask is empty")
         case .unavailable(let message):
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Mask analysis unavailable", systemImage: "exclamationmark.triangle")
-                    .font(.caption.weight(.semibold))
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Retry mask analysis") {
-                    viewModel.retryMaskAnalysis()
-                }
-                .buttonStyle(.borderless)
-            }
-            .padding(8)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            statusBanner(
+                title: "Mask analysis unavailable", message: message,
+                retryTitle: "Retry mask analysis", retry: viewModel.retryMaskAnalysis)
         case .failed(let message):
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Mask analysis failed", systemImage: "exclamationmark.triangle")
-                    .font(.caption.weight(.semibold))
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Retry mask analysis") {
-                    viewModel.retryMaskAnalysis()
-                }
-                .buttonStyle(.borderless)
-            }
-            .padding(8)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            statusBanner(
+                title: "Mask analysis failed", message: message,
+                retryTitle: "Retry mask analysis", retry: viewModel.retryMaskAnalysis)
         case .idle, .ready:
             EmptyView()
         }
@@ -210,51 +261,44 @@ struct MaskingWorkspace: View {
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Mask preview is loading")
         case .failed:
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Preview unavailable", systemImage: "exclamationmark.triangle")
-                    .font(.caption.weight(.semibold))
-                Text(viewModel.statusMessage)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Button("Retry preview") { viewModel.retryPreview() }
-                    .buttonStyle(.borderless)
-                    .accessibilityHint("Retry without discarding the saved mask definition")
-            }
-            .padding(8)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+            statusBanner(
+                title: "Preview unavailable", message: viewModel.statusMessage,
+                retryTitle: "Retry preview", retry: viewModel.retryPreview)
+                .accessibilityHint("Retry without discarding the saved mask definition")
         default:
             EmptyView()
         }
     }
 
-    @ViewBuilder
-    private var layerList: some View {
-        let layers = visibleLayers
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("Layers")
-                    .font(.headline)
-                Spacer()
-                Text("\(layers.count)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
+    private func statusBanner(
+        title: String, message: String, retryTitle: String, retry: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(title, systemImage: "exclamationmark.triangle")
+                .font(.caption.weight(.semibold))
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button(retryTitle, action: retry)
+                .buttonStyle(.borderless)
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+    }
 
-            if viewModel.sourceImage == nil {
-                ContentUnavailableView(
-                    "No photo", systemImage: "photo",
-                    description: Text("Open a photo to edit masks."))
-            } else if layers.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label("No mask layers yet", systemImage: "rectangle.dashed")
-                        .font(.subheadline.weight(.semibold))
-                    Text("Create a foreground, background, brush, linear, or radial mask to begin.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Create mask") { viewModel.createMask(.foreground) }
-                        .buttonStyle(.bordered)
-                }
-                .padding(.vertical, 8)
+    // MARK: Masks
+
+    @ViewBuilder
+    private var maskList: some View {
+        let layers = visibleLayers
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Masks")
+                .font(.subheadline.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+
+            if layers.isEmpty {
+                emptyMaskChooser
             } else {
                 ForEach(Array(layers.enumerated()), id: \.element.id) {
                     index, layer in
@@ -273,6 +317,34 @@ struct MaskingWorkspace: View {
         }
     }
 
+    /// With no masks yet, the choice of mask *is* the next step, so offer it directly rather than
+    /// a generic create button that has to guess a kind.
+    private var emptyMaskChooser: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Choose what to select. Each mask carries its own adjustments.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 116), spacing: 6)], alignment: .leading,
+                spacing: 6
+            ) {
+                ForEach(MaskCreationKind.allAddable, id: \.self) { kind in
+                    Button {
+                        create(kind)
+                    } label: {
+                        Label(kind.title, systemImage: kind.iconName)
+                            .font(.caption)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel("Add \(kind.title) mask")
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
     private var visibleLayers: [LocalAdjustmentLayer] {
         var layers = viewModel.document.localAdjustments
         if let draft = maskingState.draftLayer,
@@ -282,36 +354,44 @@ struct MaskingWorkspace: View {
         return layers
     }
 
+    // MARK: Selected mask
+
     @ViewBuilder
     private var selectedInspector: some View {
         if let id = maskingState.selectedLayerID,
             let layer = inspectorLayer(id: id)
         {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 Divider()
-                Text("Layer settings")
-                    .font(.headline)
-                HStack {
+                HStack(alignment: .firstTextBaseline) {
                     Text(layer.name)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.headline)
+                        .lineLimit(1)
+                        .accessibilityAddTraits(.isHeader)
                     Spacer()
-                    Text(layer.maskingSummary)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Button("Reset Mask") { viewModel.resetMask(id) }
+                        .buttonStyle(.link)
+                        .accessibilityHint("Restore this mask's saved controls to their defaults")
                 }
 
-                Toggle("Enabled", isOn: layerBinding(id: id, keyPath: \.isEnabled))
-                Toggle("Invert layer", isOn: layerBinding(id: id, keyPath: \.isInverted))
-                maskSlider("Amount", value: layerBinding(id: id, keyPath: \.amount), range: 0...1)
-
-                componentInspector(layer)
-                localAdjustmentControls
-
-                Button("Reset layer", systemImage: "arrow.counterclockwise") {
-                    viewModel.resetMask(id)
+                InspectorDisclosure("Adjustments", isExpanded: $adjustmentsExpanded) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        maskSlider(
+                            "Amount", value: layerBinding(id: id, keyPath: \.amount),
+                            range: 0...1
+                        )
+                        .help("How strongly this mask's adjustments apply")
+                        ForEach(LocalAdjustmentControl.allCases, id: \.self) { control in
+                            localAdjustmentRow(control, layerID: id)
+                        }
+                    }
+                    .padding(.top, 10)
                 }
-                .buttonStyle(.borderless)
-                .accessibilityHint("Restore this layer's saved controls to their defaults")
+
+                InspectorDisclosure("Mask", isExpanded: $maskShapeExpanded) {
+                    maskShapeSection(layer)
+                        .padding(.top, 10)
+                }
             }
         }
     }
@@ -325,116 +405,183 @@ struct MaskingWorkspace: View {
         return viewModel.document.localAdjustments.first(where: { $0.id == id })
     }
 
-    private func componentInspector(_ layer: LocalAdjustmentLayer) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            HStack {
-                Text("Components")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Menu {
-                    ForEach([MaskCombineMode.add, .subtract, .intersect], id: \.self) { mode in
-                        Menu(mode.title) {
-                            Section("Smart masks") {
-                                ForEach(MaskCreationKind.smartKinds, id: \.self) { kind in
-                                    Button(kind.title) {
-                                        viewModel.addSmartMaskComponent(
-                                            to: layer.id, kind: kind, mode: mode)
-                                    }
-                                }
-                            }
-                            Section("Paint and gradients") {
-                                ForEach(MaskCreationKind.allCases.filter {
-                                    !$0.isSmart && $0 != .erase
-                                }, id: \.self) {
-                                kind in
-                                Button(kind.title) {
-                                    viewModel.addMaskComponent(to: layer.id, kind: kind, mode: mode)
-                                }
-                                }
-                            }
-                        }
-                    }
-                } label: {
-                    Image(systemName: "plus.circle")
+    /// A mask with one source shows that source's controls directly. The part list, with its
+    /// combine modes, solo, and ordering, only appears once a mask actually combines several
+    /// sources — that is the only time those controls have anything to act on.
+    private func maskShapeSection(_ layer: LocalAdjustmentLayer) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Toggle("Invert mask", isOn: layerBinding(id: layer.id, keyPath: \.isInverted))
+                .help("Apply the adjustments everywhere this mask does not select")
+
+            if layer.components.count == 1, let component = layer.components.first {
+                HStack(spacing: 6) {
+                    Label(component.source.maskingTypeTitle, systemImage: component.source.iconName)
+                        .font(.caption.weight(.semibold))
+                    Spacer()
                 }
-                .accessibilityLabel("Add mask component")
+                componentControls(component, layerID: layer.id, allowsInvert: false)
+            } else {
+                ForEach(Array(layer.components.enumerated()), id: \.element.id) {
+                    index, component in
+                    componentRow(component, index: index, layer: layer)
+                }
             }
 
-            ForEach(Array(layer.components.enumerated()), id: \.element.id) { index, component in
-                DisclosureGroup(
-                    isExpanded: Binding(
-                        get: { maskingState.selectedComponentID == component.id },
-                        set: { expanded in
-                            if expanded {
-                                viewModel.selectMaskComponent(component.id, in: layer.id)
-                            } else if maskingState.selectedComponentID == component.id {
-                                viewModel.selectMaskLayer(layer.id)
+            addToMaskMenu(layer)
+        }
+    }
+
+    private func addToMaskMenu(_ layer: LocalAdjustmentLayer) -> some View {
+        Menu {
+            ForEach([MaskCombineMode.add, .subtract, .intersect], id: \.self) { mode in
+                Section(mode.summaryWord) {
+                    ForEach(MaskCreationKind.allAddable, id: \.self) { kind in
+                        Button(kind.title) {
+                            if kind.isSmart {
+                                viewModel.addSmartMaskComponent(
+                                    to: layer.id, kind: kind, mode: mode)
+                            } else {
+                                viewModel.addMaskComponent(to: layer.id, kind: kind, mode: mode)
                             }
                         }
-                    )
-                ) {
-                    componentControls(component, layerID: layer.id)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(
-                            systemName: maskingState.selectedComponentID == component.id
-                                ? "checkmark.circle.fill" : "circle")
-                        TextField(
-                            component.source.maskingTypeTitle,
-                            text: Binding(
-                                get: { component.displayName },
-                                set: { viewModel.renameMaskComponent(component.id, in: layer.id, name: $0) }
-                            )
-                        )
-                        .textFieldStyle(.plain)
-                        .font(.caption)
-                        Text(index == 0 ? "Replace" : component.mode.title)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button {
-                            maskingState.toggleSolo(componentID: component.id, layerID: layer.id)
-                        } label: {
-                            Image(systemName: maskingState.soloComponentID == component.id
-                                ? "eye.fill" : "eye")
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("Solo \(component.displayName)")
-                        .accessibilityValue(
-                            maskingState.soloComponentID == component.id ? "On" : "Off")
-                        Toggle(
-                            "Enabled",
-                            isOn: componentBinding(
-                                component.id, layerID: layer.id, keyPath: \.isEnabled)
-                        )
-                        .labelsHidden()
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .accessibilityLabel("Enable \(component.displayName)")
-                        Menu {
-                            Button("Move up") { viewModel.moveMaskComponent(component.id, in: layer.id, by: -1) }
-                                .disabled(index == 0)
-                            Button("Move down") { viewModel.moveMaskComponent(component.id, in: layer.id, by: 1) }
-                                .disabled(index == layer.components.count - 1)
-                            Divider()
-                            componentModeMenu(component, layerID: layer.id)
-                            Button("Delete", role: .destructive) {
-                                viewModel.deleteMaskComponent(component.id, from: layer.id)
-                            }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                        }
-                        .menuStyle(.borderlessButton)
-                        .accessibilityLabel("Actions for \(component.displayName)")
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        viewModel.selectMaskComponent(component.id, in: layer.id)
                     }
                 }
-                .padding(7)
-                .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
             }
+        } label: {
+            Label("Add or Subtract…", systemImage: "plus.forwardslash.minus")
+                .font(.caption)
+        }
+        .fixedSize()
+        .accessibilityLabel("Add mask component")
+        .help("Combine another selection with this mask")
+    }
+
+    private func componentRow(
+        _ component: MaskComponent, index: Int, layer: LocalAdjustmentLayer
+    ) -> some View {
+        DisclosureGroup(
+            isExpanded: Binding(
+                get: { maskingState.selectedComponentID == component.id },
+                set: { expanded in
+                    if expanded {
+                        viewModel.selectMaskComponent(component.id, in: layer.id)
+                    } else if maskingState.selectedComponentID == component.id {
+                        viewModel.selectMaskLayer(layer.id)
+                    }
+                }
+            )
+        ) {
+            componentControls(component, layerID: layer.id, allowsInvert: true)
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: component.source.iconName)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                TextField(
+                    component.source.maskingTypeTitle,
+                    text: Binding(
+                        get: { component.displayName },
+                        set: { viewModel.renameMaskComponent(component.id, in: layer.id, name: $0) }
+                    )
+                )
+                .textFieldStyle(.plain)
+                .font(.caption)
+                // The first part defines the starting selection; only later parts combine.
+                if index > 0 {
+                    componentModeMenu(component, layerID: layer.id)
+                }
+                Spacer()
+                Button {
+                    maskingState.toggleSolo(componentID: component.id, layerID: layer.id)
+                } label: {
+                    Image(systemName: maskingState.soloComponentID == component.id
+                        ? "eye.fill" : "eye")
+                }
+                .buttonStyle(.borderless)
+                .help("Show only this part in the overlay")
+                .accessibilityLabel("Solo \(component.displayName)")
+                .accessibilityValue(
+                    maskingState.soloComponentID == component.id ? "On" : "Off")
+                Toggle(
+                    "Enabled",
+                    isOn: componentBinding(
+                        component.id, layerID: layer.id, keyPath: \.isEnabled)
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .accessibilityLabel("Enable \(component.displayName)")
+                Menu {
+                    Button("Move up") {
+                        viewModel.moveMaskComponent(component.id, in: layer.id, by: -1)
+                    }
+                    .disabled(index == 0)
+                    Button("Move down") {
+                        viewModel.moveMaskComponent(component.id, in: layer.id, by: 1)
+                    }
+                    .disabled(index == layer.components.count - 1)
+                    Divider()
+                    Button("Delete", role: .destructive) {
+                        viewModel.deleteMaskComponent(component.id, from: layer.id)
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("Actions for \(component.displayName)")
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                viewModel.selectMaskComponent(component.id, in: layer.id)
+            }
+        }
+        .padding(7)
+        .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    // MARK: Overlay
+
+    private var overlaySection: some View {
+        InspectorDisclosure("Overlay", isExpanded: $overlayExpanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                Picker("Inspection", selection: $maskingState.overlayInspection) {
+                    ForEach(MaskInteractionState.OverlayInspection.allCases, id: \.self) {
+                        Text($0.title).tag($0)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                HStack {
+                    Text("Color")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    ColorPicker(
+                        "Overlay color", selection: $maskingState.overlayColor,
+                        supportsOpacity: false
+                    )
+                    .labelsHidden()
+                    .accessibilityLabel("Overlay color")
+                }
+                HStack {
+                    Text("Opacity")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    NeutralOriginSlider(
+                        value: $maskingState.overlayOpacity, in: 0...1, neutral: 0,
+                        accessibilityTitle: "Opacity",
+                        accessibilityReadout: "\(Int(maskingState.overlayOpacity * 100)) percent")
+                        .accessibilityValue("\(Int(maskingState.overlayOpacity * 100)) percent")
+                    Text(percentage(maskingState.overlayOpacity))
+                        .font(.caption.monospacedDigit())
+                        .frame(width: 38, alignment: .trailing)
+                }
+                Text("Display only. The overlay never changes the edit or the export.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 10)
         }
     }
 
@@ -457,13 +604,19 @@ struct MaskingWorkspace: View {
         .accessibilityValue(component.mode.title)
     }
 
+    /// - Parameter allowsInvert: A single-source mask is inverted by the mask-level toggle; a
+    ///   per-part invert beside it would be a second switch with the same visible effect.
     @ViewBuilder
-    private func componentControls(_ component: MaskComponent, layerID: UUID) -> some View {
-        Toggle(
-            "Invert component",
-            isOn: componentBinding(component.id, layerID: layerID, keyPath: \.isInverted)
-        )
-        .font(.caption)
+    private func componentControls(
+        _ component: MaskComponent, layerID: UUID, allowsInvert: Bool
+    ) -> some View {
+        if allowsInvert || component.isInverted {
+            Toggle(
+                "Invert component",
+                isOn: componentBinding(component.id, layerID: layerID, keyPath: \.isInverted)
+            )
+            .font(.caption)
+        }
         switch component.source {
         case .semantic(let definition):
             maskSlider(
@@ -502,7 +655,13 @@ struct MaskingWorkspace: View {
             )
             .font(.caption)
             .foregroundStyle(.secondary)
-            brushControls
+            if maskingState.activeTool != .brush, maskingState.activeTool != .erase {
+                Button("Paint with Brush", systemImage: "paintbrush") {
+                    viewModel.setMaskTool(.brush)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption)
+            }
         case .linear(let definition):
             VStack(alignment: .leading, spacing: 5) {
                 Text("Canvas guide")
@@ -639,20 +798,6 @@ struct MaskingWorkspace: View {
         }
     }
 
-    private var brushControls: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Brush")
-                .font(.caption.weight(.semibold))
-            brushSlider("Size", value: $maskingState.brushRadius, range: 0.001...0.5)
-            brushSlider("Feather", value: $maskingState.brushFeather, range: 0...1)
-            brushSlider("Flow / Intensity", value: $maskingState.brushFlow, range: 0...1)
-            brushSlider("Density", value: $maskingState.brushDensity, range: 0...1)
-            Text("[ ] size · Shift-[ ] feather · Space pan")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     private func brushSlider(
         _ title: String, value: Binding<Double>, range: ClosedRange<Double>
     ) -> some View {
@@ -669,19 +814,6 @@ struct MaskingWorkspace: View {
             Text(Int(value.wrappedValue * 100).description + "%")
                 .font(.caption2.monospacedDigit())
                 .frame(width: 34, alignment: .trailing)
-        }
-    }
-
-    private var localAdjustmentControls: some View {
-        let layerID = maskingState.selectedLayerID
-        return VStack(alignment: .leading, spacing: 7) {
-            Text("Local adjustments")
-                .font(.subheadline.weight(.semibold))
-            if let layerID {
-                ForEach(LocalAdjustmentControl.allCases, id: \.self) { control in
-                    localAdjustmentRow(control, layerID: layerID)
-                }
-            }
         }
     }
 
@@ -878,6 +1010,8 @@ fileprivate extension LocalAdjustmentControl {
     }
 }
 
+/// One mask in the list. The whole row selects the mask; the type icon, name, and summary say
+/// what it selects, and the switch and menu hold the few per-mask actions.
 private struct MaskLayerRow: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject var maskingState: MaskInteractionState
@@ -886,42 +1020,42 @@ private struct MaskLayerRow: View {
     let total: Int
     let isTransient: Bool
 
+    private var isSelected: Bool { maskingState.selectedLayerID == layer.id }
+
     var body: some View {
         HStack(spacing: 7) {
-            Button {
-                viewModel.selectMaskLayer(layer.id)
-            } label: {
-                Image(
-                    systemName: maskingState.selectedLayerID == layer.id
-                        ? "checkmark.circle.fill" : "circle"
-                )
-                .foregroundStyle(
-                    maskingState.selectedLayerID == layer.id ? Color.accentColor : Color.secondary)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Select mask layer \(layer.name)")
-            .accessibilityValue(
-                maskingState.selectedLayerID == layer.id ? "Selected" : "Not selected")
-
-            Circle()
-                .fill(maskingState.overlayColor)
-                .frame(width: 9, height: 9)
+            Image(systemName: layer.components.first?.source.iconName ?? "rectangle.dashed")
+                .frame(width: 16)
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                 .accessibilityHidden(true)
 
-            TextField(
-                "Mask name",
-                text: Binding(
-                    get: { layer.name },
-                    set: { viewModel.renameMask(layer.id, name: $0) }
+            VStack(alignment: .leading, spacing: 1) {
+                TextField(
+                    "Mask name",
+                    text: Binding(
+                        get: { layer.name },
+                        set: { viewModel.renameMask(layer.id, name: $0) }
+                    )
                 )
-            )
-            .textFieldStyle(.plain)
-            .font(.caption.weight(.medium))
+                .textFieldStyle(.plain)
+                .font(.caption.weight(.medium))
+                if layer.maskingSummary != layer.name {
+                    Text(layer.maskingSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
 
-            Text(layer.maskingSummary)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
+            Spacer(minLength: 4)
+
+            if maskingState.soloLayerID == layer.id {
+                Image(systemName: "eye.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .help("Overlay shows only this mask")
+                    .accessibilityLabel("Solo overlay on")
+            }
 
             Toggle(
                 "Enabled",
@@ -933,6 +1067,7 @@ private struct MaskLayerRow: View {
             .labelsHidden()
             .toggleStyle(.switch)
             .controlSize(.mini)
+            .help("Turn this mask's adjustments on or off")
             .accessibilityLabel("Enable \(layer.name)")
             .accessibilityValue(layer.isEnabled ? "On" : "Off")
 
@@ -942,9 +1077,13 @@ private struct MaskLayerRow: View {
                 Button("Move down") { viewModel.moveMask(layer.id, by: 1) }
                     .disabled(isTransient || index == total - 1)
                 Divider()
-                Button("Solo") { maskingState.toggleSolo(layerID: layer.id) }
-                    .accessibilityLabel("Solo \(layer.name)")
-                    .accessibilityValue(maskingState.soloLayerID == layer.id ? "On" : "Off")
+                Button(
+                    maskingState.soloLayerID == layer.id ? "Show All in Overlay" : "Solo in Overlay"
+                ) {
+                    maskingState.toggleSolo(layerID: layer.id)
+                }
+                .accessibilityLabel("Solo \(layer.name)")
+                .accessibilityValue(maskingState.soloLayerID == layer.id ? "On" : "Off")
                 Button("Duplicate") { viewModel.duplicateMask(layer.id) }
                     .disabled(isTransient)
                 Button("Reset") { viewModel.resetMask(layer.id) }
@@ -959,19 +1098,51 @@ private struct MaskLayerRow: View {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .fixedSize()
             .accessibilityLabel("Actions for \(layer.name)")
         }
-        .padding(.vertical, 4)
-        .padding(.horizontal, 5)
+        .padding(.vertical, 5)
+        .padding(.horizontal, 6)
         .background(
-            maskingState.selectedLayerID == layer.id ? Color.accentColor.opacity(0.12) : .clear,
+            isSelected ? Color.accentColor.opacity(0.14) : .clear,
             in: RoundedRectangle(cornerRadius: 6)
         )
+        .contentShape(Rectangle())
+        .onTapGesture { viewModel.selectMaskLayer(layer.id) }
         .accessibilityElement(children: .contain)
+        .accessibilityLabel("Mask \(layer.name)")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(named: "Select mask layer \(layer.name)") {
+            viewModel.selectMaskLayer(layer.id)
+        }
+    }
+}
+
+extension MaskSource {
+    fileprivate var iconName: String {
+        switch self {
+        case .semantic(let definition):
+            switch definition.target {
+            case .subject, .foreground: return "person.crop.square"
+            case .person: return "figure.stand"
+            case .face: return "face.smiling"
+            case .background: return "photo"
+            }
+        case .brush: return "paintbrush"
+        case .linear: return "line.diagonal"
+        case .radial: return "oval"
+        }
     }
 }
 
 extension MaskCreationKind {
+    /// The kinds drawn on the canvas. Erase is not a mask of its own: it is the Erase tool, which
+    /// subtracts from whichever mask is selected.
+    fileprivate static let canvasKinds: [MaskCreationKind] = [.brush, .linear, .radial]
+
+    fileprivate static let allAddable: [MaskCreationKind] = smartKinds + canvasKinds
+
     fileprivate var iconName: String {
         switch self {
         case .subject: return "person.crop.square"

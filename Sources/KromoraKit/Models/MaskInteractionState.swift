@@ -39,14 +39,15 @@ enum MaskResolutionState: Equatable, Sendable {
 /// while the pointer is moving.
 @MainActor
 final class MaskInteractionState: ObservableObject {
+    /// What a drag on the canvas does. Smart masks (subject, background, …) are not tools: they
+    /// are created from the Add Mask menu and never respond to the pointer, so they do not appear
+    /// here where they would capture the canvas without acting on it.
     enum Tool: String, CaseIterable, Codable, Sendable {
-        case selection, foreground, background, brush, erase, linear, radial
+        case selection, brush, erase, linear, radial
 
         var title: String {
             switch self {
             case .selection: return "Select"
-            case .foreground: return "Foreground"
-            case .background: return "Background"
             case .brush: return "Brush"
             case .erase: return "Erase"
             case .linear: return "Linear"
@@ -57,12 +58,20 @@ final class MaskInteractionState: ObservableObject {
         var iconName: String {
             switch self {
             case .selection: return "cursorarrow"
-            case .foreground: return "person.crop.square"
-            case .background: return "photo"
             case .brush: return "paintbrush"
             case .erase: return "eraser"
             case .linear: return "line.diagonal"
             case .radial: return "oval"
+            }
+        }
+
+        var helpText: String {
+            switch self {
+            case .selection: return "Select — leave the canvas free to pan and zoom (Esc)"
+            case .brush: return "Brush — paint to add to the selected mask (B)"
+            case .erase: return "Erase — paint to remove from the selected mask (E)"
+            case .linear: return "Linear gradient — drag on the canvas to draw one (L)"
+            case .radial: return "Radial gradient — drag on the canvas to draw one (R)"
             }
         }
     }
@@ -267,6 +276,13 @@ final class MaskInteractionState: ObservableObject {
         linearCreationPending = tool == .linear
         radialCreationPending = tool == .radial
         hoveredLinearHandle = nil
+    }
+
+    /// A gradient drag that starts a new layer records the prior selection the same way a pending
+    /// creation does, so cancelling the transient layer hands selection back.
+    func rememberSelectionBeforeCreation() {
+        selectionBeforePendingCreationLayerID = selectedLayerID
+        selectionBeforePendingCreationComponentID = selectedComponentID
     }
 
     var selectionBeforePendingCreation: (layerID: UUID?, componentID: UUID?) {

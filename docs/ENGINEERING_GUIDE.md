@@ -78,6 +78,14 @@ provider version. A missing or invalid sidecar is a cache miss; it must never in
 mask recipe. Local masks use the same resolved definition for preview, overlay, histogram,
 comparison, copy/paste, and full-resolution export.
 
+The masking workspace follows task order: canvas tool, mask list, then the selected mask's
+Adjustments and Mask sections, with overlay inspection collapsed at the bottom. Canvas tools are
+only the pointer tools (Select, Brush, Erase, Linear, Radial); smart masks are created from
+Add Mask and never capture the canvas. A gradient drag edits the selected mask only when its
+target part is that same gradient; otherwise it draws a new gradient mask, and a click that never
+becomes a gradient restores the previous selection. Combine controls (mode, solo, ordering) appear
+only once a mask has more than one part.
+
 [`STORAGE_POLICY.md`](STORAGE_POLICY.md) is the source-of-truth matrix for the durable package,
 the Application Support projection, device caches, and user-visible output destinations.
 `PortableLibraryValidation` is the reusable read-only scrub boundary for package backup and restore.

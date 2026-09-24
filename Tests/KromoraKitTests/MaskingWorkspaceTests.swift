@@ -498,6 +498,63 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         )
     }
 
+    func testCanvasToolsAreOnlyPointerToolsAndSmartMasksLeaveTheCanvasNavigable() throws {
+        // Smart masks never respond to the pointer, so offering them as tools captured the canvas
+        // (blocking pan/zoom) while a drag did nothing.
+        XCTAssertEqual(
+            MaskInteractionState.Tool.allCases, [.selection, .brush, .erase, .linear, .radial])
+
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.setMaskTool(.brush)
+        viewModel.createMask(.background)
+        XCTAssertEqual(viewModel.maskingState.activeTool, .selection)
+        XCTAssertNotNil(viewModel.maskingState.selectedLayerID)
+    }
+
+    func testGradientDragOnANonGradientMaskDrawsANewGradientMask() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.foreground)
+        let existing = try XCTUnwrap(viewModel.document.localAdjustments.first)
+
+        for tool in [MaskInteractionState.Tool.linear, .radial] {
+            viewModel.selectMaskLayer(existing.id)
+            viewModel.setMaskTool(tool)
+            let countBefore = viewModel.document.localAdjustments.count
+            viewModel.beginMaskGesture(
+                at: CGPoint(x: 0.2, y: 0.5), sourceSize: CGSize(width: 400, height: 300))
+            viewModel.updateMaskGesture(to: CGPoint(x: 0.7, y: 0.5), modifiers: [])
+            viewModel.endMaskGesture()
+
+            XCTAssertEqual(viewModel.document.localAdjustments.count, countBefore + 1, "\(tool)")
+            XCTAssertEqual(
+                viewModel.document.localAdjustments.first, existing,
+                "a \(tool) drag must not edit the selected smart mask")
+            let created = try XCTUnwrap(viewModel.document.localAdjustments.last)
+            XCTAssertEqual(viewModel.maskingState.selectedLayerID, created.id)
+            switch (tool, created.components.first?.source) {
+            case (.linear, .linear?), (.radial, .radial?): break
+            default: XCTFail("\(tool) drag created \(String(describing: created.components.first))")
+            }
+        }
+    }
+
+    func testGradientClickOnANonGradientMaskRestoresThePreviousSelection() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.createMask(.foreground)
+        let existing = try XCTUnwrap(viewModel.document.localAdjustments.first)
+        let before = viewModel.document
+        let undoBefore = viewModel.undoDepth
+
+        viewModel.setMaskTool(.linear)
+        viewModel.beginMaskGesture(at: CGPoint(x: 0.5, y: 0.5))
+        viewModel.endMaskGesture()
+
+        XCTAssertEqual(viewModel.document, before)
+        XCTAssertEqual(viewModel.undoDepth, undoBefore)
+        XCTAssertFalse(viewModel.maskInteractionState.hasDraft)
+        XCTAssertEqual(viewModel.maskingState.selectedLayerID, existing.id)
+    }
+
     func testCancellingLinearCreationDoesNotPersistAnEmptyLayer() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.createMask(.linear)
