@@ -44,6 +44,28 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         return (name, try Data(contentsOf: url))
     }
 
+    private func makeKeyboardViewModel(libraryName: String) -> AppViewModel {
+        makeAppViewModel(
+            engine: FakeRenderEngine(),
+            editStore: makeInMemoryEditStore(),
+            portablePackageURL: tempDirectory.appendingPathComponent(
+                "\(libraryName).kromoralibrary", isDirectory: true
+            )
+        )
+    }
+
+    private func waitForSource(_ name: String, in viewModel: AppViewModel) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.sourceName != name {
+            guard Date() < deadline else {
+                throw TestSynchronizationError.timedOut(
+                    "source \(name) to open", "sourceName=\(viewModel.sourceName)"
+                )
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     private func keyEvent(
         _ type: NSEvent.EventType,
         keyCode: UInt16,
@@ -130,16 +152,9 @@ final class KeyMonitorTests: TempDirectoryTestCase {
     }
 
     func testPlainCommandCopyAndPasteRouteOnlyWhenGlobalSurfaceOwnsKeyboard() async throws {
-        let viewModel = makeAppViewModel(
-            engine: FakeRenderEngine(),
-            editStore: makeInMemoryEditStore()
-        )
+        let viewModel = makeKeyboardViewModel(libraryName: "keyboard-copy")
         viewModel.importPhotosData([try importedPhoto(named: "keyboard-copy.png")])
-        let deadline = Date().addingTimeInterval(5)
-        while viewModel.sourceName != "keyboard-copy.png" {
-            XCTAssertLessThan(Date(), deadline, "the keyboard test source did not open")
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForSource("keyboard-copy.png", in: viewModel)
 
         let copyEvent = try keyEvent(
             .keyDown, keyCode: 8, modifierFlags: .command,
@@ -163,15 +178,9 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertNil(globalMonitor.handle(pasteEvent))
         XCTAssertEqual(viewModel.document, sourceEdits)
 
-        let textViewModel = makeAppViewModel(
-            engine: FakeRenderEngine(),
-            editStore: makeInMemoryEditStore()
-        )
+        let textViewModel = makeKeyboardViewModel(libraryName: "keyboard-text-focus")
         textViewModel.importPhotosData([try importedPhoto(named: "keyboard-text-focus.png")])
-        while textViewModel.sourceName != "keyboard-text-focus.png" {
-            XCTAssertLessThan(Date(), deadline, "the text-focus source did not open")
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForSource("keyboard-text-focus.png", in: textViewModel)
         let textMonitor = KeyMonitor(
             viewModel: textViewModel,
             firstResponderProvider: { _ in NSText() }
@@ -184,15 +193,9 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         // A native control also keeps plain ⌘C/⌘V. There is no plain-⌘C menu binding, so the
         // event falls through unchanged; the explicit toolbar/menu Copy Edits… action remains
         // available. This is intentional AppKit focus behavior, not a silent copy failure.
-        let controlViewModel = makeAppViewModel(
-            engine: FakeRenderEngine(),
-            editStore: makeInMemoryEditStore()
-        )
+        let controlViewModel = makeKeyboardViewModel(libraryName: "keyboard-control-focus")
         controlViewModel.importPhotosData([try importedPhoto(named: "keyboard-control-focus.png")])
-        while controlViewModel.sourceName != "keyboard-control-focus.png" {
-            XCTAssertLessThan(Date(), deadline, "the control-focus source did not open")
-            try await Task.sleep(for: .milliseconds(10))
-        }
+        try await waitForSource("keyboard-control-focus.png", in: controlViewModel)
         let controlMonitor = KeyMonitor(
             viewModel: controlViewModel,
             firstResponderProvider: { _ in NSButton() }
