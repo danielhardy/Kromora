@@ -381,8 +381,15 @@ struct MaskingWorkspace: View {
                             range: 0...1
                         )
                         .help("How strongly this mask's adjustments apply")
-                        ForEach(LocalAdjustmentControl.allCases, id: \.self) { control in
-                            localAdjustmentRow(control, layerID: id)
+                        ForEach(LocalAdjustmentControl.inspectorGroups, id: \.title) { group in
+                            Text(group.title)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 4)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(group.controls, id: \.self) { control in
+                                localAdjustmentRow(control, layerID: id)
+                            }
                         }
                     }
                     .padding(.top, 10)
@@ -663,21 +670,16 @@ struct MaskingWorkspace: View {
                 .font(.caption)
             }
         case .linear(let definition):
-            VStack(alignment: .leading, spacing: 5) {
-                Text("Canvas guide")
-                    .font(.caption.weight(.semibold))
-                HStack(spacing: 8) {
-                    linearGuideSwatch(.gray, title: "Zero")
-                    linearGuideSwatch(.orange, title: "Transition")
-                    linearGuideSwatch(.cyan, title: "Full")
-                }
-                Text("Drag the edge bars to resize, the orange center bar to move, or the purple handle to rotate.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Linear gradient guide: zero strength, transition, and full strength")
+            Text(
+                "On the photo, the dashed line is where the effect starts and the outer solid "
+                    + "line is where it reaches full strength. Drag the center to move it or the "
+                    + "small knob to rotate it."
+            )
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(
+                "Linear gradient guide: zero strength, transition, and full strength")
             .accessibilityHint("Use the canvas bars to resize, move, or rotate the gradient")
             maskSlider(
                 "Angle",
@@ -915,16 +917,6 @@ struct MaskingWorkspace: View {
 
     private func percentage(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
 
-    private func linearGuideSwatch(_ color: Color, title: String) -> some View {
-        HStack(spacing: 3) {
-            Circle()
-                .fill(color)
-                .frame(width: 7, height: 7)
-            Text(title)
-                .font(.caption2)
-        }
-        .foregroundStyle(.secondary)
-    }
 }
 
 /// The local-adjustment row mirrors the global value-entry contract while its binding remains
@@ -994,6 +986,16 @@ private struct LocalAdjustmentValueRow: View {
             .accessibilityAction(named: Text("Reset to neutral"), reset)
         }
     }
+}
+
+extension LocalAdjustmentControl {
+    /// The same Light / Color / Effects grouping the global inspectors use, so a mask's controls
+    /// are found where the photographer already expects them.
+    static let inspectorGroups: [(title: String, controls: [LocalAdjustmentControl])] = [
+        ("Light", [.exposure, .contrast, .highlights, .shadows, .whites, .blacks]),
+        ("Color", [.temperature, .tint, .saturation, .vibrance]),
+        ("Effects", [.texture, .clarity, .dehaze]),
+    ]
 }
 
 fileprivate extension LocalAdjustmentControl {
@@ -1172,6 +1174,13 @@ extension MaskCreationKind {
     }
 }
 
+/// The brush stroke being painted (or just committed and awaiting the resolved overlay), and
+/// whether it removes coverage.
+private struct LiveBrushStroke: Equatable {
+    let stroke: BrushStroke
+    let subtracts: Bool
+}
+
 /// Lightweight, presentation-only canvas guides for the saved component definition. The renderer
 /// remains responsible for mask pixels; these guides give gradient/brush authors immediate handles
 /// without putting pointer-frequency geometry into AppViewModel's published document.
@@ -1187,6 +1196,10 @@ struct MaskCanvasOverlay: View {
     @State private var lastPanPoint: CGPoint?
     @State private var gestureStartViewportPoint: CGPoint?
     @State private var maskImage: CGImage?
+    /// The stroke that just finished, held on screen until the re-resolved overlay that
+    /// contains it arrives. Without it the stroke would vanish at mouse-up and reappear a frame
+    /// later when the renderer catches up.
+    @State private var settlingStroke: LiveBrushStroke?
 
     var body: some View {
         GeometryReader { geometry in
@@ -1205,12 +1218,13 @@ struct MaskCanvasOverlay: View {
             // radial showed just its ellipse tooling).
             let documentLayers = viewModel.document.localAdjustments
             let layers = overlayLayers(document: documentLayers, draft: gradientDraftForOverlay)
-            // Brush drafts are presented as lightweight Canvas guides while the committed layer
-            // remains the resolved wash. In particular an active subtractive brush must keep the
-            // existing semantic/gradient coverage visible; inspecting the new brush component by
-            // itself would make the base mask appear to vanish during an erase gesture.
-            let overlayComponentID = brushDraftKeepsEffectiveOverlay
-                ? nil : maskingState.selectedComponentID
+            // The overlay always shows the selected mask's effective coverage — what its
+            // adjustments will actually touch. Selecting a part (for example the eraser part a
+            // stroke just created) must not swap the wash for that part in isolation: an erase
+            // would then read as a new colored stroke instead of coverage being removed. Only an
+            // explicit solo isolates a part. The live brush stroke is composited into the same
+            // wash by `draw`, so painting adds color and erasing visibly removes it.
+            let overlayComponentID: UUID? = nil
             let style = overlayStyle
             let presentation = MaskOverlayPresentation(
                 coverageOpacity: maskingState.overlayOpacity)
@@ -1236,7 +1250,8 @@ struct MaskCanvasOverlay: View {
                 }
                 MaskPointerSurface(
                     isInteractive: maskingState.activeTool != .selection
-                        && !viewModel.isCropToolActive
+                        && !viewModel.isCropToolActive,
+                    cursor: maskingState.isSpacePanning ? .openHand : .crosshair
                 ) { event in
                     handleNativePointer(event, transform: transform, viewportSize: geometry.size)
                 }
@@ -1270,6 +1285,7 @@ struct MaskCanvasOverlay: View {
                 )
                 guard !Task.isCancelled else { return }
                 maskImage = resolved
+                settlingStroke = nil
                 if semanticTarget != nil {
                     if resolved == nil {
                         maskingState.markMaskUnavailable(
@@ -1281,6 +1297,16 @@ struct MaskCanvasOverlay: View {
                 } else {
                     maskingState.markMaskResolved()
                 }
+            }
+            .onChange(of: maskingState.draftLayer) { previous, current in
+                guard current == nil, let previous,
+                      let stroke = liveStroke(in: previous),
+                      strokeWasCommitted(stroke.stroke.id)
+                else {
+                    if current == nil { settlingStroke = nil }
+                    return
+                }
+                settlingStroke = stroke
             }
         }
         .accessibilityElement(children: .contain)
@@ -1329,6 +1355,9 @@ struct MaskCanvasOverlay: View {
         }
 
         switch event {
+        case .exited:
+            maskingState.updateHoverPoint(nil)
+            maskingState.updateLinearHover(nil)
         case .moved(let samples):
             if let sample = samples.last { updateHover(sample) }
         case .began(let samples):
@@ -1402,9 +1431,26 @@ struct MaskCanvasOverlay: View {
         return definition.target
     }
 
-    private var brushDraftKeepsEffectiveOverlay: Bool {
-        guard maskingState.hasDraft else { return false }
-        return maskingState.activeTool == .brush || maskingState.activeTool == .erase
+    /// The stroke being painted right now: each brush gesture appends exactly one stroke to the
+    /// draft's target brush part, so it is that part's last stroke.
+    private func liveStroke(in draft: LocalAdjustmentLayer?) -> LiveBrushStroke? {
+        guard let draft,
+              maskingState.activeTool == .brush || maskingState.activeTool == .erase,
+              let index = draft.targetComponentIndex(selected: maskingState.selectedComponentID),
+              case .brush(let definition) = draft.components[index].source,
+              let stroke = definition.strokes.last
+        else { return nil }
+        return LiveBrushStroke(
+            stroke: stroke, subtracts: draft.components[index].mode == .subtract)
+    }
+
+    private func strokeWasCommitted(_ strokeID: UUID) -> Bool {
+        viewModel.document.localAdjustments.contains { layer in
+            layer.components.contains { component in
+                guard case .brush(let definition) = component.source else { return false }
+                return definition.strokes.contains { $0.id == strokeID }
+            }
+        }
     }
 
     private var overlayStyle: MaskOverlayStyle {
@@ -1479,168 +1525,187 @@ struct MaskCanvasOverlay: View {
         let resolveEpoch: UInt64
     }
 
+    /// Draws the inspection wash, the live brush stroke, and the tool guides.
+    ///
+    /// The wash and the live stroke share one transparency layer so a stroke reads as part of the
+    /// mask rather than a second overlay: painting adds the same color at the same opacity, and
+    /// erasing cuts coverage out of the wash (or darkens it in grayscale inspection). Guides use
+    /// one neutral language — white lines with a soft shadow and round knobs — so they stay
+    /// legible on any photo and never compete with the overlay color.
     private func draw(
         layer: LocalAdjustmentLayer?, maskImage: CGImage?, transform: CanvasMaskTransform,
         presentation: MaskOverlayPresentation, in context: inout GraphicsContext
     ) {
-        if let maskImage,
+        let grayscale = maskingState.overlayInspection == .grayscale
+        let live = liveStroke(in: maskingState.draftLayer) ?? settlingStroke
+        if maskImage != nil || live != nil,
             let imageRect = transform.viewportRect(
-                forSourceNormalized: CGRect(x: 0, y: 0, width: 1, height: 1)
-            ),
-            let visibleRect = transform.viewportRect(forSourceNormalized: transform.cropRect) {
-            var maskContext = context
-            maskContext.opacity = presentation.coverageOpacity
-            maskContext.clip(to: Path(visibleRect))
-            maskContext.draw(
-                Image(decorative: maskImage, scale: 1, orientation: .up), in: imageRect
-            )
+                forSourceNormalized: CGRect(x: 0, y: 0, width: 1, height: 1)),
+            let visibleRect = transform.viewportRect(forSourceNormalized: transform.cropRect)
+        {
+            var coverage = context
+            coverage.opacity = presentation.coverageOpacity
+            coverage.clip(to: Path(visibleRect))
+            coverage.drawLayer { wash in
+                if let maskImage {
+                    wash.draw(
+                        Image(decorative: maskImage, scale: 1, orientation: .up), in: imageRect)
+                }
+                if let live {
+                    drawLiveStroke(live, transform: transform, grayscale: grayscale, in: &wash)
+                }
+            }
         }
+
+        drawBrushCursor(live: live, transform: transform, in: &context)
 
         guard let layer,
             let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID)
         else { return }
-        let component = layer.components[index]
-        let guideColor =
-            maskingState.overlayInspection == .grayscale
-            ? Color.white.opacity(presentation.toolingOpacity)
-            : Color(
-                red: overlayStyle.red, green: overlayStyle.green, blue: overlayStyle.blue
-            ).opacity(presentation.toolingOpacity)
-
-        func point(_ normalized: CGPoint) -> CGPoint? {
-            transform.viewportPoint(forSourceNormalized: normalized)
-        }
-
-        switch component.source {
-        case .semantic:
-            let rect = CGRect(origin: .zero, size: transform.viewportSize).insetBy(dx: 10, dy: 10)
-            context.stroke(
-                Path(rect), with: .color(guideColor),
-                style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-        case .brush(let definition):
-            for stroke in definition.strokes {
-                var path = Path()
-                for (index, sample) in stroke.samples.enumerated() {
-                    guard let viewportPoint = point(sample.point) else { continue }
-                    if index == 0 {
-                        path.move(to: viewportPoint)
-                    } else {
-                        path.addLine(to: viewportPoint)
-                    }
-                }
-                let sourceRadius = stroke.radius
-                    * Double(min(transform.sourceSize.width, transform.sourceSize.height))
-                    / max(transform.sourceSize.width, 1)
-                let center = stroke.samples.last?.point ?? .zero
-                let viewportRadius: CGFloat
-                if let centerPoint = point(center),
-                   let edgePoint = point(CGPoint(
-                       x: min(max(center.x + sourceRadius, 0), 1), y: center.y)) {
-                    viewportRadius = max(1, abs(edgePoint.x - centerPoint.x))
-                } else {
-                    viewportRadius = 1
-                }
-                context.stroke(
-                    path, with: .color(guideColor),
-                    style: StrokeStyle(
-                        lineWidth: viewportRadius * 2, lineCap: .round, lineJoin: .round))
-            }
-            if let hover = maskingState.hoverPoint,
-               let center = point(hover),
-               let activeStroke = definition.strokes.last,
-               let edge = point(CGPoint(
-                   x: hover.x + (maskingState.hasDraft
-                       ? activeStroke.radius : maskingState.brushRadius)
-                       * Double(min(transform.sourceSize.width, transform.sourceSize.height))
-                       / max(transform.sourceSize.width, 1),
-                   y: hover.y)) {
-                let radius = max(5, abs(edge.x - center.x))
-                context.stroke(
-                    Path(ellipseIn: CGRect(
-                        x: center.x - radius, y: center.y - radius,
-                        width: radius * 2, height: radius * 2)),
-                    with: .color(guideColor), style: StrokeStyle(lineWidth: 1.5))
-                context.fill(
-                    Path(ellipseIn: CGRect(x: center.x - 1, y: center.y - 1, width: 2, height: 2)),
-                    with: .color(guideColor))
-            }
+        switch layer.components[index].source {
+        case .semantic, .brush:
+            // The wash already shows these; a frame or stroke outline would only add noise.
+            break
         case .linear(let definition):
-            guard let start = point(definition.zeroStrengthPoint),
-                let end = point(definition.fullStrengthPoint)
+            guard
+                let start = transform.viewportPoint(
+                    forSourceNormalized: definition.zeroStrengthPoint),
+                let end = transform.viewportPoint(
+                    forSourceNormalized: definition.fullStrengthPoint)
             else { return }
-            drawLinearGuide(
-                start: start, end: end, transform: transform,
-                in: &context
-            )
+            drawLinearGuide(start: start, end: end, transform: transform, in: &context)
         case .radial(let definition):
-            guard let center = point(definition.center) else { return }
-            let outer = radialGuidePoints(
-                definition: definition, scale: 1, transform: transform)
-            let inner = radialGuidePoints(
-                definition: definition, scale: max(0, 1 - definition.feather), transform: transform)
-            context.stroke(
-                Path { path in
-                    guard let first = outer.first else { return }
-                    path.move(to: first)
-                    for value in outer.dropFirst() { path.addLine(to: value) }
-                }, with: .color(guideColor), style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
-            context.stroke(
-                Path { path in
-                    guard let first = inner.first else { return }
-                    path.move(to: first)
-                    for value in inner.dropFirst() { path.addLine(to: value) }
-                }, with: .color(guideColor.opacity(0.75)), style: StrokeStyle(lineWidth: 1.5))
-
-            drawHandle(at: center, in: &context, color: guideColor)
-            for parameter in [0.0, .pi / 2, .pi, .pi * 1.5] {
-                if let handle = radialGuidePoint(
-                    definition: definition, parameter: parameter, scale: 1, transform: transform) {
-                    drawHandle(at: handle, in: &context, color: guideColor)
-                }
-            }
-            for parameter in [Double.pi / 4, Double.pi * 3 / 4,
-                              Double.pi * 5 / 4, Double.pi * 7 / 4] {
-                if let handle = radialGuidePoint(
-                    definition: definition, parameter: parameter, scale: 1, transform: transform) {
-                    drawHandle(at: handle, in: &context, color: guideColor)
-                }
-            }
-            if let innerHandle = radialGuidePoint(
-                definition: definition, parameter: 0, scale: max(0, 1 - definition.feather),
-                transform: transform) {
-                drawHandle(at: innerHandle, in: &context, color: guideColor.opacity(0.8))
-            }
-            let outerTop = radialGuidePoint(
-                definition: definition, parameter: -.pi / 2, scale: 1, transform: transform)
-            let rotationHandle: CGPoint
-            if let outerTop {
-                let dx = outerTop.x - center.x
-                let dy = outerTop.y - center.y
-                let length = max(hypot(dx, dy), 0.001)
-                rotationHandle = CGPoint(
-                    x: outerTop.x + dx / length * 30,
-                    y: outerTop.y + dy / length * 30)
-            } else {
-                rotationHandle = CGPoint(x: center.x, y: center.y - 30)
-            }
-            context.stroke(
-                Path { path in
-                    path.move(to: center)
-                    path.addLine(to: rotationHandle)
-                }, with: .color(guideColor), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-            drawHandle(at: rotationHandle, in: &context, color: guideColor)
+            drawRadialGuide(definition, transform: transform, in: &context)
         }
     }
 
-    private func drawHandle(at point: CGPoint, in context: inout GraphicsContext, color: Color) {
-        context.fill(
-            Path(ellipseIn: CGRect(x: point.x - 5, y: point.y - 5, width: 10, height: 10)),
-            with: .color(color))
+    /// An approximation of the renderer's stroke, shown only until the resolved overlay catches
+    /// up: a round-capped path at the stroke's density whose soft edge follows its feather.
+    private func drawLiveStroke(
+        _ live: LiveBrushStroke, transform: CanvasMaskTransform, grayscale: Bool,
+        in wash: inout GraphicsContext
+    ) {
+        let points = live.stroke.samples.compactMap {
+            transform.viewportPoint(forSourceNormalized: $0.point)
+        }
+        guard let first = points.first, let anchor = live.stroke.samples.first?.point else {
+            return
+        }
+        let radius = viewportBrushRadius(live.stroke.radius, at: anchor, transform: transform)
+        let feather = CGFloat(live.stroke.feather)
+        var path = Path()
+        path.move(to: first)
+        for point in points.dropFirst() { path.addLine(to: point) }
+        // A click is a zero-length segment; its round caps draw the dab.
+        if points.count == 1 { path.addLine(to: first) }
+
+        let paint: Color
+        var strokeContext = wash
+        if grayscale {
+            paint = live.subtracts ? .black : .white
+        } else if live.subtracts {
+            paint = .black
+            strokeContext.blendMode = .destinationOut
+        } else {
+            paint = maskingState.overlayColor
+        }
+        strokeContext.opacity = live.stroke.density
+        strokeContext.drawLayer { stroke in
+            if feather > 0 {
+                stroke.addFilter(.blur(radius: radius * feather * 0.5))
+            }
+            stroke.stroke(
+                path, with: .color(paint),
+                style: StrokeStyle(
+                    lineWidth: max(1, radius * 2 * (1 - feather * 0.5)),
+                    lineCap: .round, lineJoin: .round))
+        }
     }
 
-    /// Draw the linear guide handles. The resolved overlay image above is the source of truth for
-    /// coverage and already contains the renderer's smoothstep falloff. Constant-opacity zone
-    /// fills here used to sit on top of that image and made the color wash read like a flat tint.
+    /// The brush footprint under the pointer: the outer ring is the brush size and the faint
+    /// inner ring is where feathering begins. Erase uses a dashed ring so the two tools are
+    /// distinguishable at a glance without a badge on the photo.
+    private func drawBrushCursor(
+        live: LiveBrushStroke?, transform: CanvasMaskTransform, in context: inout GraphicsContext
+    ) {
+        let tool = maskingState.activeTool
+        guard tool == .brush || tool == .erase, !maskingState.isSpacePanning,
+            let hover = maskingState.hoverPoint,
+            let center = transform.viewportPoint(forSourceNormalized: hover)
+        else { return }
+        let painting = maskingState.hasDraft ? live : nil
+        let radius = max(
+            4,
+            viewportBrushRadius(
+                painting?.stroke.radius ?? maskingState.brushRadius, at: hover,
+                transform: transform))
+        let feather = CGFloat(painting?.stroke.feather ?? maskingState.brushFeather)
+        let dash: [CGFloat] = tool == .erase ? [4, 3] : []
+        strokeGuide(
+            Path(ellipseIn: circle(center, radius)), lineWidth: 1.25, dash: dash, in: &context)
+        let inner = radius * (1 - feather)
+        if feather > 0.02, inner > 2 {
+            strokeGuide(
+                Path(ellipseIn: circle(center, inner)), lineWidth: 1, dash: dash, opacity: 0.45,
+                in: &context)
+        }
+    }
+
+    /// Converts a stroke radius (a fraction of the source's shorter side) to viewport points.
+    private func viewportBrushRadius(
+        _ radius: Double, at point: CGPoint, transform: CanvasMaskTransform
+    ) -> CGFloat {
+        let size = transform.sourceSize
+        let normalizedX = radius * Double(min(size.width, size.height)) / max(size.width, 1)
+        let step = point.x < 0.5 ? 0.001 : -0.001
+        guard let center = transform.viewportPoint(forSourceNormalized: point),
+            let offset = transform.viewportPoint(
+                forSourceNormalized: CGPoint(x: point.x + step, y: point.y))
+        else { return 1 }
+        let pointsPerUnit = hypot(offset.x - center.x, offset.y - center.y) / abs(step)
+        return max(1, pointsPerUnit * CGFloat(normalizedX))
+    }
+
+    private func circle(_ center: CGPoint, _ radius: CGFloat) -> CGRect {
+        CGRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+    }
+
+    private func strokeGuide(
+        _ path: Path, lineWidth: CGFloat = 1.5, dash: [CGFloat] = [], opacity: Double = 1,
+        in context: inout GraphicsContext
+    ) {
+        context.stroke(
+            path, with: .color(.black.opacity(0.35 * opacity)),
+            style: StrokeStyle(
+                lineWidth: lineWidth + 2, lineCap: .round, lineJoin: .round, dash: dash))
+        context.stroke(
+            path, with: .color(.white.opacity(0.95 * opacity)),
+            style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round, dash: dash))
+    }
+
+    /// A round handle. The one being dragged or hovered takes the accent color so the
+    /// photographer can see which part of the guide they have hold of.
+    private func drawKnob(
+        at point: CGPoint, radius: CGFloat = 5, emphasized: Bool = false, opacity: Double = 1,
+        in context: inout GraphicsContext
+    ) {
+        let knobRadius = emphasized ? radius + 1.5 : radius
+        context.fill(
+            Path(ellipseIn: circle(point, knobRadius + 1.5)),
+            with: .color(.black.opacity(0.3 * opacity)))
+        context.fill(
+            Path(ellipseIn: circle(point, knobRadius)),
+            with: .color((emphasized ? Color.accentColor : .white).opacity(opacity)))
+        if emphasized {
+            context.stroke(
+                Path(ellipseIn: circle(point, knobRadius)), with: .color(.white.opacity(opacity)),
+                lineWidth: 1.5)
+        }
+    }
+
+    /// Linear guide: the dashed line is where the effect starts, the solid outer line where it
+    /// reaches full strength, and the center line moves the whole gradient. The resolved wash
+    /// already shows the falloff, so the guide adds only geometry and handles.
     private func drawLinearGuide(
         start: CGPoint, end: CGPoint, transform: CanvasMaskTransform,
         in context: inout GraphicsContext
@@ -1655,58 +1720,117 @@ struct MaskCanvasOverlay: View {
             max(transform.viewportSize.width, transform.viewportSize.height) * 0.12, 64)
         let rotationHandle = CGPoint(
             x: center.x + normal.x * 34, y: center.y + normal.y * 34)
-        let isToolActive = maskingState.activeTool == .linear
-        let baseOpacity = isToolActive ? 1.0 : 0.55
-        let handles: [(MaskInteractionState.LinearHandle, CGPoint, Color, Bool)] = [
-            (.zeroStrength, start, Color.gray, false),
-            (.center, center, Color.orange, true),
-            (.fullStrength, end, Color.cyan, false),
-            (.rotation, rotationHandle, Color.purple, false),
-        ]
+        let opacity = maskingState.activeTool == .linear ? 1.0 : 0.6
 
-        for (handle, point, color, solid) in handles {
-            let isActive = maskingState.activeLinearHandle == handle
-            let isHovered = maskingState.hoveredLinearHandle == handle
-            let lineWidth: CGFloat = isActive ? 4 : (isHovered ? 3 : (solid ? 2 : 1.5))
-            let style = StrokeStyle(
-                lineWidth: lineWidth, lineCap: .round, dash: solid ? [] : [5, 3])
-            let barPath: Path
-            if handle == .rotation {
-                barPath = Path { path in
-                    path.move(to: center)
-                    path.addLine(to: point)
-                }
-            } else {
-                let barStart = CGPoint(
-                    x: point.x - normal.x * halfBarLength,
-                    y: point.y - normal.y * halfBarLength)
-                let barEnd = CGPoint(
-                    x: point.x + normal.x * halfBarLength,
-                    y: point.y + normal.y * halfBarLength)
-                barPath = Path { path in
-                    path.move(to: barStart)
-                    path.addLine(to: barEnd)
-                }
-            }
-            context.stroke(
-                barPath, with: .color(Color.black.opacity(0.7 * baseOpacity)),
-                style: StrokeStyle(
-                    lineWidth: lineWidth + 3, lineCap: .round, dash: style.dash))
-            context.stroke(
-                barPath, with: .color(color.opacity(baseOpacity)), style: style)
-
-            let radius: CGFloat = isActive ? 8 : (isHovered ? 7 : 6)
-            context.fill(
-                Path(ellipseIn: CGRect(
-                    x: point.x - radius, y: point.y - radius,
-                    width: radius * 2, height: radius * 2)),
-                with: .color(Color.black.opacity(0.8)))
-            context.fill(
-                Path(ellipseIn: CGRect(
-                    x: point.x - radius + 1.5, y: point.y - radius + 1.5,
-                    width: (radius - 1.5) * 2, height: (radius - 1.5) * 2)),
-                with: .color(color.opacity(baseOpacity)))
+        func isEmphasized(_ handle: MaskInteractionState.LinearHandle) -> Bool {
+            maskingState.activeLinearHandle == handle || maskingState.hoveredLinearHandle == handle
         }
+        func bar(through point: CGPoint) -> Path {
+            Path { path in
+                path.move(to: CGPoint(
+                    x: point.x - normal.x * halfBarLength, y: point.y - normal.y * halfBarLength))
+                path.addLine(to: CGPoint(
+                    x: point.x + normal.x * halfBarLength, y: point.y + normal.y * halfBarLength))
+            }
+        }
+
+        let bars: [(MaskInteractionState.LinearHandle, CGPoint, [CGFloat])] = [
+            (.zeroStrength, start, [5, 4]),
+            (.center, center, []),
+            (.fullStrength, end, []),
+        ]
+        for (handle, point, dash) in bars {
+            strokeGuide(
+                bar(through: point), lineWidth: isEmphasized(handle) ? 2.5 : 1.5, dash: dash,
+                opacity: opacity, in: &context)
+        }
+        strokeGuide(
+            Path { path in
+                path.move(to: center)
+                path.addLine(to: rotationHandle)
+            }, lineWidth: 1, opacity: opacity * 0.8, in: &context)
+        drawKnob(at: center, emphasized: isEmphasized(.center), opacity: opacity, in: &context)
+        drawKnob(
+            at: rotationHandle, radius: 4.5, emphasized: isEmphasized(.rotation),
+            opacity: opacity, in: &context)
+    }
+
+    /// Radial guide: the solid ellipse is the gradient's edge, the dashed inner ellipse is where
+    /// feathering begins, and knobs resize (sides and corners), move (center), or rotate.
+    private func drawRadialGuide(
+        _ definition: RadialGradientDefinition, transform: CanvasMaskTransform,
+        in context: inout GraphicsContext
+    ) {
+        guard let center = transform.viewportPoint(forSourceNormalized: definition.center)
+        else { return }
+        let opacity = maskingState.activeTool == .radial ? 1.0 : 0.6
+        let active = maskingState.activeRadialHandle
+
+        func ellipse(scale: Double) -> Path {
+            let points = radialGuidePoints(
+                definition: definition, scale: scale, transform: transform)
+            return Path { path in
+                guard let first = points.first else { return }
+                path.move(to: first)
+                for point in points.dropFirst() { path.addLine(to: point) }
+                path.closeSubpath()
+            }
+        }
+
+        strokeGuide(ellipse(scale: 1), opacity: opacity, in: &context)
+        let innerScale = max(0, 1 - definition.feather)
+        if definition.feather > 0.01 {
+            strokeGuide(
+                ellipse(scale: innerScale), lineWidth: 1, dash: [5, 4], opacity: opacity * 0.8,
+                in: &context)
+        }
+
+        let top = radialGuidePoint(
+            definition: definition, parameter: -.pi / 2, scale: 1, transform: transform)
+        let rotationHandle: CGPoint
+        if let top {
+            let dx = top.x - center.x
+            let dy = top.y - center.y
+            let length = max(hypot(dx, dy), 0.001)
+            rotationHandle = CGPoint(x: top.x + dx / length * 30, y: top.y + dy / length * 30)
+        } else {
+            rotationHandle = CGPoint(x: center.x, y: center.y - 30)
+        }
+        strokeGuide(
+            Path { path in
+                path.move(to: top ?? center)
+                path.addLine(to: rotationHandle)
+            }, lineWidth: 1, opacity: opacity * 0.8, in: &context)
+
+        let sides: [(Double, MaskInteractionState.RadialHandle)] = [
+            (0, .horizontalRadius), (.pi / 2, .verticalRadius),
+            (.pi, .horizontalRadius), (.pi * 1.5, .verticalRadius),
+        ]
+        for (parameter, handle) in sides {
+            if let point = radialGuidePoint(
+                definition: definition, parameter: parameter, scale: 1, transform: transform) {
+                drawKnob(at: point, emphasized: active == handle, opacity: opacity, in: &context)
+            }
+        }
+        for parameter in [Double.pi / 4, .pi * 3 / 4, .pi * 5 / 4, .pi * 7 / 4] {
+            if let point = radialGuidePoint(
+                definition: definition, parameter: parameter, scale: 1, transform: transform) {
+                drawKnob(
+                    at: point, radius: 3.5, emphasized: active == .corner, opacity: opacity,
+                    in: &context)
+            }
+        }
+        if definition.feather > 0,
+            let inner = radialGuidePoint(
+                definition: definition, parameter: 0, scale: innerScale, transform: transform) {
+            drawKnob(
+                at: inner, radius: 4, emphasized: active == .innerBoundary,
+                opacity: opacity * 0.9, in: &context)
+        }
+        drawKnob(at: center, emphasized: active == .center, opacity: opacity, in: &context)
+        drawKnob(
+            at: rotationHandle, radius: 4.5, emphasized: active == .rotation, opacity: opacity,
+            in: &context)
     }
 
     private var canvasAccessibilityLabel: String {
