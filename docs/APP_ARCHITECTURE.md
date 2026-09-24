@@ -52,11 +52,12 @@ child tasks.
 ## Preview-presentation ownership
 
 `PreviewAdmissionCoordinator` owns request admission, debounce handles, histogram jobs,
-adjacent prefetch, idle cache fill, and comparison retry. `PreviewPresentationCoordinator` owns the
-display and comparison generations, per-surface resolution-planner hysteresis, preview cache
-keys/access, and canonical complete-frame cache writes. `PreviewCoordinator` remains the only
-render-submission funnel. The root supplies value-only document/source/navigation inputs and retains
-the `PreviewSurface` instances, so there is no second document store or surface reference in these
+adjacent prefetch, idle cache fill, and comparison-preview admission, including its scheduled and
+retried revision state and retry task. `PreviewPresentationCoordinator` owns the display and
+comparison generations, per-surface resolution-planner hysteresis, preview cache keys/access, and
+canonical complete-frame cache writes. `PreviewCoordinator` remains the only render-submission
+funnel. The root supplies value-only document/source/navigation inputs and retains the
+`PreviewSurface` instances, so there is no second document store or surface reference in these
 collaborators.
 
 ## Canvas workflow ownership
