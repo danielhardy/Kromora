@@ -862,6 +862,107 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         XCTAssertLessThan(alphaAt(32, 300), 5, "coverage must not appear mid-frame")
     }
 
+    func testBrushRasterMatchesAPerPixelReferenceOverEverySample() throws {
+        // The renderer stamps each dab over only its reachable pixels. That must be exactly the
+        // per-pixel accumulation over every sample in order: same coverage, same feather.
+        let width = 96
+        let height = 300
+        let stroke = BrushStroke(
+            samples: [
+                BrushSample(point: CGPoint(x: 0.15, y: 0.2), pressure: 0.6),
+                BrushSample(point: CGPoint(x: 0.5, y: 0.45)),
+                BrushSample(point: CGPoint(x: 0.85, y: 0.8), pressure: 1),
+            ],
+            radius: 0.18, feather: 0.6, flow: 0.7, density: 0.85)
+        let payload = LocalMaskPayload(
+            sourceFingerprint: "reference", targetSize: PixelDimensions(width: width, height: height),
+            quality: .preview, descriptor: .brush(BrushMaskDefinition(strokes: [stroke])))
+        let image = try XCTUnwrap(LocalMaskRenderer().image(
+            for: payload, extent: CGRect(x: 0, y: 0, width: width, height: height),
+            transform: .identity))
+        let pixels = try Pixels.bytes(of: image)
+        XCTAssertEqual(pixels.count, width * height * 4)
+        guard pixels.count == width * height * 4 else { return }
+
+        let size = CGSize(width: width, height: height)
+        let samples = BrushMaskMath.resampledAndSimplified(
+            stroke.samples, sourceSize: size, radius: stroke.radius)
+        let shorterSide = Double(min(width, height))
+        var worst = 0
+        for y in 0..<height {
+            for x in 0..<width {
+                var opacity = 0.0
+                for sample in samples {
+                    let distance = hypot(
+                        ((Double(x) + 0.5) / Double(width) - sample.point.x) * Double(width),
+                        ((Double(y) + 0.5) / Double(height) - sample.point.y) * Double(height)
+                    ) / shorterSide
+                    opacity = BrushMaskMath.accumulatedOpacity(
+                        current: opacity,
+                        stamp: BrushMaskMath.stampAlpha(
+                            distance: distance, radius: stroke.radius, feather: stroke.feather,
+                            flow: stroke.flow, pressure: sample.pressure),
+                        density: stroke.density)
+                }
+                let expected = Int((min(max(opacity, 0), 1) * 255).rounded())
+                worst = max(worst, abs(Int(pixels[(y * width + x) * 4 + 3]) - expected))
+            }
+        }
+        XCTAssertLessThanOrEqual(worst, 1, "brush coverage diverged from the reference by \(worst)")
+    }
+
+    func testRenderedEraseRemovesTheAdjustmentWhereItWasPaintedInAMultiTileFrame() async throws {
+        // The canvas erase must match the pixels the renderer adjusts: after an erase stroke,
+        // the painted area is unadjusted and the rest of the mask still is.
+        let width = 200
+        let height = 600
+        let source = try source(width: width, height: height)
+        let layer = LocalAdjustmentLayer(
+            components: [
+                MaskComponent(mode: .replace, source: .brush(BrushMaskDefinition(strokes: [
+                    BrushStroke(
+                        samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))],
+                        radius: 2, feather: 0)
+                ]))),
+                MaskComponent(mode: .subtract, source: .brush(BrushMaskDefinition(strokes: [
+                    BrushStroke(
+                        samples: [
+                            BrushSample(point: CGPoint(x: 0.2, y: 0.12)),
+                            BrushSample(point: CGPoint(x: 0.8, y: 0.12)),
+                        ],
+                        radius: 0.15, feather: 0)
+                ]))),
+            ],
+            adjustments: LocalAdjustments(exposure: -4)
+        )
+        let request = { (document: EditDocument) in
+            RenderRequest(
+                source: source, document: document,
+                targetSize: CGSize(width: width, height: height), quality: .preview,
+                output: .raster)
+        }
+        let engine = RenderEngine()
+        let original = try Pixels.bytes(
+            of: image(from: try await engine.render(request(EditDocument()))))
+        let edited = try Pixels.bytes(
+            of: image(from: try await engine.render(request(EditDocument(localAdjustments: [layer])))))
+        guard original.count == width * height * 4, edited.count == original.count else {
+            return XCTFail("unexpected raster sizes \(original.count) / \(edited.count)")
+        }
+        func luma(_ pixels: [UInt8], _ x: Int, _ y: Int) -> Int {
+            let index = (y * width + x) * 4
+            return Int(pixels[index]) + Int(pixels[index + 1]) + Int(pixels[index + 2])
+        }
+        let erased = (x: width / 2, y: Int(0.12 * Double(height)))
+        let kept = (x: width / 2, y: Int(0.75 * Double(height)))
+        XCTAssertEqual(
+            luma(edited, erased.x, erased.y), luma(original, erased.x, erased.y), accuracy: 6,
+            "the erased band must be unadjusted")
+        XCTAssertLessThan(
+            luma(edited, kept.x, kept.y), luma(original, kept.x, kept.y) / 2,
+            "the rest of the mask must still be darkened")
+    }
+
     func testBrushRasterAccumulatesSeparatedStrokesWithoutFullFrameSmear() throws {
         let dimensions = PixelDimensions(width: 64, height: 32)
         let renderer = LocalMaskRenderer()

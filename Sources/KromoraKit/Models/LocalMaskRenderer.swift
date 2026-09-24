@@ -353,34 +353,53 @@ final class LocalMaskRenderer {
         guard !resultCount.overflow else {
             return nil
         }
-        var result = [Float](repeating: 0, count: resultCount.partialValue)
-        for y in 0..<region.height {
-            guard !Task.isCancelled else { return nil }
-            for x in 0..<region.width {
-                let point = CGPoint(
-                    x: (Double(region.x + x) + 0.5) / width,
-                    y: (Double(region.y + y) + 0.5) / height
-                )
-                let index = y * region.width + x
-                var opacity = 0.0
-                for (sampleIndex, sample) in transformed.enumerated() {
-                    if sampleIndex % 64 == 0 && Task.isCancelled { return nil }
-                    let distance = hypot(
-                        (point.x - sample.point.x) * width,
-                        (point.y - sample.point.y) * height
-                    ) / shorterSide
+        // Stamp each dab over only the pixels it can reach, in sample order. Every pixel sees the
+        // same deposits in the same order as a per-pixel walk over all samples (a dab outside its
+        // radius deposits nothing, and coverage saturates at the stroke's density), but the cost
+        // is samples × dab area instead of region area × samples — the difference between
+        // milliseconds and many seconds for a long stroke on a preview-sized frame.
+        var opacity = [Double](repeating: 0, count: resultCount.partialValue)
+        let pixelRadius = stroke.radius * shorterSide
+        let pixelRadiusSquared = pixelRadius * pixelRadius
+        let lastColumn = region.x + region.width - 1
+        let lastRow = region.y + region.height - 1
+        for (sampleIndex, sample) in transformed.enumerated() {
+            if sampleIndex % 16 == 0 && Task.isCancelled { return nil }
+            // Pixel x is centered at x + 0.5, so it is within the radius only when
+            // |x + 0.5 - sampleX| < pixelRadius.
+            let centerX = sample.point.x * width - 0.5
+            let centerY = sample.point.y * height - 0.5
+            guard centerX.isFinite, centerY.isFinite else { continue }
+            let firstX = max(region.x, Int(max(floor(centerX - pixelRadius), -1)))
+            let finalX = min(lastColumn, Int(min(ceil(centerX + pixelRadius), Double(lastColumn))))
+            let firstY = max(region.y, Int(max(floor(centerY - pixelRadius), -1)))
+            let finalY = min(lastRow, Int(min(ceil(centerY + pixelRadius), Double(lastRow))))
+            guard firstX <= finalX, firstY <= finalY else { continue }
+            for globalY in firstY...finalY {
+                let pointY = (Double(globalY) + 0.5) / height
+                let rowStart = (globalY - region.y) * region.width - region.x
+                let offsetY = (pointY - sample.point.y) * height
+                for globalX in firstX...finalX {
+                    let offsetX = ((Double(globalX) + 0.5) / width - sample.point.x) * width
+                    // The dab's bounding square includes corners outside its circle; skip them
+                    // before the square root and falloff.
+                    guard offsetX * offsetX + offsetY * offsetY < pixelRadiusSquared else {
+                        continue
+                    }
+                    let distance = hypot(offsetX, offsetY) / shorterSide
                     let deposited = BrushMaskMath.stampAlpha(
                         distance: distance, radius: stroke.radius, feather: stroke.feather,
                         flow: stroke.flow, pressure: sample.pressure
                     )
-                    opacity = BrushMaskMath.accumulatedOpacity(
-                        current: opacity, stamp: deposited, density: stroke.density
+                    guard deposited > 0 else { continue }
+                    let index = rowStart + globalX
+                    opacity[index] = BrushMaskMath.accumulatedOpacity(
+                        current: opacity[index], stamp: deposited, density: stroke.density
                     )
-                    if opacity >= stroke.density { break }
                 }
-                result[index] = Float(opacity)
             }
         }
+        let result = opacity.map(Float.init)
         let cost = result.count.multipliedReportingOverflow(by: MemoryLayout<Float>.size)
         let raster = CachedBrushStroke(region: region, values: result)
         guard !cost.overflow, maxBrushStrokeCacheCostBytes > 0,
