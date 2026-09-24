@@ -514,6 +514,27 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         XCTAssertEqual(state.brushRadius, 0.001)
     }
 
+    func testOverlayAppearanceFollowsSettingsAndOTogglesVisibility() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let state = viewModel.maskInteractionState
+        XCTAssertEqual(state.overlayOpacity, MaskOverlayAppearance.standard.opacity)
+
+        let chosen = MaskOverlayAppearance(
+            inspection: .grayscale,
+            color: MaskOverlayColor(red: 0, green: 0.8, blue: 0.4, alpha: 1),
+            opacity: 0.7)
+        viewModel.settings.maskOverlayAppearance = chosen
+        XCTAssertEqual(state.overlayInspection, .grayscale)
+        XCTAssertEqual(state.overlayColorValue, chosen.color)
+        XCTAssertEqual(state.overlayOpacity, 0.7)
+
+        let documentBefore = viewModel.document
+        XCTAssertTrue(state.showOverlay)
+        state.toggleOverlay()
+        XCTAssertFalse(state.showOverlay)
+        XCTAssertEqual(viewModel.document, documentBefore, "the overlay never changes the edit")
+    }
+
     func testMaskAdjustmentGroupsListEveryControlExactlyOnce() {
         // A control missing from the groups would silently disappear from the mask inspector.
         let grouped = LocalAdjustmentControl.inspectorGroups.flatMap(\.controls)

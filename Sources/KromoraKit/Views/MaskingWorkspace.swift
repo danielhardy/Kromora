@@ -5,15 +5,14 @@ import SwiftUI
 /// while the photographer changes masks, reopens saved recipes, or switches tools.
 ///
 /// The panel reads top to bottom in task order: choose what a canvas drag does, choose (or add) a
-/// mask, then shape it and set its adjustments. Overlay inspection is presentation-only, so its
-/// settings sit collapsed at the bottom and only the show/hide switch stays in the header.
+/// mask, then shape it and set its adjustments. The overlay is a viewing aid: it is shown or
+/// hidden from the header (or with O), and its color and style are preferences in Settings.
 struct MaskingWorkspace: View {
     @ObservedObject var viewModel: AppViewModel
     @ObservedObject private var maskingState: MaskInteractionState
 
     @State private var adjustmentsExpanded = true
     @State private var maskShapeExpanded = true
-    @State private var overlayExpanded = false
 
     init(viewModel: AppViewModel) {
         self.viewModel = viewModel
@@ -34,8 +33,6 @@ struct MaskingWorkspace: View {
                     renderStatus
                     maskList
                     selectedInspector
-                    Divider()
-                    overlaySection
                 }
             }
             .padding(16)
@@ -60,7 +57,7 @@ struct MaskingWorkspace: View {
             }
             .toggleStyle(.button)
             .buttonStyle(.borderless)
-            .help("Show or hide the mask overlay. Display only; the edit is unchanged.")
+            .help("Show or hide the mask overlay (O). Change its color in Settings.")
             .accessibilityLabel("Show overlay")
             .accessibilityValue(maskingState.showOverlay ? "On" : "Off")
             .accessibilityHint("Presentation only; does not change the saved mask or export")
@@ -440,12 +437,24 @@ struct MaskingWorkspace: View {
                     Label(partTitle(component, index: index), systemImage: component.source.iconName)
                         .font(.caption.weight(.semibold))
                     Spacer()
+                    if component.source.brushDefinition == nil {
+                        Button {
+                            viewModel.resetMaskComponent(component.id, in: layer.id)
+                        } label: {
+                            Image(systemName: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.borderless)
+                        .help("Reset this shape")
+                        .accessibilityLabel("Reset \(component.displayName)")
+                    }
                 }
-                componentControls(
-                    component, layerID: layer.id, allowsInvert: layer.components.count > 1)
+                componentControls(component, layerID: layer.id)
             }
 
-            addToMaskMenu(layer)
+            HStack(spacing: 8) {
+                refineMenu(layer, mode: .add)
+                refineMenu(layer, mode: .subtract)
+            }
         }
     }
 
@@ -465,93 +474,66 @@ struct MaskingWorkspace: View {
         return "\(component.displayName) — \(component.mode.summaryWord)"
     }
 
-    private func addToMaskMenu(_ layer: LocalAdjustmentLayer) -> some View {
+    /// "Add" and "Subtract" are how photographers refine a selection: brush in more sky, take
+    /// the trees back out. Intersect is available from a part's menu once the mask has parts.
+    private func refineMenu(_ layer: LocalAdjustmentLayer, mode: MaskCombineMode) -> some View {
         Menu {
-            ForEach([MaskCombineMode.add, .subtract, .intersect], id: \.self) { mode in
-                Section(mode.summaryWord) {
-                    ForEach(MaskCreationKind.allAddable, id: \.self) { kind in
-                        Button(kind.title) {
-                            if kind.isSmart {
-                                viewModel.addSmartMaskComponent(
-                                    to: layer.id, kind: kind, mode: mode)
-                            } else {
-                                viewModel.addMaskComponent(to: layer.id, kind: kind, mode: mode)
-                            }
-                        }
-                    }
+            Section("Paint and gradients") {
+                ForEach(MaskCreationKind.canvasKinds, id: \.self) { kind in
+                    refineButton(kind, layer: layer, mode: mode)
+                }
+            }
+            Section("Smart selections") {
+                ForEach(MaskCreationKind.smartKinds, id: \.self) { kind in
+                    refineButton(kind, layer: layer, mode: mode)
                 }
             }
         } label: {
-            Label("Add or Subtract…", systemImage: "plus.forwardslash.minus")
-                .font(.caption)
+            Label(
+                mode == .subtract ? "Subtract" : "Add",
+                systemImage: mode == .subtract ? "minus.circle" : "plus.circle")
         }
         .fixedSize()
-        .accessibilityLabel("Add mask component")
-        .help("Combine another selection with this mask")
+        .accessibilityLabel(mode == .subtract ? "Subtract from mask" : "Add to mask")
+        .help(mode == .subtract
+            ? "Remove an area from this mask" : "Add another area to this mask")
     }
 
-    // MARK: Overlay
-
-    private var overlaySection: some View {
-        InspectorDisclosure("Overlay", isExpanded: $overlayExpanded) {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("Inspection", selection: $maskingState.overlayInspection) {
-                    ForEach(MaskInteractionState.OverlayInspection.allCases, id: \.self) {
-                        Text($0.title).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                HStack {
-                    Text("Color")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    ColorPicker(
-                        "Overlay color", selection: $maskingState.overlayColor,
-                        supportsOpacity: false
-                    )
-                    .labelsHidden()
-                    .accessibilityLabel("Overlay color")
-                }
-                HStack {
-                    Text("Opacity")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    NeutralOriginSlider(
-                        value: $maskingState.overlayOpacity, in: 0...1, neutral: 0,
-                        accessibilityTitle: "Opacity",
-                        accessibilityReadout: "\(Int(maskingState.overlayOpacity * 100)) percent")
-                        .accessibilityValue("\(Int(maskingState.overlayOpacity * 100)) percent")
-                    Text(percentage(maskingState.overlayOpacity))
-                        .font(.caption.monospacedDigit())
-                        .frame(width: 38, alignment: .trailing)
-                }
-                Text("Display only. The overlay never changes the edit or the export.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+    private func refineButton(
+        _ kind: MaskCreationKind, layer: LocalAdjustmentLayer, mode: MaskCombineMode
+    ) -> some View {
+        Button {
+            if kind == .brush {
+                // Brushing is the common refinement: arm the tool and let the stroke create
+                // the part, exactly as pressing B or E does.
+                viewModel.selectMaskLayer(layer.id)
+                viewModel.setMaskTool(mode == .subtract ? .erase : .brush)
+            } else if kind.isSmart {
+                viewModel.addSmartMaskComponent(to: layer.id, kind: kind, mode: mode)
+            } else {
+                viewModel.addMaskComponent(to: layer.id, kind: kind, mode: mode)
             }
-            .padding(.top, 10)
+        } label: {
+            Label(kind.title, systemImage: kind.iconName)
         }
     }
 
-    /// - Parameter allowsInvert: A single-source mask is inverted by the mask-level toggle; a
-    ///   per-part invert beside it would be a second switch with the same visible effect.
+    /// Controls for one part, in a photographer's terms: how soft its edge is and how strongly it
+    /// selects. Geometry is edited on the photo; the canvas guides say how, so no instructions
+    /// are repeated here. Inverting is done once, for the whole mask; a part's own invert lives
+    /// in its menu and only surfaces here when it is on, so it can be turned back off.
     @ViewBuilder
-    private func componentControls(
-        _ component: MaskComponent, layerID: UUID, allowsInvert: Bool
-    ) -> some View {
-        if allowsInvert || component.isInverted {
+    private func componentControls(_ component: MaskComponent, layerID: UUID) -> some View {
+        if component.isInverted {
             Toggle(
-                "Invert component",
+                "Invert this part",
                 isOn: componentBinding(component.id, layerID: layerID, keyPath: \.isInverted)
             )
-            .font(.caption)
         }
         switch component.source {
         case .semantic(let definition):
             maskSlider(
-                "Edge feather",
+                "Soften edges",
                 value: componentValue(
                     component.id, layerID: layerID,
                     get: { source in
@@ -565,7 +547,7 @@ struct MaskingWorkspace: View {
                         }
                     }), range: 0...1)
             maskSlider(
-                "Density",
+                "Strength",
                 value: componentValue(
                     component.id, layerID: layerID,
                     get: { source in
@@ -579,13 +561,11 @@ struct MaskingWorkspace: View {
                         }
                     }), range: 0...1)
         case .brush(let definition):
-            Text(
-                definition.strokes.isEmpty
-                    ? "Paint on the canvas to add a stroke."
-                    : "\(definition.strokes.count) stroke\(definition.strokes.count == 1 ? "" : "s")"
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
+            if definition.strokes.isEmpty {
+                Text("Paint on the photo to add to this mask.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             if maskingState.activeTool != .brush, maskingState.activeTool != .erase {
                 Button("Paint with Brush", systemImage: "paintbrush") {
                     viewModel.setMaskTool(.brush)
@@ -594,17 +574,6 @@ struct MaskingWorkspace: View {
                 .font(.caption)
             }
         case .linear(let definition):
-            Text(
-                "On the photo, the dashed line is where the effect starts and the outer solid "
-                    + "line is where it reaches full strength. Drag the center to move it or the "
-                    + "small knob to rotate it."
-            )
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel(
-                "Linear gradient guide: zero strength, transition, and full strength")
-            .accessibilityHint("Use the canvas bars to resize, move, or rotate the gradient")
             maskSlider(
                 "Angle",
                 value: componentValue(
@@ -618,9 +587,9 @@ struct MaskingWorkspace: View {
                             current.angleDegrees = value
                             source = .linear(current)
                         }
-                    }), range: -180...180, neutral: 0)
+                    }), range: -180...180, neutral: 0, readout: .degrees)
             maskSlider(
-                "Falloff",
+                "Feather",
                 value: componentValue(
                     component.id, layerID: layerID,
                     get: { source in
@@ -634,7 +603,7 @@ struct MaskingWorkspace: View {
                         }
                     }), range: 0...sqrt(2.0))
             maskSlider(
-                "Density",
+                "Strength",
                 value: componentValue(
                     component.id, layerID: layerID,
                     get: { source in
@@ -647,32 +616,24 @@ struct MaskingWorkspace: View {
                             source = .linear(current)
                         }
                     }), range: 0...1)
-            Button("Reset linear gradient", systemImage: "arrow.counterclockwise") {
-                viewModel.resetMaskComponent(component.id, in: layerID)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Reset linear gradient")
-            .accessibilityHint("Restore the angle and falloff of this gradient")
         case .radial(let definition):
-            Toggle(
-                "Select inside",
-                isOn: Binding(
-                    get: {
-                        guard let layer = viewModel.document.localAdjustments.first(where: {
-                            $0.id == layerID
-                        }), let selected = layer.components.first(where: { $0.id == component.id }),
-                        case .radial(let value) = selected.source else { return definition.isInside }
-                        return value.isInside
-                    },
-                    set: { isInside in
-                        viewModel.updateMaskComponent(component.id, in: layerID) { component in
-                            if case .radial(var current) = component.source {
-                                current.isInside = isInside
-                                component.source = .radial(current)
+            // Selecting outside the ellipse is what Invert does; the separate switch only
+            // appears for a gradient already set that way, so it can be switched back.
+            if !definition.isInside {
+                Toggle(
+                    "Apply outside the shape",
+                    isOn: Binding(
+                        get: { !definition.isInside },
+                        set: { outside in
+                            viewModel.updateMaskComponent(component.id, in: layerID) { component in
+                                if case .radial(var current) = component.source {
+                                    current.isInside = !outside
+                                    component.source = .radial(current)
+                                }
                             }
-                        }
-                    })
-            )
+                        })
+                )
+            }
             maskSlider(
                 "Angle",
                 value: componentValue(
@@ -686,7 +647,7 @@ struct MaskingWorkspace: View {
                             current.rotation = value * .pi / 180
                             source = .radial(current)
                         }
-                    }), range: -180...180, neutral: 0)
+                    }), range: -180...180, neutral: 0, readout: .degrees)
             maskSlider(
                 "Feather",
                 value: componentValue(
@@ -702,7 +663,7 @@ struct MaskingWorkspace: View {
                         }
                     }), range: 0...1)
             maskSlider(
-                "Density",
+                "Strength",
                 value: componentValue(
                     component.id, layerID: layerID,
                     get: { source in
@@ -715,12 +676,6 @@ struct MaskingWorkspace: View {
                             source = .radial(current)
                         }
                     }), range: 0...1)
-            Button("Reset radial gradient", systemImage: "arrow.counterclockwise") {
-                viewModel.resetMaskComponent(component.id, in: layerID)
-            }
-            .buttonStyle(.borderless)
-            .accessibilityLabel("Reset radial gradient")
-            .accessibilityHint("Restore the angle, radii, and feather of this gradient")
         }
     }
 
@@ -760,9 +715,11 @@ struct MaskingWorkspace: View {
     ///   or Feather. The signed rows (Angle, and every local adjustment) pass theirs.
     private func maskSlider(
         _ title: String, value: Binding<Double>, range: ClosedRange<Double>,
-        neutral: Double? = nil, trackStyle: SliderTrackStyle = .neutral
+        neutral: Double? = nil, trackStyle: SliderTrackStyle = .neutral,
+        readout: MaskSliderReadout = .percent
     ) -> some View {
-        HStack(spacing: 6) {
+        let text = readout.text(value.wrappedValue, range: range)
+        return HStack(spacing: 6) {
             Text(title)
                 .font(.caption)
                 .frame(width: 82, alignment: .leading)
@@ -770,8 +727,7 @@ struct MaskingWorkspace: View {
                 value: value, in: range, neutral: neutral ?? range.lowerBound,
                 trackStyle: trackStyle,
                 accessibilityTitle: title,
-                accessibilityReadout: value.wrappedValue.formatted(
-                    .number.precision(.fractionLength(1))),
+                accessibilityReadout: text,
                 onEditingChanged: { editing in
                     if editing {
                         viewModel.beginPreviewInteraction()
@@ -779,13 +735,13 @@ struct MaskingWorkspace: View {
                         viewModel.endPreviewInteraction()
                     }
                 })
-            Text(value.wrappedValue.formatted(.number.precision(.fractionLength(0))))
+            Text(text)
                 .font(.caption.monospacedDigit())
                 .frame(width: 42, alignment: .trailing)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
-        .accessibilityValue(value.wrappedValue.formatted(.number.precision(.fractionLength(1))))
+        .accessibilityValue(text)
     }
 
     private func layerBinding<Value>(
@@ -839,8 +795,24 @@ struct MaskingWorkspace: View {
         )
     }
 
-    private func percentage(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
 
+}
+
+/// How a mask slider reads out: amounts as a percentage of their range, angles in degrees.
+private enum MaskSliderReadout {
+    case percent
+    case degrees
+
+    func text(_ value: Double, range: ClosedRange<Double>) -> String {
+        switch self {
+        case .degrees:
+            return "\(Int(value.rounded()))°"
+        case .percent:
+            let span = range.upperBound - range.lowerBound
+            let fraction = span > 0 ? (value - range.lowerBound) / span : 0
+            return "\(Int((fraction * 100).rounded()))%"
+        }
+    }
 }
 
 /// The local-adjustment row mirrors the global value-entry contract while its binding remains
@@ -946,6 +918,8 @@ private struct MaskLayerRow: View {
     let total: Int
     let isTransient: Bool
 
+    @State private var isHovered = false
+
     private var isSelected: Bool { maskingState.selectedLayerID == layer.id }
 
     var body: some View {
@@ -983,17 +957,17 @@ private struct MaskLayerRow: View {
                     .accessibilityLabel("Solo overlay on")
             }
 
-            Toggle(
-                "Enabled",
-                isOn: Binding(
-                    get: { layer.isEnabled },
-                    set: { value in viewModel.updateMask(layer.id) { $0.isEnabled = value } }
-                )
-            )
-            .labelsHidden()
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-            .help("Turn this mask's adjustments on or off")
+            // Like a layer's eye: hides the mask's effect without deleting it. Always visible
+            // while hidden, so an off mask never looks like an active one.
+            Button {
+                viewModel.updateMask(layer.id) { $0.isEnabled.toggle() }
+            } label: {
+                Image(systemName: layer.isEnabled ? "eye" : "eye.slash")
+                    .foregroundStyle(layer.isEnabled ? .secondary : .tertiary)
+            }
+            .buttonStyle(.borderless)
+            .opacity(isHovered || isSelected || !layer.isEnabled ? 1 : 0)
+            .help(layer.isEnabled ? "Hide this mask's effect" : "Show this mask's effect")
             .accessibilityLabel("Enable \(layer.name)")
             .accessibilityValue(layer.isEnabled ? "On" : "Off")
 
@@ -1024,9 +998,13 @@ private struct MaskLayerRow: View {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
+            .opacity(isHovered || isSelected ? 1 : 0)
             .accessibilityLabel("Actions for \(layer.name)")
         }
+        .opacity(layer.isEnabled ? 1 : 0.6)
+        .onHover { isHovered = $0 }
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
         .background(
@@ -1066,6 +1044,8 @@ private struct MaskPartRow: View {
     }
 
     private var isSoloed: Bool { maskingState.soloComponentID == component.id }
+
+    @State private var isHovered = false
 
     private var partAccessibilityLabel: String {
         let combine = index == 0 ? "" : ", \(component.mode.summaryWord),"
@@ -1113,9 +1093,10 @@ private struct MaskPartRow: View {
                     .help("Overlay shows only this part")
             }
             if !component.isEnabled {
-                Text("Off")
+                Image(systemName: "eye.slash")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
+                    .help("This part is turned off")
             }
 
             Menu {
@@ -1129,6 +1110,16 @@ private struct MaskPartRow: View {
                 }
                 .accessibilityLabel("Solo \(component.displayName)")
                 .accessibilityValue(isSoloed ? "On" : "Off")
+                Button(component.isInverted ? "Don’t Invert" : "Invert") {
+                    viewModel.updateMaskComponent(component.id, in: layer.id) {
+                        $0.isInverted.toggle()
+                    }
+                }
+                if component.source.brushDefinition == nil {
+                    Button("Reset Shape") {
+                        viewModel.resetMaskComponent(component.id, in: layer.id)
+                    }
+                }
                 if index > 0 {
                     Picker(
                         "Combine",
@@ -1162,9 +1153,12 @@ private struct MaskPartRow: View {
                 Image(systemName: "ellipsis.circle")
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
+            .opacity(isHovered || isSelected ? 1 : 0)
             .accessibilityLabel("Actions for \(component.displayName)")
         }
+        .onHover { isHovered = $0 }
         .padding(.vertical, 3)
         .padding(.leading, 22)
         .padding(.trailing, 6)

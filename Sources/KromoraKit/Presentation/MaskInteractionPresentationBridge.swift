@@ -7,23 +7,26 @@ import SwiftUI
 /// how a SwiftUI `Color` is represented and edited by the color picker.
 extension MaskInteractionState {
     var overlayColor: Color {
-        get {
-            Color(
-                .sRGB,
-                red: overlayColorValue.red,
-                green: overlayColorValue.green,
-                blue: overlayColorValue.blue,
-                opacity: overlayColorValue.alpha
-            )
-        }
+        get { overlayColorValue.color }
         set {
-            guard let color = NSColor(newValue).usingColorSpace(.sRGB) else { return }
-            overlayColorValue = MaskOverlayColor(
-                red: Double(color.redComponent),
-                green: Double(color.greenComponent),
-                blue: Double(color.blueComponent),
-                alpha: Double(color.alphaComponent)
-            )
+            guard let value = MaskOverlayColor(newValue) else { return }
+            overlayColorValue = value
         }
+    }
+}
+
+extension MaskOverlayColor {
+    var color: Color {
+        Color(.sRGB, red: red, green: green, blue: blue, opacity: alpha)
+    }
+
+    init?(_ color: Color) {
+        guard let color = NSColor(color).usingColorSpace(.sRGB) else { return nil }
+        self.init(
+            red: Double(color.redComponent),
+            green: Double(color.greenComponent),
+            blue: Double(color.blueComponent),
+            alpha: Double(color.alphaComponent)
+        )
     }
 }

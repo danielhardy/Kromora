@@ -201,6 +201,7 @@ imports use a SHA-256 identity for the delivered bytes.
 | `↑` / `↓` (masking workspace) | Nudge the selected mask; hold `Shift` for a larger step |
 | `[` / `]` (masking workspace) | Decrease / increase brush radius |
 | `⌥` + scroll (Brush / Erase) | Resize the brush; plain scroll still zooms the canvas |
+| `O` (masking workspace) | Show / hide the mask overlay (color and opacity are in Settings) |
 | `⌘I` | Toggle the Info inspector |
 | `⌘O` | Open an image |
 | `⌘⇧I` | Import from Photos |
