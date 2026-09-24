@@ -11,6 +11,27 @@ enum MaskNativePointerEvent: Sendable {
     case ended(MaskNativePointerSample?)
     /// The pointer left the canvas; hover-only presentation such as the brush ring should go.
     case exited
+    /// Scroll over an interactive surface. The surface sits above the preview, so it must
+    /// answer scrolling itself: Option-scroll resizes the brush, plain scroll zooms the canvas.
+    case scrolled(MaskNativeScroll)
+    /// Trackpad pinch over an interactive surface, forwarded as canvas zoom.
+    case magnified(MaskNativeMagnification)
+}
+
+struct MaskNativeScroll: Sendable {
+    let point: CGPoint
+    let deltaY: Double
+    /// Trackpads report pixel deltas; mouse wheels report coarse line steps.
+    let isPrecise: Bool
+    let isOptionDown: Bool
+}
+
+struct MaskNativeMagnification: Sendable {
+    let point: CGPoint
+    let factor: Double
+    let phase: Phase
+
+    enum Phase: Sendable { case began, changed, ended }
 }
 
 struct MaskNativePointerSample: Sendable {
@@ -88,6 +109,38 @@ final class MaskPointerNSView: NSView {
 
     override func mouseMoved(with event: NSEvent) { send(.moved(samples(for: event))) }
     override func mouseExited(with event: NSEvent) { send(.exited) }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard isInteractive, event.scrollingDeltaY.isFinite else {
+            super.scrollWheel(with: event)
+            return
+        }
+        send(
+            .scrolled(
+                MaskNativeScroll(
+                    point: convert(event.locationInWindow, from: nil),
+                    deltaY: Double(event.scrollingDeltaY),
+                    isPrecise: event.hasPreciseScrollingDeltas,
+                    isOptionDown: event.modifierFlags.contains(.option))))
+    }
+
+    override func magnify(with event: NSEvent) {
+        guard isInteractive else {
+            super.magnify(with: event)
+            return
+        }
+        let phase: MaskNativeMagnification.Phase
+        switch event.phase {
+        case .began: phase = .began
+        case .ended, .cancelled: phase = .ended
+        default: phase = .changed
+        }
+        send(
+            .magnified(
+                MaskNativeMagnification(
+                    point: convert(event.locationInWindow, from: nil),
+                    factor: 1 + Double(event.magnification), phase: phase)))
+    }
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         send(.began(samples(for: event)))

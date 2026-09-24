@@ -200,6 +200,7 @@ imports use a SHA-256 identity for the delivered bytes.
 | `R` | Select the Radial Gradient mask tool |
 | `↑` / `↓` (masking workspace) | Nudge the selected mask; hold `Shift` for a larger step |
 | `[` / `]` (masking workspace) | Decrease / increase brush radius |
+| `⌥` + scroll (Brush / Erase) | Resize the brush; plain scroll still zooms the canvas |
 | `⌘I` | Toggle the Info inspector |
 | `⌘O` | Open an image |
 | `⌘⇧I` | Import from Photos |

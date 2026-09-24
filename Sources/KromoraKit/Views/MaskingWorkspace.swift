@@ -187,7 +187,7 @@ struct MaskingWorkspace: View {
             brushSlider("Feather", value: $maskingState.brushFeather, range: 0...1)
             brushSlider("Flow", value: $maskingState.brushFlow, range: 0...1)
             brushSlider("Density", value: $maskingState.brushDensity, range: 0...1)
-            Text("[ ] size · Shift-[ ] feather · Space pan")
+            Text("⌥-scroll or [ ] size · ⇧[ ] feather · Space pan")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -1358,6 +1358,29 @@ struct MaskCanvasOverlay: View {
         case .exited:
             maskingState.updateHoverPoint(nil)
             maskingState.updateLinearHover(nil)
+        case .scrolled(let scroll):
+            guard abs(scroll.deltaY) > 0.001 else { return }
+            // Mouse wheels report a line per notch; scale it to feel like a trackpad swipe.
+            let steps = scroll.isPrecise ? scroll.deltaY : scroll.deltaY * 6
+            let paints = maskingState.activeTool == .brush || maskingState.activeTool == .erase
+            if scroll.isOptionDown, paints {
+                // Same direction as scroll-zoom: the gesture that zooms in grows the brush.
+                maskingState.scaleBrushRadius(by: pow(1.01, steps))
+                maskingState.updateHoverPoint(
+                    transform.sourceNormalizedPoint(forViewport: scroll.point))
+            } else {
+                viewModel.zoomCanvas(
+                    by: pow(1.01, steps), at: scroll.point, viewportSize: viewportSize)
+            }
+        case .magnified(let magnification):
+            if magnification.phase == .began { viewModel.beginCanvasInteraction() }
+            if magnification.phase != .ended, magnification.factor.isFinite,
+                magnification.factor > 0 {
+                viewModel.zoomCanvas(
+                    by: magnification.factor, at: magnification.point,
+                    viewportSize: viewportSize)
+            }
+            if magnification.phase == .ended { viewModel.endCanvasInteraction() }
         case .moved(let samples):
             if let sample = samples.last { updateHover(sample) }
         case .began(let samples):
