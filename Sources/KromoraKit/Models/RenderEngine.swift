@@ -14,7 +14,7 @@ import UniformTypeIdentifiers
 ///
 /// `Sendable` because every conformer is crossed from the main actor. `actor RenderEngine` gets that
 /// for free; a fake has to earn it.
-protocol RenderEngining: Sendable {
+protocol RenderEngining: EditedThumbnailRendering, Sendable {
 
     /// Prepare source value state without requesting source pixels. The production renderer owns
     /// RAW preparation so the same decoder session can answer geometry/capability questions and

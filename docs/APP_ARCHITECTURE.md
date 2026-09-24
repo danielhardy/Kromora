@@ -26,6 +26,7 @@ fences. Feature workflows do not reach into one another's private state.
 | --- | --- | --- |
 | Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions, undo/redo, revisions, and clipboard | `EditDocument`, `PhotoEditSession`, `EditClipboardPayload`, revision numbers |
+| Edited thumbnails | `EditedThumbnailCoordinator` owns per-asset request generations, debounce handles, and scheduler job IDs; `AppViewModel` owns documents and the collection projection | source/document revisions, cache identity, bounded raster thumbnail and edit/LUT revision |
 | Preview and comparison | `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render admission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
 | Crop, rotation, and canvas navigation | `CanvasWorkflowCoordinator` owns crop-session commands and presentation snapshot, crop/rotation commands, and fit/fill/zoom/pan navigation; `CanvasInteractionState` owns observable draft and viewport values; `AppViewModel` owns document history, persistence, and render scheduling | crop presentation snapshot, `EditDocument` mutation closures, source size, image extent, and render/navigation callbacks |
 | Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
@@ -121,6 +122,25 @@ document store. `AppViewModel` keeps every masking entry point (`createMask`, `c
 `KeyboardShortcuts` call sites are unaffected. Smart-mask and person-signal-warming tasks are owned
 and cancelled by the coordinator's own `shutdown()`, called once from `AppViewModel.shutdown`,
 rather than living in `AppViewModel`'s task-cancellation array.
+
+## Edited-thumbnail ownership
+
+`EditedThumbnailCoordinator` owns edited-thumbnail demand admission, per-asset generations,
+trailing debounce tasks, scheduler job IDs, and cancellation during source replacement, item
+deletion, and shutdown. It reuses the collection's bounded `.thumbnail` scheduler lane and submits
+only `.thumbnail` raster requests through `EditedThumbnailRendering`; source preparation supplies
+the extent fallback, and full-resolution preview work remains outside this workflow. Debounced
+active-asset edits wait 500 ms after preview settles and coalesce repeated changes into one forced
+request.
+
+`AppViewModel` remains the sole owner of the active `EditDocument`, editor sessions, edit store,
+source/document revisions, LUT resolution, and collection. The coordinator reaches these through
+`EditedThumbnailDestination`, a narrow `@MainActor` protocol, and publishes only thumbnail values,
+crop presentation, and revision strings. Every completion checks the per-asset generation, current
+collection item and source cache identity, and the appropriate active-source/document or stored
+document revision before publishing. Identity documents publish a nil edited thumbnail without
+rendering. Fake-only `EditedThumbnailCoordinatorTests` cover debounce coalescing, shutdown and
+source-identity late-result rejection, revision composition, and identity-document behavior.
 
 ## Boundary rules
 
