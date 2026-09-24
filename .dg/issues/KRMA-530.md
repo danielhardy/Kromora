@@ -2,42 +2,40 @@
 id: KRMA-530
 title: Split RenderEngine responsibilities and bound revision bookkeeping
 type: task
-status: review
+status: done
 priority: medium
 agent: claude
 verification_agent: codex
 model: sonnet
 verification_report:
-  verdict: blocker
+  verdict: pass
   acceptance_criteria:
     - criterion: Render, mask, histogram, RAW capability, and preview tests remain green with no isolation regressions.
       result: pass
-      notes: Selected render and mask suites passed; build passed. The refactor retains a single RenderEngine actor.
+      notes: swift build passed; the declared focused suite passed 84 tests with 5 environment-gated skips. The extracted helpers and revision ledger remain owned by the single RenderEngine actor.
     - criterion: Revision ledger/cache size stays bounded during a long source-navigation stress test.
       result: pass
-      notes: The 500-source sequential navigation stress test passed and asserted the configured ledger caps.
+      notes: The 500-source navigation stress test passed and asserted tracked ledger caps. KRMA-550 also bounds the overlay recency queue when recipe and overlay recency diverge.
     - criterion: No stale render or mask result is published after invalidation/source revision changes.
-      result: fail
-      notes: The sequential stress test does not exercise in-flight requests. Render ledger eviction removes the source fence; a suspended older render can resume after eviction, observe default revision 0, and pass isCurrentRenderRequest.
+      result: pass
+      notes: Deterministic suspended render and overlay tests passed after navigating beyond their ledger capacities. In-flight fences preserve supersession across eviction and invalidation.
     - criterion: Mask revision eviction is no longer quadratic in the tested bounded-history scenario.
-      result: fail
-      notes: Revision eviction uses Array.removeFirst(), which shifts remaining entries (O(n)); touch also scans/removes from the array. Fixed capacities bound the absolute work, but the stated amortized O(1) claim is not met.
+      result: pass
+      notes: Bookkeeping cost is now accurately documented and bounded by fixed capacities; the regression test confirms the overlay recency queue stays within its cap.
     - criterion: The actor remains the single ownership/isolation boundary; no second render store is created.
       result: pass
-      notes: RevisionLedger is a Sendable value owned by RenderEngine; extracted behavior remains in actor extensions.
+      notes: RevisionLedger is a Sendable value owned by RenderEngine; no second render actor/store was introduced.
   checks_run:
-    - swift build (pass)
-    - swift test --filter 'RevisionLedgerTests|RenderEngineTests|LocalMaskRenderingTests|PackageSettingsTests' (79 passed, 5 environment-gated skips, 0 failures)
-    - Independent review of commit c908c12 and revision-ledger call sites
-  findings:
-    - "correctness/blocker: Bounded render-ledger eviction can erase a fence for a suspended in-flight request. After enough distinct sources evict its key, an old positive revision compares against the default 0 and is accepted as current, allowing stale publication. The new navigation test awaits renders sequentially and does not cover this race. Filed urgent child dependency KRMA-550."
-    - "performance: Array.removeFirst() shifts the remaining ordered keys and touch uses removeAll; the claimed amortized O(1) eviction is not achieved. Included in KRMA-550."
+    - swift build — passed, zero warnings/errors
+    - swift test --filter RevisionLedgerTests|RenderEngineTests|LocalMaskRenderingTests|PackageSettingsTests — 84 passed, 5 environment-gated skips, 0 failures
+    - Reviewed KRMA-550 fence lifecycle, eviction handling, overlay queue trimming, and deterministic concurrency regression coverage
+  findings: []
   fixes: []
   verification_commits: []
   actor: codex
   resolved_model: unknown
-  completed_at: 2026-09-23T06:13:01.261Z
-  session: 01MUDPF4ASW91JIJN2
+  completed_at: 2026-09-23T15:52:25.116Z
+  session: 01MUEA5JR5D9F1EFRR
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -47,14 +45,14 @@ labels:
   - architecture
   - rendering
 created: 2026-09-21T20:33:10.575Z
-updated: 2026-09-23T06:13:01.316Z
+updated: 2026-09-23T15:52:25.118Z
 depends_on:
   - KRMA-522
   - KRMA-523
   - KRMA-524
   - KRMA-550
 estimate: 8
-order: x
+order: zh
 board: product
 ---
 
@@ -121,3 +119,26 @@ Actor: codex
 Resolved model: unknown
 Pickup session: 01MUDPF4ASW91JIJN2
 Summary: Stale render requests can pass currentness after their bounded ledger entry is evicted; urgent fix and deterministic concurrency coverage are tracked in KRMA-550.
+
+- 2026-09-23T15:52:25.116Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Render, mask, histogram, RAW capability, and preview tests remain green with no isolation regressions. (pass) — swift build passed; the declared focused suite passed 84 tests with 5 environment-gated skips. The extracted helpers and revision ledger remain owned by the single RenderEngine actor.
+- [x] Revision ledger/cache size stays bounded during a long source-navigation stress test. (pass) — The 500-source navigation stress test passed and asserted tracked ledger caps. KRMA-550 also bounds the overlay recency queue when recipe and overlay recency diverge.
+- [x] No stale render or mask result is published after invalidation/source revision changes. (pass) — Deterministic suspended render and overlay tests passed after navigating beyond their ledger capacities. In-flight fences preserve supersession across eviction and invalidation.
+- [x] Mask revision eviction is no longer quadratic in the tested bounded-history scenario. (pass) — Bookkeeping cost is now accurately documented and bounded by fixed capacities; the regression test confirms the overlay recency queue stays within its cap.
+- [x] The actor remains the single ownership/isolation boundary; no second render store is created. (pass) — RevisionLedger is a Sendable value owned by RenderEngine; no second render actor/store was introduced.
+Checks run:
+- swift build — passed, zero warnings/errors
+- swift test --filter RevisionLedgerTests|RenderEngineTests|LocalMaskRenderingTests|PackageSettingsTests — 84 passed, 5 environment-gated skips, 0 failures
+- Reviewed KRMA-550 fence lifecycle, eviction handling, overlay queue trimming, and deterministic concurrency regression coverage
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: codex
+Resolved model: unknown
+Pickup session: 01MUEA5JR5D9F1EFRR
+Summary: Pass: focused build and render/mask/revision-ledger checks are clean; KRMA-550 resolves the stale-publication and bounded-eviction findings.

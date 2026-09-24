@@ -2,7 +2,7 @@
 id: KRMA-483
 title: Double-click on the Edit canvas no longer toggles fit and zoom
 type: bug
-status: review
+status: done
 priority: high
 verification_report:
   verdict: pass
@@ -42,8 +42,8 @@ labels:
   - regression
   - ui
 created: 2026-09-20T16:05:45.277Z
-updated: 2026-09-21T01:13:09.683Z
-order: q
+updated: 2026-09-23T22:38:33.084Z
+order: zzzzzzzq
 board: product
 ---
 

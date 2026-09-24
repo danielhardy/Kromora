@@ -2,7 +2,7 @@
 id: KRMA-555
 title: "Verification hygiene: untracked helpers, format skew, dirty tree"
 type: task
-status: backlog
+status: blocked
 priority: high
 creation_provenance:
   runner: pi
@@ -11,10 +11,13 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-23T15:00:55.501Z
-updated: 2026-09-23T15:00:55.501Z
-order: zq
-board: product
+updated: 2026-09-23T16:18:52.766Z
 parent: KRMA-548
+order: n
+board: product
+blocked_reason: The remaining dirty ObservabilityTests.swift edit appears to belong to KRMA-557, which is in verification, and the intended import-summary precedence while a photo is loading needs product-owner confirmation. This issue forbids absorbing other work before ownership is confirmed.
+blocked_action: Confirm whether the ObservabilityTests.swift update should be committed under KRMA-557, and whether import outcome summaries (especially partial failures) should remain visible during Loading; then resume KRMA-555.
+blocked_from_status: claimed
 ---
 
 ## Objective

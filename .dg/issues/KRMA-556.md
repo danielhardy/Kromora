@@ -2,7 +2,7 @@
 id: KRMA-556
 title: Recover a killed local package writer without waiting for the lease timeout
 type: bug
-status: ready
+status: verification
 priority: urgent
 creation_provenance:
   runner: codex
@@ -13,8 +13,8 @@ labels:
   - library
   - lease
 created: 2026-09-23T15:17:37.655Z
-updated: 2026-09-23T15:18:40.622Z
-order: a0
+updated: 2026-09-23T23:10:19.243Z
+order: zv
 board: product
 ---
 
@@ -59,3 +59,8 @@ The PID and device label are from the user’s error message; the process state 
 ## Related observations
 
 The reported unresponsive launch and the misleading zero-import result have separate tickets so their main-thread and presentation fixes can be reviewed independently. No production logs or crash report were supplied, so confirm the beachball’s main-thread stack before attributing it to a specific call.
+
+
+### Comment — codex @ 2026-09-23T15:36:58.421Z
+
+Implemented same-host writer identity using kern.uuid plus the exact process start token, allowing immediate recovery only when the identified local process is gone. Recovery rolls back interrupted transactions before replacing the lease, leaves live and ambiguous/remote owners contended, and surfaces recovery in the launch status. Added dead-before-expiry, live contention, remote identity, PID reuse, rollback ordering, and launch-path coverage. Focused tests passed (9 tests). Fast lane reached all 1,175 cases but failed on DevelopInspectorTests.testHistogramFollowsTheDisplayedComparisonRequest timing out; the same test failed when rerun alone. Manual swift run force-quit/relaunch was not run against the real user library.
