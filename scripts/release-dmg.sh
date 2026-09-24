@@ -91,6 +91,7 @@ command -v swift >/dev/null || { print -u2 "missing swift"; exit 1; }
 mkdir -p "$release_dir"
 release_dmg="$release_dir/Kromora-$version.dmg"
 work_dmg="$release_dir/.Kromora-$version.work.dmg"
+app_notarize_zip="$release_dir/.Kromora-$version.app.zip"
 staging_dir=".build/Kromora-dmg-staging"
 mount_dir=".build/Kromora-dmg-mount"
 success=0
@@ -162,7 +163,10 @@ archs="$(/usr/bin/lipo -archs "$app_bundle/Contents/MacOS/Kromora")"
 
 if [[ "$skip_notarize" != "1" ]]; then
   print "Notarizing and stapling app"
-  /usr/bin/xcrun notarytool submit "$app_bundle" --keychain-profile "$notary_profile" --wait
+  rm -f "$app_notarize_zip"
+  /usr/bin/ditto -c -k --keepParent "$app_bundle" "$app_notarize_zip"
+  /usr/bin/xcrun notarytool submit "$app_notarize_zip" --keychain-profile "$notary_profile" --wait
+  rm -f "$app_notarize_zip"
   /usr/bin/xcrun stapler staple "$app_bundle"
   /usr/bin/xcrun stapler validate "$app_bundle"
 fi

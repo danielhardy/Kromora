@@ -34,7 +34,7 @@ public final class UpdateCoordinator: ObservableObject {
     private var task: Task<Void, Never>?
 
     public static let automaticInterval: TimeInterval = 24 * 60 * 60
-    public nonisolated static let log = Logger(subsystem: "com.kromora.photo", category: "updates")
+    public nonisolated static let log = Logger(subsystem: "com.last8.kromora.photo", category: "updates")
 
     public init(
         currentVersion: AppVersion? = AppVersion.current,
