@@ -1,8 +1,8 @@
 ---
 id: KRMA-468
-title: "Stage 4: Extract the AppViewModel masking workspace owner"
+title: "Superseded by KRMA-529: masking workspace owner already extracted"
 type: task
-status: backlog
+status: done
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,16 +13,30 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:25.201Z
-updated: 2026-09-20T02:20:19.291Z
-depends_on:
-  - KRMA-467
-order: y8
+updated: 2026-09-24T01:13:24.920Z
+blockers: []
+order: zzzzzzzy
 board: product
 ---
 
 Parent: KRMA-460
 
-## Objective
+## Disposition — do not implement (reviewed 2026-09-23)
+
+Superseded by **KRMA-529** (`done`). That ticket extracted the masking workspace. The original `depends_on: KRMA-467` was plan sequencing only; masking landed first and does not need the preview-scheduling extraction.
+
+Already in the tree:
+
+- `Sources/KromoraKit/ViewModels/MaskingWorkflowCoordinator.swift` owns layer/component selection, transient creation, smart-mask invocation/cancellation/retry, and person-signal warm-up.
+- The root seam is `MaskingWorkflowDestination`. Committed recipes go through `updateDocument`. There is no second document store.
+- `Sources/KromoraKit/ViewModels/AppViewModel+Masking.swift` is **172 lines** of one-line forwarders (`createMask`, `createSmartMask`, `beginMaskGesture`, and the rest). Views and keyboard shortcuts still call `AppViewModel`.
+- `AppViewModel.shutdown()` calls `await maskingWorkflow.shutdown()`.
+- `Tests/KromoraKitTests/MaskingWorkflowCoordinatorTests.swift` constructs the coordinator with fakes (no `AppViewModel`, no Vision, no GPU).
+- `docs/APP_ARCHITECTURE.md` section “Masking-workflow ownership” is the contract.
+
+Do not replace the forwarder file with another collaborator, and do not fold masking back into `AppViewModel`. The acceptance criteria below are already satisfied by KRMA-529.
+
+## Original objective
 
 Replace the 1,310-line `AppViewModel+Masking.swift` feature boundary with a testable masking workspace collaborator. Keep committed recipes on the root's single document commit path.
 
@@ -44,6 +58,10 @@ Replace the 1,310-line `AppViewModel+Masking.swift` feature boundary with a test
 - [ ] AppViewModel integration coverage remains for committed edits, undo/redo, navigation, persistence failure, and shutdown.
 - [ ] No `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency` is introduced.
 - [ ] Focused tests, `swift build`, the relevant fast CI lane, `dg validate`, and `git diff --check` pass.
+
+### Comment — cursor @ 2026-09-24T01:13:23.966Z
+
+Triage 2026-09-23: superseded by KRMA-529. MaskingWorkflowCoordinator owns the workspace; AppViewModel+Masking.swift is a forwarder file. Removed the obsolete depends_on KRMA-467 sequencing dependency.
 
 ## Agent log
 
