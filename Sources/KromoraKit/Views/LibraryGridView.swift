@@ -39,6 +39,7 @@ struct LibraryGridView: View {
                 .disabled(collection.selection.selectedIDs.isEmpty && collection.selection.activeID == nil)
                 .padding(.horizontal, 12)
             }
+            .background(KromoraTheme.secondaryChrome)
             Divider()
             if collection.isPortableWindowed, let total = collection.portableTotalCount {
                 Text("Showing \(collection.items.count) of \(total) — scroll for more")
