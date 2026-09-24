@@ -834,6 +834,34 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         )
     }
 
+    func testBrushTilesKeepTheirVerticalPositionInFramesTallerThanOneTile() throws {
+        // Brush rasters are top-down (normalized y = 0 is the top row) and are emitted in
+        // 256-pixel tiles. Core Image is bottom-up, so a tile must be placed from the top of the
+        // frame; placing it at its top-down row offset mirrored tile rows, moving coverage (and
+        // Erase) to a different band than the one painted — only once a frame spans >1 tile.
+        let dimensions = PixelDimensions(width: 64, height: 600)
+        let renderer = LocalMaskRenderer()
+        let payload = LocalMaskPayload(
+            sourceFingerprint: "tall-brush", targetSize: dimensions, quality: .preview,
+            descriptor: .brush(BrushMaskDefinition(strokes: [BrushStroke(
+                samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.1))], radius: 0.2, feather: 0
+            )]))
+        )
+        guard let image = renderer.image(
+            for: payload, extent: CGRect(x: 0, y: 0, width: 64, height: 600), transform: .identity
+        ) else {
+            return XCTFail("tall brush did not render")
+        }
+        let pixels = try Pixels.bytes(of: image)
+        guard pixels.count == dimensions.width * dimensions.height * 4 else {
+            return XCTFail("unexpected raster size \(pixels.count)")
+        }
+        let alphaAt = { (x: Int, y: Int) in pixels[(y * dimensions.width + x) * 4 + 3] }
+        XCTAssertGreaterThan(alphaAt(32, 60), 200, "the dab painted at y = 0.1 must cover row 60")
+        XCTAssertLessThan(alphaAt(32, 540), 5, "coverage must not appear near the bottom")
+        XCTAssertLessThan(alphaAt(32, 300), 5, "coverage must not appear mid-frame")
+    }
+
     func testBrushRasterAccumulatesSeparatedStrokesWithoutFullFrameSmear() throws {
         let dimensions = PixelDimensions(width: 64, height: 32)
         let renderer = LocalMaskRenderer()

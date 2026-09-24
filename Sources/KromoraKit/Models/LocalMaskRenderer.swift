@@ -200,11 +200,17 @@ final class LocalMaskRenderer {
         // is correct for Vision's soft person boundaries, but it would introduce a visible
         // one-pixel transition into density-1/no-feather definitions.
         let sampled = mask.isBinary ? image.samplingNearest() : image.samplingLinear()
+        // `pixelOrigin` is a top-down row offset (like the raster rows themselves), while Core
+        // Image's y axis points up. A tile therefore sits `origin + tile height` rows below the
+        // top of the frame; using the top-down offset directly mirrored tile rows vertically
+        // whenever a brush spanned more than one output tile.
+        let bottomRow =
+            CGFloat(sourceDimensions.height) - pixelOrigin.y - CGFloat(mask.size.height)
         return sampled
             .transformed(by: scale)
             .transformed(by: CGAffineTransform(
                 translationX: extent.minX + pixelOrigin.x * scale.a,
-                y: extent.minY + pixelOrigin.y * scale.d
+                y: extent.minY + bottomRow * scale.d
             ))
             .cropped(to: extent)
     }
