@@ -27,7 +27,7 @@ fences. Feature workflows do not reach into one another's private state.
 | Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions, undo/redo, revisions, and clipboard | `EditDocument`, `PhotoEditSession`, `EditClipboardPayload`, revision numbers |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns per-asset request generations, debounce handles, and scheduler job IDs; `AppViewModel` owns documents and the collection projection | source/document revisions, cache identity, bounded raster thumbnail and edit/LUT revision |
-| Preview and comparison | `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render admission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
+| Preview and comparison | `PreviewAdmissionCoordinator` owns preview, histogram, prefetch, idle-fill, debounce, and comparison-retry admission; `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render submission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
 | Crop, rotation, and canvas navigation | `CanvasWorkflowCoordinator` owns crop-session commands and presentation snapshot, crop/rotation commands, and fit/fill/zoom/pan navigation; `CanvasInteractionState` owns observable draft and viewport values; `AppViewModel` owns document history, persistence, and render scheduling | crop presentation snapshot, `EditDocument` mutation closures, source size, image extent, and render/navigation callbacks |
 | Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
 | Export and Looks | `ExportCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, and `LUTLibrary` | render requests, export items, LUT IDs/values, status/error callbacks |
@@ -51,12 +51,13 @@ child tasks.
 
 ## Preview-presentation ownership
 
-`PreviewPresentationCoordinator` owns the display and comparison generations, per-surface
-resolution-planner hysteresis, preview cache keys/access, and canonical complete-frame cache
-writes. `PreviewCoordinator` remains the only render-admission owner. The root supplies the
-value-only document/source/navigation inputs and retains the compatibility methods plus the
-`PreviewSurface` instances, so there is no second document store or broad root reference in either
-collaborator.
+`PreviewAdmissionCoordinator` owns request admission, debounce handles, histogram jobs,
+adjacent prefetch, idle cache fill, and comparison retry. `PreviewPresentationCoordinator` owns the
+display and comparison generations, per-surface resolution-planner hysteresis, preview cache
+keys/access, and canonical complete-frame cache writes. `PreviewCoordinator` remains the only
+render-submission funnel. The root supplies value-only document/source/navigation inputs and retains
+the `PreviewSurface` instances, so there is no second document store or surface reference in these
+collaborators.
 
 ## Canvas workflow ownership
 

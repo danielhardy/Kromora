@@ -344,7 +344,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// The newest settled request accepted by the preview surface. Mode entry may use this current
     /// candidate before drawable confirmation, but it must never fall back to an older document.
     private var lastPublishedVisibleRequest: RenderRequest?
-    private var isPreviewInteractionActive = false
+    var isPreviewInteractionActive: Bool {
+        get { previewAdmissionCoordinator.isPreviewInteractionActive }
+        set { previewAdmissionCoordinator.isPreviewInteractionActive = newValue }
+    }
 
     /// Whether any call since the last fired render changed a comparison-frame stage.
     ///
@@ -586,12 +589,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// unsupported source, or a failed calculation. Keep the terminal UI state explicit.
     @Published private(set) var isHistogramLoading = false
     @Published private(set) var histogramErrorMessage: String?
-    private var histogramTaskRevision: UInt64?
-    private var histogramTaskRequest: RenderRequest?
-    /// The asset identity is checked separately from the source value. Two library items can
-    /// legitimately carry equal-valued source data, and an old histogram must never become the
-    /// current item's result just because its `ImageSource` compares equal.
-    private var histogramTaskAssetID: PhotoAssetID?
 
     /// Auto has its own analysis lifecycle rather than borrowing the Info histogram's loading flag:
     /// an Auto request must not make the histogram spinner appear to be waiting on unrelated work.
@@ -762,7 +759,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var editedThumbnailDocumentRevision: UInt64 { documentRevision }
     var isEditedThumbnailShuttingDown: Bool { isShuttingDown }
     var isEditedThumbnailInteractionActive: Bool { isPreviewInteractionActive }
-    var isEditedThumbnailPreviewDebouncing: Bool { previewDebounceTask != nil }
+    var isEditedThumbnailPreviewDebouncing: Bool { previewAdmissionCoordinator.isPreviewDebouncing }
     var editedThumbnailItems: [ImageCollection.Item] { collection.items }
     func editedThumbnailItem(for assetID: PhotoAssetID) -> ImageCollection.Item? {
         collection.items.first { $0.id == assetID }
@@ -802,54 +799,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private let usesInjectedEditStore: Bool
     private let previewCoordinator: PreviewCoordinator
     private let previewPresentation: PreviewPresentationCoordinator
-    private var pendingPreviewCacheLookup:
-        (
-            request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
-            displayRevision: UInt64
-        )?
-    private struct AdjacentPreviewCandidate: Sendable {
-        let source: ImageSource
-        let inMemoryDocument: EditDocument?
-        let reference: EditSourceReference
-    }
-    private struct IdlePreviewCandidate: Sendable {
-        let index: Int
-        let source: ImageSource
-        let inMemoryDocument: EditDocument?
-        let reference: EditSourceReference
-    }
-    private struct IdlePreviewWorkItem: Sendable {
-        let cursor: Int
-        let request: RenderRequest?
-    }
-    /// One non-cancellable source preparation is allowed to run. New navigation replaces this one
-    /// pending value, so a burst cannot build a queue of obsolete RAW decoder operations.
-    /// Idle preview building is deliberately separate from adjacent prefetch. The neighbour wave
-    /// warms the renderer's in-memory sources; this slower wave owns cache-fill cancellation and
-    /// must never cancel or be cancelled by that existing two-item prefetch.
-    private let idlePreviewBuildJobID = ImageWorkScheduler.JobID("idle-preview-build")
-    private var idleBuildTask: Task<Void, Never>?
-    private var idleBuildGeneration: UInt64 = 0
-    private var idleBuildCursor: Int?
-    private static let maxItemsPerIdleSession = 20
+    private lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
+        workScheduler: workScheduler, engine: engine, destination: self
+    )
     /// Tracks whether a preview was already admitted after source chrome appeared. A user edit
     /// can arrive while stored edits are still loading; adopting the store result must not submit
     /// a duplicate preview in that case.
-    private var previewScheduledSourceRevision: UInt64?
     /// The first preview may be speculative while persistence is still loading. Supporting work
     /// such as histogram and edited-thumbnail generation is admitted only after this source's
     /// stored document has been reconciled.
     private var storedEditsResolvedSourceRevision: UInt64?
-    private let adjacentPreviewPrefetchJobID = ImageWorkScheduler.JobID("adjacent-preview-prefetch")
     private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
-    private let histogramJobID = ImageWorkScheduler.JobID("histogram")
     /// The embedded camera JPEG is a presentation-only first frame. It never enters the render
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
     private let fileDialog: any FileDialogProviding
-    private var prefetchDelayTask: Task<Void, Never>?
-    private var previewDebounceTask: Task<Void, Never>?
-    private var previewDebounceGeneration: UInt64 = 0
     private let sourceSession: SourceSessionCoordinator
     private var lutCacheInvalidationTask: Task<Void, Never>?
     private var semanticCoordinatorInstallTask: Task<Void, Never>?
@@ -1129,7 +1093,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceSession.onPreparation = { [weak self] publication in
             guard let self, !self.isShuttingDown else { return }
             self.install(preparation: publication.preparation, request: publication.request)
-            if self.previewScheduledSourceRevision != self.sourceRevision {
+            if self.previewAdmissionCoordinator.scheduledSourceRevision != self.sourceRevision {
                 self.schedulePreview()
             }
         }
@@ -1966,29 +1930,28 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func cancelPendingPreviewDebounce() {
-        previewDebounceGeneration &+= 1
-        previewDebounceTask?.cancel()
-        previewDebounceTask = nil
-        previewPresentation.cancelCacheLookup()
-        pendingPreviewCacheLookup = nil
-        previewCoordinator.cancel()
+        previewAdmissionCoordinator.cancelPendingPreviewWork()
     }
 
     private func invalidateEditedThumbnailWork(for assetID: PhotoAssetID?) {
         editedThumbnailCoordinator.invalidateWork(for: assetID)
     }
 
+    private func cancelIdlePreviewBuild(resetCursor: Bool = false) {
+        previewAdmissionCoordinator.cancelIdlePreviewBuild(resetCursor: resetCursor)
+    }
+
+    private func scheduleAdjacentPreviewPrefetch() {
+        previewAdmissionCoordinator.scheduleAdjacentPreviewPrefetch()
+    }
+
+    private func scheduleIdlePreviewBuild() {
+        previewAdmissionCoordinator.scheduleIdlePreviewBuild()
+    }
+
     /// Stop cache-only work before any user-visible operation gets a chance to enter the editor
     /// lane. The scheduler's background job may already be inside one Core Image call; cancellation
     /// bounds that unavoidable tail to the current item and the generation guards the result.
-    private func cancelIdlePreviewBuild(resetCursor: Bool = false) {
-        idleBuildGeneration &+= 1
-        idleBuildTask?.cancel()
-        idleBuildTask = nil
-        workScheduler.cancel(id: idlePreviewBuildJobID, pump: false)
-        if resetCursor { idleBuildCursor = nil }
-    }
-
     /// Prepare a source without decoding pixels, then publish it and render the previews. RAW
     /// demosaicing remains renderer-owned and happens at the requested preview scale. The worker
     /// below deliberately has one active preparation and one replaceable pending request.
@@ -2062,9 +2025,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         comparisonPreviewRetryTask?.cancel()
         comparisonPreviewRetryTask = nil
         comparisonPreviewScheduledRevision = nil
-        workScheduler.cancel(id: adjacentPreviewPrefetchJobID, pump: false)
-        prefetchDelayTask?.cancel()
-        prefetchDelayTask = nil
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         cancelPendingPreviewDebounce()
         rawCapabilities = nil
         capabilitiesProbeCompleted = false
@@ -2091,7 +2052,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         preparation: ImageSourcePreparation, request: SourceSessionCoordinator.Request
     ) {
         imageSource = preparation.source
-        previewScheduledSourceRevision = nil
+        previewAdmissionCoordinator.resetScheduledSourceRevision()
         if case .url(let url) = request.plan.source.backing {
             sourceURL = url
         } else {
@@ -2237,307 +2198,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// window. The request is cancellable at the orchestration layer and the snapshot is value-only;
     /// an obsolete prefetch may finish in the renderer, but it cannot publish or start source-load
     /// work for a photo the user has already left.
-    private func scheduleAdjacentPreviewPrefetch() {
-        workScheduler.cancel(id: adjacentPreviewPrefetchJobID)
-        prefetchDelayTask?.cancel()
-        prefetchDelayTask = nil
-        guard collection.isActive else { return }
-
-        let selected = collection.selectedIndex
-        let candidates = collection.filteredIndices
-            .filter { $0 != selected && abs($0 - selected) <= 2 }
-            .sorted { abs($0 - selected) < abs($1 - selected) }
-            .prefix(2)
-            .compactMap { index -> AdjacentPreviewCandidate? in
-                let item = collection.items[index]
-                guard let dimensions = item.asset.dimensions,
-                    dimensions.width > 0, dimensions.height > 0
-                else { return nil }
-                let extent = CGSize(width: dimensions.width, height: dimensions.height)
-                let source: ImageSource
-                if let url = item.url {
-                    source = ImageSource(
-                        url: url, nativeExtent: extent,
-                        portableIdentity: item.asset.source.portableIdentity
-                    )
-                } else if let data = item.imageData {
-                    source = ImageSource(
-                        data: data, nativeExtent: extent, dataFingerprint: item.dataFingerprint,
-                        portableIdentity: item.asset.source.portableIdentity
-                    )
-                } else {
-                    return nil
-                }
-                return AdjacentPreviewCandidate(
-                    source: source,
-                    inMemoryDocument: editorDocument.session(for: item.id)?.document,
-                    reference: EditSourceReference(
-                        assetID: item.id, portableIdentity: persistencePortableIdentity(for: item),
-                        url: item.url
-                    )
-                )
-            }
-        guard !candidates.isEmpty else { return }
-
-        let revision = sourceRevision
-        let assetID = activeAssetID
-        let engine = self.engine
-        let editStore = self.editStore
-        prefetchDelayTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(350))
-            guard !Task.isCancelled, let self,
-                self.activeAssetID == assetID,
-                self.sourceRevision == revision
-            else { return }
-
-            // Resolve all cold neighbors before admitting the scheduler job. The editor lane is
-            // reserved for renderer work, and a corrupt/unavailable record must not be converted
-            // into a guessed identity document that is immediately discarded on open.
-            let coldCandidates = candidates.filter { $0.inMemoryDocument == nil }
-            let storedResults = await editStore.load(for: coldCandidates.map(\.reference))
-            guard !Task.isCancelled,
-                self.activeAssetID == assetID,
-                self.sourceRevision == revision
-            else { return }
-
-            var storedResultIndex = 0
-            var requests: [RenderRequest] = []
-            requests.reserveCapacity(candidates.count)
-            for candidate in candidates {
-                let document: EditDocument
-                if let inMemory = candidate.inMemoryDocument {
-                    document = inMemory
-                } else {
-                    let stored = storedResults[storedResultIndex]
-                    storedResultIndex += 1
-                    guard stored.isUsableForPrefetch else { continue }
-                    document = stored.document
-                }
-                requests.append(
-                    self.makeSettledPreviewRequest(
-                        source: candidate.source,
-                        assetID: candidate.reference.assetID,
-                        document: document,
-                        lut: self.resolvedLUT(document.lut.lutID),
-                        plan: self.adjacentPreviewPlan(
-                            for: document, nativeExtent: candidate.source.nativeExtent
-                        )
-                    )
-                )
-            }
-            guard !requests.isEmpty,
-                !Task.isCancelled,
-                self.activeAssetID == assetID,
-                self.sourceRevision == revision
-            else { return }
-
-            self.workScheduler.enqueue(
-                id: self.adjacentPreviewPrefetchJobID, lane: .editor, priority: .background
-            ) { [weak self, engine] in
-                guard !Task.isCancelled, let self,
-                    self.activeAssetID == assetID,
-                    self.sourceRevision == revision
-                else { return }
-                for request in requests {
-                    guard !Task.isCancelled,
-                        self.activeAssetID == assetID,
-                        self.sourceRevision == revision
-                    else { return }
-                    _ = await engine.makeCIImage(request)
-                }
-            }
-        }
-    }
-
-    /// Start the slower, folder-wide cache-fill wave after a settled frame. The sleep is the idle
-    /// admission window; every guard is repeated after it because source preparation, edits, and
-    /// interaction can all make the original quiet period obsolete.
-    private func scheduleIdlePreviewBuild() {
-        guard idleBuildTask == nil else { return }
-        cancelIdlePreviewBuild()
-        guard collection.isActive,
-            !collection.isScanning,
-            !sourceSession.isBusy,
-            previewDebounceTask == nil,
-            !isPreviewInteractionActive,
-            !sourceSession.isBusy,
-            NSApplication.shared.isActive
-        else { return }
-
-        let candidates = collection.filteredIndices
-            .filter { $0 != collection.selectedIndex }
-            .sorted { abs($0 - collection.selectedIndex) < abs($1 - collection.selectedIndex) }
-            .compactMap { index -> IdlePreviewCandidate? in
-                let item = collection.items[index]
-                guard let dimensions = item.asset.dimensions,
-                    dimensions.width > 0, dimensions.height > 0
-                else { return nil }
-                let extent = CGSize(width: dimensions.width, height: dimensions.height)
-                let source: ImageSource
-                if let url = item.url {
-                    source = ImageSource(
-                        url: url, nativeExtent: extent,
-                        portableIdentity: item.asset.source.portableIdentity
-                    )
-                } else if let data = item.imageData {
-                    source = ImageSource(
-                        data: data, nativeExtent: extent, dataFingerprint: item.dataFingerprint,
-                        portableIdentity: item.asset.source.portableIdentity
-                    )
-                } else {
-                    return nil
-                }
-                return IdlePreviewCandidate(
-                    index: index, source: source,
-                    inMemoryDocument: editorDocument.session(for: item.id)?.document,
-                    reference: EditSourceReference(
-                        assetID: item.id, portableIdentity: persistencePortableIdentity(for: item),
-                        url: item.url
-                    )
-                )
-            }
-        guard !candidates.isEmpty else { return }
-
-        let generation = idleBuildGeneration
-        let revision = sourceRevision
-        let selectedAssetID = activeAssetID
-        idleBuildTask = Task { [weak self, candidates, generation, revision, selectedAssetID] in
-            try? await Task.sleep(for: .milliseconds(1500))
-            guard !Task.isCancelled, let self,
-                !self.isShuttingDown,
-                self.idleBuildGeneration == generation,
-                self.sourceRevision == revision,
-                self.activeAssetID == selectedAssetID,
-                self.collection.isActive,
-                !self.collection.isScanning,
-                !self.sourceSession.isBusy,
-                self.previewDebounceTask == nil,
-                !self.isPreviewInteractionActive,
-                !self.sourceSession.isBusy,
-                NSApplication.shared.isActive
-            else {
-                if let self, self.idleBuildGeneration == generation {
-                    self.idleBuildTask = nil
-                }
-                return
-            }
-            await self.runIdlePreviewBuild(
-                candidates: candidates, generation: generation, sourceRevision: revision,
-                selectedAssetID: selectedAssetID
-            )
-            if self.idleBuildGeneration == generation {
-                self.idleBuildTask = nil
-            }
-        }
-    }
-
-    /// Fill only the disk cache. No publication path is reachable from here: this job never calls
-    /// `previewSurface`, `PreviewCoordinator`, `previewState`, histogram work, or selection APIs.
-    /// The background priority and single editor lane mean the worst-case added latency to a user
-    /// open is one in-flight background develop, and only if it started before cancellation landed.
-    private func runIdlePreviewBuild(
-        candidates: [IdlePreviewCandidate], generation: UInt64, sourceRevision: UInt64,
-        selectedAssetID: PhotoAssetID?
-    ) async {
-        let start = min(idleBuildCursor ?? 0, candidates.count)
-        guard start < candidates.count else { return }
-        let sessionCandidates = Array(
-            candidates[start..<candidates.count].prefix(Self.maxItemsPerIdleSession)
-        )
-        let coldCandidates = sessionCandidates.filter { $0.inMemoryDocument == nil }
-        let storedResults = await editStore.load(for: coldCandidates.map(\.reference))
-        guard !Task.isCancelled,
-            idleBuildGeneration == generation,
-            self.sourceRevision == sourceRevision,
-            activeAssetID == selectedAssetID,
-            !collection.isScanning,
-            NSApplication.shared.isActive
-        else { return }
-
-        var storedResultIndex = 0
-        var workItems: [IdlePreviewWorkItem] = []
-        workItems.reserveCapacity(sessionCandidates.count)
-        for (offset, candidate) in sessionCandidates.enumerated() {
-            let cursor = start + offset
-            let document: EditDocument
-            if let inMemory = candidate.inMemoryDocument {
-                document = inMemory
-            } else {
-                guard storedResults.indices.contains(storedResultIndex) else {
-                    workItems.append(IdlePreviewWorkItem(cursor: cursor, request: nil))
-                    storedResultIndex += 1
-                    continue
-                }
-                let stored = storedResults[storedResultIndex]
-                storedResultIndex += 1
-                guard stored.isUsableForPrefetch else {
-                    workItems.append(IdlePreviewWorkItem(cursor: cursor, request: nil))
-                    continue
-                }
-                document = stored.document
-            }
-
-            let plan = canonicalPreviewPlan(
-                for: document, nativeExtent: candidate.source.nativeExtent
-            )
-            let request = makeSettledPreviewRequest(
-                source: candidate.source, assetID: candidate.reference.assetID,
-                document: document, lut: resolvedLUT(document.lut.lutID), plan: plan,
-                canonical: true
-            )
-            // This is metadata/stat work only. Do not decode pixels merely to decide whether to
-            // render; an exact key hit is enough to skip the candidate.
-            workItems.append(
-                IdlePreviewWorkItem(
-                    cursor: cursor,
-                    request: previewPresentation.cache.contains(previewDiskCacheKey(for: request))
-                        ? nil : request
-                )
-            )
-        }
-
-        guard !workItems.isEmpty, !Task.isCancelled else { return }
-        let engine = self.engine
-        let cache = self.previewPresentation.cache
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            workScheduler.enqueue(
-                id: idlePreviewBuildJobID, lane: .editor, priority: .background,
-                onTerminal: { _ in continuation.resume() }
-            ) {
-                [weak self, engine, cache, workItems, generation, sourceRevision, selectedAssetID]
-                in
-                guard let self else { return }
-                for item in workItems {
-                    guard !Task.isCancelled,
-                        self.idleBuildGeneration == generation,
-                        self.sourceRevision == sourceRevision,
-                        self.activeAssetID == selectedAssetID,
-                        !self.collection.isScanning,
-                        NSApplication.shared.isActive
-                    else { return }
-
-                    guard let request = item.request else {
-                        self.idleBuildCursor = item.cursor + 1
-                        continue
-                    }
-                    let key = self.previewPresentation.cacheKey(for: request)
-                    guard !cache.contains(key) else {
-                        self.idleBuildCursor = item.cursor + 1
-                        continue
-                    }
-                    let image = await engine.makeCIImage(request)
-                    guard !Task.isCancelled,
-                        self.idleBuildGeneration == generation,
-                        self.sourceRevision == sourceRevision,
-                        self.activeAssetID == selectedAssetID
-                    else { return }
-                    if let image { self.previewPresentation.writeCanonical(image, for: request) }
-                    self.idleBuildCursor = item.cursor + 1
-                }
-            }
-        }
-    }
-
     func openImageDialog() {
         guard portableLibrary != nil else {
             reportPortableLibraryUnavailable()
@@ -3685,8 +3345,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         pendingDevelopChange = pendingDevelopChange || comparisonChanged
 
         guard debounced else {
-            previewDebounceTask?.cancel()
-            previewDebounceTask = nil
+            previewAdmissionCoordinator.cancelPreviewDebounce()
             schedulePreview()
             if let activeAssetID {
                 scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
@@ -3816,360 +3475,48 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func setLUTIntensity(_ value: Double) { setLookIntensity(value) }
 
-    // MARK: - Preview
+    // MARK: - Preview admission façade
 
-    /// Backing pixels of the visible canvas. PreviewView updates this from its live geometry;
-    /// the fallback is only used before the first layout pass.
-    private var previewBackingSize = CGSize(width: 1600, height: 1200)
-    private static let intensityDebounceMs = 60
-
-    /// Build the same fit-state plan that a newly selected source receives after navigation resets
-    /// the canvas. Keeping the ROI and presentation extent with the warm request is important:
-    /// RenderEngine's preview cache includes the ROI, so a prefetch that only matches the pyramid
-    /// level still forces the selected photo through the graph a second time.
-    private func adjacentPreviewPlan(
-        for document: EditDocument,
-        nativeExtent: CGSize
-    ) -> ResolutionPlan {
-        var planner = ResolutionPlanner()
-        return planner.plan(
-            nativeExtent: document.rotation.orientedExtent(nativeExtent),
-            crop: document.crop,
-            viewportSize: previewBackingSize,
-            // `openImage` resets presentation navigation for the next source before it plans
-            // that source's preview. Match that fit-state input instead of borrowing the current
-            // photo's zoom/pan.
-            navigation: CanvasNavigation()
-        )
-    }
-
-    /// Plan source detail for one logical rendering surface.
-    ///
-    /// This stays an internal value seam so tests can exercise the same surface routing without
-    /// depending on asynchronous image preparation or a real drawable size. Production render
-    /// requests use the returned plan's source size, ROI, and presentation extent together.
+    /// Shared request seam retained for the render-planning tests. Admission policy lives in
+    /// `PreviewAdmissionCoordinator`; resolution hysteresis and cache identity remain in presentation.
     func resolutionPlan(
         for document: EditDocument,
         nativeExtent: CGSize,
         viewportSize: CGSize,
         surface: ResolutionPlannerSurface
     ) -> ResolutionPlan {
-        return previewPresentation.plan(
+        previewPresentation.plan(
             for: document, nativeExtent: nativeExtent, viewportSize: viewportSize,
             surface: surface, navigation: canvasState.navigation
         )
     }
 
-    private func resetResolutionPlanners() {
-        previewPresentation.resetPlanners()
-    }
+    private func resetResolutionPlanners() { previewPresentation.resetPlanners() }
 
-    /// What the main preview panel should currently show, as a render request.
-    ///
-    /// While Space is held that is the **comparison baseline** — the same document with the look
-    /// removed and develop kept (§8.5). Both sides therefore share a `rawDevelop`, so the swap reuses
-    /// the engine's developed source instead of re-developing the RAW.
-    ///
-    /// One accessor rather than the same ternary at each call site: the histogram is supposed to
-    /// describe the pixels on screen, and it stopped doing so precisely because it derived its image
-    /// separately. Reading the request from one place is what makes that structural.
     private var displayRequest: (document: EditDocument, lut: CubeLUT?) {
-        var requested = isShowingOriginal ? comparisonBaselineDocument : document
-
-        // Crop is a composition stage. While the tool is open the overlay is expressed in the
-        // full, oriented source coordinate space, so the pixels underneath it must be the same
-        // adjusted stage before crop. This preserves the developed-source cache (including RAW
-        // reuse) while making the saved rectangle line up with recognizable content. Vignette and
-        // grain consequently describe this temporary full-source frame; the committed request
-        // below restores their existing post-crop semantics.
-        if canvasState.isCropToolActive {
-            requested.rotation = requested.rotation.addingClockwiseQuarterTurns(
-                canvasState.cropRotation.rawValue / 90
-            )
-            requested.crop = CropAdjustments(
-                // Straighten is a presentation transform while the crop workspace is open.
-                // The photo is rotated by PreviewSurfaceView beneath the upright overlay; keeping
-                // this stage neutral prevents CIStraightenFilter from baking an axis-aligned AABB
-                // that would make the pixels look zoomed inside a fixed image box.
-                straightenAngle: 0,
-                flipHorizontal: canvasState.cropFlipHorizontal,
-                flipVertical: canvasState.cropFlipVertical,
-                verticalPerspective: canvasState.cropVerticalPerspective,
-                horizontalPerspective: canvasState.cropHorizontalPerspective
-            )
-        }
-
-        return isShowingOriginal ? (requested, nil) : (requested, selectedLook)
+        previewAdmissionCoordinator.displayRequest
     }
 
-    /// Render the document for display.
-    ///
-    /// **This is the Step 5 cutover.** The preview no longer grades a baked `CIImage` on the main
-    /// actor and rasterizes it through the old `ImageProcessor`; it hands the whole document to
-    /// `PreviewCoordinator`, which selects the interactive or settled quality and asks
-    /// `RenderEngine` to evaluate the graph inside its actor.
-    private func schedulePreview() {
-        cancelIdlePreviewBuild()
-        submitSettledPreview(preemptsPredecessor: true)
-    }
-
-    /// Entering Crop is a presentation transition, not an edit that should make the tool wait for
-    /// a settled render. Submit the uncropped frame through the interactive lane first so the
-    /// existing canvas can keep drawing while the inspector/overlay become usable. The coordinator
-    /// promotes this request to the normal settled preview after its quiet period, preserving the
-    /// full-quality/export-parity request without putting its cache lookup on the hotkey path.
-    private func scheduleCropEntryPreview() {
-        cancelIdlePreviewBuild()
-        scheduleInteractivePreview()
-    }
-
-    /// The stored-edit corrective render for a speculative open (see `adoptStoredEdits`). Unlike
-    /// every other settled submission, this queues behind the speculative request instead of
-    /// cancelling it, so both renders reach the engine in order.
-    private func scheduleCorrectivePreview() {
-        cancelIdlePreviewBuild()
-        submitSettledPreview(preemptsPredecessor: false)
-    }
-
-    /// Construct the request used by both the visible settled path and the idle cache builder.
-    /// Idle work uses a fit plan with the cache's canonical long edge and no ROI, so its raster is
-    /// always a complete photo rather than a viewport fragment.
-    private func makeSettledPreviewRequest(
-        source: ImageSource, assetID: PhotoAssetID?, document: EditDocument, lut: CubeLUT?,
-        plan: ResolutionPlan, canonical: Bool = false, cropInteractionActive: Bool = false,
-        requestRevision: UInt64 = 0
-    ) -> RenderRequest {
-        RenderRequest(
-            source: source, assetID: assetID, document: document, lut: lut,
-            targetSize: plan.sourceSize,
-            sourceROI: canonical || cropInteractionActive
-                ? nil
-                : plan.previewSourceROI(
-                    nativeExtent: document.rotation.orientedExtent(source.nativeExtent)
-                ),
-            presentationROI: canonical || cropInteractionActive
-                ? nil : plan.visiblePresentationRect,
-            presentationImageExtent: plan.presentationImageExtent,
-            presentationNavigation: canvasState.navigation,
-            quality: .preview,
-            output: .raster, space: .current, requestRevision: requestRevision
-        )
-    }
-
-    private func canonicalPreviewPlan(
-        for document: EditDocument, nativeExtent: CGSize
-    ) -> ResolutionPlan {
-        var planner = ResolutionPlanner()
-        return planner.plan(
-            nativeExtent: document.rotation.orientedExtent(nativeExtent),
-            crop: document.crop,
-            viewportSize: CGSize(
-                width: CGFloat(PreviewDiskCache.canonicalLongEdge),
-                height: CGFloat(PreviewDiskCache.canonicalLongEdge)
-            ),
-            navigation: CanvasNavigation()
-        )
-    }
-
-    private func submitSettledPreview(preemptsPredecessor: Bool) {
-        cancelIdlePreviewBuild()
-        guard !isShuttingDown, let imageSource else {
-            previewSurface.clear()
-            return
-        }
-
-        let supersededLookup = pendingPreviewCacheLookup
-        previewPresentation.advanceDisplayRevision()
-        cancelHistogram(clear: false, pump: false)
-
-        let (requested, look) = displayRequest
-        let plan = resolutionPlan(
-            for: requested,
-            nativeExtent: imageSource.nativeExtent,
-            viewportSize: previewBackingSize,
-            surface: .mainPreview
-        )
-        previewScheduledSourceRevision = sourceRevision
-        let request = makeSettledPreviewRequest(
-            source: imageSource, assetID: activeAssetID, document: requested, lut: look,
-            plan: plan, cropInteractionActive: canvasState.isCropToolActive,
-            requestRevision: displayRevision
-        )
-        let cacheKey = previewPresentation.cacheKey(for: request)
-        let assetID = activeAssetID
-        let sourceRevision = self.sourceRevision
-        let displayRevision = self.displayRevision
-        if !preemptsPredecessor,
-            let supersededLookup,
-            supersededLookup.sourceRevision == sourceRevision,
-            supersededLookup.assetID == assetID
-        {
-            // Stored-edit adoption intentionally preserves the speculative-first-frame contract.
-            // If the miss lookup has not returned before the corrective request arrives, admit the
-            // same speculative request now, then queue the corrective lookup behind it.
-            previewPresentation.cancelCacheLookup()
-            previewCoordinator.submit(
-                supersededLookup.request, phase: .settled,
-                assetID: supersededLookup.assetID,
-                sourceRevision: supersededLookup.sourceRevision,
-                displayRevision: supersededLookup.displayRevision
-            )
-        }
-        // A cached entry is always a complete canonical photo, because the disk key deliberately
-        // omits viewport state and `didPresentVisibleFrame` only writes a frame whose `sourceROI`
-        // is nil. A zoomed or panned request asks for an ROI, so adopting that canonical raster
-        // for it would publish the whole photo through ROI geometry — wrong scale, wrong origin —
-        // and the retained frame would then refuse the correct render that follows. Reads have to
-        // refuse the asymmetric case for exactly the reason writes already do.
-        if request.sourceROI != nil {
-            previewPresentation.cancelCacheLookup()
-            pendingPreviewCacheLookup = nil
-            if preemptsPredecessor {
-                previewCoordinator.submit(
-                    request, phase: .settled, assetID: assetID,
-                    sourceRevision: sourceRevision, displayRevision: displayRevision
-                )
-            } else {
-                previewCoordinator.submitCorrective(
-                    request, assetID: assetID,
-                    sourceRevision: sourceRevision, displayRevision: displayRevision
-                )
-            }
-            return
-        }
-        previewPresentation.lookupCache(for: cacheKey) { [weak self] cached in
-            guard let self, !self.isShuttingDown,
-                self.sourceRevision == sourceRevision,
-                self.displayRevision == displayRevision,
-                self.activeAssetID == assetID,
-                self.imageSource == request.source,
-                self.displayRequest.document == request.document
-            else { return }
-
-            self.pendingPreviewCacheLookup = nil
-            if let cached {
-                // A hit has no coordinator publication, so explicitly retire any speculative
-                // predecessor before using the same settled presentation gate as a render.
-                self.previewCoordinator.cancel()
-                self.presentSettledRaster(
-                    CIImage(cgImage: cached), request: request, assetID: assetID,
-                    sourceRevision: sourceRevision, displayRevision: displayRevision
-                )
-            } else if preemptsPredecessor {
-                self.previewCoordinator.submit(
-                    request, phase: .settled, assetID: assetID,
-                    sourceRevision: sourceRevision, displayRevision: displayRevision
-                )
-            } else {
-                self.previewCoordinator.submitCorrective(
-                    request, assetID: assetID,
-                    sourceRevision: sourceRevision, displayRevision: displayRevision
-                )
-            }
-        }
-        pendingPreviewCacheLookup = (
-            request: request, assetID: assetID, sourceRevision: sourceRevision,
-            displayRevision: displayRevision
-        )
-    }
-
-    private func previewDiskCacheKey(for request: RenderRequest) -> PreviewDiskCache.Key {
-        previewPresentation.cacheKey(for: request)
-    }
-
-    /// A viewport-sized interactive render. `PreviewCoordinator` drops superseded values and
-    /// promotes the last value to a normal `.preview` render after the quiet period.
-    private func scheduleInteractivePreview() {
-        cancelIdlePreviewBuild()
-        guard let imageSource else { return }
-        // A gesture owns one display generation. PreviewCoordinator's request revision still
-        // rejects late frames from older slider values, while keeping this caller generation
-        // stable lets the newest interactive frame pass AppViewModel.publishPreview.
-        if !isPreviewInteractionActive {
-            previewPresentation.advanceDisplayRevision()
-        }
-        cancelHistogram(clear: false, pump: false)
-        let (requested, lut) = displayRequest
-        let plan = resolutionPlan(
-            for: requested,
-            nativeExtent: imageSource.nativeExtent,
-            viewportSize: previewBackingSize,
-            surface: .mainPreview
-        )
-        previewCoordinator.submit(
-            RenderRequest(
-                source: imageSource, assetID: activeAssetID, document: requested, lut: lut,
-                targetSize: plan.sourceSize,
-                sourceROI: canvasState.isCropToolActive
-                    ? nil
-                    : plan.previewSourceROI(
-                        nativeExtent: requested.rotation.orientedExtent(imageSource.nativeExtent)
-                    ),
-                presentationROI: canvasState.isCropToolActive
-                    ? nil : plan.visiblePresentationRect,
-                presentationImageExtent: plan.presentationImageExtent,
-                presentationNavigation: canvasState.navigation,
-                quality: .interactive,
-                output: .raster, space: .current, requestRevision: displayRevision
-            ), phase: .interactive, assetID: activeAssetID, sourceRevision: sourceRevision,
-            displayRevision: displayRevision)
-    }
-
-    /// Called by the persistent preview surface after layout. Keeping this as value state avoids
-    /// publishing a new image merely because the window changed size.
+    private func schedulePreview() { previewAdmissionCoordinator.schedulePreview() }
+    private func scheduleCropEntryPreview() { previewAdmissionCoordinator.scheduleCropEntryPreview() }
+    private func scheduleCorrectivePreview() { previewAdmissionCoordinator.scheduleCorrectivePreview() }
+    private func scheduleInteractivePreview() { previewAdmissionCoordinator.scheduleInteractivePreview() }
     func updatePreviewBackingSize(_ size: CGSize) {
-        let width = size.width.rounded(.down)
-        let height = size.height.rounded(.down)
-        guard width >= 1, height >= 1,
-            width.isFinite, height.isFinite,
-            abs(width - previewBackingSize.width) > 1 || abs(height - previewBackingSize.height) > 1
-        else { return }
-        previewBackingSize = CGSize(width: width, height: height)
-        guard imageSource != nil else { return }
-        if isPreviewInteractionActive {
-            scheduleInteractivePreview()
-        } else {
-            schedulePreview()
-        }
+        previewAdmissionCoordinator.updatePreviewBackingSize(size)
     }
-
     private func scheduleSettledPreviewAfterDebounce() {
-        cancelIdlePreviewBuild()
-        previewDebounceTask?.cancel()
-        previewDebounceGeneration &+= 1
-        let generation = previewDebounceGeneration
-        let revision = sourceRevision
-        previewDebounceTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(Self.intensityDebounceMs))
-            guard !Task.isCancelled, let self,
-                self.previewDebounceGeneration == generation,
-                self.sourceRevision == revision
-            else { return }
-            // The handle represents pending work, not the completed task. Clear it before
-            // scheduling the trailing thumbnail so scheduleEditedThumbnailAfterSettle can admit
-            // exactly one render for the settled document.
-            self.previewDebounceTask = nil
-            self.schedulePreview()
-            if let assetID = self.editedThumbnailCoordinator.pendingAssetID {
-                self.scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
-            }
-        }
+        previewAdmissionCoordinator.scheduleSettledPreviewAfterDebounce()
     }
 
     func beginPreviewInteraction() {
         cancelIdlePreviewBuild()
         beginUndoGrouping()
         editedThumbnailCoordinator.cancelActiveRequest(for: activeAssetID)
-        previewPresentation.advanceDisplayRevision()
-        isPreviewInteractionActive = true
-        previewCoordinator.beginInteraction()
+        previewAdmissionCoordinator.beginInteraction()
     }
 
     func endPreviewInteraction() {
-        isPreviewInteractionActive = false
-        previewDebounceTask?.cancel()
-        previewDebounceTask = nil
-        previewCoordinator.endInteraction()
+        previewAdmissionCoordinator.endInteraction()
         endUndoGrouping()
         if let assetID = editedThumbnailCoordinator.pendingAssetID {
             scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
@@ -4564,7 +3911,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let plan = resolutionPlan(
             for: baseline,
             nativeExtent: imageSource.nativeExtent,
-            viewportSize: previewBackingSize,
+            viewportSize: previewAdmissionCoordinator.previewBackingSize,
             surface: .comparisonBaseline
         )
         let sourceRevision = self.sourceRevision
@@ -4601,12 +3948,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     comparisonRevision == self.comparisonRevision,
                     self.imageSource == imageSource
                 else { return }
-                let request = self.makeSettledPreviewRequest(
+                let request = self.admissionSettledRequest(
                     source: imageSource,
                     assetID: assetID,
                     document: baseline,
                     lut: nil,
-                    plan: plan
+                    plan: plan, canonical: false
                 )
                 let gpuImage = await engine.makeCIImage(request)
                 if let gpuImage {
@@ -4769,91 +4116,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         for displayedRequest: RenderRequest? = nil,
         presentedImage: CIImage? = nil
     ) {
-        // Both halves of the gate: an inspector parked on Develop shows no histogram, so tallying
-        // one on every settled render of a slider drag is pure waste.
-        guard isInspectorPresented, inspectorTab == .info else {
-            cancelHistogram(clear: true)
-            return
-        }
-        guard let imageSource else {
-            cancelHistogram(clear: true)
-            return
-        }
-        guard let lastPresentedVisibleRequest else { return }
-        let request: RenderRequest
-        if let displayedRequest {
-            request = displayedRequest
-        } else {
-            // Opening Info between a document edit and its settled presentation must describe the
-            // last frame the user actually received, not a newly assembled request for the edit
-            // that is still rendering.
-            request = lastPresentedVisibleRequest
-        }
-        guard request.source == imageSource else {
-            cancelHistogram(clear: true)
-            return
-        }
-        let image = presentedImage ?? lastPresentedVisibleImage
-        guard let image else { return }
-
-        let sourceRevision = self.sourceRevision
-        let displayRevision = self.displayRevision
-        let assetID = self.activeAssetID
-
-        // Opening the Info tab can race the settled publication that is already on its way. Do not
-        // tally the same displayed request twice just because both paths noticed it.
-        if workScheduler.contains(histogramJobID),
-            histogramTaskAssetID == assetID,
-            histogramTaskRevision == displayRevision,
-            histogramTaskRequest == request
-        {
-            return
-        }
-        cancelHistogram(clear: false)
-        histogramTaskRevision = displayRevision
-        histogramTaskRequest = request
-        histogramTaskAssetID = assetID
-        isHistogramLoading = true
-        histogramErrorMessage = nil
-        workScheduler.enqueue(id: histogramJobID, lane: .editor, priority: .histogram) {
-            [weak self, engine] in
-            guard !Task.isCancelled, let self, !self.isShuttingDown else { return }
-            // The settled publication already contains the completed preview texture. Tally that
-            // value after drawable confirmation so Info describes pixels the user received and does
-            // not trigger a second evaluation of the render graph.
-            let result = await engine.histogram(
-                presentedImage: image, space: request.space, maxDimension: 512
-            )
-            guard !Task.isCancelled, !self.isShuttingDown,
-                self.isInspectorPresented,
-                self.inspectorTab == .info,
-                assetID == self.activeAssetID,
-                sourceRevision == self.sourceRevision,
-                displayRevision == self.displayRevision,
-                self.imageSource == request.source
-            else { return }
-            self.histogram = result
-            self.isHistogramLoading = false
-            if result == nil {
-                let message = "Histogram unavailable for \(self.sourceName)."
-                self.histogramErrorMessage = message
-                self.statusMessage = message
-            } else {
-                self.histogramErrorMessage = nil
-            }
-        }
+        previewAdmissionCoordinator.updateHistogram(
+            for: displayedRequest, presentedImage: presentedImage
+        )
     }
 
     /// Cancel pending or in-flight histogram work. The revision check in the task remains necessary:
     /// a renderer may be finishing a non-cancellable Core Image operation after its task is canceled.
     private func cancelHistogram(clear: Bool, pump: Bool = true) {
-        workScheduler.cancel(id: histogramJobID, pump: pump)
-        histogramTaskRevision = nil
-        histogramTaskRequest = nil
-        histogramTaskAssetID = nil
-        if isHistogramLoading { isHistogramLoading = false }
-        if histogramErrorMessage != nil { histogramErrorMessage = nil }
-        if clear, histogram != nil { histogram = nil }
+        previewAdmissionCoordinator.cancelHistogram(clear: clear, pump: pump)
     }
 
     /// Inspector-presentation gate for histogram work (KRMA-521). Called synchronously from the
@@ -5175,7 +4446,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         documentRevision &+= 1
         previewPresentation.resetForSource()
-        previewDebounceGeneration &+= 1
+        previewAdmissionCoordinator.cancelPreviewDebounce()
         comparisonPreviewRetryTask?.cancel()
         comparisonPreviewRetryTask = nil
 
@@ -5215,19 +4486,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await collection.shutdown()
 
         await editedThumbnailCoordinator.shutdown()
-        let idleBuild = idleBuildTask
+        previewAdmissionCoordinator.shutdown()
         cancelIdlePreviewBuild(resetCursor: true)
         let tasks: [Task<Void, Never>?] =
             [
-                prefetchDelayTask, previewDebounceTask,
-                idleBuild, lutCacheInvalidationTask,
+                lutCacheInvalidationTask,
                 semanticCoordinatorInstallTask,
                 droppedPromiseTask,
             ]
         for task in tasks { task?.cancel() }
-        prefetchDelayTask = nil
-        previewDebounceTask = nil
-        idleBuildTask = nil
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
         droppedPromiseTask = nil
@@ -5327,4 +4594,100 @@ extension AppViewModel: CanvasWorkflowDestination {
     func setCanvasWorkflowOriginalVisible(_ visible: Bool) {
         isShowingOriginal = visible
     }
+}
+
+extension AppViewModel: PreviewAdmissionDestination {
+    var admissionIsShuttingDown: Bool { isShuttingDown }
+    var admissionImageSource: ImageSource? { imageSource }
+    var admissionSourceRevision: UInt64 { sourceRevision }
+    var admissionDisplayRevision: UInt64 { displayRevision }
+    var admissionActiveAssetID: PhotoAssetID? { activeAssetID }
+    var admissionLastPresentedRequest: RenderRequest? { lastPresentedVisibleRequest }
+    var admissionLastPresentedImage: CIImage? { lastPresentedVisibleImage }
+    var admissionInspectorPresented: Bool { isInspectorPresented }
+    var admissionInspectorTabIsInfo: Bool { inspectorTab == .info }
+    var admissionHistogramLoading: Bool { isHistogramLoading }
+    var admissionHistogram: HistogramData? { histogram }
+    var admissionHistogramErrorMessage: String? { histogramErrorMessage }
+    var admissionSourceName: String { sourceName }
+    var admissionCollection: ImageCollection { collection }
+    var admissionEditStore: EditDocumentStore { editStore }
+    var admissionPresentation: PreviewPresentationCoordinator { previewPresentation }
+    var admissionSourceSessionIsBusy: Bool { sourceSession.isBusy }
+    var admissionPreviewDebouncing: Bool { previewAdmissionCoordinator.isPreviewDebouncing }
+    var admissionPreviewInteractionActive: Bool { isPreviewInteractionActive }
+    var admissionPreviewBackingSize: CGSize { previewAdmissionCoordinator.previewBackingSize }
+    var admissionDocument: EditDocument { document }
+    var admissionComparisonBaselineDocument: EditDocument { comparisonBaselineDocument }
+    var admissionIsShowingOriginal: Bool { isShowingOriginal }
+    var admissionSelectedLook: CubeLUT? { selectedLook }
+    var admissionCropToolActive: Bool { canvasState.isCropToolActive }
+    var admissionCanvasNavigation: CanvasNavigation { canvasState.navigation }
+    var admissionCropRotation: ImageRotation { canvasState.cropRotation }
+    var admissionCropFlipHorizontal: Bool { canvasState.cropFlipHorizontal }
+    var admissionCropFlipVertical: Bool { canvasState.cropFlipVertical }
+    var admissionCropVerticalPerspective: Double { canvasState.cropVerticalPerspective }
+    var admissionCropHorizontalPerspective: Double { canvasState.cropHorizontalPerspective }
+    var admissionPreviewCoordinator: PreviewCoordinator { previewCoordinator }
+    var pendingEditedThumbnailAssetID: PhotoAssetID? { editedThumbnailCoordinator.pendingAssetID }
+    func admitSettledEditedThumbnail(_ assetID: PhotoAssetID) {
+        scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
+    }
+    func admissionClearPreview() { previewSurface.clear() }
+    func admissionPresentCacheRaster(
+        _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, displayRevision: UInt64
+    ) {
+        _ = presentSettledRaster(image, request: request, assetID: assetID,
+            sourceRevision: sourceRevision, displayRevision: displayRevision)
+    }
+
+    func admissionDocument(for assetID: PhotoAssetID) -> EditDocument? {
+        editorDocument.session(for: assetID)?.document
+    }
+    func admissionSourceReference(for item: ImageCollection.Item) -> EditSourceReference {
+        EditSourceReference(
+            assetID: item.id, portableIdentity: persistencePortableIdentity(for: item), url: item.url
+        )
+    }
+    func admissionResolvedLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
+    func admissionAdjacentPlan(for document: EditDocument, nativeExtent: CGSize) -> ResolutionPlan {
+        var planner = ResolutionPlanner()
+        return planner.plan(
+            nativeExtent: document.rotation.orientedExtent(nativeExtent), crop: document.crop,
+            viewportSize: previewAdmissionCoordinator.previewBackingSize,
+            navigation: CanvasNavigation()
+        )
+    }
+    func admissionCanonicalPlan(for document: EditDocument, nativeExtent: CGSize) -> ResolutionPlan {
+        var planner = ResolutionPlanner()
+        return planner.plan(
+            nativeExtent: document.rotation.orientedExtent(nativeExtent), crop: document.crop,
+            viewportSize: CGSize(
+                width: CGFloat(PreviewDiskCache.canonicalLongEdge),
+                height: CGFloat(PreviewDiskCache.canonicalLongEdge)
+            ), navigation: CanvasNavigation()
+        )
+    }
+    func admissionSettledRequest(
+        source: ImageSource, assetID: PhotoAssetID?, document: EditDocument, lut: CubeLUT?,
+        plan: ResolutionPlan, canonical: Bool
+    ) -> RenderRequest {
+        RenderRequest(
+            source: source, assetID: assetID, document: document, lut: lut,
+            targetSize: plan.sourceSize,
+            sourceROI: canonical ? nil : plan.previewSourceROI(
+                nativeExtent: document.rotation.orientedExtent(source.nativeExtent)
+            ),
+            presentationROI: canonical ? nil : plan.visiblePresentationRect,
+            presentationImageExtent: plan.presentationImageExtent,
+            presentationNavigation: canvasState.navigation,
+            quality: .preview, output: .raster, space: .current
+        )
+    }
+
+    func publishAdmissionHistogram(_ histogram: HistogramData?) { self.histogram = histogram }
+    func publishAdmissionHistogramLoading(_ isLoading: Bool) { isHistogramLoading = isLoading }
+    func publishAdmissionHistogramError(_ message: String?) { histogramErrorMessage = message }
+    func publishAdmissionStatus(_ message: String) { statusMessage = message }
 }
