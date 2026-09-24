@@ -63,7 +63,7 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 /// Central state for the Kromora app.
 @MainActor
 public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination,
-    AsyncPhotosImportDestination, MaskingWorkflowDestination
+    AsyncPhotosImportDestination, MaskingWorkflowDestination, EditedThumbnailDestination
 {
 
     var packageImportDoesNotNeedDigest: Bool { true }
@@ -671,12 +671,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 #endif
     let library: LUTLibrary
     let workScheduler: ImageWorkScheduler
-    /// Edited thumbnails share the collection's bounded thumbnail lane. A stable job per asset
-    /// lets filmstrip and grid demand one render rather than producing duplicate work.
-    private var editedThumbnailGenerations: [PhotoAssetID: UInt64] = [:]
-    private var editedThumbnailDebounceTasks: [PhotoAssetID: Task<Void, Never>] = [:]
-    private var pendingEditedThumbnailAssetID: PhotoAssetID?
-    private let editedThumbnailJobPrefix = "edited-thumbnail-"
+    /// Edit-aware collection thumbnail scheduling and cache publication.
+    private lazy var editedThumbnailCoordinator = EditedThumbnailCoordinator(
+        workScheduler: workScheduler, engine: engine, editStore: editStore, destination: self
+    )
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
     let editStore: EditDocumentStore
@@ -758,6 +756,33 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var maskingSourceRevision: UInt64 { sourceRevision }
     var maskingSource: ImageSource? { isShuttingDown ? nil : imageSource }
     var hasOpenSource: Bool { sourceImage != nil }
+
+    var activeEditedThumbnailAssetID: PhotoAssetID? { activeAssetID }
+    var editedThumbnailSourceRevision: UInt64 { sourceRevision }
+    var editedThumbnailDocumentRevision: UInt64 { documentRevision }
+    var isEditedThumbnailShuttingDown: Bool { isShuttingDown }
+    var isEditedThumbnailInteractionActive: Bool { isPreviewInteractionActive }
+    var isEditedThumbnailPreviewDebouncing: Bool { previewDebounceTask != nil }
+    var editedThumbnailItems: [ImageCollection.Item] { collection.items }
+    func editedThumbnailItem(for assetID: PhotoAssetID) -> ImageCollection.Item? {
+        collection.items.first { $0.id == assetID }
+    }
+    func editedThumbnailDocument(for assetID: PhotoAssetID) -> EditDocument? {
+        editorDocument.session(for: assetID)?.document
+    }
+    func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64 {
+        editorDocument.revision(for: assetID)
+    }
+    func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
+    func invalidateEditedThumbnail(for assetID: PhotoAssetID) {
+        collection.invalidateEditedThumbnail(for: assetID)
+    }
+    func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
+        collection.applyEditedThumbnail(image, for: assetID, revision: revision)
+    }
+    func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID) {
+        collection.setPresentedCrop(crop, for: assetID)
+    }
 
     func setMaskingStatusMessage(_ message: String) { statusMessage = message }
 
@@ -1949,17 +1974,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.cancel()
     }
 
-    /// Invalidate an edited-thumbnail operation without removing a bitmap that has already been
-    /// published for the item. Cancellation is cooperative — a renderer may still be returning
-    /// from a framework call — so the generation bump is the durable fence for that late result.
     private func invalidateEditedThumbnailWork(for assetID: PhotoAssetID?) {
-        guard let assetID else { return }
-        editedThumbnailGenerations[assetID] = (editedThumbnailGenerations[assetID] ?? 0) &+ 1
-        editedThumbnailDebounceTasks[assetID]?.cancel()
-        editedThumbnailDebounceTasks[assetID] = nil
-        workScheduler.cancel(
-            id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw), pump: false
-        )
+        editedThumbnailCoordinator.invalidateWork(for: assetID)
     }
 
     /// Stop cache-only work before any user-visible operation gets a chance to enter the editor
@@ -2015,7 +2031,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelHistogram(clear: true, pump: false)
         previewCoordinator.cancel()
         invalidateEditedThumbnailWork(for: previousActiveAssetID)
-        pendingEditedThumbnailAssetID = nil
+        editedThumbnailCoordinator.clearPendingRequest()
         previewSurface.clear()
         originalPreviewSurface.clear()
         if canvasState.isCropToolActive {
@@ -3138,20 +3154,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         let deletedSet = Set(result.deletedIDs)
-        for id in deletedSet {
-            editedThumbnailDebounceTasks[id]?.cancel()
-            editedThumbnailDebounceTasks.removeValue(forKey: id)
-            editedThumbnailGenerations.removeValue(forKey: id)
-            workScheduler.cancel(
-                id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
-            )
-        }
+        editedThumbnailCoordinator.removeAssets(deletedSet)
         // Deletion is the lifecycle boundary for editor sessions. Keep the coordinator's bulk
         // operation wired here so removed photos cannot leave their undo snapshots retained.
         editorDocument.removeSessions(for: deletedSet)
-        if let pendingEditedThumbnailAssetID, deletedSet.contains(pendingEditedThumbnailAssetID) {
-            self.pendingEditedThumbnailAssetID = nil
-        }
         _ = collection.removeItems(with: deletedSet)
         if collection.isPortableWindowed {
             guard let portableLibrary else { return result }
@@ -3250,255 +3256,26 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Edit-aware thumbnails
 
-    /// Request one bounded edited-thumbnail render for a photo. The original thumbnail is already
-    /// visible while this work runs, so a slow RAW or LUT render never blocks the editor or blanks a
-    /// browsing cell. The job identity is per photo; the document hash and resolved Look fingerprint
-    /// are the effective pixel revision applied at publication time.
     private func requestEditedThumbnail(
         for assetID: PhotoAssetID,
         priority: ImageWorkScheduler.Priority,
         force: Bool = false
     ) {
-        guard !isShuttingDown,
-            let item = collection.items.first(where: { $0.id == assetID })
-        else { return }
-
-        // A demand callback can arrive while the preview debounce is already pending (or after a
-        // cell reappears during a gesture). Keep the active photo's request as value state and let
-        // the settle path admit it; no thumbnail should enter the shared render actor in either
-        // interval.
-        if isPreviewInteractionActive || previewDebounceTask != nil {
-            if assetID == activeAssetID {
-                pendingEditedThumbnailAssetID = assetID
-                editedThumbnailDebounceTasks[assetID]?.cancel()
-                editedThumbnailDebounceTasks[assetID] = nil
-                workScheduler.cancel(
-                    id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw),
-                    pump: false
-                )
-            }
-            return
-        }
-
-        let jobID = ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw)
-        if workScheduler.contains(jobID) {
-            if force {
-                workScheduler.cancel(id: jobID, pump: false)
-            } else {
-                workScheduler.updatePriority(for: jobID, to: priority)
-                return
-            }
-        }
-
-        // A completed result is shared by both surfaces. Repeated SwiftUI appearance callbacks
-        // should not re-render it; a force request is reserved for explicit edit/look changes.
-        if !force, item.editedThumbnailRevision != nil { return }
-
-        let generation = (editedThumbnailGenerations[assetID] ?? 0) &+ 1
-        editedThumbnailGenerations[assetID] = generation
-        collection.invalidateEditedThumbnail(for: assetID)
-
-        let source: ImageSource?
-        if let url = item.url {
-            source = ImageSource(
-                url: url, nativeExtent: item.thumbnailNativeExtent,
-                portableIdentity: item.asset.source.portableIdentity
-            )
-        } else if let data = item.imageData {
-            source = ImageSource(
-                data: data, nativeExtent: item.thumbnailNativeExtent,
-                dataFingerprint: item.dataFingerprint,
-                portableIdentity: item.asset.source.portableIdentity
-            )
-        } else {
-            source = nil
-        }
-        guard let source else { return }
-
-        let inMemoryDocument = editorDocument.session(for: assetID)?.document
-        if let inMemoryDocument, inMemoryDocument.isIdentity {
-            let revision = editedThumbnailRevision(document: inMemoryDocument, lut: nil)
-            collection.applyEditedThumbnail(nil, for: assetID, revision: revision)
-            return
-        }
-        let sourceReference = EditSourceReference(
-            assetID: assetID, portableIdentity: persistencePortableIdentity(for: item),
-            url: item.url
-        )
-        // Active thumbnails need a navigation fence as well as the per-asset generation: A → B → A
-        // can otherwise let a cancelled A request publish into the second A session. Non-active
-        // thumbnails remain useful across navigation, so their session revision is the document
-        // fence and they are not tied to the active source generation.
-        let thumbnailSourceRevision: UInt64? = assetID == activeAssetID ? self.sourceRevision : nil
-        let thumbnailDocumentRevision =
-            assetID == activeAssetID
-            ? self.documentRevision : editorDocument.revision(for: assetID)
-        let thumbnailSourceIdentity = source.cacheIdentity
-        let engine = self.engine
-        let editStore = self.editStore
-        workScheduler.enqueue(
-            id: jobID, lane: .thumbnail, priority: priority
-        ) {
-            [
-                weak self, engine, editStore, source, sourceReference, assetID, generation,
-                thumbnailSourceRevision, thumbnailDocumentRevision, thumbnailSourceIdentity
-            ] in
-            guard let self, !self.isShuttingDown,
-                self.isCurrentEditedThumbnailRequest(
-                    assetID: assetID, generation: generation,
-                    sourceRevision: thumbnailSourceRevision,
-                    documentRevision: thumbnailDocumentRevision,
-                    sourceIdentity: thumbnailSourceIdentity
-                )
-            else { return }
-
-            let document: EditDocument
-            if let inMemoryDocument {
-                document = inMemoryDocument
-            } else {
-                document = await editStore.load(for: sourceReference).document
-            }
-            guard !Task.isCancelled, !self.isShuttingDown,
-                self.isCurrentEditedThumbnailRequest(
-                    assetID: assetID, generation: generation,
-                    sourceRevision: thumbnailSourceRevision,
-                    documentRevision: thumbnailDocumentRevision,
-                    sourceIdentity: thumbnailSourceIdentity
-                )
-            else { return }
-
-            self.collection.setPresentedCrop(document.crop, for: assetID)
-            let lut = self.resolvedLUT(document.lut.lutID)
-            let revision = self.editedThumbnailRevision(document: document, lut: lut)
-            guard !document.isIdentity else {
-                self.collection.applyEditedThumbnail(nil, for: assetID, revision: revision)
-                return
-            }
-
-            // Metadata normally supplies the extent before a cell appears. Preparing the source
-            // here is the safe fallback for a just-discovered cell and keeps the thumbnail render
-            // at preview scale instead of accidentally rasterizing a full-resolution image.
-            let renderSource = await engine.prepareSource(source)?.source ?? source
-            let request = RenderRequest(
-                source: renderSource,
-                assetID: assetID,
-                document: document,
-                lut: lut,
-                targetSize: CGSize(
-                    width: Thumbnails.defaultMaxPixelSize,
-                    height: Thumbnails.defaultMaxPixelSize),
-                quality: .thumbnail,
-                output: .raster, space: .current
-            )
-            let image: NSImage?
-            if let cgImage = await engine.makeThumbnailCGImage(request) {
-                image = NSImage(
-                    cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-            } else {
-                image = nil
-            }
-            guard !Task.isCancelled, !self.isShuttingDown,
-                self.isCurrentEditedThumbnailRequest(
-                    assetID: assetID, generation: generation,
-                    sourceRevision: thumbnailSourceRevision,
-                    documentRevision: thumbnailDocumentRevision,
-                    sourceIdentity: thumbnailSourceIdentity
-                )
-            else { return }
-            self.collection.applyEditedThumbnail(image, for: assetID, revision: revision)
-        }
+        editedThumbnailCoordinator.request(for: assetID, priority: priority, force: force)
     }
 
-    /// Validate every value that can make an edited thumbnail stale. The collection item is checked
-    /// again because a file-backed source can be replaced in place while a thumbnail is rendering.
-    private func isCurrentEditedThumbnailRequest(
-        assetID: PhotoAssetID,
-        generation: UInt64,
-        sourceRevision: UInt64?,
-        documentRevision: UInt64,
-        sourceIdentity: PortablePhotoIdentity
-    ) -> Bool {
-        guard !isShuttingDown,
-            editedThumbnailGenerations[assetID] == generation,
-            let item = collection.items.first(where: { $0.id == assetID })
-        else { return false }
-
-        let currentSource: ImageSource?
-        if let url = item.url {
-            currentSource = ImageSource(
-                url: url, nativeExtent: item.thumbnailNativeExtent,
-                portableIdentity: item.asset.source.portableIdentity
-            )
-        } else if let data = item.imageData {
-            currentSource = ImageSource(
-                data: data, nativeExtent: item.thumbnailNativeExtent,
-                dataFingerprint: item.dataFingerprint,
-                portableIdentity: item.asset.source.portableIdentity
-            )
-        } else {
-            currentSource = nil
-        }
-        guard currentSource?.cacheIdentity == sourceIdentity else { return false }
-
-        if let sourceRevision {
-            guard activeAssetID == assetID,
-                self.sourceRevision == sourceRevision,
-                self.documentRevision == documentRevision
-            else { return false }
-        } else {
-            guard editorDocument.revision(for: assetID) == documentRevision else { return false }
-        }
-        return true
-    }
-
-    private func editedThumbnailRevision(document: EditDocument, lut: CubeLUT?) -> String {
-        document.editHash + ":" + (lut?.cacheFingerprint ?? "unresolved")
-    }
-
-    /// Keep the active photo's badge out of the shared renderer while a preview burst is active.
-    /// One task survives the quiet period, so a slider drag can invalidate and replace a queued
-    /// thumbnail without submitting one thumbnail per document tick.
     private func scheduleEditedThumbnailAfterSettle(
         for assetID: PhotoAssetID, priority: ImageWorkScheduler.Priority
     ) {
-        guard !isShuttingDown, assetID == activeAssetID else { return }
-        pendingEditedThumbnailAssetID = assetID
-        editedThumbnailDebounceTasks[assetID]?.cancel()
-        editedThumbnailDebounceTasks[assetID] = nil
-        guard !isPreviewInteractionActive, previewDebounceTask == nil else { return }
+        editedThumbnailCoordinator.scheduleAfterSettle(for: assetID, priority: priority)
+    }
 
-        let sourceRevision = self.sourceRevision
-        editedThumbnailDebounceTasks[assetID] = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled, let self,
-                !self.isShuttingDown,
-                self.sourceRevision == sourceRevision,
-                self.activeAssetID == assetID,
-                !self.isPreviewInteractionActive,
-                self.previewDebounceTask == nil
-            else { return }
-            self.editedThumbnailDebounceTasks[assetID] = nil
-            self.pendingEditedThumbnailAssetID = nil
-            self.requestEditedThumbnail(for: assetID, priority: priority, force: true)
-        }
+    private func refreshMaterializedEditedThumbnails() {
+        editedThumbnailCoordinator.refreshMaterializedThumbnails()
     }
 
     private func cancelEditedThumbnailDebounce(for assetID: PhotoAssetID?) {
-        guard let assetID else { return }
-        editedThumbnailDebounceTasks[assetID]?.cancel()
-        editedThumbnailDebounceTasks[assetID] = nil
-    }
-
-    /// A LUT scan can resolve or replace a file-backed Look without changing the edit document.
-    /// Only items that already produced an edited thumbnail are revisited; demand admission still
-    /// keeps the work bounded and avoids a full-library render after every Look-folder scan.
-    private func refreshMaterializedEditedThumbnails() {
-        for item in collection.items where item.editedThumbnailRevision != nil {
-            let priority: ImageWorkScheduler.Priority =
-                item.id == activeAssetID
-                ? .activeEditor : .visibleGrid
-            requestEditedThumbnail(for: item.id, priority: priority, force: true)
-        }
+        editedThumbnailCoordinator.cancelDebounce(for: assetID)
     }
 
     // MARK: - Copy and paste
@@ -4373,7 +4150,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // exactly one render for the settled document.
             self.previewDebounceTask = nil
             self.schedulePreview()
-            if let assetID = self.pendingEditedThumbnailAssetID {
+            if let assetID = self.editedThumbnailCoordinator.pendingAssetID {
                 self.scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
             }
         }
@@ -4382,13 +4159,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func beginPreviewInteraction() {
         cancelIdlePreviewBuild()
         beginUndoGrouping()
-        cancelEditedThumbnailDebounce(for: activeAssetID)
-        if let activeAssetID {
-            workScheduler.cancel(
-                id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + activeAssetID.raw),
-                pump: false
-            )
-        }
+        editedThumbnailCoordinator.cancelActiveRequest(for: activeAssetID)
         previewPresentation.advanceDisplayRevision()
         isPreviewInteractionActive = true
         previewCoordinator.beginInteraction()
@@ -4400,7 +4171,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewDebounceTask = nil
         previewCoordinator.endInteraction()
         endUndoGrouping()
-        if let assetID = pendingEditedThumbnailAssetID {
+        if let assetID = editedThumbnailCoordinator.pendingAssetID {
             scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
         }
     }
@@ -5443,7 +5214,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // prevents a late scan batch from admitting another thumbnail job.
         await collection.shutdown()
 
-        let thumbnailDebounceTasks = editedThumbnailDebounceTasks.values.map(Optional.init)
+        await editedThumbnailCoordinator.shutdown()
         let idleBuild = idleBuildTask
         cancelIdlePreviewBuild(resetCursor: true)
         let tasks: [Task<Void, Never>?] =
@@ -5452,13 +5223,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 idleBuild, lutCacheInvalidationTask,
                 semanticCoordinatorInstallTask,
                 droppedPromiseTask,
-            ] + thumbnailDebounceTasks
+            ]
         for task in tasks { task?.cancel() }
         prefetchDelayTask = nil
         previewDebounceTask = nil
         idleBuildTask = nil
-        editedThumbnailDebounceTasks.removeAll()
-        pendingEditedThumbnailAssetID = nil
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
         droppedPromiseTask = nil
