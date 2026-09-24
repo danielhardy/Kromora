@@ -12,14 +12,14 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-09-19T16:28:57.226Z
+updated: 2026-09-23T15:47:02.359Z
 depends_on:
   - KRMA-465
   - KRMA-466
   - KRMA-467
   - KRMA-468
   - KRMA-469
-order: t
+order: f
 board: product
 ---
 

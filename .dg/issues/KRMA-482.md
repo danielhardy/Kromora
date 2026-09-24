@@ -2,7 +2,7 @@
 id: KRMA-482
 title: Panning at 800% zoom leaves unrendered gaps beside the visible image
 type: bug
-status: review
+status: done
 priority: high
 verification_report:
   verdict: pass
@@ -49,8 +49,8 @@ labels:
   - zoom
   - rendering
 created: 2026-09-20T16:04:31.732Z
-updated: 2026-09-21T01:13:10.316Z
-order: v
+updated: 2026-09-23T22:38:27.483Z
+order: zzzzzzzh
 board: product
 ---
 
