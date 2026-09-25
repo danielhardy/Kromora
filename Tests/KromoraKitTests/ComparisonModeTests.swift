@@ -179,6 +179,48 @@ final class ComparisonModeTests: TempDirectoryTestCase {
         try await assertIdentityComparison(viewModel, fake: fake, image: image)
     }
 
+    func testLocalMaskEditKeepsTheDisplayedComparisonBaseline() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(
+            engine: fake,
+            editStore: makeInMemoryEditStore(),
+            preferences: makeDefaults()
+        )
+        enableSideBySide(on: viewModel)
+        let image = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "local-mask-baseline.png", in: tempDirectory
+        )
+        viewModel.openImage(url: image)
+        try await waitForBothSurfaces(viewModel, fake: fake, image: image)
+        try await Task.sleep(for: .milliseconds(200))
+
+        let originalRevision = viewModel.originalPreviewSurface.revision
+        let requestCount = await fake.previewRequests.count
+        viewModel.updateDocument {
+            $0.localAdjustments = [LocalAdjustmentLayer(
+                name: "Brush", amount: 1,
+                components: [MaskComponent(source: .brush(BrushMaskDefinition(strokes: [
+                    BrushStroke(samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))])
+                ])))],
+                adjustments: LocalAdjustments(exposure: 1)
+            )]
+        }
+        let adjustedDocument = viewModel.document
+        XCTAssertEqual(adjustedDocument.comparisonBaseline, EditDocument())
+
+        try await waitUntil("the local-mask adjusted render") {
+            await fake.previewRequests.contains { $0.document == adjustedDocument }
+        }
+        try await Task.sleep(for: .milliseconds(200))
+
+        XCTAssertNotNil(viewModel.originalPreviewSurface.image)
+        XCTAssertEqual(viewModel.originalPreviewSurface.revision, originalRevision,
+                       "a local-mask edit must not clear or replace the displayed baseline")
+        let finalRequestCount = await fake.previewRequests.count
+        XCTAssertEqual(finalRequestCount, requestCount + 1,
+                       "only the Adjusted pane should render for a local-mask edit")
+    }
+
     func testUneditedPhotoPopulatesBothSurfacesWithAnEmptyPersistedDocument() async throws {
         let defaults = makeDefaults()
         let image = try Fixtures.writeGradientPNG(

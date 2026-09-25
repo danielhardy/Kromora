@@ -100,7 +100,8 @@ struct PreviewView: View {
                     label: "Original",
                     accessibilityLabel: "Original photo preview",
                     labelSide: .leading,
-                    width: geo.size.width / 2
+                    width: geo.size.width / 2,
+                    showsMaskOverlay: false
                 )
 
                 // Divider
@@ -116,7 +117,8 @@ struct PreviewView: View {
                         "\($0.name) edited photo preview"
                     } ?? "Edited photo preview",
                     labelSide: .trailing,
-                    width: geo.size.width / 2
+                    width: geo.size.width / 2,
+                    showsMaskOverlay: true
                 )
             }
         }
@@ -125,13 +127,13 @@ struct PreviewView: View {
 
     private func panelView(
         surface: PreviewSurface, label: String, accessibilityLabel: String,
-        labelSide: HorizontalAlignment, width: CGFloat
+        labelSide: HorizontalAlignment, width: CGFloat, showsMaskOverlay: Bool
     ) -> some View {
         ZStack(alignment: labelSide == .leading ? .topLeading : .topTrailing) {
             bgColor
 
             if surface.image != nil {
-                canvasSurface(surface)
+                canvasSurface(surface, showsMaskOverlay: showsMaskOverlay)
             } else {
                 ProgressView()
                     .scaleEffect(1.2)
@@ -155,7 +157,7 @@ struct PreviewView: View {
         GeometryReader { geometry in
             ZStack {
                     if previewSurface.image != nil {
-                        canvasSurface(previewSurface)
+                        canvasSurface(previewSurface, showsMaskOverlay: true)
                             .padding(8)
                     }
 
@@ -232,7 +234,9 @@ struct PreviewView: View {
     /// double-click live on `PreviewMTKView` so a SwiftUI `DragGesture` cannot swallow the AppKit
     /// click path. The same navigation value is passed to both comparison panels.
     @ViewBuilder
-    private func canvasSurface(_ surface: PreviewSurface) -> some View {
+    private func canvasSurface(
+        _ surface: PreviewSurface, showsMaskOverlay: Bool = true
+    ) -> some View {
         GeometryReader { _ in
             let preview = PreviewSurfaceView(
                 surface: surface,
@@ -265,7 +269,7 @@ struct PreviewView: View {
                     preview
                 }
 
-                if viewModel.isMaskingWorkspaceActive,
+                if showsMaskOverlay, viewModel.isMaskingWorkspaceActive,
                     maskingState.showOverlay, viewModel.sourceSize != .zero,
                     maskingState.selectedLayerID != nil || maskingState.hasDraft
                         || maskingState.activeTool == .linear || maskingState.activeTool == .radial

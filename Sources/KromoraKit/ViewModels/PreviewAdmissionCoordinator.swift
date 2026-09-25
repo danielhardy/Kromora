@@ -32,6 +32,7 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionActiveSourceReference: EditSourceReference? { get }
     var admissionIsShowingOriginal: Bool { get }
     var admissionIsSideBySideVisible: Bool { get }
+    var admissionHasOriginalPreview: Bool { get }
     var admissionHasComparisonPreviewCandidate: Bool { get }
     var admissionSelectedLook: CubeLUT? { get }
     var admissionCropToolActive: Bool { get }
@@ -279,6 +280,10 @@ final class PreviewAdmissionCoordinator {
                     comparisonRevision == destination.admissionComparisonRevision,
                     self.comparisonPreviewScheduledRevision == comparisonRevision
                 else { return }
+                // An already displayed baseline remains correct when a redundant request is
+                // evicted. Keep this revision admitted so a later Adjusted publication cannot
+                // enqueue the same Original render again.
+                if destination.admissionHasOriginalPreview { return }
                 // A queued comparison can be evicted by a newer active-editor render. Leave the
                 // revision retryable so the next settled publication can re-admit it.
                 self.comparisonPreviewScheduledRevision = nil
@@ -345,6 +350,11 @@ final class PreviewAdmissionCoordinator {
             destination.admissionIsSideBySideVisible,
             comparisonPreviewScheduledRevision == comparisonRevision
         else { return }
+        if destination.admissionHasOriginalPreview {
+            // The current baseline is still displayed. A failed redundant refresh must not blank
+            // it or create a retry loop for pixels that have not changed.
+            return
+        }
         comparisonPreviewScheduledRevision = nil
         destination.admissionClearOriginalPreview()
         destination.publishAdmissionStatus("Could not display the comparison preview. Retrying…")

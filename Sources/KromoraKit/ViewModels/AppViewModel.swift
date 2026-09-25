@@ -4477,6 +4477,7 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionActiveSourceReference: EditSourceReference? { activeSourceReference }
     var admissionIsShowingOriginal: Bool { isShowingOriginal }
     var admissionIsSideBySideVisible: Bool { isSideBySideVisible }
+    var admissionHasOriginalPreview: Bool { originalPreviewSurface.image != nil }
     var admissionHasComparisonPreviewCandidate: Bool {
         previewSurface.image != nil
             && lastPublishedVisibleRequest?.source == imageSource
