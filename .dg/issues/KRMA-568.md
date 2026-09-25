@@ -12,11 +12,11 @@ labels:
   - masking
   - ui-ux
 created: 2026-09-25T00:33:19.544Z
-updated: 2026-09-25T00:33:20.171Z
+updated: 2026-09-25T03:55:21.833Z
 depends_on:
   - KRMA-563
 blockers: []
-order: z
+order: zl
 board: product
 ---
 

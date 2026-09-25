@@ -2,7 +2,7 @@
 id: KRMA-566
 title: "Masking: show a mask's overlay while hovering its row"
 type: feature
-status: backlog
+status: ready
 priority: high
 creation_provenance:
   runner: claude
@@ -12,11 +12,11 @@ labels:
   - masking
   - ui-ux
 created: 2026-09-25T00:33:17.575Z
-updated: 2026-09-25T00:33:18.171Z
+updated: 2026-09-25T03:54:59.606Z
 depends_on:
   - KRMA-563
 blockers: []
-order: x
+order: zh
 board: product
 ---
 

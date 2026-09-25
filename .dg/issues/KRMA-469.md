@@ -2,8 +2,39 @@
 id: KRMA-469
 title: "Stage 5: Re-inventory AppViewModel and update architecture documentation"
 type: task
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: "Expected root remainder is confirmed: init/wiring, load sequencer, updateDocument/applyHistoryDocument, published chrome, and shutdown."
+      result: pass
+      notes: MARK-by-MARK inventory in APP_ARCHITECTURE.md matches actual AppViewModel.swift MARKs verified by grep; the four remaining root task handles (semanticCoordinatorInstallTask, lutCacheInvalidationTask, droppedPromiseTask, pendingPersistenceFlush) match exactly what the file declares, with no undocumented extras.
+    - criterion: docs/APP_ARCHITECTURE.md and the R5 paragraph in docs/REPOSITORY_IMPROVEMENT_PLAN.md are updated if stale.
+      result: pass
+      notes: New AppViewModel root inventory section added to APP_ARCHITECTURE.md with ownership table, façade list, task-handle table, and shutdown-order narrative. R5 section rewritten to remove the stale pre-extraction line-range table and the stale AppViewModel+Masking.swift 1,309-line figure, replaced with a pointer to the durable inventory.
+    - criterion: Line-count trend is recorded only as supporting evidence, never as the extraction goal.
+      result: pass
+      notes: AppViewModel.swift (4,293) and AppViewModel+Masking.swift (172) are stated as supporting context/evidence in both docs, matching wc -l on the actual files.
+    - criterion: Focused tests for each landed stage, swift build, the relevant fast CI lane, dg validate, and git diff --check pass.
+      result: pass
+      notes: Docs-only diff (plus one new backlog issue file); no forwarder moved, so swift build, dg validate, and git diff --check are the applicable checks per the issue brief. All three pass; dg validate shows only pre-existing unrelated model-name/context-completeness warnings.
+    - criterion: This remains a documentation/review stage; no broad refactor is started here.
+      result: pass
+      notes: git show --stat on commit 1ecbfaa confirms zero Sources/ files changed; only docs/APP_ARCHITECTURE.md, docs/REPOSITORY_IMPROVEMENT_PLAN.md, and the new KRMA-586.md backlog child were touched. The remaining Photos-import batch state found during inventory was correctly filed as a non-blocking backlog child (KRMA-586, depends_on KRMA-469) rather than extracted here.
+  checks_run:
+    - "swift build: pass"
+    - "dg validate: OK (only pre-existing unrelated model-name/context-completeness warnings)"
+    - "git diff --check: pass"
+    - "wc -l on AppViewModel.swift (4293) and AppViewModel+Masking.swift (172): matches documented figures"
+    - "grep MARK/task-handle inventory in AppViewModel.swift: matches documented ownership table and task-handle table exactly"
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-25T05:53:47.401Z
+  session: 01MUGJOCEV132JSV02
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -13,7 +44,7 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:26.087Z
-updated: 2026-09-24T15:19:44.586Z
+updated: 2026-09-25T05:53:47.403Z
 depends_on:
   - KRMA-465
   - KRMA-466
@@ -22,7 +53,7 @@ depends_on:
   - KRMA-564
   - KRMA-565
 blockers: []
-order: x
+order: a0
 board: product
 context:
   files:
@@ -107,6 +138,34 @@ After Stages 1–4 land, re-inventory `AppViewModel` and update the durable arch
 
 Triage 2026-09-23: this stays a docs/inventory pass after KRMA-466 and KRMA-467. APP_ARCHITECTURE.md already documents the finished extractions.
 
+### Comment — codex @ 2026-09-25T05:52:58.462Z
+
+Re-inventoried AppViewModel MARKs and documented current workflow ownership, root sequencing, façade forwarders, retained task handles, revision fences, and shutdown order in APP_ARCHITECTURE.md. Updated R5 to remove stale extraction proposals and masking line count; AppViewModel.swift is 4,293 lines and AppViewModel+Masking.swift is 172 lines (supporting evidence only). The remaining Photos import batch state is tracked in backlog child KRMA-586, dependent on this inventory. Docs-only checks: dg validate passed with existing model-name/context-completeness warnings; git diff --check passed. Commit: 1ecbfaa.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-25T05:53:47.401Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Expected root remainder is confirmed: init/wiring, load sequencer, updateDocument/applyHistoryDocument, published chrome, and shutdown. (pass) — MARK-by-MARK inventory in APP_ARCHITECTURE.md matches actual AppViewModel.swift MARKs verified by grep; the four remaining root task handles (semanticCoordinatorInstallTask, lutCacheInvalidationTask, droppedPromiseTask, pendingPersistenceFlush) match exactly what the file declares, with no undocumented extras.
+- [x] docs/APP_ARCHITECTURE.md and the R5 paragraph in docs/REPOSITORY_IMPROVEMENT_PLAN.md are updated if stale. (pass) — New AppViewModel root inventory section added to APP_ARCHITECTURE.md with ownership table, façade list, task-handle table, and shutdown-order narrative. R5 section rewritten to remove the stale pre-extraction line-range table and the stale AppViewModel+Masking.swift 1,309-line figure, replaced with a pointer to the durable inventory.
+- [x] Line-count trend is recorded only as supporting evidence, never as the extraction goal. (pass) — AppViewModel.swift (4,293) and AppViewModel+Masking.swift (172) are stated as supporting context/evidence in both docs, matching wc -l on the actual files.
+- [x] Focused tests for each landed stage, swift build, the relevant fast CI lane, dg validate, and git diff --check pass. (pass) — Docs-only diff (plus one new backlog issue file); no forwarder moved, so swift build, dg validate, and git diff --check are the applicable checks per the issue brief. All three pass; dg validate shows only pre-existing unrelated model-name/context-completeness warnings.
+- [x] This remains a documentation/review stage; no broad refactor is started here. (pass) — git show --stat on commit 1ecbfaa confirms zero Sources/ files changed; only docs/APP_ARCHITECTURE.md, docs/REPOSITORY_IMPROVEMENT_PLAN.md, and the new KRMA-586.md backlog child were touched. The remaining Photos-import batch state found during inventory was correctly filed as a non-blocking backlog child (KRMA-586, depends_on KRMA-469) rather than extracted here.
+Checks run:
+- swift build: pass
+- dg validate: OK (only pre-existing unrelated model-name/context-completeness warnings)
+- git diff --check: pass
+- wc -l on AppViewModel.swift (4293) and AppViewModel+Masking.swift (172): matches documented figures
+- grep MARK/task-handle inventory in AppViewModel.swift: matches documented ownership table and task-handle table exactly
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUGJOCEV132JSV02
