@@ -350,7 +350,7 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
             )
         }
 
-        let kind = definition.target.semanticMaskKind
+        let kind = definition.semanticMaskKind
         let requestedQuality = request.quality.maskQuality
         let mask: RegionMask
         do {
@@ -444,6 +444,11 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
 
 extension SemanticMaskDefinition {
     static let currentGenerationVersion = 1
+
+    var semanticMaskKind: SemanticMaskKind {
+        guard target == .face else { return target.semanticMaskKind }
+        return faceIndex == 0 ? .face : .faceInstance(faceIndex)
+    }
 }
 
 extension SemanticTarget {

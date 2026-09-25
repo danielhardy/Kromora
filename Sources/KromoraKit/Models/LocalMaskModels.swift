@@ -117,27 +117,32 @@ enum SemanticTarget: String, Codable, Sendable, Equatable, CaseIterable {
 
 struct SemanticMaskDefinition: Codable, Sendable, Equatable {
     var target: SemanticTarget
+    /// Ordinal among landmarked face mattes. Older recipes omit this and continue to address face
+    /// zero. Vision's result order can change when the source is analyzed again.
+    var faceIndex: Int
     var edgeFeather: Double
     var edgeShift: Double
     var density: Double
     var generationVersion: Int
 
     init(
-        target: SemanticTarget = .foreground, edgeFeather: Double = 0,
+        target: SemanticTarget = .foreground, faceIndex: Int = 0, edgeFeather: Double = 0,
         edgeShift: Double = 0, density: Double = 1, generationVersion: Int = 1
     ) {
         self.target = target
+        self.faceIndex = max(0, faceIndex)
         self.edgeFeather = Self.unit(edgeFeather)
         self.edgeShift = edgeShift.clamped(to: -1...1, default: 0)
         self.density = Self.unit(density)
         self.generationVersion = max(1, generationVersion)
     }
 
-    private enum CodingKeys: String, CodingKey { case target, edgeFeather, edgeShift, density, generationVersion }
+    private enum CodingKeys: String, CodingKey { case target, faceIndex, edgeFeather, edgeShift, density, generationVersion }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             target: try c.decodeIfPresent(SemanticTarget.self, forKey: .target) ?? .foreground,
+            faceIndex: try c.decodeIfPresent(Int.self, forKey: .faceIndex) ?? 0,
             edgeFeather: try c.decodeIfPresent(Double.self, forKey: .edgeFeather) ?? 0,
             edgeShift: try c.decodeIfPresent(Double.self, forKey: .edgeShift) ?? 0,
             density: try c.decodeIfPresent(Double.self, forKey: .density) ?? 1,

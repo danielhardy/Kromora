@@ -482,11 +482,18 @@ final class MaskingWorkflowCoordinator {
             destination.setMaskingStatusMessage(message)
             return
         }
+        // The Face action creates the next unused indexed recipe. This keeps the familiar
+        // single-face action and lets photographers add Face 2, Face 3, and so on independently.
+        let faceIndex = target == .face ? nextFaceIndex(in: destination.document) : 0
+        let requestedKind: SemanticMaskKind = target == .face
+            ? (faceIndex == 0 ? .face : .faceInstance(faceIndex))
+            : target.semanticMaskKind
         let sourceRevision = destination.maskingSourceRevision
         let sourceFingerprint = source.cacheFingerprint
         let coordinator = analysis
         interactionState.beginMaskResolution()
-        destination.setMaskingStatusMessage("Analyzing \(kind.title) mask…")
+        let requestTitle = target == .face ? "Face \(faceIndex + 1)" : kind.title
+        destination.setMaskingStatusMessage("Analyzing \(requestTitle) mask…")
         smartMaskCreationTask = Task { @MainActor [weak self] in
             do {
                 // Person segmentation is deliberately gated by the shared provider. Detailed
@@ -506,7 +513,7 @@ final class MaskingWorkflowCoordinator {
                 }
                 let mask = try await coordinator.mask(
                     assetID: assetID, source: source,
-                    kind: target.semanticMaskKind, quality: .preview
+                    kind: requestedKind, quality: .preview
                 )
                 try Task.checkCancellation()
                 guard let self, let destination = self.destination,
@@ -527,10 +534,11 @@ final class MaskingWorkflowCoordinator {
                     destination.setMaskingStatusMessage(message)
                     return
                 }
-                self.insertDurableMask(kind, destination: destination)
+                self.insertDurableMask(kind, faceIndex: faceIndex, destination: destination)
                 self.smartMaskRetryContext = nil
                 self.interactionState.markMaskResolved()
-                destination.setMaskingStatusMessage("Created \(kind.title) mask")
+                let title = target == .face ? "Face \(faceIndex + 1)" : kind.title
+                destination.setMaskingStatusMessage("Created \(title) mask")
             } catch is CancellationError {
                 return
             } catch {
@@ -545,12 +553,15 @@ final class MaskingWorkflowCoordinator {
         }
     }
 
-    private func insertDurableMask(_ kind: MaskCreationKind, destination: any MaskingWorkflowDestination) {
+    private func insertDurableMask(
+        _ kind: MaskCreationKind, faceIndex: Int = 0, destination: any MaskingWorkflowDestination
+    ) {
         guard let target = kind.semanticTarget else { return }
-        let source = MaskSource.semantic(SemanticMaskDefinition(target: target))
+        let source = MaskSource.semantic(SemanticMaskDefinition(target: target, faceIndex: faceIndex))
         let layerID = UUID()
         let component = MaskComponent(source: source)
-        let name = nextMaskName(for: kind.title, in: destination)
+        let baseName = target == .face ? "Face \(faceIndex + 1)" : kind.title
+        let name = nextMaskName(for: baseName, in: destination)
         destination.updateDocument { document in
             document.localAdjustments.append(LocalAdjustmentLayer(
                 id: layerID, name: name, components: [component]
@@ -558,6 +569,18 @@ final class MaskingWorkflowCoordinator {
         }
         interactionState.setTool(.selection)
         interactionState.select(componentID: component.id, in: layerID)
+    }
+
+    private func nextFaceIndex(in document: EditDocument) -> Int {
+        let used = Set(document.localAdjustments.flatMap(\.components).compactMap { component -> Int? in
+            guard let definition = component.source.semanticDefinition, definition.target == .face else {
+                return nil
+            }
+            return definition.faceIndex
+        })
+        var candidate = 0
+        while used.contains(candidate) { candidate += 1 }
+        return candidate
     }
 
     private func userFacingSmartMaskError(_ error: Error, target: SemanticTarget) -> String {
@@ -767,11 +790,16 @@ final class MaskingWorkflowCoordinator {
             destination.setMaskingStatusMessage(message)
             return
         }
+        let faceIndex = target == .face ? nextFaceIndex(in: destination.document) : 0
+        let requestedKind: SemanticMaskKind = target == .face
+            ? (faceIndex == 0 ? .face : .faceInstance(faceIndex))
+            : target.semanticMaskKind
         let sourceRevision = destination.maskingSourceRevision
         let sourceFingerprint = source.cacheFingerprint
         let coordinator = analysis
         interactionState.beginMaskResolution()
-        destination.setMaskingStatusMessage("Analyzing \(kind.title) component…")
+        let requestTitle = target == .face ? "Face \(faceIndex + 1)" : kind.title
+        destination.setMaskingStatusMessage("Analyzing \(requestTitle) component…")
         smartMaskCreationTask = Task { @MainActor [weak self] in
             do {
                 if target == .person {
@@ -783,7 +811,7 @@ final class MaskingWorkflowCoordinator {
                 }
                 let mask = try await coordinator.mask(
                     assetID: assetID, source: source,
-                    kind: target.semanticMaskKind, quality: .preview
+                    kind: requestedKind, quality: .preview
                 )
                 try Task.checkCancellation()
                 guard let self, let destination = self.destination,
@@ -802,10 +830,12 @@ final class MaskingWorkflowCoordinator {
                 }
                 self.addMaskComponent(
                     to: layerID,
-                    source: .semantic(SemanticMaskDefinition(target: target)), mode: mode)
+                    source: .semantic(SemanticMaskDefinition(target: target, faceIndex: faceIndex)),
+                    mode: mode)
                 self.smartMaskRetryContext = nil
                 self.interactionState.markMaskResolved()
-                destination.setMaskingStatusMessage("Added \(kind.title) component")
+                let title = target == .face ? "Face \(faceIndex + 1)" : kind.title
+                destination.setMaskingStatusMessage("Added \(title) component")
             } catch is CancellationError {
                 return
             } catch {

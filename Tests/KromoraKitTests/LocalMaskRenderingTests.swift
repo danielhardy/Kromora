@@ -33,6 +33,26 @@ final class LocalMaskRenderingTests: TempDirectoryTestCase {
         return try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
     }
 
+    func testFaceSemanticRecipesAddressIndependentIndexedMattesAndLegacyFaceZero() throws {
+        let first = SemanticMaskDefinition(target: .face)
+        let second = SemanticMaskDefinition(target: .face, faceIndex: 1)
+        let third = SemanticMaskDefinition(target: .face, faceIndex: 2)
+
+        XCTAssertEqual(first.semanticMaskKind, .face)
+        XCTAssertEqual(second.semanticMaskKind, .faceInstance(1))
+        XCTAssertEqual(third.semanticMaskKind, .faceInstance(2))
+
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+        XCTAssertEqual(try decoder.decode(SemanticMaskDefinition.self, from: encoder.encode(second)), second)
+        XCTAssertEqual(try decoder.decode(SemanticMaskDefinition.self, from: encoder.encode(third)), third)
+
+        let legacy = Data(#"{"target":"face","edgeFeather":0,"edgeShift":0,"density":1,"generationVersion":1}"#.utf8)
+        let decodedLegacy = try decoder.decode(SemanticMaskDefinition.self, from: legacy)
+        XCTAssertEqual(decodedLegacy.faceIndex, 0)
+        XCTAssertEqual(decodedLegacy.semanticMaskKind, .face)
+    }
+
     func testPreviewSemanticMaskWorkingResolutionUsesFourMegapixelAndLongEdgeCaps() {
         let capped = SemanticMaskPreviewResolution.targetSize(
             for: PixelDimensions(width: 6_000, height: 4_000),
