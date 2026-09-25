@@ -253,6 +253,29 @@ final class NeutralOriginSliderTests: XCTestCase {
         }
     }
 
+    func testThumbRendersAsAShadedCopperBead() throws {
+        let enabled = try renderThumb(diameter: 48, enabled: true)
+        // colorAt measures y from the top of the bitmap, so the lit face is the smaller fraction.
+        let top = try sample(enabled, xFraction: 0.5, yFraction: 0.30)
+        let middle = try sample(enabled, xFraction: 0.5, yFraction: 0.5)
+        let bottom = try sample(enabled, xFraction: 0.5, yFraction: 0.72)
+
+        XCTAssertGreaterThan(middle.redComponent, middle.greenComponent)
+        XCTAssertGreaterThan(middle.greenComponent, middle.blueComponent,
+                             "the bead's face should read as copper, not grey or gold-green")
+        XCTAssertGreaterThan(
+            luminance(of: top), luminance(of: bottom) + 0.12,
+            "light should fall on the top of the bead"
+        )
+
+        let disabled = try renderThumb(diameter: 48, enabled: false)
+        let disabledMiddle = try sample(disabled, xFraction: 0.5, yFraction: 0.5)
+        XCTAssertLessThan(
+            chroma(of: disabledMiddle), 0.08,
+            "a disabled thumb should cool to pewter"
+        )
+    }
+
     func testThumbVisualCanCorrectAnOffsetNativeKnobRectWithoutChangingItsHorizontalGeometry() {
         let nativeKnob = NSRect(x: 40, y: 3, width: 20, height: 16)
         let circle = NeutralOriginSliderCell.circularKnobRect(in: nativeKnob, centeredOn: 12)
@@ -351,6 +374,55 @@ final class NeutralOriginSliderTests: XCTestCase {
     private func chroma(of color: NSColor) -> CGFloat {
         let components = [color.redComponent, color.greenComponent, color.blueComponent]
         return components.max()! - components.min()!
+    }
+
+    private func luminance(of color: NSColor) -> CGFloat {
+        0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
+    }
+
+    private func renderThumb(diameter: CGFloat, enabled: Bool) throws -> NSBitmapImageRep {
+        let canvas = Int(ceil(diameter + 8))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: canvas,
+            pixelsHigh: canvas,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: rep) else {
+            struct RenderFailure: Error {}
+            throw RenderFailure()
+        }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        NSColor(srgbRed: 0.45, green: 0.45, blue: 0.46, alpha: 1).setFill()
+        NSRect(x: 0, y: 0, width: CGFloat(canvas), height: CGFloat(canvas)).fill()
+        let origin = (CGFloat(canvas) - diameter) / 2
+        NeutralOriginSliderCell.drawBrassThumb(
+            in: NSRect(x: origin, y: origin, width: diameter, height: diameter),
+            flipped: false,
+            enabled: enabled
+        )
+        NSGraphicsContext.restoreGraphicsState()
+        return rep
+    }
+
+    /// `yFraction` is measured from the top of the bitmap. `NSBitmapImageRep.colorAt` uses that
+    /// origin here, opposite the unflipped drawing context.
+    private func sample(
+        _ rep: NSBitmapImageRep, xFraction: CGFloat, yFraction: CGFloat
+    ) throws -> NSColor {
+        let x = min(max(Int((CGFloat(rep.pixelsWide) * xFraction).rounded()), 0), rep.pixelsWide - 1)
+        let y = min(max(Int((CGFloat(rep.pixelsHigh) * yFraction).rounded()), 0), rep.pixelsHigh - 1)
+        guard let color = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else {
+            struct SampleFailure: Error {}
+            throw SampleFailure()
+        }
+        return color
     }
 
     /// The horizontal extent of the accent-coloured fill, in points, or `nil` when nothing is

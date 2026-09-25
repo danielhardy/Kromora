@@ -235,9 +235,10 @@ enum SliderTrackStyle: Equatable, Sendable {
 
 /// The one piece of `NeutralOriginSlider` that draws.
 ///
-/// `drawKnob` only changes the thumb's shape; the cell's knob geometry, hit testing, and tracking
-/// remain AppKit's. That keeps the control behaving like a macOS slider while avoiding the stock
-/// capsule thumb, which leaves the coloured bar looking capped at either end.
+/// `drawKnob` replaces the stock capsule with a small polished copper bead. The cell's knob
+/// geometry, hit testing, and tracking remain AppKit's, so the control still behaves like a macOS
+/// slider. The bead is inset from the native knob rect, which keeps the coloured bar from looking
+/// capped by a wide system thumb.
 final class NeutralOriginSliderCell: NSSliderCell {
     /// The drawn thumb is smaller than AppKit's native knob rect. The native rect remains the
     /// source of travel geometry and hit testing, so shrinking the visual does not make the
@@ -317,15 +318,46 @@ final class NeutralOriginSliderCell: NSSliderCell {
 
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
+        Self.drawBrassThumb(in: circle, flipped: flipped, enabled: isEnabled)
+    }
+
+    /// A machined copper bead, lit from above. The outer ring is the sidewall; the inset face is
+    /// the polished top. Shading stays inside the circle so a cast shadow cannot pull the thumb
+    /// off the track's vertical centre.
+    static func drawBrassThumb(in circle: NSRect, flipped: Bool, enabled: Bool) {
+        let diameter = min(circle.width, circle.height)
+        guard diameter > 0 else { return }
 
         let path = NSBezierPath(ovalIn: circle)
-        let fill = isEnabled ? NSColor.controlBackgroundColor : NSColor.quaternaryLabelColor
-        fill.setFill()
-        path.fill()
+        let palette = BrassThumbPalette(enabled: enabled)
+        let top = NSPoint(x: circle.midX, y: flipped ? circle.minY : circle.maxY)
+        let bottom = NSPoint(x: circle.midX, y: flipped ? circle.maxY : circle.minY)
 
-        let stroke = isEnabled ? KromoraTheme.primaryAccentNSColor : NSColor.tertiaryLabelColor
-        stroke.setStroke()
-        path.lineWidth = 1
+        NSGraphicsContext.saveGraphicsState()
+        path.addClip()
+        palette.sidewall.draw(from: top, to: bottom, options: [])
+
+        let faceInset = diameter * 0.16
+        let face = circle.insetBy(dx: faceInset, dy: faceInset)
+        NSBezierPath(ovalIn: face).addClip()
+        palette.dome.draw(from: top, to: bottom, options: [])
+
+        let faceDiameter = min(face.width, face.height)
+        let sheen = NSPoint(
+            x: face.minX + faceDiameter * 0.40,
+            y: flipped ? face.minY + faceDiameter * 0.30 : face.maxY - faceDiameter * 0.30
+        )
+        palette.sheen.draw(
+            fromCenter: sheen,
+            radius: 0,
+            toCenter: sheen,
+            radius: faceDiameter * 0.46,
+            options: []
+        )
+        NSGraphicsContext.restoreGraphicsState()
+
+        palette.rim.setStroke()
+        path.lineWidth = max(0.5, diameter * 0.045)
         path.stroke()
     }
 
@@ -424,5 +456,79 @@ final class NeutralOriginSliderCell: NSSliderCell {
             width: visualDiameter,
             height: visualDiameter
         )
+    }
+}
+
+/// Polished-metal stops for the slider bead. Copper when the control can be dragged, pewter when
+/// it cannot. The metal does not follow the accent's light/dark variants: a physical thumb keeps
+/// the same alloy in either appearance, and the dark rim is what keeps it legible on light chrome.
+private struct BrassThumbPalette {
+    let sidewall: NSGradient
+    let dome: NSGradient
+    let sheen: NSGradient
+    let rim: NSColor
+
+    init(enabled: Bool) {
+        if enabled {
+            sidewall = Self.gradient(
+                colors: [
+                    Self.rgb(0.93, 0.74, 0.42),
+                    Self.rgb(0.62, 0.32, 0.14),
+                    Self.rgb(0.22, 0.09, 0.04),
+                ],
+                locations: [0, 0.55, 1]
+            )
+            dome = Self.gradient(
+                colors: [
+                    Self.rgb(0.98, 0.84, 0.56),
+                    Self.rgb(0.90, 0.56, 0.28),
+                    Self.rgb(0.62, 0.30, 0.13),
+                    Self.rgb(0.40, 0.17, 0.08),
+                ],
+                locations: [0, 0.34, 0.72, 1]
+            )
+            sheen = Self.gradient(
+                colors: [
+                    Self.rgb(1, 0.93, 0.74, alpha: 0.42),
+                    Self.rgb(1, 0.86, 0.62, alpha: 0),
+                ],
+                locations: [0, 1]
+            )
+            rim = Self.rgb(0.16, 0.06, 0.03)
+        } else {
+            sidewall = Self.gradient(
+                colors: [
+                    Self.rgb(0.78, 0.76, 0.72),
+                    Self.rgb(0.48, 0.46, 0.44),
+                    Self.rgb(0.24, 0.23, 0.21),
+                ],
+                locations: [0, 0.55, 1]
+            )
+            dome = Self.gradient(
+                colors: [
+                    Self.rgb(0.86, 0.84, 0.80),
+                    Self.rgb(0.62, 0.60, 0.56),
+                    Self.rgb(0.36, 0.34, 0.32),
+                ],
+                locations: [0, 0.45, 1]
+            )
+            sheen = Self.gradient(
+                colors: [Self.rgb(1, 1, 1, alpha: 0.22), Self.rgb(1, 1, 1, alpha: 0)],
+                locations: [0, 1]
+            )
+            rim = Self.rgb(0.22, 0.21, 0.20)
+        }
+    }
+
+    private static func rgb(
+        _ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, alpha: CGFloat = 1
+    ) -> NSColor {
+        NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
+    }
+
+    private static func gradient(colors: [NSColor], locations: [CGFloat]) -> NSGradient {
+        locations.withUnsafeBufferPointer { buffer in
+            NSGradient(colors: colors, atLocations: buffer.baseAddress!, colorSpace: .sRGB)!
+        }
     }
 }
