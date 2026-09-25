@@ -396,7 +396,7 @@ struct LookInspectorView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.12), in: Capsule())
+                    .background(KromoraTheme.primaryAccent.opacity(0.12), in: Capsule())
                     .accessibilityLabel("Starter Looks, read-only")
             }
             Spacer()
@@ -425,7 +425,7 @@ struct LookInspectorView: View {
                             .foregroundStyle(.secondary)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Color.accentColor.opacity(0.12), in: Capsule())
+                            .background(KromoraTheme.primaryAccent.opacity(0.12), in: Capsule())
                     }
                 }
                 Text(category.name)
@@ -580,16 +580,16 @@ private struct LookNoneRow: View {
     var body: some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 3)
-                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.3))
+                .fill(isSelected ? KromoraTheme.primaryAccent : Color.secondary.opacity(0.3))
                 .frame(width: 4, height: 20)
             Image(systemName: "circle.slash")
-                .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                .foregroundStyle(isSelected ? KromoraTheme.primaryAccent : .secondary)
             Text("None")
                 .font(.system(.body, design: .default))
             Spacer()
             if isSelected {
                 Image(systemName: "checkmark")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(KromoraTheme.primaryAccent)
                     .font(.caption.weight(.semibold))
             }
         }
@@ -621,7 +621,7 @@ struct LookRow: View {
     var body: some View {
         HStack(spacing: 8) {
             RoundedRectangle(cornerRadius: 3)
-                .fill(isSelected ? Color.accentColor : Color.secondary.opacity(0.3))
+                .fill(isSelected ? KromoraTheme.primaryAccent : Color.secondary.opacity(0.3))
                 .frame(width: 4, height: 20)
 
             LookPreviewThumbnail(
@@ -644,7 +644,7 @@ struct LookRow: View {
                 .accessibilityHidden(true)
             if isSelected {
                 Image(systemName: "checkmark")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(KromoraTheme.primaryAccent)
                     .font(.caption.weight(.semibold))
             }
         }

@@ -127,7 +127,7 @@ struct SourceBrowserView: View {
             .id(entry.item.id)
             .listRowBackground(
                 entry.index == collection.selectedIndex
-                    ? Color.accentColor.opacity(0.22)
+                    ? KromoraTheme.primaryAccent.opacity(0.22)
                     : Color.clear
             )
         }

@@ -21,6 +21,25 @@ enum KromoraTheme {
         Color(nsColor: .windowBackgroundColor)
     }
 
+    /// Kromora's primary interactive accent. The dark variant is a muted copper chosen
+    /// to harmonize with the independently configurable orange mask overlay while staying
+    /// distinct from it. Keep both appearance values here so every control shares one source.
+    static var primaryAccent: Color {
+        Color(nsColor: primaryAccentNSColor)
+    }
+
+    /// AppKit controls use this same dynamic color at their native drawing boundary.
+    static var primaryAccentNSColor: NSColor { primaryAccentColor }
+
+    static func resolvedPrimaryAccentColor(for appearance: NSAppearance? = nil) -> NSColor {
+        let effectiveAppearance = appearance ?? NSAppearance(named: .aqua)!
+        var color: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = primaryAccentColor.usingColorSpace(.deviceRGB)
+        }
+        return color ?? NSColor(srgbRed: 0.616, green: 0.341, blue: 0.220, alpha: 1)
+    }
+
     /// Quiet semantic surface for chrome that supports the canvas without competing with it.
     /// `underPageBackgroundColor` follows the active light/dark appearance and is deliberately
     /// shared by the source browser and the large bottom chrome family.
@@ -52,6 +71,16 @@ enum KromoraTheme {
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return NSColor(calibratedWhite: isDark ? 0.12 : 0.90, alpha: 1)
+    }
+
+    private static let primaryAccentColor = NSColor(
+        name: NSColor.Name("KromoraPrimaryAccent")
+    ) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        // Dark: #CE865C (RGB 206, 134, 92), light: #9D5738 (RGB 157, 87, 56).
+        return isDark
+            ? NSColor(srgbRed: 206 / 255, green: 134 / 255, blue: 92 / 255, alpha: 1)
+            : NSColor(srgbRed: 157 / 255, green: 87 / 255, blue: 56 / 255, alpha: 1)
     }
 
     static var controlBackground: Color {

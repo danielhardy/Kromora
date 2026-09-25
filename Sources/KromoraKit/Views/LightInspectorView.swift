@@ -223,7 +223,7 @@ private struct ToneCurveEditor: View {
         // until its primary action resolves on mouse-up. That can leave a handle drag dependent
         // on the release path instead of publishing its changing location immediately.
         Circle()
-            .fill(Color.accentColor)
+            .fill(KromoraTheme.primaryAccent)
             .overlay(Circle().stroke(.white, lineWidth: 1))
             .frame(width: 12, height: 12)
             .shadow(radius: 1)

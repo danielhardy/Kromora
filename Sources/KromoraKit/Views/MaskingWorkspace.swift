@@ -199,7 +199,7 @@ struct MaskingWorkspace: View {
         if maskingState.linearCreationPending {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "hand.draw")
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(KromoraTheme.primaryAccent)
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Create linear gradient")
                         .font(.caption.weight(.semibold))
@@ -216,7 +216,7 @@ struct MaskingWorkspace: View {
                     .accessibilityLabel("Cancel linear gradient creation")
             }
             .padding(9)
-            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+            .background(KromoraTheme.primaryAccent.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
             .accessibilityElement(children: .contain)
             .accessibilityLabel("Linear gradient creation pending")
             .accessibilityHint("Drag across the canvas to create the gradient, or cancel")
@@ -926,7 +926,7 @@ private struct MaskLayerRow: View {
         HStack(spacing: 7) {
             Image(systemName: layer.components.first?.source.iconName ?? "rectangle.dashed")
                 .frame(width: 16)
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isSelected ? KromoraTheme.primaryAccent : Color.secondary)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -1008,7 +1008,7 @@ private struct MaskLayerRow: View {
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
         .background(
-            isSelected ? Color.accentColor.opacity(0.14) : .clear,
+            isSelected ? KromoraTheme.primaryAccent.opacity(0.14) : .clear,
             in: RoundedRectangle(cornerRadius: 6)
         )
         .contentShape(Rectangle())
@@ -1070,7 +1070,7 @@ private struct MaskPartRow: View {
             Image(systemName: component.source.iconName)
                 .font(.caption)
                 .frame(width: 14)
-                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .foregroundStyle(isSelected ? KromoraTheme.primaryAccent : Color.secondary)
                 .accessibilityHidden(true)
 
             TextField(
@@ -1163,7 +1163,7 @@ private struct MaskPartRow: View {
         .padding(.leading, 22)
         .padding(.trailing, 6)
         .background(
-            isSelected ? Color.accentColor.opacity(0.08) : .clear,
+            isSelected ? KromoraTheme.primaryAccent.opacity(0.08) : .clear,
             in: RoundedRectangle(cornerRadius: 5)
         )
         .contentShape(Rectangle())
@@ -1786,7 +1786,7 @@ struct MaskCanvasOverlay: View {
             with: .color(.black.opacity(0.3 * opacity)))
         context.fill(
             Path(ellipseIn: circle(point, knobRadius)),
-            with: .color((emphasized ? Color.accentColor : .white).opacity(opacity)))
+            with: .color((emphasized ? KromoraTheme.primaryAccent : .white).opacity(opacity)))
         if emphasized {
             context.stroke(
                 Path(ellipseIn: circle(point, knobRadius)), with: .color(.white.opacity(opacity)),
