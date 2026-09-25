@@ -158,6 +158,68 @@ document revision before publishing. Identity documents publish a nil edited thu
 rendering. Fake-only `EditedThumbnailCoordinatorTests` cover debounce coalescing, shutdown and
 source-identity late-result rejection, revision composition, and identity-document behavior.
 
+## AppViewModel root inventory
+
+`AppViewModel` is the composition root, the main-window command façade, and the sole publisher of
+the active `EditDocument`. The inventory below reflects the current `AppViewModel.swift` MARKs
+after the ownership stages; the main file is 4,293 lines, recorded here only as supporting context.
+
+| MARK / remaining workflow | Owner and root responsibility |
+| --- | --- |
+| Published state | `AppViewModel` owns the active document and cross-feature chrome: source/loading and preview state, navigation, inspector presentation, comparison mode, metadata, histogram result, status/error, and import/Auto presentation. Collaborators own their workflow state and report values through narrow destinations or callbacks. |
+| Owned state | Composition references and application-wide seams remain at the root: collection, editor sessions, edit store/persistence, source identity, revision fences, preview surfaces, schedulers, and collaborator instances. Extracted per-workflow state and task handles live with their owners. |
+| Init and wiring | `init` constructs the one shared render and package-I/O graph and wires destinations/callbacks. `wireCoordinators` connects export/Look status and resolution behavior. Neither is a second workflow owner. |
+| Error presentation | The root maps hard failures to its status bar and alert; collaborators report outcomes. |
+| Auto adjustment | `AutoWorkflowCoordinator` owns invocation state and cancellation. `runAutoAdjustment` snapshots source/document identity, fences completion, presents status, and commits a successful value through `updateDocument`. |
+| Image loading and source changes | `load` is the root sequencer: it closes undo, flushes the previous edit, activates the session, invalidates old source/display work, clears surfaces, then starts `SourceSessionCoordinator`. Root installation and stored-edit adoption publish the active document and schedule the corrective render. `SourceSessionCoordinator` owns replaceable source preparation and its worker tasks. |
+| Import and library commands | `LibraryImportCoordinator`, `PhotosImportCoordinator`, `LibraryMediaWorkflowCoordinator`, and `LibraryBrowsingCoordinator` own their worker, provider, validation, query-window, and selection state. The root keeps view-compatible entry points, final package/import publication, source-to-edit handoff, and cross-feature deletion cleanup. |
+| Edited thumbnails | `EditedThumbnailCoordinator` owns request state. Root demand, refresh, debounce, and invalidation hooks are forwards; collection/document publication remains at the root boundary. |
+| Copy/paste and Looks | `EditorDocumentCoordinator` owns per-photo sessions, history, and clipboard. Root commands translate UI actions into document mutations, preserve multi-photo persistence semantics, and resolve Looks against `LUTLibrary`/`DerivedLUTRegistry`. |
+| Document commit and history | `updateDocument` is the sole ordinary edit commit path: it records history, updates the published document and crop, queues persistence, advances revisions, and admits preview/thumbnail work. `applyHistoryDocument` is the restore sequencer for undo/redo and reset, using the same published document, persistence, revision, and render boundaries. |
+| Preview, canvas, and inspector | Preview admission, publication, and presentation collaborators own scheduling, publication fences, cache/planner state, histogram work, and comparison retry. `PreviewCoordinator` remains the render submitter. Canvas workflow owns crop/viewport commands; the root retains surfaces and presentation state. Inspector chrome and displayed histogram values remain root-published. |
+| Export, derive, and Look dialogs | `ExportCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, and `LUTLibrary` own execution and file/model work. `AppViewModel` owns AppKit panels, compatibility commands, and snapshots each export request from the active document or selected assets. |
+| Persistence and shutdown | `EditPersistenceCoordinator` owns queued writes. The root serializes source-switch flush barriers and composes shutdown across collaborators and the package lease. |
+
+The narrow one-line façades remain where existing views and integrations call the root:
+
+- Edited-thumbnail request, settle, materialized-refresh, and debounce-cancel methods forward to
+  `EditedThumbnailCoordinator`.
+- Preview scheduling and comparison-retry helpers forward to `PreviewAdmissionCoordinator`; the
+  resolution-plan seam forwards to `PreviewPresentationCoordinator`.
+- Crop/rotation and canvas navigation commands forward to `CanvasWorkflowCoordinator`. The root's
+  preview-interaction methods remain sequencers because they also bracket undo grouping and
+  thumbnail admission; canvas gesture methods update the root's display revision and render policy.
+- Masking commands in `AppViewModel+Masking.swift` forward to `MaskingWorkflowCoordinator`.
+- Library query/window selection commands forward to `LibraryBrowsingCoordinator`; source opening
+  and deletion cleanup remain root-owned handoffs.
+
+The remaining stored root task handles are bounded to root-only setup, platform, or sequencing
+work:
+
+| Handle | Why it remains on the root |
+| --- | --- |
+| `semanticCoordinatorInstallTask` | Installs the photo-analysis coordinator into the shared `RenderEngine` during composition; the root cancels and awaits it at shutdown. |
+| `lutCacheInvalidationTask` | Bridges a `LUTLibrary` scan to shared-engine cache invalidation and then re-admits preview/thumbnail work; the root cancels and awaits the current bridge. |
+| `droppedPromiseTask` | Owns the AppKit file-promise receipt tied to the root's import and source handoff; a newer drop replaces it, and shutdown cancels and awaits it. |
+| `pendingPersistenceFlush` | Chains source-switch flush barriers so an older snapshot finishes before the next one; it is passed into source preparation and is not a second persistence queue. |
+
+Shutdown first closes admission: it marks the root as shutting down, cancels source work, invalidates
+Auto/document generations, resets presentation revisions, and cancels preview debounce/retry. It
+then disconnects callbacks and Combine subscriptions, shuts down the application shell, and stops the
+collection before awaiting edited-thumbnail and preview-admission teardown. It cancels the three
+retained cancellable setup/platform tasks, then shuts down masking, media/import, source, library,
+export, canvas, Photos, derive/Look-save, analysis, preview-presentation, preview-render, and Look
+preview owners. The shared image scheduler barrier runs before the portable package releases its
+writer lease; cancelled root tasks are awaited, then explicitly abandoned persistence snapshots
+are discarded. Each collaborator cancels its own work within this order.
+
+Source, document, and display revisions remain distinct. `load` and source-session publications
+fence source identity; `updateDocument` advances the document revision and advances display revision
+outside an active preview interaction, while `applyHistoryDocument` advances both for history
+restoration. Preview publication checks the corresponding source, document, and display snapshot
+before touching root-owned surfaces. No extraction adds another document store, renderer, or
+scheduler.
+
 ## Boundary rules
 
 - Rendered pixels cross only through `RenderRequest` and `RenderEngine`; source, document, and

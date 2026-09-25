@@ -117,32 +117,26 @@ Useful entry points: [AppViewModel](../Sources/KromoraKit/ViewModels/AppViewMode
 [portable-library plan](LIBRARY_PACKAGE_PLAN.md). These links open the current checkout;
 the symbol locations and observations in this review are anchored to the baseline above.
 
-## Why AppViewModel is still approximately 5,000 lines
+## Why AppViewModel remains large
 
-At the committed baseline, `AppViewModel.swift` is **4,943 lines**, with approximately **180 methods**,
-**39 `@Published` declarations** including nested state, and **20 task-valued fields**. Its six
-extensions add **2,238 lines**, for **7,181 lines belonging to the same object**. Of the main file,
-796 lines are comment-only and 407 are blank; deleting documentation would leave the ownership
-problem intact. The ten-commit range reduced the main file by only 26 lines: the Photos extraction
-moved the provider loop from `ContentView`, while import progress and insertion orchestration stayed
-in the application model.
+The current `AppViewModel.swift` is **4,293 lines**; this count is supporting evidence, not an
+extraction target. The completed ownership stages moved Auto execution, edited-thumbnail work,
+preview admission/publication, canvas workflows, masking, and library browsing into focused owners.
+The durable method-by-method inventory, task-handle rationale, revision fences, and shutdown order
+are in [APP_ARCHITECTURE.md](APP_ARCHITECTURE.md#appviewmodel-root-inventory).
 
-| Responsibility still in the main file | Baseline location | Proposed destination |
-| --- | --- | --- |
-| Auto invocation and application | `runAutoAdjustment`, roughly 1128–1405 | Auto workflow coordinator with value results |
-| Source load, stored-edit reconciliation, first frame, prefetch, idle cache building | `load`, `prepareAndInstall`, roughly 1406–2103 | Source session owner plus background preview worker |
-| Photos, removable media, navigation, deletion | roughly 2128–2759 | Import/library workflow owners and platform adapters |
-| Edited thumbnails | `requestEditedThumbnail`, roughly 2760–2925 | Edited-thumbnail coordinator |
-| Clipboard, history, document mutations | `pasteEdits`, `updateDocument`, `applyHistoryDocument` | Existing pending editor coordinator plus one application commit path |
-| Preview planning, disk-cache lookup, comparison, presentation, histogram | roughly 3397–3764 and 4090–4588 | Preview presentation owner using the existing render scheduler |
-| Native dialogs, export assembly, persistence façade, shutdown | roughly 4600–4943 | Platform adapters and focused collaborators, composed at the root |
+The root still contains the responsibilities that compose those owners: initialization and wiring,
+the source-load and stored-edit handoffs, the single `updateDocument` commit path and
+`applyHistoryDocument` restore path, published active-document and window chrome, cross-feature
+import/deletion sequencing, and AppKit export/Look dialogs. Several view-facing MARKs are thin
+forwarders; the remaining active logic coordinates root-owned state, persistence, and collaborator
+boundaries. The masking extension is now a 172-line façade rather than the former 1,309-line block.
 
-`AppViewModel+Masking.swift` alone is 1,309 lines. Extensions share the root's state and lifecycle;
-that file is a feature boundary candidate, not evidence that masking has already been extracted.
-
-Keep the root responsible for composition, command routing, cross-feature sequencing, and the one
-published active document during this transition. Keep Core Image/Metal resources in their existing
-render owners. Do not introduce a second renderer or a second writable active-document store.
+The main architectural problem is responsibility ownership, not simply file length. Moving methods
+into extensions or renaming a type does not make a workflow independently testable, reduce its
+observation footprint, or give it a complete cancellation boundary. Keep the root as the composition
+point and sole published active-document owner; keep Core Image/Metal resources in their existing
+render owners, with no second renderer or writable active-document store.
 
 ## Prioritized work packages
 
