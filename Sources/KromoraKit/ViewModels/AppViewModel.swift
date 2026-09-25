@@ -326,28 +326,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Keeping the snapshot outside the persisted edit document lets ordinary Temperature/Tint edits
     /// remain undoable without moving the comparison reference.
     private var comparisonBaselineDocument = EditDocument().comparisonBaseline
-    /// The last settled request confirmed by the presentation surface. Supporting work is never
-    /// admitted before this lifecycle boundary.
-    private var lastPresentedVisibleRequest: RenderRequest?
-    /// The completed image belonging to `lastPresentedVisibleRequest`. Keeping the value alongside
-    /// the request lets a later Info-tab open use the frame that was actually presented without
-    /// asking the renderer to reconstruct it.
-    private var lastPresentedVisibleImage: CIImage?
-    /// The newest settled request accepted by the preview surface. Mode entry may use this current
-    /// candidate before drawable confirmation, but it must never fall back to an older document.
-    private var lastPublishedVisibleRequest: RenderRequest?
+    private lazy var previewPublicationCoordinator = PreviewPublicationCoordinator(
+        destination: self
+    )
     var isPreviewInteractionActive: Bool {
         get { previewAdmissionCoordinator.isPreviewInteractionActive }
         set { previewAdmissionCoordinator.isPreviewInteractionActive = newValue }
     }
-
-    /// Whether any call since the last fired render changed a comparison-frame stage.
-    ///
-    /// A coalesced burst of edits accumulates this flag while the preview coordinator keeps only the
-    /// newest visible request. A baseline is released after that settled visible request, so an
-    /// earlier develop/crop edit in the burst is not lost when a later tick supersedes its value.
-    private var pendingDevelopChange = false
-
     /// LUTs a document can reference that no folder scan produces — a freshly derived LUT, and the
     /// file it becomes once saved. See `DerivedLUTRegistry`; this is the Step 9 replacement for the
     /// single `scratchLUT` slot that stood here.
@@ -1171,7 +1156,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             })
 
         previewCoordinator.onPublication = { [weak self] publication in
-            self?.publishPreview(publication)
+            self?.previewPublicationCoordinator.publish(publication)
         }
         previewCoordinator.onFailure = { [weak self] request in
             guard request.quality == .preview else { return }
@@ -1871,9 +1856,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // The old source must not describe the empty/loading state or gate the new image's
         // inspector while its pixels are being decoded.
         imageSource = nil
-        lastPresentedVisibleRequest = nil
-        lastPresentedVisibleImage = nil
-        lastPublishedVisibleRequest = nil
+        previewPublicationCoordinator.resetForSource()
         sourceURL = nil
         sourceSize = .zero
         isPreviewInteractionActive = false
@@ -1887,10 +1870,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelPendingPreviewDebounce()
         rawCapabilities = nil
         capabilitiesProbeCompleted = false
-        // A pending develop flag describes the image being left; it must not survive onto whatever
-        // opens next, or an unrelated first edit on the new image would render a comparison baseline
-        // for develop settings that were never actually touched on it.
-        pendingDevelopChange = false
         // Keep the tab during the transient no-source interval. The new source publication below
         // validates it once its actual capabilities are known; resetting here would make an import
         // change an unrelated inspector preference merely because source preparation is async.
@@ -1942,7 +1921,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard publication.request.sourceRevision == sourceRevision,
             publication.request.assetID == activeAssetID,
             previewState == .loading,
-            lastPublishedVisibleRequest == nil,
+            !previewPublicationCoordinator.hasPublishedFrame,
             let cgImage = publication.image.cgImage(
                 forProposedRect: nil, context: nil, hints: nil
             )
@@ -2030,7 +2009,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // request still reaches the engine (LUMO-317).
         if shouldAdopt, documentChanged {
             scheduleCorrectivePreview()
-        } else if let lastPresentedVisibleRequest,
+        } else if let lastPresentedVisibleRequest =
+            previewPublicationCoordinator.lastPresentedVisibleRequest,
             lastPresentedVisibleRequest.source == imageSource,
             lastPresentedVisibleRequest.document == displayRequest.document
         {
@@ -2038,7 +2018,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // allowed to start histogram work. Re-admit that final request now that persistence
             // has confirmed it is the document on screen.
             updateHistogram(
-                for: lastPresentedVisibleRequest, presentedImage: lastPresentedVisibleImage)
+                for: lastPresentedVisibleRequest,
+                presentedImage: previewPublicationCoordinator.lastPresentedVisibleImage)
         }
         scheduleEditedThumbnailAfterSettle(for: request.assetID, priority: .activeEditor)
         applyStoredLoadStatus(stored.status)
@@ -2717,6 +2698,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceSize = .zero
         activeAssetID = nil
         activeSourceReference = nil
+        previewPublicationCoordinator.resetForSource()
         editorDocument.clearActiveHistory()
         document = EditDocument()
         metadata = ImageMetadata()
@@ -3147,8 +3129,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         // OR'd in rather than assigned: a call earlier in a coalesced burst may have changed a
         // comparison-frame stage even though this call did not, and only the last call's task
-        // survives to fire (see `pendingDevelopChange`'s doc comment).
-        pendingDevelopChange = pendingDevelopChange || comparisonChanged
+        // survives to fire (see the publication coordinator's pending develop-change flag).
+        previewPublicationCoordinator.noteDevelopChange(comparisonChanged)
 
         guard debounced else {
             previewAdmissionCoordinator.cancelPreviewDebounce()
@@ -3447,7 +3429,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewAdmissionCoordinator.resetComparisonPreviewAdmission()
         cancelComparisonPreview(pump: false)
         originalPreviewSurface.clear()
-        pendingDevelopChange = true
+        previewPublicationCoordinator.noteDevelopChange()
     }
 
     /// Reset the currently visible inspector stage without crossing into another stage. The
@@ -3516,176 +3498,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             cancelComparisonPreview(pump: false)
             originalPreviewSurface.clear()
         }
-        pendingDevelopChange = comparisonChanged
+        previewPublicationCoordinator.noteDevelopChange(comparisonChanged)
         restoreMaskSelection()
         if cropToolRemainsActive {
             scheduleCropEntryPreview()
         } else {
             schedulePreview()
         }
-    }
-
-    private func publishPreview(_ publication: PreviewCoordinator.Publication) {
-        guard !isShuttingDown,
-            publication.assetID == activeAssetID,
-            publication.sourceRevision == sourceRevision,
-            publication.displayRevision == displayRevision,
-            publication.request.source == imageSource
-        else { return }
-        let request = publication.request
-        let detailIdentity = PreviewFrameIdentity(
-            sourceToken: request.source.traceToken,
-            documentHash: request.document.editHash,
-            space: request.space
-        )
-        let detailFactor = request.renderScale.factor(for: request.source.nativeExtent)
-        let presentedImage = publication.gpuImage ?? publication.image.map(CIImage.init)
-        if publication.phase == .settled, let presentedImage {
-            presentSettledRaster(
-                presentedImage, request: request, assetID: publication.assetID,
-                sourceRevision: publication.sourceRevision,
-                displayRevision: publication.displayRevision,
-                surfaceRevision: publication.revision
-            )
-        } else if let gpuImage = publication.gpuImage {
-            previewSurface.present(
-                gpuImage, space: request.space,
-                revision: publication.revision,
-                telemetry: previewCoordinator.telemetry,
-                source: request.source,
-                quality: request.quality,
-                detailIdentity: detailIdentity,
-                detailFactor: detailFactor,
-                presentationImageExtent: request.presentationImageExtent,
-                coversPresentationExtent: request.coversPresentationExtent,
-                layoutImageExtent: request.presentationLayoutExtent,
-                presentationNavigation: request.presentationNavigation,
-                onPresented: nil)
-        } else if let cgImage = publication.image {
-            // Non-GPU conformers retain a raster compatibility seam, but it terminates at the
-            // same persistent surface. Production RenderEngine publishes `gpuImage`, so this does
-            // not allocate or publish an NSImage on the normal preview path.
-            previewSurface.present(
-                CIImage(cgImage: cgImage), space: request.space,
-                revision: publication.revision,
-                telemetry: previewCoordinator.telemetry,
-                source: request.source,
-                quality: request.quality,
-                detailIdentity: detailIdentity,
-                detailFactor: detailFactor,
-                presentationImageExtent: request.presentationImageExtent,
-                coversPresentationExtent: request.coversPresentationExtent,
-                layoutImageExtent: request.presentationLayoutExtent,
-                presentationNavigation: request.presentationNavigation,
-                onPresented: nil)
-        }
-        guard publication.gpuImage != nil || publication.image != nil else {
-            if publication.phase == .settled {
-                previewState = .failed
-                publishAutoAdjustmentState(
-                    .unavailable("Auto is unavailable because the photo preview failed."))
-                statusMessage = "Could not render \(sourceName)"
-            }
-            return
-        }
-        if publication.phase == .settled {
-            lastPublishedVisibleRequest = request
-            // A thumbnail switch can publish the new Adjusted candidate before its MTKView has a
-            // drawable (for example while SwiftUI is replacing the selected filmstrip cell). Do
-            // not make the new Original pane depend on that later confirmation; both requests are
-            // already fenced to this source and display revision.
-            if isSideBySideVisible {
-                scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
-            }
-        }
-
-    }
-
-    /// The one settled-raster presentation funnel. Rendered frames and disk-cache hits both use
-    /// this path so drawable confirmation, histogram admission, Auto readiness, and thumbnail
-    /// gating cannot diverge between a cold and warm open.
-    @discardableResult
-    private func presentSettledRaster(
-        _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
-        sourceRevision: UInt64, displayRevision: UInt64, surfaceRevision: UInt64? = nil
-    ) -> Bool {
-        let detailIdentity = PreviewFrameIdentity(
-            sourceToken: request.source.traceToken,
-            documentHash: request.document.editHash,
-            space: request.space
-        )
-        let detailFactor = request.renderScale.factor(for: request.source.nativeExtent)
-        let presented = previewSurface.present(
-            image, space: request.space,
-            revision: surfaceRevision ?? displayRevision,
-            telemetry: previewCoordinator.telemetry,
-            source: request.source,
-            quality: request.quality,
-            detailIdentity: detailIdentity,
-            detailFactor: detailFactor,
-            presentationImageExtent: request.presentationImageExtent,
-            coversPresentationExtent: request.coversPresentationExtent,
-            layoutImageExtent: request.presentationLayoutExtent,
-            presentationNavigation: request.presentationNavigation,
-            onPresented: { [weak self] in
-                self?.didPresentVisibleFrame(
-                    request, assetID: assetID, sourceRevision: sourceRevision,
-                    displayRevision: displayRevision, presentedImage: image
-                )
-            }
-        )
-        if presented {
-            lastPublishedVisibleRequest = request
-        }
-        return presented
-    }
-
-    /// Supporting work starts only after the persistent presentation surface confirms that the
-    /// visible frame made it through its drawable lifecycle. This keeps a completed renderer result
-    /// from being mistaken for pixels the user has actually received.
-    private func didPresentVisibleFrame(
-        _ request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
-        displayRevision: UInt64, presentedImage: CIImage?
-    ) {
-        guard assetID == activeAssetID,
-            sourceRevision == self.sourceRevision,
-            displayRevision == self.displayRevision,
-            request.source == imageSource,
-            request.document == displayRequest.document
-        else { return }
-        previewState = .ready
-        if request.source.kind == .raw,
-            statusMessage == "Loading \(sourceName)..."
-        {
-            statusMessage =
-                "\(sourceName)  \(Int(request.source.nativeExtent.width))\u{00D7}\(Int(request.source.nativeExtent.height))"
-        }
-        if !isAutoAdjustmentInProgress { publishAutoAdjustmentState(.ready) }
-        lastPresentedVisibleRequest = request
-        lastPresentedVisibleImage = presentedImage
-        let needsComparisonRefresh = pendingDevelopChange
-        pendingDevelopChange = false
-        if isSideBySideVisible || needsComparisonRefresh {
-            scheduleOriginalPreview(allowHiddenPreparation: needsComparisonRefresh)
-        } else {
-            cancelComparisonPreview()
-        }
-        if storedEditsResolvedSourceRevision == sourceRevision {
-            updateHistogram(for: request, presentedImage: presentedImage)
-        }
-
-        // The builder is admitted by a settled presentation, even when this particular frame is
-        // an ROI and therefore cannot itself be written to the canonical disk cache.
-        scheduleIdlePreviewBuild()
-
-        // A zoomed request may contain only an ROI. Since the disk key intentionally omits viewport
-        // state, only a complete settled frame is eligible; otherwise a pan could persist a partial
-        // raster that a later fit-open would incorrectly treat as the whole photo.
-        guard request.quality == .preview,
-            request.sourceROI == nil,
-            let presentedImage
-        else { return }
-        previewPresentation.writeCanonical(presentedImage, for: request)
     }
 
     /// Rasterize the comparison baseline for the side-by-side left panel. Only needs to re-run when
@@ -4260,14 +4079,88 @@ extension AppViewModel: CanvasWorkflowDestination {
     }
 }
 
+extension AppViewModel: PreviewPublicationDestination {
+    var publicationIsShuttingDown: Bool { isShuttingDown }
+    var publicationActiveAssetID: PhotoAssetID? { activeAssetID }
+    var publicationImageSource: ImageSource? { imageSource }
+    var publicationSourceRevision: UInt64 { sourceRevision }
+    var publicationDisplayRevision: UInt64 { displayRevision }
+    var publicationDisplayDocument: EditDocument { displayRequest.document }
+    var publicationSourceName: String { sourceName }
+    var publicationIsAutoAdjustmentInProgress: Bool { isAutoAdjustmentInProgress }
+    var publicationIsSideBySideVisible: Bool { isSideBySideVisible }
+    var publicationStoredEditsResolvedSourceRevision: UInt64? {
+        storedEditsResolvedSourceRevision
+    }
+
+    func publishPreviewReady() { previewState = .ready }
+    func publishPreviewFailure() { previewState = .failed }
+    func publishAutoAdjustmentReady() {
+        publishAutoAdjustmentState(.ready)
+    }
+    func publishAutoAdjustmentFailure() {
+        publishAutoAdjustmentState(
+            .unavailable("Auto is unavailable because the photo preview failed.")
+        )
+    }
+    func publishStatusMessage(_ message: String) { statusMessage = message }
+    func publishStatusMessageIfLoading(_ expected: String, replacement: String) {
+        if statusMessage == expected { statusMessage = replacement }
+    }
+    func presentAdjustedFrame(
+        _ image: CIImage, request: RenderRequest, revision: UInt64,
+        onPresented: (@MainActor () -> Void)?
+    ) -> Bool {
+        let detailIdentity = PreviewFrameIdentity(
+            sourceToken: request.source.traceToken,
+            documentHash: request.document.editHash,
+            space: request.space
+        )
+        return previewSurface.present(
+            image, space: request.space,
+            revision: revision,
+            telemetry: previewCoordinator.telemetry,
+            source: request.source,
+            quality: request.quality,
+            detailIdentity: detailIdentity,
+            detailFactor: request.renderScale.factor(for: request.source.nativeExtent),
+            presentationImageExtent: request.presentationImageExtent,
+            coversPresentationExtent: request.coversPresentationExtent,
+            layoutImageExtent: request.presentationLayoutExtent,
+            presentationNavigation: request.presentationNavigation,
+            onPresented: onPresented
+        )
+    }
+    func publicationScheduleOriginalPreview(
+        allowHiddenPreparation: Bool, allowBeforePresentationConfirmation: Bool
+    ) {
+        scheduleOriginalPreview(
+            allowHiddenPreparation: allowHiddenPreparation,
+            allowBeforePresentationConfirmation: allowBeforePresentationConfirmation
+        )
+    }
+    func publicationCancelComparisonPreview() { cancelComparisonPreview() }
+    func publicationUpdateHistogram(for request: RenderRequest, presentedImage: CIImage?) {
+        updateHistogram(for: request, presentedImage: presentedImage)
+    }
+    func publicationScheduleIdlePreviewBuild() { scheduleIdlePreviewBuild() }
+    func writeCanonicalPreview(_ image: CIImage, request: RenderRequest) {
+        previewPresentation.writeCanonical(image, for: request)
+    }
+}
+
 extension AppViewModel: PreviewAdmissionDestination {
     var admissionIsShuttingDown: Bool { isShuttingDown }
     var admissionImageSource: ImageSource? { imageSource }
     var admissionSourceRevision: UInt64 { sourceRevision }
     var admissionDisplayRevision: UInt64 { displayRevision }
     var admissionActiveAssetID: PhotoAssetID? { activeAssetID }
-    var admissionLastPresentedRequest: RenderRequest? { lastPresentedVisibleRequest }
-    var admissionLastPresentedImage: CIImage? { lastPresentedVisibleImage }
+    var admissionLastPresentedRequest: RenderRequest? {
+        previewPublicationCoordinator.lastPresentedVisibleRequest
+    }
+    var admissionLastPresentedImage: CIImage? {
+        previewPublicationCoordinator.lastPresentedVisibleImage
+    }
     var admissionInspectorPresented: Bool { isInspectorPresented }
     var admissionInspectorTabIsInfo: Bool { inspectorTab == .info }
     var admissionHistogramLoading: Bool { isHistogramLoading }
@@ -4290,8 +4183,8 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionHasOriginalPreview: Bool { originalPreviewSurface.image != nil }
     var admissionHasComparisonPreviewCandidate: Bool {
         previewSurface.image != nil
-            && lastPublishedVisibleRequest?.source == imageSource
-            && lastPublishedVisibleRequest?.document == document
+            && previewPublicationCoordinator.lastPublishedVisibleRequest?.source == imageSource
+            && previewPublicationCoordinator.lastPublishedVisibleRequest?.document == document
     }
     var admissionSelectedLook: CubeLUT? { selectedLook }
     var admissionCropToolActive: Bool { canvasState.isCropToolActive }
@@ -4311,8 +4204,10 @@ extension AppViewModel: PreviewAdmissionDestination {
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64
     ) {
-        _ = presentSettledRaster(image, request: request, assetID: assetID,
-            sourceRevision: sourceRevision, displayRevision: displayRevision)
+        _ = previewPublicationCoordinator.presentSettledRaster(
+            image, request: request, assetID: assetID,
+            sourceRevision: sourceRevision, displayRevision: displayRevision
+        )
     }
 
     func admissionDocument(for assetID: PhotoAssetID) -> EditDocument? {

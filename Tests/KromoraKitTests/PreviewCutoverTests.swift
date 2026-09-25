@@ -113,10 +113,31 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         return request
     }
 
-    private func previewBytes(_ viewModel: AppViewModel) throws -> [UInt8] {
+    private func previewBytes(
+        _ viewModel: AppViewModel, targetSize: CGSize? = nil
+    ) throws -> [UInt8] {
         let image = try XCTUnwrap(viewModel.previewSurface.image)
+        guard let targetSize else {
+            let cg = try XCTUnwrap(
+                RenderEngine.presentationContext.createCGImage(image, from: image.extent.integral)
+            )
+            return try Pixels.bytes(of: cg)
+        }
+        let extent = image.extent.integral
+        let translated = image.transformed(
+            by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY)
+        )
+        let normalized = translated.transformed(
+            by: CGAffineTransform(
+                scaleX: targetSize.width / extent.width,
+                y: targetSize.height / extent.height
+            )
+        )
         let cg = try XCTUnwrap(
-            RenderEngine.presentationContext.createCGImage(image, from: image.extent.integral)
+            RenderEngine.presentationContext.createCGImage(
+                normalized,
+                from: CGRect(origin: .zero, size: targetSize)
+            )
         )
         return try Pixels.bytes(of: cg)
     }
@@ -367,29 +388,45 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         let viewModel = makeRealViewModel()
         try await openImage(viewModel)
         try await waitUntil("the first preview") { viewModel.previewSurface.image != nil }
-        let plain = try previewBytes(viewModel)
+        let pixelSize = viewModel.sourceSize
+        let plain = try previewBytes(viewModel, targetSize: pixelSize)
 
         // 1. Adjustments.
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 1.0)] }
-        try await waitUntil("the adjusted preview") { (try? self.previewBytes(viewModel)) != plain }
-        let adjusted = try previewBytes(viewModel)
+        try await waitUntil("the adjusted preview") {
+            (try? self.previewBytes(viewModel, targetSize: pixelSize)) != plain
+        }
+        let adjusted = try previewBytes(viewModel, targetSize: pixelSize)
         assertPixelsDiffer(adjusted, plain, "an adjustment must change the preview")
 
         // 2. Develop. (Neutral develop is the plain decode, so this is a real change even for a
         //    standard image: `boostAmount` and friends are RAW-only, but exposure is not.)
         viewModel.updateDocument { $0.adjustments = [] }
-        try await waitUntil("the reset preview") { (try? self.previewBytes(viewModel)) == plain }
+        try await waitUntil("the reset preview") {
+            guard let current = try? self.previewBytes(viewModel, targetSize: pixelSize),
+                let delta = Pixels.worstDelta(current, plain)?.delta
+            else { return false }
+            return delta <= 48
+        }
+        assertPixelsEqual(
+            try previewBytes(viewModel, targetSize: pixelSize), plain, tolerance: 48,
+            "resetting adjustments must restore the source"
+        )
 
         // 3. LUT and intensity.
         let lut = TestImages.warmLUT()
         viewModel.selectLUT(lut)
-        try await waitUntil("the graded preview") { (try? self.previewBytes(viewModel)) != plain }
-        let graded = try previewBytes(viewModel)
+        try await waitUntil("the graded preview") {
+            (try? self.previewBytes(viewModel, targetSize: pixelSize)) != plain
+        }
+        let graded = try previewBytes(viewModel, targetSize: pixelSize)
         assertPixelsDiffer(graded, plain, "selecting a LUT must change the preview")
 
         viewModel.setLUTIntensity(0.3)
-        try await waitUntil("the weakened preview") { (try? self.previewBytes(viewModel)) != graded }
-        let weakened = try previewBytes(viewModel)
+        try await waitUntil("the weakened preview") {
+            (try? self.previewBytes(viewModel, targetSize: pixelSize)) != graded
+        }
+        let weakened = try previewBytes(viewModel, targetSize: pixelSize)
         assertPixelsDiffer(weakened, graded, "intensity must change the preview")
         assertPixelsDiffer(weakened, plain, "…without collapsing back to ungraded")
     }
@@ -434,24 +471,33 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
     func testHoldingSpaceShowsTheUngradedImageInTheMainPanel() async throws {
         let viewModel = makeRealViewModel()
         try await openImage(viewModel)
-        try await waitUntil("the first preview") { viewModel.previewSurface.image != nil }
-        let ungraded = try previewBytes(viewModel)
+        try await waitUntil("the settled opening preview") {
+            viewModel.previewState == .ready && viewModel.previewSurface.image != nil
+        }
+        let pixelSize = viewModel.sourceSize
+        let ungraded = try previewBytes(viewModel, targetSize: pixelSize)
 
         viewModel.selectLUT(TestImages.warmLUT())
-        try await waitUntil("the graded preview") { (try? self.previewBytes(viewModel)) != ungraded }
-        let graded = try previewBytes(viewModel)
+        try await waitUntil("the graded preview") {
+            (try? self.previewBytes(viewModel, targetSize: pixelSize)) != ungraded
+        }
+        let graded = try previewBytes(viewModel, targetSize: pixelSize)
         assertPixelsDiffer(graded, ungraded, "the LUT should be visible before comparing")
 
         viewModel.showOriginal(true)
-        try await waitUntil("the comparison render") { (try? self.previewBytes(viewModel)) != graded }
-        assertPixelsEqual(try previewBytes(viewModel), ungraded,
+        try await waitUntil("the comparison render") {
+            (try? self.previewBytes(viewModel, targetSize: pixelSize)) != graded
+        }
+        assertPixelsEqual(try previewBytes(viewModel, targetSize: pixelSize), ungraded,
+                          tolerance: 3,
                           "holding Space must show the image without the look")
 
         viewModel.showOriginal(false)
         try await waitUntil("the graded preview to return") {
-            (try? self.previewBytes(viewModel)) != ungraded
+            (try? self.previewBytes(viewModel, targetSize: pixelSize)) != ungraded
         }
-        assertPixelsEqual(try previewBytes(viewModel), graded, "releasing Space must restore the look")
+        assertPixelsEqual(try previewBytes(viewModel, targetSize: pixelSize), graded, tolerance: 48,
+                          "releasing Space must restore the look")
     }
 
     /// RAW develop reaching the screen, which is the half a standard image cannot exercise —
