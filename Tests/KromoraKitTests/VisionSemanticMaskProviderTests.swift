@@ -81,6 +81,7 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         XCTAssertTrue(CGImageDestinationFinalize(destination))
 
         let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 48))
+        let assetID = PhotoAnalysisCoordinator.assetID(for: source)
         let analysisImage = try AnalysisImageFactory.make(from: source, configuration: .init(maximumDimension: 64))
         let store = MaskStore(directory: directory)
         let provider = VisionSemanticMaskProvider(store: store)
@@ -91,7 +92,6 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         let foregrounds = try await provider.foregroundMasks(image: analysisImage, quality: .analysis)
         XCTAssertTrue(foregrounds.isEmpty)
 
-        let assetID = PhotoAnalysisCoordinator.assetID(for: source)
         let foreground = try await coordinator.mask(
             assetID: assetID, source: source, kind: .foreground, quality: .analysis
         )
@@ -113,6 +113,72 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
             assetID: assetID, source: source, kind: .background, quality: .analysis
         )
         XCTAssertEqual(cachedBackground.reference, background.reference)
+    }
+
+    func testSubjectSelectionKeepsNonRectangularSegmentedInstanceShape() throws {
+        let shape = try NormalizedMask(
+            size: PixelDimensions(width: 5, height: 5),
+            values: [
+                0, 0, 1, 0, 0,
+                0, 1, 1, 1, 0,
+                1, 1, 1, 1, 1,
+                0, 1, 1, 1, 0,
+                0, 0, 1, 0, 0
+            ]
+        )
+        let salientBounds = NormalizedRect(x: 0.1, y: 0.1, width: 0.8, height: 0.8)
+
+        let selection = VisionSemanticMaskProvider.selectSubjectPixels(
+            from: [shape], salientBounds: salientBounds
+        )
+
+        XCTAssertEqual(selection?.index, 0)
+        XCTAssertEqual(selection?.pixels, shape)
+        XCTAssertEqual(selection?.pixels.coverage, shape.coverage)
+        XCTAssertEqual(selection?.pixels.values[0], 0, "Subject must retain the segmented contour")
+        XCTAssertGreaterThan(selection?.overlap ?? 0, 0.05)
+    }
+
+    func testPartialForegroundBackgroundIsPixelComplementOnAnalysisGrid() async throws {
+        let directory = try Fixtures.makeTempDirectory("PartialBackgroundMaskTests")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cgImage = try Fixtures.makeCGImage(width: 64, height: 48, red: 0.25, green: 0.25, blue: 0.25)
+        let url = directory.appendingPathComponent("solid.png")
+        guard let destination = CGImageDestinationCreateWithURL(
+            url as CFURL, UTType.png.identifier as CFString, 1, nil
+        ) else { XCTFail("could not create image destination"); return }
+        CGImageDestinationAddImage(destination, cgImage, nil)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 48))
+        let assetID = PhotoAnalysisCoordinator.assetID(for: source)
+        let analysisImage = try AnalysisImageFactory.make(
+            from: source, assetID: assetID, configuration: .init(maximumDimension: 64)
+        )
+        let store = MaskStore(directory: directory)
+        let provider = VisionSemanticMaskProvider(store: store)
+        let coordinator = PhotoAnalysisCoordinator(maskStore: store, maskProvider: provider, stages: [:])
+        var values = Array(repeating: Float.zero, count: analysisImage.dimensions.width * analysisImage.dimensions.height)
+        values[analysisImage.dimensions.width + analysisImage.dimensions.width / 2] = 1
+        let partialForeground = try NormalizedMask(size: analysisImage.dimensions, values: values)
+        let instanceKey = await provider.cacheKey(for: .foregroundInstance(0), image: analysisImage, quality: .analysis)
+        _ = try await store.store(partialForeground, for: instanceKey, quality: .analysis)
+        let foreground = try await coordinator.mask(
+            assetID: assetID, source: source, kind: .foreground, quality: .analysis
+        )
+        let background = try await coordinator.mask(
+            assetID: assetID, source: source, kind: .background, quality: .analysis
+        )
+        let foregroundPixels = await store.pixels(for: foreground.reference)
+        let backgroundPixels = await store.pixels(for: background.reference)
+
+        XCTAssertEqual(foreground.coverage, partialForeground.coverage, accuracy: 0.0001)
+        XCTAssertGreaterThan(foreground.coverage, 0)
+        XCTAssertLessThan(foreground.coverage, 1)
+        XCTAssertEqual(foreground.reference.size, analysisImage.dimensions)
+        XCTAssertEqual(background.reference.size, analysisImage.dimensions)
+        XCTAssertEqual(backgroundPixels?.size, foregroundPixels?.size)
+        XCTAssertEqual(backgroundPixels?.values, foregroundPixels?.values.map { 1 - $0 })
     }
 
     func testPersonSegmentationIsGatedWithoutCachedSignals() async throws {
