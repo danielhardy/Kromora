@@ -163,6 +163,38 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertEqual(resolved.item.id, expectedID)
     }
 
+    func testEXIFPortraitKeepsItsFramingBeforeAndAfterSelection() async throws {
+        try Fixtures.writeJPEG(
+            width: 800, height: 600, orientation: 6,
+            named: "initial-portrait.jpg", in: tempDirectory
+        )
+
+        let collection = makeTestCollection()
+        collection.loadFromFolder(tempDirectory)
+        await collection.scanCompletion()
+
+        let item = try XCTUnwrap(collection.items.first)
+        XCTAssertEqual(item.libraryAspectRatio, 0.75, accuracy: 0.001)
+        collection.requestThumbnail(for: item.id)
+        let deadline = Date().addingTimeInterval(5)
+        while item.thumbnail == nil {
+            if Date() > deadline { return XCTFail("the portrait thumbnail did not arrive") }
+            await Task.yield()
+        }
+        XCTAssertLessThan(item.thumbnail!.size.width, item.thumbnail!.size.height)
+
+        collection.select(at: 0)
+
+        XCTAssertEqual(collection.selection.activeID, item.id)
+        XCTAssertEqual(
+            collection.thumbnailEntries.first?.aspectRatio ?? 0,
+            0.75,
+            accuracy: 0.001,
+            "selecting the photo must not change its portrait framing geometry"
+        )
+        XCTAssertLessThan(item.thumbnail!.size.width, item.thumbnail!.size.height)
+    }
+
     func testDemandDrivenGridWaitsForMaterializedCellsBeforeDecoding() async throws {
         for index in 0..<64 {
             try Fixtures.writeJPEG(
