@@ -2,8 +2,54 @@
 id: KRMA-565
 title: Extract preview publication from AppViewModel
 type: task
-status: backlog
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: publishPreview, presentSettledRaster, and didPresentVisibleFrame move to PreviewPublicationCoordinator, which holds no AppViewModel/PreviewSurface reference.
+      result: pass
+      notes: PreviewPublicationCoordinator.swift owns publish/presentSettledRaster/didPresentVisibleFrame; it only holds a weak PreviewPublicationDestination and no surface or CIContext. AppViewModel conforms via a value/hook-only extension.
+    - criterion: lastPresentedVisibleRequest, lastPresentedVisibleImage, lastPublishedVisibleRequest move to the coordinator; resetForSource() replaces the nil sites in load() and clearActiveSourceAfterLibraryDeletion; install()'s no-frame-published check uses a coordinator accessor with the condition unchanged.
+      result: pass
+      notes: Fields are private(set) on the coordinator. load() and the deletion-clear path call resetForSource(). install() now reads !previewPublicationCoordinator.hasPublishedFrame, logically identical to the prior lastPublishedVisibleRequest == nil check.
+    - criterion: pendingDevelopChange moves to the coordinator as noteDevelopChange(); the three document-commit assignment sites forward to it.
+      result: pass
+      notes: All three prior assignment sites (undo/update paths) now call previewPublicationCoordinator.noteDevelopChange(...); OR-into-existing semantics preserved.
+    - criterion: didPresentVisibleFrame preserves its 7-step order (fence check; ready/status/Auto; store frame; comparison schedule-or-cancel then clear flag; histogram if resolved; scheduleIdlePreviewBuild; canonical cache write only for .preview + nil sourceROI).
+      result: pass
+      notes: "Order matches exactly in the new implementation, including scheduleOriginalPreview(allowBeforePresentationConfirmation: false) matching the prior call's default parameter value."
+    - criterion: "publishPreview keeps the latest-wins guard and settled/interactive branching, including the no-image settled failure path and the side-by-side scheduleOriginalPreview(allowBeforePresentationConfirmation: true) call."
+      result: pass
+      notes: Guard and branching reproduced in PreviewPublicationCoordinator.publish(_:); confirmed line-by-line against the pre-extraction AppViewModel.publishPreview.
+    - criterion: load, updateDocument, applyHistoryDocument, shutdown, PreviewSurface storage, showOriginal/toggleSideBySide, and the previewCoordinator.onPublication = nil shutdown ordering stay on AppViewModel.
+      result: pass
+      notes: Confirmed unchanged in AppViewModel.swift; only the onPublication closure body now forwards into the coordinator.
+    - criterion: PreviewPublicationCoordinatorTests covers stale fence, interactive-no-histogram/idle, settled-complete admits histogram/idle/cache, settled-ROI skips cache, one-shot develop-change comparison schedule, and resetForSource.
+      result: pass
+      notes: All 6 required cases present in Tests/KromoraKitTests/PreviewPublicationCoordinatorTests.swift and pass.
+    - criterion: docs/APP_ARCHITECTURE.md names publication, admission, and render submission as three separate owners.
+      result: pass
+      notes: Ownership table and prose both updated to list PreviewPublicationCoordinator alongside PreviewAdmissionCoordinator and PreviewCoordinator.
+    - criterion: "Swift 6 mode: no @unchecked Sendable / nonisolated(unsafe) / @preconcurrency; CIImage crosses the boundary only as a value the destination presents; no CIContext stored."
+      result: pass
+      notes: PreviewPublicationCoordinator stores only RenderRequest/CIImage values (no CIContext) and is @MainActor; no escape hatches introduced.
+    - criterion: Focused tests, swift build, the fast CI lane, dg validate, and git diff --check pass.
+      result: pass
+      notes: See checks_run. The 2 focused-filter failures are testOpeningStoredEditsSpeculatesThenSubmitsTheStoredDocument and testOrphanedSpeculativePredecessorDoesNotBlockTheNextPhoto in PreviewCutoverTests, both failing on a missing temp-package asset.json (EditDocumentStore.swift:289). Reproduced independently on the pre-extraction parent commit (2789196) in an isolated worktree with the identical failure, confirming this is a pre-existing package-fixture issue unrelated to this ticket's change. scripts/ci-tests.sh fast (which does not use this narrower filter) passed all 1211/1211.
+  checks_run:
+    - "swift build: pass"
+    - "swift test --filter 'PreviewPublicationCoordinatorTests|PreviewAdmissionCoordinatorTests|PreviewCutoverTests|PreviewDiskCacheTests|ComparisonModeTests|FilmstripNavigationTests': 58 executed, 1 skipped (no local RAW fixture), 2 pre-existing unrelated failures (PreviewCutoverTests package asset.json, reproduced on parent commit 2789196 in an isolated worktree)"
+    - "scripts/ci-tests.sh fast: pass (exit 0, 1211/1211)"
+    - "dg validate: OK (only pre-existing unrelated model-name/context-completeness warnings)"
+    - "git diff --check: pass (exit 0)"
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-25T05:47:29.554Z
+  session: 01MUGJAETBADIQYC8A
 creation_provenance:
   runner: cursor
   model: unknown
@@ -13,11 +59,11 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-24T15:18:53.177Z
-updated: 2026-09-24T15:19:43.804Z
+updated: 2026-09-25T05:47:29.556Z
 depends_on:
   - KRMA-467
 blockers: []
-order: u
+order: a0
 board: product
 context:
   files:
@@ -133,3 +179,40 @@ Swift 6: no `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`. 
 ## Out of scope
 
 Library browsing (KRMA-564). Changing render quality, cache keys, or comparison policy. Moving `PreviewAdmissionCoordinator` into this type.
+
+
+### Comment — codex @ 2026-09-25T05:42:05.892Z
+
+Implemented and committed as a84a901 (Extract preview publication coordinator). PreviewPublicationCoordinator now owns publication fences, presented-frame state, drawable confirmation, comparison-change tracking, histogram/idle admission hooks, and canonical cache writes; AppViewModel retains the surfaces and published UI state. Added six coordinator tests and updated preview ownership docs. Verification: swift build passed; PreviewPublicationCoordinatorTests passed (6/6); scripts/ci-tests.sh fast completed all 1,211 required-fast tests with no failure diagnostics; dg validate and git diff --check passed. The exact focused filter ran 58 tests with 1 skip and 3 failures: testEachKnobVisiblyChangesThePreview and the Space comparison now pass in isolated reruns, while testOpeningStoredEditsSpeculatesThenSubmitsTheStoredDocument still fails because its temporary package asset.json is missing; the parallel filter also reports the same missing asset.json in testOrphanedSpeculativePredecessorDoesNotBlockTheNextPhoto. Handing off for review with this package fixture issue noted.
+
+## Agent log
+
+- 2026-09-25T05:47:29.554Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] publishPreview, presentSettledRaster, and didPresentVisibleFrame move to PreviewPublicationCoordinator, which holds no AppViewModel/PreviewSurface reference. (pass) — PreviewPublicationCoordinator.swift owns publish/presentSettledRaster/didPresentVisibleFrame; it only holds a weak PreviewPublicationDestination and no surface or CIContext. AppViewModel conforms via a value/hook-only extension.
+- [x] lastPresentedVisibleRequest, lastPresentedVisibleImage, lastPublishedVisibleRequest move to the coordinator; resetForSource() replaces the nil sites in load() and clearActiveSourceAfterLibraryDeletion; install()'s no-frame-published check uses a coordinator accessor with the condition unchanged. (pass) — Fields are private(set) on the coordinator. load() and the deletion-clear path call resetForSource(). install() now reads !previewPublicationCoordinator.hasPublishedFrame, logically identical to the prior lastPublishedVisibleRequest == nil check.
+- [x] pendingDevelopChange moves to the coordinator as noteDevelopChange(); the three document-commit assignment sites forward to it. (pass) — All three prior assignment sites (undo/update paths) now call previewPublicationCoordinator.noteDevelopChange(...); OR-into-existing semantics preserved.
+- [x] didPresentVisibleFrame preserves its 7-step order (fence check; ready/status/Auto; store frame; comparison schedule-or-cancel then clear flag; histogram if resolved; scheduleIdlePreviewBuild; canonical cache write only for .preview + nil sourceROI). (pass) — Order matches exactly in the new implementation, including scheduleOriginalPreview(allowBeforePresentationConfirmation: false) matching the prior call's default parameter value.
+- [x] publishPreview keeps the latest-wins guard and settled/interactive branching, including the no-image settled failure path and the side-by-side scheduleOriginalPreview(allowBeforePresentationConfirmation: true) call. (pass) — Guard and branching reproduced in PreviewPublicationCoordinator.publish(_:); confirmed line-by-line against the pre-extraction AppViewModel.publishPreview.
+- [x] load, updateDocument, applyHistoryDocument, shutdown, PreviewSurface storage, showOriginal/toggleSideBySide, and the previewCoordinator.onPublication = nil shutdown ordering stay on AppViewModel. (pass) — Confirmed unchanged in AppViewModel.swift; only the onPublication closure body now forwards into the coordinator.
+- [x] PreviewPublicationCoordinatorTests covers stale fence, interactive-no-histogram/idle, settled-complete admits histogram/idle/cache, settled-ROI skips cache, one-shot develop-change comparison schedule, and resetForSource. (pass) — All 6 required cases present in Tests/KromoraKitTests/PreviewPublicationCoordinatorTests.swift and pass.
+- [x] docs/APP_ARCHITECTURE.md names publication, admission, and render submission as three separate owners. (pass) — Ownership table and prose both updated to list PreviewPublicationCoordinator alongside PreviewAdmissionCoordinator and PreviewCoordinator.
+- [x] Swift 6 mode: no @unchecked Sendable / nonisolated(unsafe) / @preconcurrency; CIImage crosses the boundary only as a value the destination presents; no CIContext stored. (pass) — PreviewPublicationCoordinator stores only RenderRequest/CIImage values (no CIContext) and is @MainActor; no escape hatches introduced.
+- [x] Focused tests, swift build, the fast CI lane, dg validate, and git diff --check pass. (pass) — See checks_run. The 2 focused-filter failures are testOpeningStoredEditsSpeculatesThenSubmitsTheStoredDocument and testOrphanedSpeculativePredecessorDoesNotBlockTheNextPhoto in PreviewCutoverTests, both failing on a missing temp-package asset.json (EditDocumentStore.swift:289). Reproduced independently on the pre-extraction parent commit (2789196) in an isolated worktree with the identical failure, confirming this is a pre-existing package-fixture issue unrelated to this ticket's change. scripts/ci-tests.sh fast (which does not use this narrower filter) passed all 1211/1211.
+Checks run:
+- swift build: pass
+- swift test --filter 'PreviewPublicationCoordinatorTests|PreviewAdmissionCoordinatorTests|PreviewCutoverTests|PreviewDiskCacheTests|ComparisonModeTests|FilmstripNavigationTests': 58 executed, 1 skipped (no local RAW fixture), 2 pre-existing unrelated failures (PreviewCutoverTests package asset.json, reproduced on parent commit 2789196 in an isolated worktree)
+- scripts/ci-tests.sh fast: pass (exit 0, 1211/1211)
+- dg validate: OK (only pre-existing unrelated model-name/context-completeness warnings)
+- git diff --check: pass (exit 0)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUGJAETBADIQYC8A
+Summary: Verified PreviewPublicationCoordinator extraction: publication funnel, presented-frame fields, and pendingDevelopChange fully moved off AppViewModel per spec; all 6 required coordinator tests present; docs updated; build/tests/CI/validate/diff-check all pass (2 pre-existing unrelated PreviewCutoverTests failures reproduced on the parent commit).

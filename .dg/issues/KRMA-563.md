@@ -12,15 +12,10 @@ labels:
   - masking
   - ui-ux
 created: 2026-09-24T14:07:05.300Z
-updated: 2026-09-24T19:09:21.701Z
+updated: 2026-09-25T03:54:20.748Z
 blockers: []
 order: x
 board: product
-claim:
-  actor: claude
-  session: 01MUFML3S2KBUJBBSD
-  claimed_at: 2026-09-24T14:26:49.058Z
-  expires_at: 2026-09-24T16:26:49.058Z
 ---
 
 ## Objective

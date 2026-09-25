@@ -2,8 +2,38 @@
 id: KRMA-572
 title: Keep the side-by-side Original pane free of masks and stable during Adjusted-only edits
 type: bug
-status: backlog
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: "Side-by-side + masking workspace: mask overlay, guides, brush cursor appear on Adjusted pane only, not Original"
+      result: pass
+      notes: PreviewView.canvasSurface now takes showsMaskOverlay; sideBySideView passes false for the Original panel and true for Adjusted; single-image/Space-hold path still passes true.
+    - criterion: Original pixels stay on comparisonBaseline/originalForComparison; local mask edits (including mask-layer exposure) do not appear in Original
+      result: pass
+      notes: Original canvasSurface call disables the overlay; originalForComparison already strips localAdjustments.
+    - criterion: Dragging exposure/contrast/Light/Color/Effects/Look/local-mask controls does not clear Original or request a new Original render when originalForComparison is unchanged
+      result: pass
+      notes: ComparisonFramePolicy.changesBaseline now compares old/new comparisonBaseline (which already excludes localAdjustments, Light, Color, Effects, adjustments, LUT) instead of separately checking localAdjustments. PreviewAdmissionCoordinator's onTerminal eviction path and the failure-retry path both added an admissionHasOriginalPreview guard so a still-valid displayed baseline is not cleared or re-enqueued.
+    - criterion: Crop, rotation, and a raw-develop change that rawDevelopChangesFrame reports still refresh Original
+      result: pass
+      notes: comparisonBaseline retains crop/rotation/rawDevelop; changesBaseline neutralizes only neutralTemperature/neutralTint before comparing, matching rawDevelopChangesFrame's exclusions. Verified via testComparisonFramePolicyTracksTheDerivedBaseline and existing white-balance tests.
+    - criterion: Single-image view and Space-hold comparison still show the mask overlay on the one visible surface
+      result: pass
+      notes: "Line 160 canvasSurface call (used by both single-image and Space-hold) passes showsMaskOverlay: true; unchanged from prior behavior."
+  checks_run:
+    - swift build — pass
+    - swift test --filter 'ComparisonModeTests|AdjustInspectorTests|PreviewAdmissionCoordinatorTests' — pass, 41 tests, 0 failures
+    - swift test --filter 'CoordinatorBoundaryTests' — pass, 7 tests, 0 failures, includes new ComparisonFramePolicy coverage
+    - git diff --check — pass
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-25T04:35:37.143Z
+  session: 01MUGGUSG68CI641P7
 creation_provenance:
   runner: cursor
   model: unknown
@@ -13,9 +43,9 @@ labels:
   - masking
   - preview
 created: 2026-09-25T01:33:32.931Z
-updated: 2026-09-25T01:34:06.891Z
+updated: 2026-09-25T04:35:37.145Z
 blockers: []
-order: zx
+order: a0
 board: product
 context:
   files:
@@ -74,3 +104,33 @@ Global Light/Adjust exposure is already excluded by that policy. `AdjustInspecto
 ## Out of scope
 
 Changing how Subject or Foreground mattes are generated (KRMA-573). Changing export. Moving preview publication (KRMA-565).
+
+
+### Comment — codex @ 2026-09-25T04:34:01.670Z
+
+Implemented and committed as cc692f7. Original now excludes mask overlay chrome; comparison invalidation follows the derived baseline while preserving the Temperature/Tint exception, and retained Original frames survive redundant job eviction/failure. Added regressions for local-mask no-clear/no-baseline-render, crop/rotation/raw baseline changes, and kept preview admission behavior covered. Verified: focused comparison/adjustment/admission suite (41 tests), CoordinatorBoundaryTests (7 tests), swift build, and git diff --check. Overlay call-site review: Original canvasSurface disables MaskCanvasOverlay; Adjusted and single-image canvases enable it.
+
+## Agent log
+
+- 2026-09-25T04:35:37.143Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Side-by-side + masking workspace: mask overlay, guides, brush cursor appear on Adjusted pane only, not Original (pass) — PreviewView.canvasSurface now takes showsMaskOverlay; sideBySideView passes false for the Original panel and true for Adjusted; single-image/Space-hold path still passes true.
+- [x] Original pixels stay on comparisonBaseline/originalForComparison; local mask edits (including mask-layer exposure) do not appear in Original (pass) — Original canvasSurface call disables the overlay; originalForComparison already strips localAdjustments.
+- [x] Dragging exposure/contrast/Light/Color/Effects/Look/local-mask controls does not clear Original or request a new Original render when originalForComparison is unchanged (pass) — ComparisonFramePolicy.changesBaseline now compares old/new comparisonBaseline (which already excludes localAdjustments, Light, Color, Effects, adjustments, LUT) instead of separately checking localAdjustments. PreviewAdmissionCoordinator's onTerminal eviction path and the failure-retry path both added an admissionHasOriginalPreview guard so a still-valid displayed baseline is not cleared or re-enqueued.
+- [x] Crop, rotation, and a raw-develop change that rawDevelopChangesFrame reports still refresh Original (pass) — comparisonBaseline retains crop/rotation/rawDevelop; changesBaseline neutralizes only neutralTemperature/neutralTint before comparing, matching rawDevelopChangesFrame's exclusions. Verified via testComparisonFramePolicyTracksTheDerivedBaseline and existing white-balance tests.
+- [x] Single-image view and Space-hold comparison still show the mask overlay on the one visible surface (pass) — Line 160 canvasSurface call (used by both single-image and Space-hold) passes showsMaskOverlay: true; unchanged from prior behavior.
+Checks run:
+- swift build — pass
+- swift test --filter 'ComparisonModeTests|AdjustInspectorTests|PreviewAdmissionCoordinatorTests' — pass, 41 tests, 0 failures
+- swift test --filter 'CoordinatorBoundaryTests' — pass, 7 tests, 0 failures, includes new ComparisonFramePolicy coverage
+- git diff --check — pass
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUGGUSG68CI641P7

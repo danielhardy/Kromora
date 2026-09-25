@@ -2,8 +2,42 @@
 id: KRMA-564
 title: Extract library window, selection, and culling from AppViewModel
 type: task
-status: backlog
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: LibraryBrowsingCoordinator owns portable window paging, query/selection sync, off-window opens, culling persistence, and deletion confirmation; does not store AppViewModel
+      result: pass
+      notes: LibraryBrowsingCoordinator.swift holds only ImageCollection, a LibraryBrowsingProviding library, and a weak LibraryBrowsingDestination. AppViewModel's portableLibrary is a let set once at init, so the lazy-var capture at first coordinator access is safe.
+    - criterion: AppViewModel retains source/edit handoff, deleteLibraryItems cross-feature sequencing, and clearActiveSourceAfterLibraryDeletion
+      result: pass
+      notes: AppViewModel.swift deleteLibraryItems (widened from private to internal for protocol conformance) still calls editedThumbnailCoordinator.removeAssets, editorDocument.removeSessions, preview-cache invalidation, and engine.invalidateRenderCaches; openImage, load, openActiveCollectionImage, and clearActiveSourceAfterLibraryDeletion untouched.
+    - criterion: "Behavior preserved: page-0 reload on filter/sort/search no-op skip, keyboard tail paging, off-window open page-fault with 200_000 bound, shift/command/click selection semantics, culling persistence and rapid-cull advance, grid-only deletion confirmation"
+      result: pass
+      notes: Verified by reading LibraryBrowsingCoordinator.swift against the ticket's behavior spec; all details (200_000 scan bound, portablePageSize tail threshold, weak destination Task in confirmDeleteSelectedLibraryItems) match.
+    - criterion: LibraryBrowsingCoordinatorTests.swift covers all 5 required cases with fakes only, no AppViewModel, no package I/O
+      result: pass
+      notes: testFilterSortAndSearchReloadPageZeroAndSkipNoOp, testKeyboardNextAtWindowTailLoadsNextPageBeforeSelecting, testOffWindowOpenFaultsItsPageAndMissingAssetDoesNotOpen, testCullingPersistsOnlyWhenStateChanges, testDeletionConfirmationIsRefusedOutsideGrid all present and pass.
+    - criterion: Existing suites (LibraryWindowedBrowsingTests, LibraryCullingTests, LibraryDeletionTests, LibrarySelectionTests) stay green; docs/APP_ARCHITECTURE.md updated
+      result: pass
+      notes: 26/26 focused tests pass. docs/APP_ARCHITECTURE.md boundaries table row and a new Library browsing ownership section accurately describe the split.
+    - criterion: swift build, focused tests, scripts/ci-tests.sh fast, dg validate, git diff --check all pass
+      result: pass
+      notes: All five re-run independently this session; see checks_run.
+  checks_run:
+    - "swift build: pass"
+    - "swift test --filter 'LibraryBrowsingCoordinatorTests|LibraryWindowedBrowsingTests|LibraryCullingTests|LibraryDeletionTests|LibrarySelectionTests': 26/26 pass"
+    - "scripts/ci-tests.sh fast: pass (exit 0, 1205/1205)"
+    - "dg validate: OK (only pre-existing unrelated model-name/context-completeness warnings)"
+    - "git diff --check: pass (exit 0)"
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-25T05:16:29.791Z
+  session: 01MUGI6Y7W9DBON9DO
 creation_provenance:
   runner: cursor
   model: unknown
@@ -13,11 +47,11 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-24T15:18:52.736Z
-updated: 2026-09-24T15:19:43.417Z
+updated: 2026-09-25T05:16:29.794Z
 depends_on:
   - KRMA-467
 blockers: []
-order: p
+order: a0
 board: product
 context:
   files:
@@ -144,3 +178,36 @@ Swift 6: no `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
 ## Out of scope
 
 Preview publication (KRMA-565). Preview admission (KRMA-467). Import package writes (KRMA-551). Turning one-line export, Look, or crop forwarders into new files.
+
+
+### Comment — codex @ 2026-09-25T05:11:22.421Z
+
+Implemented LibraryBrowsingCoordinator for portable window paging, query and selection sync, off-window opens, culling persistence, and deletion confirmation. AppViewModel retains source/edit handoff and cross-feature deletion cleanup. Added five fake-driven coordinator tests and documented ownership. Checks passed: swift build; focused library suites (26 tests); scripts/ci-tests.sh fast (1,205 tests); dg validate; git diff --check. Commit: 2789196.
+
+## Agent log
+
+- 2026-09-25T05:16:29.791Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] LibraryBrowsingCoordinator owns portable window paging, query/selection sync, off-window opens, culling persistence, and deletion confirmation; does not store AppViewModel (pass) — LibraryBrowsingCoordinator.swift holds only ImageCollection, a LibraryBrowsingProviding library, and a weak LibraryBrowsingDestination. AppViewModel's portableLibrary is a let set once at init, so the lazy-var capture at first coordinator access is safe.
+- [x] AppViewModel retains source/edit handoff, deleteLibraryItems cross-feature sequencing, and clearActiveSourceAfterLibraryDeletion (pass) — AppViewModel.swift deleteLibraryItems (widened from private to internal for protocol conformance) still calls editedThumbnailCoordinator.removeAssets, editorDocument.removeSessions, preview-cache invalidation, and engine.invalidateRenderCaches; openImage, load, openActiveCollectionImage, and clearActiveSourceAfterLibraryDeletion untouched.
+- [x] Behavior preserved: page-0 reload on filter/sort/search no-op skip, keyboard tail paging, off-window open page-fault with 200_000 bound, shift/command/click selection semantics, culling persistence and rapid-cull advance, grid-only deletion confirmation (pass) — Verified by reading LibraryBrowsingCoordinator.swift against the ticket's behavior spec; all details (200_000 scan bound, portablePageSize tail threshold, weak destination Task in confirmDeleteSelectedLibraryItems) match.
+- [x] LibraryBrowsingCoordinatorTests.swift covers all 5 required cases with fakes only, no AppViewModel, no package I/O (pass) — testFilterSortAndSearchReloadPageZeroAndSkipNoOp, testKeyboardNextAtWindowTailLoadsNextPageBeforeSelecting, testOffWindowOpenFaultsItsPageAndMissingAssetDoesNotOpen, testCullingPersistsOnlyWhenStateChanges, testDeletionConfirmationIsRefusedOutsideGrid all present and pass.
+- [x] Existing suites (LibraryWindowedBrowsingTests, LibraryCullingTests, LibraryDeletionTests, LibrarySelectionTests) stay green; docs/APP_ARCHITECTURE.md updated (pass) — 26/26 focused tests pass. docs/APP_ARCHITECTURE.md boundaries table row and a new Library browsing ownership section accurately describe the split.
+- [x] swift build, focused tests, scripts/ci-tests.sh fast, dg validate, git diff --check all pass (pass) — All five re-run independently this session; see checks_run.
+Checks run:
+- swift build: pass
+- swift test --filter 'LibraryBrowsingCoordinatorTests|LibraryWindowedBrowsingTests|LibraryCullingTests|LibraryDeletionTests|LibrarySelectionTests': 26/26 pass
+- scripts/ci-tests.sh fast: pass (exit 0, 1205/1205)
+- dg validate: OK (only pre-existing unrelated model-name/context-completeness warnings)
+- git diff --check: pass (exit 0)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUGI6Y7W9DBON9DO
+Summary: Re-verified LibraryBrowsingCoordinator extraction: correct ownership boundaries, all 5 required fake-based tests present and green, focused suite (26/26), fast CI lane (1205/1205), dg validate, and git diff --check all pass; docs updated accurately.
