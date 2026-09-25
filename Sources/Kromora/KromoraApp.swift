@@ -118,6 +118,11 @@ struct KromoraApp: App {
         }
         .windowStyle(.titleBar)
         .defaultSize(width: 1200, height: 800)
+        Window("About Kromora", id: KromoraAboutView.windowID) {
+            KromoraAboutView()
+                .frame(minWidth: 360, idealWidth: 420, minHeight: 440, idealHeight: 520)
+        }
+        .windowResizability(.contentSize)
         .commands {
 #if KROMORA_DIRECT_DISTRIBUTION
             KromoraCommands(
