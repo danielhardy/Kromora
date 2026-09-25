@@ -58,4 +58,29 @@ final class KromoraAboutTests: XCTestCase {
         XCTAssertTrue(app.contains("Window(\"About Kromora\", id: KromoraAboutView.windowID)"))
         XCTAssertTrue(menuCommands.contains("Button(\"Check for Updates…\") { updateCoordinator.checkNow() }"))
     }
+
+    func testStarterLookDisclosureLivesInAboutAndNotTheLooksInspector() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let aboutView = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/KromoraAboutView.swift"),
+            encoding: .utf8
+        )
+        let lookInspector = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/LookInspectorView.swift"),
+            encoding: .utf8
+        )
+        let manifest = try BundledLookLibrary.validate()
+
+        XCTAssertTrue(aboutView.contains("GroupBox(\"Bundled Starter Looks\")"))
+        XCTAssertTrue(aboutView.contains("starterLookManifest.acknowledgement"))
+        XCTAssertTrue(aboutView.contains("look.license"))
+        XCTAssertTrue(aboutView.contains("look.attribution"))
+        XCTAssertTrue(aboutView.contains("look.redistribution"))
+        XCTAssertFalse(lookInspector.contains("bundledAcknowledgement"))
+        XCTAssertFalse(lookInspector.contains("starterAcknowledgement"))
+        XCTAssertTrue(manifest.looks.allSatisfy { !$0.license.isEmpty && !$0.attribution.isEmpty && !$0.redistribution.isEmpty })
+    }
 }
