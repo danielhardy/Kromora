@@ -213,6 +213,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     }
     var admissionIsShowingOriginal = false
     var admissionIsSideBySideVisible = false
+    var admissionHasOriginalPreview = false
     var admissionHasComparisonPreviewCandidate = false
     var admissionSelectedLook: CubeLUT?
     var admissionCropToolActive = false

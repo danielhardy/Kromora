@@ -131,4 +131,30 @@ final class CoordinatorBoundaryTests: TempDirectoryTestCase {
         XCTAssertTrue(
             ComparisonFramePolicy.changesBaseline(from: whiteBalanceOnly, to: developChanged))
     }
+
+    func testComparisonFramePolicyTracksTheDerivedBaseline() {
+        let original = EditDocument()
+        var localMaskChanged = original
+        localMaskChanged.localAdjustments = [LocalAdjustmentLayer(
+            components: [MaskComponent(source: .brush(BrushMaskDefinition()))],
+            adjustments: LocalAdjustments(exposure: 1)
+        )]
+        XCTAssertFalse(ComparisonFramePolicy.changesBaseline(from: original, to: localMaskChanged))
+
+        var cropChanged = localMaskChanged
+        cropChanged.crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0, width: 0.8, height: 1))
+        XCTAssertTrue(ComparisonFramePolicy.changesBaseline(from: localMaskChanged, to: cropChanged))
+
+        var rotationChanged = original
+        rotationChanged.rotation = .clockwise90
+        XCTAssertTrue(ComparisonFramePolicy.changesBaseline(from: original, to: rotationChanged))
+
+        var rawDevelopChanged = original
+        rawDevelopChanged.rawDevelop.exposure = 0.5
+        XCTAssertTrue(ComparisonFramePolicy.rawDevelopChangesFrame(
+            from: original.rawDevelop, to: rawDevelopChanged.rawDevelop))
+        XCTAssertTrue(
+            ComparisonFramePolicy.changesBaseline(from: original, to: rawDevelopChanged))
+    }
 }
