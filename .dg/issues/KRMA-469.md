@@ -13,12 +13,14 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:26.087Z
-updated: 2026-09-24T01:18:19.094Z
+updated: 2026-09-24T15:19:44.586Z
 depends_on:
   - KRMA-465
   - KRMA-466
   - KRMA-467
   - KRMA-468
+  - KRMA-564
+  - KRMA-565
 blockers: []
 order: x
 board: product
@@ -37,6 +39,8 @@ context:
     - KRMA-529
     - KRMA-551
     - KRMA-552
+    - KRMA-564
+    - KRMA-565
   commands:
     - swift build
     - dg validate
@@ -47,7 +51,7 @@ Parent: KRMA-460
 
 ## Execution brief (reviewed 2026-09-23)
 
-Do not start until KRMA-466 and KRMA-467 are `done`. KRMA-465 and KRMA-468 are already satisfied elsewhere; do not re-open them.
+Do not start until KRMA-467, KRMA-564, and KRMA-565 are `done`. KRMA-466 is already done. KRMA-465 and KRMA-468 are already satisfied elsewhere; do not re-open them.
 
 This is a documentation and inventory pass. The only code motion allowed is a Stage-0-style move of a MARK that the inventory proves is now a pure forwarder. Do not start another coordinator here.
 
@@ -59,7 +63,7 @@ This is a documentation and inventory pass. The only code motion allowed is a St
 
 ### What to record
 
-After 466 and 467, re-read `AppViewModel.swift` MARK by MARK and write the resulting table into `docs/APP_ARCHITECTURE.md`:
+After KRMA-467, KRMA-564, and KRMA-565, re-read `AppViewModel.swift` MARK by MARK and write the resulting table into `docs/APP_ARCHITECTURE.md`:
 
 - owner of each remaining workflow
 - which root methods are sequencers (`init` / `wireCoordinators`, `load`, `updateDocument`, `applyHistoryDocument`, `shutdown`)

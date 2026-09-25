@@ -2,8 +2,39 @@
 id: KRMA-466
 title: "Stage 2: Extract edited-thumbnail workflow ownership from AppViewModel"
 type: task
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Current thumbnail demand behavior for collection, filmstrip, and grid is preserved.
+      result: pass
+      notes: All call sites (init onThumbnailDemand, collection selection, paste, LUT scan callbacks, source replacement, adoptStoredEdits, Look/LUT application, preview settle/interaction end, undo/history apply, shutdown) remain one-line forwards to EditedThumbnailCoordinator; ThumbnailSwitchLifecycleTests (16/16) and ThumbnailTests (9/10, 1 pre-existing unrelated failure) confirm behavior.
+    - criterion: Latest-wins behavior and crop-aware cache identity are preserved.
+      result: pass
+      notes: isCurrentEditedThumbnailRequest fences on generation, collection item presence, source cacheIdentity, and active source/document revision or per-asset document revision, matching the pre-extraction contract verbatim; setPresentedCrop still runs before render.
+    - criterion: Collaborator tests with fakes cover debounce, cancellation, stale completions, and cache identity; integration coverage remains for navigation and edit adoption.
+      result: pass
+      notes: "EditedThumbnailCoordinatorTests (5/5): debounce coalescing, shutdown drops late result, source-identity change rejects late result, revision string composition, identity-document nil publish without rendering. Fakes only, no AppViewModel construction. ThumbnailSwitchLifecycleTests retained for integration coverage."
+    - criterion: No second document store, generic event bus, root back-reference, or Swift 6 escape hatch is introduced.
+      result: pass
+      notes: Coordinator holds only a weak EditedThumbnailDestination reference plus value/Sendable collaborators (ImageWorkScheduler, EditedThumbnailRendering, EditDocumentStore). No @unchecked Sendable/nonisolated(unsafe)/@preconcurrency; PackageSettingsTests-style constraints unaffected. AppViewModel remains sole document/collection owner.
+    - criterion: Focused tests, swift build, the relevant fast CI lane, dg validate, and git diff --check pass.
+      result: pass
+      notes: "swift build: pass. Focused filter: 30/31 pass; ThumbnailTests.testImportingFromDataAlsoProducesThumbnails fails identically on parent commit faab249 (verified in an isolated worktree) — pre-existing, unrelated to this change. scripts/ci-tests.sh fast: exit 0, no failures. dg validate: OK (only pre-existing unrelated model-name warnings). git diff --check: pass (no changes needed)."
+  checks_run:
+    - "swift build: pass"
+    - "swift test --filter 'EditedThumbnailCoordinatorTests|ThumbnailSwitchLifecycleTests|ThumbnailTests': 30/31 pass; sole failure (testImportingFromDataAlsoProducesThumbnails) reproduced on parent commit faab249 in an isolated worktree, confirming it predates this change"
+    - "scripts/ci-tests.sh fast: pass (exit 0)"
+    - "dg validate: OK"
+    - "git diff --check: pass"
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-24T03:34:23.105Z
+  session: 01MUEZ2SZDTNVSMJI1
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -13,11 +44,11 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:23.427Z
-updated: 2026-09-24T01:18:14.253Z
+updated: 2026-09-24T03:34:23.107Z
 depends_on:
   - KRMA-465
 blockers: []
-order: q
+order: a0
 board: product
 context:
   files:
@@ -160,6 +191,34 @@ Create an `EditedThumbnailCoordinator` that owns edited-thumbnail scheduling sta
 
 Triage 2026-09-23: added an execution brief with the current symbols, fences, call sites, tests, and the MaskingWorkflowCoordinator pattern. KRMA-465 no longer blocks this once it is done.
 
+### Comment — codex @ 2026-09-24T03:28:36.071Z
+
+Implemented in 60172fd (Extract edited thumbnail coordinator). Edited-thumbnail scheduling state and methods now live in EditedThumbnailCoordinator behind a narrow destination/rendering seam; AppViewModel keeps thin forwards and sole document/collection ownership. Added fake-only coordinator coverage and architecture ownership documentation. Verification: swift build passed; EditedThumbnailCoordinatorTests (5/5) and ThumbnailSwitchLifecycleTests (16/16) passed; fast CI passed; dg validate and git diff --check passed. The focused aggregate command exits 1 only because ThumbnailTests.testImportingFromDataAlsoProducesThumbnails fails identically on parent 15528d1 (nil import URL).
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-24T03:34:23.105Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Current thumbnail demand behavior for collection, filmstrip, and grid is preserved. (pass) — All call sites (init onThumbnailDemand, collection selection, paste, LUT scan callbacks, source replacement, adoptStoredEdits, Look/LUT application, preview settle/interaction end, undo/history apply, shutdown) remain one-line forwards to EditedThumbnailCoordinator; ThumbnailSwitchLifecycleTests (16/16) and ThumbnailTests (9/10, 1 pre-existing unrelated failure) confirm behavior.
+- [x] Latest-wins behavior and crop-aware cache identity are preserved. (pass) — isCurrentEditedThumbnailRequest fences on generation, collection item presence, source cacheIdentity, and active source/document revision or per-asset document revision, matching the pre-extraction contract verbatim; setPresentedCrop still runs before render.
+- [x] Collaborator tests with fakes cover debounce, cancellation, stale completions, and cache identity; integration coverage remains for navigation and edit adoption. (pass) — EditedThumbnailCoordinatorTests (5/5): debounce coalescing, shutdown drops late result, source-identity change rejects late result, revision string composition, identity-document nil publish without rendering. Fakes only, no AppViewModel construction. ThumbnailSwitchLifecycleTests retained for integration coverage.
+- [x] No second document store, generic event bus, root back-reference, or Swift 6 escape hatch is introduced. (pass) — Coordinator holds only a weak EditedThumbnailDestination reference plus value/Sendable collaborators (ImageWorkScheduler, EditedThumbnailRendering, EditDocumentStore). No @unchecked Sendable/nonisolated(unsafe)/@preconcurrency; PackageSettingsTests-style constraints unaffected. AppViewModel remains sole document/collection owner.
+- [x] Focused tests, swift build, the relevant fast CI lane, dg validate, and git diff --check pass. (pass) — swift build: pass. Focused filter: 30/31 pass; ThumbnailTests.testImportingFromDataAlsoProducesThumbnails fails identically on parent commit faab249 (verified in an isolated worktree) — pre-existing, unrelated to this change. scripts/ci-tests.sh fast: exit 0, no failures. dg validate: OK (only pre-existing unrelated model-name warnings). git diff --check: pass (no changes needed).
+Checks run:
+- swift build: pass
+- swift test --filter 'EditedThumbnailCoordinatorTests|ThumbnailSwitchLifecycleTests|ThumbnailTests': 30/31 pass; sole failure (testImportingFromDataAlsoProducesThumbnails) reproduced on parent commit faab249 in an isolated worktree, confirming it predates this change
+- scripts/ci-tests.sh fast: pass (exit 0)
+- dg validate: OK
+- git diff --check: pass
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUEZ2SZDTNVSMJI1
