@@ -73,17 +73,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// need to publish through the model observed by the library and canvas shells.
     @MainActor
     final class InspectorState: ObservableObject {
-        /// Assignment observers run after `@Published` has emitted its will-change event. The
-        /// histogram gate needs the assigned value synchronously, so it uses this callback
-        /// instead of trying to read the old value from the projected publisher.
+        /// Inspector visibility drives the histogram gate synchronously after assignment.
         var onPresentationChange: (() -> Void)?
 
         @Published var isPresented = false {
             didSet { onPresentationChange?() }
         }
-        @Published var tab: InspectorTab = .info {
-            didSet { onPresentationChange?() }
-        }
+        @Published var tab: InspectorTab = .info
 
         /// Masking is an inspector tab, not a second presentation mode. Keep the previous tab so
         /// Done/Escape can return to the edit control the user came from.
@@ -467,8 +463,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     var hasCropAdjustments: Bool { !document.crop.isIdentity }
 
-    /// Inspector visibility. Computing the histogram is gated on this — plus on the Info tab being
-    /// the one on screen — so we don't tally pixels for a panel nobody's looking at.
+    /// Inspector visibility. Computing the histogram is gated on this so we don't tally pixels
+    /// for a panel nobody's looking at.
     enum InspectorTab: String, CaseIterable, Sendable {
         case info, light, develop, adjust
         case effects, look, masking
@@ -518,7 +514,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         /// Describes the panel's purpose for compact icon-only navigation controls.
         var purpose: String {
             switch self {
-            case .info: return "Histogram and photo metadata"
+            case .info: return "Photo name, file type, and metadata"
             case .light: return "Tone and RGB curve adjustments"
             case .develop: return "RAW decoder controls"
             case .adjust: return "Color adjustments"
@@ -3578,7 +3574,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         return true
     }
 
-    // MARK: - Info inspector (EXIF + histogram)
+    // MARK: - Inspector histogram
 
     func toggleInspector() {
         guard sourceImage != nil else {
@@ -3589,13 +3585,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         isInspectorPresented.toggle()
     }
 
-    /// Recompute the histogram for the currently displayed image. No-op unless the Info tab of an
-    /// open inspector is on screen. Cancellable, so dragging the intensity slider stays smooth.
+    /// Recompute the histogram for the currently displayed image. No-op unless the inspector is
+    /// open. Cancellable, so dragging the intensity slider stays smooth.
     ///
     /// The histogram consumes the completed image from the settled presentation. This keeps it
     /// aligned with the pixels the user received and avoids evaluating the preview graph again.
     /// The source/document overload remains available for standalone engine analysis, but it is
-    /// intentionally not used for the visible Info inspector path.
+    /// intentionally not used for the visible inspector path.
     private func updateHistogram(
         for displayedRequest: RenderRequest? = nil,
         presentedImage: CIImage? = nil
@@ -3611,15 +3607,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewAdmissionCoordinator.cancelHistogram(clear: clear, pump: pump)
     }
 
-    /// Inspector-presentation gate for histogram work (KRMA-521). Called synchronously from the
-    /// inspector's assigned-value publishers so no Task is spawned per chrome change and the
+    /// Inspector-presentation gate for histogram work (KRMA-521). Called synchronously when
+    /// inspector visibility changes so no Task is spawned per presentation change and the
     /// broad AppViewModel publisher is never involved.
     private func refreshHistogramGate() {
         guard !isShuttingDown else { return }
-        if inspectorState.isPresented,
-            !isCropToolActive,
-            inspectorState.tab == .info
-        {
+        if inspectorState.isPresented, !isCropToolActive {
             updateHistogram()
         } else {
             cancelHistogram(clear: true)
@@ -4162,7 +4155,6 @@ extension AppViewModel: PreviewAdmissionDestination {
         previewPublicationCoordinator.lastPresentedVisibleImage
     }
     var admissionInspectorPresented: Bool { isInspectorPresented }
-    var admissionInspectorTabIsInfo: Bool { inspectorTab == .info }
     var admissionHistogramLoading: Bool { isHistogramLoading }
     var admissionHistogram: HistogramData? { histogram }
     var admissionHistogramErrorMessage: String? { histogramErrorMessage }

@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Docked inspector pane: histogram of the displayed image up top, EXIF/TIFF
-/// metadata listed below. Toggled from the toolbar (and ⌘I).
+/// Docked inspector pane: a pinned histogram above the selected editor surface.
+/// Toggled from the toolbar (and ⌘I).
 struct InfoInspectorView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject var viewModel: AppViewModel
@@ -53,11 +53,15 @@ struct InfoInspectorView: View {
                 emptyState
                     .transition(.opacity)
             } else {
+                histogramSection
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+
+                tabSwitcher
+
+                Divider()
+
                 Group {
-                    tabSwitcher
-
-                    Divider()
-
                     switch inspectorState.tab.content {
                     case .info:
                         infoContent
@@ -75,6 +79,7 @@ struct InfoInspectorView: View {
                         MaskingWorkspace(viewModel: viewModel)
                     }
                 }
+                .frame(maxHeight: .infinity, alignment: .top)
                 .transition(inspectorTransition(edge: .leading))
             }
         }
@@ -120,13 +125,12 @@ struct InfoInspectorView: View {
         .padding(.bottom, 6)
     }
 
-    /// The original histogram + EXIF column. Only reached with an image open — the no-image case is
+    /// Photo identity and EXIF content. Only reached with an image open — the no-image case is
     /// handled one level up, before the tab switcher exists.
     private var infoContent: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 identitySection
-                histogramSection
                 metadataSection
                 if let assetID = viewModel.maskingAssetID,
                    let source = viewModel.maskingSource {
