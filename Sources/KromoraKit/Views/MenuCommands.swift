@@ -21,6 +21,7 @@ enum KromoraEditTransferShortcuts {
 /// picks up on the view side — the menu bar is outside the view hierarchy, so
 /// it can't reach the view model directly.
 public struct KromoraCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
     @ObservedObject private var settings: KromoraSettings
 #if KROMORA_DIRECT_DISTRIBUTION
     @ObservedObject private var updateCoordinator: UpdateCoordinator
@@ -41,6 +42,10 @@ public struct KromoraCommands: Commands {
 #endif
 
     public var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About Kromora") { openWindow(id: KromoraAboutView.windowID) }
+        }
+
         CommandMenu("View") {
             Toggle("Show Photo Names", isOn: $settings.showPhotoNames)
                 .accessibilityLabel("Show Photo Names")
@@ -120,11 +125,11 @@ public struct KromoraCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
         }
 
-#if KROMORA_DIRECT_DISTRIBUTION
         CommandGroup(after: .appInfo) {
+#if KROMORA_DIRECT_DISTRIBUTION
             Button("Check for Updates…") { updateCoordinator.checkNow() }
-        }
 #endif
+        }
     }
 
     private func post(_ name: Notification.Name) {
