@@ -201,7 +201,7 @@ extension AdjustInspectorTests {
 
     func testInspectorTabsExposeCompactSymbolsAndAccessiblePurposes() {
         let expected: [AppViewModel.InspectorTab: (icon: String, purpose: String)] = [
-            .info: ("info.circle", "Histogram and photo metadata"),
+            .info: ("info.circle", "Photo name, file type, and metadata"),
             .light: ("sun.max", "Tone and RGB curve adjustments"),
             .develop: ("camera.aperture", "RAW decoder controls"),
             .adjust: ("paintpalette", "Color adjustments"),
@@ -217,26 +217,21 @@ extension AdjustInspectorTests {
         }
     }
 
-    /// The histogram is gated on the Info tab being on screen. Adjust is as much "a panel nobody is
-    /// looking at" as Develop is, so switching to it must not start tallying pixels — the same
-    /// finding `testNoHistogramIsTalliedWhileTheDevelopTabIsShowing` pins for the other tab.
-    func testTheAdjustTabDoesNotTallyAHistogram() async throws {
+    func testTheColorTabUpdatesThePinnedHistogram() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
 
-        // Switch first, *then* open: opening with Info showing would legitimately tally one — see
-        // testNoHistogramIsTalliedWhileTheDevelopTabIsShowing for the same pitfall on the other tab.
         viewModel.inspectorTab = .adjust
         viewModel.isInspectorPresented = true
         viewModel.adjustmentBinding(for: .exposure).wrappedValue = 1.5
-        try await Task.sleep(for: .milliseconds(300))
+        try await waitUntil("the Color histogram") {
+            await fake.histogramRequests.count == 1
+        }
 
         let requests = await fake.histogramRequests
-        XCTAssertTrue(requests.isEmpty,
-                      "the Adjust tab has no histogram; \(requests.count) tallies were issued")
-        XCTAssertNil(viewModel.histogram)
+        XCTAssertEqual(requests.first?.document.adjustments, [.exposure(ev: 1.5)])
     }
 }
 

@@ -14,7 +14,6 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionLastPresentedRequest: RenderRequest? { get }
     var admissionLastPresentedImage: CIImage? { get }
     var admissionInspectorPresented: Bool { get }
-    var admissionInspectorTabIsInfo: Bool { get }
     var admissionHistogramLoading: Bool { get }
     var admissionHistogram: HistogramData? { get }
     var admissionHistogramErrorMessage: String? { get }
@@ -126,15 +125,13 @@ final class PreviewAdmissionCoordinator {
     }
 
     /// Recompute the histogram from the frame that was actually presented. It never rebuilds the
-    /// source graph, so the Info panel describes the same comparison or edited request on screen.
+    /// source graph, so the pinned chart describes the same comparison or edited request on screen.
     func updateHistogram(
         for displayedRequest: RenderRequest? = nil,
         presentedImage: CIImage? = nil
     ) {
         guard let destination else { return }
-        guard destination.admissionInspectorPresented,
-            destination.admissionInspectorTabIsInfo
-        else {
+        guard destination.admissionInspectorPresented else {
             cancelHistogram(clear: true)
             return
         }
@@ -177,7 +174,6 @@ final class PreviewAdmissionCoordinator {
             )
             guard !Task.isCancelled, !destination.admissionIsShuttingDown,
                 destination.admissionInspectorPresented,
-                destination.admissionInspectorTabIsInfo,
                 assetID == destination.admissionActiveAssetID,
                 sourceRevision == destination.admissionSourceRevision,
                 displayRevision == destination.admissionDisplayRevision,

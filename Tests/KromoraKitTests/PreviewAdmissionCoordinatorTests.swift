@@ -52,7 +52,6 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
 
         _ = try await engine.render(request)
         destination.admissionInspectorPresented = true
-        destination.admissionInspectorTabIsInfo = true
         await engine.gateHistogram()
         coordinator.updateHistogram(
             for: request, presentedImage: destination.admissionLastPresentedImage
@@ -196,7 +195,6 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var admissionLastPresentedRequest: RenderRequest?
     var admissionLastPresentedImage: CIImage?
     var admissionInspectorPresented = false
-    var admissionInspectorTabIsInfo = false
     var admissionHistogramLoading = false
     var admissionHistogram: HistogramData?
     var admissionHistogramErrorMessage: String?
