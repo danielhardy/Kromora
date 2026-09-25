@@ -701,6 +701,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let lookSave = LookSaveCoordinator()
     let libraryMediaWorkflow: LibraryMediaWorkflowCoordinator
     private let libraryDeletionCoordinator: LibraryDeletionCoordinator
+    private lazy var libraryBrowsingCoordinator = LibraryBrowsingCoordinator(
+        collection: collection, library: portableLibrary, destination: self
+    )
     private let applicationShell: ApplicationShellCoordinator
     /// Compatibility façade for diagnostics and package-maintenance tests. Lifecycle ownership
     /// remains in `ApplicationShellCoordinator`.
@@ -1606,97 +1609,41 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func reloadPortableCollection() throws {
-        try reloadPortableWindow(pageIndex: 0)
+        try libraryBrowsingCoordinator.reloadPortableCollection()
     }
 
     /// Publish one query page as the visible window (KRMA-519 scope items 2-3). Membership,
     /// ordering, filtering, and selection come from the query controller; the collection holds
     /// only the window's Items as a presentation adapter.
     func reloadPortableWindow(pageIndex: Int = 0) throws {
-        guard let portableLibrary else { return }
-        let window = try portableLibrary.browsingWindow(
-            pageIndex: pageIndex, query: portableQuery
-        )
-        collection.loadPortableWindow(
-            assets: window.assets, totalCount: window.totalCount,
-            pageIndex: pageIndex, pageSize: window.pageSize, query: portableQuery
-        )
-        // The query controller is the single selection authority; mirror it into the adapter
-        // so keyboard navigation, culling, and open all agree on the active asset.
-        collection.syncPortableSelection(
-            selectedIDs: portableLibrary.portableSelectedIDs,
-            activeID: portableLibrary.portableActiveID
-        )
-        if collection.isActive {
-            navigation.move(to: .grid)
-        }
-        collection.beginThumbnailDemand()
+        try libraryBrowsingCoordinator.reloadPortableWindow(pageIndex: pageIndex)
     }
 
     /// Fault the next page when the visible window approaches its tail. Grid/filmstrip call this
     /// from `onAppear` of trailing cells so scrolling never materializes the full library.
     func loadMorePortableIfNeeded(currentIndex: Int) {
-        guard let portableLibrary, collection.isPortableWindowed,
-            collection.portableHasMorePages
-        else { return }
-        // Prefetch when within two pages of the tail; the grid's LazyVStack only materializes
-        // near-visible cells, so this stays proportional to the viewport, not the library.
-        let loaded = collection.items.count
-        guard currentIndex >= loaded - collection.portablePageSize else { return }
-        let nextPage = collection.portablePageIndex + 1
-        guard
-            let window = try? portableLibrary.browsingWindow(
-            pageIndex: nextPage, query: portableQuery
-            )
-        else { return }
-        collection.appendPortableWindow(assets: window.assets, pageIndex: nextPage)
+        libraryBrowsingCoordinator.loadMorePortableIfNeeded(currentIndex: currentIndex)
     }
 
     /// Portable filtering/sorting preserve user-visible behavior without materializing the full
     /// collection: the query controller re-pages from summaries and the window reloads page 0.
     func setPortableFilter(_ filter: LibraryFilter) {
-        guard portableQuery.filter != filter else { return }
-        portableQuery.filter = filter
-        try? reloadPortableWindow(pageIndex: 0)
+        libraryBrowsingCoordinator.setPortableFilter(filter)
     }
 
     func setPortableSort(_ sort: LibraryQuerySort) {
-        guard portableQuery.sort != sort else { return }
-        portableQuery.sort = sort
-        try? reloadPortableWindow(pageIndex: 0)
+        libraryBrowsingCoordinator.setPortableSort(sort)
     }
 
     func setPortableSearch(_ text: String?) {
-        let normalized = text?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let next: String? = (normalized?.isEmpty == false) ? normalized : nil
-        guard portableQuery.searchText != next else { return }
-        portableQuery.searchText = next
-        try? reloadPortableWindow(pageIndex: 0)
+        libraryBrowsingCoordinator.setPortableSearch(text)
     }
 
     /// Route a presentation selection through the query-controller authority, then mirror back.
     /// Ordinary click replaces, Command toggles, Shift is approximated as additive here because
     /// range extension needs the ordered window IDs owned by the collection.
     func selectPortableItem(at index: Int, modifiers: LibrarySelectionModel.Modifiers = []) {
-        guard let portableLibrary, collection.items.indices.contains(index) else { return }
-        let photoID = collection.items[index].id
-        guard let portableID = Self.portableID(for: photoID) else { return }
-        if modifiers.contains(.shift) {
-            collection.select(at: index, modifiers: modifiers)
-            let selectedIDs = collection.selectedItems.compactMap { Self.portableID(for: $0.id) }
-            let activeID = collection.selectedItem.flatMap { Self.portableID(for: $0.id) }
-            portableLibrary.setPortableSelection(selectedIDs, activeID: activeID)
-        } else if modifiers.contains(.command) {
-            portableLibrary.togglePortableSelection(portableID)
-            collection.select(at: index, modifiers: modifiers)
-        } else {
-            portableLibrary.select(portableID)
-        collection.select(at: index, modifiers: modifiers)
-        }
-        collection.syncPortableSelection(
-            selectedIDs: portableLibrary.portableSelectedIDs,
-            activeID: portableLibrary.portableActiveID
-        )
+        libraryBrowsingCoordinator.selectPortableItem(at: index, modifiers: modifiers)
     }
 
     /// Grid keyboard stepping under the single portable authority. Unlike the editor
@@ -1704,100 +1651,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// window tail with more pages, the next page faults in first so keyboard traversal
     /// covers the full query without materializing it.
     func selectNextPortableInGrid() {
-        if collection.portableHasMorePages,
-            collection.selectedIndex >= collection.items.count - 1
-        {
-            loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
-        }
-        let target = min(collection.selectedIndex + 1, collection.items.count - 1)
-        guard collection.items.indices.contains(target), target != collection.selectedIndex
-        else { return }
-        selectPortableItem(at: target)
+        libraryBrowsingCoordinator.selectNextPortableInGrid()
     }
 
     func selectPreviousPortableInGrid() {
-        let target = max(collection.selectedIndex - 1, 0)
-        guard collection.items.indices.contains(target), target != collection.selectedIndex
-        else { return }
-        selectPortableItem(at: target)
-    }
-
-    private static func portableID(for photoID: PhotoAssetID) -> PortablePhotoAssetID? {
-        let prefix = "portable:"
-        guard photoID.raw.hasPrefix(prefix) else { return nil }
-        let uuidString = String(photoID.raw.dropFirst(prefix.count))
-        guard let uuid = UUID(uuidString: uuidString) else { return nil }
-        return PortablePhotoAssetID(uuid: uuid)
+        libraryBrowsingCoordinator.selectPreviousPortableInGrid()
     }
 
     private func openPortableAsset(_ assetID: PortablePhotoAssetID) {
-        // The query controller is authoritative: record the open target there first so
-        // filtering/sorting/page changes keep it selected even when it is off-window.
-        guard let portableLibrary else {
-            statusMessage = "The library package is not open."
-            return
-        }
-        portableLibrary.select(assetID)
-        if let item = collection.items.first(where: {
-            $0.asset.source.portableIdentity.assetID == assetID
-        }) {
-            // The grid item carries the derived browsing locator. Verify it against the package
-            // (record fallback for pre-current layouts) so opening pays at most one record read.
-            if let verified = try? portableLibrary.resolveEmbeddedSourceURL(for: assetID) {
-                openImage(url: verified, assetID: item.id)
-                return
-            }
-            guard let url = item.url else {
-                statusMessage = "The imported photo is not available in the package index."
-                return
-            }
-            openImage(url: url, assetID: item.id)
-            return
-        }
-        // Off-window open (e.g. import result on page > 0, or filtered-out position): fault the
-        // containing page into the window, then open from the stable identity. This keeps launch
-        // bounded while preserving open-anywhere behavior.
-        do {
-            let pageSize = portableLibrary.queryController.pageSize
-            let ordered = portableLibrary.page(at: 0, query: portableQuery)
-            _ = ordered
-            // Find the asset's page by scanning query pages without opening records.
-            var pageIndex = 0
-            while true {
-                let page = portableLibrary.page(at: pageIndex, query: portableQuery)
-                if page.items.contains(where: { $0.assetID == assetID }) {
-                    if let window = try? portableLibrary.browsingWindow(
-                        pageIndex: pageIndex, query: portableQuery
-                    ) {
-                        collection.loadPortableWindow(
-                            assets: window.assets, totalCount: window.totalCount,
-                            pageIndex: pageIndex, pageSize: window.pageSize, query: portableQuery
-                        )
-                        collection.syncPortableSelection(
-                            selectedIDs: portableLibrary.portableSelectedIDs,
-                            activeID: portableLibrary.portableActiveID
-                        )
-                        if let item = collection.items.first(where: {
-                            $0.asset.source.portableIdentity.assetID == assetID
-                        }),
-                            let verified = try? portableLibrary.resolveEmbeddedSourceURL(
-                            for: assetID
-                            )
-                        {
-                            openImage(url: verified, assetID: item.id)
-                            return
-                        }
-                    }
-                    break
-                }
-                guard page.hasNextPage else { break }
-                pageIndex += 1
-                // Bound the scan: pageSize is 500, so even a 100k library faults at most its
-                // index entries (summaries only, no records) to locate one asset.
-                if pageIndex * pageSize > 200_000 { break }
-            }
-        }
-        statusMessage = "The imported photo is not available in the package index."
+        libraryBrowsingCoordinator.openPortableAsset(assetID)
     }
 
     func openImage(url: URL, operationID: UUID? = nil) {
@@ -2764,23 +2626,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Capture the current Library selection for a destructive confirmation. The focused item is
     /// included by `ImageCollection` even for a keyboard/menu invocation with no explicit set.
     func requestDeleteSelectedLibraryItems() {
-        guard navigation.isGrid else { return }
-        let candidates = collection.deletionCandidates
-        guard !candidates.isEmpty else {
-            statusMessage = "Select at least one photo to remove"
-            return
-        }
-        libraryDeletionConfirmation = LibraryDeletionConfirmation(candidates: candidates)
+        libraryBrowsingCoordinator.requestDeleteSelectedLibraryItems()
     }
 
     /// Confirm the previously captured target set. The actual work is asynchronous because edit
     /// records and analysis/mask caches are actor-isolated.
     func confirmDeleteSelectedLibraryItems() {
-        guard let confirmation = libraryDeletionConfirmation else { return }
-        libraryDeletionConfirmation = nil
-        Task { @MainActor [weak self] in
-            _ = await self?.deleteLibraryItems(confirmation.candidates)
-        }
+        libraryBrowsingCoordinator.confirmDeleteSelectedLibraryItems()
     }
 
     /// Delete the supplied Library targets. This is also the testable seam behind the confirmation
@@ -2792,7 +2644,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     @discardableResult
-    private func deleteLibraryItems(
+    func deleteLibraryItems(
         _ candidates: [ImageCollection.DeletionCandidate]
     ) async -> LibraryDeletionResult {
         let identitiesByID: [PhotoAssetID: PortablePhotoIdentity] = Dictionary(
@@ -2816,13 +2668,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         editorDocument.removeSessions(for: deletedSet)
         _ = collection.removeItems(with: deletedSet)
         if collection.isPortableWindowed {
-            guard let portableLibrary else { return result }
             // Query controller already dropped tombstones via index delta; mirror the single
             // authority back into the window adapter so selection never points at a deleted ID.
-            collection.syncPortableSelection(
-                selectedIDs: portableLibrary.portableSelectedIDs,
-                activeID: portableLibrary.portableActiveID
-            )
+            libraryBrowsingCoordinator.syncPortableSelection()
         }
         let deletedIdentities = Set(
             result.deletedIDs.compactMap { identitiesByID[$0] }
@@ -3073,62 +2921,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         modifiers: LibrarySelectionModel.Modifiers = []
     ) {
         cancelIdlePreviewBuild(resetCursor: true)
-        collection.select(at: index, modifiers: modifiers)
+        libraryBrowsingCoordinator.selectLibraryItem(at: index, modifiers: modifiers)
     }
 
     /// Apply a culling flag to the focused library asset. Pick/reject use the rapid-cull workflow
     /// and move to the next visible asset; rating changes stay on the current photo.
     @discardableResult
     func setFocusedFlag(_ flag: PhotoFlag, advance: Bool = false) -> Bool {
-        let name = collection.selectedItem?.displayName
-        let previousIndex = collection.selectedIndex
-        let changed = collection.setFlag(flag, advance: advance)
-        if changed { persistPortableLibraryStateIfNeeded() }
-        if changed, let name {
-            statusMessage =
-                "\(name): \(flag == .pick ? "Picked" : flag == .reject ? "Rejected" : "Flag cleared")"
-        }
-        // `ImageCollection` owns browsing focus, but Edit also has a prepared/rendered source.
-        // Keep them in lockstep after the rapid-cull advance so the filmstrip never highlights a
-        // different photo from the one shown on the canvas.
-        if advance, !navigation.isGrid, collection.selectedIndex != previousIndex {
-            selectCollectionImage(at: collection.selectedIndex)
-        }
-        return changed
+        libraryBrowsingCoordinator.setFocusedFlag(flag, advance: advance)
     }
 
     @discardableResult
     func setFocusedRating(_ rating: Int) -> Bool {
-        let changed = collection.setRating(rating)
-        if changed { persistPortableLibraryStateIfNeeded() }
-        if changed, let item = collection.selectedItem {
-            statusMessage =
-                "\(item.displayName): \(rating == 0 ? "Rating cleared" : "Rated \(rating) stars")"
-        }
-        return changed
+        libraryBrowsingCoordinator.setFocusedRating(rating)
     }
 
     @discardableResult
     func undoCullingChange() -> Bool {
-        let changed = collection.undoLastCullingChange()
-        if changed { persistPortableLibraryStateIfNeeded() }
-        return changed
-    }
-
-    private func persistPortableLibraryStateIfNeeded() {
-        guard let portableLibrary, let assetID = collection.lastCullingAssetID,
-            let item = collection.items.first(where: { $0.id == assetID })
-        else { return }
-        do {
-            try portableLibrary.updateLibraryState(
-                for: item.asset.source.portableIdentity.assetID,
-                rating: item.asset.rating,
-                flag: item.asset.flag
-            )
-        } catch {
-            presentError(
-                "Kromora could not update the library catalog: \(error.localizedDescription)")
-        }
+        libraryBrowsingCoordinator.undoCullingChange()
     }
 
     /// Enter the editor for the grid's active photo. Thumbnail availability is not a prerequisite;
@@ -4565,4 +4375,24 @@ extension AppViewModel: PreviewAdmissionDestination {
         ) || hadValidOriginal
     }
     func admissionClearOriginalPreview() { originalPreviewSurface.clear() }
+}
+
+extension AppViewModel: LibraryBrowsingDestination {
+    var isLibraryGridShowing: Bool { navigation.isGrid }
+
+    func showLibraryGridIfActive() {
+        if collection.isActive { navigation.move(to: .grid) }
+    }
+
+    func openPortableLibraryAsset(url: URL, assetID: PhotoAssetID) {
+        openImage(url: url, assetID: assetID)
+    }
+
+    func selectCollectionImage(at index: Int) {
+        selectCollectionImage(at: index, modifiers: [])
+    }
+
+    func setLibraryStatusMessage(_ message: String) { statusMessage = message }
+
+    func presentLibraryError(_ message: String) { presentError(message) }
 }
