@@ -700,13 +700,14 @@ struct LibraryQueryController: Sendable {
             options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
         let right = rhs.folding(
             options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-        let folded: ComparisonResult
-        if left == right {
-            folded = .orderedSame
-        } else {
-            folded = left < right ? .orderedAscending : .orderedDescending
+        if left != right {
+            return left < right ? .orderedAscending : .orderedDescending
         }
-        return folded == .orderedSame ? compare(lhs, rhs) : folded
+        // Folded duplicates are common (identical filenames, case, diacritics).
+        // The tie-break must compare the originals directly: calling this
+        // overload again recurses until the sort overflows the stack.
+        if lhs == rhs { return .orderedSame }
+        return lhs < rhs ? .orderedAscending : .orderedDescending
     }
 
     private func compareOptional(_ lhs: String?, _ rhs: String?) -> ComparisonResult {

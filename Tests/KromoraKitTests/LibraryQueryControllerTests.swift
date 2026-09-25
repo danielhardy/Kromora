@@ -180,6 +180,47 @@ final class LibraryQueryControllerTests: TempDirectoryTestCase {
         XCTAssertTrue(selectedPage.items.contains { $0.assetID == selectedID && $0.isSelected })
     }
 
+    func testDisplayNameSortOrdersFoldedDuplicatesWithoutRecursing() throws {
+        func id(_ suffix: String) -> PortablePhotoAssetID {
+            PortablePhotoAssetID(uuid: UUID(uuidString: "00000000-0000-4000-8000-0000000000\(suffix)")!)
+        }
+        func entry(_ assetID: PortablePhotoAssetID, _ name: String) -> LibraryIndexEntry {
+            LibraryIndexEntry(from: .init(
+                assetID: assetID,
+                recordPath: "Assets/00/\(assetID.raw)/asset.json",
+                summary: .init(displayName: name)
+            ))
+        }
+
+        let alpha = id("01")
+        let cafe = id("02")
+        let cafeLater = id("04")
+        let cafeAccent = id("03")
+        let cafeLower = id("05")
+        let zebra = id("06")
+        let projection = try LibraryIndexProjection(libraryID: UUID(), entries: [
+            entry(zebra, "zebra.jpg"),
+            entry(cafeLower, "cafe.jpg"),
+            entry(cafeLater, "Cafe.jpg"),
+            entry(cafeAccent, "Café.jpg"),
+            entry(cafe, "Cafe.jpg"),
+            entry(alpha, "Alpha.jpg"),
+        ])
+        let page = LibraryQueryController(index: projection, pageSize: 10).page(
+            at: 0,
+            query: .init(sort: .init(key: .displayName, direction: .ascending))
+        )
+
+        XCTAssertEqual(
+            page.items.map(\.displayName),
+            ["Alpha.jpg", "Cafe.jpg", "Cafe.jpg", "Café.jpg", "cafe.jpg", "zebra.jpg"]
+        )
+        XCTAssertEqual(
+            page.items.filter { $0.displayName == "Cafe.jpg" }.map(\.assetID),
+            [cafe, cafeLater]
+        )
+    }
+
     func testIndexProjectionExcludesTombstonesAndKeepsSelectionUUIDBased() throws {
         let packageURL = tempDirectory.appendingPathComponent("DeletionProjection.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)
