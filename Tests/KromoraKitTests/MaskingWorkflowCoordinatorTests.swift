@@ -20,12 +20,19 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
         private(set) var retryPreviewCount = 0
         private(set) var presentedWorkspace = false
         private(set) var dismissedWorkspace = false
+        private(set) var documentUpdateDebounceValues: [Bool] = []
 
         init(engine: any RenderEngining) {
             maskOverlayEngine = engine
         }
 
         func updateDocument(_ transform: (inout EditDocument) -> Void) {
+            documentUpdateDebounceValues.append(false)
+            transform(&document)
+        }
+
+        func updateDocument(debounced: Bool, _ transform: (inout EditDocument) -> Void) {
+            documentUpdateDebounceValues.append(debounced)
             transform(&document)
         }
 
@@ -101,6 +108,17 @@ final class MaskingWorkflowCoordinatorTests: XCTestCase {
         let destination = FakeDestination(engine: FakeRenderEngine())
         let coordinator = MaskingWorkflowCoordinator(analysis: analysis, destination: destination)
         return (coordinator, destination, analysis)
+    }
+
+    func testLocalAdjustmentUpdatePreservesDebouncedPreviewIntent() throws {
+        let (coordinator, destination, _) = makeCoordinator()
+        let layer = LocalAdjustmentLayer()
+        destination.document.localAdjustments = [layer]
+
+        coordinator.updateMask(layer.id, debounced: true) { $0.adjustments.exposure = -5 }
+
+        XCTAssertEqual(destination.document.localAdjustments.first?.adjustments.exposure, -5)
+        XCTAssertEqual(destination.documentUpdateDebounceValues, [true])
     }
 
     func testCreateSmartMaskInsertsDurableLayerOnSuccess() async {
