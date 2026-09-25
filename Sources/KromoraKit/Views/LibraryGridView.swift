@@ -62,7 +62,8 @@ struct LibraryGridView: View {
                             width: max(1, geometry.size.width - 32),
                             cropGeneration: collection.cropGeneration,
                             layout: layout,
-                            aspectRatioAt: { entries[$0].aspectRatio }
+                            aspectRatioAt: { entries[$0].aspectRatio },
+                            aspectResolvedAt: { entries[$0].aspectResolved }
                         )
                         LazyVStack(alignment: .leading, spacing: CGFloat(layout.spacing)) {
                             ForEach(rows) { row in
@@ -268,11 +269,10 @@ private struct LibraryGridCell: View {
         if let thumbnail = item.thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
-                // Row geometry can briefly use fallback metadata while a cell is first
-                // materialized. Filling that frame crops the photo (most visibly for EXIF
-                // rotated portraits) until selection loads the oriented source dimensions.
-                // Fit keeps the complete image visible during that transition and when an edit
-                // changes the thumbnail's aspect ratio.
+                // The mosaic adopts pixel dimensions when the metadata burst settles. Until
+                // then a cell can still be a 4:3 placeholder, and a crop can change the
+                // bitmap before the row rebuilds. Fit keeps the whole photo visible in
+                // that frame instead of cropping it.
                 .aspectRatio(contentMode: .fit)
         } else if item.asset.thumbnailState == .failed {
             Rectangle()
