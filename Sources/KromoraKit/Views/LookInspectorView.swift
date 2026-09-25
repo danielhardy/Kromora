@@ -149,10 +149,6 @@ struct LookInspectorView: View {
             }
             Divider()
             lookList
-            if !viewModel.library.bundledAcknowledgement.isEmpty,
-               !viewModel.library.starterLooks.isEmpty {
-                starterAcknowledgement
-            }
             unresolvedLookSection
             intensitySection
         }
@@ -535,16 +531,6 @@ struct LookInspectorView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(.bar)
-    }
-
-    private var starterAcknowledgement: some View {
-        Text(viewModel.library.bundledAcknowledgement)
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .accessibilityLabel("Starter Look acknowledgement: \(viewModel.library.bundledAcknowledgement)")
     }
 
     @ViewBuilder

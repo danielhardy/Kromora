@@ -30,12 +30,14 @@ public struct KromoraAboutView: View {
 
     private let metadata: KromoraAboutMetadata
     private let licenseText: String
+    private let starterLookManifest: BundledLookManifest
 
     public init() {
         metadata = KromoraAboutMetadata()
         licenseText = KromoraKitResourceBundle.data(forResource: "LICENSE", withExtension: "txt")
             .flatMap { String(data: $0, encoding: .utf8) }
             ?? "The MIT license text is available from the Kromora project license source."
+        starterLookManifest = BundledLookLibrary.load().manifest
     }
 
     public var body: some View {
@@ -73,6 +75,29 @@ public struct KromoraAboutView: View {
                             .accessibilityLabel("Complete MIT License text")
                         Link("Open the canonical license source", destination: Self.licenseURL)
                     }
+                    .padding(.top, 4)
+                }
+
+                GroupBox("Bundled Starter Looks") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(starterLookManifest.acknowledgement)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        ForEach(starterLookManifest.looks, id: \.id) { look in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(look.name)
+                                    .font(.subheadline.weight(.semibold))
+                                Text("License: \(look.license)")
+                                Text("Attribution: \(look.attribution)")
+                                Text("Redistribution: \(look.redistribution)")
+                            }
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
                     .padding(.top, 4)
                 }
             }
