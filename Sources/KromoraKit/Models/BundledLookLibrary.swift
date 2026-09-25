@@ -59,6 +59,17 @@ struct BundledLookLibrary: Sendable {
     static let resourceSubdirectory = "Resources/StarterLooks"
     static let manifestName = "manifest"
 
+    /// Reads just the manifest (acknowledgement text plus per-Look provenance fields) without
+    /// parsing any `.cube` resource. Use this for text-only display, such as the About window's
+    /// credits section — `load()` additionally parses every bundled LUT and is unnecessary there.
+    static func loadManifestOnly(bundle: Bundle = KromoraKitResourceBundle.bundle) -> BundledLookManifest {
+        (try? readManifest(from: bundle)) ?? BundledLookManifest(
+            schemaVersion: 0,
+            acknowledgement: "Starter Look metadata is unavailable.",
+            looks: []
+        )
+    }
+
     /// Load whatever valid bundled entries are available. This is the runtime partial-failure path.
     static func load(bundle: Bundle = KromoraKitResourceBundle.bundle) -> Self {
         do {

@@ -37,7 +37,7 @@ public struct KromoraAboutView: View {
         licenseText = KromoraKitResourceBundle.data(forResource: "LICENSE", withExtension: "txt")
             .flatMap { String(data: $0, encoding: .utf8) }
             ?? "The MIT license text is available from the Kromora project license source."
-        starterLookManifest = BundledLookLibrary.load().manifest
+        starterLookManifest = BundledLookLibrary.loadManifestOnly()
     }
 
     public var body: some View {
