@@ -145,6 +145,7 @@ protocol MaskingWorkflowDestination: AnyObject {
     var maskOverlayEngine: any RenderEngining { get }
 
     func updateDocument(_ transform: (inout EditDocument) -> Void)
+    func updateDocument(debounced: Bool, _ transform: (inout EditDocument) -> Void)
     func setMaskingStatusMessage(_ message: String)
     func endUndoGrouping()
     func beginPreviewInteraction()
@@ -699,7 +700,7 @@ final class MaskingWorkflowCoordinator {
             interactionState.updateDraft(draft)
             return
         }
-        destination?.updateDocument { document in
+        destination?.updateDocument(debounced: debounced) { document in
             guard let index = document.localAdjustments.firstIndex(where: { $0.id == id }) else {
                 return
             }
