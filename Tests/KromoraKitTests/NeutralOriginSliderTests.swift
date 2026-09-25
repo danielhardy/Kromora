@@ -129,15 +129,39 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertGreaterThan(magenta.blueComponent, magenta.greenComponent, "the positive tint end should retain blue")
     }
 
-    func testChromaTracksRemainClearlyColouredWhenInactive() {
-        for style in [SliderTrackStyle.saturation, .vibrance] {
-            let sample = trackColor(style: style, at: 0.2)
-            let components = [sample.redComponent, sample.greenComponent, sample.blueComponent]
-            XCTAssertGreaterThan(
-                components.max()! - components.min()!,
-                0.06,
-                "\(style) should not collapse into a grey inactive track"
+    func testSaturationTrackRunsFromMutedLeftThroughCyanGreenToWarmColor() {
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            let restrained = trackColor(style: .saturation, at: 0.2, appearance: appearance)
+            let cyanGreen = trackColor(style: .saturation, at: 0.84, appearance: appearance)
+            let warm = trackColor(style: .saturation, at: 0.98, appearance: appearance)
+
+            XCTAssertLessThan(
+                chroma(of: restrained), 0.25,
+                "the reduced-saturation end should stay subdued in \(appearance)"
             )
+            XCTAssertGreaterThan(cyanGreen.greenComponent, cyanGreen.redComponent)
+            XCTAssertGreaterThan(cyanGreen.blueComponent, cyanGreen.redComponent)
+            XCTAssertGreaterThan(chroma(of: cyanGreen), 0.30)
+            XCTAssertGreaterThan(warm.redComponent, warm.blueComponent)
+            XCTAssertGreaterThan(warm.greenComponent, warm.blueComponent,
+                                 "the warm endpoint should remain amber rather than red in \(appearance)")
+            XCTAssertGreaterThan(chroma(of: warm), 0.35)
+        }
+    }
+
+    func testVibranceTrackRemainsChromaticFromBlueToMagenta() {
+        for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+            let blue = trackColor(style: .vibrance, at: 0.84, appearance: appearance)
+            let magenta = trackColor(style: .vibrance, at: 0.98, appearance: appearance)
+
+            XCTAssertGreaterThan(blue.blueComponent, blue.redComponent)
+            XCTAssertGreaterThan(blue.greenComponent, blue.redComponent)
+            XCTAssertGreaterThan(chroma(of: blue), 0.35,
+                                 "the blue range should be vivid in \(appearance)")
+            XCTAssertGreaterThan(magenta.redComponent, magenta.greenComponent)
+            XCTAssertGreaterThan(magenta.blueComponent, magenta.greenComponent)
+            XCTAssertGreaterThan(chroma(of: magenta), 0.35,
+                                 "the magenta end should be vivid in \(appearance)")
         }
     }
 
@@ -294,8 +318,11 @@ final class NeutralOriginSliderTests: XCTestCase {
         return slider
     }
 
-    private func trackColor(style: SliderTrackStyle, at fraction: CGFloat) -> NSColor {
+    private func trackColor(
+        style: SliderTrackStyle, at fraction: CGFloat, appearance: NSAppearance.Name = .aqua
+    ) -> NSColor {
         let slider = makeSlider(range: -100...100, neutral: 0, value: 0, trackStyle: style)
+        slider.appearance = NSAppearance(named: appearance)
         guard let cell = slider.cell as? NeutralOriginSliderCell,
               let rep = slider.bitmapImageRepForCachingDisplay(in: slider.bounds),
               let context = NSGraphicsContext(bitmapImageRep: rep)
@@ -319,6 +346,11 @@ final class NeutralOriginSliderTests: XCTestCase {
             return .clear
         }
         return sampled
+    }
+
+    private func chroma(of color: NSColor) -> CGFloat {
+        let components = [color.redComponent, color.greenComponent, color.blueComponent]
+        return components.max()! - components.min()!
     }
 
     /// The horizontal extent of the accent-coloured fill, in points, or `nil` when nothing is
