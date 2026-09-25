@@ -268,7 +268,12 @@ private struct LibraryGridCell: View {
         if let thumbnail = item.thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
-                .aspectRatio(contentMode: .fill)
+                // Row geometry can briefly use fallback metadata while a cell is first
+                // materialized. Filling that frame crops the photo (most visibly for EXIF
+                // rotated portraits) until selection loads the oriented source dimensions.
+                // Fit keeps the complete image visible during that transition and when an edit
+                // changes the thumbnail's aspect ratio.
+                .aspectRatio(contentMode: .fit)
         } else if item.asset.thumbnailState == .failed {
             Rectangle()
                 .fill(Color.secondary.opacity(0.12))
