@@ -12,13 +12,15 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-09-24T01:13:35.039Z
+updated: 2026-09-24T15:19:45.370Z
 depends_on:
   - KRMA-465
   - KRMA-466
   - KRMA-467
   - KRMA-468
   - KRMA-469
+  - KRMA-564
+  - KRMA-565
 blockers: []
 order: f
 board: product
@@ -35,10 +37,12 @@ This remains a **backlog tracking parent**. Do not claim it, do not `dg issue pr
 | KRMA-461, KRMA-462, KRMA-463 | Unrelated UI bugs filed beside this plan | Already `done`. Ignore. |
 | KRMA-464 | Stage 0, optional façade file moves | **Withdrawn.** Crop/canvas forwarders already exist (KRMA-552). The “Look folder” MARK also contains `shutdown()`. A file split here does not change ownership. |
 | KRMA-465 | Stage 1, Auto invocation | **Superseded by KRMA-528.** `AutoWorkflowCoordinator` owns invocation, progress, and cancellation. The remaining Auto MARK (`runAutoAdjustment`, about lines 1441–1571) is the apply façade and stays on the root. |
-| KRMA-466 | Stage 2, edited thumbnails | **Still open.** This is the next implementation ticket. |
-| KRMA-467 | Stage 3, preview and histogram scheduling | **Still open.** Start only after KRMA-466. The preview MARK is still about 365 lines, and idle/prefetch/histogram admission is still on the root. |
+| KRMA-466 | Stage 2, edited thumbnails | **Done.** `EditedThumbnailCoordinator` owns the workflow. |
+| KRMA-467 | Stage 3, preview and histogram scheduling | **In review.** `PreviewAdmissionCoordinator` owns admission. Publication is still on the root. |
 | KRMA-468 | Stage 4, masking workspace | **Superseded by KRMA-529.** `MaskingWorkflowCoordinator` owns the workspace. `AppViewModel+Masking.swift` is 172 lines of forwarders. |
-| KRMA-469 | Stage 5, re-inventory and docs | **Still open, last.** Start only after KRMA-466 and KRMA-467. `docs/APP_ARCHITECTURE.md` already documents source session, preview presentation, canvas, library import, and masking. |
+| KRMA-564 | Library window, selection, and culling | **Backlog.** Start after KRMA-467. `LibraryBrowsingCoordinator`. |
+| KRMA-565 | Preview publication | **Backlog.** Start after KRMA-467. `PreviewPublicationCoordinator`. |
+| KRMA-469 | Stage 5, re-inventory and docs | **Last.** Start after KRMA-467, KRMA-564, and KRMA-565. |
 
 The inventory table and stage write-ups under “Remaining inventory (2026-09-19)” are the original plan. Where they disagree with the table above, follow the table above.
 

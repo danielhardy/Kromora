@@ -2,7 +2,7 @@
 id: KRMA-561
 title: Bound asynchronous import waits in KeyMonitorTests
 type: bug
-status: claimed
+status: review
 priority: medium
 creation_provenance:
   runner: codex
@@ -11,15 +11,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-24T03:11:17.182Z
-updated: 2026-09-24T03:14:31.779Z
+updated: 2026-09-24T03:16:00.008Z
 blockers: []
-order: y
+order: q
 board: product
-claim:
-  actor: codex
-  session: 01MUEYGZ84SVD5HOPU
-  claimed_at: 2026-09-24T03:11:45.748Z
-  expires_at: 2026-09-24T04:11:45.748Z
 ---
 
 ## Objective
@@ -37,3 +32,8 @@ The serial XCTest process was sampled in this test at the wait for `keyboard-tex
 ## Files and checks
 - `Tests/KromoraKitTests/KeyMonitorTests.swift`
 - Focused `KeyMonitorTests.testPlainCommandCopyAndPasteRouteOnlyWhenGlobalSurfaceOwnsKeyboard` passed.
+
+
+### Comment — codex @ 2026-09-24T03:15:33.442Z
+
+Fixed the serial-lane hang by giving each view model a unique temporary package and replacing the unbounded source waits with independent five-second throwing waits. The focused KeyMonitor test passes in 1.065s. Commit: 043c2c0.

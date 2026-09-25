@@ -2,8 +2,42 @@
 id: KRMA-467
 title: "Stage 3: Move remaining preview and histogram scheduling ownership"
 type: task
-status: ready
+status: review
 priority: medium
+verification_report:
+  verdict: blocker
+  acceptance_criteria:
+    - criterion: RenderRequest / RenderEngine funnel semantics and preview quality/resource policies are preserved.
+      result: pass
+      notes: PreviewCoordinator remains the sole render-admission owner; PreviewAdmissionCoordinator.submit/scheduleInteractivePreview forward into it unchanged. Focused suite and fast CI lane pass.
+    - criterion: Histogram parity and comparison retry behavior are preserved.
+      result: pass
+      notes: Histogram admission moved to PreviewAdmissionCoordinator.updateHistogram/cancelHistogram/refreshHistogramGate and behaves correctly (HistogramTests, DevelopInspectorTests histogram cases pass). Comparison-retry behavior still works, but the cluster was never actually moved off AppViewModel (see finding below) despite being explicitly in scope.
+    - criterion: Collaborator-level fake-based admission/fence tests exist, with AppViewModel integration coverage for navigation, comparison, and histogram behavior.
+      result: fail
+      notes: "PreviewAdmissionCoordinatorTests.swift has only 1 of the 5 required cases (idle/adjacent-prefetch job-id independence). Missing: stale display revision/asset id drops a cache hit and histogram result; idle admission never calls the preview publication fake; comparison retry runs once per comparison revision; ROI requests do not adopt a canonical cache hit. AppViewModel integration coverage (FilmstripNavigationTests, ComparisonModeTests, ThumbnailSwitchLifecycleTests, PreviewDiskCacheTests) remains green."
+    - criterion: load(), updateDocument(), applyHistoryDocument(), and shutdown() sequencing remain root-owned.
+      result: pass
+      notes: Verified in AppViewModel.swift; shutdown() calls previewAdmissionCoordinator.shutdown() at the same point the pre-extraction code cancelled debounce/idle/prefetch work, before previewCoordinator.shutdown()/workScheduler.cancelAllAndWait().
+    - criterion: Focused tests, swift build, the relevant fast CI lane, dg validate, and git diff --check pass.
+      result: pass
+      notes: All five checks pass cleanly (see checks_run). This confirms the landed slice is functionally correct, not that the ticket's scope is complete.
+  checks_run:
+    - "swift build: pass"
+    - "swift test --filter 'PreviewAdmissionCoordinatorTests|PreviewPresentationCoordinatorTests|FilmstripNavigationTests|HistogramTests|ComparisonModeTests|PreviewDiskCacheTests': 46/46 pass"
+    - "scripts/ci-tests.sh fast: pass (exit 0)"
+    - "dg validate: OK (only pre-existing unrelated model-name warnings)"
+    - "git diff --check: pass"
+  findings:
+    - "Slice C's comparison-retry cluster (comparisonPreviewScheduledRevision, comparisonPreviewRetriedRevision, comparisonPreviewRetryTask, comparisonPreviewJobID, scheduleOriginalPreview, comparisonPreviewDidFail, cancelComparisonPreview) was never moved into PreviewAdmissionCoordinator; it remains entirely on AppViewModel (lines ~332-336, ~812, ~3891-4051). This contradicts the ticket's explicit ownership contract ('State owned: ... comparison retry ...') and the Slice C execution brief."
+    - docs/APP_ARCHITECTURE.md was updated to state PreviewAdmissionCoordinator 'owns ... comparison-retry admission,' which is currently inaccurate given the above.
+    - PreviewAdmissionCoordinatorTests.swift implements only 1 of the 5 fake-based test cases the ticket required (job-id independence); the stale-revision/asset-id fence, idle-admission-never-publishes, comparison-retry-once-per-revision, and ROI-no-canonical-adoption cases are all missing.
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-24T03:55:55.273Z
+  session: 01MUEZU4FBFZYXXGTZ
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -13,9 +47,10 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:24.296Z
-updated: 2026-09-24T01:18:17.490Z
+updated: 2026-09-24T03:55:55.333Z
 depends_on:
   - KRMA-466
+  - KRMA-562
 blockers: []
 order: v
 board: product
@@ -183,3 +218,30 @@ Triage 2026-09-23: added a three-slice execution brief (histogram, idle/prefetch
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-24T03:55:55.332Z: Verification report
+Verdict: BLOCKER
+Acceptance criteria:
+- [x] RenderRequest / RenderEngine funnel semantics and preview quality/resource policies are preserved. (pass) — PreviewCoordinator remains the sole render-admission owner; PreviewAdmissionCoordinator.submit/scheduleInteractivePreview forward into it unchanged. Focused suite and fast CI lane pass.
+- [x] Histogram parity and comparison retry behavior are preserved. (pass) — Histogram admission moved to PreviewAdmissionCoordinator.updateHistogram/cancelHistogram/refreshHistogramGate and behaves correctly (HistogramTests, DevelopInspectorTests histogram cases pass). Comparison-retry behavior still works, but the cluster was never actually moved off AppViewModel (see finding below) despite being explicitly in scope.
+- [ ] Collaborator-level fake-based admission/fence tests exist, with AppViewModel integration coverage for navigation, comparison, and histogram behavior. (fail) — PreviewAdmissionCoordinatorTests.swift has only 1 of the 5 required cases (idle/adjacent-prefetch job-id independence). Missing: stale display revision/asset id drops a cache hit and histogram result; idle admission never calls the preview publication fake; comparison retry runs once per comparison revision; ROI requests do not adopt a canonical cache hit. AppViewModel integration coverage (FilmstripNavigationTests, ComparisonModeTests, ThumbnailSwitchLifecycleTests, PreviewDiskCacheTests) remains green.
+- [x] load(), updateDocument(), applyHistoryDocument(), and shutdown() sequencing remain root-owned. (pass) — Verified in AppViewModel.swift; shutdown() calls previewAdmissionCoordinator.shutdown() at the same point the pre-extraction code cancelled debounce/idle/prefetch work, before previewCoordinator.shutdown()/workScheduler.cancelAllAndWait().
+- [x] Focused tests, swift build, the relevant fast CI lane, dg validate, and git diff --check pass. (pass) — All five checks pass cleanly (see checks_run). This confirms the landed slice is functionally correct, not that the ticket's scope is complete.
+Checks run:
+- swift build: pass
+- swift test --filter 'PreviewAdmissionCoordinatorTests|PreviewPresentationCoordinatorTests|FilmstripNavigationTests|HistogramTests|ComparisonModeTests|PreviewDiskCacheTests': 46/46 pass
+- scripts/ci-tests.sh fast: pass (exit 0)
+- dg validate: OK (only pre-existing unrelated model-name warnings)
+- git diff --check: pass
+Findings:
+- Slice C's comparison-retry cluster (comparisonPreviewScheduledRevision, comparisonPreviewRetriedRevision, comparisonPreviewRetryTask, comparisonPreviewJobID, scheduleOriginalPreview, comparisonPreviewDidFail, cancelComparisonPreview) was never moved into PreviewAdmissionCoordinator; it remains entirely on AppViewModel (lines ~332-336, ~812, ~3891-4051). This contradicts the ticket's explicit ownership contract ('State owned: ... comparison retry ...') and the Slice C execution brief.
+- docs/APP_ARCHITECTURE.md was updated to state PreviewAdmissionCoordinator 'owns ... comparison-retry admission,' which is currently inaccurate given the above.
+- PreviewAdmissionCoordinatorTests.swift implements only 1 of the 5 fake-based test cases the ticket required (job-id independence); the stale-revision/asset-id fence, idle-admission-never-publishes, comparison-retry-once-per-revision, and ROI-no-canonical-adoption cases are all missing.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUEZU4FBFZYXXGTZ
+Summary: Stage 3 landed histogram, idle/prefetch, and interactive/settled admission correctly (build/tests/CI all green), but the comparison-retry cluster explicitly required by Slice C and the ownership contract was never moved off AppViewModel, and docs/APP_ARCHITECTURE.md now inaccurately claims it was. 4 of 5 required PreviewAdmissionCoordinatorTests fake-based cases are also missing. Filed KRMA-562 as the child ticket to finish the extraction and add the missing tests; returning KRMA-467 to review.

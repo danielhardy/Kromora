@@ -2,8 +2,38 @@
 id: KRMA-560
 title: Match the trailing toolbar cluster to the rest of the horizontal bar
 type: bug
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: In Library, the circled trailing toolbar region uses the same surface as the rest of the horizontal bar. No second plate, material, or color break behind that cluster.
+      result: pass
+      notes: "ContentView.swift hides the macOS 26 shared glass plate behind the trailing primary-action ToolbarItemGroup via .sharedBackgroundVisibility(.hidden), guarded by #available(macOS 26.0, *); the pre-26 branch is unchanged since that plate doesn't exist there."
+    - criterion: Edit shows the same continuous bar.
+      result: pass
+      notes: Library and Edit share the same ContentView.toolbar block and toolbarContent, so the fix applies uniformly to both modes.
+    - criterion: With the inspector open, the toolbar still spans the full window width as one band (KRMA-513).
+      result: pass
+      notes: ".toolbarBackground(.visible, for: .windowToolbar) from KRMA-513 is untouched by this change; the new modifier only affects the trailing ToolbarItemGroup's own background plate."
+    - criterion: Culling controls, Delete, and the photo grid keep their current roles.
+      result: pass
+      notes: This commit (15528d1) touches only ContentView.swift. A separate KRMA-560 commit (faab249) applied KromoraTheme.secondaryChrome to the Delete row in LibraryGridView.swift to match CullingBarView's existing secondaryChrome surface, consistent with the ticket's fallback guidance; CullingBarView itself is unchanged.
+    - criterion: swift build succeeds and scripts/ci-tests.sh fast passes.
+      result: pass
+      notes: "swift build: Build complete. scripts/ci-tests.sh fast: 1185/1185 reached, exit code 0."
+  checks_run:
+    - swift build
+    - scripts/ci-tests.sh fast (1185/1185)
+    - git diff --check
+    - dg validate
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-24T03:24:34.751Z
+  session: 01MUEYRR3V96E0VCXP
 creation_provenance:
   runner: cursor
   model: unknown
@@ -13,9 +43,9 @@ labels:
   - chrome
   - library
 created: 2026-09-24T00:35:41.566Z
-updated: 2026-09-24T00:35:53.989Z
+updated: 2026-09-24T03:24:34.753Z
 blockers: []
-order: h
+order: a0
 board: product
 context:
   files:
@@ -23,6 +53,7 @@ context:
     - Sources/KromoraKit/Views/KromoraTheme.swift
     - Sources/KromoraKit/Views/CullingBarView.swift
     - Sources/KromoraKit/Views/LibraryGridView.swift
+  docs: []
   issues:
     - KRMA-513
   commands:
@@ -55,3 +86,34 @@ Library and Edit share this toolbar, so both should show one surface. Do not res
 - [ ] `swift build` succeeds and `scripts/ci-tests.sh fast` passes.
 
 ![Library window with the trailing toolbar cluster circled](../assets/KRMA-560/composer-annotation-4cf4d92f-76cb-4453-8b23-254192d97b2f.png)
+
+
+### Comment — codex @ 2026-09-24T03:19:58.683Z
+
+Removed the macOS 26 shared glass plate from the trailing primary-action toolbar group so the native full-width toolbar material remains continuous in Library and Edit. The macOS 14+ fallback and culling row are unchanged. Checks: swift build, scripts/ci-tests.sh fast (1185 tests reached), git diff --check, dg validate. Commit: 15528d1.
+
+## Agent log
+
+- 2026-09-24T03:24:34.751Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] In Library, the circled trailing toolbar region uses the same surface as the rest of the horizontal bar. No second plate, material, or color break behind that cluster. (pass) — ContentView.swift hides the macOS 26 shared glass plate behind the trailing primary-action ToolbarItemGroup via .sharedBackgroundVisibility(.hidden), guarded by #available(macOS 26.0, *); the pre-26 branch is unchanged since that plate doesn't exist there.
+- [x] Edit shows the same continuous bar. (pass) — Library and Edit share the same ContentView.toolbar block and toolbarContent, so the fix applies uniformly to both modes.
+- [x] With the inspector open, the toolbar still spans the full window width as one band (KRMA-513). (pass) — .toolbarBackground(.visible, for: .windowToolbar) from KRMA-513 is untouched by this change; the new modifier only affects the trailing ToolbarItemGroup's own background plate.
+- [x] Culling controls, Delete, and the photo grid keep their current roles. (pass) — This commit (15528d1) touches only ContentView.swift. A separate KRMA-560 commit (faab249) applied KromoraTheme.secondaryChrome to the Delete row in LibraryGridView.swift to match CullingBarView's existing secondaryChrome surface, consistent with the ticket's fallback guidance; CullingBarView itself is unchanged.
+- [x] swift build succeeds and scripts/ci-tests.sh fast passes. (pass) — swift build: Build complete. scripts/ci-tests.sh fast: 1185/1185 reached, exit code 0.
+Checks run:
+- swift build
+- scripts/ci-tests.sh fast (1185/1185)
+- git diff --check
+- dg validate
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUEYRR3V96E0VCXP
+Summary: Verified the macOS 26 trailing toolbar glass-plate fix: swift build and scripts/ci-tests.sh fast (1185/1185) pass, git diff --check and dg validate are clean, and the shared toolbarContent/toolbar block confirms Library and Edit both get the fix.
