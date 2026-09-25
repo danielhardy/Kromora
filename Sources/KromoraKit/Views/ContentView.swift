@@ -62,11 +62,12 @@ public struct ContentView: View {
                     }
                 }
             }
-            // The inspector is a sibling column of the navigation content. Explicitly keep the
-            // native window-toolbar material visible so SwiftUI paints one continuous chrome band
-            // across that column too. Inspector roots stay transparent so their system material
-            // starts below this band instead of owning a competing top edge.
-            .toolbarBackground(.visible, for: .windowToolbar)
+            // The histogram occupies the toolbar band in the inspector. A visible toolbar
+            // background is a second layer over that band, and dragging the window opens a
+            // one-pixel gap between the layers. The title bar stays transparent so the plot
+            // is the only thing drawn there.
+            .toolbarBackground(.hidden, for: .windowToolbar)
+            .background(TitlebarSeparatorSuppression())
             .photosPicker(
                 isPresented: $viewModel.isPhotosPickerPresented,
                 selection: $photosSelection,
@@ -164,7 +165,10 @@ public struct ContentView: View {
 
     private var mainContent: some View {
         NavigationStack {
+            // The detail column's trailing safe area is an empty inset between the photo and the
+            // inspector. The preview should meet the divider.
             detailContent
+                .ignoresSafeArea(.container, edges: .trailing)
         }
         .background(KromoraTheme.windowBackground)
         .inspector(isPresented: Binding(
@@ -177,6 +181,8 @@ public struct ContentView: View {
             }
         )) {
             InfoInspectorView(viewModel: viewModel, inspectorState: inspectorState)
+                // The plot occupies the band beside the toolbar controls.
+                .ignoresSafeArea(.container, edges: .top)
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
     }
@@ -527,3 +533,87 @@ private struct CropToolbarControls: View {
 
 // The File menu, its notification names, and `MenuCommandReceivers` live in
 // MenuCommands.swift.
+
+/// The histogram draws in the title-bar band. AppKit otherwise composites that band as its own
+/// layer, and dragging the window opens a one-pixel gap through the plot. A transparent title
+/// bar leaves the plot as the single layer.
+private struct TitlebarSeparatorSuppression: NSViewRepresentable {
+    func makeNSView(context: Context) -> TitlebarSeparatorSuppressionView {
+        TitlebarSeparatorSuppressionView()
+    }
+
+    func updateNSView(_ nsView: TitlebarSeparatorSuppressionView, context: Context) {
+        nsView.suppressSeparator()
+    }
+
+    static func dismantleNSView(_ nsView: TitlebarSeparatorSuppressionView, coordinator: ()) {
+        nsView.detach()
+    }
+}
+
+private final class TitlebarSeparatorSuppressionView: NSView {
+    private weak var observedWindow: NSWindow?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if let observedWindow {
+            NotificationCenter.default.removeObserver(
+                self, name: NSWindow.didMoveNotification, object: observedWindow
+            )
+            NotificationCenter.default.removeObserver(
+                self, name: NSWindow.didBecomeKeyNotification, object: observedWindow
+            )
+        }
+        observedWindow = window
+        if let window {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowChanged(_:)),
+                name: NSWindow.didMoveNotification,
+                object: window
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(windowChanged(_:)),
+                name: NSWindow.didBecomeKeyNotification,
+                object: window
+            )
+        }
+        suppressSeparator()
+    }
+
+    override func layout() {
+        super.layout()
+        suppressSeparator()
+    }
+
+    override func viewWillDraw() {
+        super.viewWillDraw()
+        suppressSeparator()
+    }
+
+    func detach() {
+        NotificationCenter.default.removeObserver(self)
+        observedWindow = nil
+    }
+
+    func suppressSeparator() {
+        guard let window else { return }
+        window.styleMask.insert(.fullSizeContentView)
+        window.titlebarAppearsTransparent = true
+        window.titlebarSeparatorStyle = .none
+        window.isOpaque = true
+        // A clear window background is what shows through the drag gap as a black line.
+        if window.backgroundColor == nil || window.backgroundColor?.alphaComponent == 0 {
+            window.backgroundColor = .windowBackgroundColor
+        }
+    }
+
+    @objc private func windowChanged(_ notification: Notification) {
+        suppressSeparator()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+}
