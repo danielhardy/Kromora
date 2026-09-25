@@ -24,7 +24,7 @@ struct VisionConfiguration: Codable, Sendable, Equatable, Hashable {
     static let `default` = VisionConfiguration()
 
     var providerVersion: String {
-        "vision-a\(attentionRevision)-f\(foregroundRevision)-face\(faceRevision)-person\(personRevision)-lm\(faceLandmarkRevision)"
+        "vision-a\(attentionRevision)-f\(foregroundRevision)-face\(faceRevision)-person\(personRevision)-lm\(faceLandmarkRevision)-matte2"
     }
 }
 
@@ -126,11 +126,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         }
 
         let instances = try await foregroundMasks(image: image, quality: quality)
-        // Seed from the instances themselves, never from `image.dimensions`: Vision reports
-        // instance masks at its own output resolution (a square buffer regardless of source
-        // aspect), so combining them with an analysis-sized seed threw incompatibleSizes for
-        // every real image.
-        guard let seed = instances.first, let seedPixels = await store.pixels(for: seed.reference) else {
+        guard !instances.isEmpty else {
             // Documented empty-result case: a zero-coverage union at the analysis dimensions so
             // Background can still be produced as its complement.
             let empty = try NormalizedMask(
@@ -141,12 +137,16 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             return RegionMask(kind: .foreground, bounds: bounds(of: empty), quality: quality,
                               reference: reference, confidence: 1, coverage: empty.coverage)
         }
-        var union = seedPixels
-        for instance in instances.dropFirst() {
+        var union = try NormalizedMask(
+            size: image.dimensions,
+            values: Array(repeating: 0, count: image.dimensions.width * image.dimensions.height)
+        )
+        for instance in instances {
             guard let pixels = await store.pixels(for: instance.reference) else {
                 throw RegionMaskError.missingPixels
             }
-            union = try MaskOperations.union(union, MaskOperations.resized(pixels, to: union.size))
+            let alignedPixels = try MaskOperations.resized(pixels, to: image.dimensions)
+            union = try MaskOperations.union(union, alignedPixels)
         }
         let reference = try await store.store(union, for: key, quality: quality)
         return RegionMask(kind: .foreground, bounds: bounds(of: union), quality: quality,
@@ -217,9 +217,9 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         return masks
     }
 
-    /// Returns each foreground instance as a real pixel mask. The ordinal is stable for the
-    /// request result: `.foregroundInstance(0)` is the first instance, `.foregroundInstance(1)`
-    /// the second, and so on. Vision's instance labels remain private to this adapter.
+    /// Returns each foreground instance as an analysis-image-space pixel mask. The ordinal is
+    /// stable for the request result: `.foregroundInstance(0)` is the first instance,
+    /// `.foregroundInstance(1)` the second, and so on. Vision's instance labels remain private.
     func foregroundMasks(image: AnalysisImage, quality: MaskQuality) async throws -> [RegionMask] {
         try Task.checkCancellation()
         let firstKey = cacheKey(for: .foregroundInstance(0), image: image, quality: quality)
@@ -268,11 +268,13 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             try Task.checkCancellation()
             let buffer: CVPixelBuffer
             do {
-                buffer = try observation.generateMask(forInstances: IndexSet(integer: instanceID))
+                buffer = try observation.generateScaledMaskForImage(
+                    forInstances: IndexSet(integer: instanceID), from: handler
+                )
             } catch {
                 throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
             }
-            let pixels = try normalizedMask(from: buffer)
+            let pixels = try imageAlignedMask(from: buffer, image: image)
             let key = cacheKey(for: .foregroundInstance(index), image: image, quality: quality)
             let reference = try await store.store(pixels, for: key, quality: quality)
             masks.append(makeForegroundMask(index: index, pixels: pixels, reference: reference,
@@ -311,13 +313,41 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             throw VisionSemanticMaskError.noSalientRegion
         }
 
-        let bounds = NormalizedRect.fromVision(salientObject.boundingBox)
-        // The salient-object box is the stable semantic result. It is rasterized at the requested
-        // mask resolution here; a later refinement ticket can use the observation's heat map for
-        // a higher-fidelity render-quality matte without changing this provider boundary.
-        let pixels = try rectangularMask(bounds: bounds, size: image.dimensions)
+        let salientBounds = NormalizedRect.fromVision(salientObject.boundingBox)
+        let foregroundInstances = try await foregroundMasks(image: image, quality: quality)
+        var selectedPixels: NormalizedMask?
+        var selectedOverlap: Float = 0
+        for instance in foregroundInstances {
+            guard let instancePixels = await store.pixels(for: instance.reference) else { continue }
+            let overlap = overlap(of: instancePixels, with: salientBounds)
+            if overlap > selectedOverlap {
+                selectedPixels = instancePixels
+                selectedOverlap = overlap
+            }
+        }
+        guard var pixels = selectedPixels, selectedOverlap >= 0.05 else {
+            throw VisionSemanticMaskError.noSalientRegion
+        }
+
+        // Saliency chooses among segmented objects; its bounding box is never the painted matte.
+        // Prefer Person only when its existing cache gate applies and its matte overlaps the
+        // salient region meaningfully.
+        if quality != .render, selectedOverlap >= 0.15 {
+            do {
+                let person = try await personMask(image: image, quality: quality)
+                if let personPixels = await store.pixels(for: person.reference),
+                   overlap(of: personPixels, with: salientBounds) >= 0.15 {
+                    pixels = try MaskOperations.resized(personPixels, to: image.dimensions)
+                }
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Person is a refinement of the selected instance. A gated or failed optional
+                // Person request leaves the valid foreground instance matte in place.
+            }
+        }
         let reference = try await store.store(pixels, for: key, quality: quality)
-        return RegionMask(kind: .subject, bounds: bounds, quality: quality, reference: reference,
+        return RegionMask(kind: .subject, bounds: bounds(of: pixels), quality: quality, reference: reference,
                           confidence: 1, coverage: pixels.coverage)
     }
 
@@ -548,6 +578,37 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         return try NormalizedMask(size: PixelDimensions(width: width, height: height), values: values)
     }
 
+    /// Vision's scaled instance API maps provider labels into the request image. Keep the stored
+    /// value on the analysis grid even if a Vision version returns a nearby output size.
+    private func imageAlignedMask(from buffer: CVPixelBuffer, image: AnalysisImage) throws -> NormalizedMask {
+        let pixels = try normalizedMask(from: buffer)
+        guard pixels.size != image.dimensions else { return pixels }
+        return try MaskOperations.resized(pixels, to: image.dimensions)
+    }
+
+    /// Fraction of the salient rectangle covered by a matte. Sampling in normalized coordinates
+    /// lets this compare image-aligned foreground masks with lower-resolution Person masks.
+    private func overlap(of mask: NormalizedMask, with rect: NormalizedRect) -> Float {
+        let minX = max(0, min(1, rect.minX))
+        let maxX = max(0, min(1, rect.maxX))
+        let minY = max(0, min(1, rect.minY))
+        let maxY = max(0, min(1, rect.maxY))
+        guard maxX > minX, maxY > minY else { return 0 }
+        var total: Float = 0
+        var count = 0
+        for y in 0..<mask.size.height {
+            let normalizedY = (Double(y) + 0.5) / Double(mask.size.height)
+            guard normalizedY >= minY, normalizedY < maxY else { continue }
+            for x in 0..<mask.size.width {
+                let normalizedX = (Double(x) + 0.5) / Double(mask.size.width)
+                guard normalizedX >= minX, normalizedX < maxX else { continue }
+                total += mask.values[y * mask.size.width + x]
+                count += 1
+            }
+        }
+        return count == 0 ? 0 : total / Float(count)
+    }
+
     /// Constructing the handler is kept private so VNImageRequestHandler cannot cross isolation.
     private func makeRequestHandler(for image: AnalysisImage) throws -> VNImageRequestHandler {
         let ciImage: CIImage?
@@ -572,27 +633,6 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         }
         return MaskCacheKey(identity: identity, kind: kind, quality: quality,
                             providerVersion: configuration.providerVersion)
-    }
-
-    private func rectangularMask(bounds: NormalizedRect, size: PixelDimensions) throws -> NormalizedMask {
-        var values = Array(repeating: Float.zero, count: size.width * size.height)
-        var total: Float = 0
-        for y in 0..<size.height {
-            let normalizedY = Double(y) / Double(max(1, size.height - 1))
-            for x in 0..<size.width {
-                let normalizedX = Double(x) / Double(max(1, size.width - 1))
-                if normalizedX >= bounds.minX, normalizedX <= bounds.maxX,
-                   normalizedY >= bounds.minY, normalizedY <= bounds.maxY {
-                    values[y * size.width + x] = 1
-                    total += 1
-                }
-            }
-        }
-        return NormalizedMask(
-            trustingSize: size, values: values,
-            coverage: values.isEmpty ? 0 : total / Float(values.count),
-            isBinary: true
-        )
     }
 
     private func bounds(of mask: NormalizedMask) -> NormalizedRect {

@@ -134,10 +134,7 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         }
     }
 
-    func testForegroundUnionAcceptsInstanceMasksAtProviderResolution() async throws {
-        // Regression: Vision reports instance masks at its own output resolution (e.g. a square
-        // 512×512 buffer for a 3:2 source), so seeding the union at the analysis dimensions made
-        // MaskOperations.union throw incompatibleSizes for every real Foreground/Background mask.
+    func testForegroundUnionNormalizesDifferingInstanceResolutionsToAnalysisImage() async throws {
         let directory = try Fixtures.makeTempDirectory("ForegroundUnionSizeTests")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = MaskStore(directory: directory)
@@ -172,8 +169,11 @@ final class VisionSemanticMaskProviderTests: XCTestCase {
         XCTAssertEqual(union.kind, .foreground)
         let maybeUnionPixels = await store.pixels(for: union.reference)
         let unionPixels = try XCTUnwrap(maybeUnionPixels)
-        XCTAssertEqual(unionPixels.size, instanceSize, "the union must adopt the instance resolution")
-        let expected = try MaskOperations.union(first, second)
+        XCTAssertEqual(unionPixels.size, image.dimensions,
+                       "the stored union must use the analysis image coordinate space")
+        let alignedFirst = try MaskOperations.resized(first, to: image.dimensions)
+        let alignedSecond = try MaskOperations.resized(second, to: image.dimensions)
+        let expected = try MaskOperations.union(alignedFirst, alignedSecond)
         XCTAssertEqual(unionPixels.values, expected.values)
     }
 
