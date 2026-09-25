@@ -33,7 +33,8 @@ enum CollectionProjection {
             let entries = indices.map { index in
                 ImageCollection.ThumbnailEntry(
                     id: items[index].id, itemIndex: index,
-                    aspectRatio: items[index].libraryAspectRatio
+                    aspectRatio: items[index].libraryAspectRatio,
+                    aspectResolved: items[index].hasResolvedLibraryAspect
                 )
             }
             let next = Snapshot(filteredIndices: indices, thumbnailEntries: entries)

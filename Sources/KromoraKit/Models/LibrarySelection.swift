@@ -275,20 +275,22 @@ struct LibraryGridLayout: Sendable, Equatable {
     }
 }
 
-/// Retains mosaic geometry across item mutations that do not change the filtered collection.
+/// Retains mosaic geometry across item mutations that do not change the placed photos.
 ///
-/// Metadata arrives after discovery and changes an item's aspect ratio from the photographic
-/// fallback to its real value. Rebuilding rows for that mutation would move every later item in
-/// the collection, so the cache does not key on the raw per-item aspect ratios. Crop edits also
-/// change an item's presented aspect ratio, but they are rare, explicit user actions rather than
-/// background metadata arrival, so they invalidate the snapshot through `cropGeneration` instead
-/// — bumped only by `ImageCollectionPresentationModel.setPresentedCrop`. The row snapshot is still
-/// value data, so the lazy stack keeps virtualizing the hosted cells as before.
+/// Discovery publishes items before ImageIO dimensions arrive, and the grid would otherwise
+/// lock those photos into the 4:3 fallback. The first time an item's pixel dimensions resolve,
+/// the cache rebuilds so the initial mosaic matches the photos. Later metadata rewrites of an
+/// already-resolved aspect do not move rows; a scan must not reshuffle the library on every
+/// header. Crop edits are the exception: they invalidate through `cropGeneration`, bumped only
+/// by `ImageCollectionPresentationModel.setPresentedCrop`. The row snapshot is still value
+/// data, so the lazy stack keeps virtualizing the hosted cells as before.
 @MainActor
 final class LibraryMosaicLayoutCache {
     private var cachedItemIDs: [PhotoAssetID]?
     private var cachedWidth: Double?
     private var cachedCropGeneration: Int?
+    private var cachedAspects: [Double]?
+    private var cachedResolved: [Bool]?
     private var cachedRows: [LibraryGridLayout.MosaicRow] = []
 
     /// Exposed for regression tests and performance instrumentation.
@@ -299,19 +301,34 @@ final class LibraryMosaicLayoutCache {
         width: Double,
         cropGeneration: Int,
         layout: LibraryGridLayout,
-        aspectRatioAt: (Int) -> Double
+        aspectRatioAt: (Int) -> Double,
+        aspectResolvedAt: (Int) -> Bool = { _ in true }
     ) -> [LibraryGridLayout.MosaicRow] {
-        guard cachedItemIDs != itemIDs
-            || cachedWidth != width
-            || cachedCropGeneration != cropGeneration else {
+        let aspectRatios = itemIDs.indices.map(aspectRatioAt)
+        let resolved = itemIDs.indices.map(aspectResolvedAt)
+        let samePlacement = cachedItemIDs == itemIDs
+            && cachedWidth == width
+            && cachedCropGeneration == cropGeneration
+        if samePlacement, cachedAspects == aspectRatios, cachedResolved == resolved {
+            return cachedRows
+        }
+        if samePlacement,
+           let cachedResolved,
+           cachedResolved.count == resolved.count,
+           !zip(cachedResolved, resolved).contains(where: { wasResolved, isResolved in
+               !wasResolved && isResolved
+           }) {
+            // Pixel dimensions were already committed. Ignore a later metadata rewrite so a
+            // scan cannot move every following row. Crop changes miss `samePlacement`.
             return cachedRows
         }
 
-        let aspectRatios = itemIDs.indices.map(aspectRatioAt)
         cachedRows = layout.mosaicRows(aspectRatios: aspectRatios, width: width)
         cachedItemIDs = itemIDs
         cachedWidth = width
         cachedCropGeneration = cropGeneration
+        cachedAspects = aspectRatios
+        cachedResolved = resolved
         recomputeCount += 1
         return cachedRows
     }

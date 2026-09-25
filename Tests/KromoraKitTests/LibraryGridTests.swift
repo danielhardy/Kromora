@@ -66,7 +66,7 @@ final class LibraryGridTests: TempDirectoryTestCase {
         )
     }
 
-    func testMosaicCacheFreezesPlacedRowsWhenDeferredAspectRatioArrives() {
+    func testMosaicCacheRebuildsWhenPlaceholderAspectBecomesResolved() {
         let cache = LibraryMosaicLayoutCache()
         let layout = LibraryGridLayout()
         let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
@@ -77,18 +77,52 @@ final class LibraryGridTests: TempDirectoryTestCase {
             width: 900,
             cropGeneration: 0,
             layout: layout,
-            aspectRatioAt: { fallback[$0] }
+            aspectRatioAt: { fallback[$0] },
+            aspectResolvedAt: { _ in false }
         )
         let resolved = cache.rows(
             itemIDs: itemIDs,
             width: 900,
             cropGeneration: 0,
             layout: layout,
-            aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] }
+            aspectRatioAt: { $0 == 0 ? 0.75 : fallback[$0] },
+            aspectResolvedAt: { $0 == 0 }
         )
 
-        XCTAssertEqual(resolved, initial, "metadata must not move already-placed mosaic rows")
-        XCTAssertEqual(cache.recomputeCount, 1, "a metadata update must not redo full-collection row math")
+        XCTAssertNotEqual(
+            resolved, initial,
+            "the first pixel dimensions must replace the 4:3 placeholder mosaic"
+        )
+        XCTAssertEqual(cache.recomputeCount, 2)
+        let placed = resolved[0]
+        XCTAssertEqual(placed.itemWidths[0] / placed.imageHeight, 0.75, accuracy: 0.000_001)
+    }
+
+    func testMosaicCacheKeepsPlacedRowsWhenResolvedAspectIsRewritten() {
+        let cache = LibraryMosaicLayoutCache()
+        let layout = LibraryGridLayout()
+        let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
+        let itemIDs = fallback.indices.map { _ in PhotoAssetID.imported(UUID()) }
+
+        let initial = cache.rows(
+            itemIDs: itemIDs,
+            width: 900,
+            cropGeneration: 0,
+            layout: layout,
+            aspectRatioAt: { fallback[$0] },
+            aspectResolvedAt: { _ in true }
+        )
+        let rewritten = cache.rows(
+            itemIDs: itemIDs,
+            width: 900,
+            cropGeneration: 0,
+            layout: layout,
+            aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] },
+            aspectResolvedAt: { _ in true }
+        )
+
+        XCTAssertEqual(rewritten, initial, "a later metadata rewrite must not move placed rows")
+        XCTAssertEqual(cache.recomputeCount, 1, "a resolved-aspect rewrite must not redo row math")
     }
 
     func testMosaicCacheRebuildsWhenCropGenerationChanges() {
@@ -175,6 +209,13 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
         let item = try XCTUnwrap(collection.items.first)
         XCTAssertEqual(item.libraryAspectRatio, 0.75, accuracy: 0.001)
+        XCTAssertEqual(
+            collection.thumbnailEntries.first?.aspectRatio ?? 0,
+            0.75,
+            accuracy: 0.001,
+            "the grid mosaic must see the oriented aspect as soon as metadata settles"
+        )
+        XCTAssertEqual(collection.thumbnailEntries.first?.aspectResolved, true)
         collection.requestThumbnail(for: item.id)
         let deadline = Date().addingTimeInterval(5)
         while item.thumbnail == nil {

@@ -47,6 +47,9 @@ final class ImageCollectionPresentationModel {
         let id: PhotoAssetID
         let itemIndex: Int?
         let aspectRatio: Double
+        /// False while the entry is still using the 4:3 fallback because pixel dimensions
+        /// have not arrived. The mosaic may replace that placeholder; a resolved entry stays put.
+        let aspectResolved: Bool
         var isPlaceholder: Bool { false }
     }
 
@@ -72,9 +75,12 @@ final class ImageCollectionPresentationModel {
                   dimensions.width > 0, dimensions.height > 0 else { return .zero }
             return CGSize(width: dimensions.width, height: dimensions.height)
         }
+        var hasResolvedLibraryAspect: Bool {
+            guard let dimensions = asset.dimensions else { return false }
+            return dimensions.width > 0 && dimensions.height > 0
+        }
         var libraryAspectRatio: Double {
-            guard let dimensions = asset.dimensions,
-                  dimensions.width > 0, dimensions.height > 0 else { return 4.0 / 3.0 }
+            guard hasResolvedLibraryAspect, let dimensions = asset.dimensions else { return 4.0 / 3.0 }
             return LibraryGridLayout.presentedAspectRatio(
                 sourceAspectRatio: Double(dimensions.width) / Double(dimensions.height),
                 crop: presentedCrop
@@ -185,6 +191,9 @@ final class ImageCollectionPresentationModel {
     private var nextMetadataRequestID: UInt64 = 0
     private var pendingMetadataRequestIDs: Set<UInt64> = []
     private var metadataCompletionWaiters: [CheckedContinuation<Void, Never>] = []
+    /// Dimensions that arrived during the current metadata burst. Published once when the
+    /// burst drains so the mosaic corrects itself without rebuilding on every header.
+    private var metadataAffectsMosaic = false
     private var scanGeneration: UInt64 = 0
 
     private struct MetadataRequest: Sendable {
@@ -558,6 +567,7 @@ final class ImageCollectionPresentationModel {
         metadataContinuation = nil
         metadataTask?.cancel()
         metadataTask = nil
+        metadataAffectsMosaic = false
         pendingMetadataRequestIDs.removeAll()
         let waiters = metadataCompletionWaiters
         metadataCompletionWaiters.removeAll()
@@ -624,9 +634,12 @@ final class ImageCollectionPresentationModel {
         }
         switch outcome {
         case .success(let metadata):
+            let previousDimensions = items[index].asset.dimensions
             items[index].metadata = metadata
             items[index].asset.updateMetadata(from: metadata)
-            invalidateCollectionProjection(notify: true)
+            if items[index].asset.dimensions != previousDimensions {
+                metadataAffectsMosaic = true
+            }
         case .failure(let warning):
             if !scanWarnings.contains(where: { $0.message == warning }) {
                 scanWarnings.append(.init(id: warning, message: warning))
@@ -636,6 +649,10 @@ final class ImageCollectionPresentationModel {
     }
     private func finishMetadataWaitersIfIdle() {
         guard pendingMetadataRequestIDs.isEmpty else { return }
+        if metadataAffectsMosaic {
+            metadataAffectsMosaic = false
+            invalidateCollectionProjection(notify: true)
+        }
         let waiters = metadataCompletionWaiters
         metadataCompletionWaiters.removeAll()
         waiters.forEach { $0.resume() }
