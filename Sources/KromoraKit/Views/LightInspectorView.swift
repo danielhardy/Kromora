@@ -213,7 +213,7 @@ private struct ToneCurveEditor: View {
                 if index == 0 { path.move(to: point) }
                 else { path.addLine(to: point) }
             }
-            context.stroke(path, with: .color(.accentColor), style: StrokeStyle(lineWidth: 2))
+            context.stroke(path, with: .color(KromoraTheme.primaryAccent), style: StrokeStyle(lineWidth: 2))
         }
         .clipShape(RoundedRectangle(cornerRadius: 5))
     }
