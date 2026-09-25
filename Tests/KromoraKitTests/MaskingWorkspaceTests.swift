@@ -927,6 +927,45 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.maskingState.resolutionState, .ready)
     }
 
+    func testRepeatedFaceActionCreatesIndependentlyIndexedDurableMasks() async throws {
+        let directory = try Fixtures.makeTempDirectory("IndexedFaceMasks")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "faces.png", in: directory)
+        let store = MaskStore(directory: directory.appendingPathComponent("masks"))
+        let editFixture = makeEditPackageFixture()
+        try editFixture.register(imageURL)
+        let coordinator = PhotoAnalysisCoordinator(
+            maskStore: store,
+            maskProvider: ProductionSmartMaskProvider(store: store),
+            stages: [:]
+        )
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), editStore: editFixture.store(),
+            photoAnalysisCoordinator: coordinator
+        )
+
+        viewModel.openImage(url: imageURL)
+        try await waitUntil("the photo to load") { viewModel.maskingSource != nil }
+        if let assetID = viewModel.maskingAssetID {
+            try editFixture.register(assetID: assetID, url: imageURL)
+        }
+        viewModel.createSmartMask(.face)
+        try await waitUntil("Face 1 to be created") {
+            viewModel.document.localAdjustments.count == 1
+        }
+        viewModel.createSmartMask(.face)
+        try await waitUntil("Face 2 to be created") {
+            viewModel.document.localAdjustments.count == 2
+        }
+
+        let definitions = viewModel.document.localAdjustments.compactMap {
+            $0.components.first?.source.semanticDefinition
+        }
+        XCTAssertEqual(definitions.map(\.faceIndex), [0, 1])
+        XCTAssertEqual(definitions.map(\.semanticMaskKind), [.face, .faceInstance(1)])
+    }
+
     func testRetryingFailedSmartComponentReattemptsTheOriginalLayerAdd() async throws {
         let directory = try Fixtures.makeTempDirectory("SmartMaskComponentRetry")
         defer { try? FileManager.default.removeItem(at: directory) }
