@@ -25,6 +25,7 @@ fences. Feature workflows do not reach into one another's private state.
 | Workflow | Owner | Values crossing the boundary |
 | --- | --- | --- |
 | Source and library | `ImageCollection`, `SourceImportPlan`, `SourceSessionCoordinator`, `LibraryMediaWorkflowCoordinator`, `LibraryImportCoordinator`, `PhotosImportCoordinator`, and `LUTLibrary` | source plans, prepared source publications, media/import requests, stored-document results, metadata/capability values, collection items, import progress |
+| Library browsing | `LibraryBrowsingCoordinator` owns portable query-window paging, mirrored selection, culling-state persistence, and deletion confirmation; `AppViewModel` owns source loading, deletion cleanup, and the edit handoff | query values, page summaries/assets, selection IDs, deletion candidates/results, and open/status callbacks |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions, undo/redo, revisions, and clipboard | `EditDocument`, `PhotoEditSession`, `EditClipboardPayload`, revision numbers |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns per-asset request generations, debounce handles, and scheduler job IDs; `AppViewModel` owns documents and the collection projection | source/document revisions, cache identity, bounded raster thumbnail and edit/LUT revision |
 | Preview and comparison | `PreviewAdmissionCoordinator` owns preview, histogram, prefetch, idle-fill, debounce, and comparison-retry admission; `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render submission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
@@ -76,6 +77,18 @@ coordinator has no asynchronous work or retained external resources; `shutdown()
 and its presentation snapshot, and source replacement resets the interaction state. Fake-only
 `CanvasWorkflowCoordinatorTests` cover crop cancellation and commit, document rotation, and
 presentation-only navigation without constructing `AppViewModel`.
+
+## Library browsing ownership
+
+`LibraryBrowsingCoordinator` sequences portable query pages into `ImageCollection`, mirrors the
+query controller's selection for the visible window, and owns grid selection, keyboard paging,
+portable asset page-faulting, culling persistence, and deletion confirmation. Its
+`LibraryBrowsingDestination` is limited to presentation values and callbacks for status/errors,
+selection-to-edit, source opening, and deletion. `AppViewModel` remains responsible for opening and
+preparing the active photo, the cross-feature cleanup after deletion, and
+`clearActiveSourceAfterLibraryDeletion`; the coordinator never stores the application model.
+`LibraryBrowsingCoordinatorTests` exercise paging, query no-op behavior, off-window opens, culling
+persistence, and the grid-only confirmation rule with a fake query provider and destination.
 
 ## Library/media and application-shell ownership
 
