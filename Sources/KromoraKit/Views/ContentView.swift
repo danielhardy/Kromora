@@ -47,6 +47,7 @@ public struct ContentView: View {
         let _ = RenderDiagnostics.noteContentViewBody()
         return mainContent
             .navigationTitle("")
+            .tint(KromoraTheme.primaryAccent)
             .toolbar {
                 if #available(macOS 26.0, *) {
                     ToolbarItemGroup(placement: .primaryAction) {

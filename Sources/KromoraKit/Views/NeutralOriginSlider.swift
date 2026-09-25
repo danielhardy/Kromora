@@ -323,7 +323,7 @@ final class NeutralOriginSliderCell: NSSliderCell {
         fill.setFill()
         path.fill()
 
-        let stroke = isEnabled ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor
+        let stroke = isEnabled ? KromoraTheme.primaryAccentNSColor : NSColor.tertiaryLabelColor
         stroke.setStroke()
         path.lineWidth = 1
         path.stroke()
@@ -346,7 +346,7 @@ final class NeutralOriginSliderCell: NSSliderCell {
     }
 
     private var fillColor: NSColor {
-        isEnabled ? .controlAccentColor : .tertiaryLabelColor
+        isEnabled ? KromoraTheme.primaryAccentNSColor : .tertiaryLabelColor
     }
 
     private var emptyTrackColor: NSColor {

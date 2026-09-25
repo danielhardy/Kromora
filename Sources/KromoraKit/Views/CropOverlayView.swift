@@ -59,7 +59,7 @@ struct CropOverlayView: View {
                 ForEach(Handle.allCases, id: \.self) { handle in
                     Circle()
                         .fill(Color.white)
-                        .overlay(Circle().stroke(Color.accentColor, lineWidth: 2))
+                        .overlay(Circle().stroke(KromoraTheme.primaryAccent, lineWidth: 2))
                         .frame(width: 18, height: 18)
                         .position(handlePosition(handle, in: cropRect))
                         .allowsHitTesting(false)

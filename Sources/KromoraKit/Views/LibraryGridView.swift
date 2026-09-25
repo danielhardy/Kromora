@@ -242,7 +242,7 @@ private struct LibraryGridCell: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(
-                        isActive ? Color.accentColor : (isSelected ? Color.accentColor.opacity(0.7) : .clear),
+                        isActive ? KromoraTheme.primaryAccent : (isSelected ? KromoraTheme.primaryAccent.opacity(0.7) : .clear),
                         lineWidth: isActive ? 3 : 2
                     )
             }

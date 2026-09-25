@@ -346,7 +346,7 @@ final class NeutralOriginSliderTests: XCTestCase {
         cell.drawBar(inside: slider.bounds, flipped: false)
         NSGraphicsContext.restoreGraphicsState()
 
-        guard let accent = NSColor.controlAccentColor.usingColorSpace(.deviceRGB) else {
+        guard let accent = KromoraTheme.primaryAccentNSColor.usingColorSpace(.deviceRGB) else {
             XCTFail("no device-RGB accent colour")
             return nil
         }

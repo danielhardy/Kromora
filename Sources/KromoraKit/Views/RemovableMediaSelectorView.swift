@@ -88,7 +88,7 @@ struct RemovableMediaSelectorView: View {
                         Image(systemName: viewModel.removableMediaSelection.contains(file)
                               ? "checkmark.circle.fill" : "circle")
                             .foregroundStyle(viewModel.removableMediaSelection.contains(file)
-                                             ? Color.accentColor : Color.secondary)
+                                             ? KromoraTheme.primaryAccent : Color.secondary)
                         RemovableMediaThumbnail(url: file.url)
                         VStack(alignment: .leading, spacing: 3) {
                             Text(file.filename)

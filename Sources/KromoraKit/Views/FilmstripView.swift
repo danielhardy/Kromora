@@ -197,7 +197,7 @@ struct FilmstripThumbnail: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2.5)
+                    .stroke(isSelected ? KromoraTheme.primaryAccent : Color.clear, lineWidth: 2.5)
             )
 
             if settings.showPhotoNames {

@@ -253,7 +253,7 @@ struct CropInspectorView: View {
         .accessibilityLabel(title)
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
         .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .tint(isSelected ? .accentColor : .secondary)
+        .tint(isSelected ? KromoraTheme.primaryAccent : .secondary)
     }
 
     private var straightenSection: some View {
@@ -368,7 +368,7 @@ struct CropInspectorView: View {
         .contentShape(Rectangle())
         .help(help)
         .accessibilityLabel(title)
-        .tint(isOn ? .accentColor : nil)
+        .tint(isOn ? KromoraTheme.primaryAccent : nil)
         .accessibilityValue(isOn ? "On" : "Off")
     }
 
