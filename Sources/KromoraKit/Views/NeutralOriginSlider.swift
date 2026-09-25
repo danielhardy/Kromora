@@ -217,12 +217,12 @@ enum SliderTrackStyle: Equatable, Sendable {
         case .saturation:
             return intensity(
                 color(0.28, 0.34, 0.40), color(0.55, 0.62, 0.66),
-                color(0.02, 0.78, 0.76), color(0.98, 0.32, 0.20)
+                color(0.00, 0.84, 0.66), color(0.96, 0.38, 0.16)
             )
         case .vibrance:
             return intensity(
                 color(0.30, 0.32, 0.40), color(0.55, 0.60, 0.68),
-                color(0.16, 0.68, 0.94), color(0.82, 0.22, 0.84)
+                color(0.06, 0.62, 0.98), color(0.90, 0.14, 0.76)
             )
         case .hue:
             return NSGradient(
