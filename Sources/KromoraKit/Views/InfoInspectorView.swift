@@ -54,8 +54,6 @@ struct InfoInspectorView: View {
                     .transition(.opacity)
             } else {
                 histogramSection
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
 
                 tabSwitcher
 
@@ -84,8 +82,9 @@ struct InfoInspectorView: View {
             }
         }
         .frame(minWidth: 240, idealWidth: 280)
-        // Leave the pane transparent so the native inspector material owns the surface and
-        // begins below the window toolbar instead of creating a second opaque slab.
+        // Leave the pane transparent so the native inspector material shows around the chart.
+        // The plot extends into the toolbar band. The window title bar is transparent there so
+        // AppKit does not composite a second layer over the histogram.
         .animation(inspectorAnimation, value: canvasState.isCropToolActive)
     }
 
@@ -171,35 +170,16 @@ struct InfoInspectorView: View {
                     .padding(.vertical, 2)
                     .background(Color.primary.opacity(0.08), in: Capsule())
             }
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
 
-            if let histogram = viewModel.histogram {
-                HistogramChart(data: histogram, channel: channel)
-                    .frame(height: 120)
-                    // The plot is intentionally dark for stable channel contrast. It is
-                    // scoped to the chart and does not define the inspector background.
-                    .background(KromoraTheme.analysisBackground, in: RoundedRectangle(cornerRadius: 6))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(KromoraTheme.analysisBorder, lineWidth: 1)
-                    )
-            } else if viewModel.isHistogramLoading {
-                RoundedRectangle(cornerRadius: 6)
-                    // Match the loaded histogram's intentionally dark analysis surface.
-                    .fill(KromoraTheme.analysisBackground)
-                    .frame(height: 120)
-                    .overlay(ProgressView().controlSize(.small))
-            } else {
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(KromoraTheme.analysisBackground)
-                    .frame(height: 120)
-                    .overlay {
-                        Text(viewModel.histogramErrorMessage ?? "Histogram unavailable")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(12)
-                    }
-            }
+            histogramPlot
+                .frame(height: 120)
+                .frame(maxWidth: .infinity)
+                // Full bleed to the photo and the window edge. The plot stays a local dark
+                // surface; it does not define the inspector background.
+                .background(KromoraTheme.analysisBackground)
+                .overlay(Rectangle().stroke(KromoraTheme.analysisBorder, lineWidth: 1))
 
             Picker("Channel", selection: $channel) {
                 Text("RGB").tag(HistogramChart.Mode.rgb)
@@ -210,6 +190,22 @@ struct InfoInspectorView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+            .padding(.horizontal, 12)
+        }
+    }
+
+    @ViewBuilder
+    private var histogramPlot: some View {
+        if let histogram = viewModel.histogram {
+            HistogramChart(data: histogram, channel: channel)
+        } else if viewModel.isHistogramLoading {
+            ProgressView().controlSize(.small)
+        } else {
+            Text(viewModel.histogramErrorMessage ?? "Histogram unavailable")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(12)
         }
     }
 
