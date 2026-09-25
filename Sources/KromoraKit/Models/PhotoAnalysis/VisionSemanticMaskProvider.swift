@@ -261,6 +261,9 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
         guard let observation = request.results?.first else { return [] }
         let instanceIDs = observation.allInstances
         guard !instanceIDs.isEmpty else { return [] }
+        let providerMask = observation.instanceMask
+        let providerWidth = CVPixelBufferGetWidth(providerMask)
+        let providerHeight = CVPixelBufferGetHeight(providerMask)
 
         var masks: [RegionMask] = []
         masks.reserveCapacity(instanceIDs.count)
@@ -275,6 +278,13 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
                 throw VisionSemanticMaskError.requestFailed(error.localizedDescription)
             }
             let pixels = try imageAlignedMask(from: buffer, image: image)
+            Self.recordMatteDiagnostics(
+                image: image, quality: quality, providerWidth: providerWidth,
+                providerHeight: providerHeight, generatedWidth: CVPixelBufferGetWidth(buffer),
+                generatedHeight: CVPixelBufferGetHeight(buffer),
+                instanceIDs: Array(instanceIDs), selectedInstanceIDs: [],
+                foregroundCoverage: pixels.coverage, subjectCoverage: nil
+            )
             let key = cacheKey(for: .foregroundInstance(index), image: image, quality: quality)
             let reference = try await store.store(pixels, for: key, quality: quality)
             masks.append(makeForegroundMask(index: index, pixels: pixels, reference: reference,
@@ -315,28 +325,26 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
 
         let salientBounds = NormalizedRect.fromVision(salientObject.boundingBox)
         let foregroundInstances = try await foregroundMasks(image: image, quality: quality)
-        var selectedPixels: NormalizedMask?
-        var selectedOverlap: Float = 0
+        var candidates: [NormalizedMask] = []
+        candidates.reserveCapacity(foregroundInstances.count)
         for instance in foregroundInstances {
             guard let instancePixels = await store.pixels(for: instance.reference) else { continue }
-            let overlap = overlap(of: instancePixels, with: salientBounds)
-            if overlap > selectedOverlap {
-                selectedPixels = instancePixels
-                selectedOverlap = overlap
-            }
+            candidates.append(instancePixels)
         }
-        guard var pixels = selectedPixels, selectedOverlap >= 0.05 else {
+        guard let selection = Self.selectSubjectPixels(from: candidates, salientBounds: salientBounds),
+              selection.overlap >= 0.05 else {
             throw VisionSemanticMaskError.noSalientRegion
         }
+        var pixels = selection.pixels
 
         // Saliency chooses among segmented objects; its bounding box is never the painted matte.
         // Prefer Person only when its existing cache gate applies and its matte overlaps the
         // salient region meaningfully.
-        if quality != .render, selectedOverlap >= 0.15 {
+        if quality != .render, selection.overlap >= 0.15 {
             do {
                 let person = try await personMask(image: image, quality: quality)
                 if let personPixels = await store.pixels(for: person.reference),
-                   overlap(of: personPixels, with: salientBounds) >= 0.15 {
+                   Self.overlap(of: personPixels, with: salientBounds) >= 0.15 {
                     pixels = try MaskOperations.resized(personPixels, to: image.dimensions)
                 }
             } catch is CancellationError {
@@ -346,9 +354,68 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
                 // Person request leaves the valid foreground instance matte in place.
             }
         }
+        Self.recordMatteDiagnostics(
+            image: image, quality: quality, providerWidth: nil, providerHeight: nil,
+            generatedWidth: pixels.size.width, generatedHeight: pixels.size.height,
+            instanceIDs: Array(foregroundInstances.indices),
+            selectedInstanceIDs: [selection.index], foregroundCoverage: selection.pixels.coverage,
+            subjectCoverage: pixels.coverage
+        )
         let reference = try await store.store(pixels, for: key, quality: quality)
         return RegionMask(kind: .subject, bounds: bounds(of: pixels), quality: quality, reference: reference,
                           confidence: 1, coverage: pixels.coverage)
+    }
+
+    /// Saliency chooses an instance, while the returned pixels always come from its segmented
+    /// matte. Internal so tests can deterministically prove a non-rectangular instance survives
+    /// selection without relying on live Vision inference.
+    static func selectSubjectPixels(
+        from candidates: [NormalizedMask], salientBounds: NormalizedRect
+    ) -> (index: Int, pixels: NormalizedMask, overlap: Float)? {
+        var selected: (index: Int, pixels: NormalizedMask, overlap: Float)?
+        for (index, pixels) in candidates.enumerated() {
+            let overlap = Self.overlap(of: pixels, with: salientBounds)
+            if overlap > (selected?.overlap ?? 0) {
+                selected = (index, pixels, overlap)
+            }
+        }
+        return selected
+    }
+
+    private static func recordMatteDiagnostics(
+        image: AnalysisImage,
+        quality: MaskQuality,
+        providerWidth: Int?,
+        providerHeight: Int?,
+        generatedWidth: Int,
+        generatedHeight: Int,
+        instanceIDs: [Int],
+        selectedInstanceIDs: [Int],
+        foregroundCoverage: Float,
+        subjectCoverage: Float?
+    ) {
+        let analysis = image.dimensions
+        let sourceWidth = Int(image.source.nativeExtent.width.rounded())
+        let sourceHeight = Int(image.source.nativeExtent.height.rounded())
+        let sourceAspect = sourceHeight == 0 ? 0 : Double(sourceWidth) / Double(sourceHeight)
+        let analysisAspect = analysis.height == 0 ? 0 : Double(analysis.width) / Double(analysis.height)
+        let provider = providerWidth.map(String.init) ?? "unknown"
+        let providerH = providerHeight.map(String.init) ?? "unknown"
+        let subject = subjectCoverage.map { String(format: "%.2f", $0 * 100) } ?? "unknown"
+        let logger = Logger(subsystem: "com.kromora.app", category: "vision-matte")
+        let fields = [
+            "matte", "source=\(image.source.traceToken)", "quality=\(quality.rawValue)",
+            "sourceSize=\(sourceWidth)x\(sourceHeight)",
+            "analysisSize=\(analysis.width)x\(analysis.height)",
+            "sourceAspect=\(String(format: "%.5f", sourceAspect))",
+            "analysisAspect=\(String(format: "%.5f", analysisAspect))",
+            "provider=\(provider)x\(providerH)",
+            "scaled=\(generatedWidth)x\(generatedHeight)", "instances=\(instanceIDs)",
+            "selected=\(selectedInstanceIDs)",
+            "foregroundCoverage=\(String(format: "%.2f", foregroundCoverage * 100))%",
+            "subjectCoverage=\(subject)%"
+        ]
+        logger.debug("\(fields.joined(separator: " "), privacy: .public)")
     }
 
     private func faceMask(index: Int, image: AnalysisImage, quality: MaskQuality) async throws -> RegionMask {
@@ -588,7 +655,7 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
 
     /// Fraction of the salient rectangle covered by a matte. Sampling in normalized coordinates
     /// lets this compare image-aligned foreground masks with lower-resolution Person masks.
-    private func overlap(of mask: NormalizedMask, with rect: NormalizedRect) -> Float {
+    private static func overlap(of mask: NormalizedMask, with rect: NormalizedRect) -> Float {
         let minX = max(0, min(1, rect.minX))
         let maxX = max(0, min(1, rect.maxX))
         let minY = max(0, min(1, rect.minY))
