@@ -107,8 +107,27 @@ extension ImageCollection {
     func addFromData(_ values: [(name: String, data: Data)]) -> [PhotoAssetID] {
         let existing = items.map(\.asset)
         let existingIDs = Set(existing.map(\.id))
-        let additions = values.map { PhotoAsset(data: $0.data, filename: $0.name) }
-            .filter { !existingIDs.contains($0.id) }
+        let destinationFolder = libraryFolderURL
+        do {
+            try FileManager.default.createDirectory(
+                at: destinationFolder, withIntermediateDirectories: true
+            )
+        } catch {
+            return []
+        }
+        let additions = values.compactMap { value -> PhotoAsset? in
+            let candidate = PhotoAsset(data: value.data, filename: value.name)
+            guard !existingIDs.contains(candidate.id) else { return nil }
+            let filename = URL(fileURLWithPath: value.name).lastPathComponent
+            guard !filename.isEmpty else { return nil }
+            let destination = destinationFolder.appendingPathComponent(filename)
+            do {
+                try value.data.write(to: destination, options: .atomic)
+            } catch {
+                return nil
+            }
+            return PhotoAsset(url: destination, filename: filename)
+        }
         loadPortableAssets(existing + additions)
         return additions.map(\.id)
     }

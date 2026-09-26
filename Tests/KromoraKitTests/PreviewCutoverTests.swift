@@ -178,7 +178,9 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
             rawDevelop: RAWDevelopSettings(exposure: 0.75),
             adjustments: [.vibrance(amount: 0.4)]
         )
-        let store = makeInMemoryEditStore()
+        let package = makeEditPackageFixture()
+        try package.register(image)
+        let store = package.store()
         try await store.save(
             storedDocument,
             for: EditSourceReference(assetID: .file(image), url: image)
@@ -223,7 +225,9 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
             rawDevelop: RAWDevelopSettings(exposure: 0.75),
             adjustments: [.vibrance(amount: 0.4)]
         )
-        let store = makeInMemoryEditStore()
+        let package = makeEditPackageFixture()
+        try package.register(first)
+        let store = package.store()
         try await store.save(
             storedDocument,
             for: EditSourceReference(assetID: .file(first), url: first)

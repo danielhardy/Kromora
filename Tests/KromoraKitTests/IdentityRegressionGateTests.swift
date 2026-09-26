@@ -35,8 +35,10 @@ final class IdentityRegressionGateTests: TempDirectoryTestCase {
 
         // Write the whole library through the portable UUID key before relocation. A moved open
         // must hit this direct key and report .ready, never enter the legacy relink path.
-        let editStore = makeInMemoryEditStore()
+        let editPackage = makeEditPackageFixture()
+        let editStore = editPackage.store()
         for snapshot in snapshots {
+            try editPackage.register(sourceReference(snapshot, url: snapshot.asset.url))
             try await editStore.save(
                 snapshot.document,
                 for: sourceReference(snapshot, url: snapshot.asset.url)

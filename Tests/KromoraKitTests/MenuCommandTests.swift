@@ -141,16 +141,16 @@ final class MenuCommandTests: XCTestCase {
             contentView.contains("ToolbarItemGroup(placement: .navigation)"),
             "Crop and the other edit actions stay in the trailing toolbar group"
         )
-        let editBranch = try XCTUnwrap(
+        let toolbarContent = try XCTUnwrap(
             contentView
-                .components(separatedBy: "case .edit:")
+                .components(separatedBy: "private var toolbarContent: some View {")
                 .dropFirst()
                 .first?
-                .components(separatedBy: "enum EditorToolbarMode")
+                .components(separatedBy: "\nenum EditorToolbarMode")
                 .first
         )
         XCTAssertFalse(
-            editBranch.contains("Picker(\"Workspace\""),
+            toolbarContent.contains("Picker(\"Workspace\""),
             "the workspace switcher is a leading toolbar item, not part of the trailing edit actions"
         )
         XCTAssertFalse(cropBranch.contains("AutoToolbarButton"))
