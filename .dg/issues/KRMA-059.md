@@ -9,12 +9,13 @@ labels:
   - epic:quality
   - phase:10
 created: 2026-08-30T18:30:37.650Z
-updated: 2026-09-21T02:12:28.404Z
+updated: 2026-09-26T13:56:42.254Z
 depends_on:
   - KRMA-058
   - KRMA-056
+blockers: []
 estimate: 5
-order: 8zzzzzzw
+order: 4aaaaaa6
 board: product
 ---
 

@@ -2,7 +2,7 @@
 id: KRMA-591
 title: Keep the histogram unchanged when zooming
 type: bug
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -12,8 +12,9 @@ labels:
   - histogram
   - zoom
 created: 2026-09-26T02:55:36.594Z
-updated: 2026-09-26T02:55:50.693Z
-order: zzzz
+updated: 2026-09-26T13:40:26.461Z
+blockers: []
+order: zzzzl
 board: product
 ---
 

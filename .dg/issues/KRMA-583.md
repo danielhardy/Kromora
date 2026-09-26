@@ -14,11 +14,11 @@ labels:
   - core-ml
   - performance
 created: 2026-09-25T03:17:08.906Z
-updated: 2026-09-25T03:17:59.945Z
+updated: 2026-09-26T13:56:42.571Z
 depends_on:
   - KRMA-580
 blockers: []
-order: zzzv
+order: b555554u
 board: product
 ---
 

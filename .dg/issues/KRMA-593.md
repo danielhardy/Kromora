@@ -2,7 +2,7 @@
 id: KRMA-593
 title: Make Auto more decisive with Light and Color improvements
 type: feature
-status: backlog
+status: ready
 priority: high
 creation_provenance:
   runner: codex
@@ -12,8 +12,9 @@ labels:
   - auto
   - quality
 created: 2026-09-26T03:05:01.511Z
-updated: 2026-09-26T03:05:17.993Z
-order: zzzzq
+updated: 2026-09-26T13:40:20.843Z
+blockers: []
+order: zzzzh
 board: product
 context:
   files:

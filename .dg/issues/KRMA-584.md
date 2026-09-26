@@ -13,11 +13,11 @@ labels:
   - semantic-mask
   - ui
 created: 2026-09-25T03:19:13.712Z
-updated: 2026-09-25T03:19:33.864Z
+updated: 2026-09-26T13:56:42.608Z
 depends_on:
   - KRMA-583
 blockers: []
-order: zzzx
+order: bzzzzzzo
 board: product
 ---
 

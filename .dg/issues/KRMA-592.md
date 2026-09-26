@@ -2,7 +2,7 @@
 id: KRMA-592
 title: Animate the Info sidebar closed when returning to Library
 type: bug
-status: backlog
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,8 +13,9 @@ labels:
   - sidebar
   - animation
 created: 2026-09-26T02:56:21.124Z
-updated: 2026-09-26T02:56:28.578Z
-order: zzzzh
+updated: 2026-09-26T13:40:23.336Z
+blockers: []
+order: zzzzq
 board: product
 ---
 

@@ -13,12 +13,12 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-25T05:51:26.616Z
-updated: 2026-09-25T05:51:26.616Z
-blockers: []
-order: zzzy
-board: product
+updated: 2026-09-26T13:56:42.644Z
 depends_on:
   - KRMA-469
+blockers: []
+order: cuuuuuui
+board: product
 context:
   files:
     - Sources/KromoraKit/ViewModels/AppViewModel.swift
