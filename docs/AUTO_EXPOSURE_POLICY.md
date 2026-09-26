@@ -58,13 +58,18 @@ unsupported neutral color error, mask-edge artifacts, or unmeasurable pixels. Fo
 measured muted color, the frozen score target closes 75% of the gap to colorfulness 0.46 (capped
 at 0.46); otherwise it equals the measured baseline. Color confidence must be at least 0.60,
 colorfulness below 0.35, and saturation p95 no higher than 0.85. Mixed lighting, monochrome
-(likelihood above 0.50), sunset warmth (above 0.60), and night (above 0.60) disable the boost.
-The policy raises vibrance toward that target with a bounded 0–24 slider response. Candidate
+(likelihood above 0.50), and sunset warmth (above 0.60) disable the boost. Night likelihood
+(above 0.60) disables it unless median luma is below 0.20 and measured chroma is clear (median
+saturation at least 0.50 and colorfulness at least 0.10). The policy raises vibrance toward that
+target with a bounded 0–24 slider response: 60 points per unit of colorfulness shortfall, with
+an 18-point minimum when measured colorfulness is below 0.28. For dark chromatic evidence,
+vibrance also gets a saturation increase up to 10 points, limited by measured p95 headroom.
+Candidate
 selection weights the rendered colorfulness shortfall at 1.75 alongside tone and saturation
 guardrails, so a safe color improvement can win alongside a tonal improvement. Relative contrast/noise
 costs are measured against the unchanged render. This protects shadow readability without
 accepting crushed blacks, clipped whites, or a washed-out result. Existing manual controls,
-curves, Looks, LUTs, and user-owned local layers remain unchanged; Auto provenance version 4
+curves, Looks, LUTs, and user-owned local layers remain unchanged; Auto provenance version 5
 invalidates older run fingerprints so the calibrated policy is evaluated once.
 
 ## Quality rubric

@@ -37,7 +37,7 @@ import Foundation
 enum AutoEnhancementPolicy {
     /// Bumped when policy strength or selection objectives change so prior results are not
     /// treated as current by the repeat-run fingerprint.
-    static let algorithmVersion = 4
+    static let algorithmVersion = 5
 
     static func propose(
         facts: AutoEnhancementFacts,
@@ -520,9 +520,9 @@ struct AutoEnhancementProposal: Codable, Sendable, Equatable {
 /// The neutral target is a perceptual median of 0.48 for ordinary photographic frames. A key
 /// scene (high-key, low-key, or night) pulls that target back toward the measured median, but
 /// only while the robust distribution is consistent with intent. A low p50 by itself is not
-/// enough to override the key brake: the p10/p75/p95 spread must also show usable scene
-/// structure. This is what lets a materially underexposed mountain frame lift while a genuinely
-/// low-key frame stays low-key.
+/// enough to override the key brake: the upper distribution, retained shadow detail, or a
+/// broad very-dark distribution must also show usable scene structure. A compact dim distribution
+/// stays behind the key brake.
 enum AutoExposureObjective {
     static let neutralMedian = 0.48
     static let ordinaryCorrectionCapEV = 1.25
@@ -584,7 +584,13 @@ enum AutoExposureObjective {
         let upperStructure = smooth(tone.p95, start: 0.38, full: 0.68)
         let spread = smooth(tone.p95 - tone.p05, start: 0.30, full: 0.60)
         let shadowClipping = min(max(Double(tone.shadowClippingFraction) * 8, 0), 1)
-        let structure = max(upperStructure * spread, shadowClipping * 0.75)
+        // A very dark, broad gradient can have no p95 above 0.38 and no clipped pixels, yet
+        // still carry enough tonal separation to contradict the key-scene guess. Use its
+        // measured spread as a second structural cue; keep compact dark distributions (such as
+        // a uniformly dim night frame) under the key brake.
+        let darkSpread = smooth(tone.p95 - tone.p05, start: 0.10, full: 0.22)
+        let darkStructure = midDeficit * darkSpread
+        let structure = max(upperStructure * spread, max(shadowClipping * 0.75, darkStructure))
         return bounded(midDeficit * structure, 0...1)
     }
 
@@ -790,7 +796,10 @@ private enum ColorPlacement {
         if color.isMixed { return nil }
         if scene.monochromeLikelihood > 0.5 { return nil }
         if scene.sunsetWarmLikelihood > 0.6 { return nil }
-        if scene.nightLikelihood > 0.6 { return nil }
+        let darkChromaticEvidence = facts.tonePerceptual.p50 < 0.20
+            && color.saturationMedian >= 0.50
+            && color.colorfulness >= 0.10
+        if scene.nightLikelihood > 0.6 && !darkChromaticEvidence { return nil }
         if confidence.colorNeutral < 0.4 { return nil }
 
         let spread = Double(color.saturationP95 - color.saturationMedian)
@@ -809,16 +818,28 @@ private enum ColorPlacement {
                 reasons.append("restrains clipped/over-saturated color")
             }
         } else if color.colorfulness < 0.35, spread < 0.5, confidence.colorNeutral >= 0.6 {
-            // Close most of the measured gap to a modestly colorful image. The wider cap
-            // makes reliable muted-color evidence visible while the intent gates above keep
-            // already vivid, monochrome, warm, and night scenes out of this path.
+            // Close most of the measured gap to a modestly colorful image. Very muted images
+            // need a visible minimum because Core Image's vibrance response is nonlinear near
+            // neutral; retain the smaller proportional response near the balanced boundary.
+            let gapResponse = Double(max(0.46 - color.colorfulness, 0) * 60)
+            let visibleFloor = color.colorfulness < 0.28 ? 18.0 : 0.0
             let target = bounded(
-                current.color.vibrance + Double(max(0.46 - color.colorfulness, 0) * 60),
+                current.color.vibrance + max(gapResponse, visibleFloor),
                 0...24
             )
             if target - current.color.vibrance >= 2, current.color.vibrance < 24 {
                 vibrance = min(target, 24)
                 reasons.append("lifts muted color within a restrained envelope")
+            }
+            if darkChromaticEvidence {
+                // Dark, already-saturated colors receive little from vibrance alone. A small
+                // global saturation move makes the supported chroma gain visible while staying
+                // below the measured p95 headroom.
+                let darkSaturation = min(10, max(0, 0.85 - Double(color.saturationP95)) * 100)
+                if darkSaturation >= 2 {
+                    saturation = darkSaturation
+                    reasons.append("adds restrained saturation to dark chromatic evidence")
+                }
             }
         }
         guard vibrance != nil || saturation != nil else { return nil }
