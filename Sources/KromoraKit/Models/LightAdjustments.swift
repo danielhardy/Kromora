@@ -27,11 +27,13 @@ struct LightCurvePoint: Codable, Equatable, Sendable {
 
 /// The versioned, master RGB tone curve value used by `LightAdjustments`.
 ///
-/// Points are sorted by input, duplicate inputs use the last point, and the endpoints are always
-/// present. This makes malformed hand-edited documents deterministic and gives the eventual GPU
-/// interpolator a well-defined domain. The diagonal is the exact neutral curve.
+/// Points are sorted by input, duplicate inputs use the last point, and at least two controls are
+/// always present. Version 1 adds fixed controls at inputs 0 and 1; version 2 persists the first
+/// and last controls as movable endpoints. This gives interpolation a well-defined domain.
 struct LightToneCurve: Codable, Equatable, Sendable {
-    static let currentVersion = 1
+    // Version 1 implicitly fixed endpoint inputs at 0 and 1. Version 2 stores their positions
+    // explicitly so existing documents keep their original transfer function.
+    static let currentVersion = 2
     static let identity = LightToneCurve(points: [
         LightCurvePoint(input: 0, output: 0),
         LightCurvePoint(input: 1, output: 1),
@@ -39,12 +41,18 @@ struct LightToneCurve: Codable, Equatable, Sendable {
 
     private(set) var version: Int
     var points: [LightCurvePoint] {
-        didSet { points = Self.normalized(points) }
+        didSet { points = Self.normalized(points, fixedEndpoints: version == 1) }
     }
 
-    init(version: Int = Self.currentVersion, points: [LightCurvePoint] = Self.identity.points) {
+    init(
+        version: Int = Self.currentVersion,
+        points: [LightCurvePoint] = Self.identity.points,
+        preserveEndpointPositions: Bool = false
+    ) {
         self.version = min(max(version, 1), Self.currentVersion)
-        self.points = Self.normalized(points)
+        self.points = Self.normalized(
+            points, fixedEndpoints: self.version == 1 || !preserveEndpointPositions
+        )
     }
 
     var isIdentity: Bool { self == Self.identity }
@@ -150,13 +158,15 @@ struct LightToneCurve: Codable, Equatable, Sendable {
     ///
     /// This is the model operation behind clicking the drawn curve. Keeping the sampling here
     /// means the editor and any future curve surface use exactly the same interpolation rule as
-    /// the renderer. Invalid and endpoint inputs are ignored because endpoint handles are fixed.
+    /// the renderer. Invalid and endpoint inputs are ignored because endpoints are handles, not
+    /// add targets.
     func addingPoint(at input: Double) -> LightToneCurve {
         guard input.isFinite, input > 0.001, input < 0.999 else { return self }
         guard !points.contains(where: { abs($0.input - input) < 0.005 }) else { return self }
         return LightToneCurve(
             version: version,
-            points: points + [LightCurvePoint(input: input, output: value(at: input))]
+            points: points + [LightCurvePoint(input: input, output: value(at: input))],
+            preserveEndpointPositions: version >= 2
         )
     }
 
@@ -183,10 +193,14 @@ struct LightToneCurve: Codable, Equatable, Sendable {
               let index = points.firstIndex(of: point) else { return self }
         var remaining = points
         remaining.remove(at: index)
-        return LightToneCurve(version: version, points: remaining)
+        return LightToneCurve(
+            version: version, points: remaining, preserveEndpointPositions: version >= 2
+        )
     }
 
-    private static func normalized(_ input: [LightCurvePoint]) -> [LightCurvePoint] {
+    private static func normalized(
+        _ input: [LightCurvePoint], fixedEndpoints: Bool = false
+    ) -> [LightCurvePoint] {
         // Dictionary assignment gives duplicate inputs an explicit last-write-wins rule before
         // sorting; relying on sort stability would make a hand-edited document non-deterministic.
         var unique: [Double: LightCurvePoint] = [:]
@@ -201,11 +215,16 @@ struct LightToneCurve: Codable, Equatable, Sendable {
             }
         }
 
-        if result.first?.input != 0 {
-            result.insert(LightCurvePoint(input: 0, output: 0), at: 0)
-        }
-        if result.last?.input != 1 {
-            result.append(LightCurvePoint(input: 1, output: 1))
+        if fixedEndpoints {
+            if result.first?.input != 0 {
+                result.insert(LightCurvePoint(input: 0, output: 0), at: 0)
+            }
+            if result.last?.input != 1 {
+                result.append(LightCurvePoint(input: 1, output: 1))
+            }
+        } else if result.count < 2 {
+            // Keep malformed and empty v2 documents evaluable.
+            return Self.identity.points
         }
         return result.isEmpty ? Self.identity.points : result
     }
@@ -214,7 +233,8 @@ struct LightToneCurve: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let version = try container.decodeIfPresent(Int.self, forKey: .version) ?? Self.currentVersion
+        // Curves written before schema versioning were normalized to fixed 0/1 endpoints.
+        let version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
         guard version <= Self.currentVersion else {
             throw DecodingError.dataCorruptedError(
                 forKey: .version,
@@ -224,7 +244,8 @@ struct LightToneCurve: Codable, Equatable, Sendable {
         }
         self.init(
             version: version,
-            points: try container.decodeIfPresent([LightCurvePoint].self, forKey: .points) ?? Self.identity.points
+            points: try container.decodeIfPresent([LightCurvePoint].self, forKey: .points) ?? Self.identity.points,
+            preserveEndpointPositions: version >= 2
         )
     }
 }
@@ -263,7 +284,13 @@ struct LightAdjustments: Codable, Equatable, Sendable {
         didSet { blacks = blacks.clamped(to: Self.blacksRange, default: 0) }
     }
     var toneCurve: LightToneCurve {
-        didSet { toneCurve = LightToneCurve(version: toneCurve.version, points: toneCurve.points) }
+        didSet {
+            toneCurve = LightToneCurve(
+                version: toneCurve.version,
+                points: toneCurve.points,
+                preserveEndpointPositions: toneCurve.version >= 2
+            )
+        }
     }
 
     init(
@@ -281,7 +308,11 @@ struct LightAdjustments: Codable, Equatable, Sendable {
         self.shadows = shadows.clamped(to: Self.shadowsRange, default: 0)
         self.whites = whites.clamped(to: Self.whitesRange, default: 0)
         self.blacks = blacks.clamped(to: Self.blacksRange, default: 0)
-        self.toneCurve = LightToneCurve(version: toneCurve.version, points: toneCurve.points)
+        self.toneCurve = LightToneCurve(
+            version: toneCurve.version,
+            points: toneCurve.points,
+            preserveEndpointPositions: toneCurve.version >= 2
+        )
     }
 
     var isIdentity: Bool {

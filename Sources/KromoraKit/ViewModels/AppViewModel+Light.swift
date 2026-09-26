@@ -35,20 +35,40 @@ extension AppViewModel {
 
     var hasLightAdjustments: Bool { !document.light.isIdentity }
 
-    /// Replace one editable curve point. Endpoints are fixed by the model and are ignored here.
+    /// Replace a curve point while keeping its slot ordered between adjacent controls.
     func setToneCurvePoint(_ point: LightCurvePoint, input: Double? = nil, output: Double? = nil) {
         var points = document.light.toneCurve.points
         if points.dropFirst().dropLast().isEmpty, abs(point.input - 0.5) < 0.001 {
             points.append(LightCurvePoint(input: input ?? point.input, output: output ?? point.output))
-            updateDocument(debounced: true) { $0.light.toneCurve = LightToneCurve(points: points) }
+            updateDocument(debounced: true) {
+                $0.light.toneCurve = LightToneCurve(points: points, preserveEndpointPositions: true)
+            }
             return
         }
-        guard let index = points.firstIndex(of: point), index > 0, index < points.count - 1 else { return }
+        guard let index = points.firstIndex(of: point) else { return }
+        let lower = index == 0 ? 0 : points[index - 1].input + 0.001
+        let upper = index == points.count - 1 ? 1 : points[index + 1].input - 0.001
+        guard lower <= upper else { return }
+        let constrainedInput = min(max(input ?? point.input, lower), upper)
+        let monotonic = document.light.toneCurve.isMonotonic
+        let constrainedOutput: Double
+        if monotonic, index == 0 {
+            constrainedOutput = min(output ?? point.output, points[index + 1].output)
+        } else if monotonic, index == points.count - 1 {
+            constrainedOutput = max(output ?? point.output, points[index - 1].output)
+        } else if monotonic {
+            constrainedOutput = min(max(output ?? point.output,
+                                        points[index - 1].output), points[index + 1].output)
+        } else {
+            constrainedOutput = output ?? point.output
+        }
         points[index] = LightCurvePoint(
-            input: input ?? point.input,
-            output: output ?? point.output
+            input: constrainedInput,
+            output: constrainedOutput
         )
-        updateDocument(debounced: true) { $0.light.toneCurve = LightToneCurve(points: points) }
+        updateDocument(debounced: true) {
+            $0.light.toneCurve = LightToneCurve(points: points, preserveEndpointPositions: true)
+        }
     }
 
     /// Remove an interior point. The model owns endpoint protection; this method is intentionally
@@ -65,7 +85,7 @@ extension AppViewModel {
     @discardableResult
     func moveToneCurvePoint(fromInput: Double, input: Double, output: Double) -> Double? {
         let points = document.light.toneCurve.points
-        guard let point = points.dropFirst().dropLast().min(by: {
+        guard let point = points.min(by: {
             abs($0.input - fromInput) < abs($1.input - fromInput)
         }) else {
             addToneCurvePoint(input: input, output: output)
@@ -73,21 +93,12 @@ extension AppViewModel {
         }
 
         let index = points.firstIndex(of: point)!
-        let lower = points[index - 1].input + 0.001
-        let upper = points[index + 1].input - 0.001
-        let constrainedInput = min(max(input, lower), upper)
-        let constrainedOutput: Double
-        if document.light.toneCurve.isMonotonic {
-            constrainedOutput = min(max(output, points[index - 1].output), points[index + 1].output)
-        } else {
-            constrainedOutput = output
-        }
         setToneCurvePoint(
             point,
-            input: constrainedInput,
-            output: constrainedOutput
+            input: input,
+            output: output
         )
-        return constrainedInput
+        return document.light.toneCurve.points[index].input
     }
 
     /// Add a point to the master curve, keeping endpoint points and deterministic ordering intact.
@@ -98,7 +109,7 @@ extension AppViewModel {
         var points = curve.points
         points.append(LightCurvePoint(input: input, output: output))
         updateDocument(debounced: isToneCurvePreviewInteractionActive) {
-            $0.light.toneCurve = LightToneCurve(points: points)
+            $0.light.toneCurve = LightToneCurve(points: points, preserveEndpointPositions: true)
         }
     }
 

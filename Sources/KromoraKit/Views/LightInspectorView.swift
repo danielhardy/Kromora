@@ -101,8 +101,8 @@ struct LightInspectorView: View {
     }
 }
 
-/// A compact master RGB curve editor. The endpoint handles are fixed by `LightToneCurve`; interior
-/// handles can be dragged and adjusted through the keyboard/VoiceOver adjustable action.
+/// A compact master RGB curve editor. Every control handle can be dragged and adjusted through
+/// the keyboard/VoiceOver adjustable action.
 private struct ToneCurveEditor: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var curveDrag: CurveDragState?
@@ -124,10 +124,6 @@ private struct ToneCurveEditor: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Add Point") {
-                    viewModel.addToneCurvePoint(input: 0.5, output: 0.5)
-                }
-                .buttonStyle(.link)
                 Button("Reset") { viewModel.resetToneCurve() }
                     .buttonStyle(.link)
                     .disabled(viewModel.document.light.toneCurve.isIdentity)
@@ -177,8 +173,7 @@ private struct ToneCurveEditor: View {
     }
 
     private var editablePoints: [LightCurvePoint] {
-        let points = viewModel.document.light.toneCurve.points
-        return Array(points.dropFirst().dropLast())
+        viewModel.document.light.toneCurve.points
     }
 
     private func curveGraph(size: CGSize) -> some View {
@@ -309,7 +304,7 @@ private struct ToneCurveEditor: View {
         let width = max(size.width, 1)
         let height = max(size.height, 1)
         return (
-            input: min(max(location.x / width, 0.001), 0.999),
+            input: min(max(location.x / width, 0), 1),
             output: min(max(1 - location.y / height, 0), 1)
         )
     }

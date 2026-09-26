@@ -66,8 +66,55 @@ final class LightAdjustmentsTests: XCTestCase {
         XCTAssertEqual(curve.points[0].output, 0)
         XCTAssertEqual(curve.points[3].output, 0,
                        "the clamped duplicate at input 1 uses the last point's output")
-        XCTAssertEqual(curve.version, LightToneCurve.currentVersion)
+        XCTAssertEqual(curve.version, 1)
         XCTAssertFalse(curve.isIdentity)
+    }
+
+    func testMovableToneCurveEndpointsNormalizeAndRoundTrip() throws {
+        let curve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.18, output: 0.12),
+            LightCurvePoint(input: 0.52, output: 0.55),
+            LightCurvePoint(input: 0.84, output: 0.91),
+        ], preserveEndpointPositions: true)
+
+        XCTAssertEqual(curve.version, LightToneCurve.currentVersion)
+        XCTAssertEqual(curve.points.map(\.input), [0.18, 0.52, 0.84])
+        XCTAssertEqual(try JSONDecoder().decode(
+            LightToneCurve.self, from: JSONEncoder().encode(curve)
+        ), curve)
+        XCTAssertEqual(curve.value(at: 0), 0.12, accuracy: 0.000_001)
+        XCTAssertEqual(curve.value(at: 1), 0.91, accuracy: 0.000_001)
+        XCTAssertTrue((0...100).allSatisfy { curve.value(at: Double($0) / 100).isFinite })
+    }
+
+    func testMovableToneCurveEndpointsPersistThroughEditDocument() throws {
+        let document = EditDocument(light: LightAdjustments(toneCurve: LightToneCurve(
+            points: [
+                LightCurvePoint(input: 0.14, output: 0.08),
+                LightCurvePoint(input: 0.86, output: 0.93),
+            ],
+            preserveEndpointPositions: true
+        )))
+
+        let data = try JSONEncoder().encode(document)
+        let restored = try JSONDecoder().decode(EditDocument.self, from: data)
+
+        XCTAssertEqual(restored.light.toneCurve, document.light.toneCurve)
+        XCTAssertEqual(restored.light.toneCurve.points.first?.input ?? -1, 0.14, accuracy: 0.000_001)
+        XCTAssertEqual(restored.light.toneCurve.points.last?.input ?? -1, 0.86, accuracy: 0.000_001)
+    }
+
+    func testLegacyToneCurveDecodeKeepsFixedEndpointBehavior() throws {
+        let data = Data("""
+        {"version":1,"points":[{"input":0.4,"output":0.7}]}
+        """.utf8)
+
+        let curve = try JSONDecoder().decode(LightToneCurve.self, from: data)
+
+        XCTAssertEqual(curve.version, 1)
+        XCTAssertEqual(curve.points.map(\.input), [0, 0.4, 1])
+        XCTAssertEqual(curve.points.first?.output, 0)
+        XCTAssertEqual(curve.points.last?.output, 1)
     }
 
     func testToneCurveInterpolatesDeterministicallyAndClampsInput() {
