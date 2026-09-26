@@ -49,6 +49,21 @@ public struct ContentView: View {
             .navigationTitle("")
             .tint(KromoraTheme.primaryAccent)
             .toolbar {
+                // Only Library and Edit sit on the leading edge. Everything else stays
+                // in the trailing group.
+                if !canvasState.isCropToolActive {
+                    if #available(macOS 26.0, *) {
+                        ToolbarItem(placement: .navigation) {
+                            workspaceModePicker
+                        }
+                        .sharedBackgroundVisibility(.hidden)
+                        ToolbarSpacer(.flexible)
+                    } else {
+                        ToolbarItem(placement: .navigation) {
+                            workspaceModePicker
+                        }
+                    }
+                }
                 if #available(macOS 26.0, *) {
                     ToolbarItemGroup(placement: .primaryAction) {
                         toolbarContent
@@ -273,6 +288,23 @@ public struct ContentView: View {
             : .move(edge: .leading).combined(with: .opacity)
     }
 
+    private var workspaceModePicker: some View {
+        Picker("Workspace", selection: Binding(
+            get: { viewModel.navigation.mode },
+            set: { viewModel.navigate(to: $0) }
+        )) {
+            ForEach(NavigationState.Mode.allCases) { mode in
+                Text(mode.title)
+                    .tag(mode)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .frame(width: 142)
+        .focusable(false)
+        .help("Library (G) or Edit (E)")
+    }
+
     private var toolbarContent: some View {
         Group {
             switch Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) {
@@ -284,26 +316,13 @@ public struct ContentView: View {
                 .transition(.opacity)
             case .edit:
                 Group {
-                    Picker("Workspace", selection: Binding(
-                        get: { viewModel.navigation.mode },
-                        set: { viewModel.navigate(to: $0) }
-                    )) {
-                        ForEach(NavigationState.Mode.allCases) { mode in
-                            Text(mode.title)
-                                .tag(mode)
-                        }
+                    Button {
+                        viewModel.toggleCropTool()
+                    } label: {
+                        Label("Crop", systemImage: "crop")
                     }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 142)
-                    .focusable(false)
-                    .help("Library (G) or Edit (E)")
-
-                    CanvasToolbarControls(
-                        viewModel: viewModel,
-                        canvasState: viewModel.canvasState,
-                        hasImage: viewModel.sourceImage != nil
-                    )
+                    .help("Crop the photo with a freeform or preset frame")
+                    .disabled(viewModel.sourceImage == nil)
 
                     AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
                         viewModel.runAutoAdjustment()
@@ -313,8 +332,14 @@ public struct ContentView: View {
                     .help(viewModel.autoAdjustmentHelp)
                     .disabled(!viewModel.canRunAutoAdjustment)
 
-                    // Keep the comparison affordance in a stable toolbar position. The model still guards
-                    // the action until a source is loaded; an untouched source is valid split-view input.
+                    CanvasToolbarControls(
+                        viewModel: viewModel,
+                        canvasState: viewModel.canvasState,
+                        hasImage: viewModel.sourceImage != nil
+                    )
+
+                    // Comparison stays beside zoom. The model still guards the action until a
+                    // source is loaded; an untouched source is valid split-view input.
                     Button {
                         viewModel.toggleSideBySide()
                     } label: {
@@ -467,15 +492,6 @@ private struct CanvasToolbarControls: View {
     let hasImage: Bool
 
     var body: some View {
-        // Crop is a committed edit, but its in-progress rectangle stays transient until Save.
-        Button {
-            viewModel.toggleCropTool()
-        } label: {
-            Label("Crop", systemImage: "crop")
-        }
-        .help("Crop the photo with a freeform or preset frame")
-        .disabled(!hasImage)
-
         // Canvas navigation is presentation-only; these controls never touch the edit document.
         Menu {
             Button("Fit") { viewModel.fitCanvas() }

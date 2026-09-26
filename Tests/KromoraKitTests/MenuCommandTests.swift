@@ -133,6 +133,26 @@ final class MenuCommandTests: XCTestCase {
 
         XCTAssertTrue(cropBranch.contains("CropToolbarControls("))
         XCTAssertFalse(cropBranch.contains("Picker(\"Workspace\""))
+        XCTAssertTrue(
+            contentView.contains("ToolbarItem(placement: .navigation)"),
+            "Only Library and Edit sit on the leading edge of the window toolbar"
+        )
+        XCTAssertFalse(
+            contentView.contains("ToolbarItemGroup(placement: .navigation)"),
+            "Crop and the other edit actions stay in the trailing toolbar group"
+        )
+        let editBranch = try XCTUnwrap(
+            contentView
+                .components(separatedBy: "case .edit:")
+                .dropFirst()
+                .first?
+                .components(separatedBy: "enum EditorToolbarMode")
+                .first
+        )
+        XCTAssertFalse(
+            editBranch.contains("Picker(\"Workspace\""),
+            "the workspace switcher is a leading toolbar item, not part of the trailing edit actions"
+        )
         XCTAssertFalse(cropBranch.contains("AutoToolbarButton"))
         XCTAssertFalse(cropBranch.contains("Export Selected"))
         XCTAssertTrue(contentView.contains("Label(\"Save\", systemImage: \"checkmark\")"))
