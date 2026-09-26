@@ -4066,7 +4066,6 @@ extension AppViewModel: CanvasWorkflowDestination {
         switch change {
         case .zoom:
             if !isPreviewInteractionActive { previewPresentation.advanceDisplayRevision() }
-            cancelHistogram(clear: false, pump: false)
             if isPreviewInteractionActive {
                 scheduleInteractivePreview()
             } else {
