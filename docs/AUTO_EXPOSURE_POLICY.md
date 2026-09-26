@@ -53,21 +53,31 @@ Ordinary corrections remain within `±1.25 EV`. Structurally underexposed frames
 candidate score uses the same neutral target and selects only a rendered candidate that improves
 global/important-region placement enough to clear the improvement threshold.
 
-Candidates are rejected for new highlight clipping, excessive saturation, unsupported neutral
-color error, mask-edge artifacts, or unmeasurable pixels. Relative contrast/noise costs are
-measured against the unchanged render. This protects shadow readability without accepting
-crushed blacks, clipped whites, or a washed-out result. Existing manual controls, curves, Looks,
-LUTs, and user-owned local layers remain unchanged; Auto provenance version 2 invalidates older
-run fingerprints so the stronger policy is evaluated once.
+Candidates are rejected for new highlight clipping, saturation above the absolute 0.97 guardrail,
+unsupported neutral color error, mask-edge artifacts, or unmeasurable pixels. For reliably
+measured muted color, the frozen score target closes 70% of the gap to colorfulness 0.42 (capped
+at 0.42); otherwise it equals the measured baseline. Color confidence must be at least 0.60,
+colorfulness below 0.35, and saturation p95 no higher than 0.85. Mixed lighting, monochrome
+(likelihood above 0.50), sunset warmth (above 0.60), and night (above 0.60) disable the boost.
+The policy raises vibrance toward that target with a bounded 0–18 slider response. Candidate
+selection now scores the rendered colorfulness shortfall as well as saturation above its prior
+cap, so a safe color improvement can win alongside a tonal improvement. Relative contrast/noise
+costs are measured against the unchanged render. This protects shadow readability without
+accepting crushed blacks, clipped whites, or a washed-out result. Existing manual controls,
+curves, Looks, LUTs, and user-owned local layers remain unchanged; Auto provenance version 3
+invalidates older run fingerprints so the calibrated policy is evaluated once.
 
 ## Quality rubric
 
-`AutoQualityRegressionTests` covers balanced, underexposed, clipped, warm/cool cast, high-key,
-low-key, sunset, monochrome, fog, snow, night, and backlit fixtures. The underexposed fixture
-asserts a materially positive policy response and measures before/after pixels through the real
-renderer with no new clipping. The policy suite also exercises a RAW source-kind equivalent; a
-licensed local ARW/DNG is picked up automatically by the existing optional RAW test lane when
-`KROMORA_RAW_FIXTURE_DIR` is configured.
+`AutoQualityRegressionTests` defines a representative routing matrix and covers balanced,
+underexposed, clipped, warm/cool cast, high-key, low-key, sunset, monochrome, fog, snow, night,
+and backlit fixtures. The matrix expects a Light correction for supported underexposure, Color for
+reliably muted color, white balance for a measured cast, and preservation for balanced/high-key/
+low-key/sunset/night/monochrome intent; backlit correction remains subject-local. The underexposed
+fixture measures before/after rendered luminance with no new clipping, and the muted-color fixture
+measures before/after renderer colorfulness plus visible pixel difference. The policy suite also
+exercises a RAW source-kind equivalent; a licensed local ARW/DNG is picked up automatically by the
+existing optional RAW test lane when `KROMORA_RAW_FIXTURE_DIR` is configured.
 
 Run the focused report with:
 

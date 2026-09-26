@@ -317,6 +317,8 @@ struct AutoEvaluationTargets: Codable, Sendable, Equatable {
     let baselineHighlightClipping: Double
     /// Baseline colorfulness cap: candidates must not exceed the restrained baseline.
     let baselineSaturationP95: Double
+    /// A bounded renderer-measured colorfulness target, earned only by reliable muted-color evidence.
+    let targetColorfulness: Double
     /// Baseline cast magnitude (warm + green) of the current render.
     let baselineCastMagnitude: Double
     /// True when neutral evidence was credible enough to score neutral-color error.
@@ -370,10 +372,27 @@ struct AutoEvaluationTargets: Codable, Sendable, Equatable {
             baselineMedian: baselineMedian,
             baselineHighlightClipping: Double(facts.tonePerceptual.highlightClippingFraction),
             baselineSaturationP95: Double(facts.color.saturationP95),
+            targetColorfulness: colorfulnessTarget(facts: facts),
             baselineCastMagnitude: castMagnitude,
             hasNeutralReference: hasNeutral,
             regions: Array(scored)
         )
+    }
+
+    private static func colorfulnessTarget(facts: AutoEnhancementFacts) -> Double {
+        let color = facts.color
+        let scene = facts.scene
+        let confidence = facts.signalConfidence
+        guard !color.isMixed,
+              scene.monochromeLikelihood <= 0.5,
+              scene.sunsetWarmLikelihood <= 0.6,
+              scene.nightLikelihood <= 0.6,
+              confidence.colorNeutral >= 0.6,
+              color.colorfulness < 0.35,
+              color.saturationP95 <= 0.85 else { return Double(color.colorfulness) }
+        // Close most of the measured gap to a modestly colorful image, while leaving room
+        // for intentional palette choices and the renderer's nonlinear vibrance response.
+        return min(0.42, Double(color.colorfulness) + (0.42 - Double(color.colorfulness)) * 0.7)
     }
 }
 
@@ -534,9 +553,10 @@ enum AutoCandidateScoring {
             neutralUnsupported = true
         }
 
-        // Excessive saturation above the restrained baseline cap.
+        // Reward supported muted-color improvement while retaining the restrained cap cost.
         let saturationCap = min(targets.baselineSaturationP95, 0.85)
-        let saturation = max(0, Double(color.saturationP95) - saturationCap)
+        let saturation = max(0, targets.targetColorfulness - Double(color.colorfulness))
+            + max(0, Double(color.saturationP95) - saturationCap)
 
         // Lost contrast and amplified noise, relative to the frozen unchanged render.
         let contrastLoss = max(0, baseline.localContrast - Double(contrast) - 0.01)
