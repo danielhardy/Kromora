@@ -34,6 +34,9 @@ protocol PreviewPublicationDestination: AnyObject {
     func publicationUpdateHistogram(for request: RenderRequest, presentedImage: CIImage?)
     func publicationScheduleIdlePreviewBuild()
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest)
+    /// The adjusted frame the surface is actually showing. A newer settled request can be turned
+    /// away when this frame is already sharper; the histogram still has to describe it.
+    var publicationVisiblePreview: CIImage? { get }
 }
 
 /// Owns settled and interactive preview publication without owning a view model or surface.
@@ -120,8 +123,37 @@ final class PreviewPublicationCoordinator {
                 )
             }
         )
-        if presented { lastPublishedVisibleRequest = request }
-        return presented
+        if presented {
+            lastPublishedVisibleRequest = request
+            return true
+        }
+        admitHistogramForRetainedFrame(
+            request, assetID: assetID, sourceRevision: sourceRevision,
+            displayRevision: displayRevision
+        )
+        return false
+    }
+
+    /// A size change after the first library open often asks for a cheaper preview than the frame
+    /// already on screen. The surface keeps that frame and never delivers a presentation callback,
+    /// so histogram admission has to run from the pixels that stayed visible.
+    private func admitHistogramForRetainedFrame(
+        _ request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
+        displayRevision: UInt64
+    ) {
+        guard let destination,
+            assetID == destination.publicationActiveAssetID,
+            sourceRevision == destination.publicationSourceRevision,
+            displayRevision == destination.publicationDisplayRevision,
+            request.source == destination.publicationImageSource,
+            request.document == destination.publicationDisplayDocument
+        else { return }
+        let image = lastPresentedVisibleImage ?? destination.publicationVisiblePreview
+        guard let image else { return }
+        lastPresentedVisibleRequest = request
+        lastPresentedVisibleImage = image
+        guard destination.publicationStoredEditsResolvedSourceRevision == sourceRevision else { return }
+        destination.publicationUpdateHistogram(for: request, presentedImage: image)
     }
 
     private func didPresentVisibleFrame(
