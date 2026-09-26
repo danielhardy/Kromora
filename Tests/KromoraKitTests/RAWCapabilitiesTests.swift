@@ -718,4 +718,41 @@ final class RAWCapabilitiesTests: XCTestCase {
             + "Step 10b's Adjust temperature mapping must be the identity — see the design doc §5."
         )
     }
+
+    /// Positive RAW Tint should move toward magenta and negative RAW Tint toward green, matching
+    /// the Color and Develop slider track. Skips unless the opt-in DNG fixture is available.
+    func testRawTintDirectionMatchesGreenToMagentaTrack() async throws {
+        guard let rawURL = Fixtures.localRAWURL else {
+            throw XCTSkip("no local RAW; see Fixtures.localRAWURL and PHASE2_SPEC §8.9")
+        }
+        let engine = RenderEngine()
+        let source = ImageSource(url: rawURL, nativeExtent: .zero)
+
+        func meanGreenAdvantage(at tint: Double) async throws -> Double {
+            var develop = RAWDevelopSettings.neutral
+            develop.neutralTint = tint
+            let rendered = await engine.makeCGImage(
+                source: source,
+                document: EditDocument(rawDevelop: develop),
+                lut: nil,
+                scale: .preview(maxSize: CGSize(width: 400, height: 400)),
+                space: .current
+            )
+            let cgImage = try XCTUnwrap(rendered)
+            let bytes = try Pixels.bytes(of: cgImage)
+
+            var greenAdvantage = 0
+            for pixel in stride(from: 0, to: bytes.count, by: 4) {
+                greenAdvantage += 2 * Int(bytes[pixel + 1])
+                    - Int(bytes[pixel]) - Int(bytes[pixel + 2])
+            }
+            return Double(greenAdvantage) / Double(bytes.count / 4)
+        }
+
+        let greenEnd = try await meanGreenAdvantage(at: -100)
+        let magentaEnd = try await meanGreenAdvantage(at: 100)
+        XCTAssertLessThan(
+            magentaEnd, greenEnd,
+            "positive neutralTint should move toward magenta and negative toward green")
+    }
 }
