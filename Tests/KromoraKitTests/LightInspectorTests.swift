@@ -175,6 +175,24 @@ final class LightInspectorTests: TempDirectoryTestCase {
                        "a drag must not invert the tone curve past its upper neighbor")
     }
 
+    func testCurveDragMovesBothEndpointsInBothDimensions() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.beginPreviewInteraction()
+        let leftInput = viewModel.moveToneCurvePoint(fromInput: 0, input: 0.12, output: 0.1)
+        let rightInput = viewModel.moveToneCurvePoint(fromInput: 1, input: 0.88, output: 0.9)
+        viewModel.endPreviewInteraction()
+
+        let curve = viewModel.document.light.toneCurve
+        XCTAssertEqual(leftInput ?? -1, 0.12, accuracy: 0.000_001)
+        XCTAssertEqual(rightInput ?? -1, 0.88, accuracy: 0.000_001)
+        XCTAssertEqual(curve.points.first?.output ?? -1, 0.1, accuracy: 0.000_001)
+        XCTAssertEqual(curve.points.last?.output ?? -1, 0.9, accuracy: 0.000_001)
+        XCTAssertTrue(zip(curve.points, curve.points.dropFirst()).allSatisfy { $0.input < $1.input })
+        XCTAssertEqual(curve.value(at: 0), 0.1, accuracy: 0.000_001)
+        XCTAssertEqual(curve.value(at: 1), 0.9, accuracy: 0.000_001)
+        XCTAssertTrue((0...100).allSatisfy { curve.value(at: Double($0) / 100).isFinite })
+    }
+
     func testCurveHitTestingUsesTheSameNormalizedToleranceForSelectionAndRemoval() {
         let curve = LightToneCurve(points: [
             LightCurvePoint(input: 0.4, output: 0.4),
