@@ -7,7 +7,7 @@ import XCTest
 #if DEBUG
 @MainActor
 final class AnalysisDebugPanelTests: XCTestCase {
-    func testAnalysisMaskOverlayLayoutMapsNonOriginCropAndFitsItsAspectRatio() {
+    func testAnalysisMaskOverlayLayoutMapsNonOriginCropAndFitsItsAspectRatio() throws {
         let sourceSize = CGSize(width: 2400, height: 1200)
         let crop = CropAdjustments(normalizedRect: CGRect(x: 0.2, y: 0.25, width: 0.5, height: 0.4))
         let layout = AnalysisMaskOverlayLayout(
@@ -24,6 +24,26 @@ final class AnalysisDebugPanelTests: XCTestCase {
         // CropAdjustments uses a bottom-left origin; the mask and viewport use top-left.
         XCTAssertEqual(layout.sourceFrame.minY + 0.35 * layout.sourceFrame.height,
                        layout.cropFrame.minY, accuracy: 0.000_001)
+
+        // A subject sample inside the crop must land at the same fractional position in the
+        // fitted preview. This catches overlays that fit the mask independently of the photo.
+        let subjectPoint = CGPoint(x: 0.45, y: 0.55)
+        let transform = CanvasMaskTransform(
+            sourceSize: sourceSize, crop: crop, viewportSize: CGSize(width: 300, height: 130)
+        )
+        let presentedSubjectPoint = try XCTUnwrap(
+            transform.viewportPoint(forSourceNormalized: subjectPoint)
+        )
+        XCTAssertEqual(
+            presentedSubjectPoint.x,
+            layout.cropFrame.minX + 0.5 * layout.cropFrame.width,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            presentedSubjectPoint.y,
+            layout.cropFrame.minY + 0.5 * layout.cropFrame.height,
+            accuracy: 0.000_001
+        )
     }
 
     func testAnalysisMaskOverlayIdentityCropMatchesFittedPhotoFrame() {
