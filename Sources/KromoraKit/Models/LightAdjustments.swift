@@ -184,6 +184,21 @@ struct LightToneCurve: Codable, Equatable, Sendable {
         return points[index]
     }
 
+    /// Return the nearest point, including endpoints, within the editor's hit tolerance.
+    ///
+    /// This is the counterpart to `interiorPoint(nearInput:)` used to start a drag on an existing
+    /// handle. Endpoints must stay eligible here even though `interiorPoint` deliberately excludes
+    /// them for removal, or a press on an endpoint handle would fall through to click-to-add and
+    /// insert a spurious neighboring point instead of moving the endpoint.
+    func nearestPoint(toInput input: Double, tolerance: Double = 0.03) -> LightCurvePoint? {
+        guard input.isFinite, tolerance >= 0, !points.isEmpty else { return nil }
+        let index = points.indices.min(by: {
+            abs(points[$0].input - input) < abs(points[$1].input - input)
+        })!
+        guard abs(points[index].input - input) <= tolerance else { return nil }
+        return points[index]
+    }
+
     /// Return a curve with the interior point nearest to `input` removed.
     ///
     /// Endpoints are deliberately never candidates. A small hit tolerance makes this useful for
