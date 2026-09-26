@@ -276,4 +276,73 @@ final class LibraryGridTests: TempDirectoryTestCase {
             "requesting one materialized cell must not admit the rest of the folder"
         )
     }
+
+    func testVisibleMosaicIndicesCoverTheViewportAndPrefetchWithoutTheWholeLibrary() {
+        let layout = LibraryGridLayout(prefetchRows: 1)
+        let rows = (0..<8).map { index in
+            LibraryGridLayout.MosaicRow(
+                id: index * 2,
+                itemIndices: [index * 2, index * 2 + 1],
+                imageHeight: 100,
+                itemWidths: [120, 120]
+            )
+        }
+
+        let firstScreen = layout.visibleMosaicIndices(
+            rows: rows, viewportHeight: 200, scrollOffset: 0
+        )
+        XCTAssertEqual(
+            firstScreen, [0, 1, 2, 3, 4, 5],
+            "the first screen admits the intersecting rows plus one prefetch row"
+        )
+
+        let scrolled = layout.visibleMosaicIndices(
+            rows: rows, viewportHeight: 200, scrollOffset: 300
+        )
+        XCTAssertEqual(scrolled, Array(2...9))
+        XCTAssertFalse(scrolled.contains(0))
+        XCTAssertLessThan(scrolled.count, 16)
+
+        let padded = layout.visibleMosaicIndices(
+            rows: rows, viewportHeight: 100, scrollOffset: 0, contentOrigin: 16
+        )
+        XCTAssertEqual(padded.prefix(2), [0, 1])
+        XCTAssertTrue(padded.contains(2))
+    }
+
+    func testVisibleWindowLoadsEveryRequestedPhotoWithoutASelectionChange() async throws {
+        for index in 0..<12 {
+            try Fixtures.writeJPEG(
+                width: 64, height: 48, orientation: 1,
+                named: String(format: "photo-%03d.jpg", index), in: tempDirectory
+            )
+        }
+
+        let collection = makeTestCollection()
+        collection.beginThumbnailDemand()
+        collection.loadFromFolder(tempDirectory)
+        await collection.scanCompletion()
+        XCTAssertEqual(collection.items.count, 12)
+
+        let visible = Array(collection.items.prefix(9).map(\.id))
+        var demanded: [PhotoAssetID] = []
+        collection.onThumbnailDemand = { id, _ in demanded.append(id) }
+        collection.requestVisibleThumbnails(for: visible)
+
+        let deadline = Date().addingTimeInterval(5)
+        while Set(demanded) != Set(visible) || collection.items.prefix(9).contains(where: { $0.thumbnail == nil }) {
+            if Date() > deadline {
+                return XCTFail("the visible window did not admit every photo and its edited thumbnail")
+            }
+            await Task.yield()
+        }
+
+        XCTAssertEqual(Set(demanded), Set(visible))
+        XCTAssertTrue(
+            collection.items.dropFirst(9).allSatisfy {
+                $0.thumbnail == nil && $0.asset.thumbnailState == .notRequested
+            },
+            "photos outside the visible window stay unloaded"
+        )
+    }
 }

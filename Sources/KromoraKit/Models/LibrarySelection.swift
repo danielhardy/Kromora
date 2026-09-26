@@ -144,6 +144,11 @@ struct LibraryGridLayout: Sendable, Equatable {
         let itemWidths: [Double]
     }
 
+    /// Space under a mosaic image: the cell's 6pt stack spacing plus one caption line.
+    /// Shared by the grid and `visibleMosaicIndices` so a viewport admission matches the
+    /// rows the user can actually see.
+    static let mosaicCaptionBlock = 22.0
+
     let minimumCellWidth: Double
     let cellHeight: Double
     let spacing: Double
@@ -272,6 +277,52 @@ struct LibraryGridLayout: Sendable, Equatable {
         let start = min(itemCount, firstRow * columns)
         let end = min(itemCount, (firstRow + visibleRows) * columns)
         return start..<max(start, end)
+    }
+
+    /// Item indices whose mosaic rows intersect the viewport, expanded by `prefetchRows`.
+    ///
+    /// `contentOrigin` is the first row's y position inside the scroll content. Row height
+    /// includes the caption under the image; `spacing` is the gap between rows. Results stay
+    /// in source order so the scheduler paints the top of the window first. A zero-height
+    /// first layout still admits the leading prefetch window, because that is the frame the
+    /// user is about to see.
+    func visibleMosaicIndices(
+        rows: [MosaicRow],
+        viewportHeight: Double,
+        scrollOffset: Double,
+        contentOrigin: Double = 0
+    ) -> [Int] {
+        guard !rows.isEmpty else { return [] }
+        let caption = Self.mosaicCaptionBlock
+        var origins: [Double] = []
+        origins.reserveCapacity(rows.count)
+        var y = contentOrigin
+        for row in rows {
+            origins.append(y)
+            y += row.imageHeight + caption + spacing
+        }
+
+        let top = max(0, scrollOffset)
+        let bottom = top + max(0, viewportHeight)
+        var first = rows.count
+        var last = -1
+        for index in rows.indices {
+            let rowTop = origins[index]
+            let rowBottom = rowTop + rows[index].imageHeight + caption
+            guard rowBottom >= top, rowTop <= bottom else { continue }
+            if first == rows.count { first = index }
+            last = index
+        }
+        if last < first {
+            if top > contentOrigin {
+                let start = max(0, rows.count - 1 - prefetchRows)
+                return rows[start...].flatMap(\.itemIndices)
+            }
+            return rows.prefix(min(rows.count, 1 + prefetchRows)).flatMap(\.itemIndices)
+        }
+        let start = max(0, first - prefetchRows)
+        let end = min(rows.count - 1, last + prefetchRows)
+        return rows[start...end].flatMap(\.itemIndices)
     }
 }
 
