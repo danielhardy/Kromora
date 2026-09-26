@@ -383,9 +383,7 @@ struct AutoEvaluationTargets: Codable, Sendable, Equatable {
         let color = facts.color
         let scene = facts.scene
         let confidence = facts.signalConfidence
-        let darkChromaticEvidence = facts.tonePerceptual.p50 < 0.20
-            && color.saturationMedian >= 0.50
-            && color.colorfulness >= 0.10
+        let darkChromaticEvidence = facts.hasDarkChromaticEvidence
         guard !color.isMixed,
               scene.monochromeLikelihood <= 0.5,
               scene.sunsetWarmLikelihood <= 0.6,

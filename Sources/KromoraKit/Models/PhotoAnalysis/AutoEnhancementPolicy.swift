@@ -399,6 +399,13 @@ struct AutoEnhancementFacts: Codable, Sendable, Equatable {
         self.asShotTemperature = asShotTemperature
         self.asShotTint = asShotTint
     }
+
+    /// A dark frame with clear measured chroma contradicts the night-scene guess enough to
+    /// let Light and Color evidence through despite a high night likelihood. Shared by the
+    /// exposure/color eligibility gates and the scoring target so they agree on the same frames.
+    var hasDarkChromaticEvidence: Bool {
+        tonePerceptual.p50 < 0.20 && color.saturationMedian >= 0.50 && color.colorfulness >= 0.10
+    }
 }
 
 // MARK: - Proposal types
@@ -796,9 +803,7 @@ private enum ColorPlacement {
         if color.isMixed { return nil }
         if scene.monochromeLikelihood > 0.5 { return nil }
         if scene.sunsetWarmLikelihood > 0.6 { return nil }
-        let darkChromaticEvidence = facts.tonePerceptual.p50 < 0.20
-            && color.saturationMedian >= 0.50
-            && color.colorfulness >= 0.10
+        let darkChromaticEvidence = facts.hasDarkChromaticEvidence
         if scene.nightLikelihood > 0.6 && !darkChromaticEvidence { return nil }
         if confidence.colorNeutral < 0.4 { return nil }
 
