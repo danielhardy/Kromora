@@ -172,6 +172,54 @@ final class PortableLibraryPackageTests: TempDirectoryTestCase {
         XCTAssertTrue(first.xmp.rawData.contains(Data("kromora:editDocument".utf8)))
     }
 
+    func testPortablePackageErrorUsesLocalizedDescription() {
+        XCTAssertEqual(
+            PortablePackageError.malformedXMP("writer produced a mismatched packet").localizedDescription,
+            "Malformed XMP edit sidecar: writer produced a mismatched packet"
+        )
+        XCTAssertEqual(
+            PortablePackageError.immutableRevisionExists("Assets/aa/edits/2.json").localizedDescription,
+            "Immutable edit revision already exists at 'Assets/aa/edits/2.json'"
+        )
+        XCTAssertEqual(
+            PortablePackageError.invalidRelativePath("Original/Photo").localizedDescription,
+            "Unsafe package-relative path 'Original/Photo'"
+        )
+    }
+
+    func testAppendEditRevisionSkipsSidecarsMissingFromTheAssetRecord() throws {
+        let packageURL = tempDirectory.appendingPathComponent("OccupiedRevision.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let assetID = PortablePhotoAssetID(uuid: UUID(uuidString: "aa000000-0000-4000-8000-00000000000a")!)
+        try package.writeAssetRecord(PortablePackageAssetRecord(
+            identity: PortablePhotoIdentity(
+                assetID: assetID,
+                sourceFingerprint: .data(Data("source".utf8), decoderVersion: "test")
+            ),
+            source: .embedded(relativePath: "Assets/aa/\(assetID.raw)/Original/source.jpg")
+        ))
+        let lease = try PortablePackageLease.acquire(at: packageURL, deviceName: "test", processID: 1)
+        _ = try package.appendEditRevision(
+            for: assetID, document: EditDocument(light: .init(exposure: 0.25)), lease: lease
+        )
+        let revisionDirectory = packageURL.appendingPathComponent("Assets/aa/\(assetID.raw)")
+        try Data(contentsOf: revisionDirectory.appendingPathComponent("Edits/1.json"))
+            .write(to: revisionDirectory.appendingPathComponent("Edits/2.json"))
+        try Data(contentsOf: revisionDirectory.appendingPathComponent("Metadata/1.xmp"))
+            .write(to: revisionDirectory.appendingPathComponent("Metadata/2.xmp"))
+
+        let next = try package.appendEditRevision(
+            for: assetID, document: EditDocument(light: .init(exposure: 0.75)), lease: lease
+        )
+        try lease.release()
+
+        XCTAssertEqual(next.native.revision, 3)
+        let record = try package.readAssetRecord(for: assetID)
+        XCTAssertEqual(record.currentRevision, 3)
+        XCTAssertEqual(record.editHistory.currentRevision, 3)
+        XCTAssertEqual(try package.readEditRevision(for: assetID).document.light.exposure, 0.75)
+    }
+
     func testMalformedXMPIsReportedAndCanBeQuarantined() throws {
         let packageURL = tempDirectory.appendingPathComponent("MalformedXMP.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)
