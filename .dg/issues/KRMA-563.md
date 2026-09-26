@@ -2,7 +2,7 @@
 id: KRMA-563
 title: Simplify the masking UI and editing workflow
 type: feature
-status: review
+status: done
 priority: medium
 creation_provenance:
   runner: codex
@@ -12,9 +12,9 @@ labels:
   - masking
   - ui-ux
 created: 2026-09-24T14:07:05.300Z
-updated: 2026-09-25T03:54:20.748Z
+updated: 2026-09-26T13:41:11.666Z
 blockers: []
-order: x
+order: zzzzzzzz
 board: product
 ---
 
