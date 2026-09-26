@@ -922,6 +922,10 @@ private struct MaskLayerRow: View {
 
     private var isSelected: Bool { maskingState.selectedLayerID == layer.id }
 
+    private var previewTarget: MaskOverlayPreviewTarget {
+        MaskOverlayPreviewTarget(layerID: layer.id, componentID: nil)
+    }
+
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: layer.components.first?.source.iconName ?? "rectangle.dashed")
@@ -1004,7 +1008,14 @@ private struct MaskLayerRow: View {
             .accessibilityLabel("Actions for \(layer.name)")
         }
         .opacity(layer.isEnabled ? 1 : 0.6)
-        .onHover { isHovered = $0 }
+        .onHover {
+            isHovered = $0
+            if $0 {
+                maskingState.setHoveredOverlayTarget(previewTarget)
+            } else {
+                maskingState.clearHoveredOverlayTarget(if: previewTarget)
+            }
+        }
         .padding(.vertical, 5)
         .padding(.horizontal, 6)
         .background(
@@ -1019,6 +1030,9 @@ private struct MaskLayerRow: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityAction(named: "Select mask layer \(layer.name)") {
             viewModel.selectMaskLayer(layer.id)
+        }
+        .accessibilityAction(named: "Preview mask coverage") {
+            maskingState.toggleAccessibilityOverlayPreview(previewTarget)
         }
     }
 }
@@ -1044,6 +1058,10 @@ private struct MaskPartRow: View {
     }
 
     private var isSoloed: Bool { maskingState.soloComponentID == component.id }
+
+    private var previewTarget: MaskOverlayPreviewTarget {
+        MaskOverlayPreviewTarget(layerID: layer.id, componentID: component.id)
+    }
 
     @State private var isHovered = false
 
@@ -1158,7 +1176,14 @@ private struct MaskPartRow: View {
             .opacity(isHovered || isSelected ? 1 : 0)
             .accessibilityLabel("Actions for \(component.displayName)")
         }
-        .onHover { isHovered = $0 }
+        .onHover {
+            isHovered = $0
+            if $0 {
+                maskingState.setHoveredOverlayTarget(previewTarget)
+            } else {
+                maskingState.clearHoveredOverlayTarget(if: previewTarget)
+            }
+        }
         .padding(.vertical, 3)
         .padding(.leading, 22)
         .padding(.trailing, 6)
@@ -1174,6 +1199,9 @@ private struct MaskPartRow: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityAction(named: "Select part \(component.displayName)") {
             viewModel.selectMaskComponent(component.id, in: layer.id)
+        }
+        .accessibilityAction(named: "Preview part coverage") {
+            maskingState.toggleAccessibilityOverlayPreview(previewTarget)
         }
     }
 }
@@ -1264,6 +1292,7 @@ struct MaskCanvasOverlay: View {
     @State private var lastPanPoint: CGPoint?
     @State private var gestureStartViewportPoint: CGPoint?
     @State private var maskImage: CGImage?
+    @State private var settledOverlayImage: CGImage?
     /// The stroke that just finished, held on screen until the re-resolved overlay that
     /// contains it arrives. Without it the stroke would vanish at mouse-up and reappear a frame
     /// later when the renderer catches up.
@@ -1286,22 +1315,22 @@ struct MaskCanvasOverlay: View {
             // radial showed just its ellipse tooling).
             let documentLayers = viewModel.document.localAdjustments
             let layers = overlayLayers(document: documentLayers, draft: gradientDraftForOverlay)
+            let overlaySelection = MaskOverlayRenderSelection(state: maskingState)
             // The overlay always shows the selected mask's effective coverage — what its
             // adjustments will actually touch. Selecting a part (for example the eraser part a
             // stroke just created) must not swap the wash for that part in isolation: an erase
             // would then read as a new colored stroke instead of coverage being removed. Only an
             // explicit solo isolates a part. The live brush stroke is composited into the same
             // wash by `draw`, so painting adds color and erasing visibly removes it.
-            let overlayComponentID: UUID? = nil
             let style = overlayStyle
             let presentation = MaskOverlayPresentation(
                 coverageOpacity: maskingState.overlayOpacity)
             let taskID = OverlayTaskID(
                 layers: layers,
-                selectedLayerID: maskingState.selectedLayerID,
-                soloLayerID: maskingState.soloLayerID,
-                selectedComponentID: overlayComponentID,
-                soloComponentID: maskingState.soloComponentID,
+                selectedLayerID: overlaySelection.layerID,
+                soloLayerID: overlaySelection.soloLayerID,
+                selectedComponentID: overlaySelection.componentID,
+                soloComponentID: overlaySelection.soloComponentID,
                 assetID: viewModel.maskingAssetID,
                 sourceFingerprint: viewModel.maskingSource?.cacheFingerprint ?? "missing",
                 requestRevision: viewModel.maskingSourceRevision,
@@ -1326,12 +1355,19 @@ struct MaskCanvasOverlay: View {
             }
             .accessibilityLabel(canvasAccessibilityLabel)
             .accessibilityValue(canvasAccessibilityValue)
+            .onChange(of: maskingState.overlayPreviewTarget) { _, target in
+                if target == nil {
+                    // The ordinary overlay image is retained while a row is previewed, so
+                    // leaving the row restores it synchronously instead of waiting on a render.
+                    maskImage = settledOverlayImage
+                }
+            }
             .task(id: taskID) {
                 let semanticTarget = selectedSemanticTarget(
                     in: layers,
-                    selectedLayerID: maskingState.selectedLayerID,
-                    selectedComponentID: overlayComponentID,
-                    soloComponentID: maskingState.soloComponentID
+                    selectedLayerID: overlaySelection.layerID,
+                    selectedComponentID: overlaySelection.componentID,
+                    soloComponentID: overlaySelection.soloComponentID
                 )
                 if semanticTarget != nil {
                     maskingState.beginMaskResolution()
@@ -1344,15 +1380,18 @@ struct MaskCanvasOverlay: View {
                 }
                 let resolved = await viewModel.renderMaskOverlay(
                     layers: layers,
-                    selectedLayerID: maskingState.selectedLayerID,
-                    soloLayerID: maskingState.soloLayerID,
+                    selectedLayerID: overlaySelection.layerID,
+                    soloLayerID: overlaySelection.soloLayerID,
                     targetSize: targetSize,
                     style: style,
-                    selectedComponentID: overlayComponentID,
-                    soloComponentID: maskingState.soloComponentID
+                    selectedComponentID: overlaySelection.componentID,
+                    soloComponentID: overlaySelection.soloComponentID
                 )
                 guard !Task.isCancelled else { return }
                 maskImage = resolved
+                if maskingState.overlayPreviewTarget == nil {
+                    settledOverlayImage = resolved
+                }
                 settlingStroke = nil
                 if semanticTarget != nil {
                     if resolved == nil {
