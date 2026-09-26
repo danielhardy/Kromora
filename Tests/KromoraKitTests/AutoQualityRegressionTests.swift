@@ -186,6 +186,19 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
         return try Fixtures.jpegData(for: image)
     }
 
+    /// Dark, visibly chromatic gradient: supplies independent Light and Color defects in one
+    /// rendered fixture so a stronger Color proposal cannot stand in for the Light correction.
+    private func underexposedMutedColorData() throws -> Data {
+        let image = try Fixtures.makeParametricCGImage(width: 96, height: 64) { nx, ny in
+            let t = (nx + ny) / 2
+            if nx < 0.5 {
+                return (0.18 + 0.12 * t, 0.10 + 0.08 * t, 0.06 + 0.05 * t)
+            }
+            return (0.12 + 0.10 * t, 0.07 + 0.06 * t, 0.04 + 0.04 * t)
+        }
+        return try Fixtures.jpegData(for: image)
+    }
+
     /// Warm cast with a neutral card: warm gradient (left two-thirds) plus a neutral gradient
     /// card (right third). A globally warm flat reads as sunset and is *correctly* preserved
     /// by the WB veto; the card supplies the credible neutral evidence a correction needs.
@@ -782,41 +795,20 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
             id: "underexposed", data: data, extent: extent
         )
         XCTAssertFalse(report.hasFailures, "failures: \(report.renderFailures)")
-        // Full-path guardrails: whatever the policy proposes for a dark frame must stay
-        // bounded and must not invent clipping. (The policy's own lift is pinned pure above;
-        // the renderer-honors-lift half follows.)
+        // The same proposal is rendered through the real pipeline. Auto must visibly lift
+        // the measured defect without exceeding its evidence-derived correction bound.
         XCTAssertLessThanOrEqual(
             abs(proposal.changes[.exposure]?.proposed ?? 0),
             AutoExposureObjective.structurallyUnderexposedCorrectionCapEV
         )
         XCTAssertNotNil(report.measurements)
-        // Renderer half, KRMA-342 style: the representative +1EV correction the policy class
-        // proposes must lift the defect metric (luma toward the 0.48 band) without clipping.
-        // This split is deliberate (see known limitations): dark low-spread frames attract fog
-        // dehaze, so the end-to-end selection backstop lives in the coordinator (KRMA-347),
-        // while here each half is measured separately through real pixels.
-        let source = ImageSource(data: data, nativeExtent: extent)
-        let engine = RenderEngine()
-        let evaluator = AutoCandidateEvaluator()
-        var lifted = EditDocument()
-        lifted.light.exposure = 1.0
-        let evaluation = await evaluator.evaluate(
-            fixtureID: "auto-quality-underexposed-lift", source: source,
-            baseDocument: EditDocument(), proposedDocument: lifted, engine: engine
-        )
-        XCTAssertFalse(evaluation.report.hasFailures)
-        let baseImage = try XCTUnwrap(CGImageSourceCreateWithData(
-            try XCTUnwrap(evaluation.base).pngData as CFData, nil
-        ).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
-        let liftedImage = try XCTUnwrap(CGImageSourceCreateWithData(
-            try XCTUnwrap(evaluation.proposed).pngData as CFData, nil
-        ).flatMap { CGImageSourceCreateImageAtIndex($0, 0, nil) })
-        let baseLevels = try XCTUnwrap(Fixtures.sampleLevels(of: baseImage))
-        let liftedLevels = try XCTUnwrap(Fixtures.sampleLevels(of: liftedImage))
-        let baseLuma = 0.2126 * baseLevels.meanR + 0.7152 * baseLevels.meanG + 0.0722 * baseLevels.meanB
-        let liftedLuma = 0.2126 * liftedLevels.meanR + 0.7152 * liftedLevels.meanG + 0.0722 * liftedLevels.meanB
-        XCTAssertGreaterThan(liftedLuma, baseLuma, "a +1EV correction must lift a dark frame")
-        XCTAssertLessThan(liftedLevels.highlightClip, 0.05, "the lift must not clip")
+        let base = try XCTUnwrap(baseLevels)
+        let proposed = try XCTUnwrap(proposedLevels)
+        let baseLuma = 0.2126 * base.meanR + 0.7152 * base.meanG + 0.0722 * base.meanB
+        let proposedLuma = 0.2126 * proposed.meanR + 0.7152 * proposed.meanG + 0.0722 * proposed.meanB
+        XCTAssertGreaterThan(proposal.changes[.exposure]?.proposed ?? 0, 0.4)
+        XCTAssertGreaterThan(proposedLuma - baseLuma, 0.025, "Auto's rendered Light result must be visible")
+        XCTAssertLessThan(proposed.highlightClip, 0.05, "Auto's lift must not invent clipping")
     }
 
     func testActualRenderWarmCastProposalCoolsStandardPath() async throws {
@@ -864,7 +856,7 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
             )
         )
         let proposal = AutoEnhancementPolicy.propose(facts: facts, current: base, sourceKind: .standard)
-        XCTAssertGreaterThan(proposal.document.color.vibrance, 0)
+        XCTAssertGreaterThanOrEqual(proposal.document.color.vibrance, 18)
 
         let after = try await measurer.measure(
             source: source, document: proposal.document,
@@ -876,6 +868,7 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
             "the Color correction must improve its measured target"
         )
         XCTAssertGreaterThan(after.color.colorfulness - before.color.colorfulness, 0.015)
+        XCTAssertLessThan(after.globalTone.perceptual.highlightClippingFraction, 0.05)
 
         let rendered = await AutoCandidateEvaluator().evaluate(
             fixtureID: "auto-quality-muted-color", source: source,
@@ -883,6 +876,47 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
         )
         XCTAssertFalse(rendered.report.hasFailures, "failures: \(rendered.report.renderFailures)")
         XCTAssertGreaterThan(try XCTUnwrap(rendered.report.measurements).meanAbsoluteDifference, 0.01)
+    }
+
+    func testActualRenderUnderexposedMutedPhotoImprovesLightAndColorTogether() async throws {
+        let data = try underexposedMutedColorData()
+        let source = ImageSource(data: data, nativeExtent: Self.corpusSize)
+        let engine = RenderEngine()
+        let measurer = CurrentEditMeasurer(
+            engine: engine,
+            store: MaskStore(directory: tempDirectory.appendingPathComponent("masks-underexposed-muted"))
+        )
+        let base = EditDocument()
+        let before = try await measurer.measure(
+            source: source, document: base, expectedDocumentHash: base.editHash,
+            configuration: smallMeasureConfig()
+        )
+        let scene = SceneCharacteristicsAnalyzer.analyze(measurement: before, classifications: nil)
+        let facts = AutoEnhancementFacts(
+            measurement: before, scene: scene,
+            signalConfidence: AutoSignalConfidence(
+                globalTone: 1, colorNeutral: 0.9, scene: 0.9,
+                subjectRegions: 0.5, overall: 0.9
+            )
+        )
+        let proposal = AutoEnhancementPolicy.propose(facts: facts, current: base, sourceKind: .standard)
+        XCTAssertGreaterThan(proposal.document.light.exposure, 0.4, "Light evidence must earn a visible lift")
+        XCTAssertGreaterThanOrEqual(proposal.document.color.vibrance, 18, "muted Color evidence must earn a visible boost")
+
+        let after = try await measurer.measure(
+            source: source, document: proposal.document,
+            expectedDocumentHash: proposal.document.editHash,
+            configuration: smallMeasureConfig()
+        )
+        let target = 0.48
+        XCTAssertLessThan(
+            abs(Double(after.globalTone.perceptual.p50) - target),
+            abs(Double(before.globalTone.perceptual.p50) - target),
+            "rendered Light must move median luminance toward the target"
+        )
+        XCTAssertGreaterThan(after.color.colorfulness, before.color.colorfulness)
+        XCTAssertGreaterThan(after.color.colorfulness - before.color.colorfulness, 0.015)
+        XCTAssertLessThan(after.globalTone.perceptual.highlightClippingFraction, 0.05)
     }
 
     func testActualRenderFogDehazeRespondsWithoutNewClipping() async throws {
