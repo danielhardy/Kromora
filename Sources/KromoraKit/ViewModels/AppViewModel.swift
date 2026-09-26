@@ -4185,6 +4185,9 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionIsShowingOriginal: Bool { isShowingOriginal }
     var admissionIsSideBySideVisible: Bool { isSideBySideVisible }
     var admissionHasOriginalPreview: Bool { originalPreviewSurface.image != nil }
+    func admissionScheduleOriginalPreview() {
+        scheduleOriginalPreview(allowBeforePresentationConfirmation: true)
+    }
     var admissionHasComparisonPreviewCandidate: Bool {
         previewSurface.image != nil
             && previewPublicationCoordinator.lastPublishedVisibleRequest?.source == imageSource

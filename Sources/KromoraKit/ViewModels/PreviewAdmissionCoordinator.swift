@@ -32,6 +32,7 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionIsShowingOriginal: Bool { get }
     var admissionIsSideBySideVisible: Bool { get }
     var admissionHasOriginalPreview: Bool { get }
+    func admissionScheduleOriginalPreview()
     var admissionHasComparisonPreviewCandidate: Bool { get }
     var admissionSelectedLook: CubeLUT? { get }
     var admissionCropToolActive: Bool { get }
@@ -102,6 +103,7 @@ final class PreviewAdmissionCoordinator {
     private var previewScheduledSourceRevision: UInt64?
     private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
     private var comparisonPreviewScheduledRevision: UInt64?
+    private var comparisonPreviewScheduledPlan: ResolutionPlan?
     private var comparisonPreviewRetriedRevision: UInt64?
     private var comparisonPreviewRetryTask: Task<Void, Never>?
     var previewBackingSize = CGSize(width: 1600, height: 1200)
@@ -232,6 +234,7 @@ final class PreviewAdmissionCoordinator {
 
     func resetComparisonPreviewAdmission() {
         comparisonPreviewScheduledRevision = nil
+        comparisonPreviewScheduledPlan = nil
         cancelComparisonRetry()
     }
 
@@ -247,24 +250,32 @@ final class PreviewAdmissionCoordinator {
             let imageSource = destination.admissionImageSource
         else {
             comparisonPreviewScheduledRevision = nil
+            comparisonPreviewScheduledPlan = nil
             cancelComparisonPreview()
             destination.admissionClearOriginalPreview()
             return
         }
         let comparisonRevision = destination.admissionComparisonRevision
-        guard comparisonPreviewScheduledRevision != comparisonRevision else { return }
+        let navigation = destination.admissionCanvasNavigation
         let baseline = destination.admissionComparisonBaselineDocument
         let plan = destination.admissionPresentation.plan(
             for: baseline,
             nativeExtent: imageSource.nativeExtent,
             viewportSize: destination.admissionPreviewBackingSize,
             surface: .comparisonBaseline,
-            navigation: destination.admissionCanvasNavigation
+            navigation: navigation
         )
+        guard comparisonPreviewScheduledRevision != comparisonRevision
+                || comparisonPreviewScheduledPlan != plan
+        else { return }
+        if comparisonPreviewScheduledRevision != nil {
+            cancelComparisonPreview(pump: false)
+        }
         let sourceRevision = destination.admissionSourceRevision
         let assetID = destination.admissionActiveAssetID
         let sourceReference = destination.admissionActiveSourceReference
         comparisonPreviewScheduledRevision = comparisonRevision
+        comparisonPreviewScheduledPlan = plan
 
         let accepted = workScheduler.enqueue(
             id: comparisonPreviewJobID, lane: .editor, priority: .comparison,
@@ -274,7 +285,8 @@ final class PreviewAdmissionCoordinator {
                     sourceReference == destination.admissionActiveSourceReference,
                     sourceRevision == destination.admissionSourceRevision,
                     comparisonRevision == destination.admissionComparisonRevision,
-                    self.comparisonPreviewScheduledRevision == comparisonRevision
+                    self.comparisonPreviewScheduledRevision == comparisonRevision,
+                    self.comparisonPreviewScheduledPlan == plan
                 else { return }
                 // An already displayed baseline remains correct when a redundant request is
                 // evicted. Keep this revision admitted so a later Adjusted publication cannot
@@ -283,6 +295,7 @@ final class PreviewAdmissionCoordinator {
                 // A queued comparison can be evicted by a newer active-editor render. Leave the
                 // revision retryable so the next settled publication can re-admit it.
                 self.comparisonPreviewScheduledRevision = nil
+                self.comparisonPreviewScheduledPlan = nil
             },
             operation: { [weak self, weak destination, engine] in
                 guard !Task.isCancelled, let self, let destination,
@@ -290,6 +303,7 @@ final class PreviewAdmissionCoordinator {
                     sourceReference == destination.admissionActiveSourceReference,
                     sourceRevision == destination.admissionSourceRevision,
                     comparisonRevision == destination.admissionComparisonRevision,
+                    navigation == destination.admissionCanvasNavigation,
                     destination.admissionImageSource == imageSource
                 else { return }
                 let request = destination.admissionSettledRequest(
@@ -303,6 +317,7 @@ final class PreviewAdmissionCoordinator {
                         sourceReference == destination.admissionActiveSourceReference,
                         sourceRevision == destination.admissionSourceRevision,
                         comparisonRevision == destination.admissionComparisonRevision,
+                        navigation == destination.admissionCanvasNavigation,
                         destination.admissionImageSource == imageSource
                     else { return }
                     if !destination.admissionPresentOriginalPreview(gpuImage, request: request) {
@@ -319,6 +334,7 @@ final class PreviewAdmissionCoordinator {
                     sourceReference == destination.admissionActiveSourceReference,
                     sourceRevision == destination.admissionSourceRevision,
                     comparisonRevision == destination.admissionComparisonRevision,
+                    navigation == destination.admissionCanvasNavigation,
                     destination.admissionImageSource == imageSource,
                     let cgImage
                 else { return }
@@ -332,6 +348,7 @@ final class PreviewAdmissionCoordinator {
         )
         if !accepted, comparisonPreviewScheduledRevision == comparisonRevision {
             comparisonPreviewScheduledRevision = nil
+            comparisonPreviewScheduledPlan = nil
         }
     }
 
@@ -352,6 +369,7 @@ final class PreviewAdmissionCoordinator {
             return
         }
         comparisonPreviewScheduledRevision = nil
+        comparisonPreviewScheduledPlan = nil
         destination.admissionClearOriginalPreview()
         destination.publishAdmissionStatus("Could not display the comparison preview. Retrying…")
         guard comparisonPreviewRetriedRevision != comparisonRevision else { return }
@@ -583,6 +601,7 @@ final class PreviewAdmissionCoordinator {
             else { return }
             self.previewDebounceTask = nil
             self.schedulePreview()
+            destination.admissionScheduleOriginalPreview()
             if let assetID = destination.pendingEditedThumbnailAssetID {
                 destination.admitSettledEditedThumbnail(assetID)
             }
