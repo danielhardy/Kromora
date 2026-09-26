@@ -436,6 +436,13 @@ final class KeyMonitor {
             return nil
         }
         switch chars {
+        case "i":
+            // Keep plain I as a preview-only presentation toggle. ⌘I remains owned by the Info
+            // Inspector menu command, and focused controls/text inputs keep their own keystrokes.
+            guard KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods),
+                  vm.sourceImage != nil else { return event }
+            NotificationCenter.default.post(name: .toggleCaptureMetadataOverlay, object: nil)
+            return nil
         case "c":
             // Crop is an editor command: leave the key alone when there is no current image, and
             // preserve shifted/system-modified C for AppKit and the focused control.

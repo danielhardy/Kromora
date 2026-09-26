@@ -110,6 +110,19 @@ struct ImageMetadata: Codable, Sendable, Equatable {
         return result
     }
 
+    /// The compact set of capture values used by the preview overlay. Values are already
+    /// formatted for display by the metadata reader, and absent fields are omitted.
+    var captureOverlayRows: [Row] {
+        [
+            ("ISO", iso),
+            ("Shutter", shutterSpeed),
+            ("Aperture", aperture),
+            ("Focal length", focalLength),
+        ].compactMap { label, value in
+            value.map { Row(label: label, value: $0) }
+        }
+    }
+
     private var dimensionsLabel: String? {
         guard let w = pixelWidth, let h = pixelHeight, w > 0, h > 0 else { return nil }
         let mp = Double(w * h) / 1_000_000
