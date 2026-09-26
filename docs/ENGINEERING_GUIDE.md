@@ -80,8 +80,12 @@ comparison, copy/paste, and full-resolution export.
 
 The masking workspace follows task order: canvas tool, mask list (a multi-part mask lists its
 parts indented beneath it), then the selected mask's Adjustments and Mask sections. The overlay
-is shown or hidden from the header or with `O`; its style, color, and opacity are a Settings
-preference (`KromoraSettings.maskOverlayAppearance`) and never enter an edit or render request. Canvas tools are
+starts hidden for a clean photo; the header eye or `O` toggles its visibility. Hovering
+a mask row temporarily previews that mask's effective coverage, and hovering a part previews that
+part alone, even while the overlay is hidden. VoiceOver can invoke the equivalent Preview Coverage
+row action. Leaving the row restores the prior overlay selection. Its style, color, and opacity are
+a Settings preference (`KromoraSettings.maskOverlayAppearance`); hover targets and overlay pixels
+never enter an edit, history, preview render request, or export. Canvas tools are
 only the pointer tools (Select, Brush, Erase, Linear, Radial); smart masks are created from
 Add Mask and never capture the canvas. A gradient drag edits the selected mask only when its
 target part is that same gradient; otherwise it draws a new gradient mask, and a click that never

@@ -34,6 +34,37 @@ struct MaskOverlayAppearance: Codable, Equatable, Sendable {
     private static let standardOpacity = 0.35
 }
 
+/// A transient request to inspect one mask or one of its parts. This is presentation state and
+/// never participates in an edit, history entry, or preview render request.
+struct MaskOverlayPreviewTarget: Equatable, Sendable {
+    let layerID: UUID
+    let componentID: UUID?
+}
+
+/// Selection values consumed by the overlay task. A temporary preview supersedes both the
+/// selected and solo mask; clearing it restores those values exactly.
+struct MaskOverlayRenderSelection: Equatable, Sendable {
+    let layerID: UUID?
+    let componentID: UUID?
+    let soloLayerID: UUID?
+    let soloComponentID: UUID?
+
+    @MainActor
+    init(state: MaskInteractionState) {
+        if let target = state.overlayPreviewTarget {
+            layerID = target.layerID
+            componentID = target.componentID
+            soloLayerID = nil
+            soloComponentID = nil
+        } else {
+            layerID = state.selectedLayerID
+            componentID = nil
+            soloLayerID = state.soloLayerID
+            soloComponentID = state.soloComponentID
+        }
+    }
+}
+
 /// Presentation state for the selected semantic mask. An empty result is different from an
 /// unavailable result: the former is a valid analysis with zero coverage, while the latter means
 /// the component could not be evaluated and must not quietly look like a successful no-op.
@@ -138,6 +169,8 @@ final class MaskInteractionState: ObservableObject {
 
     @Published private(set) var selectedLayerID: UUID?
     @Published private(set) var selectedComponentID: UUID?
+    @Published private(set) var hoveredOverlayTarget: MaskOverlayPreviewTarget?
+    @Published private(set) var accessibilityOverlayTarget: MaskOverlayPreviewTarget?
     @Published private(set) var activeTool: Tool = .selection
     @Published private(set) var hoverPoint: CGPoint?
     @Published private(set) var draftLayer: LocalAdjustmentLayer?
@@ -172,7 +205,7 @@ final class MaskInteractionState: ObservableObject {
 
     // Presentation-only controls. These values intentionally never enter EditDocument, history,
     // or a render request; they describe how the photographer is inspecting the saved recipe.
-    @Published var showOverlay = true
+    @Published var showOverlay = false
     @Published var overlayInspection: OverlayInspection = .colorWash
     @Published var overlayColorValue: MaskOverlayColor = .orange
     @Published var overlayOpacity: Double = 0.35
@@ -180,6 +213,23 @@ final class MaskInteractionState: ObservableObject {
     @Published private(set) var soloComponentID: UUID?
 
     var hasDraft: Bool { draftLayer != nil }
+
+    var overlayPreviewTarget: MaskOverlayPreviewTarget? {
+        hoveredOverlayTarget ?? accessibilityOverlayTarget
+    }
+
+    func setHoveredOverlayTarget(_ target: MaskOverlayPreviewTarget?) {
+        hoveredOverlayTarget = target
+    }
+
+    func clearHoveredOverlayTarget(if target: MaskOverlayPreviewTarget) {
+        guard hoveredOverlayTarget == target else { return }
+        hoveredOverlayTarget = nil
+    }
+
+    func toggleAccessibilityOverlayPreview(_ target: MaskOverlayPreviewTarget) {
+        accessibilityOverlayTarget = accessibilityOverlayTarget == target ? nil : target
+    }
 
     func select(layerID: UUID?, componentID: UUID? = nil) {
         let selectionChanged = selectedLayerID != layerID || selectedComponentID != componentID

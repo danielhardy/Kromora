@@ -529,10 +529,53 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         XCTAssertEqual(state.overlayOpacity, 0.7)
 
         let documentBefore = viewModel.document
+        XCTAssertFalse(state.showOverlay, "the overlay starts hidden for a clean photo")
+        state.toggleOverlay()
         XCTAssertTrue(state.showOverlay)
         state.toggleOverlay()
         XCTAssertFalse(state.showOverlay)
         XCTAssertEqual(viewModel.document, documentBefore, "the overlay never changes the edit")
+    }
+
+    func testMaskPreviewTargetsOverrideOverlaySelectionWithoutEditingOrHistory() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let state = viewModel.maskInteractionState
+        let selectedLayerID = UUID()
+        let selectedComponentID = UUID()
+        let hoveredLayerID = UUID()
+        let hoveredComponentID = UUID()
+        let selectedSoloID = UUID()
+        state.select(layerID: selectedLayerID, componentID: selectedComponentID)
+        state.toggleSolo(layerID: selectedSoloID)
+
+        let documentBefore = viewModel.document
+        let undoDepthBefore = viewModel.undoDepth
+        let hoveredTarget = MaskOverlayPreviewTarget(
+            layerID: hoveredLayerID, componentID: hoveredComponentID)
+        state.setHoveredOverlayTarget(hoveredTarget)
+
+        let hoveredSelection = MaskOverlayRenderSelection(state: state)
+        XCTAssertEqual(hoveredSelection.layerID, hoveredLayerID)
+        XCTAssertEqual(hoveredSelection.componentID, hoveredComponentID)
+        XCTAssertNil(hoveredSelection.soloLayerID)
+        XCTAssertNil(hoveredSelection.soloComponentID)
+        XCTAssertEqual(state.selectedLayerID, selectedLayerID)
+        XCTAssertEqual(state.selectedComponentID, selectedComponentID)
+
+        state.clearHoveredOverlayTarget(if: hoveredTarget)
+        let restoredSelection = MaskOverlayRenderSelection(state: state)
+        XCTAssertEqual(restoredSelection.layerID, selectedLayerID)
+        XCTAssertNil(restoredSelection.componentID)
+        XCTAssertEqual(restoredSelection.soloLayerID, selectedSoloID)
+
+        let accessibleTarget = MaskOverlayPreviewTarget(layerID: hoveredLayerID, componentID: nil)
+        state.toggleAccessibilityOverlayPreview(accessibleTarget)
+        XCTAssertEqual(MaskOverlayRenderSelection(state: state).layerID, hoveredLayerID)
+        state.toggleAccessibilityOverlayPreview(accessibleTarget)
+        XCTAssertEqual(MaskOverlayRenderSelection(state: state).layerID, selectedLayerID)
+
+        XCTAssertEqual(viewModel.document, documentBefore)
+        XCTAssertEqual(viewModel.undoDepth, undoDepthBefore)
     }
 
     func testMaskAdjustmentGroupsListEveryControlExactlyOnce() {
