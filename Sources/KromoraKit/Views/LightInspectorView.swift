@@ -87,6 +87,7 @@ struct LightInspectorView: View {
             .accessibilityAction(named: Text("Reset to neutral")) {
                 viewModel.resetLight(control)
             }
+            .help(control.explanation)
         }
     }
 

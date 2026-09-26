@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "license": "CC0 1.0 Universal Public Domain Dedication",
+  "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "photos": [
+    {
+      "resource": "Monterey-Beach.jpg",
+      "title": "Monterey Beach",
+      "creator": "Tammcd7",
+      "source": "https://commons.wikimedia.org/wiki/File:Beach_Scene.jpg",
+      "license": "CC0 1.0"
+    },
+    {
+      "resource": "Golden-Hour.jpg",
+      "title": "Golden Hour",
+      "creator": "www.Pixel.la Free Stock Photos",
+      "source": "https://commons.wikimedia.org/wiki/File:Landscape-sunset-beach-sand_(24030967210).jpg",
+      "license": "CC0 1.0"
+    }
+  ]
+}

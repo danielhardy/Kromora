@@ -94,6 +94,25 @@ struct PreviewView: View {
         .onReceive(NotificationCenter.default.publisher(for: .toggleCaptureMetadataOverlay)) { _ in
             isCaptureOverlayVisible.toggle()
         }
+        .overlay(alignment: .bottomTrailing) {
+            if previewSurface.image != nil && !canvasState.isCropToolActive {
+                GuidedEditCards(viewModel: viewModel)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if viewModel.statusMessage.hasPrefix("Exported") {
+                HStack(spacing: 12) {
+                    Label("Export complete", systemImage: "checkmark.circle.fill")
+                    Button("Export another…") { viewModel.shareDialog() }
+                    Button("Back to Library") { _ = viewModel.navigate(to: .grid) }
+                }
+                .font(.caption)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.bottom, 14)
+            }
+        }
     }
 
     private var failedState: some View {
@@ -329,6 +348,15 @@ struct PreviewView: View {
             Text("⌘O open  \u{2022}  ⌘⇧I import from Photos  \u{2022}  ⌘⌥I source folder")
                 .font(.caption)
                 .foregroundColor(Color(nsColor: .tertiaryLabelColor))
+
+            HStack {
+                Button("Import photos…") { viewModel.openImageDialog() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!viewModel.canImportIntoPortableLibrary)
+                Button("Import from Photos…") { viewModel.importFromPhotos() }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.canImportIntoPortableLibrary)
+            }
         }
     }
 

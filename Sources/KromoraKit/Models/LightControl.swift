@@ -31,6 +31,17 @@ enum LightControl: String, CaseIterable, Hashable, Sendable {
 
     var neutral: Double { 0 }
 
+    var explanation: String {
+        switch self {
+        case .exposure: return "Adjust overall image brightness in exposure values."
+        case .contrast: return "Increase or decrease separation between darker and brighter tones."
+        case .highlights: return "Recover or brighten detail in the brightest areas."
+        case .shadows: return "Reveal or deepen detail in the darker areas."
+        case .whites: return "Set the brightest white point without shifting the whole image."
+        case .blacks: return "Set the darkest black point without shifting the whole image."
+        }
+    }
+
     func value(in light: LightAdjustments) -> Double {
         switch self {
         case .exposure: return light.exposure
