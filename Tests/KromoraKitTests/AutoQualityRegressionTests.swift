@@ -791,7 +791,7 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
     func testActualRenderUnderexposedImprovesMeanWithoutNewClipping() async throws {
         let data = try darkGradientData()
         let extent = CGSize(width: 96, height: 64)
-        let (report, _, _, proposal) = try await autoEvaluate(
+        let (report, baseLevels, proposedLevels, proposal) = try await autoEvaluate(
             id: "underexposed", data: data, extent: extent
         )
         XCTAssertFalse(report.hasFailures, "failures: \(report.renderFailures)")
