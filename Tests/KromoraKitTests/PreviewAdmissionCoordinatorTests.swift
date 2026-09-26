@@ -246,6 +246,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var source: ImageSource { admissionImageSource! }
     func admitSettledEditedThumbnail(_ assetID: PhotoAssetID) {}
     func admissionClearPreview() {}
+    func admissionScheduleOriginalPreview() {}
     func admissionPresentCacheRaster(
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64

@@ -56,6 +56,65 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
         XCTAssertEqual(Set(Self.corpusIDs).count, Self.corpusIDs.count, "corpus IDs must be unique")
     }
 
+    func testRepresentativeQualityMatrixRoutesEvidenceToTheRightCategory() {
+        let muted = colorFacts(
+            meanRGB: SIMD3(0.36, 0.34, 0.32),
+            saturationP95: 0.35, colorfulness: 0.12
+        )
+        let vivid = colorFacts(saturationP95: 0.65, colorfulness: 0.5)
+        let cases: [(String, AutoEnhancementFacts, Set<AutoPolicyControl>)] = [
+            ("underexposed/flat-light", facts(tone: toneFacts(
+                median: 0.20, p05: 0.01, p10: 0.04, p25: 0.10,
+                p75: 0.36, p90: 0.52, p95: 0.60
+            )), [.exposure, .shadows]),
+            ("muted-color", facts(color: muted), [.vibrance]),
+            ("underexposed-and-muted", facts(
+                tone: toneFacts(median: 0.20, p05: 0.01, p10: 0.04, p25: 0.10,
+                                p75: 0.36, p90: 0.52, p95: 0.60),
+                color: muted
+            ), [.exposure, .vibrance]),
+            ("color-cast", facts(color: colorFacts(
+                meanRGB: SIMD3(0.56, 0.47, 0.44), medianRGB: SIMD3(0.55, 0.47, 0.45),
+                neutralConfidence: 0.8
+            ), asShotTemperature: 5500), [.temperature]),
+            ("balanced", facts(color: vivid), []),
+            ("high-key", facts(color: vivid, scene: SceneCharacteristics(highKeyLikelihood: 0.9)), []),
+            ("low-key", facts(color: vivid, scene: SceneCharacteristics(lowKeyLikelihood: 0.9)), []),
+            ("sunset", facts(scene: SceneCharacteristics(sunsetWarmLikelihood: 0.85)), []),
+            ("night", facts(scene: SceneCharacteristics(nightLikelihood: 0.85)), []),
+            ("monochrome", facts(
+                color: colorFacts(colorfulness: 0.05),
+                scene: SceneCharacteristics(monochromeLikelihood: 0.9)
+            ), []),
+            ("backlit", facts(
+                tone: toneFacts(median: 0.40), color: vivid,
+                scene: SceneCharacteristics(subjectProminence: 0.8, backlightingLikelihood: 0.8)
+            ), []),
+        ]
+
+        for (name, caseFacts, expected) in cases {
+            let proposal = AutoEnhancementPolicy.propose(
+                facts: caseFacts, current: EditDocument(), sourceKind: .standard
+            )
+            let actual = Set(proposal.changes.keys)
+            for control in expected {
+                XCTAssertTrue(actual.contains(control), "\(name) should change \(control)")
+            }
+            if expected.isEmpty {
+                XCTAssertFalse(actual.contains(.vibrance), "\(name) should not force a color boost")
+                XCTAssertFalse(actual.contains(.saturation), "\(name) should not force saturation")
+                XCTAssertFalse(actual.contains(.temperature), "\(name) should not force white balance")
+                XCTAssertFalse(actual.contains(.tint), "\(name) should not force white balance")
+                if name != "backlit" {
+                    XCTAssertLessThan(
+                        abs(proposal.changes[.exposure]?.proposed ?? 0), 0.6,
+                        "\(name) should retain its tonal key"
+                    )
+                }
+            }
+        }
+    }
+
     // MARK: - Fixture generators (96×64 unless noted)
 
     static let corpusSize = CGSize(width: 96, height: 64)
@@ -109,6 +168,20 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
             let t = (nx + ny) / 2
             let v = 0.05 + 0.25 * t
             return (v, v, v * 0.98)
+        }
+        return try Fixtures.jpegData(for: image)
+    }
+
+    /// Muted but chromatic palette with spatial color variation, so vibrance has measurable
+    /// work to do and the fixture is not mistaken for monochrome.
+    private func mutedColorData() throws -> Data {
+        let image = try Fixtures.makeParametricCGImage(width: 96, height: 64) { nx, ny in
+            let t = (nx + ny) / 2
+            if nx < 0.5 {
+                return (0.34 + 0.18 * t, 0.30 + 0.12 * t, 0.26 + 0.08 * t)
+            } else {
+                return (0.28 + 0.10 * t, 0.34 + 0.16 * t, 0.33 + 0.14 * t)
+            }
         }
         return try Fixtures.jpegData(for: image)
     }
@@ -769,6 +842,47 @@ final class AutoQualityRegressionTests: TempDirectoryTestCase {
             XCTAssertLessThan(proposedCast, baseCast, "correction must reduce the cast")
             XCTAssertLessThan(proposed.highlightClip, 0.05)
         }
+    }
+
+    func testActualRenderMutedColorImprovesMeasuredColorfulnessAndIsVisible() async throws {
+        let data = try mutedColorData()
+        let source = ImageSource(data: data, nativeExtent: CGSize(width: 96, height: 64))
+        let engine = RenderEngine()
+        let store = MaskStore(directory: tempDirectory.appendingPathComponent("masks-muted-color"))
+        let measurer = CurrentEditMeasurer(engine: engine, store: store)
+        let base = EditDocument()
+        let before = try await measurer.measure(
+            source: source, document: base, expectedDocumentHash: base.editHash,
+            configuration: smallMeasureConfig()
+        )
+        let scene = SceneCharacteristicsAnalyzer.analyze(measurement: before, classifications: nil)
+        let facts = AutoEnhancementFacts(
+            measurement: before, scene: scene,
+            signalConfidence: AutoSignalConfidence(
+                globalTone: 1, colorNeutral: 0.9, scene: 0.9,
+                subjectRegions: 0.5, overall: 0.9
+            )
+        )
+        let proposal = AutoEnhancementPolicy.propose(facts: facts, current: base, sourceKind: .standard)
+        XCTAssertGreaterThan(proposal.document.color.vibrance, 0)
+
+        let after = try await measurer.measure(
+            source: source, document: proposal.document,
+            expectedDocumentHash: proposal.document.editHash,
+            configuration: smallMeasureConfig()
+        )
+        XCTAssertGreaterThan(
+            after.color.colorfulness, before.color.colorfulness,
+            "the Color correction must improve its measured target"
+        )
+        XCTAssertGreaterThan(after.color.colorfulness - before.color.colorfulness, 0.015)
+
+        let rendered = await AutoCandidateEvaluator().evaluate(
+            fixtureID: "auto-quality-muted-color", source: source,
+            baseDocument: base, proposedDocument: proposal.document, engine: engine
+        )
+        XCTAssertFalse(rendered.report.hasFailures, "failures: \(rendered.report.renderFailures)")
+        XCTAssertGreaterThan(try XCTUnwrap(rendered.report.measurements).meanAbsoluteDifference, 0.01)
     }
 
     func testActualRenderFogDehazeRespondsWithoutNewClipping() async throws {

@@ -37,7 +37,7 @@ import Foundation
 enum AutoEnhancementPolicy {
     /// Bumped when the exposure objective changes so a prior near-no-op Auto result is not
     /// treated as current by the repeat-run fingerprint.
-    static let algorithmVersion = 2
+    static let algorithmVersion = 3
 
     static func propose(
         facts: AutoEnhancementFacts,
@@ -809,8 +809,11 @@ private enum ColorPlacement {
                 reasons.append("restrains clipped/over-saturated color")
             }
         } else if color.colorfulness < 0.35, spread < 0.5, confidence.colorNeutral >= 0.6 {
+            // Aim toward the same modest colorfulness range scored by the renderer. The
+            // stronger slope makes reliably muted images visibly respond without a fixed
+            // boost on already colorful or weak-evidence frames.
             let target = bounded(
-                current.color.vibrance + Double((0.5 - spread) * 24),
+                current.color.vibrance + Double(max(0.42 - color.colorfulness, 0) * 60),
                 0...18
             )
             if target - current.color.vibrance >= 2, current.color.vibrance < 18 {
