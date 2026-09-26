@@ -382,6 +382,9 @@ final class MaskingWorkflowCoordinator {
         } else {
             destination.endUndoGrouping()
         }
+        // A clean photo starts with its overlay hidden, but creating a mask should make its
+        // coverage visible immediately. Workspace navigation preserves this presentation choice.
+        interactionState.showOverlay = true
         // “Add Erase Brush” augments the selected layer when one exists. A subtract component
         // only has meaning relative to prior coverage, so placing it in a separate empty layer
         // would silently erase nothing. Keep the no-selection path below for callers that are
