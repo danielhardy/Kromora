@@ -46,8 +46,10 @@ enum RenderPipeline {
     /// source sizing crop-aware so a settled crop is not enlarged from an under-sized raster.
     /// v28 adds the non-destructive flip/straighten geometry stage before crop. v29 adds the
     /// bounded vertical/horizontal perspective stage. v30 normalizes straighten output onto its
-    /// geometry AABB so post-geometry ROI previews share the planner's frame.
-    static let cacheVersion = 30
+    /// geometry AABB so post-geometry ROI previews share the planner's frame. v31 aligns the
+    /// standard-image Tint sign with the green-to-magenta UI track; previously positive values
+    /// rendered greener while RAW positive values rendered magenta.
+    static let cacheVersion = 31
 
     /// Build the graph for `document` over `source`.
     ///
@@ -1461,15 +1463,16 @@ enum RenderPipeline {
             let f = CIFilter.temperatureAndTint()
             f.inputImage = input
             // Source neutral is pinned at D65; only the target moves. This is what makes identity
-            // land at (6500, 0) — and also what pins the node's own Kelvin direction backwards:
-            // raising Kelvin cools the image, held by testRaisingKelvinCoolsTheImage. §8.7 is
-            // closed: the Adjust panel's slider is reflected about D65 in
-            // AdjustmentControl.sliderMapped(_:), so both Kelvin sliders in the inspector warm
-            // rightward without touching this line. Changing *this* line instead changes stored
-            // pixel behaviour for every document — a different and much larger act than flipping a
-            // slider's display mapping.
+            // land at (6500, 0). Its Kelvin axis runs backwards: raising Kelvin cools the image,
+            // held by testRaisingKelvinCoolsTheImage. AdjustmentControl.sliderMapped(_:) reflects
+            // the standard-image Kelvin slider about D65, so both Kelvin sliders in the inspector
+            // warm rightward. Tint has its own sign conversion below.
             f.neutral = CIVector(x: 6500, y: 0)
-            f.targetNeutral = CIVector(x: temp, y: tint)
+            // CITemperatureAndTint's tint axis runs green-positive, unlike the RAW decoder's
+            // neutralTint axis and our user-facing track (negative green, positive magenta).
+            // Reflect only tint at this renderer boundary so saved edits and Auto proposals keep
+            // the same sign on both source kinds.
+            f.targetNeutral = CIVector(x: temp, y: -tint)
             return f.outputImage
 
         case .vibrance(let amount):

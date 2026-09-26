@@ -621,6 +621,28 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         XCTAssertLessThan(cool.r, cool.b, "above 6500 K should cool it — see PHASE2_SPEC §8.7")
     }
 
+    /// Positive Tint is magenta (green decreases relative to red and blue) and negative Tint is
+    /// green, matching the slider track and the RAW decoder's user-facing direction.
+    func testTintDirectionMatchesGreenToMagentaTrack() throws {
+        let flat = CIImage(color: CIColor(red: 0.5, green: 0.5, blue: 0.5))
+            .cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+
+        func magentaAxis(_ tint: Double) throws -> Int {
+            let output = RenderPipeline.applyAdjustments(
+                [.temperatureTint(temp: 6500, tint: tint)], to: flat)
+            let bytes = try Pixels.bytes(of: output)
+            return Int(bytes[0]) + Int(bytes[2]) - 2 * Int(bytes[1])
+        }
+
+        let neutral = try Pixels.bytes(of: flat)
+        let zeroTint = try Pixels.bytes(of: RenderPipeline.applyAdjustments(
+            [.temperatureTint(temp: 6500, tint: 0)], to: flat))
+        XCTAssertEqual(zeroTint, neutral, "zero Tint must preserve the neutral identity")
+        XCTAssertGreaterThan(
+            try magentaAxis(80), try magentaAxis(-80),
+            "positive Tint should move toward magenta and negative Tint toward green")
+    }
+
     /// The source-aware render path reserves the post-render temperature/tint node for standard
     /// images. This direct graph test keeps the rule testable without requiring a RAW fixture.
     func testRAWRenderingCanIgnoreLegacyPostRenderWhiteBalance() throws {
