@@ -262,7 +262,7 @@ private struct ToneCurveEditor: View {
 
         if curveDrag == nil {
             let curve = viewModel.document.light.toneCurve
-            if let existing = curve.interiorPoint(nearInput: coordinate.input) {
+            if let existing = curve.nearestPoint(toInput: coordinate.input) {
                 viewModel.beginPreviewInteraction()
                 curveDrag = .point(input: existing.input, moved: false)
             } else {

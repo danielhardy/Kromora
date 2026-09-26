@@ -205,6 +205,21 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(curve.removingPoint(at: 0.431), curve)
     }
 
+    func testNearestPointIncludesEndpointsSoAPressOnAHandleStartsADragNotAnAdd() {
+        let curve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.4, output: 0.4),
+            LightCurvePoint(input: 0.7, output: 0.7),
+        ])
+
+        // interiorPoint deliberately excludes endpoints (removal must never target them), but the
+        // graph gesture's drag-start check needs endpoints to be recognized as existing handles.
+        XCTAssertNil(curve.interiorPoint(nearInput: 0.01))
+        XCTAssertEqual(curve.nearestPoint(toInput: 0.01)?.input, 0)
+        XCTAssertEqual(curve.nearestPoint(toInput: 0.99)?.input, 1)
+        XCTAssertEqual(curve.nearestPoint(toInput: 0.425)?.input, 0.4)
+        XCTAssertNil(curve.nearestPoint(toInput: 0.2))
+    }
+
     func testEmptyCurveDragCreatesOnePointAndUndoRedoKeepTheWholeGestureTogether() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let curve = viewModel.document.light.toneCurve
