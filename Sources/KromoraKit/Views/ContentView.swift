@@ -15,6 +15,10 @@ public struct ContentView: View {
     @Bindable private var collection: ImageCollection
     @Bindable private var exportCoordinator: ExportCoordinator
     @State private var photosSelection: [PhotosPickerItem] = []
+    @AppStorage("hasSeenWelcome") private var hasSeenWelcome = false
+    @State private var isWelcomePresented = false
+    @State private var isTourPresented = false
+    @State private var isShortcutReferencePresented = false
 
     /// The window toolbar has a deliberately small crop-mode surface. Keep this as a named seam
     /// so the crop branch cannot accidentally grow the normal Edit chrome back into the workspace.
@@ -120,8 +124,44 @@ public struct ContentView: View {
                     onCancel: viewModel.cancelSelectiveCopy
                 )
             }
+            .sheet(isPresented: $isWelcomePresented, onDismiss: { hasSeenWelcome = true }) {
+                WelcomeView(
+                    onImport: {
+                        isWelcomePresented = false
+                        Task { @MainActor in await Task.yield(); viewModel.openImageDialog() }
+                    },
+                    onPhotos: {
+                        isWelcomePresented = false
+                        Task { @MainActor in await Task.yield(); viewModel.importFromPhotos() }
+                    },
+                    onSamples: {
+                        isWelcomePresented = false
+                        _ = viewModel.openImages(urls: StarterSampleLibrary.urls)
+                    },
+                    onTour: {
+                        isWelcomePresented = false
+                        isTourPresented = true
+                    },
+                    onDismiss: { isWelcomePresented = false }
+                )
+            }
+            .sheet(isPresented: $isTourPresented) {
+                WorkflowTourView(onAction: { page in
+                    switch page {
+                    case .library: _ = viewModel.navigate(to: .grid)
+                    case .edit: _ = viewModel.navigate(to: .edit)
+                    case .export:
+                        isTourPresented = false
+                        Task { @MainActor in await Task.yield(); viewModel.shareDialog() }
+                    }
+                }, onDone: { isTourPresented = false })
+            }
+            .sheet(isPresented: $isShortcutReferencePresented) {
+                KeyboardShortcutReferenceView()
+            }
             .onAppear {
                 viewModel.refreshRemovableMedia()
+                if !hasSeenWelcome { isWelcomePresented = true }
             }
             .modifier(KeyboardShortcuts(viewModel: viewModel))
             .modifier(MenuCommandReceivers(viewModel: viewModel))
@@ -450,10 +490,17 @@ public struct ContentView: View {
                     } label: {
                         Label("Export", systemImage: "square.and.arrow.up")
                     }
+                    .disabled(viewModel.sourceImage == nil)
                     // ⌘S is bound once, on the File ▸ Export menu item (KromoraApp.swift).
                     // Binding it here too gave the window two competing handlers.
                     .help("Export the graded image (⌘S)")
-                    .disabled(viewModel.sourceImage == nil)
+
+                    Button {
+                        isShortcutReferencePresented = true
+                    } label: {
+                        Label("Keyboard Shortcuts", systemImage: "keyboard")
+                    }
+                    .help("Search keyboard shortcuts")
                 }
                 .transition(.opacity)
             }

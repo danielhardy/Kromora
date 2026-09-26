@@ -57,7 +57,7 @@ struct LibraryGridView: View {
 
             GeometryReader { geometry in
                 if entries.isEmpty {
-                    LibraryEmptyState(collection: collection)
+                    LibraryEmptyState(collection: collection, viewModel: viewModel)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
@@ -114,6 +114,23 @@ struct LibraryGridView: View {
                         scrollOffset = offset
                     }
                     .background(KromoraTheme.windowBackground)
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if !entries.isEmpty && collection.selection.activeID == nil {
+                    HStack(spacing: 10) {
+                        Label("Choose a photo to open in Edit", systemImage: "cursorarrow.click")
+                            .font(.subheadline)
+                        Button("Open first photo") {
+                            viewModel.selectCollectionImage(at: 0)
+                            viewModel.openLibraryImageForEditing()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(12)
+                    .background(.regularMaterial, in: Capsule())
+                    .padding(.bottom, 18)
+                    .accessibilityElement(children: .contain)
                 }
             }
         }
@@ -255,6 +272,7 @@ private struct LibraryMosaicCellLayout: Identifiable {
 
 private struct LibraryEmptyState: View {
     @Bindable var collection: ImageCollection
+    @ObservedObject var viewModel: AppViewModel
 
     var body: some View {
         VStack(spacing: 10) {
@@ -266,6 +284,21 @@ private struct LibraryEmptyState: View {
             if collection.filter.isFiltered {
                 Button("Clear filters") { collection.clearFilter() }
                     .buttonStyle(.bordered)
+            } else if collection.items.isEmpty {
+                Text("Import photos to start a library, or try the bundled sample photos.")
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+                HStack {
+                    Button("Import photos…") { viewModel.openImageDialog() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!viewModel.canImportIntoPortableLibrary)
+                    Button("Try sample library") {
+                        _ = viewModel.openImages(urls: StarterSampleLibrary.urls)
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!viewModel.canImportIntoPortableLibrary)
+                }
             }
         }
         .foregroundStyle(.secondary)
