@@ -6,6 +6,8 @@ import SwiftUI
 struct PhotoAnalysisInspectSection: View {
     @StateObject private var model: AnalysisDebugPanelModel
     @ObservedObject private var surface: PreviewSurface
+    let sourceSize: CGSize
+    let crop: CropAdjustments
     let histogram: HistogramData?
     @Binding var isExpanded: Bool
     let onUseEditingMask: (SemanticMaskKind, RegionMask, NormalizedMask) -> Void
@@ -15,6 +17,8 @@ struct PhotoAnalysisInspectSection: View {
         assetID: PhotoAssetID,
         source: ImageSource,
         surface: PreviewSurface,
+        sourceSize: CGSize,
+        crop: CropAdjustments,
         histogram: HistogramData?,
         isExpanded: Binding<Bool>,
         onUseEditingMask: @escaping (SemanticMaskKind, RegionMask, NormalizedMask) -> Void
@@ -23,6 +27,8 @@ struct PhotoAnalysisInspectSection: View {
             coordinator: coordinator, assetID: assetID, source: source
         ))
         _surface = ObservedObject(wrappedValue: surface)
+        self.sourceSize = sourceSize
+        self.crop = crop
         self.histogram = histogram
         _isExpanded = isExpanded
         self.onUseEditingMask = onUseEditingMask
@@ -102,11 +108,7 @@ struct PhotoAnalysisInspectSection: View {
                     guard model.isVisible(entry.kind), let pixels = entry.pixels else { return nil }
                     return (entry.kind, pixels)
                 }, id: \.0) { _, pixels in
-                    MaskGridView(mask: pixels)
-                        .aspectRatio(
-                            CGFloat(pixels.size.width) / CGFloat(pixels.size.height),
-                            contentMode: .fit
-                        )
+                    AnalysisMaskOverlay(mask: pixels, sourceSize: sourceSize, crop: crop)
                         .allowsHitTesting(false)
                 }
             }
@@ -181,6 +183,54 @@ struct PhotoAnalysisInspectSection: View {
         let milliseconds = Double(components.seconds) * 1_000
             + Double(components.attoseconds) / 1_000_000_000_000_000
         return String(format: "%.1f ms", milliseconds)
+    }
+}
+
+/// Places full-source analysis pixels over the cropped preview using the canvas crop mapping.
+/// The outer clip is the displayed crop; the mask itself remains in source coordinates.
+struct AnalysisMaskOverlay: View {
+    let mask: NormalizedMask
+    let sourceSize: CGSize
+    let crop: CropAdjustments
+
+    var body: some View {
+        GeometryReader { geometry in
+            let layout = AnalysisMaskOverlayLayout(
+                sourceSize: sourceSize, crop: crop, viewportSize: geometry.size
+            )
+            ZStack(alignment: .topLeading) {
+                MaskGridView(mask: mask)
+                    .frame(width: layout.sourceFrame.width, height: layout.sourceFrame.height)
+                    .offset(
+                        x: layout.sourceFrame.minX - layout.cropFrame.minX,
+                        y: layout.sourceFrame.minY - layout.cropFrame.minY
+                    )
+            }
+            .frame(width: layout.cropFrame.width, height: layout.cropFrame.height)
+            .clipped()
+            .position(x: layout.cropFrame.midX, y: layout.cropFrame.midY)
+        }
+    }
+}
+
+/// Source-to-viewport geometry shared with the analysis mask overlay, factored for regression
+/// coverage without depending on SwiftUI layout timing.
+struct AnalysisMaskOverlayLayout: Equatable {
+    let sourceFrame: CGRect
+    let cropFrame: CGRect
+
+    init(sourceSize: CGSize, crop: CropAdjustments, viewportSize: CGSize) {
+        let transform = CanvasMaskTransform(
+            sourceSize: sourceSize, crop: crop, viewportSize: viewportSize
+        )
+        let topLeft = transform.viewportPoint(forSourceNormalized: .zero) ?? .zero
+        let bottomRight = transform.viewportPoint(forSourceNormalized: CGPoint(x: 1, y: 1)) ?? .zero
+        sourceFrame = CGRect(
+            x: topLeft.x, y: topLeft.y,
+            width: bottomRight.x - topLeft.x,
+            height: bottomRight.y - topLeft.y
+        )
+        cropFrame = transform.viewportRect(forSourceNormalized: transform.cropRect) ?? .zero
     }
 }
 
