@@ -37,7 +37,7 @@ import Foundation
 enum AutoEnhancementPolicy {
     /// Bumped when policy strength or selection objectives change so prior results are not
     /// treated as current by the repeat-run fingerprint.
-    static let algorithmVersion = 5
+    static let algorithmVersion = 6
 
     static func propose(
         facts: AutoEnhancementFacts,
@@ -77,7 +77,9 @@ enum AutoEnhancementPolicy {
             working.light.exposure = bounded(
                 exposure, LightAdjustments.exposureRange
             )
-            let underexposure = AutoExposureObjective.robustUnderexposureEvidence(tone: tone)
+            let underexposure = AutoExposureObjective.robustUnderexposureEvidence(
+                tone: tone, scene: scene
+            )
             let evidence = "p05=\(format(tone.p05)) p10=\(format(tone.p10)) "
                 + "p50=\(format(tone.p50)) p75=\(format(tone.p75)) "
                 + "p95=\(format(tone.p95)) spread=\(format(tone.p95 - tone.p05)) "
@@ -527,9 +529,9 @@ struct AutoEnhancementProposal: Codable, Sendable, Equatable {
 /// The neutral target is a perceptual median of 0.48 for ordinary photographic frames. A key
 /// scene (high-key, low-key, or night) pulls that target back toward the measured median, but
 /// only while the robust distribution is consistent with intent. A low p50 by itself is not
-/// enough to override the key brake: the upper distribution, retained shadow detail, or a
-/// broad very-dark distribution must also show usable scene structure. A compact dim distribution
-/// stays behind the key brake.
+/// enough to override the key brake: the upper distribution or retained shadow clipping must
+/// also show usable scene structure. A broad, very-dark distribution can add supporting evidence
+/// when the scene classifier has not identified a decisive key-scene intent.
 enum AutoExposureObjective {
     static let neutralMedian = 0.48
     static let ordinaryCorrectionCapEV = 1.25
@@ -543,7 +545,7 @@ enum AutoExposureObjective {
             scene.highKeyLikelihood,
             max(scene.lowKeyLikelihood, scene.nightLikelihood)
         ))
-        let underexposure = robustUnderexposureEvidence(tone: tone)
+        let underexposure = robustUnderexposureEvidence(tone: tone, scene: scene)
         // Keep a clearly intentional key unchanged when the distribution is not materially
         // contradictory. Once the evidence crosses the structural-underexposure gate, use the
         // neutral target fully; a fractional key brake is exactly the near-no-op failure this
@@ -574,7 +576,7 @@ enum AutoExposureObjective {
         if desired > 0, tone.highlightClippingFraction > 0.01 {
             desired *= max(0.3, 1 - Double(tone.highlightClippingFraction) * 4)
         }
-        let cap = robustUnderexposureEvidence(tone: tone) >= structuralEvidenceGate
+        let cap = robustUnderexposureEvidence(tone: tone, scene: scene) >= structuralEvidenceGate
             ? structurallyUnderexposedCorrectionCapEV + recoveryAllowance
             : ordinaryCorrectionCapEV
         guard desired.isFinite else { return 0 }
@@ -582,22 +584,26 @@ enum AutoExposureObjective {
     }
 
     /// Confidence that a dark median is a placement defect rather than a tonal-key choice.
-    /// The three terms are intentionally robust quantiles, not a mean or a fixed exposure delta:
-    /// mid-tone deficit (p50), retained upper structure (p95), and usable spread (p95−p05).
-    /// Shadow clipping is a supporting signal, never a requirement, because a developed RAW can
-    /// report a dark p10 before the display histogram reaches zero.
-    static func robustUnderexposureEvidence(tone: ToneStatistics) -> Double {
+    /// The terms use robust quantiles, not a mean or fixed exposure delta. A broad dark spread can
+    /// support underexposure only when scene evidence does not decisively identify key intent.
+    /// Shadow clipping is supporting evidence because a developed RAW can report a dark p10
+    /// before the display histogram reaches zero.
+    static func robustUnderexposureEvidence(
+        tone: ToneStatistics, scene: SceneCharacteristics? = nil
+    ) -> Double {
         let midDeficit = smooth(1 - tone.p50, start: 0.45, full: 0.80)
         let upperStructure = smooth(tone.p95, start: 0.38, full: 0.68)
         let spread = smooth(tone.p95 - tone.p05, start: 0.30, full: 0.60)
         let shadowClipping = min(max(Double(tone.shadowClippingFraction) * 8, 0), 1)
-        // A very dark, broad gradient can have no p95 above 0.38 and no clipped pixels, yet
-        // still carry enough tonal separation to contradict the key-scene guess. Use its
-        // measured spread as a second structural cue; keep compact dark distributions (such as
-        // a uniformly dim night frame) under the key brake.
         let darkSpread = smooth(tone.p95 - tone.p05, start: 0.10, full: 0.22)
-        let darkStructure = midDeficit * darkSpread
-        let structure = max(upperStructure * spread, max(shadowClipping * 0.75, darkStructure))
+        let decisiveKeyIntent = scene.map {
+            max($0.highKeyLikelihood, $0.lowKeyLikelihood) >= 0.95
+        } ?? false
+        let darkSpreadStructure = decisiveKeyIntent ? 0 : midDeficit * darkSpread
+        let structure = max(
+            upperStructure * spread,
+            max(shadowClipping * 0.75, darkSpreadStructure)
+        )
         return bounded(midDeficit * structure, 0...1)
     }
 
