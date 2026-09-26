@@ -495,6 +495,73 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(requestsAfterCompletion, 1)
     }
 
+    func testCanvasNavigationDoesNotRecomputeTheHistogram() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+        try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
+        viewModel.isInspectorPresented = true
+        try await waitUntil("the opening histogram") { await fake.histogramRequests.count == 1 }
+
+        let previewCount = await fake.previewRequests.count
+        viewModel.zoomCanvas(by: 1.5)
+        try await waitUntil("a navigation preview") {
+            await fake.previewRequests.count > previewCount
+        }
+        let zoomedPreviewCount = await fake.previewRequests.count
+        viewModel.zoomCanvas(
+            by: 1.2, at: CGPoint(x: 12, y: 8), viewportSize: CGSize(width: 32, height: 24)
+        )
+        try await waitUntil("a pointer-zoom preview") {
+            await fake.previewRequests.count > zoomedPreviewCount
+        }
+        viewModel.fillCanvas()
+        viewModel.fitCanvas()
+        try await Task.sleep(for: .milliseconds(150))
+
+        let histogramRequests = await fake.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 1)
+        XCTAssertNotNil(viewModel.histogram)
+    }
+
+    func testPendingHistogramSurvivesCanvasZoom() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+        try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
+        await fake.gateHistogram()
+        viewModel.isInspectorPresented = true
+        try await waitUntil("the histogram renderer to start") {
+            await fake.histogramRequests.count == 1
+        }
+
+        viewModel.zoomCanvas(by: 1.5)
+        await fake.releaseHistograms()
+        try await waitUntil("the pending histogram to publish") { viewModel.histogram != nil }
+        try await Task.sleep(for: .milliseconds(150))
+
+        let histogramRequests = await fake.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 1)
+    }
+
+    func testCropChangeRecomputesTheHistogram() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+        try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
+        viewModel.isInspectorPresented = true
+        try await waitUntil("the opening histogram") { await fake.histogramRequests.count == 1 }
+
+        viewModel.updateDocument { $0.crop.normalizedRect = CGRect(x: 0, y: 0, width: 0.75, height: 1) }
+        try await waitUntil("the cropped histogram") { await fake.histogramRequests.count == 2 }
+
+        let request = await fake.histogramRequests.last
+        XCTAssertEqual(
+            request?.document.crop.normalizedRect,
+            CGRect(x: 0, y: 0, width: 0.75, height: 1)
+        )
+    }
+
     /// Histogram work follows the settled preview, not every transient slider value. The gate keeps
     /// the final tally in flight so the request count can be checked before any result is published.
     func testRapidEditsCoalesceHistogramWorkAfterTheSettledPreview() async throws {
