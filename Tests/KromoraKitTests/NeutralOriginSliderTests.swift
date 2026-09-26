@@ -192,7 +192,7 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(circle.midY, nativeKnob.midY, accuracy: 0.001)
     }
 
-    func testThumbVisualIsEightyPercentOfTheNativeKnobWhileHitGeometryStaysNative() {
+    func testThumbVisualScaleDoesNotChangeNativeHitGeometry() {
         let slider = makeSlider(range: -100...100, neutral: 0, value: 0)
         guard let cell = slider.cell as? NeutralOriginSliderCell else {
             return XCTFail("the slider is not using the neutral-origin cell")
@@ -253,58 +253,30 @@ final class NeutralOriginSliderTests: XCTestCase {
         }
     }
 
-    func testThumbRendersAsAShadedCopperBead() throws {
-        let enabled = try renderThumb(diameter: 48, enabled: true)
-        // colorAt measures y from the top of the bitmap, so the lit face is the smaller fraction.
-        let top = try sample(enabled, xFraction: 0.5, yFraction: 0.30)
-        let middle = try sample(enabled, xFraction: 0.5, yFraction: 0.5)
-        let bottom = try sample(enabled, xFraction: 0.5, yFraction: 0.72)
+    func testThumbUsesThePrimaryAccent() throws {
+        for appearance in [NSAppearance.Name.darkAqua, .aqua] {
+            let enabled = try renderThumb(diameter: 48, enabled: true, appearance: appearance)
+            let upper = try sample(enabled, xFraction: 0.5, yFraction: 0.42)
+            let middle = try sample(enabled, xFraction: 0.5, yFraction: 0.5)
+            let lower = try sample(enabled, xFraction: 0.5, yFraction: 0.58)
+            let accent = KromoraTheme.resolvedPrimaryAccentColor(
+                for: NSAppearance(named: appearance)
+            ).usingColorSpace(.sRGB)!
 
-        XCTAssertGreaterThan(middle.redComponent, middle.greenComponent)
-        XCTAssertGreaterThan(middle.greenComponent, middle.blueComponent,
-                             "the disc's face should read as copper, not grey or gold-green")
-        XCTAssertGreaterThan(
-            luminance(of: top), luminance(of: bottom) + 0.12,
-            "light should fall on the top of the bead"
-        )
+            XCTAssertEqual(middle.redComponent, accent.redComponent, accuracy: 0.03)
+            XCTAssertEqual(middle.greenComponent, accent.greenComponent, accuracy: 0.03)
+            XCTAssertEqual(middle.blueComponent, accent.blueComponent, accuracy: 0.03)
+            XCTAssertEqual(
+                luminance(of: upper), luminance(of: lower), accuracy: 0.04,
+                "the face should be flat"
+            )
+        }
 
         let disabled = try renderThumb(diameter: 48, enabled: false)
         let disabledMiddle = try sample(disabled, xFraction: 0.5, yFraction: 0.5)
         XCTAssertLessThan(
             chroma(of: disabledMiddle), 0.08,
-            "a disabled thumb should cool to pewter"
-        )
-    }
-
-    func testThumbShineFacesTheMiddleOfTheTrack() {
-        XCTAssertEqual(
-            NeutralOriginSliderCell.thumbShine(for: -100, min: -100, max: 100), 1, accuracy: 0.001
-        )
-        XCTAssertEqual(
-            NeutralOriginSliderCell.thumbShine(for: 100, min: -100, max: 100), 0, accuracy: 0.001
-        )
-        XCTAssertEqual(
-            NeutralOriginSliderCell.thumbShine(for: 0, min: -100, max: 100), 0.5, accuracy: 0.001
-        )
-        XCTAssertEqual(
-            NeutralOriginSliderCell.thumbShine(for: 4, min: 4, max: 4), 0.5, accuracy: 0.001
-        )
-    }
-
-    func testThumbSpecularSlidesAcrossTheFace() throws {
-        let leftLit = try renderThumb(diameter: 64, enabled: true, shine: 0.05)
-        let rightLit = try renderThumb(diameter: 64, enabled: true, shine: 0.95)
-        let leftWhenLeftLit = try averageLuminance(leftLit, xFraction: 0.30, yFraction: 0.40)
-        let rightWhenLeftLit = try averageLuminance(leftLit, xFraction: 0.70, yFraction: 0.40)
-        XCTAssertGreaterThan(
-            leftWhenLeftLit, rightWhenLeftLit + 0.04,
-            "a low shine should brighten the left of the disc"
-        )
-        let leftWhenRightLit = try averageLuminance(rightLit, xFraction: 0.30, yFraction: 0.40)
-        let rightWhenRightLit = try averageLuminance(rightLit, xFraction: 0.70, yFraction: 0.40)
-        XCTAssertGreaterThan(
-            rightWhenRightLit, leftWhenRightLit + 0.04,
-            "a high shine should brighten the right of the disc"
+            "a disabled thumb should cool to grey"
         )
     }
 
@@ -413,7 +385,7 @@ final class NeutralOriginSliderTests: XCTestCase {
     }
 
     private func renderThumb(
-        diameter: CGFloat, enabled: Bool, shine: CGFloat = 0.5
+        diameter: CGFloat, enabled: Bool, appearance: NSAppearance.Name = .darkAqua
     ) throws -> NSBitmapImageRep {
         let canvas = Int(ceil(diameter + 8))
         guard let rep = NSBitmapImageRep(
@@ -436,34 +408,14 @@ final class NeutralOriginSliderTests: XCTestCase {
         NSColor(srgbRed: 0.45, green: 0.45, blue: 0.46, alpha: 1).setFill()
         NSRect(x: 0, y: 0, width: CGFloat(canvas), height: CGFloat(canvas)).fill()
         let origin = (CGFloat(canvas) - diameter) / 2
-        NeutralOriginSliderCell.drawBrassThumb(
-            in: NSRect(x: origin, y: origin, width: diameter, height: diameter),
-            flipped: false,
-            enabled: enabled,
-            shine: shine
-        )
+        NSAppearance(named: appearance)!.performAsCurrentDrawingAppearance {
+            NeutralOriginSliderCell.drawThumb(
+                in: NSRect(x: origin, y: origin, width: diameter, height: diameter),
+                enabled: enabled
+            )
+        }
         NSGraphicsContext.restoreGraphicsState()
         return rep
-    }
-
-    /// A small patch, so a single lathe groove cannot decide which side of the disc is lit.
-    private func averageLuminance(
-        _ rep: NSBitmapImageRep, xFraction: CGFloat, yFraction: CGFloat
-    ) throws -> CGFloat {
-        var total: CGFloat = 0
-        var count: CGFloat = 0
-        for yOffset in -2...2 {
-            for xOffset in -2...2 {
-                let color = try sample(
-                    rep,
-                    xFraction: xFraction + CGFloat(xOffset) / CGFloat(rep.pixelsWide),
-                    yFraction: yFraction + CGFloat(yOffset) / CGFloat(rep.pixelsHigh)
-                )
-                total += luminance(of: color)
-                count += 1
-            }
-        }
-        return total / count
     }
 
     /// `yFraction` is measured from the top of the bitmap. `NSBitmapImageRep.colorAt` uses that
