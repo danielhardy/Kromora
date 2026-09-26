@@ -34,6 +34,31 @@ final class KromoraThemeTests: XCTestCase {
         XCTAssertGreaterThan(contrastRatio(accent, canvas), 4.5)
     }
 
+    func testSecondaryChromeUsesWarmLightSurfaceAndRetainsSystemDarkSurface() throws {
+        let light = try XCTUnwrap(
+            KromoraTheme.resolvedSecondaryChromeColor(for: NSAppearance(named: .aqua))
+                .usingColorSpace(.deviceRGB)
+        )
+        XCTAssertEqual(light.redComponent, 236 / 255, accuracy: 0.002)
+        XCTAssertEqual(light.greenComponent, 232 / 255, accuracy: 0.002)
+        XCTAssertEqual(light.blueComponent, 225 / 255, accuracy: 0.002)
+
+        let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let dark = try XCTUnwrap(
+            KromoraTheme.resolvedSecondaryChromeColor(for: darkAppearance)
+                .usingColorSpace(.deviceRGB)
+        )
+        var systemDarkSurface: NSColor?
+        darkAppearance.performAsCurrentDrawingAppearance {
+            systemDarkSurface = NSColor.underPageBackgroundColor.usingColorSpace(.deviceRGB)
+        }
+        let expectedDark = try XCTUnwrap(systemDarkSurface)
+
+        XCTAssertEqual(dark.redComponent, expectedDark.redComponent, accuracy: 0.002)
+        XCTAssertEqual(dark.greenComponent, expectedDark.greenComponent, accuracy: 0.002)
+        XCTAssertEqual(dark.blueComponent, expectedDark.blueComponent, accuracy: 0.002)
+    }
+
     private func contrastRatio(_ lhs: NSColor, _ rhs: NSColor) -> CGFloat {
         let values = [luminance(lhs), luminance(rhs)].sorted(by: >)
         return (values[0] + 0.05) / (values[1] + 0.05)
