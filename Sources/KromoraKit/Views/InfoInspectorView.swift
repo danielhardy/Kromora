@@ -138,6 +138,8 @@ struct InfoInspectorView: View {
                         assetID: assetID,
                         source: source,
                         surface: viewModel.previewSurface,
+                        sourceSize: viewModel.sourceSize,
+                        crop: viewModel.document.crop,
                         histogram: viewModel.histogram,
                         isExpanded: $analysisExpanded,
                         onUseEditingMask: { kind, result, pixels in

@@ -7,6 +7,36 @@ import XCTest
 #if DEBUG
 @MainActor
 final class AnalysisDebugPanelTests: XCTestCase {
+    func testAnalysisMaskOverlayLayoutMapsNonOriginCropAndFitsItsAspectRatio() {
+        let sourceSize = CGSize(width: 2400, height: 1200)
+        let crop = CropAdjustments(normalizedRect: CGRect(x: 0.2, y: 0.25, width: 0.5, height: 0.4))
+        let layout = AnalysisMaskOverlayLayout(
+            sourceSize: sourceSize, crop: crop, viewportSize: CGSize(width: 300, height: 130)
+        )
+
+        XCTAssertEqual(layout.cropFrame.width / layout.cropFrame.height, 2.5, accuracy: 0.000_001)
+        XCTAssertEqual(layout.cropFrame.width, 300, accuracy: 0.000_001)
+        XCTAssertEqual(layout.sourceFrame.width / layout.sourceFrame.height, 2, accuracy: 0.000_001)
+        XCTAssertLessThan(layout.sourceFrame.minX, layout.cropFrame.minX)
+        XCTAssertLessThan(layout.sourceFrame.minY, layout.cropFrame.minY)
+        XCTAssertEqual(layout.sourceFrame.minX + 0.2 * layout.sourceFrame.width,
+                       layout.cropFrame.minX, accuracy: 0.000_001)
+        // CropAdjustments uses a bottom-left origin; the mask and viewport use top-left.
+        XCTAssertEqual(layout.sourceFrame.minY + 0.35 * layout.sourceFrame.height,
+                       layout.cropFrame.minY, accuracy: 0.000_001)
+    }
+
+    func testAnalysisMaskOverlayIdentityCropMatchesFittedPhotoFrame() {
+        let layout = AnalysisMaskOverlayLayout(
+            sourceSize: CGSize(width: 2400, height: 1200),
+            crop: .neutral,
+            viewportSize: CGSize(width: 300, height: 130)
+        )
+
+        XCTAssertEqual(layout.sourceFrame, layout.cropFrame)
+        XCTAssertEqual(layout.cropFrame.width / layout.cropFrame.height, 2, accuracy: 0.000_001)
+    }
+
     func testModelLoadsMasksMapsProviderErrorsAndControlsOverlayVisibility() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("KromoraAnalysisPanel-\(UUID().uuidString)", isDirectory: true)
