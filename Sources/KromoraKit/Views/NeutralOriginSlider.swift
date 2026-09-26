@@ -235,16 +235,15 @@ enum SliderTrackStyle: Equatable, Sendable {
 
 /// The one piece of `NeutralOriginSlider` that draws.
 ///
-/// `drawKnob` replaces the stock capsule with a spun copper disc. The cell's knob geometry, hit
-/// testing, and tracking remain AppKit's, so the control still behaves like a macOS slider. The
-/// disc is inset from the native knob rect, which keeps the coloured bar from looking capped by a
-/// wide system thumb. A lamp over the middle of the track rakes the face: the specular slides
-/// across the metal as the thumb travels.
+/// `drawKnob` replaces the stock capsule with a flat disc in the suite's primary accent, the same
+/// copper as the tone curve. The cell's knob geometry, hit testing, and tracking remain AppKit's,
+/// so the control still behaves like a macOS slider. The disc is inset from the native knob rect,
+/// which keeps the coloured bar from looking capped by a wide system thumb.
 final class NeutralOriginSliderCell: NSSliderCell {
-    /// The drawn thumb is smaller than AppKit's native knob rect. The native rect remains the
-    /// source of travel geometry and hit testing, so shrinking the visual does not make the
-    /// control harder to grab or change where values reach the track ends.
-    static let knobVisualScale: CGFloat = 0.8
+    /// The drawn disc is 60% of AppKit's native knob. The native rect remains the source of
+    /// travel geometry and hit testing, so the smaller visual does not make the control harder
+    /// to grab or change where values reach the track ends.
+    static let knobVisualScale: CGFloat = 0.6
 
     /// The value the fill is anchored at, in slider space.
     var neutral: Double = 0
@@ -317,138 +316,29 @@ final class NeutralOriginSliderCell: NSSliderCell {
         )
         guard !circle.isEmpty else { return }
 
-        NSGraphicsContext.saveGraphicsState()
-        defer { NSGraphicsContext.restoreGraphicsState() }
-        Self.drawBrassThumb(
-            in: circle,
-            flipped: flipped,
-            enabled: isEnabled,
-            shine: Self.thumbShine(for: doubleValue, min: minValue, max: maxValue)
-        )
+        Self.drawThumb(in: circle, enabled: isEnabled)
     }
 
-    /// Where the specular sits for a slider value. `1` lights the right side of the disc, `0` the
-    /// left, and `0.5` the top.
-    ///
-    /// The lamp stays over the middle of the track, so a thumb at the left end is bright on its
-    /// inner (right) face and a thumb at the right end is bright on its inner (left) face.
-    static func thumbShine(for value: Double, min minValue: Double, max maxValue: Double) -> CGFloat {
-        let span = maxValue - minValue
-        guard span > 0, value.isFinite, minValue.isFinite, maxValue.isFinite else { return 0.5 }
-        let fraction = min(max((value - minValue) / span, 0), 1)
-        return CGFloat(1 - fraction)
-    }
-
-    /// A spun copper disc. Grooves are cut at the thumb's pixel size, then a single smooth light
-    /// rakes the whole face so the brush — not a spot painted on top — is what brightens. The
-    /// light sweeps the upper half as `shine` changes. Shading stays inside the circle so a cast
-    /// shadow cannot pull the thumb off the track's vertical centre.
-    static func drawBrassThumb(
-        in circle: NSRect, flipped: Bool, enabled: Bool, shine: CGFloat = 0.5
-    ) {
+    /// A flat disc in `KromoraTheme.primaryAccent`. Disabled controls cool to a neutral grey.
+    /// The edge is a darker shade of the same accent so the disc stays visible without becoming
+    /// a second colour.
+    static func drawThumb(in circle: NSRect, enabled: Bool) {
         let diameter = min(circle.width, circle.height)
         guard diameter > 0 else { return }
 
         let path = NSBezierPath(ovalIn: circle)
-        let palette = BrassThumbPalette(enabled: enabled)
-        let clampedShine = min(max(shine, 0), 1)
-        let direction = specularDirection(shine: clampedShine, flipped: flipped)
-
-        NSGraphicsContext.saveGraphicsState()
-        path.addClip()
-        if let face = spunFace(
-            diameter: diameter, direction: direction, flipped: flipped, palette: palette
-        ) {
-            NSGraphicsContext.current?.imageInterpolation = .high
-            face.draw(in: circle, from: .zero, operation: .sourceOver, fraction: 1)
-        } else {
-            palette.metal.setFill()
-            path.fill()
-        }
-        NSGraphicsContext.restoreGraphicsState()
-
-        palette.rim.setStroke()
-        path.lineWidth = min(1.1, max(0.4, diameter * 0.025))
+        let accent = KromoraTheme.primaryAccentNSColor
+        let fill = enabled
+            ? accent
+            : NSColor(srgbRed: 0.58, green: 0.56, blue: 0.53, alpha: 1)
+        let rim = enabled
+            ? (accent.blended(withFraction: 0.45, of: .black) ?? accent)
+            : NSColor(srgbRed: 0.40, green: 0.38, blue: 0.36, alpha: 1)
+        fill.setFill()
+        path.fill()
+        rim.setStroke()
+        path.lineWidth = max(0.75, diameter * 0.045)
         path.stroke()
-    }
-
-    /// Sweeps through the upper half of the disc. The lamp stays overhead; only which side of the
-    /// face it catches changes.
-    private static func specularDirection(shine: CGFloat, flipped: Bool) -> CGPoint {
-        let sweep = (shine - 0.5) * .pi * 0.72
-        return CGPoint(x: sin(sweep), y: (flipped ? -1 : 1) * cos(sweep))
-    }
-
-    /// Lathe and light the face in one pass. Stroking concentric circles piles coverage on the
-    /// horizontal and vertical axes and draws a cross through the hub; a radial sine does not.
-    private static func spunFace(
-        diameter: CGFloat, direction: CGPoint, flipped: Bool, palette: BrassThumbPalette
-    ) -> NSImage? {
-        let transform = NSGraphicsContext.current?.cgContext.userSpaceToDeviceSpaceTransform
-            ?? CGAffineTransform.identity
-        let scale = max(1, hypot(transform.a, transform.b))
-        // Match the thumb's device pixels. Extra grooves would alias into a starburst once the
-        // bitmap is scaled into a control only a dozen points across.
-        let pixels = min(220, max(32, Int(ceil(diameter * scale))))
-        guard let context = CGContext(
-            data: nil,
-            width: pixels,
-            height: pixels,
-            bitsPerComponent: 8,
-            bytesPerRow: pixels * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ), let data = context.data else { return nil }
-
-        // `NSImage` displays this CGImage with y flipped relative to the unflipped context the
-        // tests draw into, and compensates again when the slider itself is flipped. Authoring the
-        // lamp toward bitmap -y puts it on the visual top in both cases.
-        let light = CGPoint(x: direction.x, y: flipped ? direction.y : -direction.y)
-        let buffer = data.bindMemory(to: UInt8.self, capacity: pixels * pixels * 4)
-        let center = (CGFloat(pixels) - 1) / 2
-        let radius = CGFloat(pixels) / 2
-        // Stay under half a cycle per pixel. A finer lathe aliases into a starburst.
-        let turns = CGFloat(pixels) * 0.15
-        let metal = (
-            palette.metal.redComponent, palette.metal.greenComponent, palette.metal.blueComponent
-        )
-        for y in 0..<pixels {
-            for x in 0..<pixels {
-                let dx = CGFloat(x) - center
-                let dy = CGFloat(y) - center
-                let radial = hypot(dx, dy) / radius
-                let coverage = min(1, max(0, (1 - radial) * radius))
-                let index = (y * pixels + x) * 4
-                guard coverage > 0 else {
-                    buffer[index] = 0
-                    buffer[index + 1] = 0
-                    buffer[index + 2] = 0
-                    buffer[index + 3] = 0
-                    continue
-                }
-                let along = (dx * light.x + dy * light.y) / radius
-                let spread = (along - 0.36) / 0.52
-                let lobe = exp(-spread * spread)
-                let rim = 1 - smoothstep(0.72, 1, radial) * 0.55
-                let wave = 0.5 + 0.5 * sin(radial * turns * 2 * .pi)
-                // Broad copper crests, narrow dark valleys: a lathe groove, not a barcode.
-                let groove = 0.74 + 0.26 * pow(wave, 0.42)
-                let amount = min(1.48, (0.62 + palette.highlightGain * lobe) * rim * groove)
-                let channels = [metal.0 * amount, metal.1 * amount, metal.2 * amount]
-                for channel in 0..<3 {
-                    buffer[index + channel] = UInt8(min(255, max(0, channels[channel] * coverage * 255)))
-                }
-                buffer[index + 3] = UInt8(min(255, max(0, coverage * 255)))
-            }
-        }
-
-        guard let rendered = context.makeImage() else { return nil }
-        return NSImage(cgImage: rendered, size: NSSize(width: diameter, height: diameter))
-    }
-
-    private static func smoothstep(_ edge0: CGFloat, _ edge1: CGFloat, _ value: CGFloat) -> CGFloat {
-        let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
-        return t * t * (3 - 2 * t)
     }
 
     override func startTracking(at startPoint: NSPoint, in controlView: NSView) -> Bool {
@@ -546,33 +436,5 @@ final class NeutralOriginSliderCell: NSSliderCell {
             width: visualDiameter,
             height: visualDiameter
         )
-    }
-}
-
-/// Metal stops for the slider disc. Copper when the control can be dragged, pewter when it
-/// cannot. The alloy does not follow the accent's light/dark variants: a physical thumb keeps the
-/// same metal in either appearance, and the dark rim is what keeps it legible on light chrome.
-private struct BrassThumbPalette {
-    let metal: NSColor
-    let rim: NSColor
-    /// How hard the lamp lifts the lit side. Pewter stays quieter than copper.
-    let highlightGain: CGFloat
-
-    init(enabled: Bool) {
-        if enabled {
-            metal = Self.rgb(0.86, 0.45, 0.18)
-            rim = Self.rgb(0.20, 0.07, 0.03)
-            highlightGain = 0.78
-        } else {
-            metal = Self.rgb(0.62, 0.60, 0.57)
-            rim = Self.rgb(0.22, 0.21, 0.20)
-            highlightGain = 0.28
-        }
-    }
-
-    private static func rgb(
-        _ red: CGFloat, _ green: CGFloat, _ blue: CGFloat, alpha: CGFloat = 1
-    ) -> NSColor {
-        NSColor(srgbRed: red, green: green, blue: blue, alpha: alpha)
     }
 }
