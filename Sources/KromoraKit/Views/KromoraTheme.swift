@@ -42,10 +42,19 @@ enum KromoraTheme {
     }
 
     /// Quiet semantic surface for chrome that supports the canvas without competing with it.
-    /// `underPageBackgroundColor` follows the active light/dark appearance and is deliberately
-    /// shared by the source browser and the large bottom chrome family.
+    /// Light mode uses a warm neutral close to the canvas tone; dark mode retains the system
+    /// under-page surface that already works well across the editor chrome family.
     static var secondaryChrome: Color {
-        Color(nsColor: .underPageBackgroundColor)
+        Color(nsColor: secondaryChromeNSColor)
+    }
+
+    static func resolvedSecondaryChromeColor(for appearance: NSAppearance? = nil) -> NSColor {
+        let effectiveAppearance = appearance ?? NSAppearance(named: .aqua)!
+        var color: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = secondaryChromeNSColor.usingColorSpace(.deviceRGB)
+        }
+        return color ?? NSColor(srgbRed: 0.925, green: 0.910, blue: 0.882, alpha: 1)
     }
 
     /// Dedicated editor surface color. Secondary chrome can converge with
@@ -72,6 +81,17 @@ enum KromoraTheme {
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         return NSColor(calibratedWhite: isDark ? 0.12 : 0.90, alpha: 1)
+    }
+
+    private static let secondaryChromeNSColor = NSColor(
+        name: NSColor.Name("KromoraSecondaryChrome")
+    ) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        // Light: #ECE8E1, a quiet warm neutral near the canvas' #E6E6E6.
+        // Dark continues to use the system surface already established for this role.
+        return isDark
+            ? .underPageBackgroundColor
+            : NSColor(srgbRed: 236 / 255, green: 232 / 255, blue: 225 / 255, alpha: 1)
     }
 
     private static let primaryAccentColor = NSColor(
