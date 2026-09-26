@@ -55,29 +55,40 @@ global/important-region placement enough to clear the improvement threshold.
 
 Candidates are rejected for new highlight clipping, saturation above the absolute 0.97 guardrail,
 unsupported neutral color error, mask-edge artifacts, or unmeasurable pixels. For reliably
-measured muted color, the frozen score target closes 70% of the gap to colorfulness 0.42 (capped
-at 0.42); otherwise it equals the measured baseline. Color confidence must be at least 0.60,
+measured muted color, the frozen score target closes 75% of the gap to colorfulness 0.46 (capped
+at 0.46); otherwise it equals the measured baseline. Color confidence must be at least 0.60,
 colorfulness below 0.35, and saturation p95 no higher than 0.85. Mixed lighting, monochrome
 (likelihood above 0.50), sunset warmth (above 0.60), and night (above 0.60) disable the boost.
-The policy raises vibrance toward that target with a bounded 0–18 slider response. Candidate
-selection now scores the rendered colorfulness shortfall as well as saturation above its prior
-cap, so a safe color improvement can win alongside a tonal improvement. Relative contrast/noise
+The policy raises vibrance toward that target with a bounded 0–24 slider response. Candidate
+selection weights the rendered colorfulness shortfall at 1.75 alongside tone and saturation
+guardrails, so a safe color improvement can win alongside a tonal improvement. Relative contrast/noise
 costs are measured against the unchanged render. This protects shadow readability without
 accepting crushed blacks, clipped whites, or a washed-out result. Existing manual controls,
-curves, Looks, LUTs, and user-owned local layers remain unchanged; Auto provenance version 3
+curves, Looks, LUTs, and user-owned local layers remain unchanged; Auto provenance version 4
 invalidates older run fingerprints so the calibrated policy is evaluated once.
 
 ## Quality rubric
 
-`AutoQualityRegressionTests` defines a representative routing matrix and covers balanced,
-underexposed, clipped, warm/cool cast, high-key, low-key, sunset, monochrome, fog, snow, night,
-and backlit fixtures. The matrix expects a Light correction for supported underexposure, Color for
-reliably muted color, white balance for a measured cast, and preservation for balanced/high-key/
-low-key/sunset/night/monochrome intent; backlit correction remains subject-local. The underexposed
-fixture measures before/after rendered luminance with no new clipping, and the muted-color fixture
-measures before/after renderer colorfulness plus visible pixel difference. The policy suite also
-exercises a RAW source-kind equivalent; a licensed local ARW/DNG is picked up automatically by the
-existing optional RAW test lane when `KROMORA_RAW_FIXTURE_DIR` is configured.
+`AutoQualityRegressionTests` defines a representative routing matrix and checks rendered before/
+after results for supported Light, Color, and white-balance corrections. Expected visible changes:
+
+| Photo evidence | Expected Auto result |
+| --- | --- |
+| Underexposed with recoverable spread | Lift midtones toward the neutral target; open residual shadows when supported, without new highlight clipping. |
+| Muted color with reliable color evidence | Raise vibrance enough to measurably improve colorfulness; preserve the hue palette and clipping limits. |
+| Both tonal and muted-color evidence | Improve rendered luminance placement and colorfulness in the same proposal. |
+| Measured color cast with neutral evidence | Reduce the rendered cast; skip correction when estimators disagree or scene intent vetoes it. |
+| Balanced | Keep Light and Color close to the input. |
+| High-key / low-key | Preserve the scene's tonal key unless robust distribution evidence contradicts it. |
+| Sunset / night | Preserve warm or dark intent; do not force Color or white balance. |
+| Monochrome | Preserve grayscale character; do not add saturation. |
+| Backlit | Lift a supported subject region without indiscriminately lifting the bright background. |
+
+The underexposed test measures the actual Auto proposal's rendered luminance change and clipping.
+The muted-color fixture measures before/after renderer colorfulness and pixel difference. Balanced
+and intentional-scene fixtures assert restraint. The policy suite also exercises a RAW source-kind
+equivalent; a licensed local ARW/DNG is picked up automatically by the existing optional RAW test
+lane when `KROMORA_RAW_FIXTURE_DIR` is configured.
 
 Run the focused report with:
 

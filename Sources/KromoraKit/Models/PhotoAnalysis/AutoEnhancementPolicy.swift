@@ -35,9 +35,9 @@ import Foundation
 /// `AdjustmentControl.sliderMapped`). A warm cast therefore *lowers* the RAW temperature and
 /// *raises* the standard temperature. Tint runs the same way on both paths (+ is magenta).
 enum AutoEnhancementPolicy {
-    /// Bumped when the exposure objective changes so a prior near-no-op Auto result is not
+    /// Bumped when policy strength or selection objectives change so prior results are not
     /// treated as current by the repeat-run fingerprint.
-    static let algorithmVersion = 3
+    static let algorithmVersion = 4
 
     static func propose(
         facts: AutoEnhancementFacts,
@@ -809,15 +809,15 @@ private enum ColorPlacement {
                 reasons.append("restrains clipped/over-saturated color")
             }
         } else if color.colorfulness < 0.35, spread < 0.5, confidence.colorNeutral >= 0.6 {
-            // Aim toward the same modest colorfulness range scored by the renderer. The
-            // stronger slope makes reliably muted images visibly respond without a fixed
-            // boost on already colorful or weak-evidence frames.
+            // Close most of the measured gap to a modestly colorful image. The wider cap
+            // makes reliable muted-color evidence visible while the intent gates above keep
+            // already vivid, monochrome, warm, and night scenes out of this path.
             let target = bounded(
-                current.color.vibrance + Double(max(0.42 - color.colorfulness, 0) * 60),
-                0...18
+                current.color.vibrance + Double(max(0.46 - color.colorfulness, 0) * 60),
+                0...24
             )
-            if target - current.color.vibrance >= 2, current.color.vibrance < 18 {
-                vibrance = min(target, 18)
+            if target - current.color.vibrance >= 2, current.color.vibrance < 24 {
+                vibrance = min(target, 24)
                 reasons.append("lifts muted color within a restrained envelope")
             }
         }

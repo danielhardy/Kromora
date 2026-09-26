@@ -392,7 +392,7 @@ struct AutoEvaluationTargets: Codable, Sendable, Equatable {
               color.saturationP95 <= 0.85 else { return Double(color.colorfulness) }
         // Close most of the measured gap to a modestly colorful image, while leaving room
         // for intentional palette choices and the renderer's nonlinear vibrance response.
-        return min(0.42, Double(color.colorfulness) + (0.42 - Double(color.colorfulness)) * 0.7)
+        return min(0.46, Double(color.colorfulness) + (0.46 - Double(color.colorfulness)) * 0.75)
     }
 }
 
@@ -586,7 +586,9 @@ enum AutoCandidateScoring {
             + regionExposure * 1.5
             + clipping * 3.0
             + neutral * 1.2
-            + saturation * 1.0
+            // Colorfulness is a supported defect target. Give a real rendered gain enough
+            // weight to beat movement/complexity costs without weakening clipping caps.
+            + saturation * 1.75
             + contrastLoss * 1.0
             + noiseCost * 0.8
             + maskEdge * 2.0
