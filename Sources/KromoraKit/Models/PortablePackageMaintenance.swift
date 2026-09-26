@@ -621,8 +621,16 @@ final class PortablePackageMaintenance {
                     continue
                 }
 
+                let latest = try package.readAssetRecord(for: entry.assetID)
+                guard latest.currentRevision == record.currentRevision,
+                      latest.editHistory == record.editHistory else {
+                    // An edit commit published a newer record after this scan. Writing the stale
+                    // plan would drop that revision's pointer while leaving its sidecar on disk.
+                    after += pointers.count
+                    continue
+                }
                 let quarantinePrefix = "Recovery/Quarantine/Maintenance/\(UUID().uuidString)"
-                var updated = record
+                var updated = latest
                 updated.editHistory.edits = pointers.filter { retained.contains($0.revision) }
                 var transaction = try package.beginTransaction(
                     lease: lease, now: now, faultInjector: faultInjector

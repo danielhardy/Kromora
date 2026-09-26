@@ -172,6 +172,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// image from opening, but it should remain visible to the user.
     @Published private(set) var editStoreStatus: String?
 
+    /// The status-bar text last published by a failed edit write. A later successful write clears
+    /// the bar only when that text is still showing, so an unrelated status is left alone.
+    private var persistenceFailureMessage: String?
+
     /// Compatibility diagnostics for the application boundary. Persistence accounting is owned by
     /// `EditPersistenceCoordinator`; these accessors keep existing integrations and tests stable.
     var pendingPersistenceCount: Int { persistence.pendingCount }
@@ -1009,9 +1013,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         persistence.onStatusChange = { [weak self] status in
-            self?.editStoreStatus = status
+            guard let self else { return }
+            self.editStoreStatus = status
+            if status == nil, let failure = self.persistenceFailureMessage,
+               self.statusMessage == failure {
+                self.persistenceFailureMessage = nil
+                self.statusMessage = ""
+            }
         }
         persistence.onFailure = { [weak self] message in
+            self?.persistenceFailureMessage = message
             self?.statusMessage = message
         }
 

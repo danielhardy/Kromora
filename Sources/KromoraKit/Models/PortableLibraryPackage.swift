@@ -278,7 +278,7 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     }
 }
 
-enum PortablePackageError: Error, Equatable, CustomStringConvertible {
+enum PortablePackageError: Error, Equatable, CustomStringConvertible, LocalizedError {
     case invalidPackageRoot
     case invalidManifest(String)
     case invalidShard(String)
@@ -315,6 +315,8 @@ enum PortablePackageError: Error, Equatable, CustomStringConvertible {
         case .missingLook(let hash): return "Embedded Look blob is missing: \(hash)"
         }
     }
+
+    var errorDescription: String? { description }
 }
 
 /// Read/write access to the format-only portion of a portable library package.

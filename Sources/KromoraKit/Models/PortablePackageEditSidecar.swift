@@ -203,17 +203,30 @@ extension PortableLibraryPackage {
         faultInjector: PortablePackageFaultInjector? = nil
     ) throws -> PortablePackageEditSidecar {
         var record = try readAssetRecord(for: assetID)
-        let nextRevision = max(
+        let recordedRevision = max(
+            record.currentRevision,
             record.editHistory.currentRevision,
             record.editHistory.edits.map(\.revision).max() ?? 0
-        ) + 1
+        )
+        // A crashed or overlapping writer can publish the sidecar files and then lose the race
+        // to update this record. The next number taken only from the record then collides with
+        // those files and every later save, including quit, fails forever.
+        let occupiedRevision = try highestOccupiedEditRevision(for: assetID)
+        var nextRevision = max(recordedRevision, occupiedRevision) + 1
         let shard = PortableLibraryPackage.shard(for: assetID)
         let base = "Assets/\(shard)/\(assetID.raw)"
-        let nativePath = "\(base)/Edits/\(nextRevision).json"
-        let xmpPath = "\(base)/Metadata/\(nextRevision).xmp"
-        guard !FileManager.default.fileExists(atPath: try packageURL(for: nativePath).path),
-              !FileManager.default.fileExists(atPath: try packageURL(for: xmpPath).path) else {
-            throw PortablePackageError.immutableRevisionExists(nativePath)
+        var nativePath = "\(base)/Edits/\(nextRevision).json"
+        var xmpPath = "\(base)/Metadata/\(nextRevision).xmp"
+        var collisions = 0
+        while try FileManager.default.fileExists(atPath: packageURL(for: nativePath).path)
+            || FileManager.default.fileExists(atPath: packageURL(for: xmpPath).path) {
+            collisions += 1
+            guard collisions <= 64 else {
+                throw PortablePackageError.immutableRevisionExists(nativePath)
+            }
+            nextRevision += 1
+            nativePath = "\(base)/Edits/\(nextRevision).json"
+            xmpPath = "\(base)/Metadata/\(nextRevision).xmp"
         }
 
         var references: [PortablePackageLookReference] = []
@@ -283,6 +296,27 @@ extension PortableLibraryPackage {
             throw error
         }
         return PortablePackageEditSidecar(native: persistedRevision, xmp: xmp)
+    }
+
+    /// The highest revision number already stored as an edit JSON or XMP sidecar.
+    ///
+    /// Missing directories mean no revisions have been published. Non-revision filenames are
+    /// ignored so a stray file cannot make the scan fail.
+    private func highestOccupiedEditRevision(for assetID: PortablePhotoAssetID) throws -> UInt64 {
+        let shard = PortableLibraryPackage.shard(for: assetID)
+        let base = "Assets/\(shard)/\(assetID.raw)"
+        var highest: UInt64 = 0
+        for directory in ["Edits", "Metadata"] {
+            let url = try packageURL(for: "\(base)/\(directory)")
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let names = try FileManager.default.contentsOfDirectory(atPath: url.path)
+            for name in names {
+                let stem = URL(fileURLWithPath: name).deletingPathExtension().lastPathComponent
+                guard let revision = UInt64(stem) else { continue }
+                highest = max(highest, revision)
+            }
+        }
+        return highest
     }
 
     func readEditRevision(
