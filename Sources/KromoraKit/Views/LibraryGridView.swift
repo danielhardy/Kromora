@@ -4,16 +4,21 @@ import SwiftUI
 /// The grid-first browsing surface for a source collection.
 ///
 /// `LazyVStack` is important here: the collection may contain thousands of `PhotoAsset` values, but
-/// SwiftUI only hosts the rows around the viewport. Each hosted cell opts into thumbnail work from
-/// `onAppear`, and releases in-flight work from `onDisappear`, so scrolling does not create a decode
-/// task for the entire folder.
+/// SwiftUI only hosts the rows around the viewport. Hosted cells still request a fast preview from
+/// `onAppear`, and release in-flight work from `onDisappear`. That callback is not the admission
+/// signal for the first screen — SwiftUI can leave visible cells unannounced until a click — so
+/// the grid also admits every photo in the visible mosaic, originals first and edited renders
+/// immediately after.
 struct LibraryGridView: View {
     @Bindable var collection: ImageCollection
     @ObservedObject var viewModel: AppViewModel
     let onOpen: () -> Void
 
     private let layout = LibraryGridLayout()
+    private let contentPadding: CGFloat = 16
     @State private var mosaicCache = LibraryMosaicLayoutCache()
+    @State private var scrollOffset: Double = 0
+    @State private var admittedThumbnailIDs: [PhotoAssetID] = []
 
     var body: some View {
         let _ = RenderDiagnostics.noteGridBody()
@@ -65,6 +70,9 @@ struct LibraryGridView: View {
                             aspectRatioAt: { entries[$0].aspectRatio },
                             aspectResolvedAt: { entries[$0].aspectResolved }
                         )
+                        let visibleIDs = visibleThumbnailIDs(
+                            rows: rows, entries: entries, viewportHeight: geometry.size.height
+                        )
                         LazyVStack(alignment: .leading, spacing: CGFloat(layout.spacing)) {
                             ForEach(rows) { row in
                                 LibraryMosaicRow(
@@ -73,18 +81,37 @@ struct LibraryGridView: View {
                                     collection: collection,
                                     settings: viewModel.settings,
                                     spacing: layout.spacing,
+                                    admittedThumbnailIDs: admittedThumbnailIDs,
                                     onSelect: select(index:),
                                     onOpen: onOpen,
                                     onAppearIndex: { viewModel.loadMorePortableIfNeeded(currentIndex: $0) }
                                 )
                             }
                         }
-                        .padding(16)
+                        .padding(contentPadding)
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: LibraryGridScrollOffsetKey.self,
+                                    value: proxy.frame(in: .named("libraryGrid")).minY
+                                )
+                            }
+                        }
                         .frame(
                             maxWidth: .infinity,
                             minHeight: geometry.size.height,
                             alignment: .top
                         )
+                        .onAppear { admitVisibleThumbnails(visibleIDs) }
+                        .onChange(of: visibleIDs) { _, ids in
+                            admitVisibleThumbnails(ids)
+                        }
+                    }
+                    .coordinateSpace(name: "libraryGrid")
+                    .onPreferenceChange(LibraryGridScrollOffsetKey.self) { minY in
+                        let offset = max(0, -Double(minY))
+                        guard abs(offset - scrollOffset) >= 24 else { return }
+                        scrollOffset = offset
                     }
                     .background(KromoraTheme.windowBackground)
                 }
@@ -104,6 +131,33 @@ struct LibraryGridView: View {
                     .background(.regularMaterial, in: Capsule())
                     .padding(12)
             }
+        }
+    }
+
+    private func visibleThumbnailIDs(
+        rows: [LibraryGridLayout.MosaicRow],
+        entries: [ImageCollection.ThumbnailEntry],
+        viewportHeight: Double
+    ) -> [PhotoAssetID] {
+        layout.visibleMosaicIndices(
+            rows: rows,
+            viewportHeight: viewportHeight,
+            scrollOffset: scrollOffset,
+            contentOrigin: Double(contentPadding)
+        ).compactMap { index in
+            guard entries.indices.contains(index) else { return nil }
+            return entries[index].id
+        }
+    }
+
+    private func admitVisibleThumbnails(_ ids: [PhotoAssetID]) {
+        let previous = Set(admittedThumbnailIDs)
+        let next = Set(ids)
+        admittedThumbnailIDs = ids
+        collection.beginThumbnailDemand()
+        collection.requestVisibleThumbnails(for: ids)
+        for id in previous.subtracting(next) {
+            collection.releaseThumbnail(for: id)
         }
     }
 
@@ -129,6 +183,7 @@ private struct LibraryMosaicRow: View {
     @Bindable var collection: ImageCollection
     @ObservedObject var settings: KromoraSettings
     let spacing: Double
+    let admittedThumbnailIDs: [PhotoAssetID]
     let onSelect: (Int) -> Void
     let onOpen: () -> Void
     var onAppearIndex: ((Int) -> Void)? = nil
@@ -161,12 +216,15 @@ private struct LibraryMosaicRow: View {
                     .frame(width: CGFloat(cell.width))
                     .onAppear {
                         // Make the cell callback order-independent: SwiftUI may deliver a child's
-                        // appearance before its row's appearance.
+                        // appearance before its row's appearance. The fast preview starts here;
+                        // edited renders are admitted for the whole viewport so a missing
+                        // `onAppear` cannot leave a visible photo blank or unedited.
                         collection.beginThumbnailDemand()
-                        collection.requestThumbnail(for: item.id)
+                        collection.requestThumbnail(for: item.id, requestsEditedThumbnail: false)
                         onAppearIndex?(resolved.index)
                     }
                     .onDisappear {
+                        guard !admittedThumbnailIDs.contains(item.id) else { return }
                         collection.releaseThumbnail(for: item.id)
                     }
                     .onTapGesture {
@@ -321,5 +379,12 @@ private struct LibraryGridCell: View {
         }
         .font(.caption2.weight(.semibold))
         .frame(minWidth: 14)
+    }
+}
+
+private struct LibraryGridScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }

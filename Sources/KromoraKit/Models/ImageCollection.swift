@@ -186,6 +186,11 @@ final class ImageCollectionPresentationModel {
     private var thumbnailDemandIDs: Set<PhotoAssetID> = []
     private var thumbnailDemandPriorities: [PhotoAssetID: ImageWorkScheduler.Priority] = [:]
     private var preparedThumbnailIDs: Set<PhotoAssetID> = []
+    /// Photos whose edited thumbnails the visible window asked for. Originals are queued
+    /// immediately; edited renders are flushed on the next turn so they cannot occupy a
+    /// thumbnail slot before the fast previews.
+    private var visibleEditedThumbnailIDs: [PhotoAssetID] = []
+    private var visibleEditedDemandScheduled = false
     private var metadataTask: Task<Void, Never>?
     private var metadataContinuation: AsyncStream<MetadataRequest>.Continuation?
     private var nextMetadataRequestID: UInt64 = 0
@@ -425,28 +430,50 @@ final class ImageCollectionPresentationModel {
         guard !isThumbnailDemandDriven else { return }
         isThumbnailDemandDriven = true
         cancelThumbnailWork()
-        prepareAdjacentThumbnails(around: selectedIndex)
+        // Originals only. The grid admits edited thumbnails for the whole viewport after those
+        // previews are queued; doing it here would start a handful of full renders first and
+        // leave the rest of the window blank.
+        prepareAdjacentThumbnails(around: selectedIndex, requestsEditedThumbnails: false)
         fillThumbnailQueue()
     }
 
     func requestThumbnail(
-        for id: PhotoAssetID, priority: ImageWorkScheduler.Priority = .visibleGrid
+        for id: PhotoAssetID,
+        priority: ImageWorkScheduler.Priority = .visibleGrid,
+        requestsEditedThumbnail: Bool = true
     ) {
         guard isThumbnailDemandDriven, let index = items.firstIndex(where: { $0.id == id }) else { return }
-        onThumbnailDemand?(id, priority)
-        guard items[index].thumbnail == nil else { return }
-        thumbnailDemandIDs.insert(id)
-        thumbnailDemandPriorities[id] = priority
-        let jobID = thumbnailJobID(for: items[index])
-        if !scheduler.contains(jobID) {
-            enqueueThumbnail(for: items[index], at: index, generation: thumbnailGeneration, priority: priority)
-        } else { scheduler.updatePriority(for: jobID, to: priority) }
+        requestOriginalThumbnail(for: id, at: index, priority: priority)
+        if requestsEditedThumbnail { onThumbnailDemand?(id, priority) }
+    }
+
+    /// Admit fast previews for the photos in the viewport, then their edited renders.
+    ///
+    /// Edited work is one turn behind the originals and uses background priority, so a free
+    /// thumbnail slot keeps painting embedded previews until that window is queued. Calling
+    /// this for the visible mosaic is what fills the grid without waiting for a click.
+    func requestVisibleThumbnails(for ids: [PhotoAssetID]) {
+        guard !ids.isEmpty else { return }
+        if !isThumbnailDemandDriven { beginThumbnailDemand() }
+        var indexByID: [PhotoAssetID: Int] = [:]
+        indexByID.reserveCapacity(items.count)
+        for (index, item) in items.enumerated() { indexByID[item.id] = index }
+        var admitted: [PhotoAssetID] = []
+        admitted.reserveCapacity(ids.count)
+        for id in ids {
+            guard let index = indexByID[id] else { continue }
+            requestOriginalThumbnail(for: id, at: index, priority: priority(for: index))
+            admitted.append(id)
+        }
+        visibleEditedThumbnailIDs = admitted
+        scheduleVisibleEditedThumbnails()
     }
 
     func releaseThumbnail(for id: PhotoAssetID) {
         guard isThumbnailDemandDriven else { return }
         thumbnailDemandIDs.remove(id)
         thumbnailDemandPriorities.removeValue(forKey: id)
+        visibleEditedThumbnailIDs.removeAll { $0 == id }
         guard !preparedThumbnailIDs.contains(id),
               let index = items.firstIndex(where: { $0.id == id }), items[index].thumbnail == nil else { return }
         let jobID = thumbnailJobID(for: items[index])
@@ -699,6 +726,39 @@ final class ImageCollectionPresentationModel {
         item.setOriginalThumbnail(thumbnail)
         item.asset.thumbnailState = thumbnail == nil ? .failed : .ready
         fillThumbnailQueue()
+        // A full viewport can exceed the thumbnail queue. As each preview finishes, ask again
+        // for the edited renders that were rejected while the queue held originals.
+        let editedIDs = visibleEditedThumbnailIDs
+        for id in editedIDs {
+            onThumbnailDemand?(id, .background)
+        }
+    }
+    private func requestOriginalThumbnail(
+        for id: PhotoAssetID, at index: Int, priority: ImageWorkScheduler.Priority
+    ) {
+        guard items.indices.contains(index), items[index].thumbnail == nil else { return }
+        thumbnailDemandIDs.insert(id)
+        thumbnailDemandPriorities[id] = priority
+        let jobID = thumbnailJobID(for: items[index])
+        if !scheduler.contains(jobID) {
+            enqueueThumbnail(
+                for: items[index], at: index, generation: thumbnailGeneration, priority: priority
+            )
+        } else {
+            scheduler.updatePriority(for: jobID, to: priority)
+        }
+    }
+    private func scheduleVisibleEditedThumbnails() {
+        guard !visibleEditedDemandScheduled else { return }
+        visibleEditedDemandScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.visibleEditedDemandScheduled = false
+            let ids = self.visibleEditedThumbnailIDs
+            for id in ids {
+                self.onThumbnailDemand?(id, .background)
+            }
+        }
     }
     private func fillThumbnailQueue() {
         let candidates = items.indices.filter {
@@ -711,11 +771,17 @@ final class ImageCollectionPresentationModel {
             enqueueThumbnail(for: item, at: index, generation: thumbnailGeneration, priority: thumbnailDemandPriorities[item.id])
         }
     }
-    private func prepareAdjacentThumbnails(around index: Int) {
+    private func prepareAdjacentThumbnails(
+        around index: Int, requestsEditedThumbnails: Bool = true
+    ) {
         guard isThumbnailDemandDriven else { return }
         preparedThumbnailIDs = Set(items.indices.filter { abs($0 - index) <= 2 }.map { items[$0].id })
-        for id in preparedThumbnailIDs { thumbnailDemandPriorities[id] = .adjacentFilmstrip; onThumbnailDemand?(id, .adjacentFilmstrip) }
+        for id in preparedThumbnailIDs {
+            thumbnailDemandPriorities[id] = .adjacentFilmstrip
+        }
         fillThumbnailQueue()
+        guard requestsEditedThumbnails else { return }
+        for id in preparedThumbnailIDs { onThumbnailDemand?(id, .adjacentFilmstrip) }
     }
     private func reprioritizeThumbnails() { fillThumbnailQueue() }
     private func priority(for index: Int) -> ImageWorkScheduler.Priority {
