@@ -14,8 +14,9 @@ enum KromoraTheme {
     // - Inspector: the system inspector material. The histogram occupies the band beside the
     //   toolbar; the window hides the title-bar separator so it is not drawn through the plot.
     // - Canvas surround: the dedicated recessed stage below, kept distinct from chrome.
-    // - Secondary chrome: source browser, filmstrip, culling, and status surfaces share the
-    //   quieter semantic under-page color rather than the elevated `.bar` material.
+    // - Secondary chrome: source browser, filmstrip, culling, and status surfaces share a
+    //   quieter semantic surface (warm neutral in light appearance, the system under-page
+    //   color in dark appearance) rather than the elevated `.bar` material.
     // - Analysis plots: locally scoped dark plot surfaces only.
 
     static var windowBackground: Color {
