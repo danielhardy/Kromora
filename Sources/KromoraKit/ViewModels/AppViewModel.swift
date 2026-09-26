@@ -4151,6 +4151,7 @@ extension AppViewModel: PreviewPublicationDestination {
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest) {
         previewPresentation.writeCanonical(image, for: request)
     }
+    var publicationVisiblePreview: CIImage? { previewSurface.image }
 }
 
 extension AppViewModel: PreviewAdmissionDestination {

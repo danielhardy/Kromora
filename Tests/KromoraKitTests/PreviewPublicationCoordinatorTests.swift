@@ -60,6 +60,40 @@ final class PreviewPublicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.lastPresentedVisibleRequest, publication.request)
     }
 
+    func testRefusedCheaperFrameStillAdmitsHistogramForTheVisiblePhoto() throws {
+        let destination = FakeDestination()
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+        let publication = try makePublication(destination: destination)
+
+        coordinator.publish(publication)
+        XCTAssertEqual(destination.histogramCount, 0)
+        XCTAssertEqual(coordinator.lastPresentedVisibleRequest, publication.request)
+
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        destination.refuseNextPresentation = true
+        coordinator.publish(publication)
+
+        XCTAssertEqual(destination.histogramCount, 1)
+        XCTAssertEqual(coordinator.lastPresentedVisibleImage, destination.visiblePreview)
+    }
+
+    func testRefusedFrameAdmitsHistogramFromTheSurfaceWhenPresentationWasNotConfirmed() throws {
+        let destination = FakeDestination()
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        destination.deferPresentation = true
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+        let publication = try makePublication(destination: destination)
+
+        coordinator.publish(publication)
+        XCTAssertEqual(destination.histogramCount, 0)
+        XCTAssertNil(coordinator.lastPresentedVisibleRequest)
+
+        destination.refuseNextPresentation = true
+        coordinator.publish(publication)
+
+        XCTAssertEqual(destination.histogramCount, 1)
+    }
+
     func testSettledROIFrameDoesNotWriteCanonicalCache() throws {
         let destination = FakeDestination()
         let coordinator = PreviewPublicationCoordinator(destination: destination)
@@ -141,6 +175,9 @@ private final class FakeDestination: PreviewPublicationDestination {
     var statusMessage = "Loading Test..."
     var presentCount = 0
     var histogramCount = 0
+    var refuseNextPresentation = false
+    var deferPresentation = false
+    var visiblePreview: CIImage?
     var idleCount = 0
     var canonicalWriteCount = 0
     var originalScheduleCount = 0
@@ -173,6 +210,15 @@ private final class FakeDestination: PreviewPublicationDestination {
         onPresented: (@MainActor () -> Void)?
     ) -> Bool {
         presentCount += 1
+        visiblePreview = image
+        if refuseNextPresentation {
+            refuseNextPresentation = false
+            return false
+        }
+        if deferPresentation {
+            deferPresentation = false
+            return true
+        }
         onPresented?()
         return true
     }
@@ -185,7 +231,9 @@ private final class FakeDestination: PreviewPublicationDestination {
     func publicationCancelComparisonPreview() { comparisonCancelCount += 1 }
     func publicationUpdateHistogram(for request: RenderRequest, presentedImage: CIImage?) {
         histogramCount += 1
+        visiblePreview = presentedImage
     }
+    var publicationVisiblePreview: CIImage? { visiblePreview }
     func publicationScheduleIdlePreviewBuild() { idleCount += 1 }
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest) {
         canonicalWriteCount += 1
