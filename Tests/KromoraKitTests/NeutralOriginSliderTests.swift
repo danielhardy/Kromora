@@ -262,7 +262,7 @@ final class NeutralOriginSliderTests: XCTestCase {
 
         XCTAssertGreaterThan(middle.redComponent, middle.greenComponent)
         XCTAssertGreaterThan(middle.greenComponent, middle.blueComponent,
-                             "the bead's face should read as copper, not grey or gold-green")
+                             "the disc's face should read as copper, not grey or gold-green")
         XCTAssertGreaterThan(
             luminance(of: top), luminance(of: bottom) + 0.12,
             "light should fall on the top of the bead"
@@ -273,6 +273,38 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertLessThan(
             chroma(of: disabledMiddle), 0.08,
             "a disabled thumb should cool to pewter"
+        )
+    }
+
+    func testThumbShineFacesTheMiddleOfTheTrack() {
+        XCTAssertEqual(
+            NeutralOriginSliderCell.thumbShine(for: -100, min: -100, max: 100), 1, accuracy: 0.001
+        )
+        XCTAssertEqual(
+            NeutralOriginSliderCell.thumbShine(for: 100, min: -100, max: 100), 0, accuracy: 0.001
+        )
+        XCTAssertEqual(
+            NeutralOriginSliderCell.thumbShine(for: 0, min: -100, max: 100), 0.5, accuracy: 0.001
+        )
+        XCTAssertEqual(
+            NeutralOriginSliderCell.thumbShine(for: 4, min: 4, max: 4), 0.5, accuracy: 0.001
+        )
+    }
+
+    func testThumbSpecularSlidesAcrossTheFace() throws {
+        let leftLit = try renderThumb(diameter: 64, enabled: true, shine: 0.05)
+        let rightLit = try renderThumb(diameter: 64, enabled: true, shine: 0.95)
+        let leftWhenLeftLit = try averageLuminance(leftLit, xFraction: 0.30, yFraction: 0.40)
+        let rightWhenLeftLit = try averageLuminance(leftLit, xFraction: 0.70, yFraction: 0.40)
+        XCTAssertGreaterThan(
+            leftWhenLeftLit, rightWhenLeftLit + 0.04,
+            "a low shine should brighten the left of the disc"
+        )
+        let leftWhenRightLit = try averageLuminance(rightLit, xFraction: 0.30, yFraction: 0.40)
+        let rightWhenRightLit = try averageLuminance(rightLit, xFraction: 0.70, yFraction: 0.40)
+        XCTAssertGreaterThan(
+            rightWhenRightLit, leftWhenRightLit + 0.04,
+            "a high shine should brighten the right of the disc"
         )
     }
 
@@ -380,7 +412,9 @@ final class NeutralOriginSliderTests: XCTestCase {
         0.2126 * color.redComponent + 0.7152 * color.greenComponent + 0.0722 * color.blueComponent
     }
 
-    private func renderThumb(diameter: CGFloat, enabled: Bool) throws -> NSBitmapImageRep {
+    private func renderThumb(
+        diameter: CGFloat, enabled: Bool, shine: CGFloat = 0.5
+    ) throws -> NSBitmapImageRep {
         let canvas = Int(ceil(diameter + 8))
         guard let rep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
@@ -405,10 +439,31 @@ final class NeutralOriginSliderTests: XCTestCase {
         NeutralOriginSliderCell.drawBrassThumb(
             in: NSRect(x: origin, y: origin, width: diameter, height: diameter),
             flipped: false,
-            enabled: enabled
+            enabled: enabled,
+            shine: shine
         )
         NSGraphicsContext.restoreGraphicsState()
         return rep
+    }
+
+    /// A small patch, so a single lathe groove cannot decide which side of the disc is lit.
+    private func averageLuminance(
+        _ rep: NSBitmapImageRep, xFraction: CGFloat, yFraction: CGFloat
+    ) throws -> CGFloat {
+        var total: CGFloat = 0
+        var count: CGFloat = 0
+        for yOffset in -2...2 {
+            for xOffset in -2...2 {
+                let color = try sample(
+                    rep,
+                    xFraction: xFraction + CGFloat(xOffset) / CGFloat(rep.pixelsWide),
+                    yFraction: yFraction + CGFloat(yOffset) / CGFloat(rep.pixelsHigh)
+                )
+                total += luminance(of: color)
+                count += 1
+            }
+        }
+        return total / count
     }
 
     /// `yFraction` is measured from the top of the bitmap. `NSBitmapImageRep.colorAt` uses that
