@@ -55,6 +55,9 @@ public struct KromoraCommands: Commands {
             Button("Reset Rotation") { post(.resetRotation) }
                 .accessibilityLabel("Reset Rotation")
 
+            Button("Capture Info Overlay (I)") { post(.toggleCaptureMetadataOverlay) }
+                .accessibilityLabel("Toggle capture information overlay")
+
             Button("Info Inspector") { post(.toggleInspector) }
                 .keyboardShortcut("i", modifiers: .command)
                 .accessibilityLabel("Info Inspector")
@@ -265,6 +268,7 @@ extension Notification.Name {
     /// Notification used by the View menu command to clear a committed rotation.
     static let resetRotation = Notification.Name("Kromora.resetRotation")
     static let toggleInspector = Notification.Name("Kromora.toggleInspector")
+    static let toggleCaptureMetadataOverlay = Notification.Name("Kromora.toggleCaptureMetadataOverlay")
     static let copyAllEdits = Notification.Name("Kromora.copyAllEdits")
     static let selectiveCopy = Notification.Name("Kromora.selectiveCopy")
     static let pasteEdits = Notification.Name("Kromora.pasteEdits")

@@ -479,6 +479,40 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertFalse(KeyMonitorPolicy.isCropShortcut(characters: "c", modifiers: .control))
     }
 
+    func testPlainIAndOnlyPlainIWithAnOpenPhotoTogglesCaptureOverlay() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let monitor = KeyMonitor(viewModel: viewModel)
+        defer { monitor.stop() }
+        let togglePosted = expectation(description: "capture overlay toggle")
+        togglePosted.assertForOverFulfill = true
+        let token = NotificationCenter.default.addObserver(
+            forName: .toggleCaptureMetadataOverlay, object: nil, queue: nil
+        ) { _ in togglePosted.fulfill() }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        let plainI = try keyEvent(
+            .keyDown, keyCode: 34, characters: "i", charactersIgnoringModifiers: "i"
+        )
+        XCTAssertNotNil(monitor.handle(plainI), "without a photo, I should be left alone")
+
+        viewModel.sourceImage = CIImage(color: .gray).cropped(
+            to: CGRect(x: 0, y: 0, width: 8, height: 8)
+        )
+        XCTAssertNil(monitor.handle(plainI))
+        await fulfillment(of: [togglePosted], timeout: 0.1)
+
+        let commandI = try keyEvent(
+            .keyDown, keyCode: 34, modifierFlags: .command,
+            characters: "i", charactersIgnoringModifiers: "i"
+        )
+        XCTAssertNotNil(monitor.handle(commandI), "⌘I remains the Info Inspector shortcut")
+        let shiftedI = try keyEvent(
+            .keyDown, keyCode: 34, modifierFlags: .shift,
+            characters: "I", charactersIgnoringModifiers: "i"
+        )
+        XCTAssertNotNil(monitor.handle(shiftedI))
+    }
+
     func testCropEscapeCancelsAndReturnCommitsThroughKeyboardMonitor() throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray).cropped(

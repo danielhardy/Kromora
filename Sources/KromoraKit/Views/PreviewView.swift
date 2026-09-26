@@ -12,6 +12,7 @@ struct PreviewView: View {
     @ObservedObject private var previewSurface: PreviewSurface
     @ObservedObject private var originalPreviewSurface: PreviewSurface
     @State private var isDropTargeted = false
+    @State private var isCaptureOverlayVisible = false
     @ObservedObject private var maskingState: MaskInteractionState
 
     init(viewModel: AppViewModel) {
@@ -69,11 +70,30 @@ struct PreviewView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
+
+            if previewSurface.image != nil,
+                !canvasState.isCropToolActive,
+                isCaptureOverlayVisible,
+                !viewModel.metadata.captureOverlayRows.isEmpty
+            {
+                VStack {
+                    Spacer()
+                    HStack {
+                        CaptureMetadataOverlay(rows: viewModel.metadata.captureOverlayRows)
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(20)
+                .allowsHitTesting(false)
+            }
         }
         .onDrop(
             of: ImageDrop.acceptedTypes,
             delegate: ImageDropDelegate(viewModel: viewModel, isTargeted: $isDropTargeted)
         )
+        .onReceive(NotificationCenter.default.publisher(for: .toggleCaptureMetadataOverlay)) { _ in
+            isCaptureOverlayVisible.toggle()
+        }
     }
 
     private var failedState: some View {
@@ -312,6 +332,46 @@ struct PreviewView: View {
         }
     }
 
+}
+
+/// A quiet, film-contact-sheet-style readout that stays presentation-only over the canvas.
+private struct CaptureMetadataOverlay: View {
+    let rows: [ImageMetadata.Row]
+
+    var body: some View {
+        HStack(spacing: 11) {
+            ForEach(rows) { row in
+                if row.id != rows.first?.id {
+                    Rectangle()
+                        .fill(.white.opacity(0.28))
+                        .frame(width: 1, height: 23)
+                        .accessibilityHidden(true)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(row.label.uppercased())
+                        .font(.system(size: 8, weight: .semibold, design: .monospaced))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.68))
+                    Text(row.value)
+                        .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 10)
+        .background(.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 5))
+        .overlay {
+            RoundedRectangle(cornerRadius: 5)
+                .strokeBorder(.white.opacity(0.22), lineWidth: 0.75)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Capture information")
+        .accessibilityValue(rows.map { "\($0.label) \($0.value)" }.joined(separator: ", "))
+    }
 }
 
 struct ComparisonBadge: View {
