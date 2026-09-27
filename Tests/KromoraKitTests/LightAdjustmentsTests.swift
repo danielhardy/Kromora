@@ -70,6 +70,39 @@ final class LightAdjustmentsTests: XCTestCase {
         XCTAssertFalse(curve.isIdentity)
     }
 
+    func testRGBAndParametricCurvesRoundTripAndPreserveLegacyMasterCurve() throws {
+        let red = LightToneCurve(points: [
+            LightCurvePoint(input: 0, output: 0), LightCurvePoint(input: 0.5, output: 0.7),
+            LightCurvePoint(input: 1, output: 1)
+        ])
+        let regional = ParametricToneCurve(highlights: 20, lights: -10, darks: 12, shadows: -8,
+                                           shadowSplit: 0.2, darkSplit: 0.4,
+                                           lightSplit: 0.65, highlightSplit: 0.86)
+        let light = LightAdjustments(redToneCurve: red, parametricCurve: regional)
+        XCTAssertEqual(try roundTrip(light), light)
+        XCTAssertNotEqual(regional.value(at: 0.5), 0.5,
+                          "the four regional amounts must shape the transfer function")
+
+        let legacy = Data(#"{"toneCurve":{"version":2,"points":[{"input":0,"output":0},{"input":0.5,"output":0.7},{"input":1,"output":1}]}}"#.utf8)
+        let decoded = try JSONDecoder().decode(LightAdjustments.self, from: legacy)
+        XCTAssertEqual(decoded.toneCurve.points[1].output, 0.7)
+        XCTAssertTrue(decoded.redToneCurve.isIdentity)
+        XCTAssertTrue(decoded.parametricCurve.isIdentity)
+    }
+
+    func testToneCurvePresetHasPortableVersionedJSONFormat() throws {
+        let preset = ToneCurvePreset(light: LightAdjustments(redToneCurve: LightToneCurve(points: [
+            LightCurvePoint(input: 0, output: 0), LightCurvePoint(input: 0.5, output: 0.8),
+            LightCurvePoint(input: 1, output: 1)
+        ])))
+        let restored = try JSONDecoder().decode(ToneCurvePreset.self, from: JSONEncoder().encode(preset))
+        XCTAssertEqual(restored, preset)
+        var applied = LightAdjustments(parametricCurve: ParametricToneCurve(shadows: 20))
+        restored.apply(to: &applied)
+        XCTAssertEqual(applied.redToneCurve, preset.red)
+        XCTAssertEqual(applied.parametricCurve.shadows, 20)
+    }
+
     func testMovableToneCurveEndpointsNormalizeAndRoundTrip() throws {
         let curve = LightToneCurve(points: [
             LightCurvePoint(input: 0.18, output: 0.12),

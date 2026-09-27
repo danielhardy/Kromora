@@ -34,6 +34,15 @@ identity/intensity, and local mask definitions. An empty or neutral document is 
 transform. Preview, comparison, histogram, and export consume snapshots of this value rather than
 baked preview pixels.
 
+Light tone data keeps the legacy `toneCurve` key as the master RGB curve, then stores optional
+`redToneCurve`, `greenToneCurve`, `blueToneCurve`, and `parametricCurve` values. Missing keys decode
+to identity, so existing edit documents retain their master curve unchanged. The renderer composes
+the parametric mapping, master mapping, and per-channel mappings into its sampled 1D texture, shared
+by preview and full-resolution export. Curve presets use UTF-8 JSON with `format` set to
+`kromora-tone-curves`, `version` set to `1`, and `master`, `red`, `green`, and `blue` members using
+the persisted `LightToneCurve` shape (`version` plus normalized `points` of `input`/`output`).
+Import replaces only those four curves; parametric controls remain with the current edit document.
+
 `RenderPipeline` builds one lazy Core Image graph. `RenderEngine` evaluates that graph at the
 requested quality and output size; preview and export do not maintain separate edit logic. The
 pipeline handles source decoding/develop, orientation and rotation, global Light and Color,

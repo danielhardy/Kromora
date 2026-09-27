@@ -1,5 +1,56 @@
 import Foundation
 
+enum ToneCurveChannel: String, CaseIterable, Codable, Sendable, Identifiable {
+    case master = "Master"
+    case red = "Red"
+    case green = "Green"
+    case blue = "Blue"
+    var id: String { rawValue }
+}
+
+/// Interchange format for the four editable RGB curves. Parametric controls remain document-local.
+struct ToneCurvePreset: Codable, Equatable, Sendable {
+    let format: String
+    let version: Int
+    let master: LightToneCurve
+    let red: LightToneCurve
+    let green: LightToneCurve
+    let blue: LightToneCurve
+
+    init(light: LightAdjustments) {
+        format = "kromora-tone-curves"
+        version = 1
+        master = light.toneCurve
+        red = light.redToneCurve
+        green = light.greenToneCurve
+        blue = light.blueToneCurve
+    }
+
+    func apply(to light: inout LightAdjustments) {
+        light.toneCurve = master
+        light.redToneCurve = red
+        light.greenToneCurve = green
+        light.blueToneCurve = blue
+    }
+
+    private enum CodingKeys: String, CodingKey { case format, version, master, red, green, blue }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let format = try c.decode(String.self, forKey: .format)
+        let version = try c.decode(Int.self, forKey: .version)
+        guard format == "kromora-tone-curves", version == 1 else {
+            throw DecodingError.dataCorruptedError(forKey: .format, in: c,
+                debugDescription: "Unsupported Kromora tone-curve preset format or version.")
+        }
+        self.format = format
+        self.version = version
+        master = try c.decode(LightToneCurve.self, forKey: .master)
+        red = try c.decode(LightToneCurve.self, forKey: .red)
+        green = try c.decode(LightToneCurve.self, forKey: .green)
+        blue = try c.decode(LightToneCurve.self, forKey: .blue)
+    }
+}
+
 /// A normalized point in the master RGB tone curve.
 ///
 /// The curve editor can replace points without knowing about Core Image; this value is the
@@ -265,6 +316,68 @@ struct LightToneCurve: Codable, Equatable, Sendable {
     }
 }
 
+/// A regional tone curve with independently adjustable tonal bands and control-point positions.
+struct ParametricToneCurve: Codable, Equatable, Sendable {
+    static let neutral = ParametricToneCurve()
+    static let amountRange = -100.0...100.0
+    static let splitRange = 0.0...1.0
+
+    var highlights: Double { didSet { highlights = highlights.clamped(to: Self.amountRange, default: 0) } }
+    var lights: Double { didSet { lights = lights.clamped(to: Self.amountRange, default: 0) } }
+    var darks: Double { didSet { darks = darks.clamped(to: Self.amountRange, default: 0) } }
+    var shadows: Double { didSet { shadows = shadows.clamped(to: Self.amountRange, default: 0) } }
+    var shadowSplit: Double
+    var darkSplit: Double
+    var lightSplit: Double
+    var highlightSplit: Double
+
+    init(highlights: Double = 0, lights: Double = 0, darks: Double = 0, shadows: Double = 0,
+         shadowSplit: Double = 0.16, darkSplit: Double = 0.38,
+         lightSplit: Double = 0.62, highlightSplit: Double = 0.84) {
+        self.highlights = highlights.clamped(to: Self.amountRange, default: 0)
+        self.lights = lights.clamped(to: Self.amountRange, default: 0)
+        self.darks = darks.clamped(to: Self.amountRange, default: 0)
+        self.shadows = shadows.clamped(to: Self.amountRange, default: 0)
+        self.shadowSplit = shadowSplit.clamped(to: 0.02...0.92, default: 0.16)
+        self.darkSplit = darkSplit.clamped(to: (self.shadowSplit + 0.02)...0.94, default: 0.38)
+        self.lightSplit = lightSplit.clamped(to: (self.darkSplit + 0.02)...0.96, default: 0.62)
+        self.highlightSplit = highlightSplit.clamped(to: (self.lightSplit + 0.02)...0.98, default: 0.84)
+    }
+
+    var isIdentity: Bool { highlights == 0 && lights == 0 && darks == 0 && shadows == 0 }
+
+    func value(at input: Double) -> Double {
+        let x = input.clamped(to: 0...1, default: 0)
+        let anchors: [(Double, Double)] = [
+            (0, 0), (shadowSplit, shadows), (darkSplit, darks),
+            (lightSplit, lights), (highlightSplit, highlights), (1, 0)
+        ]
+        guard let upper = anchors.firstIndex(where: { $0.0 >= x }) else { return x }
+        guard upper > 0 else { return x + anchors[upper].1 / 100 * 0.15 }
+        let lowerAnchor = anchors[upper - 1]
+        let upperAnchor = anchors[upper]
+        let fraction = (x - lowerAnchor.0) / max(upperAnchor.0 - lowerAnchor.0, 0.001)
+        let amount = lowerAnchor.1 + (upperAnchor.1 - lowerAnchor.1) * fraction
+        return (x + amount / 100 * 0.15).clamped(to: 0...1, default: x)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case highlights, lights, darks, shadows, shadowSplit, darkSplit, lightSplit, highlightSplit
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(highlights: try c.decodeIfPresent(Double.self, forKey: .highlights) ?? 0,
+                  lights: try c.decodeIfPresent(Double.self, forKey: .lights) ?? 0,
+                  darks: try c.decodeIfPresent(Double.self, forKey: .darks) ?? 0,
+                  shadows: try c.decodeIfPresent(Double.self, forKey: .shadows) ?? 0,
+                  shadowSplit: try c.decodeIfPresent(Double.self, forKey: .shadowSplit) ?? 0.16,
+                  darkSplit: try c.decodeIfPresent(Double.self, forKey: .darkSplit) ?? 0.38,
+                  lightSplit: try c.decodeIfPresent(Double.self, forKey: .lightSplit) ?? 0.62,
+                  highlightSplit: try c.decodeIfPresent(Double.self, forKey: .highlightSplit) ?? 0.84)
+    }
+}
+
 /// Photographer-facing global Light controls.
 ///
 /// These values are intentionally independent of Core Image parameter units. Exposure is in EV;
@@ -307,6 +420,28 @@ struct LightAdjustments: Codable, Equatable, Sendable {
             )
         }
     }
+    var redToneCurve: LightToneCurve
+    var greenToneCurve: LightToneCurve
+    var blueToneCurve: LightToneCurve
+    var parametricCurve: ParametricToneCurve
+
+    func toneCurve(for channel: ToneCurveChannel) -> LightToneCurve {
+        switch channel {
+        case .master: toneCurve
+        case .red: redToneCurve
+        case .green: greenToneCurve
+        case .blue: blueToneCurve
+        }
+    }
+
+    mutating func setToneCurve(_ curve: LightToneCurve, for channel: ToneCurveChannel) {
+        switch channel {
+        case .master: toneCurve = curve
+        case .red: redToneCurve = curve
+        case .green: greenToneCurve = curve
+        case .blue: blueToneCurve = curve
+        }
+    }
 
     init(
         exposure: Double = 0,
@@ -315,7 +450,11 @@ struct LightAdjustments: Codable, Equatable, Sendable {
         shadows: Double = 0,
         whites: Double = 0,
         blacks: Double = 0,
-        toneCurve: LightToneCurve = .identity
+        toneCurve: LightToneCurve = .identity,
+        redToneCurve: LightToneCurve = .identity,
+        greenToneCurve: LightToneCurve = .identity,
+        blueToneCurve: LightToneCurve = .identity,
+        parametricCurve: ParametricToneCurve = .neutral
     ) {
         self.exposure = exposure.clamped(to: Self.exposureRange, default: 0)
         self.contrast = contrast.clamped(to: Self.contrastRange, default: 0)
@@ -328,15 +467,21 @@ struct LightAdjustments: Codable, Equatable, Sendable {
             points: toneCurve.points,
             preserveEndpointPositions: toneCurve.version >= 2
         )
+        self.redToneCurve = redToneCurve
+        self.greenToneCurve = greenToneCurve
+        self.blueToneCurve = blueToneCurve
+        self.parametricCurve = parametricCurve
     }
 
     var isIdentity: Bool {
         exposure == 0 && contrast == 0 && highlights == 0 && shadows == 0 &&
-            whites == 0 && blacks == 0 && toneCurve.isIdentity
+            whites == 0 && blacks == 0 && toneCurve.isIdentity && redToneCurve.isIdentity &&
+            greenToneCurve.isIdentity && blueToneCurve.isIdentity && parametricCurve.isIdentity
     }
 
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, highlights, shadows, whites, blacks, toneCurve
+        case redToneCurve, greenToneCurve, blueToneCurve, parametricCurve
     }
 
     init(from decoder: Decoder) throws {
@@ -348,7 +493,11 @@ struct LightAdjustments: Codable, Equatable, Sendable {
             shadows: try container.decodeIfPresent(Double.self, forKey: .shadows) ?? 0,
             whites: try container.decodeIfPresent(Double.self, forKey: .whites) ?? 0,
             blacks: try container.decodeIfPresent(Double.self, forKey: .blacks) ?? 0,
-            toneCurve: try container.decodeIfPresent(LightToneCurve.self, forKey: .toneCurve) ?? .identity
+            toneCurve: try container.decodeIfPresent(LightToneCurve.self, forKey: .toneCurve) ?? .identity,
+            redToneCurve: try container.decodeIfPresent(LightToneCurve.self, forKey: .redToneCurve) ?? .identity,
+            greenToneCurve: try container.decodeIfPresent(LightToneCurve.self, forKey: .greenToneCurve) ?? .identity,
+            blueToneCurve: try container.decodeIfPresent(LightToneCurve.self, forKey: .blueToneCurve) ?? .identity,
+            parametricCurve: try container.decodeIfPresent(ParametricToneCurve.self, forKey: .parametricCurve) ?? .neutral
         )
     }
 }

@@ -136,6 +136,31 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         }
     }
 
+    func testRedToneCurveChangesOnlyRedChannel() throws {
+        let source = CIImage(color: CIColor(red: 0.35, green: 0.35, blue: 0.35)).cropped(to: CGRect(x: 0, y: 0, width: 2, height: 2))
+        let red = LightToneCurve(points: [
+            LightCurvePoint(input: 0, output: 0), LightCurvePoint(input: 0.35, output: 0.7),
+            LightCurvePoint(input: 1, output: 1)
+        ])
+        let adjusted = RenderPipeline.applyLight(LightAdjustments(redToneCurve: red), to: source)
+        let pixel = try XCTUnwrap(CIContext().createCGImage(adjusted, from: adjusted.extent))
+        let bytes = pixel.dataProvider!.data! as Data
+        XCTAssertGreaterThan(bytes[0], bytes[1])
+        XCTAssertEqual(bytes[1], bytes[2], accuracy: 1)
+    }
+
+    func testParametricRegionsChangeTheToneCurveTransfer() throws {
+        let source = try linearRamp()
+        let neutral = try linearSamples(of: RenderPipeline.applyLight(.neutral, to: source))
+        let regional = ParametricToneCurve(highlights: 30, lights: 30, darks: 30, shadows: 30)
+        let adjusted = try linearSamples(of: RenderPipeline.applyLight(
+            LightAdjustments(parametricCurve: regional), to: source
+        ))
+        XCTAssertGreaterThan(adjusted[128], neutral[128] + 0.02)
+        XCTAssertEqual(adjusted.first ?? -1, neutral.first ?? -2, accuracy: 0.01)
+        XCTAssertEqual(adjusted.last ?? -1, neutral.last ?? -2, accuracy: 0.01)
+    }
+
     func testMasterToneCurveDoesNotBlackOutANonZeroOriginSource() throws {
         let source = try linearRamp(width: 64)
         let curve = LightToneCurve(points: [

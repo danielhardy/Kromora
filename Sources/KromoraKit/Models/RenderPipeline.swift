@@ -880,8 +880,10 @@ enum RenderPipeline {
             result = curve.outputImage ?? result
         }
 
-        if !light.toneCurve.isIdentity {
-            result = applyToneCurve(light.toneCurve, to: result, cache: cache)
+        if !light.toneCurve.isIdentity || !light.redToneCurve.isIdentity ||
+            !light.greenToneCurve.isIdentity || !light.blueToneCurve.isIdentity ||
+            !light.parametricCurve.isIdentity {
+            result = applyToneCurve(light, to: result, cache: cache)
         }
 
         // Endpoint controls intentionally run in a stable order after the shared tonal curve:
@@ -1367,12 +1369,17 @@ enum RenderPipeline {
         CIKernelLibrary.colorKernel(named: "colorGrading")
 
     private static func applyToneCurve(
-        _ curve: LightToneCurve,
+        _ light: LightAdjustments,
         to image: CIImage,
         cache: ToneCurveFilterCache?
     ) -> CIImage {
-        if let cache { return cache.apply(curve, to: image) }
-        return ToneCurveFilterCache().apply(curve, to: image)
+        if let cache {
+            return cache.apply(light.toneCurve, red: light.redToneCurve, green: light.greenToneCurve,
+                               blue: light.blueToneCurve, parametric: light.parametricCurve, to: image)
+        }
+        return ToneCurveFilterCache().apply(light.toneCurve, red: light.redToneCurve,
+            green: light.greenToneCurve, blue: light.blueToneCurve,
+            parametric: light.parametricCurve, to: image)
     }
 
     /// Move the white point with a smooth high-end rolloff. The first three control points stay on
