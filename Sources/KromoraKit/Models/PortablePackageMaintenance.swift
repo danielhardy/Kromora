@@ -610,17 +610,31 @@ final class PortablePackageMaintenance {
                     $0 == record.editHistory.currentRevision
                         || policy.isProtected($0, for: entry.assetID)
                 })
-                let namedSnapshots = Set(try pointers.compactMap { pointer in
-                    try package.readEditRevision(for: entry.assetID, revision: pointer.revision)
-                        .snapshotName == nil ? nil : pointer.revision
-                })
                 let newest = Set(
                     pointers.sorted { $0.revision > $1.revision }
                         .prefix(policy.maximumEditRevisions).map(\.revision)
                 )
-                let retained = protected.union(newest).union(namedSnapshots)
+                let retained = protected.union(newest)
                 let stale = pointers.filter { !retained.contains($0.revision) }
                 guard !stale.isEmpty else {
+                    after += pointers.count
+                    continue
+                }
+
+                // Current pointers carry snapshot state in asset.json. For older package records
+                // that predate the field, retain the historical sidecar lookup only when this
+                // asset actually needs compaction.
+                let namedSnapshots = Set(try pointers.compactMap { pointer in
+                    if pointer.isNamedSnapshot == true { return pointer.revision }
+                    guard pointer.isNamedSnapshot == nil else { return nil }
+                    return try package.readEditRevision(for: entry.assetID, revision: pointer.revision)
+                        .snapshotName == nil ? nil : pointer.revision
+                })
+                let retainedWithSnapshots = retained.union(namedSnapshots)
+                let staleWithSnapshots = pointers.filter {
+                    !retainedWithSnapshots.contains($0.revision)
+                }
+                guard !staleWithSnapshots.isEmpty else {
                     after += pointers.count
                     continue
                 }
@@ -635,12 +649,12 @@ final class PortablePackageMaintenance {
                 }
                 let quarantinePrefix = "Recovery/Quarantine/Maintenance/\(UUID().uuidString)"
                 var updated = latest
-                updated.editHistory.edits = pointers.filter { retained.contains($0.revision) }
+                updated.editHistory.edits = pointers.filter { retainedWithSnapshots.contains($0.revision) }
                 var transaction = try package.beginTransaction(
                     lease: lease, now: now, faultInjector: faultInjector
                 )
                 do {
-                    for pointer in stale {
+                    for pointer in staleWithSnapshots {
                         try transaction.stageMove(
                             from: pointer.relativePath,
                             to: "\(quarantinePrefix)/\(pointer.revision).json"
@@ -677,7 +691,7 @@ final class PortablePackageMaintenance {
                     throw error
                 }
                 after += updated.editHistory.edits.count
-                removed += stale.count
+                removed += staleWithSnapshots.count
             }
         }
         return .init(

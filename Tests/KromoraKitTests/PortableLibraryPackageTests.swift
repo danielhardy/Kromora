@@ -4,6 +4,22 @@ import XCTest
 
 final class PortableLibraryPackageTests: TempDirectoryTestCase {
 
+    func testLegacyEditPointerDecodesAndRoundTripsAsNotNamedSnapshot() throws {
+        let legacyJSON = #"{"revision":7,"relativePath":"Assets/ab/asset/Edits/7.json"}"#
+        let decoded = try PackageJSONCoder.decode(
+            PortablePackageEditPointer.self,
+            from: Data(legacyJSON.utf8)
+        )
+
+        XCTAssertNil(decoded.isNamedSnapshot)
+        let roundTripped = try PackageJSONCoder.decode(
+            PortablePackageEditPointer.self,
+            from: PackageJSONCoder.encode(decoded)
+        )
+        XCTAssertEqual(roundTripped, decoded)
+        XCTAssertNil(roundTripped.isNamedSnapshot)
+    }
+
     func testCreateWritesManifestAndAll256MembershipShards() throws {
         let packageURL = tempDirectory.appendingPathComponent("Library.kromoralibrary")
         _ = try PortableLibraryPackage.create(at: packageURL)

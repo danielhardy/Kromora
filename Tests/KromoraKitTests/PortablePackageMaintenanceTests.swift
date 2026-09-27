@@ -128,6 +128,44 @@ final class PortablePackageMaintenanceTests: TempDirectoryTestCase {
         XCTAssertThrowsError(try compacted.readEditRevision(for: assetID, revision: 2))
     }
 
+    func testRevisionCompactionRetainsNamedSnapshotsAndPrunesOtherStaleRevisions() throws {
+        let packageURL = tempDirectory.appendingPathComponent("NamedSnapshotMaintenance.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = tempDirectory.appendingPathComponent("named-snapshot-source.jpg")
+        try Data("revision source".utf8).write(to: sourceURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+        for revision in 1...5 {
+            _ = try package.appendEditRevision(
+                for: assetID,
+                document: EditDocument(light: .init(exposure: Double(revision))),
+                snapshotName: revision == 2 ? "Saved look" : nil,
+                lease: lease
+            )
+        }
+        try lease.release()
+
+        let result = try PortablePackageMaintenance.run(
+            at: packageURL,
+            options: .init(policy: PortablePackageMaintenancePolicy(maximumEditRevisions: 2))
+        )
+
+        XCTAssertEqual(result.revisions.revisionsBefore, 5)
+        XCTAssertEqual(result.revisions.revisionsAfter, 3)
+        XCTAssertEqual(result.revisions.revisionsRemoved, 2)
+        let compacted = try PortableLibraryPackage.open(at: packageURL)
+        let record = try compacted.readAssetRecord(for: assetID)
+        XCTAssertEqual(record.editHistory.edits.map(\.revision), [2, 4, 5])
+        XCTAssertEqual(record.editHistory.edits.first?.isNamedSnapshot, true)
+        XCTAssertEqual(
+            try compacted.readEditRevision(for: assetID, revision: 2).snapshotName,
+            "Saved look"
+        )
+        XCTAssertThrowsError(try compacted.readEditRevision(for: assetID, revision: 1))
+        XCTAssertThrowsError(try compacted.readEditRevision(for: assetID, revision: 3))
+    }
+
     func testInterruptedMaintenanceRollsBackAndCanBeRetried() throws {
         let packageURL = tempDirectory.appendingPathComponent("RetryMaintenance.kromoralibrary")
         _ = try PortableLibraryPackage.create(at: packageURL)
