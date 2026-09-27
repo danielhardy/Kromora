@@ -45,8 +45,8 @@ struct DustFinderSheet: View {
                                 ))
                                 Circle()
                                     .stroke(index == selectedIndex ? Color.yellow : Color.red, lineWidth: 2)
-                                    .frame(width: max(12, CGFloat(spot.radius) * CGFloat(finderImage.width) * 2),
-                                           height: max(12, CGFloat(spot.radius) * CGFloat(finderImage.height) * 2))
+                                    .frame(width: max(12, CGFloat(spot.region.radius) * CGFloat(finderImage.width) * 2),
+                                           height: max(12, CGFloat(spot.region.radius) * CGFloat(finderImage.height) * 2))
                                     .position(center)
                                     .id(spot.id)
                                 }
@@ -86,11 +86,7 @@ struct DustFinderSheet: View {
     }
 
     private func markerCenter(for spot: RetouchSpot, imageSize: CGSize) -> CGPoint {
-        let point: CGPoint
-        switch spot.shape {
-        case .circle(let center): point = center
-        case .stroke(let points): point = points.first ?? .zero
-        }
+        let point = spot.region.samples.first?.point ?? .zero
         let crop = viewModel.document.crop.normalizedRect ?? CropAdjustments.unitRect
         let mapping = GeometryPointMapping(
             sourceSize: viewModel.sourceSize, rotation: .zero, crop: viewModel.document.crop

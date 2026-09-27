@@ -53,8 +53,8 @@ final class RetouchQualityEvaluationTests: XCTestCase {
                 let damaged = try Pixels.bytes(of: fixture.damaged)
                 let input = CIImage(cgImage: fixture.damaged)
                 let radius = fixture.radius
-                let shape: SpotShape = fixture.stroke.isEmpty
-                    ? .circle(center: fixture.center) : .stroke(points: fixture.stroke)
+                let samples = fixture.stroke.isEmpty
+                    ? [BrushSample(point: fixture.center)] : fixture.stroke.map { BrushSample(point: $0) }
                 let spotRadius = radius
                 let actualModes: [(String, RetouchMode?)] = [
                     ("Remove (no path)", nil), ("Heal", .heal), ("Clone", .clone),
@@ -64,13 +64,14 @@ final class RetouchQualityEvaluationTests: XCTestCase {
                     let output: [UInt8]
                     if let mode {
                         let spot = RetouchSpot(
-                            mode: mode, shape: shape, radius: spotRadius,
-                            sourceOffset: fixture.sourceOffset
+                            mode: mode,
+                            region: RetouchRegion(samples: samples, radius: spotRadius),
+                            source: .manual(offset: fixture.sourceOffset)
                         )
-                        let rendered = RenderPipeline.applyRetouch(
+                        let rendered = RetouchRenderer.apply(
                             RetouchSettings(spots: [spot]), to: input,
                             sourceSize: CGSize(width: fixture.width, height: fixture.height),
-                            rotation: .zero, crop: .neutral
+                            maskRenderer: LocalMaskRenderer()
                         )
                         output = try Pixels.bytes(of: rendered)
                     } else {

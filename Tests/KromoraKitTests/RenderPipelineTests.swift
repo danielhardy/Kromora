@@ -120,37 +120,86 @@ final class RenderPipelineTests: TempDirectoryTestCase {
                           "neutral retouch must preserve the source")
         let spot = RetouchSpot(
             mode: .clone,
-            shape: .circle(center: CGPoint(x: 0.35, y: 0.5)),
-            radius: 0.12,
-            sourceOffset: CGVector(dx: 0.35, dy: 0)
+            region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.35, y: 0.5))], radius: 0.12),
+            source: .manual(offset: CGVector(dx: 0.35, dy: 0))
         )
         let retouched = try build(EditDocument(retouch: RetouchSettings(spots: [spot])))
         XCTAssertNotEqual(try Pixels.bytes(of: retouched), try Pixels.bytes(of: baseline))
         XCTAssertEqual(retouched.extent, baseline.extent)
     }
 
-    func testHealPreservesDestinationAppearanceWhileCloneCopiesSampledPatch() throws {
-        let geometry = SpotShape.circle(center: CGPoint(x: 0.35, y: 0.5))
-        let common = (mode: RetouchMode.heal, shape: geometry, radius: 0.12,
-                      sourceOffset: CGVector(dx: 0.35, dy: 0), feather: 0.4)
-        let heal = RetouchSpot(
-            mode: common.mode, shape: common.shape, radius: common.radius,
-            sourceOffset: common.sourceOffset, feather: common.feather
-        )
-        let clone = RetouchSpot(
-            mode: .clone, shape: common.shape, radius: common.radius,
-            sourceOffset: common.sourceOffset, feather: common.feather
-        )
+    func testManuallySourcedHealAndCloneProduceDifferentLocalFills() throws {
+        let region = RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.35, y: 0.5))], radius: 0.12)
+        let source = RetouchSource.manual(offset: CGVector(dx: 0.35, dy: 0))
+        let heal = RetouchSpot(mode: .heal, region: region, source: source, feather: 0.4)
+        let clone = RetouchSpot(mode: .clone, region: region, source: source, feather: 0.4)
+        let healed = try Pixels.bytes(of: build(EditDocument(retouch: RetouchSettings(spots: [heal]))))
+        let cloned = try Pixels.bytes(of: build(EditDocument(retouch: RetouchSettings(spots: [clone]))))
+        XCTAssertNotEqual(healed, cloned, "Heal must apply an exterior-ring color correction")
+    }
 
-        let healed = try Pixels.bytes(of: build(EditDocument(
-            retouch: RetouchSettings(spots: [heal])
-        )))
-        let cloned = try Pixels.bytes(of: build(EditDocument(
-            retouch: RetouchSettings(spots: [clone])
-        )))
+    func testHealMembraneExcludesPixelsInsideTheHole() throws {
+        let width = 96, height = 72
+        var first = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height { for x in 0..<width {
+            let i = (y * width + x) * 4
+            first[i] = UInt8(80 + x); first[i + 1] = UInt8(90 + y); first[i + 2] = 150
+        }}
+        var second = first
+        let centerX = 34, centerY = 36, holeRadius = 7
+        for y in 0..<height { for x in 0..<width where (x-centerX)*(x-centerX)+(y-centerY)*(y-centerY) < holeRadius*holeRadius {
+            let i = (y * width + x) * 4
+            first[i] = 15; first[i + 1] = 20; first[i + 2] = 25
+            second[i] = 235; second[i + 1] = 240; second[i + 2] = 245
+        }}
+        func image(_ bytes: [UInt8]) -> CIImage {
+            CIImage(bitmapData: Data(bytes), bytesPerRow: width * 4,
+                    size: CGSize(width: width, height: height), format: .RGBA8,
+                    colorSpace: CGColorSpaceCreateDeviceRGB())
+        }
+        let spot = RetouchSpot(
+            mode: .heal,
+            region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.35, y: 0.5))], radius: 0.11),
+            source: .manual(offset: CGVector(dx: 0.38, dy: 0)), feather: 0.2
+        )
+        let renderer = LocalMaskRenderer()
+        let a = RetouchRenderer.apply(RetouchSettings(spots: [spot]), to: image(first),
+                                      sourceSize: CGSize(width: width, height: height), maskRenderer: renderer)
+        let b = RetouchRenderer.apply(RetouchSettings(spots: [spot]), to: image(second),
+                                      sourceSize: CGSize(width: width, height: height), maskRenderer: renderer)
+        let outputA = try Pixels.bytes(of: a), outputB = try Pixels.bytes(of: b)
+        let centerIndex = (centerY * width + centerX) * 4
+        for channel in 0..<3 {
+            XCTAssertLessThanOrEqual(abs(Int(outputA[centerIndex + channel]) - Int(outputB[centerIndex + channel])), 1,
+                                     "Heal replacement tone must not depend on destination pixels under the hole")
+        }
+    }
 
-        XCTAssertNotEqual(healed, cloned,
-                          "Heal must adapt sampled texture to the destination's broad appearance")
+    func testRetouchRecipeStaysInOrientedSourceSpaceAcrossGeometry() throws {
+        let source = try decodedSource()
+        let spot = RetouchSpot(
+            mode: .clone,
+            region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.3, y: 0.45))], radius: 0.07),
+            source: .manual(offset: CGVector(dx: 0.2, dy: -0.1))
+        )
+        let settings = RetouchSettings(spots: [spot])
+        var document = EditDocument(rotation: .clockwise90, retouch: settings)
+        document.crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.12, width: 0.72, height: 0.7),
+            straightenAngle: 2.5, flipHorizontal: true
+        )
+        let actual = RenderPipeline.buildImage(
+            developed: source, document: document, lut: nil, applyCommittedCrop: false
+        )
+        let retouchedSource = RetouchRenderer.apply(
+            settings, to: source, sourceSize: source.extent.size, maskRenderer: LocalMaskRenderer()
+        )
+        document.retouch = .neutral
+        let expected = RenderPipeline.buildImage(
+            developed: retouchedSource, document: document, lut: nil, applyCommittedCrop: false
+        )
+        assertPixelsEqual(try Pixels.bytes(of: actual), try Pixels.bytes(of: expected),
+                          "geometry must transform the already-retouched source")
     }
 
     func testMasterToneCurveChangesAllRGBChannelsAndRemainsMonotonic() throws {

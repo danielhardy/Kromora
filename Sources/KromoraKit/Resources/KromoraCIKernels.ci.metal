@@ -420,15 +420,38 @@ float4 localCombineMask(sampler current, sampler next, float4 controls) {
     return float4(0.0, 0.0, 0.0, clamp(result, 0.0, 1.0));
 }
 
-// MARK: - Heal texture synthesis (RetouchRenderer)
+// MARK: - Region-local retouch membrane
 
-// Recombines the sampled patch's high-frequency detail with the destination's low-frequency
-// appearance, so Heal keeps the source's texture while matching the surrounding light and color.
-float4 healTexture(sampler sampled, sampler sourceLow, sampler destinationLow) {
-    float4 sourcePixel = sample(sampled, samplerCoord(sampled));
-    float4 detail = sourcePixel - sample(sourceLow, samplerCoord(sourceLow));
-    float4 destLow = sample(destinationLow, samplerCoord(destinationLow));
-    return float4(detail.rgb + destLow.rgb, sourcePixel.a);
+// Confidence is zero in the hole (mask == 1) and one in the exterior ring. Difference pixels
+// under the hole therefore never enter the normalized-convolution numerator.
+float4 retouchPull(sampler destination, sampler fill, sampler exteriorWeight) {
+    float weight = 1.0 - clamp(sample(exteriorWeight, samplerCoord(exteriorWeight)).a, 0.0, 1.0);
+    float4 difference = sample(destination, samplerCoord(destination)) - sample(fill, samplerCoord(fill));
+    return float4(difference.rgb * weight, weight);
+}
+
+// The same blur/downsample chain is applied to numerator and confidence. The quotient is the
+// exterior-ring mean propagated inward through the pull/push levels.
+float4 retouchPush(sampler fill, sampler coarse, sampler numerator, sampler confidence) {
+    float4 base = sample(fill, samplerCoord(fill));
+    float3 propagated = sample(coarse, samplerCoord(coarse)).rgb;
+    float4 weighted = sample(numerator, samplerCoord(numerator));
+    float weight = sample(confidence, samplerCoord(confidence)).a;
+    float3 localMean = weight > 0.00001 ? weighted.rgb / weight : float3(0.0);
+    return float4(base.rgb + propagated + localMean, base.a);
+}
+
+float4 retouchMembraneApply(sampler destination, sampler fill, sampler mask) {
+    float4 original = sample(destination, samplerCoord(destination));
+    float4 replacement = sample(fill, samplerCoord(fill));
+    float alpha = clamp(sample(mask, samplerCoord(mask)).a, 0.0, 1.0);
+    return mix(original, replacement, alpha);
+}
+
+// Interface reserved for the correspondence field produced by KRMA-662.
+float4 retouchSampleField(sampler image, sampler field) {
+    float2 source = sample(field, samplerCoord(field)).rg;
+    return sample(image, source);
 }
 
 // MARK: - Master RGB tone curve (ToneCurveFilterCache)
