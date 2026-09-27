@@ -50,6 +50,7 @@ final class ExportCoordinator {
 
     var onStatus: ((String) -> Void)?
     var onError: ((String) -> Void)?
+    var onExportCompleted: ((URL) -> Void)?
 
     /// The renderer. `any RenderEngining` rather than the concrete actor for the same reason
     /// `AppViewModel` holds one: a test can then assert *what was asked to be encoded* — which
@@ -278,6 +279,7 @@ final class ExportCoordinator {
                 )).data
                 try Task.checkCancellation()
                 try await Self.write(data, to: url)
+                self?.onExportCompleted?(url)
                 if let photos = options.photos, let delivery = self?.photosDelivery {
                     do {
                         let result = try await delivery.deliver(
