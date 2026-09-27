@@ -44,6 +44,9 @@ enum RetouchRenderer {
             let radius = CGFloat(spot.region.radius) * min(image.extent.width, image.extent.height)
             let bounds = workBounds(for: spot, extent: image.extent)
             guard bounds.width > 0, bounds.height > 0 else { continue }
+            // Keep the spot's source, destination, and heal pyramid inside this radius-derived
+            // window. Core Image can then evaluate the pull/push field locally instead of doing
+            // a full-frame frequency-separation pass for every spot.
             let destination = result.cropped(to: bounds)
             let dx = sourceOffset.dx * image.extent.width
             let dy = sourceOffset.dy * image.extent.height
