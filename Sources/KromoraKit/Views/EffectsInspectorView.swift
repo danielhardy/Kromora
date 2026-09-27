@@ -9,6 +9,8 @@ struct EffectsInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
 
     @State private var detailExpanded = true
+    @State private var sharpeningExpanded = true
+    @State private var noiseExpanded = false
     @State private var vignetteExpanded = false
     @State private var grainExpanded = false
 
@@ -17,6 +19,8 @@ struct EffectsInspectorView: View {
             VStack(alignment: .leading, spacing: 12) {
                 header
                 detailSection
+                sharpeningSection
+                noiseSection
                 vignetteSection
                 grainSection
             }
@@ -35,8 +39,43 @@ struct EffectsInspectorView: View {
             Button("Reset Effects") { viewModel.resetAllEffects() }
                 .buttonStyle(.link)
                 .disabled(!viewModel.hasEffects)
-                .accessibilityHint("Reset Texture, Clarity, Dehaze, Vignette, and Grain")
+                .accessibilityHint("Reset detail, noise, sharpening, Vignette, and Grain")
         }
+    }
+
+    private var sharpeningSection: some View {
+        InspectorDisclosure("Sharpening", isExpanded: $sharpeningExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach([DetailControl.sharpeningAmount, .sharpeningRadius, .sharpeningDetail, .sharpeningMasking], id: \.self) { control in
+                    detailRow(control)
+                }
+                Text("Masking protects smooth areas; higher values restrict sharpening to stronger edges.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(.top, 10)
+        }
+    }
+
+    private var noiseSection: some View {
+        InspectorDisclosure("Noise Reduction", isExpanded: $noiseExpanded) {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach([DetailControl.luminanceNoise, .luminanceDetail, .luminanceContrast, .colorNoise, .colorDetail, .colorContrast], id: \.self) { control in
+                    detailRow(control)
+                }
+            }
+            .padding(.top, 10)
+        }
+    }
+
+    private func detailRow(_ control: DetailControl) -> some View {
+        valueRow(
+            title: control.title,
+            value: viewModel.detailBinding(for: control),
+            range: control.range,
+            neutral: control.neutral,
+            readout: { value in control == .sharpeningRadius ? String(format: "%.1f px", value) : String(format: "%.0f", value) },
+            reset: { viewModel.resetDetail(control) }
+        )
     }
 
     private var detailSection: some View {

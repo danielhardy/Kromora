@@ -123,6 +123,62 @@ struct GrainAdjustments: Codable, Equatable, Sendable {
 
 }
 
+/// Capture-sharpening and noise cleanup applied after RAW decode and before the Look.
+/// Values are image-relative and therefore behave consistently at preview and export sizes.
+struct DetailAdjustments: Codable, Equatable, Sendable {
+    static let neutral = DetailAdjustments()
+    var sharpeningRadius: Double
+    var sharpeningAmount: Double
+    var sharpeningDetail: Double
+    var sharpeningMasking: Double
+    var luminanceNoise: Double
+    var luminanceDetail: Double
+    var luminanceContrast: Double
+    var colorNoise: Double
+    var colorDetail: Double
+    var colorContrast: Double
+
+    init(
+        sharpeningRadius: Double = 1, sharpeningAmount: Double = 0,
+        sharpeningDetail: Double = 50, sharpeningMasking: Double = 0,
+        luminanceNoise: Double = 0, luminanceDetail: Double = 50,
+        luminanceContrast: Double = 0, colorNoise: Double = 0, colorDetail: Double = 50,
+        colorContrast: Double = 0
+    ) {
+        self.sharpeningRadius = roundedClamped(sharpeningRadius, to: 0.1...5, default: 1)
+        self.sharpeningAmount = roundedClamped(sharpeningAmount, to: 0...100, default: 0)
+        self.sharpeningDetail = roundedClamped(sharpeningDetail, to: 0...100, default: 50)
+        self.sharpeningMasking = roundedClamped(sharpeningMasking, to: 0...100, default: 0)
+        self.luminanceNoise = roundedClamped(luminanceNoise, to: 0...100, default: 0)
+        self.luminanceDetail = roundedClamped(luminanceDetail, to: 0...100, default: 50)
+        self.luminanceContrast = roundedClamped(luminanceContrast, to: 0...100, default: 0)
+        self.colorNoise = roundedClamped(colorNoise, to: 0...100, default: 0)
+        self.colorDetail = roundedClamped(colorDetail, to: 0...100, default: 50)
+        self.colorContrast = roundedClamped(colorContrast, to: 0...100, default: 0)
+    }
+
+    var isIdentity: Bool { sharpeningAmount == 0 && luminanceNoise == 0 && colorNoise == 0 }
+    private enum CodingKeys: String, CodingKey {
+        case sharpeningRadius, sharpeningAmount, sharpeningDetail, sharpeningMasking
+        case luminanceNoise, luminanceDetail, luminanceContrast, colorNoise, colorDetail, colorContrast
+    }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            sharpeningRadius: try c.decodeIfPresent(Double.self, forKey: .sharpeningRadius) ?? 1,
+            sharpeningAmount: try c.decodeIfPresent(Double.self, forKey: .sharpeningAmount) ?? 0,
+            sharpeningDetail: try c.decodeIfPresent(Double.self, forKey: .sharpeningDetail) ?? 50,
+            sharpeningMasking: try c.decodeIfPresent(Double.self, forKey: .sharpeningMasking) ?? 0,
+            luminanceNoise: try c.decodeIfPresent(Double.self, forKey: .luminanceNoise) ?? 0,
+            luminanceDetail: try c.decodeIfPresent(Double.self, forKey: .luminanceDetail) ?? 50,
+            luminanceContrast: try c.decodeIfPresent(Double.self, forKey: .luminanceContrast) ?? 0,
+            colorNoise: try c.decodeIfPresent(Double.self, forKey: .colorNoise) ?? 0,
+            colorDetail: try c.decodeIfPresent(Double.self, forKey: .colorDetail) ?? 50,
+            colorContrast: try c.decodeIfPresent(Double.self, forKey: .colorContrast) ?? 0
+        )
+    }
+}
+
 /// Photographer-facing global Effects controls.
 ///
 /// The three main controls deliberately share a -100...100 scale but not an operation. Texture is a
@@ -151,30 +207,33 @@ struct EffectsAdjustments: Codable, Equatable, Sendable {
     /// Post-LUT film grain. Amount is the identity gate; Size and Roughness remain persisted while
     /// Amount is zero.
     var grain: GrainAdjustments
+    var detail: DetailAdjustments
 
     init(
         texture: Double = 0,
         clarity: Double = 0,
         dehaze: Double = 0,
         vignette: VignetteAdjustments = .neutral,
-        grain: GrainAdjustments = .neutral
+        grain: GrainAdjustments = .neutral,
+        detail: DetailAdjustments = .neutral
     ) {
         self.texture = roundedClamped(texture, to: Self.textureRange, default: 0)
         self.clarity = roundedClamped(clarity, to: Self.clarityRange, default: 0)
         self.dehaze = roundedClamped(dehaze, to: Self.dehazeRange, default: 0)
         self.vignette = vignette
         self.grain = grain
+        self.detail = detail
     }
 
     var isIdentity: Bool {
-        texture == 0 && clarity == 0 && dehaze == 0 && vignette.isIdentity && grain.isIdentity
+        texture == 0 && clarity == 0 && dehaze == 0 && vignette.isIdentity && grain.isIdentity && detail.isIdentity
     }
 
     var hasSpatialWork: Bool {
         texture != 0 || clarity != 0 || dehaze != 0
     }
 
-    private enum CodingKeys: String, CodingKey { case texture, clarity, dehaze, vignette, grain }
+    private enum CodingKeys: String, CodingKey { case texture, clarity, dehaze, vignette, grain, detail }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -183,7 +242,8 @@ struct EffectsAdjustments: Codable, Equatable, Sendable {
             clarity: try container.decodeIfPresent(Double.self, forKey: .clarity) ?? 0,
             dehaze: try container.decodeIfPresent(Double.self, forKey: .dehaze) ?? 0,
             vignette: try container.decodeIfPresent(VignetteAdjustments.self, forKey: .vignette) ?? .neutral,
-            grain: try container.decodeIfPresent(GrainAdjustments.self, forKey: .grain) ?? .neutral
+            grain: try container.decodeIfPresent(GrainAdjustments.self, forKey: .grain) ?? .neutral,
+            detail: try container.decodeIfPresent(DetailAdjustments.self, forKey: .detail) ?? .neutral
         )
     }
 

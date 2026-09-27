@@ -25,6 +25,7 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
     static let textureRange = EffectsAdjustments.textureRange
     static let clarityRange = EffectsAdjustments.clarityRange
     static let dehazeRange = EffectsAdjustments.dehazeRange
+    static let detailRange = 0.0...100.0
 
     var exposure: Double { didSet { exposure = Self.quantized(exposure.clamped(to: Self.exposureRange, default: 0)) } }
     var contrast: Double { didSet { contrast = Self.quantized(contrast.clamped(to: Self.contrastRange, default: 0)) } }
@@ -39,13 +40,17 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
     var texture: Double { didSet { texture = Self.quantized(texture.clamped(to: Self.textureRange, default: 0)) } }
     var clarity: Double { didSet { clarity = Self.quantized(clarity.clamped(to: Self.clarityRange, default: 0)) } }
     var dehaze: Double { didSet { dehaze = Self.quantized(dehaze.clamped(to: Self.dehazeRange, default: 0)) } }
+    var sharpness: Double { didSet { sharpness = Self.quantized(sharpness.clamped(to: Self.detailRange, default: 0)) } }
+    var noiseReduction: Double { didSet { noiseReduction = Self.quantized(noiseReduction.clamped(to: Self.detailRange, default: 0)) } }
+    var moireReduction: Double { didSet { moireReduction = Self.quantized(moireReduction.clamped(to: Self.detailRange, default: 0)) } }
 
     init(
         exposure: Double = 0, contrast: Double = 0, highlights: Double = 0,
         shadows: Double = 0, whites: Double = 0, blacks: Double = 0,
         temperature: Double = 6500, tint: Double = 0, saturation: Double = 0,
         vibrance: Double = 0, texture: Double = 0, clarity: Double = 0,
-        dehaze: Double = 0
+        dehaze: Double = 0, sharpness: Double = 0, noiseReduction: Double = 0,
+        moireReduction: Double = 0
     ) {
         self.exposure = Self.quantized(exposure.clamped(to: Self.exposureRange, default: 0))
         self.contrast = Self.quantized(contrast.clamped(to: Self.contrastRange, default: 0))
@@ -60,12 +65,16 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
         self.texture = Self.quantized(texture.clamped(to: Self.textureRange, default: 0))
         self.clarity = Self.quantized(clarity.clamped(to: Self.clarityRange, default: 0))
         self.dehaze = Self.quantized(dehaze.clamped(to: Self.dehazeRange, default: 0))
+        self.sharpness = Self.quantized(sharpness.clamped(to: Self.detailRange, default: 0))
+        self.noiseReduction = Self.quantized(noiseReduction.clamped(to: Self.detailRange, default: 0))
+        self.moireReduction = Self.quantized(moireReduction.clamped(to: Self.detailRange, default: 0))
     }
 
     var isIdentity: Bool {
         exposure == 0 && contrast == 0 && highlights == 0 && shadows == 0 &&
             whites == 0 && blacks == 0 && temperature == 6500 && tint == 0 &&
-            saturation == 0 && vibrance == 0 && texture == 0 && clarity == 0 && dehaze == 0
+            saturation == 0 && vibrance == 0 && texture == 0 && clarity == 0 && dehaze == 0 &&
+            sharpness == 0 && noiseReduction == 0 && moireReduction == 0
     }
 
     /// Core Image's normalized values, exposed here so global and local render mapping can share
@@ -75,7 +84,7 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case exposure, contrast, highlights, shadows, whites, blacks, temperature, tint,
-             saturation, vibrance, texture, clarity, dehaze
+             saturation, vibrance, texture, clarity, dehaze, sharpness, noiseReduction, moireReduction
     }
 
     init(from decoder: Decoder) throws {
@@ -93,7 +102,10 @@ struct LocalAdjustments: Codable, Sendable, Equatable {
             vibrance: try c.decodeIfPresent(Double.self, forKey: .vibrance) ?? 0,
             texture: try c.decodeIfPresent(Double.self, forKey: .texture) ?? 0,
             clarity: try c.decodeIfPresent(Double.self, forKey: .clarity) ?? 0,
-            dehaze: try c.decodeIfPresent(Double.self, forKey: .dehaze) ?? 0
+            dehaze: try c.decodeIfPresent(Double.self, forKey: .dehaze) ?? 0,
+            sharpness: try c.decodeIfPresent(Double.self, forKey: .sharpness) ?? 0,
+            noiseReduction: try c.decodeIfPresent(Double.self, forKey: .noiseReduction) ?? 0,
+            moireReduction: try c.decodeIfPresent(Double.self, forKey: .moireReduction) ?? 0
         )
     }
 

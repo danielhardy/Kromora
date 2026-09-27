@@ -912,9 +912,18 @@ actor RenderEngine: RenderEngining {
         }
         let outputImage: CIImage
         if let exportOutputSize = request.exportOutputSize {
-            outputImage = RenderPipeline.resized(image, to: exportOutputSize)
+            let resized = RenderPipeline.resized(image, to: exportOutputSize)
+            if case .encoded = request.output, let settings = request.exportOptions?.outputSharpening {
+                outputImage = RenderPipeline.applyOutputSharpening(settings, to: resized)
+            } else {
+                outputImage = resized
+            }
         } else {
-            outputImage = image
+            if case .encoded = request.output, let settings = request.exportOptions?.outputSharpening {
+                outputImage = RenderPipeline.applyOutputSharpening(settings, to: image)
+            } else {
+                outputImage = image
+            }
         }
         try Task.checkCancellation()
         guard isCurrentRenderRequest(request) else { throw CancellationError() }

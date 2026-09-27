@@ -50,6 +50,12 @@ pre-Look detail effects, ordered adjustments, Looks, ordered local adjustments, 
 post-crop composition effects. The exact order and cache invalidation version live with
 `RenderPipeline`; do not copy that volatile list into another document.
 
+Effects persist capture sharpening radius/amount/detail/masking and luminance/chroma noise reduction
+retention controls in the `detail` value. They run through the shared pre-Look Core Image graph;
+local mask layers can also scope sharpening, noise cleanup, and moiré softening. Export output
+sharpening is a separate delivery choice (screen, matte, or glossy, each low/standard/high) carried
+by `ExportOptions` and applied after sizing, so it does not change the edit document or preview.
+
 `RenderEngine` is an actor and the GPU/Core Image isolation boundary. `CIImage`, `CIFilter`,
 `CIRAWFilter`, `CIContext`, mutable GPU resources, and render caches stay inside it. Only
 Sendable request values and rendered values cross `RenderEngining`. New work should use the existing

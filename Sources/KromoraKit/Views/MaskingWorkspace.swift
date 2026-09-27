@@ -890,7 +890,7 @@ extension LocalAdjustmentControl {
     static let inspectorGroups: [(title: String, controls: [LocalAdjustmentControl])] = [
         ("Light", [.exposure, .contrast, .highlights, .shadows, .whites, .blacks]),
         ("Color", [.temperature, .tint, .saturation, .vibrance]),
-        ("Effects", [.texture, .clarity, .dehaze]),
+        ("Effects", [.texture, .clarity, .dehaze, .sharpness, .noiseReduction, .moireReduction]),
     ]
 }
 
@@ -902,7 +902,7 @@ fileprivate extension LocalAdjustmentControl {
         case .saturation: return .saturation
         case .vibrance: return .vibrance
         case .exposure, .contrast, .highlights, .shadows, .whites, .blacks, .texture, .clarity,
-             .dehaze:
+             .dehaze, .sharpness, .noiseReduction, .moireReduction:
             return .neutral
         }
     }

@@ -208,10 +208,12 @@ enum RenderPipeline {
         let effectsAdjusted = applyPreLUTEffects(
             document.effects, to: colorAdjusted, spatialReferenceExtent: spatialReferenceExtent
         )
+        let detailAdjusted = applyDetailControls(document.effects.detail, to: effectsAdjusted,
+                                                 referenceExtent: spatialReferenceExtent ?? developed.extent)
         let adjustmentNodes = includePostRenderWhiteBalance
             ? document.adjustments
             : document.adjustments.filter { $0.slot != .temperatureTint }
-        return applyAdjustments(adjustmentNodes, to: effectsAdjusted)
+        return applyAdjustments(adjustmentNodes, to: detailAdjusted)
     }
 
     /// Apply ordered local layers after all existing global pre-LUT work. `masks` contains
@@ -245,6 +247,17 @@ enum RenderPipeline {
                 clarity: layer.adjustments.clarity,
                 dehaze: layer.adjustments.dehaze
             ), to: adjusted)
+            adjusted = applyDetailControls(DetailAdjustments(
+                sharpeningAmount: layer.adjustments.sharpness,
+                luminanceNoise: layer.adjustments.noiseReduction,
+                colorNoise: layer.adjustments.noiseReduction
+            ), to: adjusted, referenceExtent: input.extent)
+            if layer.adjustments.moireReduction > 0 {
+                let softened = adjusted.applyingFilter("CIMedianFilter").cropped(to: adjusted.extent)
+                adjusted = blend(effect: softened, over: adjusted,
+                                 amount: CGFloat(layer.adjustments.moireReduction / 100),
+                                 mask: nil, extent: adjusted.extent)
+            }
             if layer.adjustments.temperature != 6500 || layer.adjustments.tint != 0 {
                 adjusted = applyAdjustments([.temperatureTint(
                     temp: layer.adjustments.temperature, tint: layer.adjustments.tint
@@ -1047,6 +1060,69 @@ enum RenderPipeline {
             result = applyDehaze(dehaze, to: result, referenceExtent: reference)
         }
         return result
+    }
+
+    /// Detail controls share this stage across preview, comparison, and export. Masking derives an
+    /// edge-protection matte from the source luminance; high settings suppress sharpening in flat
+    /// regions while retaining fine detail at strong edges.
+    static func applyDetailControls(
+        _ detail: DetailAdjustments, to image: CIImage, referenceExtent: CGRect
+    ) -> CIImage {
+        guard !detail.isIdentity else { return image }
+        let extent = image.extent
+        var result = image
+        let noise = max(detail.luminanceNoise, detail.colorNoise) / 100
+        if noise > 0 {
+            let level = CGFloat(noise * 0.1)
+            let retention = CGFloat((detail.luminanceDetail + detail.colorDetail) / 200)
+            let denoised = result.applyingFilter("CINoiseReduction", parameters: [
+                "inputNoiseLevel": level,
+                "inputSharpness": retention,
+            ]).cropped(to: extent)
+            let contrastRetention = CGFloat((detail.luminanceContrast + detail.colorContrast) / 200)
+            result = blend(effect: denoised, over: result,
+                           amount: CGFloat(noise) * (1 - contrastRetention * 0.65),
+                           mask: nil, extent: extent)
+        }
+        if detail.sharpeningAmount > 0 {
+            let referenceShortSide = max(1, min(referenceExtent.width, referenceExtent.height))
+            let radius = normalizedRadius(detail.sharpeningRadius / referenceShortSide, for: referenceExtent)
+            let amount = CGFloat(detail.sharpeningAmount / 100 * (0.5 + detail.sharpeningDetail / 100))
+            let sharpened = image.applyingFilter("CIUnsharpMask", parameters: [
+                "inputRadius": max(0.1, radius),
+                "inputIntensity": amount,
+            ]).cropped(to: extent)
+            if detail.sharpeningMasking > 0,
+               let edges = CIFilter(name: "CIEdges", parameters: [
+                    kCIInputImageKey: image, "inputIntensity": 1.0
+               ])?.outputImage?.cropped(to: extent) {
+                let threshold = CGFloat(detail.sharpeningMasking / 100)
+                let mask = edges.applyingFilter("CIColorMatrix", parameters: [
+                    "inputRVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+                    "inputGVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+                    "inputBVector": CIVector(x: 1, y: 0, z: 0, w: 0),
+                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+                    "inputBiasVector": CIVector(x: -threshold, y: -threshold, z: -threshold, w: 1),
+                ]).applyingFilter("CIColorClamp", parameters: [
+                    "inputMinComponents": CIVector(x: 0, y: 0, z: 0, w: 0),
+                    "inputMaxComponents": CIVector(x: 1, y: 1, z: 1, w: 1),
+                ]).cropped(to: extent)
+                result = blend(effect: sharpened, over: result, amount: 1, mask: mask, extent: extent)
+            } else {
+                result = sharpened
+            }
+        }
+        return result
+    }
+
+    static func applyOutputSharpening(_ settings: OutputSharpening, to image: CIImage) -> CIImage {
+        guard settings.isEnabled else { return image }
+        let mediumFactor: Double = settings.medium == .glossy ? 0.8 : settings.medium == .matte ? 1.2 : 1
+        let radiusFactor: Double = settings.medium == .screen ? 0.65 : 1
+        return image.applyingFilter("CIUnsharpMask", parameters: [
+            "inputRadius": max(0.3, min(image.extent.width, image.extent.height) * 0.001 * radiusFactor),
+            "inputIntensity": settings.strength.amount * mediumFactor,
+        ]).cropped(to: image.extent)
     }
 
     /// Apply a vignette over the current (post-crop) image extent. The mask uses normalized
