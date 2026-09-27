@@ -72,8 +72,8 @@ Heal misses at least one case of every defect family; this records the remaining
 threshold review and later solver work. “Current” runs the default Heal recipe through the production
 renderer. The evaluation limits are intentionally not a timing benchmark.
 
-Threshold violations include their metric names in the XCTest report table. On the KRMA-659
-implementation run, the manual fixture offsets passed 3/36 Heal rows and 7/36 Clone rows; the
+Threshold violations include their metric names in the XCTest report table. The manual fixture
+offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows. The
 remaining rows stay visible for later source-picking and quality work. Remove has no correspondence
 producer yet and remains unchanged, so its 36/36 rows fail. Keep the limits intact until the review
 tracked by KRMA-666, and record any justified changes with the corresponding ticket. The table is a
