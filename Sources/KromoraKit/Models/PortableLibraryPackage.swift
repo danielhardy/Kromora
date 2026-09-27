@@ -210,11 +210,43 @@ struct PortablePackageEditPointer: Codable, Equatable, Sendable {
     /// The interoperable metadata half of the revision. This is optional so a reader can still
     /// open records written by the format-only phase before XMP sidecars existed.
     var xmpRelativePath: String?
+    /// Whether this revision is a named snapshot. Nil identifies pointers written before this
+    /// metadata was added, so maintenance can preserve their historical sidecar-based behavior.
+    var isNamedSnapshot: Bool?
 
-    init(revision: UInt64, relativePath: String, xmpRelativePath: String? = nil) {
+    init(
+        revision: UInt64,
+        relativePath: String,
+        xmpRelativePath: String? = nil,
+        isNamedSnapshot: Bool? = false
+    ) {
         self.revision = revision
         self.relativePath = relativePath
         self.xmpRelativePath = xmpRelativePath
+        self.isNamedSnapshot = isNamedSnapshot
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case revision
+        case relativePath
+        case xmpRelativePath
+        case isNamedSnapshot
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        revision = try container.decode(UInt64.self, forKey: .revision)
+        relativePath = try container.decode(String.self, forKey: .relativePath)
+        xmpRelativePath = try container.decodeIfPresent(String.self, forKey: .xmpRelativePath)
+        isNamedSnapshot = try container.decodeIfPresent(Bool.self, forKey: .isNamedSnapshot)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(revision, forKey: .revision)
+        try container.encode(relativePath, forKey: .relativePath)
+        try container.encodeIfPresent(xmpRelativePath, forKey: .xmpRelativePath)
+        try container.encodeIfPresent(isNamedSnapshot, forKey: .isNamedSnapshot)
     }
 }
 

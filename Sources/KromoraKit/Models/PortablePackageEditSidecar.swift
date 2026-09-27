@@ -305,7 +305,12 @@ extension PortableLibraryPackage {
             record.currentRevision = max(record.currentRevision + 1, nextRevision)
             record.editHistory.currentRevision = nextRevision
             record.editHistory.edits.append(
-                .init(revision: nextRevision, relativePath: nativePath, xmpRelativePath: xmpPath)
+                .init(
+                    revision: nextRevision,
+                    relativePath: nativePath,
+                    xmpRelativePath: xmpPath,
+                    isNamedSnapshot: snapshotName != nil
+                )
             )
             try transaction.stage(data: try encodedAssetRecord(record), at: assetRecordPath(for: assetID))
             try transaction.commit(now: now, isCancelled: isCancelled)
