@@ -14,6 +14,7 @@ struct PreviewView: View {
     @State private var isDropTargeted = false
     @State private var isCaptureOverlayVisible = false
     @ObservedObject private var maskingState: MaskInteractionState
+    @ObservedObject private var retouchState: RetouchInteractionState
     @ObservedObject private var settings: KromoraSettings
 
     init(viewModel: AppViewModel) {
@@ -22,6 +23,7 @@ struct PreviewView: View {
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
         _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
         _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)
+        _retouchState = ObservedObject(wrappedValue: viewModel.retouchInteractionState)
         _settings = ObservedObject(wrappedValue: viewModel.settings)
     }
 
@@ -357,6 +359,14 @@ struct PreviewView: View {
                     // clicks in the masking workspace; selection leaves canvas navigation to
                     // the preview surface (including double-click zoom).
                     .allowsHitTesting(maskingState.activeTool != .selection)
+                }
+
+                if showsMaskOverlay, viewModel.isRetouchCanvasActive, viewModel.sourceSize != .zero {
+                    RetouchCanvasOverlay(
+                        viewModel: viewModel, state: retouchState, sourceSize: viewModel.sourceSize,
+                        crop: viewModel.document.crop, rotation: viewModel.document.rotation,
+                        navigation: canvasState.navigation, backingScale: maskOverlayBackingScale
+                    )
                 }
 
                 if showsMaskOverlay, viewModel.isWhiteBalanceSampling,

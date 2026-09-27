@@ -44,4 +44,22 @@ final class GeometryPointMappingTests: XCTestCase {
         XCTAssertEqual(actual.x, expected.x, accuracy: 1e-12)
         XCTAssertEqual(actual.y, expected.y, accuracy: 1e-12)
     }
+
+    func testRetouchSourcePointMapsThroughViewportAndBack() throws {
+        let mapping = GeometryPointMapping(
+            sourceSize: CGSize(width: 1600, height: 1000), rotation: .clockwise90,
+            crop: CropAdjustments(straightenAngle: 4, flipHorizontal: true)
+        )
+        let source = CGPoint(x: 0.31, y: 0.64)
+        let viewport = try XCTUnwrap(mapping.viewportPoint(
+            forRetouchPoint: source, navigation: CanvasNavigation(),
+            viewportSize: CGSize(width: 900, height: 700), backingScale: 2
+        ))
+        let restored = try XCTUnwrap(mapping.retouchPoint(
+            forViewport: viewport, navigation: CanvasNavigation(),
+            viewportSize: CGSize(width: 900, height: 700), backingScale: 2
+        ))
+        XCTAssertEqual(restored.x, source.x, accuracy: 1e-8)
+        XCTAssertEqual(restored.y, source.y, accuracy: 1e-8)
+    }
 }

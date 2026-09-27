@@ -63,7 +63,7 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 /// Central state for the Kromora app.
 @MainActor
 public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination,
-    AsyncPhotosImportDestination, MaskingWorkflowDestination, EditedThumbnailDestination
+    AsyncPhotosImportDestination, MaskingWorkflowDestination, RetouchWorkflowDestination, EditedThumbnailDestination
 {
 
     var packageImportDoesNotNeedDigest: Bool { true }
@@ -417,6 +417,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// owned by `MaskingWorkflowCoordinator`. AppViewModel remains the document/undo/preview owner
     /// that coordinator's commands commit through.
     var maskInteractionState: MaskInteractionState { maskingWorkflow.interactionState }
+    var retouchInteractionState: RetouchInteractionState { retouchWorkflow.interactionState }
 
     /// Inspector chrome has a separate observation boundary for the same reason. The view model
     /// keeps compatibility accessors below so existing commands and tests retain their API while
@@ -457,15 +458,28 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             && maskingAssetID != nil
     }
 
+    var isRetouchCanvasActive: Bool {
+        retouchInteractionState.isArmed && inspectorState.isPresented
+            && inspectorState.tab == .retouch && navigation.isEdit && sourceImage != nil
+    }
+
     /// Route every inspector-tab selection through the shared workspace transition. Masking keeps
     /// its persistent editor and selection semantics; the other tabs remain ordinary inspector
     /// navigation and implicitly return from Masking when selected.
     func selectInspectorTab(_ requestedTab: InspectorTab) {
-        guard !isCropToolActive else { return }
+        if isCropToolActive {
+            guard requestedTab == .retouch || requestedTab == .masking else { return }
+            cancelCrop()
+        }
         if requestedTab == .masking {
+            retouchWorkflow.setArmed(false)
             openMaskingWorkspace()
         } else {
+            if requestedTab == .retouch, inspectorState.isMaskingWorkspacePresented {
+                closeMaskingWorkspace()
+            }
             inspectorState.select(requestedTab)
+            retouchWorkflow.setArmed(requestedTab == .retouch)
         }
     }
 
@@ -740,6 +754,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let photoAnalysisCoordinator: PhotoAnalysisCoordinator
     /// Owns masking workspace selection, transient creation, and smart-mask analysis lifecycle.
     let maskingWorkflow: MaskingWorkflowCoordinator
+    let retouchWorkflow: RetouchWorkflowCoordinator
 
     var maskingAssetID: PhotoAssetID? { isShuttingDown ? nil : activeAssetID }
     var maskingSourceRevision: UInt64 { sourceRevision }
@@ -783,6 +798,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func dismissMaskingWorkspace() {
         inspectorState.isMaskingWorkspacePresented = false
+    }
+
+    func setRetouchCanvasActive(_ active: Bool) {
+        guard active else { return }
+        if isCropToolActive { cancelCrop() }
+        if inspectorState.isMaskingWorkspacePresented { closeMaskingWorkspace() }
+        inspectorState.select(.retouch)
+        inspectorState.isPresented = true
     }
     private let preferences: UserDefaults
     /// An injected edit store is a non-production composition boundary. It may be used while a
@@ -941,6 +964,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         self.editorDocument = EditorDocumentCoordinator()
         self.photosImportCoordinator = PhotosImportCoordinator()
         self.maskingWorkflow = MaskingWorkflowCoordinator(analysis: analysisCoordinator)
+        self.retouchWorkflow = RetouchWorkflowCoordinator()
         self.settings = KromoraSettings(
             preferences: preferences,
             userLookFolderURL: userLookFolderURL
@@ -1013,6 +1037,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self?.statusMessage = message
         }
         self.maskingWorkflow.destination = self
+        self.retouchWorkflow.destination = self
 
         collection.onThumbnailDemand = { [weak self] assetID, priority in
             self?.requestEditedThumbnail(for: assetID, priority: priority)
@@ -3387,8 +3412,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Crop and rotation workflow façade
 
-    func beginCrop() { canvasWorkflow.beginCrop() }
-    func toggleCropTool() { canvasWorkflow.toggleCropTool() }
+    func beginCrop() { retouchWorkflow.setArmed(false); canvasWorkflow.beginCrop() }
+    func toggleCropTool() { retouchWorkflow.setArmed(false); canvasWorkflow.toggleCropTool() }
     func updateCropDraft(_ normalizedRect: CGRect) {
         canvasWorkflow.updateCropDraft(normalizedRect)
     }

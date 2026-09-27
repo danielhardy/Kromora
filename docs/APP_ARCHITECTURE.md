@@ -139,6 +139,15 @@ document store. `AppViewModel` keeps every masking entry point (`createMask`, `c
 and cancelled by the coordinator's own `shutdown()`, called once from `AppViewModel.shutdown`,
 rather than living in `AppViewModel`'s task-cancellation array.
 
+## Retouch-workflow ownership
+
+`RetouchWorkflowCoordinator` owns canvas-only selection, hover/handle state, brush drafts, and
+shift-click chaining. `RetouchInteractionState` is transient and never enters `EditDocument`. The
+preview canvas routes native pointer samples through `GeometryPointMapping` into oriented-source
+coordinates; the coordinator commits each finished brush or handle gesture through
+`AppViewModel.updateDocument` once. `AppViewModel` remains the recipe, undo, and render owner.
+Entering Retouch closes crop and masking so only one canvas tool captures pointer input.
+
 ## Edited-thumbnail ownership
 
 `EditedThumbnailCoordinator` owns edited-thumbnail demand admission, per-asset generations,
