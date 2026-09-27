@@ -11,21 +11,30 @@ final class ToneCurveFilterCache {
     // Precompiled Metal kernel (Sources/KromoraKit/Resources/KromoraCIKernels.ci.metal).
     private static let kernel = CIKernelLibrary.kernel(named: "applyToneCurve")
 
-    private var curve: LightToneCurve?
+    private var curves: [LightToneCurve]?
+    private var parametric: ParametricToneCurve?
     private var sampledData: Data?
     private var sampledImage: CIImage?
 
+    func apply(_ curve: LightToneCurve, to image: CIImage) -> CIImage {
+        apply(curve, red: .identity, green: .identity, blue: .identity,
+              parametric: .neutral, to: image)
+    }
+
     /// Applies the latest curve. Reusing the compiled kernel and replacing only this small texture
     /// makes curve ticks bounded by the sample count, not by the cube volume.
-    func apply(_ nextCurve: LightToneCurve, to image: CIImage) -> CIImage {
-        if curve != nextCurve || sampledImage == nil {
+    func apply(_ master: LightToneCurve, red: LightToneCurve, green: LightToneCurve,
+               blue: LightToneCurve, parametric: ParametricToneCurve, to image: CIImage) -> CIImage {
+        let nextCurves = [master, red, green, blue]
+        if curves != nextCurves || self.parametric != parametric || sampledImage == nil || sampledData == nil {
             var samples = [Float](repeating: 0, count: Self.sampleCount * 4)
             for index in 0..<Self.sampleCount {
-                let value = Float(nextCurve.value(at: Double(index) / Double(Self.sampleCount - 1)))
                 let offset = index * 4
-                samples[offset] = value
-                samples[offset + 1] = value
-                samples[offset + 2] = value
+                let input = Double(index) / Double(Self.sampleCount - 1)
+                let masterValue = master.value(at: parametric.value(at: input))
+                samples[offset] = Float(red.value(at: masterValue))
+                samples[offset + 1] = Float(green.value(at: masterValue))
+                samples[offset + 2] = Float(blue.value(at: masterValue))
                 samples[offset + 3] = 1
             }
             sampledData = samples.withUnsafeBytes { Data($0) }
@@ -35,7 +44,8 @@ final class ToneCurveFilterCache {
                     size: CGSize(width: Self.sampleCount, height: 1), format: .RGBAf,
                     colorSpace: nil)
             }
-            curve = nextCurve
+            curves = nextCurves
+            self.parametric = parametric
         }
 
         guard let kernel = Self.kernel, let sampledImage else { return image }
@@ -66,7 +76,8 @@ final class ToneCurveFilterCache {
 
     /// Explicitly drops the texture when the source or working-space boundary is invalidated.
     func removeAll() {
-        curve = nil
+        curves = nil
+        parametric = nil
         sampledData = nil
         sampledImage = nil
     }

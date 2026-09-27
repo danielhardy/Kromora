@@ -107,6 +107,7 @@ struct LightInspectorView: View {
 private struct ToneCurveEditor: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var curveDrag: CurveDragState?
+    @State private var channel: ToneCurveChannel = .master
 
     private enum CurveDragState: Equatable {
         case ignored
@@ -121,13 +122,17 @@ private struct ToneCurveEditor: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Master RGB")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Picker("Channel", selection: $channel) {
+                    ForEach(ToneCurveChannel.allCases) { item in Text(item.rawValue).tag(item) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
                 Spacer()
-                Button("Reset") { viewModel.resetToneCurve() }
+                Button("Import…") { viewModel.importToneCurvePreset() }.buttonStyle(.link)
+                Button("Export…") { viewModel.exportToneCurvePreset() }.buttonStyle(.link)
+                Button("Reset") { viewModel.resetToneCurve(channel) }
                     .buttonStyle(.link)
-                    .disabled(viewModel.document.light.toneCurve.isIdentity)
+                    .disabled(viewModel.document.light.toneCurve(for: channel).isIdentity)
             }
 
             GeometryReader { proxy in
@@ -149,7 +154,7 @@ private struct ToneCurveEditor: View {
                 // selecting and moving every point therefore uses one graph coordinate space.
                 .gesture(curveDragGesture(size: size))
                 .accessibilityElement(children: .contain)
-                .accessibilityLabel("Master RGB tone curve")
+                .accessibilityLabel("\(channel.rawValue) tone curve")
             }
             // Keep the graph square while allowing it to shrink and grow with the inspector.
             // GeometryReader receives the resulting square size, so the normalized coordinate
@@ -170,11 +175,64 @@ private struct ToneCurveEditor: View {
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
+
+            Text("Parametric regions").font(.caption).foregroundStyle(.secondary)
+            ForEach(["Highlights", "Lights", "Darks", "Shadows"], id: \.self) { name in
+                regionSlider(name, amount: true)
+            }
+            Text("Region splits").font(.caption).foregroundStyle(.secondary)
+            ForEach(["Shadow split", "Dark split", "Light split", "Highlight split"], id: \.self) { name in
+                regionSlider(name, amount: false)
+            }
         }
     }
 
     private var editablePoints: [LightCurvePoint] {
-        viewModel.document.light.toneCurve.points
+        viewModel.document.light.toneCurve(for: channel).points
+    }
+
+    private func regionSlider(_ title: String, amount: Bool) -> some View {
+        let keyPath: WritableKeyPath<ParametricToneCurve, Double>
+        switch title {
+        case "Highlights": keyPath = \.highlights
+        case "Lights": keyPath = \.lights
+        case "Darks": keyPath = \.darks
+        case "Shadows": keyPath = \.shadows
+        case "Shadow split": keyPath = \.shadowSplit
+        case "Dark split": keyPath = \.darkSplit
+        case "Light split": keyPath = \.lightSplit
+        default: keyPath = \.highlightSplit
+        }
+        let value = viewModel.document.light.parametricCurve[keyPath: keyPath]
+        let range = amount ? ParametricToneCurve.amountRange : 0...1
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(amount ? String(format: "%+.0f", value) : String(format: "%.2f", value))
+                    .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            NeutralOriginSlider(value: Binding(
+                get: { viewModel.document.light.parametricCurve[keyPath: keyPath] },
+                set: { next in
+                    viewModel.updateDocument(debounced: true) {
+                        var curve = $0.light.parametricCurve
+                        let gap = 0.02
+                        let bounded: Double
+                        switch title {
+                        case "Shadow split": bounded = min(max(next, 0.02), curve.darkSplit - gap)
+                        case "Dark split": bounded = min(max(next, curve.shadowSplit + gap), curve.lightSplit - gap)
+                        case "Light split": bounded = min(max(next, curve.darkSplit + gap), curve.highlightSplit - gap)
+                        case "Highlight split": bounded = min(max(next, curve.lightSplit + gap), 0.98)
+                        default: bounded = next
+                        }
+                        curve[keyPath: keyPath] = bounded
+                        $0.light.parametricCurve = curve
+                    }
+                }
+            ), in: range, neutral: amount ? 0 : 0,
+               accessibilityTitle: title, accessibilityReadout: String(format: "%.2f", value))
+        }
     }
 
     private func curveGraph(size: CGSize) -> some View {
@@ -198,7 +256,7 @@ private struct ToneCurveEditor: View {
             identity.addLine(to: CGPoint(x: canvasSize.width, y: 0))
             context.stroke(identity, with: .color(KromoraTheme.analysisReference), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
-            let curve = viewModel.document.light.toneCurve
+            let curve = viewModel.document.light.toneCurve(for: channel)
             var path = Path()
             for index in 0...64 {
                 let input = Double(index) / 64
@@ -242,7 +300,7 @@ private struct ToneCurveEditor: View {
             case .decrement: output = max(point.output - step, 0)
             @unknown default: return
             }
-            viewModel.setToneCurvePoint(point, output: output)
+            viewModel.setToneCurvePoint(point, output: output, channel: channel)
         }
     }
 
@@ -262,7 +320,7 @@ private struct ToneCurveEditor: View {
         let hasMoved = translation.width != 0 || translation.height != 0
 
         if curveDrag == nil {
-            let curve = viewModel.document.light.toneCurve
+            let curve = viewModel.document.light.toneCurve(for: channel)
             if let existing = curve.nearestPoint(toInput: coordinate.input) {
                 viewModel.beginPreviewInteraction()
                 curveDrag = .point(input: existing.input, moved: false)
@@ -276,7 +334,7 @@ private struct ToneCurveEditor: View {
                     return
                 }
                 viewModel.beginPreviewInteraction()
-                viewModel.addToneCurvePoint(input: coordinate.input)
+                viewModel.addToneCurvePoint(input: coordinate.input, channel: channel)
                 curveDrag = .point(input: coordinate.input, moved: false)
             }
         }
@@ -288,7 +346,8 @@ private struct ToneCurveEditor: View {
         let movedInput = viewModel.moveToneCurvePoint(
             fromInput: sourceInput,
             input: coordinate.input,
-            output: coordinate.output
+            output: coordinate.output,
+            channel: channel
         )
         if let movedInput {
             curveDrag = .point(input: movedInput, moved: true)
@@ -316,7 +375,7 @@ private struct ToneCurveEditor: View {
 
     private func removePoint(_ point: LightCurvePoint) {
         viewModel.beginPreviewInteraction()
-        viewModel.removeToneCurvePoint(atInput: point.input)
+        viewModel.removeToneCurvePoint(atInput: point.input, channel: channel)
         viewModel.endPreviewInteraction()
     }
 }

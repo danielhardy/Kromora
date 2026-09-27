@@ -429,8 +429,8 @@ float4 applyToneCurve(sampler image, sampler curve) {
     // +0.5 lands on the texel center (texel i spans [i, i+1)); without it every lookup
     // interpolates between the wrong neighbouring pair, biasing output by up to half a texel.
     float red = sample(curve, float2(clamp(pixel.r / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
-    float green = sample(curve, float2(clamp(pixel.g / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
-    float blue = sample(curve, float2(clamp(pixel.b / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).r;
+    float green = sample(curve, float2(clamp(pixel.g / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).g;
+    float blue = sample(curve, float2(clamp(pixel.b / pixel.a, 0.0, 1.0) * 255.0 + 0.5, 0.5)).b;
     return float4(float3(red, green, blue) * pixel.a, pixel.a);
 }
 
