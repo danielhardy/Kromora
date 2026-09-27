@@ -223,7 +223,8 @@ final class RetouchWorkflowCoordinator {
         guard let destination, let id = interactionState.selectedSpotID,
               let spot = destination.document.retouch.spots.first(where: { $0.id == id }),
               spot.mode == .remove, spot.region.samples.count >= 2 else { return }
-        wireRefinementTask?.cancel()
+        wireRefinementTask?.cancel(); wireRefinementTask = nil
+        wireAnalysisTask?.cancel(); wireAnalysisTask = nil
         interactionState.beginWireRefinement(id)
         let region = spot.region, sourceSize = destination.sourceSize
         wireRefinementTask = Task { [weak self] in

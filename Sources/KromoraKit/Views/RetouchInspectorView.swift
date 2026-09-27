@@ -55,7 +55,7 @@ struct RetouchInspectorView: View {
                                     .font(.caption).foregroundStyle(.red)
                             }
                             if spot.wrappedValue.mode == .remove, spot.wrappedValue.region.samples.count > 1 {
-                                if interaction.isRefiningWire {
+                                if interaction.isRefiningWire, interaction.wireProposalSpotID == spot.wrappedValue.id {
                                     Button("Cancel Wire Refinement") { viewModel.retouchWorkflow.cancelWireRefinement() }
                                 } else if interaction.wireProposalSpotID == spot.wrappedValue.id,
                                           let proposal = interaction.wireProposal {
