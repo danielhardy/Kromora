@@ -190,6 +190,10 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     let admissionImageSource: ImageSource?
     var admissionSourceRevision: UInt64 = 1
     var admissionDisplayRevision: UInt64 { admissionPresentation.displayRevision }
+    var admissionDisplayDocument: EditDocument {
+        admissionLastPresentedRequest?.document ?? admissionDocument
+    }
+    var admissionDisplayLUT: CubeLUT? { admissionLastPresentedRequest?.lut ?? admissionSelectedLook }
     var assetID = PhotoAssetID.imported(UUID())
     var admissionActiveAssetID: PhotoAssetID? { assetID }
     var admissionLastPresentedRequest: RenderRequest?
