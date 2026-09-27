@@ -175,6 +175,35 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         }
     }
 
+    /// The pull/push membrane must select between the local exterior mean and the coarser
+    /// propagated estimate (weighted by confidence), not sum them, or a heal over a flat region
+    /// compounds across pyramid levels and blows out toward white.
+    func testHealOverFlatExteriorDoesNotOvershootDestinationTone() throws {
+        let width = 200, height = 160
+        var combined = [UInt8](repeating: 0, count: width * height * 4)
+        for y in 0..<height { for x in 0..<width {
+            let i = (y * width + x) * 4
+            let v: UInt8 = x < width / 2 ? 200 : 100
+            combined[i] = v; combined[i + 1] = v; combined[i + 2] = v; combined[i + 3] = 255
+        }}
+        let image = CIImage(bitmapData: Data(combined), bytesPerRow: width * 4,
+                             size: CGSize(width: width, height: height), format: .RGBA8,
+                             colorSpace: CGColorSpaceCreateDeviceRGB())
+        let spot = RetouchSpot(
+            mode: .heal,
+            region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.25, y: 0.5))], radius: 0.06),
+            source: .manual(offset: CGVector(dx: 0.5, dy: 0)), feather: 0.1
+        )
+        let result = RetouchRenderer.apply(RetouchSettings(spots: [spot]), to: image,
+                                            sourceSize: CGSize(width: width, height: height),
+                                            maskRenderer: LocalMaskRenderer())
+        let bytes = try Pixels.bytes(of: result)
+        let centerX = Int(0.25 * Double(width)), centerY = height / 2
+        let value = Int(bytes[(centerY * width + centerX) * 4])
+        XCTAssertLessThan(abs(value - 200), 40,
+                          "healed center value \(value) should track the flat destination/exterior tone (~200)")
+    }
+
     func testRetouchRecipeStaysInOrientedSourceSpaceAcrossGeometry() throws {
         let source = try decodedSource()
         let spot = RetouchSpot(
