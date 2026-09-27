@@ -1,0 +1,203 @@
+import AppKit
+import CoreGraphics
+import Foundation
+
+@MainActor
+protocol RetouchWorkflowDestination: AnyObject {
+    var document: EditDocument { get }
+    var sourceSize: CGSize { get }
+    func updateDocument(_ transform: (inout EditDocument) -> Void)
+    func pickRetouchSource(spotID: UUID, rank: Int) async
+    func setRetouchCanvasActive(_ active: Bool)
+}
+
+/// Owns transient retouch selection and gestures; each completed pointer action is one document edit.
+@MainActor
+final class RetouchWorkflowCoordinator {
+    enum Gesture: Equatable { case create, move(UUID), source(UUID) }
+    let interactionState = RetouchInteractionState()
+    weak var destination: (any RetouchWorkflowDestination)?
+    private var gesture: Gesture?
+    private var startPoint: CGPoint = .zero
+    private var startRegion: RetouchRegion?
+    private var startSource: RetouchSource?
+    private var samples: [BrushSample] = []
+    private var manualSourceOffset: CGVector?
+    private var pendingRegion: RetouchRegion?
+    private var pendingSource: RetouchSource?
+    private var isShiftSegment = false
+    private var isCommandCreatingSource = false
+
+    init(destination: (any RetouchWorkflowDestination)? = nil) { self.destination = destination }
+
+    func setArmed(_ armed: Bool) {
+        if armed {
+            interactionState.arm()
+        } else {
+            cancelGesture()
+            interactionState.disarm()
+        }
+        destination?.setRetouchCanvasActive(armed)
+    }
+
+    func beginGesture(at point: CGPoint, pressure: Double? = nil, modifiers: NSEvent.ModifierFlags = []) {
+        guard let destination, interactionState.isArmed, normalized(point) else { return }
+        startPoint = point
+        isShiftSegment = modifiers.contains(.shift)
+        isCommandCreatingSource = modifiers.contains(.command)
+        if modifiers.contains(.option), let hit = hitTest(point, spots: destination.document.retouch.spots) {
+            deleteSpot(hit.id); return
+        }
+        if let sourceHit = destination.document.retouch.spots.reversed().first(where: {
+            $0.mode != .remove && $0.source != nil && distance(point, sourcePoint(of: $0)) < max($0.region.radius * 1.5, 0.006)
+        }) {
+            interactionState.select(sourceHit.id)
+            gesture = .source(sourceHit.id); startSource = sourceHit.source
+            interactionState.setHandle(.source(sourceHit.id))
+            return
+        }
+        if let hit = hitTest(point, spots: destination.document.retouch.spots) {
+            interactionState.select(hit.id)
+            if let source = hit.source, hit.mode != .remove,
+               distance(point, sourcePoint(of: hit)) < max(hit.region.radius * 1.5, 0.006) {
+                gesture = .source(hit.id); startSource = source
+                interactionState.setHandle(.source(hit.id))
+            } else {
+                gesture = .move(hit.id); startRegion = hit.region; startSource = hit.source
+                interactionState.setHandle(.destination(hit.id))
+            }
+            return
+        }
+        interactionState.select(nil)
+        gesture = .create
+        interactionState.setHandle(.create)
+        let anchor = isShiftSegment ? interactionState.shiftClickAnchor : nil
+        samples = anchor.map { [BrushSample(point: $0), BrushSample(point: point, pressure: pressure)] }
+            ?? [BrushSample(point: point, pressure: pressure)]
+        interactionState.setDraft(samples, radius: interactionState.radius, feather: interactionState.feather)
+    }
+
+    func updateGesture(to point: CGPoint, pressure: Double? = nil) {
+        guard let destination, let gesture, normalized(point) else { return }
+        switch gesture {
+        case .create:
+            if isCommandCreatingSource {
+                pendingSource = .manual(offset: CGVector(dx: point.x - startPoint.x, dy: point.y - startPoint.y))
+                return
+            }
+            if isShiftSegment {
+                let anchor = interactionState.shiftClickAnchor ?? startPoint
+                samples = [BrushSample(point: anchor), BrushSample(point: point, pressure: pressure)]
+            } else {
+                if let previous = samples.last,
+                   BrushMaskMath.physicalDistance(previous.point, point, sourceSize: destination.sourceSize) >= 0.5,
+                   samples.count < 4_096 {
+                    samples.append(BrushSample(point: point, pressure: pressure))
+                }
+            }
+            interactionState.setDraft(samples, radius: interactionState.radius, feather: interactionState.feather)
+        case .move:
+            guard let initial = startRegion else { return }
+            var moved = initial
+            let dx = point.x - startPoint.x, dy = point.y - startPoint.y
+            moved.samples = initial.samples.map { BrushSample(point: CGPoint(x: $0.point.x + dx, y: $0.point.y + dy), pressure: $0.pressure) }
+            pendingRegion = moved
+            if case .manual(let offset)? = startSource {
+                pendingSource = .manual(offset: CGVector(dx: offset.dx - dx, dy: offset.dy - dy))
+            }
+            interactionState.setDraft(moved.samples, radius: moved.radius, feather: interactionState.feather)
+        case .source(let id):
+            guard let spot = destination.document.retouch.spots.first(where: { $0.id == id }) else { return }
+            let dest = spot.region.samples.first?.point ?? startPoint
+            manualSourceOffset = CGVector(dx: point.x - dest.x, dy: point.y - dest.y)
+            pendingSource = .manual(offset: manualSourceOffset ?? .zero)
+        }
+    }
+
+    func endGesture() {
+        guard let destination, let gesture else { return }
+        switch gesture {
+        case .create:
+            guard !samples.isEmpty else { cancelGesture(); return }
+            let id = UUID()
+            let sourceSamples = BrushMaskMath.resampledAndSimplified(
+                samples, sourceSize: destination.sourceSize, radius: interactionState.radius)
+            let region = RetouchRegion(samples: sourceSamples, radius: interactionState.radius)
+            var spot = RetouchSpot(id: id, mode: interactionState.mode, region: region,
+                                   feather: interactionState.feather, opacity: interactionState.opacity)
+            if let pendingSource { spot.source = pendingSource }
+            if samples.count == 1, pendingSource == nil { spot.source = nil }
+            destination.updateDocument { $0.retouch.spots.append(spot) }
+            interactionState.select(id)
+            interactionState.setShiftClickAnchor(samples.last?.point)
+            if pendingSource == nil {
+                interactionState.setSolving(id, true)
+                Task { [weak self] in
+                    await destination.pickRetouchSource(spotID: id, rank: 0)
+                    self?.interactionState.setSolving(id, false)
+                }
+            }
+        case .move(let id):
+            if let pendingRegion { updateSpot(id) { $0.region = pendingRegion; if let pendingSource { $0.source = pendingSource } } }
+            if let spot = destination.document.retouch.spots.first(where: { $0.id == id }),
+               case .auto? = spot.source {
+                interactionState.setSolving(id, true)
+                Task { [weak self] in
+                    await destination.pickRetouchSource(spotID: id, rank: 0)
+                    self?.interactionState.setSolving(id, false)
+                }
+            }
+        case .source(let id):
+            if let pendingSource { updateSpot(id) { $0.source = pendingSource } }
+        }
+        self.gesture = nil; startRegion = nil; startSource = nil; samples = []; manualSourceOffset = nil; pendingRegion = nil; pendingSource = nil; isCommandCreatingSource = false
+        interactionState.clearGesture()
+    }
+
+    func cancelGesture() {
+        gesture = nil; startRegion = nil; startSource = nil; samples = []; manualSourceOffset = nil; pendingRegion = nil; pendingSource = nil; isCommandCreatingSource = false
+        interactionState.clearGesture()
+    }
+
+    func deleteSelected() { if let id = interactionState.selectedSpotID { deleteSpot(id) } }
+    func deleteSpot(_ id: UUID) {
+        destination?.updateDocument { $0.retouch.spots.removeAll { $0.id == id } }
+        if interactionState.selectedSpotID == id { interactionState.select(nil) }
+        if interactionState.shiftClickAnchor != nil { interactionState.setShiftClickAnchor(nil) }
+    }
+    func nextSource() {
+        guard let d = destination, let id = interactionState.selectedSpotID,
+              let spot = d.document.retouch.spots.first(where: { $0.id == id }) else { return }
+        let rank: Int = { if case .auto(_, let r)? = spot.source { return r + 1 }; return 0 }()
+        interactionState.setSolving(id, true)
+        Task { [weak self] in
+            await d.pickRetouchSource(spotID: id, rank: rank)
+            self?.interactionState.setSolving(id, false)
+        }
+    }
+    func hover(at point: CGPoint) {
+        interactionState.hover(hitTest(point, spots: destination?.document.retouch.spots ?? [])?.id, at: point)
+    }
+    func hitTest(_ point: CGPoint, spots: [RetouchSpot]) -> RetouchSpot? {
+        spots.reversed().first { spot in
+            guard let center = spot.region.samples.first?.point else { return false }
+            return distance(point, center) <= max(spot.region.radius * 0.25, 0.006)
+        }
+    }
+    private func updateSpot(_ id: UUID, _ change: (inout RetouchSpot) -> Void) {
+        destination?.updateDocument { doc in
+            guard let index = doc.retouch.spots.firstIndex(where: { $0.id == id }) else { return }
+            change(&doc.retouch.spots[index])
+        }
+    }
+    private func sourcePoint(of spot: RetouchSpot) -> CGPoint {
+        let p = spot.region.samples.first?.point ?? .zero
+        let o = spot.source?.offset ?? .zero
+        return CGPoint(x: p.x + o.dx, y: p.y + o.dy)
+    }
+    private func normalized(_ p: CGPoint) -> Bool { p.x >= 0 && p.x <= 1 && p.y >= 0 && p.y <= 1 }
+    private func distance(_ a: CGPoint, _ b: CGPoint) -> Double {
+        let size = destination?.sourceSize ?? CGSize(width: 1, height: 1)
+        return hypot((a.x-b.x)*size.width, (a.y-b.y)*size.height) / max(min(size.width,size.height),1)
+    }
+}

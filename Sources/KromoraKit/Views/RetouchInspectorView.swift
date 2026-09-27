@@ -6,9 +6,14 @@ struct RetouchInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var selectedSpotID: UUID?
     @State private var selectedEyeID: UUID?
-    @State private var mode: RetouchMode = .remove
     @State private var eyeKind: EyeKind = .human
     @State private var isDustFinderPresented = false
+    @ObservedObject private var interaction: RetouchInteractionState
+
+    init(viewModel: AppViewModel) {
+        self.viewModel = viewModel
+        _interaction = ObservedObject(wrappedValue: viewModel.retouchInteractionState)
+    }
 
     var body: some View {
         InspectorScrollingContent {
@@ -16,45 +21,41 @@ struct RetouchInspectorView: View {
                 HStack {
                     Text("Retouch").font(.headline)
                     Spacer()
-                    Button("Reset") { viewModel.updateDocument { $0.retouch = .neutral } }
+                    Button("Reset All") {
+                        viewModel.updateDocument { $0.retouch = .neutral }
+                        interaction.select(nil)
+                    }
                         .disabled(viewModel.document.retouch.isIdentity)
                 }
                 GroupBox("Spots") {
                     VStack(alignment: .leading, spacing: 10) {
-                        Picker("Method", selection: $mode) {
+                        Picker("Method", selection: $interaction.mode) {
                             Text("Remove").tag(RetouchMode.remove)
                             Text("Heal").tag(RetouchMode.heal)
                             Text("Clone").tag(RetouchMode.clone)
                         }
                         .pickerStyle(.segmented)
                         HStack {
-                            Button { addSpot() } label: { Label("Add Spot", systemImage: "plus.circle") }
+                            Text("\(viewModel.document.retouch.spots.count) spots")
                             Spacer()
-                            Button { selectSpot(-1) } label: { Image(systemName: "chevron.left") }
-                                .disabled(viewModel.document.retouch.spots.isEmpty)
-                                .help("Previous spot")
-                            Button { selectSpot(1) } label: { Image(systemName: "chevron.right") }
-                                .disabled(viewModel.document.retouch.spots.isEmpty)
-                                .help("Next spot")
-                        }
-                        if let spot = selectedSpot {
-                            Toggle("Visible", isOn: spotBinding(\.isVisible))
-                            normalizedCoordinate("Center X", axis: .x)
-                            normalizedCoordinate("Center Y", axis: .y)
-                            slider("Size", value: spotRadiusBinding, range: 0.0005...0.25, format: "%.3f")
-                            slider("Feather", value: spotBinding(\.feather), range: 0...1, format: "%.0f%%", scale: 100)
-                            slider("Opacity", value: spotBinding(\.opacity), range: 0...1, format: "%.0f%%", scale: 100)
-                            sourceOffsetSliders
-                            if case .auto(_, let rank)? = spot.wrappedValue.source {
-                                HStack {
-                                    Text("Automatic source · rank \(rank + 1)").font(.caption).foregroundStyle(.secondary)
-                                    Spacer()
-                                    Button("Next Source") { Task { await viewModel.pickRetouchSource(spotID: spot.wrappedValue.id, rank: rank + 1) } }
+                            Picker("Overlay", selection: $interaction.overlayPolicy) {
+                                ForEach(RetouchInteractionState.OverlayPolicy.allCases, id: \.self) { policy in
+                                    Text(policy.title).tag(policy)
                                 }
                             }
+                            .labelsHidden()
+                            .frame(width: 115)
+                        }
+                        slider("Size", value: spotRadiusBinding, range: 0.0005...0.25, format: "%.3f")
+                        slider("Feather", value: featherBinding, range: 0...1, format: "%.0f%%", scale: 100)
+                        slider("Opacity", value: opacityBinding, range: 0...1, format: "%.0f%%", scale: 100)
+                        if let spot = selectedSpot {
+                            Toggle("Visible", isOn: spotBinding(\.isVisible))
+                            Text("Drag the pin to move it; drag its source ring to choose a source.")
+                                .font(.caption).foregroundStyle(.secondary)
                             Button("Delete Spot", role: .destructive) { removeSpot(spot.wrappedValue.id) }
                         } else {
-                            Text("Add a spot, then adjust its center and source offset.")
+                            Text("Paint on the photo to add a spot. Press Q to arm the brush.")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -115,6 +116,8 @@ struct RetouchInspectorView: View {
         .onChange(of: viewModel.document.retouch.spots) { _, spots in
             if !spots.contains(where: { $0.id == selectedSpotID }) { selectedSpotID = spots.last?.id }
         }
+        .onChange(of: interaction.selectedSpotID) { _, id in selectedSpotID = id }
+        .onAppear { selectedSpotID = interaction.selectedSpotID }
         .onChange(of: viewModel.document.retouch.eyes) { _, eyes in
             if !eyes.contains(where: { $0.id == selectedEyeID }) { selectedEyeID = eyes.last?.id }
         }
@@ -146,16 +149,6 @@ struct RetouchInspectorView: View {
                 set: { value in if var eye = selectedEye?.wrappedValue { eye[keyPath: keyPath] = value; selectedEye?.wrappedValue = eye } })
     }
 
-    private func vectorBinding(_ keyPath: WritableKeyPath<CGVector, CGFloat>) -> Binding<Double> {
-        Binding(get: { Double(selectedSpot?.wrappedValue.source?.offset[keyPath: keyPath] ?? 0) }, set: { value in
-            guard var spot = selectedSpot?.wrappedValue else { return }
-            var offset = spot.source?.offset ?? .zero
-            offset[keyPath: keyPath] = value
-            spot.source = .manual(offset: offset)
-            selectedSpot?.wrappedValue = spot
-        })
-    }
-
     private enum Axis { case x, y }
 
     private func eyeCoordinate(_ title: String, axis: Axis) -> some View {
@@ -169,30 +162,20 @@ struct RetouchInspectorView: View {
         }), range: 0...1, format: "%.2f")
     }
 
-    private var spotRadiusBinding: Binding<Double> {
-        Binding(get: { selectedSpot?.wrappedValue.region.radius ?? 0.02 }, set: { value in
+    private var featherBinding: Binding<Double> {
+        Binding(get: { selectedSpot?.wrappedValue.feather ?? interaction.feather }, set: { value in
+            interaction.feather = value
             guard var spot = selectedSpot?.wrappedValue else { return }
-            spot.region.radius = value
-            selectedSpot?.wrappedValue = spot
+            spot.feather = value; selectedSpot?.wrappedValue = spot
         })
     }
 
-    private func normalizedCoordinate(_ title: String, axis: Axis) -> some View {
-        slider(title, value: Binding(get: {
-            guard let point = selectedSpot?.wrappedValue.region.samples.first?.point else { return 0.5 }
-            return Double(axis == .x ? point.x : point.y)
-        }, set: { value in
-            guard var spot = selectedSpot?.wrappedValue, !spot.region.samples.isEmpty else { return }
-            let automaticRank: Int? = {
-                if case .auto(_, let rank)? = spot.source { return rank }
-                return nil
-            }()
-            var sample = spot.region.samples[0]
-            if axis == .x { sample.point.x = value } else { sample.point.y = value }
-            spot.region.samples[0] = sample
-            selectedSpot?.wrappedValue = spot
-            if let automaticRank { Task { await viewModel.pickRetouchSource(spotID: spot.id, rank: automaticRank) } }
-        }), range: 0...1, format: "%.2f")
+    private var opacityBinding: Binding<Double> {
+        Binding(get: { selectedSpot?.wrappedValue.opacity ?? interaction.opacity }, set: { value in
+            interaction.opacity = value
+            guard var spot = selectedSpot?.wrappedValue else { return }
+            spot.opacity = value; selectedSpot?.wrappedValue = spot
+        })
     }
 
     private func slider(
@@ -206,23 +189,13 @@ struct RetouchInspectorView: View {
         }
     }
 
-    private var sourceOffsetSliders: some View {
-        let x = vectorBinding(\.dx)
-        let y = vectorBinding(\.dy)
-        return VStack(alignment: .leading, spacing: 8) {
-            slider("Source X", value: x, range: -1.5...1.5, format: "%+.2f")
-            slider("Source Y", value: y, range: -1.5...1.5, format: "%+.2f")
-        }
-    }
-
-    private func addSpot() {
-        let spot = RetouchSpot(
-            mode: mode, region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))]),
-            source: nil
-        )
-        viewModel.updateDocument { $0.retouch.spots.append(spot) }
-        selectedSpotID = spot.id
-        Task { await viewModel.pickRetouchSource(spotID: spot.id) }
+    private var spotRadiusBinding: Binding<Double> {
+        Binding(get: { selectedSpot?.wrappedValue.region.radius ?? interaction.radius }, set: { value in
+            interaction.radius = value
+            guard var spot = selectedSpot?.wrappedValue else { return }
+            spot.region.radius = value
+            selectedSpot?.wrappedValue = spot
+        })
     }
 
     private func addEye() {
@@ -231,7 +204,7 @@ struct RetouchInspectorView: View {
         selectedEyeID = eye.id
     }
 
-    private func removeSpot(_ id: UUID) { viewModel.updateDocument { $0.retouch.spots.removeAll { $0.id == id } } }
+    private func removeSpot(_ id: UUID) { viewModel.retouchWorkflow.deleteSpot(id) }
     private func removeEye(_ id: UUID) { viewModel.updateDocument { $0.retouch.eyes.removeAll { $0.id == id } } }
 
     private func selectSpot(_ step: Int) {

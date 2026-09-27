@@ -41,7 +41,10 @@ extension AppViewModel {
         )
     }
 
-    func openMaskingWorkspace() { maskingWorkflow.openMaskingWorkspace() }
+    func openMaskingWorkspace() {
+        retouchWorkflow.setArmed(false)
+        maskingWorkflow.openMaskingWorkspace()
+    }
 
     func selectMaskLayer(_ id: UUID?) { maskingWorkflow.selectMaskLayer(id) }
 

@@ -363,14 +363,24 @@ final class KeyMonitor {
         // Arrow keys are handled above, before the NSControl ownership gate.
         switch event.keyCode {
         case 51, 117: // Delete / Forward Delete
+            if isDown, vm.isRetouchCanvasActive,
+               vm.retouchInteractionState.selectedSpotID != nil {
+                vm.retouchWorkflow.deleteSelected()
+                return nil
+            }
             // Remove the Library selection after confirmation.
             guard isDown, vm.navigation.isGrid else { return event }
             vm.requestDeleteSelectedLibraryItems()
             return nil
-        case 53: // Escape — cancel crop first, then a mask gesture/workspace/tool.
+        case 53: // Escape — cancel crop first, then deselect/exit the active canvas tool.
             guard isDown else { return event }
             if vm.isCropToolActive {
                 vm.cancelCrop()
+            } else if vm.isRetouchCanvasActive && vm.retouchInteractionState.hasDraft {
+                vm.retouchWorkflow.cancelGesture()
+            } else if vm.isRetouchCanvasActive,
+                      vm.retouchInteractionState.selectedSpotID != nil {
+                vm.retouchInteractionState.select(nil)
             } else if vm.maskInteractionState.hasDraft {
                 vm.cancelMaskGesture()
             } else if vm.inspectorState.isMaskingWorkspacePresented,
@@ -378,12 +388,19 @@ final class KeyMonitor {
                 vm.setMaskTool(.selection)
             } else if vm.inspectorState.isMaskingWorkspacePresented {
                 vm.closeMaskingWorkspace()
+            } else if vm.isRetouchCanvasActive {
+                vm.retouchWorkflow.setArmed(false)
+                vm.inspectorState.select(.info)
             } else {
                 return event
             }
             return nil
         case 49:  // Space — hold to compare original
             guard KeyMonitorPolicy.isPlainSpace(modifiers: mods) else { return event }
+            if vm.isRetouchCanvasActive {
+                vm.retouchInteractionState.setSpacePanning(isDown)
+                return nil
+            }
             if vm.inspectorState.isMaskingWorkspacePresented,
                vm.maskInteractionState.activeTool != .selection {
                 vm.maskInteractionState.setSpacePanning(isDown)
@@ -450,6 +467,16 @@ final class KeyMonitor {
                   vm.sourceImage != nil else { return event }
             vm.toggleCropTool()
             return nil
+        case "q":
+            guard KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods), vm.sourceImage != nil,
+                  vm.navigation.isEdit else { return event }
+            if vm.isRetouchCanvasActive {
+                vm.retouchWorkflow.setArmed(false)
+                vm.inspectorState.select(.info)
+            } else {
+                vm.retouchWorkflow.setArmed(true)
+            }
+            return nil
         case "g":
             if vm.navigate(to: .grid) { return nil }
             return event
@@ -465,6 +492,15 @@ final class KeyMonitor {
             guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
             guard KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods) else { return event }
             vm.maskInteractionState.toggleOverlay()
+            return nil
+        case "/":
+            guard vm.isRetouchCanvasActive else { return event }
+            vm.retouchWorkflow.nextSource()
+            return nil
+        case "h":
+            guard vm.isRetouchCanvasActive,
+                  KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods) else { return event }
+            vm.retouchInteractionState.cycleOverlayPolicy()
             return nil
         case "b":
             guard vm.inspectorState.isMaskingWorkspacePresented else { return event }
@@ -496,6 +532,11 @@ final class KeyMonitor {
                 }
                 return nil
             }
+            if vm.isRetouchCanvasActive {
+                if mods.contains(.shift) { vm.retouchInteractionState.feather = max(0, vm.retouchInteractionState.feather - 0.05) }
+                else { vm.retouchInteractionState.radius = max(0.0005, vm.retouchInteractionState.radius - 0.002) }
+                return nil
+            }
             guard vm.collection.isActive else { return event }
             if vm.navigation.isGrid {
                 vm.selectPreviousPortableInGrid()
@@ -516,6 +557,11 @@ final class KeyMonitor {
                 } else {
                     vm.maskInteractionState.adjustBrushRadius(by: 0.005)
                 }
+                return nil
+            }
+            if vm.isRetouchCanvasActive {
+                if mods.contains(.shift) { vm.retouchInteractionState.feather = min(1, vm.retouchInteractionState.feather + 0.05) }
+                else { vm.retouchInteractionState.radius = min(0.25, vm.retouchInteractionState.radius + 0.002) }
                 return nil
             }
             guard vm.collection.isActive else { return event }
