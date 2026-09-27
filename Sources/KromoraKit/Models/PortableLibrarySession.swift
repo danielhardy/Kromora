@@ -658,6 +658,28 @@ final class PortableLibrarySession {
         return result
     }
 
+    /// Copies one managed original into a new package asset, then records its source relationship.
+    /// The caller persists the copied edit document under the returned independent identity.
+    func createVirtualCopy(of sourceID: PortablePhotoAssetID) throws
+        -> (assetID: PortablePhotoAssetID, identity: PortablePhotoIdentity, displayName: String)
+    {
+        let sourceRecord = try package.readAssetRecord(for: sourceID)
+        let sourceURL = try package.embeddedSourceURL(for: sourceRecord)
+        let sourceName = sourceURL.lastPathComponent
+        let imported = try importURLs([sourceURL], duplicatePolicy: .importAnyway)
+        guard let copy = imported.imported.first else {
+            throw PortablePackageError.invalidVirtualCopy("the source original could not be copied")
+        }
+        let displayName = "\(sourceName) — Copy"
+        try package.markVirtualCopy(
+            copy.assetID, of: sourceID, displayName: displayName, lease: lease,
+            now: clock.now()
+        )
+        _ = try refreshIndex()
+        let copyRecord = try package.readAssetRecord(for: copy.assetID)
+        return (copy.assetID, copyRecord.identity, displayName)
+    }
+
     /// Photos delivers bytes rather than a stable file URL. The temporary file is only an import
     /// transport; PortablePackageImporter owns the copy and the external/provider bytes are never
     /// used as a managed source after this method returns.

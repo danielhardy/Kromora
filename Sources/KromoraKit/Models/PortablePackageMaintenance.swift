@@ -610,11 +610,15 @@ final class PortablePackageMaintenance {
                     $0 == record.editHistory.currentRevision
                         || policy.isProtected($0, for: entry.assetID)
                 })
+                let namedSnapshots = Set(try pointers.compactMap { pointer in
+                    try package.readEditRevision(for: entry.assetID, revision: pointer.revision)
+                        .snapshotName == nil ? nil : pointer.revision
+                })
                 let newest = Set(
                     pointers.sorted { $0.revision > $1.revision }
                         .prefix(policy.maximumEditRevisions).map(\.revision)
                 )
-                let retained = protected.union(newest)
+                let retained = protected.union(newest).union(namedSnapshots)
                 let stale = pointers.filter { !retained.contains($0.revision) }
                 guard !stale.isEmpty else {
                     after += pointers.count

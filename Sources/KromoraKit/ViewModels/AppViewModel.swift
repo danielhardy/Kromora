@@ -157,6 +157,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Stored in a per-photo session keyed by stable source identity. Navigation restores the active
     /// photo's Light, other edits, and history without carrying them onto a different frame.
     @Published private(set) var document = EditDocument()
+    @Published private(set) var durableEditHistory: [PortablePackageEditRevision] = []
 
     /// The last copied value-state payload. It contains no image or rendered data, so it remains
     /// safe to apply to several destinations and keeps future selective-copy UI on one stable seam.
@@ -1033,6 +1034,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self?.persistenceFailureMessage = message
             self?.statusMessage = message
         }
+        persistence.onDurableWrite = { [weak self] reference in
+            guard self?.activeSourceReference == reference else { return }
+            self?.refreshDurableEditHistory()
+        }
 
         libraryMediaWorkflow.onStatus = { [weak self] message in
             self?.statusMessage = message
@@ -1858,6 +1863,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         comparisonBaselineDocument = document.comparisonBaseline
         editorDocument.activate(session: session)
         collection.setPresentedCrop(document.crop, for: assetID)
+        refreshDurableEditHistory()
         lastReportedMissingLUT = nil
         lutResolutionStatus = nil
         refreshLUTResolutionStatus()
@@ -3429,6 +3435,86 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var canRedo: Bool { editorDocument.canRedo }
     var undoDepth: Int { editorDocument.undoDepth }
 
+    func refreshDurableEditHistory() {
+        guard let reference = activeSourceReference else {
+            durableEditHistory = []
+            return
+        }
+        Task { [weak self, editStore] in
+            do {
+                let history = try await editStore.history(for: reference)
+                guard let self, self.activeSourceReference == reference else { return }
+                self.durableEditHistory = history
+            } catch {
+                self?.durableEditHistory = []
+            }
+        }
+    }
+
+    /// Preview a durable edit state and append the restored state as a new branch revision.
+    func restoreEditRevision(_ revision: UInt64) {
+        guard let value = durableEditHistory.first(where: { $0.revision == revision }) else { return }
+        endUndoGrouping()
+        applyHistoryDocument(value.document)
+        refreshDurableEditHistory()
+    }
+
+    func saveEditSnapshot(named name: String) {
+        guard let reference = activeSourceReference else { return }
+        endUndoGrouping()
+        Task { [weak self, persistence, editStore, document] in
+            let flushed = await persistence.flush()
+            guard flushed == .success else { return }
+            do {
+                try await editStore.saveSnapshot(document, named: name, for: reference)
+                guard let self, self.activeSourceReference == reference else { return }
+                self.statusMessage = "Saved snapshot ‘\(name)’"
+                self.refreshDurableEditHistory()
+            } catch {
+                self?.statusMessage = "Could not save snapshot: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    var virtualCopySourceDescription: String? {
+        guard let portableLibrary, let assetID = activeSourceReference?.portableAssetID,
+              let record = try? portableLibrary.package.readAssetRecord(for: assetID),
+              let parent = record.copyOfAssetID else { return nil }
+        return "Virtual copy of \(parent.raw.prefix(8))"
+    }
+
+    var canCreateVirtualCopy: Bool {
+        guard let portableLibrary, let assetID = activeSourceReference?.portableAssetID else {
+            return false
+        }
+        return (try? portableLibrary.package.readAssetRecord(for: assetID)) != nil
+    }
+
+    func createVirtualCopy() {
+        guard let portableLibrary, let reference = activeSourceReference,
+              (try? portableLibrary.package.readAssetRecord(for: reference.portableAssetID)) != nil else {
+            statusMessage = "Virtual copies are available for photos in a Kromora library"
+            return
+        }
+        endUndoGrouping()
+        Task { [weak self, persistence, editStore, document] in
+            guard await persistence.flush() == .success else { return }
+            do {
+                let copy = try portableLibrary.createVirtualCopy(of: reference.portableAssetID)
+                try await editStore.save(document, for: EditSourceReference(
+                    portableIdentity: copy.identity,
+                    assetID: PhotoAssetID(rawValue: "portable:\(copy.assetID.raw)")
+                ))
+                guard let self, self.activeSourceReference == reference else { return }
+                try self.libraryBrowsingCoordinator.reloadPortableCollection()
+                self.statusMessage = "Created virtual copy ‘\(copy.displayName)’"
+                self.openPortableAsset(copy.assetID)
+            } catch {
+                self?.statusMessage = "Could not create virtual copy: \(error.localizedDescription)"
+            }
+        }
+    }
+
     func undo() {
         cancelAutoAdjustment()
         endUndoGrouping()
@@ -4174,6 +4260,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         lookSave.onSaved = nil
         persistence.onStatusChange = nil
         persistence.onFailure = nil
+        persistence.onDurableWrite = nil
         photosImportCoordinator.onStatus = nil
         photosImportCoordinator.destination = nil
         libraryMediaWorkflow.onStatus = nil

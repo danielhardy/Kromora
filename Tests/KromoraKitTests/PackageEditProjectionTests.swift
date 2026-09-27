@@ -47,6 +47,77 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         XCTAssertEqual(cacheCount, 1)
     }
 
+    func testNamedSnapshotAndDurableHistorySurviveStoreReload() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("Snapshots.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = tempDirectory.appendingPathComponent("snapshot.jpg")
+        try Data("snapshot source".utf8).write(to: sourceURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let asset = try XCTUnwrap(imported.imported.first)
+        let identity = PortablePhotoIdentity(
+            assetID: asset.assetID,
+            sourceFingerprint: .data(Data("snapshot source".utf8), decoderVersion: "test")
+        )
+        let reference = EditSourceReference(assetID: .file(sourceURL), portableIdentity: identity)
+        let store = EditDocumentStore(package: package, lease: lease)
+        let document = EditDocument(light: .init(exposure: 0.8))
+        try await store.saveSnapshot(document, named: "Warm sunset", for: reference)
+
+        let history = try await store.history(for: reference)
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history[0].snapshotName, "Warm sunset")
+        XCTAssertEqual(history[0].document, document)
+
+        let reopened = try PortableLibraryPackage.open(at: packageURL)
+        let reopenedHistory = try reopened.readEditHistory(for: asset.assetID)
+        XCTAssertEqual(reopenedHistory, history)
+    }
+
+    @MainActor
+    func testVirtualCopyHasIndependentIdentityAndEditHistory() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("VirtualCopies.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = tempDirectory.appendingPathComponent("portrait.jpg")
+        try Data("portable portrait".utf8).write(to: sourceURL)
+        let importLease = try PortablePackageLease.acquire(at: packageURL)
+        let imported = try package.importSources([.init(url: sourceURL)], lease: importLease)
+        try importLease.release()
+        let original = try XCTUnwrap(imported.imported.first)
+
+        let session = try PortableLibrarySession(at: packageURL)
+        let copy = try session.createVirtualCopy(of: original.assetID)
+        XCTAssertNotEqual(copy.assetID, original.assetID)
+        XCTAssertTrue(copy.displayName.contains("Copy"))
+        XCTAssertEqual(
+            try package.readAssetRecord(for: copy.assetID).copyOfAssetID, original.assetID
+        )
+        XCTAssertEqual(
+            try Data(contentsOf: package.embeddedSourceURL(
+                for: package.readAssetRecord(for: copy.assetID)
+            )),
+            Data("portable portrait".utf8)
+        )
+
+        let store = EditDocumentStore(package: package, lease: session.lease)
+        let originalDocument = EditDocument(light: .init(exposure: -0.4))
+        let copiedDocument = EditDocument(light: .init(exposure: 0.9))
+        try await store.save(originalDocument, for: EditSourceReference(
+            portableIdentity: try package.readAssetRecord(for: original.assetID).identity
+        ))
+        try await store.save(copiedDocument, for: EditSourceReference(portableIdentity: copy.identity))
+
+        XCTAssertEqual(try package.readEditHistory(for: original.assetID).map(\.document), [originalDocument])
+        XCTAssertEqual(try package.readEditHistory(for: copy.assetID).map(\.document), [copiedDocument])
+        let membership = try package.readMembershipShard(PortableLibraryPackage.shard(for: copy.assetID))
+        XCTAssertEqual(
+            membership.entries.first(where: { $0.assetID == copy.assetID })?.summary.displayName,
+            copy.displayName
+        )
+        await session.shutdown()
+    }
+
     func testPackagePersistenceCoordinatorStillCoalescesToOneRevision() async throws {
         let packageURL = tempDirectory.appendingPathComponent("Coalesced.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)

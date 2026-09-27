@@ -94,8 +94,10 @@ The package-backed library is the only production mode. Package edit sidecars ar
 projection. Each package revision stores one versioned JSON-encoded `EditDocument` and
 uses an opaque `PortablePhotoAssetID` UUID as its persistence key; resolved Look bytes are embedded
 with the revision. `EditPersistenceCoordinator` serializes and coalesces writes and flushes them on
-termination. Per-photo history is in-memory and bounded to 100 undo and redo snapshots; copy/paste,
-reset, navigation, and export preserve the active photo's identity and revision. The old development
+termination. Per-photo undo and redo remain in-memory and bounded to 100 snapshots; the editor's
+visible history is the durable package revision list. Named snapshots are immutable labeled
+revisions, restoring an earlier commit appends a new revision, and compaction always retains named
+snapshots. Copy/paste, reset, navigation, and export preserve the active photo's identity and revision. The old development
 `EditStore.store` and standalone v2 store remain untouched for support/disposition and are not opened
 as a second authority when a package session is active; see
 [`EDIT_STORE_IDENTITY_DISPOSITION.md`](EDIT_STORE_IDENTITY_DISPOSITION.md).

@@ -257,7 +257,28 @@ actor EditDocumentStore {
         return result.found ? result.document : nil
     }
 
+    /// Loads immutable package edit revisions for the editor's history browser.
+    func history(for source: EditSourceReference) async throws -> [PortablePackageEditRevision] {
+        guard let packageRoot else {
+            throw StoreError.cannotWrite("the canonical edit package is unavailable")
+        }
+        let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+        return try package.readEditHistory(for: source.portableAssetID)
+    }
+
     func save(_ document: EditDocument, for source: EditSourceReference) async throws {
+        try await save(document, for: source, snapshotName: nil)
+    }
+
+    func saveSnapshot(_ document: EditDocument, named name: String, for source: EditSourceReference) async throws {
+        let normalized = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { throw StoreError.cannotWrite("snapshot name cannot be empty") }
+        try await save(document, for: source, snapshotName: normalized)
+    }
+
+    private func save(
+        _ document: EditDocument, for source: EditSourceReference, snapshotName: String?
+    ) async throws {
         markIO()
         // Encode before incrementing attempt counters or changing the cache. An invalid value must
         // not make a failed save look like a dirty durable revision.
@@ -277,6 +298,7 @@ actor EditDocumentStore {
             let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
             let sidecar = try package.appendEditRevision(
                 for: source.portableAssetID, document: document,
+                snapshotName: snapshotName,
                 lookBytes: sourceLookBytes(for: document), lease: packageLease
             )
             insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
