@@ -42,3 +42,16 @@ struct RetouchAnalysisProxy: Sendable, Equatable {
         return Self(width: width, height: height, pixels: values)
     }
 }
+
+/// Full-resolution Lab pixels for a bounded source-space window, supplied on demand by RenderEngine.
+struct RetouchAnalysisRegion: Sendable, Equatable {
+    let sourceWidth: Int
+    let sourceHeight: Int
+    let originX: Int
+    let originY: Int
+    let proxy: RetouchAnalysisProxy
+
+    func lab(sourceX: Int, sourceY: Int) -> SIMD3<Float>? {
+        proxy.lab(x: sourceX - originX, y: sourceY - originY)
+    }
+}

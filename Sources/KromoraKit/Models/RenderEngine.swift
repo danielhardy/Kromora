@@ -130,6 +130,9 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
     func pickRetouchSource(
         source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int
     ) async -> RetouchSource?
+
+    /// Return a neutral full-resolution Lab crop in oriented-source pixel coordinates.
+    func retouchAnalysisCrop(source: ImageSource, bounds: CGRect) async -> RetouchAnalysisRegion?
 }
 
 extension RenderEngining {
@@ -137,6 +140,8 @@ extension RenderEngining {
     func invalidateRenderCaches() async {}
 
     func pickRetouchSource(source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int) async -> RetouchSource? { nil }
+
+    func retouchAnalysisCrop(source: ImageSource, bounds: CGRect) async -> RetouchAnalysisRegion? { nil }
 }
 
 /// Actor-local counters used by performance captures to separate RAW configuration, decoder output
@@ -552,10 +557,46 @@ actor RenderEngine: RenderEngining {
                 space: .current, interactive: false, thumbnail: false
               ),
               let proxy = retouchProxy(image: image, fingerprint: source.cacheFingerprint) else { return nil }
-        return RetouchSourcePicker.source(
-            for: spot, among: settings.spots, in: proxy, rank: rank,
+        let coarse = RetouchSourcePicker.candidates(
+            for: spot, among: settings.spots, in: proxy, limit: max(rank + 1, 24),
             cancellation: { Task.isCancelled }
         )
+        let cropCandidates = coarse.filter {
+            hypot(Double($0.offset.dx * source.nativeExtent.width), Double($0.offset.dy * source.nativeExtent.height))
+                <= Double(spot.region.radius * min(source.nativeExtent.width, source.nativeExtent.height) * 8)
+        }
+        let candidateBounds = analysisCropBounds(
+            for: spot, candidates: Array(cropCandidates.prefix(4)), sourceSize: source.nativeExtent
+        )
+        let ranked: [RetouchSourceCandidate]
+        if let crop = await retouchAnalysisCrop(source: source, bounds: candidateBounds) {
+            ranked = RetouchSourcePicker.refining(
+                coarse, for: spot, among: settings.spots, in: crop, cancellation: { Task.isCancelled }
+            )
+        } else {
+            ranked = coarse
+        }
+        guard ranked.indices.contains(rank) else { return nil }
+        return .auto(offset: ranked[rank].offset, rank: rank)
+    }
+
+    func retouchAnalysisCrop(source: ImageSource, bounds: CGRect) async -> RetouchAnalysisRegion? {
+        guard !Task.isCancelled,
+              let image = await developedSourceForBuild(
+                source, .neutral, .full, rotation: .zero, space: .current,
+                interactive: false, thumbnail: false
+              ) else { return nil }
+        let crop = bounds.integral.intersection(image.extent.integral)
+        guard !crop.isNull, crop.width > 0, crop.height > 0 else { return nil }
+        let width = Int(crop.width), height = Int(crop.height)
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        context.render(image, toBitmap: &bytes, rowBytes: width * 4, bounds: crop,
+                       format: .RGBA8, colorSpace: colorSpace)
+        let proxy = RetouchAnalysisProxy.fromRGBA8(Data(bytes), width: width, height: height)
+        guard proxy.isUsable else { return nil }
+        return RetouchAnalysisRegion(sourceWidth: Int(image.extent.width), sourceHeight: Int(image.extent.height),
+                                     originX: Int(crop.minX), originY: Int(crop.minY), proxy: proxy)
     }
 
     /// The app's engine. One instance, therefore one actor-owned processing context and queue.
@@ -1263,7 +1304,7 @@ actor RenderEngine: RenderEngining {
         ) else { return nil }
         try Task.checkCancellation()
         let retouchSettings = await resolvingAutomaticRetouchSources(
-            document.retouch, image: developedFull, source: source, space: space
+            document.retouch, source: source
         )
         let retouchedSource = RetouchRenderer.apply(
             retouchSettings, to: developedFull, sourceSize: developedFull.extent.size,
@@ -1386,34 +1427,39 @@ actor RenderEngine: RenderEngining {
     /// automatic spots. Manual offsets are preserved exactly. Pixel and Core Image values remain
     /// inside this actor; only the Sendable Lab proxy reaches the picker.
     private func resolvingAutomaticRetouchSources(
-        _ settings: RetouchSettings, image: CIImage, source: ImageSource, space: WorkingSpace
+        _ settings: RetouchSettings, source: ImageSource
     ) async -> RetouchSettings {
-        guard settings.spots.contains(where: { $0.source == nil || isAutomatic($0.source) }) else { return settings }
-        let analysisImage = await developedSourceForBuild(
-            source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
-            space: space, interactive: false, thumbnail: false
-        ) ?? image
-        guard let proxy = retouchProxy(image: analysisImage, fingerprint: source.cacheFingerprint) else {
-            return settings
-        }
+        guard settings.spots.contains(where: { $0.source == nil }) else { return settings }
         var resolved = settings
         for index in resolved.spots.indices {
             let spot = resolved.spots[index]
-            guard spot.mode == .remove || spot.mode == .heal || spot.mode == .clone,
-                  spot.source == nil || isAutomatic(spot.source) else { continue }
-            let rank: Int
-            if case .auto(_, let existingRank)? = spot.source { rank = existingRank } else { rank = 0 }
-            resolved.spots[index] = RetouchSourcePicker.resolving(
-                spot, among: resolved.spots, in: proxy, rank: rank,
-                cancellation: { Task.isCancelled }
-            )
+            guard spot.source == nil else { continue }
+            if let picked = await pickRetouchSource(source: source, settings: resolved, spotID: spot.id, rank: 0) {
+                resolved.spots[index].source = picked
+            }
         }
         return resolved
     }
 
-    private func isAutomatic(_ source: RetouchSource?) -> Bool {
-        if case .auto? = source { return true }
-        return false
+    private func analysisCropBounds(
+        for spot: RetouchSpot, candidates: [RetouchSourceCandidate], sourceSize: CGSize
+    ) -> CGRect {
+        guard sourceSize.width > 0, sourceSize.height > 0, !spot.region.samples.isEmpty else { return .null }
+        let width = sourceSize.width, height = sourceSize.height
+        let radius = CGFloat(spot.region.radius) * min(width, height)
+        let points = spot.region.samples.map { CGPoint(x: $0.point.x * width, y: (1 - $0.point.y) * height) }
+        let xs = points.map(\.x), ys = points.map(\.y)
+        guard let minX = xs.min(), let maxX = xs.max(), let minY = ys.min(), let maxY = ys.max() else { return .null }
+        let destination = CGRect(x: minX - radius, y: minY - radius,
+                                 width: maxX - minX + radius * 2, height: maxY - minY + radius * 2)
+        var bounds = destination
+        for candidate in candidates {
+            bounds = bounds.union(destination.offsetBy(dx: candidate.offset.dx * width,
+                                                       dy: candidate.offset.dy * height))
+        }
+        let padding = max(4, radius * 0.5)
+        return bounds.insetBy(dx: -padding, dy: -padding)
+            .intersection(CGRect(origin: .zero, size: sourceSize))
     }
 
     private func retouchProxy(image: CIImage, fingerprint: String) -> RetouchAnalysisProxy? {

@@ -59,6 +59,28 @@ final class RetouchSourcePickerTests: XCTestCase {
                      Date().timeIntervalSince(start) * 1000))
     }
 
+    func testFullResolutionRefinementIsStableAndBoundedToTwoPixels() {
+        let spot = makeSpot(x: 0.5, y: 0.5, radius: 0.04)
+        let coarse = RetouchSourcePicker.candidates(for: spot, among: [spot], in: makeProxy(width: 96, height: 72))
+        let highResolution = RetouchAnalysisRegion(
+            sourceWidth: 256, sourceHeight: 192, originX: 0, originY: 0,
+            proxy: makeProxy(width: 256, height: 192)
+        )
+        let first = RetouchSourcePicker.refining(coarse, for: spot, among: [spot], in: highResolution)
+        let second = RetouchSourcePicker.refining(coarse, for: spot, among: [spot], in: highResolution)
+        XCTAssertEqual(first, second)
+        XCTAssertFalse(first.isEmpty)
+        for refined in first {
+            let delta = coarse.map { candidate in
+                (abs(Double((refined.offset.dx - candidate.offset.dx) * 256)),
+                 abs(Double((refined.offset.dy - candidate.offset.dy) * 192)))
+            }.min { hypot($0.0, $0.1) < hypot($1.0, $1.1) } ?? (.infinity, .infinity)
+            // Include the ≤0.5 px rounding when mapping normalized proxy points to full resolution.
+            XCTAssertLessThanOrEqual(delta.0, 2.51)
+            XCTAssertLessThanOrEqual(delta.1, 2.51)
+        }
+    }
+
     private func makeSpot(x: CGFloat, y: CGFloat, radius: Double) -> RetouchSpot {
         RetouchSpot(mode: .heal,
                     region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: x, y: y))], radius: radius))

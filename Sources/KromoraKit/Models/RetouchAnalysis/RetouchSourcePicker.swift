@@ -42,7 +42,7 @@ enum RetouchSourcePicker {
         for (x, y) in points {
             if cancellation?() == true { return [] }
             guard valid(centerX: x, centerY: y, shape: shape, spots: spots, excluding: spot.id) else { continue }
-            let score = score(centerX: x, centerY: y, shape: shape, proxy: proxy)
+            let score = score(centerX: x, centerY: y, shape: shape, sample: proxy.lab)
             guard score.isFinite else { continue }
             best.append(RetouchSourceCandidate(
                 offset: CGVector(dx: CGFloat(x - shape.centerX) / CGFloat(proxy.width),
@@ -63,7 +63,7 @@ enum RetouchSourcePicker {
                 refined.append(RetouchSourceCandidate(
                     offset: CGVector(dx: CGFloat(x - shape.centerX) / CGFloat(proxy.width),
                                      dy: -CGFloat(y - shape.centerY) / CGFloat(proxy.height)),
-                    score: score(centerX: x, centerY: y, shape: shape, proxy: proxy)
+                    score: score(centerX: x, centerY: y, shape: shape, sample: proxy.lab)
                 ))
             } }
         }
@@ -84,6 +84,33 @@ enum RetouchSourcePicker {
         var resolved = spot
         resolved.source = source(for: spot, among: spots, in: proxy, rank: rank, cancellation: cancellation)
         return resolved
+    }
+
+    /// Re-score leading proxy matches using a bounded full-resolution crop and refine each within
+    /// ±2 full-resolution pixels. Candidates outside the supplied crop retain their proxy score.
+    static func refining(
+        _ candidates: [RetouchSourceCandidate], for spot: RetouchSpot, among spots: [RetouchSpot],
+        in region: RetouchAnalysisRegion, limit: Int = 4, cancellation: (() -> Bool)? = nil
+    ) -> [RetouchSourceCandidate] {
+        guard let shape = Shape(spot: spot, width: region.sourceWidth, height: region.sourceHeight) else { return candidates }
+        var refined: [RetouchSourceCandidate] = []
+        for candidate in candidates.prefix(max(0, limit)) {
+            if cancellation?() == true { return candidates }
+            let baseX = shape.centerX + Int((candidate.offset.dx * CGFloat(shape.width)).rounded())
+            let baseY = shape.centerY - Int((candidate.offset.dy * CGFloat(shape.height)).rounded())
+            guard region.lab(sourceX: shape.centerX, sourceY: shape.centerY) != nil,
+                  region.lab(sourceX: baseX, sourceY: baseY) != nil else { continue }
+            for dy in -2...2 { for dx in -2...2 {
+                let x = baseX + dx, y = baseY + dy
+                guard valid(centerX: x, centerY: y, shape: shape, spots: spots, excluding: spot.id) else { continue }
+                refined.append(RetouchSourceCandidate(
+                    offset: CGVector(dx: CGFloat(x - shape.centerX) / CGFloat(shape.width),
+                                     dy: -CGFloat(y - shape.centerY) / CGFloat(shape.height)),
+                    score: score(centerX: x, centerY: y, shape: shape, sample: region.lab)
+                ))
+            } }
+        }
+        return Array((refined + candidates).sorted(by: candidateOrder).uniquedOffsets().prefix(candidates.count))
     }
 
     private static func candidateOrder(_ a: RetouchSourceCandidate, _ b: RetouchSourceCandidate) -> Bool {
@@ -111,7 +138,10 @@ enum RetouchSourcePicker {
         a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY
     }
 
-    private static func score(centerX: Int, centerY: Int, shape: Shape, proxy: RetouchAnalysisProxy) -> Double {
+    private static func score(
+        centerX: Int, centerY: Int, shape: Shape,
+        sample: (Int, Int) -> SIMD3<Float>?
+    ) -> Double {
         var color = 0.0, gradient = 0.0, ringTexture = 0.0, interiorTexture = 0.0
         var ringCount = 0.0, interiorCount = 0.0
         let outer = shape.radius + max(2, shape.radius / 2)
@@ -120,17 +150,17 @@ enum RetouchSourcePicker {
           for dx in stride(from: -outer, through: outer, by: sampleStep) {
             let r2 = dx * dx + dy * dy
             guard r2 <= outer * outer && r2 >= shape.radius * shape.radius else { continue }
-            guard let a = proxy.lab(x: shape.centerX + dx, y: shape.centerY + dy),
-                  let b = proxy.lab(x: centerX + dx, y: centerY + dy) else { continue }
+            guard let a = sample(shape.centerX + dx, shape.centerY + dy),
+                  let b = sample(centerX + dx, centerY + dy) else { continue }
             let dl = Double(a.x - b.x), da = Double(a.y - b.y), db = Double(a.z - b.z)
             color += dl * dl + da * da + db * db
-            if let ax = proxy.lab(x: shape.centerX + dx + 1, y: shape.centerY + dy),
-               let bx = proxy.lab(x: centerX + dx + 1, y: centerY + dy) {
+            if let ax = sample(shape.centerX + dx + 1, shape.centerY + dy),
+               let bx = sample(centerX + dx + 1, centerY + dy) {
                 let ga = hypot(Double(ax.x - a.x), Double(ax.y - a.y))
                 let gb = hypot(Double(bx.x - b.x), Double(bx.y - b.y))
                 gradient += (ga - gb) * (ga - gb)
             }
-            let destinationGradient = proxy.lab(x: shape.centerX + dx + 1, y: shape.centerY + dy).map {
+            let destinationGradient = sample(shape.centerX + dx + 1, shape.centerY + dy).map {
                 hypot(Double($0.x - a.x), Double($0.y - a.y))
             } ?? 0
             ringTexture += destinationGradient
@@ -139,9 +169,9 @@ enum RetouchSourcePicker {
         for dy in stride(from: -shape.radius, through: shape.radius, by: sampleStep) {
           for dx in stride(from: -shape.radius, through: shape.radius, by: sampleStep)
             where dx * dx + dy * dy < shape.radius * shape.radius {
-            guard let center = proxy.lab(x: centerX + dx, y: centerY + dy),
-                  let right = proxy.lab(x: centerX + dx + 1, y: centerY + dy),
-                  let down = proxy.lab(x: centerX + dx, y: centerY + dy + 1) else { continue }
+            guard let center = sample(centerX + dx, centerY + dy),
+                  let right = sample(centerX + dx + 1, centerY + dy),
+                  let down = sample(centerX + dx, centerY + dy + 1) else { continue }
             interiorTexture += hypot(Double(right.x - center.x), Double(right.y - center.y))
                 + hypot(Double(down.x - center.x), Double(down.y - center.y))
             interiorCount += 2
