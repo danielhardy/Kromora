@@ -126,6 +126,12 @@ public struct KromoraCommands: Commands {
 
             Button("Export Originals...") { post(.exportSelected) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+
+            Button("Edit in External Editor…") { post(.editInExternalEditor) }
+                .keyboardShortcut("e", modifiers: [.command, .option])
+
+            Button("Export Original + Settings Bundle…") { post(.exportOriginalWithSettings) }
+                .keyboardShortcut("b", modifiers: [.command, .option])
         }
 
         CommandGroup(after: .appInfo) {
@@ -160,6 +166,7 @@ private struct FileMenuCommandReceiver: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .modifier(ExternalExportCommandReceiver(viewModel: viewModel))
             .onReceive(NotificationCenter.default.publisher(for: .openImage)) { _ in
                 viewModel.openImageDialog()
             }
@@ -211,6 +218,20 @@ private struct FileMenuCommandReceiver: ViewModifier {
     }
 }
 
+private struct ExternalExportCommandReceiver: ViewModifier {
+    @ObservedObject var viewModel: AppViewModel
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .editInExternalEditor)) { _ in
+                viewModel.editInExternalEditor()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .exportOriginalWithSettings)) { _ in
+                viewModel.exportOriginalWithSettings()
+            }
+    }
+}
+
 private struct SelectiveCopyMenuCommandReceiver: ViewModifier {
     @ObservedObject var viewModel: AppViewModel
 
@@ -253,6 +274,8 @@ extension Notification.Name {
     static let openImage = Notification.Name("Kromora.openImage")
     static let exportImage = Notification.Name("Kromora.exportImage")
     static let exportSelected = Notification.Name("Kromora.exportSelected")
+    static let editInExternalEditor = Notification.Name("Kromora.editInExternalEditor")
+    static let exportOriginalWithSettings = Notification.Name("Kromora.exportOriginalWithSettings")
     /// Compatibility name for callers from the pre-selection export flow.
     static let exportAll = exportSelected
     static let chooseLookFolder = Notification.Name("Kromora.chooseLookFolder")

@@ -1286,7 +1286,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         export.onStatus = { [weak self] in self?.statusMessage = $0 }
-        export.onError = { [weak self] in self?.presentError($0) }
+        export.onError = { [weak self] message in
+            self?.externalEditorHandoffURL = nil
+            self?.pendingShareURL = nil
+            self?.presentError(message)
+        }
+        export.onExportCompleted = { [weak self] url in
+            guard let self else { return }
+            if self.externalEditorHandoffURL == url {
+                self.externalEditorHandoffURL = nil
+                NSWorkspace.shared.open(url)
+            } else if self.pendingShareURL == url {
+                self.presentSharePicker(for: [url])
+            }
+        }
         export.defaultFolderURL = { [weak self] in self?.settings.ensureDefaultExportFolder() }
 
         derive.onStatus = { [weak self] in self?.statusMessage = $0 }
@@ -3668,10 +3681,91 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func shareDialog() {
         switch Self.shareDialogMode(for: collection.selectedItems.count) {
         case .singlePhoto:
-            exportDialog()
+            shareCurrentExport()
         case .selectedPhotos:
-            exportSelectedDialog()
+            shareSelectedExports()
         }
+    }
+
+    private var pendingShareURL: URL?
+    private var sharePicker: NSSharingServicePicker?
+
+    private func shareSelectedExports() {
+        let request = selectedBatchExportRequest
+        guard !request.items.isEmpty else {
+            statusMessage = "Select at least one photo to share"
+            return
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try? FileManager.default.removeItem(at: directory)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        } catch {
+            presentError("Could not prepare share exports: \(error.localizedDescription)")
+            return
+        }
+        statusMessage = "Preparing selected photos for sharing…"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let outcome = await self.export.performBatchExport(
+                request.items,
+                document: request.document,
+                lut: request.lut,
+                options: ExportOptions(format: .tiff, destination: .folder(directory)),
+                to: directory
+            )
+            guard outcome.exported > 0,
+                  let urls = try? FileManager.default.contentsOfDirectory(
+                    at: directory, includingPropertiesForKeys: nil
+                  ).filter({ $0.pathExtension.lowercased() == "tif" || $0.pathExtension.lowercased() == "tiff" }),
+                  !urls.isEmpty else { return }
+            self.presentSharePicker(for: urls)
+        }
+    }
+
+    private func shareCurrentExport() {
+        guard let request = exportRequest else {
+            statusMessage = "Open an image first"
+            return
+        }
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Kromora Share Exports", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let url = directory.appendingPathComponent(request.baseName + "_share.tiff")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try? FileManager.default.removeItem(at: url)
+        } catch {
+            presentError("Could not prepare a share export: \(error.localizedDescription)")
+            return
+        }
+        pendingShareURL = url
+        export.performExport(
+            source: request.source,
+            assetID: activeAssetID,
+            document: request.document,
+            lut: request.lut,
+            options: ExportOptions(
+                format: .tiff,
+                destination: .file(url),
+                metadata: .preserve,
+                location: .exclude
+            ),
+            to: url
+        )
+    }
+
+    private func presentSharePicker(for urls: [URL]) {
+        pendingShareURL = nil
+        guard let view = NSApp.keyWindow?.contentView else {
+            statusMessage = "Share export ready: \(urls.count) file(s)"
+            return
+        }
+        let picker = NSSharingServicePicker(items: urls)
+        sharePicker = picker
+        picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
     }
 
     /// Export the open image at full resolution.
@@ -3695,6 +3789,77 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             lut: request.lut,
             suggestedBaseName: request.baseName
         )
+    }
+
+    private var externalEditorHandoffURL: URL?
+
+    /// Render a full-resolution TIFF for the system's default TIFF editor. The active source remains
+    /// read-only; after editing, use Open Image to import the returned TIFF as a new library item.
+    func editInExternalEditor() {
+        guard let request = exportRequest else {
+            statusMessage = "Open an image first"
+            return
+        }
+        let panel = NSSavePanel()
+        panel.title = "Edit in External Editor"
+        panel.nameFieldStringValue = request.baseName + "_external.tiff"
+        panel.allowedContentTypes = [.tiff]
+        panel.directoryURL = export.defaultFolderURL?()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        externalEditorHandoffURL = url
+        export.performExport(
+            source: request.source,
+            assetID: activeAssetID,
+            document: request.document,
+            lut: request.lut,
+            options: ExportOptions(
+                format: .tiff,
+                destination: .file(url),
+                metadata: .preserve,
+                location: .exclude
+            ),
+            to: url
+        )
+    }
+
+    /// Copy the untouched source and its edit recipe into a checksum-verified portable bundle.
+    func exportOriginalWithSettings() {
+        guard let request = exportRequest else {
+            statusMessage = "Open an image first"
+            return
+        }
+        let privacyAlert = NSAlert()
+        privacyAlert.messageText = "Keep the original's embedded metadata?"
+        privacyAlert.informativeText = "The bundle preserves the original file byte-for-byte. It may contain location metadata such as GPS coordinates. The active library original will remain unchanged."
+        privacyAlert.addButton(withTitle: "Keep Original Metadata")
+        privacyAlert.addButton(withTitle: "Cancel")
+        guard privacyAlert.runModal() == .alertFirstButtonReturn else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Choose Bundle Location"
+        panel.prompt = "Export Bundle"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = export.defaultFolderURL?()
+        guard panel.runModal() == .OK, let parent = panel.url else { return }
+        let stem = URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
+        let name = stem.isEmpty ? "Photo" : stem
+        let destination = parent.appendingPathComponent(
+            "\(name).\(OriginalSettingsBundle.fileExtension)", isDirectory: true
+        )
+        do {
+            try OriginalSettingsBundle.create(
+                source: request.source,
+                sourceName: sourceName,
+                document: request.document,
+                destination: destination,
+                locationMetadataIncluded: true
+            )
+            statusMessage = "Original + settings bundle exported; the original remains read-only."
+        } catch {
+            presentError("Bundle export failed: \(error.localizedDescription)")
+        }
     }
 
     /// What ⌘S would export, without running a panel.
@@ -3951,6 +4116,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         library.onImportError = nil
         export.onStatus = nil
         export.onError = nil
+        export.onExportCompleted = nil
         derive.onStatus = nil
         derive.onError = nil
         derive.onDerived = nil

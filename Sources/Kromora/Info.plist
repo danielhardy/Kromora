@@ -65,6 +65,26 @@
 				<string>application/x-kromora-library</string>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>com.apple.package</string>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Kromora Original and Settings Bundle</string>
+			<key>UTTypeIdentifier</key>
+			<string>com.kromora.original-settings-bundle</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>kromora-original</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/x-kromora-original</string>
+			</dict>
+		</dict>
 	</array>
 </dict>
 </plist>
