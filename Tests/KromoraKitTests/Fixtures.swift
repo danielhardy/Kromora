@@ -555,6 +555,143 @@ enum Fixtures {
     }
 }
 
+/// Small deterministic clean/defective pairs for the retouch quality oracle. Pixel data and masks
+/// are generated from fixed coordinates and an integer hash, so the corpus needs no photo assets.
+enum RetouchQualityFixtures {
+    struct Case {
+        let background: String
+        let defect: String
+        let width: Int
+        let height: Int
+        let clean: CGImage
+        let damaged: CGImage
+        let mask: [Bool]
+        let center: CGPoint
+        let radius: Double
+        let sourceOffset: CGVector
+        let stroke: [CGPoint]
+    }
+
+    static let backgrounds = ["sky", "cloud", "foliage", "water", "brick", "skin"]
+    static let defects = ["soft dust 5px", "soft dust 60px", "hard speck", "wire straight", "wire sagging edge", "hair/fibre"]
+
+    static func make(background: String, defect: String, seed: UInt32 = 658) -> Case {
+        let isLargeDust = defect == "soft dust 60px"
+        let width = isLargeDust ? 192 : 96
+        let height = isLargeDust ? 144 : 72
+        var clean = [UInt8](repeating: 255, count: width * height * 4)
+        func hash(_ x: Int, _ y: Int) -> Double {
+            var n = UInt32(truncatingIfNeeded: x &* 1_103_515_245 &+ y &* 12_345) ^ seed
+            n = (n ^ (n >> 16)) &* 0x7feb352d
+            n = (n ^ (n >> 15)) &* 0x846ca68b
+            n ^= n >> 16
+            return Double(n & 0xffff) / 65535 - 0.5
+        }
+        for y in 0..<height { for x in 0..<width {
+            let nx = Double(x) / Double(width), ny = Double(y) / Double(height)
+            let grain = hash(x, y) * 0.055
+            var rgb: (Double, Double, Double)
+            switch background {
+            case "sky": rgb = (0.48 + ny * 0.24, 0.67 + ny * 0.2, 0.82 + ny * 0.14)
+            case "cloud":
+                let edge = sin(nx * 13 + sin(ny * 8) * 2) + cos(ny * 16) * 0.25
+                let cloud = edge > 0 ? 0.19 : 0
+                rgb = (0.44 + cloud, 0.64 + cloud, 0.78 + cloud)
+            case "foliage":
+                let texture = (sin(nx * 89 + ny * 21) * cos(ny * 103 - nx * 17) + 1) * 0.12
+                rgb = (0.16 + texture, 0.31 + texture, 0.12 + texture * 0.55)
+            case "water":
+                let ripple = sin(ny * 150 + sin(nx * 9) * 2) * 0.035
+                rgb = (0.12 + ripple, 0.39 + ripple, 0.56 + ripple)
+            case "brick":
+                let row = y / 12, offset = row.isMultiple(of: 2) ? 0 : 9
+                let mortar = y % 12 < 2 || (x + offset) % 18 < 2
+                let brick = mortar ? 0 : (Double((x / 9 + row) % 3) * 0.025)
+                rgb = mortar ? (0.67, 0.65, 0.59) : (0.49 + brick, 0.22 + brick, 0.15 + brick)
+            default:
+                let texture = (sin(nx * 37) + cos(ny * 49) + sin((nx + ny) * 71)) * 0.018
+                rgb = (0.66 + texture, 0.43 + texture * 0.72, 0.34 + texture * 0.55)
+            }
+            let i = (y * width + x) * 4
+            for (c, value) in [rgb.0 + grain, rgb.1 + grain, rgb.2 + grain].enumerated() {
+                clean[i + c] = UInt8(min(max(value, 0), 1) * 255)
+            }
+        }}
+
+        let centerPixel: CGPoint
+        let strokePixels: [CGPoint]
+        let radiusPixels: Double
+        switch defect {
+        case "wire straight":
+            centerPixel = CGPoint(x: 48, y: 32); radiusPixels = 1.4
+            strokePixels = [CGPoint(x: 2, y: 32), CGPoint(x: 94, y: 32)]
+        case "wire sagging edge":
+            centerPixel = CGPoint(x: 48, y: 35); radiusPixels = 2.2
+            strokePixels = [CGPoint(x: 3, y: 43), CGPoint(x: 34, y: 37), CGPoint(x: 65, y: 39), CGPoint(x: 93, y: 30)]
+        case "hair/fibre":
+            centerPixel = CGPoint(x: 47, y: 39); radiusPixels = 1.7
+            strokePixels = [CGPoint(x: 32, y: 30), CGPoint(x: 42, y: 35), CGPoint(x: 53, y: 46), CGPoint(x: 65, y: 49)]
+        case "hard speck":
+            centerPixel = CGPoint(x: 48, y: 36); radiusPixels = 3.5; strokePixels = []
+        case "soft dust 5px":
+            centerPixel = CGPoint(x: 48, y: 36); radiusPixels = 2.5; strokePixels = []
+        case "soft dust 60px":
+            centerPixel = CGPoint(x: 96, y: 72); radiusPixels = 30; strokePixels = []
+        default:
+            centerPixel = CGPoint(x: 48, y: 36); radiusPixels = 8; strokePixels = []
+        }
+        var damaged = clean
+        var mask = [Bool](repeating: false, count: width * height)
+        func segmentDistance(_ p: CGPoint, _ a: CGPoint, _ b: CGPoint) -> Double {
+            let dx = Double(b.x - a.x), dy = Double(b.y - a.y)
+            let length = dx * dx + dy * dy
+            let t = length == 0 ? 0 : min(max(((Double(p.x - a.x) * dx + Double(p.y - a.y) * dy) / length), 0), 1)
+            return hypot(Double(p.x) - Double(a.x) - t * dx, Double(p.y) - Double(a.y) - t * dy)
+        }
+        for y in 0..<height { for x in 0..<width {
+            let p = CGPoint(x: x, y: y)
+            let distance: Double
+            if strokePixels.isEmpty { distance = hypot(Double(x) - centerPixel.x, Double(y) - centerPixel.y) }
+            else { distance = zip(strokePixels, strokePixels.dropFirst()).map { segmentDistance(p, $0.0, $0.1) }.min() ?? 99 }
+            let inDefect = distance <= radiusPixels
+            let isSoftDust = defect.hasPrefix("soft dust")
+            let softWeight = isSoftDust ? max(0, min(1, (radiusPixels - distance) / max(1, radiusPixels * 0.35))) : 1
+            if inDefect || (isSoftDust && distance < radiusPixels * 1.35) {
+                let index = y * width + x
+                mask[index] = inDefect
+                let i = index * 4
+                let isLine = defect.hasPrefix("wire") || defect == "hair/fibre"
+                let level: Double = isLine ? 0.035 : 0.08
+                for c in 0..<3 {
+                    let original = Double(clean[i + c]) / 255
+                    let altered = original * (1 - softWeight) + level * softWeight
+                    damaged[i + c] = UInt8(min(max(altered, 0), 1) * 255)
+                }
+            }
+        }}
+        func image(_ bytes: [UInt8]) -> CGImage {
+            let provider = CGDataProvider(data: Data(bytes) as CFData)!
+            return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: width * 4, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+        }
+        let points = strokePixels.map { CGPoint(x: $0.x / CGFloat(width), y: $0.y / CGFloat(height)) }
+        let normalizedCenter = CGPoint(x: centerPixel.x / CGFloat(width), y: centerPixel.y / CGFloat(height))
+        let sourceOffset: CGVector
+        if defect.hasPrefix("wire") {
+            sourceOffset = CGVector(dx: 0, dy: 0.3)
+        } else if defect == "hair/fibre" {
+            sourceOffset = CGVector(dx: 0.25, dy: -0.3)
+        } else {
+            sourceOffset = CGVector(dx: 0.34, dy: 0)
+        }
+        return Case(background: background, defect: defect, width: width, height: height,
+            clean: image(clean), damaged: image(damaged), mask: mask, center: normalizedCenter,
+            radius: radiusPixels / Double(min(width, height)), sourceOffset: sourceOffset, stroke: points)
+    }
+}
+
 /// Base class that hands each test a scratch directory and cleans it up.
 class TempDirectoryTestCase: XCTestCase {
     var tempDirectory: URL!
