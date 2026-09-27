@@ -109,34 +109,28 @@ enum RetouchRenderer {
             extent: bounds, roiCallback: { _, rect in rect },
             arguments: [destination, fill, exteriorWeight]
         ) ?? fill
-        var numeratorLevels = [difference]
-        var weightLevels = [difference]
+        var levels = [difference]
         for _ in 1..<5 {
-            guard let previousNumerator = numeratorLevels.last,
-                  let previousWeight = weightLevels.last else { break }
+            guard let previous = levels.last else { break }
             let levelExtent = CGRect(
                 x: bounds.minX, y: bounds.minY,
-                width: max(1, previousNumerator.extent.width / 2),
-                height: max(1, previousNumerator.extent.height / 2)
+                width: max(1, previous.extent.width / 2),
+                height: max(1, previous.extent.height / 2)
             )
-            numeratorLevels.append(downsample(previousNumerator, to: levelExtent))
-            weightLevels.append(downsample(previousWeight, to: levelExtent))
+            levels.append(downsample(previous, to: levelExtent))
         }
-        guard let coarsestNumerator = numeratorLevels.last,
-              let coarsestWeight = weightLevels.last else { return fill }
+        guard let coarsest = levels.last else { return fill }
         var correction = push.apply(
-            extent: coarsestNumerator.extent, roiCallback: { _, rect in rect },
-            arguments: [zeroImage(coarsestNumerator.extent), zeroImage(coarsestNumerator.extent),
-                        coarsestNumerator, coarsestWeight]
-        ) ?? zeroImage(coarsestNumerator.extent)
-        if numeratorLevels.count > 1 {
-            for index in stride(from: numeratorLevels.count - 2, through: 0, by: -1) {
-                let numerator = numeratorLevels[index]
-                let confidence = weightLevels[index]
-                let coarse = upsample(correction, to: numerator.extent)
+            extent: coarsest.extent, roiCallback: { _, rect in rect },
+            arguments: [zeroImage(coarsest.extent), zeroImage(coarsest.extent), coarsest, coarsest]
+        ) ?? zeroImage(coarsest.extent)
+        if levels.count > 1 {
+            for index in stride(from: levels.count - 2, through: 0, by: -1) {
+                let level = levels[index]
+                let coarse = upsample(correction, to: level.extent)
                 correction = push.apply(
-                    extent: numerator.extent, roiCallback: { _, rect in rect },
-                    arguments: [zeroImage(numerator.extent), coarse, numerator, confidence]
+                    extent: level.extent, roiCallback: { _, rect in rect },
+                    arguments: [zeroImage(level.extent), coarse, level, level]
                 ) ?? coarse
             }
         }
