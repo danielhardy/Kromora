@@ -74,6 +74,7 @@ enum OriginalSettingsBundle {
             throw BundleError.checksumMismatch(manifestFilename)
         }
         guard !manifest.originalFilename.isEmpty,
+              manifest.originalFilename != ".", manifest.originalFilename != "..",
               URL(fileURLWithPath: manifest.originalFilename).lastPathComponent == manifest.originalFilename,
               !manifest.originalFilename.contains("/") else {
             throw BundleError.checksumMismatch(manifestFilename)
