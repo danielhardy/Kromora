@@ -4,7 +4,7 @@ import XCTest
 
 final class LocalAdjustmentControlTests: XCTestCase {
     func testAllSupportedLocalControlsUseTheirGlobalStageContract() {
-        XCTAssertEqual(LocalAdjustmentControl.allCases.count, 13)
+        XCTAssertEqual(LocalAdjustmentControl.allCases.count, 16)
         XCTAssertEqual(LocalAdjustmentControl.exposure.range, LightControl.exposure.range)
         XCTAssertEqual(LocalAdjustmentControl.contrast.range, LightControl.contrast.range)
         XCTAssertEqual(LocalAdjustmentControl.highlights.range, LightControl.highlights.range)
@@ -19,6 +19,9 @@ final class LocalAdjustmentControlTests: XCTestCase {
         XCTAssertEqual(LocalAdjustmentControl.texture.range, EffectsControl.texture.range)
         XCTAssertEqual(LocalAdjustmentControl.clarity.range, EffectsControl.clarity.range)
         XCTAssertEqual(LocalAdjustmentControl.dehaze.range, EffectsControl.dehaze.range)
+        XCTAssertEqual(LocalAdjustmentControl.sharpness.range, LocalAdjustments.detailRange)
+        XCTAssertEqual(LocalAdjustmentControl.noiseReduction.range, LocalAdjustments.detailRange)
+        XCTAssertEqual(LocalAdjustmentControl.moireReduction.range, LocalAdjustments.detailRange)
 
         for control in LocalAdjustmentControl.allCases {
             XCTAssertTrue(control.range.contains(control.neutral), "\(control) neutral drifted")
@@ -41,6 +44,9 @@ final class LocalAdjustmentControlTests: XCTestCase {
             .texture: 44.754,
             .clarity: -23.125,
             .dehaze: 9.875,
+            .sharpness: 55.256,
+            .noiseReduction: 33.505,
+            .moireReduction: 18.125,
         ]
 
         for control in LocalAdjustmentControl.allCases {

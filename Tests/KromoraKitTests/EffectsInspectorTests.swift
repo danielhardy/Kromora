@@ -59,6 +59,16 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(decoded.detail, .neutral)
     }
 
+    func testEveryDetailControlNeutralValueFallsWithinItsOwnRange() {
+        for control in DetailControl.allCases {
+            XCTAssertTrue(
+                control.range.contains(control.neutral),
+                "\(control) neutral \(control.neutral) drifted outside \(control.range)"
+            )
+            XCTAssertEqual(control.neutral, control.value(in: .neutral), "\(control) neutral mismatches DetailAdjustments.neutral")
+        }
+    }
+
     func testEffectsValuesRoundToWholeNumbersAtTheValueBoundary() throws {
         let effects = EffectsAdjustments(
             texture: 37.4,
