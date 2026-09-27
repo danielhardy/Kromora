@@ -2893,7 +2893,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 categories: editClipboardCategories
             )
             updateDocument { $0 = updated }
-            statusMessage = "Pasted \(copiedCategorySummary)"
+            statusMessage = pasteCompletionMessage(photoCount: 1)
             return
         }
 
@@ -2937,13 +2937,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             pastedCount += 1
         }
 
-        statusMessage =
-            pastedCount == 1
-            ? "Pasted \(copiedCategorySummary) to 1 photo"
-            : pastedCount > 1
-                ? "Pasted \(copiedCategorySummary) to \(pastedCount) photos"
-                : "Pasted \(copiedCategorySummary)"
+        statusMessage = pasteCompletionMessage(photoCount: pastedCount)
         requestPersistenceFlush()
+    }
+
+    private func pasteCompletionMessage(photoCount: Int) -> String {
+        let destination = photoCount == 1 ? "1 photo" : "\(photoCount) photos"
+        let result = photoCount > 0
+            ? "Pasted \(copiedCategorySummary) to \(destination)"
+            : "Pasted \(copiedCategorySummary)"
+        return editClipboardCategories.contains(.retouch)
+            ? "\(result); retouch sources resolve per photo"
+            : result
     }
 
     private var copiedCategorySummary: String {

@@ -271,7 +271,18 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         if categories.contains(.localAdjustments) {
             result.localAdjustments = localAdjustments
         }
-        if categories.contains(.retouch) { result.retouch = retouch }
+        if categories.contains(.retouch) {
+            // Spot geometry and seeds copy as authored, while sampled source offsets belong to
+            // the source frame. Clearing them makes each destination run its own source picker or
+            // Remove fill solve under that destination's cache fingerprint.
+            var copiedRetouch = retouch
+            copiedRetouch.spots = retouch.spots.map { original in
+                var spot = original
+                spot.source = nil
+                return spot
+            }
+            result.retouch = copiedRetouch
+        }
         return result
     }
 

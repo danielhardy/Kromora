@@ -453,6 +453,11 @@ final class KeyMonitor {
             return nil
         }
         switch chars {
+        case "a":
+            guard vm.isRetouchCanvasActive,
+                  KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: mods) else { return event }
+            vm.toggleRetouchVisualization()
+            return nil
         case "i":
             // Keep plain I as a preview-only presentation toggle. ⌘I remains owned by the Info
             // Inspector menu command, and focused controls/text inputs keep their own keystrokes.

@@ -53,6 +53,26 @@ struct RetouchCanvasOverlay: View {
             var crosshair = Path(); crosshair.move(to: CGPoint(x:center.x-5,y:center.y)); crosshair.addLine(to: CGPoint(x:center.x+5,y:center.y)); crosshair.move(to: CGPoint(x:center.x,y:center.y-5)); crosshair.addLine(to: CGPoint(x:center.x,y:center.y+5))
             context.stroke(crosshair, with: .color(.white), lineWidth: 1)
         }
+        if state.shouldShowOverlay && state.visualizationEnabled {
+            for candidate in state.visualizationCandidates {
+                guard let center = viewport(candidate.point) else { continue }
+                let r = screenRadius(candidate.radius, center: candidate.point, size: size, mapping: mapping)
+                let rect = CGRect(x: center.x-r, y: center.y-r, width: r*2, height: r*2)
+                context.fill(Path(ellipseIn: rect), with: .color(.orange.opacity(0.15 + candidate.confidence * 0.3)))
+                context.stroke(Path(ellipseIn: rect), with: .color(.orange.opacity(0.8)), lineWidth: 1)
+            }
+        }
+        if state.shouldShowOverlay {
+            for suggestion in state.dustSuggestions {
+                guard let center = viewport(suggestion.point) else { continue }
+                let r = screenRadius(suggestion.radius, center: suggestion.point, size: size, mapping: mapping)
+                let rect = CGRect(x: center.x-r, y: center.y-r, width: r*2, height: r*2)
+                context.stroke(Path(ellipseIn: rect), with: .color(.mint),
+                               style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+                context.fill(Path(ellipseIn: CGRect(x: center.x-3, y: center.y-3, width: 6, height: 6)),
+                             with: .color(.mint))
+            }
+        }
         guard state.shouldShowOverlay else { return }
         for spot in viewModel.document.retouch.spots where spot.isVisible {
             guard let point = spot.region.samples.first?.point, let center = viewport(point) else { continue }

@@ -61,9 +61,33 @@ engine timings remain unverified. The benchmark is opt-in so normal CI does not 
 synthetic source generation and solve.
 
 The Retouch inspector edits mode, size, feather, opacity, and visibility. Canvas strokes and pins are
-available; source handles apply to Heal and Clone. The Dust Finder shows a sharpened, high-contrast
-preview at pixel size, overlays visible spot markers, and scrolls between spot centers. It does not perform automatic face/pupil
-detection; eye centers are recipe values.
+available; source handles apply to Heal and Clone. `A` toggles the in-canvas Visualize Spots mode;
+its threshold only changes the orange analysis overlay and is not saved to the edit recipe or render.
+Detect Dust creates dashed, draggable suggestions. Clicking a pin accepts it; Accept All creates
+ordinary Remove spots with stable IDs and deterministic seeds. Dismissal only removes transient
+suggestions. Accepted spots use the normal source-space recipe, undo/history, renderer, and Remove
+solver. The manual brush remains available for candidates the detector misses. Eye centers remain
+recipe values; automatic face/pupil detection is not part of retouch.
+
+Dust suggestions use a CPU difference-of-Gaussians response over the neutral, downsampled Lab
+analysis proxy. A gradient/variance gate rejects many textured regions and strong edges. The initial
+threshold is `0.025` on normalized Lab L response (adjustable from `0.005` to `0.12`). The focused
+measurement is `swift test --filter RetouchDustDetectorTests`: at threshold `0.025`, the current
+KRMA-658 subset (six backgrounds × 5 px soft dust and hard speck) reports candidate pixel precision
+1.00 and fixture recall 0.083 (1 of 12 fixture cases contained a candidate inside the defect mask).
+This is an intentionally conservative suggestion pass, not a dust guarantee: it produced no counted
+false-positive pixels in this small subset, while missing most defects, especially in textured or
+edge-heavy scenes. Candidates outside the measured mask are false positives by the pixel metric;
+fixture recall counts a case as detected only when at least one candidate lands inside its defect
+mask. The test also checks that the foliage texture gate suppresses candidates and that changing
+threshold is deterministic. These numbers describe generated fixtures at 96 × 72 px, not camera
+performance; inspect suggestions and use the brush for missed or rejected spots.
+
+Selective Retouch copy/paste preserves source-normalized region samples, spot size, visibility, mode,
+and deterministic seed. It clears sampled source offsets so each destination resolves its own Heal/
+Clone pick and Remove fill field against that frame's source fingerprint. Remove fields are never
+copied from the source frame. Batch paste reports how many photos received the recipe; a target with
+no viable source remains unfilled under the existing render behavior rather than using a stale field.
 
 ## Retouch quality evaluation
 

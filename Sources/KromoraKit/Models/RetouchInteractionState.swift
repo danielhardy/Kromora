@@ -32,6 +32,10 @@ final class RetouchInteractionState: ObservableObject {
     @Published private(set) var solveFailures: [UUID: String] = [:]
     @Published private(set) var shiftClickAnchor: CGPoint?
     @Published var overlayPolicy: OverlayPolicy = .auto
+    @Published var visualizationEnabled = false
+    @Published var visualizationThreshold = 0.025
+    @Published private(set) var dustSuggestions: [RetouchDustSuggestion] = []
+    @Published private(set) var visualizationCandidates: [RetouchDustSuggestion] = []
     @Published var isSpacePanning = false
 
     var hasDraft: Bool { activeHandle != nil && !draftSamples.isEmpty }
@@ -67,4 +71,7 @@ final class RetouchInteractionState: ObservableObject {
         let cases = OverlayPolicy.allCases
         overlayPolicy = cases[(cases.firstIndex(of: overlayPolicy)! + 1) % cases.count]
     }
+    func setDustSuggestions(_ suggestions: [RetouchDustSuggestion]) { dustSuggestions = suggestions }
+    func setVisualizationCandidates(_ candidates: [RetouchDustSuggestion]) { visualizationCandidates = candidates }
+    func removeDustSuggestion(_ id: UUID) { dustSuggestions.removeAll { $0.id == id } }
 }

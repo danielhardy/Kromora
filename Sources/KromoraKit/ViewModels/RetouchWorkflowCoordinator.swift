@@ -16,7 +16,7 @@ protocol RetouchWorkflowDestination: AnyObject {
 /// Owns transient retouch selection and gestures; each completed pointer action is one document edit.
 @MainActor
 final class RetouchWorkflowCoordinator {
-    enum Gesture: Equatable { case create, move(UUID), source(UUID) }
+    enum Gesture: Equatable { case create, move(UUID), source(UUID), suggestion(UUID) }
     let interactionState = RetouchInteractionState()
     weak var destination: (any RetouchWorkflowDestination)?
     private var gesture: Gesture?
@@ -29,6 +29,9 @@ final class RetouchWorkflowCoordinator {
     private var pendingSource: RetouchSource?
     private var isShiftSegment = false
     private var isCommandCreatingSource = false
+    private var startSuggestion: RetouchDustSuggestion?
+    private var suggestionWasMoved = false
+    private var isResizingSuggestion = false
 
     init(destination: (any RetouchWorkflowDestination)? = nil) {
         self.destination = destination
@@ -50,6 +53,16 @@ final class RetouchWorkflowCoordinator {
         startPoint = point
         isShiftSegment = modifiers.contains(.shift)
         isCommandCreatingSource = modifiers.contains(.command)
+        if let suggestion = hitSuggestion(point) {
+            interactionState.select(nil)
+            gesture = .suggestion(suggestion.id)
+            startSuggestion = suggestion
+            let size = destination.sourceSize
+            let distance = hypot((point.x - suggestion.point.x) * size.width,
+                                 (point.y - suggestion.point.y) * size.height)
+            isResizingSuggestion = distance >= suggestion.radius * min(size.width, size.height) * 0.65
+            return
+        }
         if modifiers.contains(.option), let hit = hitTest(point, spots: destination.document.retouch.spots) {
             deleteSpot(hit.id); return
         }
@@ -116,6 +129,19 @@ final class RetouchWorkflowCoordinator {
             let dest = spot.region.samples.first?.point ?? startPoint
             manualSourceOffset = CGVector(dx: point.x - dest.x, dy: point.y - dest.y)
             pendingSource = .manual(offset: manualSourceOffset ?? .zero)
+        case .suggestion(let id):
+            guard let original = startSuggestion else { return }
+            let size = destination.sourceSize
+            suggestionWasMoved = hypot((point.x - original.point.x) * size.width,
+                                       (point.y - original.point.y) * size.height) > 2
+            let radius = isResizingSuggestion
+                ? min(0.25, max(0.0005, hypot((point.x - original.point.x) * destination.sourceSize.width,
+                                             (point.y - original.point.y) * destination.sourceSize.height)
+                                / min(destination.sourceSize.width, destination.sourceSize.height)))
+                : original.radius
+            let moved = RetouchDustSuggestion(id: original.id, point: isResizingSuggestion ? original.point : point, radius: radius,
+                                               confidence: original.confidence, seed: original.seed)
+            interactionState.setDustSuggestions(interactionState.dustSuggestions.map { $0.id == id ? moved : $0 })
         }
     }
 
@@ -166,13 +192,16 @@ final class RetouchWorkflowCoordinator {
             }
         case .source(let id):
             if let pendingSource { updateSpot(id) { $0.source = pendingSource } }
+        case .suggestion(let id):
+            if !suggestionWasMoved { acceptDustSuggestion(id) }
+            startSuggestion = nil
         }
-        self.gesture = nil; startRegion = nil; startSource = nil; samples = []; manualSourceOffset = nil; pendingRegion = nil; pendingSource = nil; isCommandCreatingSource = false
+        self.gesture = nil; startRegion = nil; startSource = nil; samples = []; manualSourceOffset = nil; pendingRegion = nil; pendingSource = nil; isCommandCreatingSource = false; startSuggestion = nil; suggestionWasMoved = false; isResizingSuggestion = false
         interactionState.clearGesture()
     }
 
     func cancelGesture() {
-        gesture = nil; startRegion = nil; startSource = nil; samples = []; manualSourceOffset = nil; pendingRegion = nil; pendingSource = nil; isCommandCreatingSource = false
+        gesture = nil; startRegion = nil; startSource = nil; samples = []; manualSourceOffset = nil; pendingRegion = nil; pendingSource = nil; isCommandCreatingSource = false; startSuggestion = nil; suggestionWasMoved = false; isResizingSuggestion = false
         interactionState.clearGesture()
     }
 
@@ -181,6 +210,35 @@ final class RetouchWorkflowCoordinator {
         destination?.updateDocument { $0.retouch.spots.removeAll { $0.id == id } }
         if interactionState.selectedSpotID == id { interactionState.select(nil) }
         if interactionState.shiftClickAnchor != nil { interactionState.setShiftClickAnchor(nil) }
+    }
+    func acceptDustSuggestion(_ id: UUID) {
+        guard let suggestion = interactionState.dustSuggestions.first(where: { $0.id == id }) else { return }
+        addDustSpot(suggestion)
+        interactionState.removeDustSuggestion(id)
+    }
+    func acceptAllDustSuggestions() {
+        let suggestions = interactionState.dustSuggestions
+        guard !suggestions.isEmpty else { return }
+        destination?.beginUndoGrouping()
+        for suggestion in suggestions { addDustSpot(suggestion) }
+        destination?.endUndoGrouping()
+        interactionState.setDustSuggestions([])
+    }
+    func dismissDustSuggestion(_ id: UUID) { interactionState.removeDustSuggestion(id) }
+    func dismissAllDustSuggestions() { interactionState.setDustSuggestions([]) }
+    private func addDustSpot(_ suggestion: RetouchDustSuggestion) {
+        let sample = BrushSample(point: suggestion.point)
+        let spot = RetouchSpot(id: suggestion.id, mode: .remove,
+            region: RetouchRegion(samples: [sample], radius: suggestion.radius), seed: suggestion.seed)
+        destination?.updateDocument { $0.retouch.spots.append(spot) }
+        interactionState.select(spot.id)
+    }
+    private func hitSuggestion(_ point: CGPoint) -> RetouchDustSuggestion? {
+        let size = destination?.sourceSize ?? CGSize(width: 1, height: 1)
+        return interactionState.dustSuggestions.reversed().first { suggestion in
+            hypot((point.x - suggestion.point.x) * size.width, (point.y - suggestion.point.y) * size.height)
+                <= max(suggestion.radius * min(size.width, size.height) * 1.5, 0.008 * min(size.width, size.height))
+        }
     }
     func nextSource() {
         guard let d = destination, let id = interactionState.selectedSpotID,

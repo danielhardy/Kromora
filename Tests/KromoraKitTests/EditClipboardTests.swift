@@ -121,10 +121,10 @@ final class EditClipboardTests: XCTestCase {
             retouch: RetouchSettings(spots: [spot])
         ))
         let destination = EditDocument(retouch: .neutral)
-        XCTAssertEqual(
-            clipboard.applying(to: destination, destinationIsRAW: false, categories: [.retouch]).retouch,
-            clipboard.retouch
-        )
+        let pasted = clipboard.applying(to: destination, destinationIsRAW: false, categories: [.retouch]).retouch
+        XCTAssertEqual(pasted.spots.first?.region, spot.region)
+        XCTAssertNil(pasted.spots.first?.source, "copied patch sources must be resolved against the destination frame")
+        XCTAssertEqual(pasted.spots.first?.seed, spot.seed)
         XCTAssertEqual(
             clipboard.applying(to: destination, destinationIsRAW: false, categories: [.light]).retouch,
             .neutral
@@ -207,6 +207,20 @@ final class CopyPasteTests: TempDirectoryTestCase {
         try await waitUntil("the source photo again") { viewModel.sourceName == "one.png" }
         XCTAssertEqual(
             viewModel.document, sourceEdits, "pasting must not consume or alter the source")
+    }
+
+    func testAcceptedDustSuggestionUsesNormalUndoHistory() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
+        viewModel.importPhotosData([try photoData(named: "dust.png")])
+        try await waitUntil("the dust test photo") { viewModel.sourceName == "dust.png" }
+        let suggestion = RetouchDustSuggestion(id: UUID(), point: CGPoint(x: 0.4, y: 0.5),
+            radius: 0.02, confidence: 0.9, seed: 824)
+        viewModel.retouchInteractionState.setDustSuggestions([suggestion])
+        viewModel.retouchWorkflow.acceptDustSuggestion(suggestion.id)
+        XCTAssertEqual(viewModel.document.retouch.spots.map(\.id), [suggestion.id])
+        XCTAssertEqual(viewModel.undoDepth, 1)
+        viewModel.undo()
+        XCTAssertTrue(viewModel.document.retouch.spots.isEmpty)
     }
 
     func testSelectiveCopyMaskLeavesUncheckedDestinationStagesIntact() async throws {
