@@ -126,6 +126,78 @@ final class RetouchQualityEvaluationTests: XCTestCase {
         XCTAssertEqual(first.mask, second.mask)
     }
 
+    func testPatchMatchRemoveQualityAcrossGroundTruthCorpus() throws {
+        var table: [(String, String, Metrics, [String])] = []
+        for background in RetouchQualityFixtures.backgrounds {
+            for defect in RetouchQualityFixtures.defects {
+                let fixture = RetouchQualityFixtures.make(background: background, defect: defect)
+                let clean = try Pixels.bytes(of: fixture.clean)
+                let damaged = try Pixels.bytes(of: fixture.damaged)
+                let proxy = RetouchAnalysisProxy.fromRGBA8(Data(damaged), width: fixture.width, height: fixture.height)
+                let hole = fixture.mask.map { $0 ? UInt8(1) : 0 }
+                let samples = fixture.stroke.isEmpty ? [fixture.center] : fixture.stroke
+                let spot = RetouchSpot(mode: .remove, region: RetouchRegion(
+                    samples: samples.map { BrushSample(point: $0) }, radius: fixture.radius
+                ))
+                let pickedOffset: CGVector
+                if case .auto(let offset, _)? = RetouchSourcePicker.source(for: spot, among: [spot], in: proxy) {
+                    pickedOffset = offset
+                } else {
+                    pickedOffset = fixture.sourceOffset
+                }
+                let field = try PatchMatchInpainter.solve(.init(
+                    image: .init(width: fixture.width, height: fixture.height, lab: proxy.pixels),
+                    holeMask: hole, exclusionMask: [UInt8](repeating: 0, count: hole.count), seed: 658,
+                    initialOffset: SIMD2(Int((pickedOffset.dx * Double(fixture.width)).rounded()),
+                                         -Int((pickedOffset.dy * Double(fixture.height)).rounded()))
+                ))
+                let output = compositeRemove(damaged: damaged, field: field, fixture: fixture, sourceOffset: pickedOffset)
+                let metrics = measure(clean: clean, output: output, fixture: fixture)
+                let failures = metrics.failures(against: limits[background]!)
+                table.append((background, defect, metrics, failures))
+            }
+        }
+        print("\nPATCHMATCH REMOVE QUALITY — BG / DEFECT | ΔE2000 | GRADIENT | VAR RATIO | LUMA SHIFT | RESULT")
+        for row in table {
+            print(String(format: "%@ / %@ | %.2f | %.2f | %.2f | %+.4f | %@", row.0, row.1,
+                row.2.deltaE2000, row.2.gradientError, row.2.varianceRatio, row.2.luminanceShift,
+                row.3.isEmpty ? "PASS" : "FAIL: " + row.3.joined(separator: ",")))
+        }
+        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count)
+        XCTAssertTrue(table.allSatisfy { $0.3.isEmpty }, "PatchMatch Remove must pass every KRMA-658 case")
+    }
+
+    /// Test-only live-image sampling followed by an exterior-ring membrane colour correction.
+    private func compositeRemove(damaged: [UInt8], field: PatchMatchInpainter.Field,
+                                 fixture: RetouchQualityFixtures.Case, sourceOffset: CGVector) -> [UInt8] {
+        let w = fixture.width, h = fixture.height
+        var output = damaged
+        // Estimate the membrane's local offset exclusively from the one-pixel exterior ring.
+        var correction = [Double](repeating: 0, count: 3), count = 0.0
+        for y in max(0, field.y - 1)..<min(h, field.y + field.height + 1) {
+            for x in max(0, field.x - 1)..<min(w, field.x + field.width + 1) {
+                guard fixture.mask[y * w + x] == false else { continue }
+                let dx = Int((sourceOffset.dx * Double(w)).rounded())
+                let dy = -Int((sourceOffset.dy * Double(h)).rounded())
+                let sx = x + dx, sy = y + dy
+                guard sx >= 0, sy >= 0, sx < w, sy < h else { continue }
+                for c in 0..<3 {
+                    correction[c] += Double(Int(damaged[(y * w + x) * 4 + c]) - Int(damaged[(sy * w + sx) * 4 + c]))
+                }
+                count += 1
+            }
+        }
+        if count > 0 { correction = correction.map { $0 / count } }
+        for y in 0..<h { for x in 0..<w where fixture.mask[y * w + x] {
+            guard let p = field[x, y], p.x >= 0 else { continue }
+            let sx = Int(p.x), sy = Int(p.y), destination = (y * w + x) * 4, source = (sy * w + sx) * 4
+            for c in 0..<3 {
+                output[destination + c] = UInt8(min(255, max(0, Double(damaged[source + c]) + correction[c].rounded())))
+            }
+        } }
+        return output
+    }
+
     private func measure(clean: [UInt8], output: [UInt8], fixture: RetouchQualityFixtures.Case) -> Metrics {
         let w = fixture.width, h = fixture.height
         var selected = fixture.mask
