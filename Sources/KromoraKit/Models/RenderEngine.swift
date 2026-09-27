@@ -125,11 +125,18 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
     /// the flags live on a non-`Sendable` type confined to the actor (§4.5). Returning a value is
     /// the only way the panel can be gated on what the decoder actually supports.
     func rawCapabilities(for source: ImageSource) async -> RAWCapabilities?
+
+    /// Pick one stable automatic retouch source from the neutral source analysis image.
+    func pickRetouchSource(
+        source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int
+    ) async -> RetouchSource?
 }
 
 extension RenderEngining {
     /// Compatibility default for lightweight render test doubles and integrations.
     func invalidateRenderCaches() async {}
+
+    func pickRetouchSource(source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int) async -> RetouchSource? { nil }
 }
 
 /// Actor-local counters used by performance captures to separate RAW configuration, decoder output
@@ -535,11 +542,28 @@ actor RenderEngine: RenderEngining {
             ))
     }
 
+    func pickRetouchSource(
+        source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int
+    ) async -> RetouchSource? {
+        guard let spot = settings.spots.first(where: { $0.id == spotID }),
+              !Task.isCancelled,
+              let image = await developedSourceForBuild(
+                source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
+                space: .current, interactive: false, thumbnail: false
+              ),
+              let proxy = retouchProxy(image: image, fingerprint: source.cacheFingerprint) else { return nil }
+        return RetouchSourcePicker.source(
+            for: spot, among: settings.spots, in: proxy, rank: rank,
+            cancellation: { Task.isCancelled }
+        )
+    }
+
     /// The app's engine. One instance, therefore one actor-owned processing context and queue.
     static let shared = RenderEngine()
 
     /// All non-Sendable GPU and cache resources live in this actor-confined storage boundary.
     let resources: RenderEngineResources
+    private var retouchAnalysisCache: (fingerprint: String, proxy: RetouchAnalysisProxy)?
 
     // These narrow aliases keep the render algorithm readable while making ownership explicit in
     // `RenderEngineResources`. They are actor-isolated through their enclosing engine. Not
@@ -1238,8 +1262,11 @@ actor RenderEngine: RenderEngining {
             thumbnail: quality == .thumbnail
         ) else { return nil }
         try Task.checkCancellation()
+        let retouchSettings = await resolvingAutomaticRetouchSources(
+            document.retouch, image: developedFull, source: source, space: space
+        )
         let retouchedSource = RetouchRenderer.apply(
-            document.retouch, to: developedFull, sourceSize: developedFull.extent.size,
+            retouchSettings, to: developedFull, sourceSize: developedFull.extent.size,
             maskRenderer: localMaskRenderer
         )
         let orientedDeveloped = RenderPipeline.applyingRotation(document.rotation, to: retouchedSource)
@@ -1353,6 +1380,63 @@ actor RenderEngine: RenderEngining {
             )
         }()
         return output.cropped(to: outputROI)
+    }
+
+    /// Build or reuse the neutral-stage analysis proxy and attach deterministic source choices to
+    /// automatic spots. Manual offsets are preserved exactly. Pixel and Core Image values remain
+    /// inside this actor; only the Sendable Lab proxy reaches the picker.
+    private func resolvingAutomaticRetouchSources(
+        _ settings: RetouchSettings, image: CIImage, source: ImageSource, space: WorkingSpace
+    ) async -> RetouchSettings {
+        guard settings.spots.contains(where: { $0.source == nil || isAutomatic($0.source) }) else { return settings }
+        let analysisImage = await developedSourceForBuild(
+            source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
+            space: space, interactive: false, thumbnail: false
+        ) ?? image
+        guard let proxy = retouchProxy(image: analysisImage, fingerprint: source.cacheFingerprint) else {
+            return settings
+        }
+        var resolved = settings
+        for index in resolved.spots.indices {
+            let spot = resolved.spots[index]
+            guard spot.mode == .remove || spot.mode == .heal || spot.mode == .clone,
+                  spot.source == nil || isAutomatic(spot.source) else { continue }
+            let rank: Int
+            if case .auto(_, let existingRank)? = spot.source { rank = existingRank } else { rank = 0 }
+            resolved.spots[index] = RetouchSourcePicker.resolving(
+                spot, among: resolved.spots, in: proxy, rank: rank,
+                cancellation: { Task.isCancelled }
+            )
+        }
+        return resolved
+    }
+
+    private func isAutomatic(_ source: RetouchSource?) -> Bool {
+        if case .auto? = source { return true }
+        return false
+    }
+
+    private func retouchProxy(image: CIImage, fingerprint: String) -> RetouchAnalysisProxy? {
+        if let cached = retouchAnalysisCache, cached.fingerprint == fingerprint { return cached.proxy }
+        let extent = image.extent.integral
+        guard extent.width > 0, extent.height > 0 else { return nil }
+        let scale = min(1, 1024 / max(extent.width, extent.height))
+        let width = max(1, Int((extent.width * scale).rounded()))
+        let height = max(1, Int((extent.height * scale).rounded()))
+        let scaled = image.transformed(by: CGAffineTransform(scaleX: CGFloat(width) / extent.width,
+                                                             y: CGFloat(height) / extent.height))
+            .transformed(by: CGAffineTransform(translationX: -extent.minX * CGFloat(width) / extent.width,
+                                               y: -extent.minY * CGFloat(height) / extent.height))
+            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        context.render(scaled, toBitmap: &bytes, rowBytes: width * 4,
+                       bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                       format: .RGBA8, colorSpace: colorSpace)
+        let proxy = RetouchAnalysisProxy.fromRGBA8(Data(bytes), width: width, height: height)
+        guard proxy.isUsable else { return nil }
+        retouchAnalysisCache = (fingerprint, proxy)
+        return proxy
     }
 
     /// Standard-image decode is immutable value work. It does not touch the interactive RAW

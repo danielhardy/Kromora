@@ -45,6 +45,13 @@ struct RetouchInspectorView: View {
                             slider("Feather", value: spotBinding(\.feather), range: 0...1, format: "%.0f%%", scale: 100)
                             slider("Opacity", value: spotBinding(\.opacity), range: 0...1, format: "%.0f%%", scale: 100)
                             sourceOffsetSliders
+                            if case .auto(_, let rank)? = spot.wrappedValue.source {
+                                HStack {
+                                    Text("Automatic source · rank \(rank + 1)").font(.caption).foregroundStyle(.secondary)
+                                    Spacer()
+                                    Button("Next Source") { Task { await viewModel.pickRetouchSource(spotID: spot.wrappedValue.id, rank: rank + 1) } }
+                                }
+                            }
                             Button("Delete Spot", role: .destructive) { removeSpot(spot.wrappedValue.id) }
                         } else {
                             Text("Add a spot, then adjust its center and source offset.")
@@ -176,10 +183,15 @@ struct RetouchInspectorView: View {
             return Double(axis == .x ? point.x : point.y)
         }, set: { value in
             guard var spot = selectedSpot?.wrappedValue, !spot.region.samples.isEmpty else { return }
+            let automaticRank: Int? = {
+                if case .auto(_, let rank)? = spot.source { return rank }
+                return nil
+            }()
             var sample = spot.region.samples[0]
             if axis == .x { sample.point.x = value } else { sample.point.y = value }
             spot.region.samples[0] = sample
             selectedSpot?.wrappedValue = spot
+            if let automaticRank { Task { await viewModel.pickRetouchSource(spotID: spot.id, rank: automaticRank) } }
         }), range: 0...1, format: "%.2f")
     }
 
@@ -206,10 +218,11 @@ struct RetouchInspectorView: View {
     private func addSpot() {
         let spot = RetouchSpot(
             mode: mode, region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))]),
-            source: mode == .remove ? nil : .manual(offset: .zero)
+            source: nil
         )
         viewModel.updateDocument { $0.retouch.spots.append(spot) }
         selectedSpotID = spot.id
+        Task { await viewModel.pickRetouchSource(spotID: spot.id) }
     }
 
     private func addEye() {

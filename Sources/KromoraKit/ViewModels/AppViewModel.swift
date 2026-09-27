@@ -3094,6 +3094,34 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             transform)
     }
 
+    /// Persist a deterministic automatic source choice only if the spot and open source still match
+    /// the request. A manual source always wins over a late picker result.
+    func pickRetouchSource(spotID: UUID, rank: Int = 0) async {
+        guard let source = imageSource,
+              let spot = document.retouch.spots.first(where: { $0.id == spotID }) else { return }
+        if case .manual? = spot.source { return }
+        let sourceFingerprint = source.cacheFingerprint
+        let originalRegion = spot.region
+        let settings = document.retouch
+        guard let picked = await engine.pickRetouchSource(
+            source: source, settings: settings, spotID: spotID, rank: rank
+        ), imageSource?.cacheFingerprint == sourceFingerprint,
+           let current = document.retouch.spots.first(where: { $0.id == spotID }),
+           current.region == originalRegion,
+           current.source == nil || isAutomaticRetouchSource(current.source) else { return }
+        updateDocument { document in
+            guard let index = document.retouch.spots.firstIndex(where: { $0.id == spotID }),
+                  document.retouch.spots[index].region == originalRegion,
+                  document.retouch.spots[index].source == nil || isAutomaticRetouchSource(document.retouch.spots[index].source) else { return }
+            document.retouch.spots[index].source = picked
+        }
+    }
+
+    private func isAutomaticRetouchSource(_ source: RetouchSource?) -> Bool {
+        if case .auto? = source { return true }
+        return false
+    }
+
     /// Mutate the document and re-render, optionally coalescing a burst of edits into one render.
     ///
     /// **`debounced: true` is for continuous controls only** — a slider drag, where the user
