@@ -552,7 +552,9 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         viewModel.isInspectorPresented = true
         try await waitUntil("the opening histogram") { await fake.histogramRequests.count == 1 }
 
-        viewModel.updateDocument { $0.crop.normalizedRect = CGRect(x: 0, y: 0, width: 0.75, height: 1) }
+        viewModel.updateDocument {
+            $0.crop.normalizedRect = CGRect(x: 0, y: 0, width: 0.75, height: 1)
+        }
         try await waitUntil("the cropped histogram") { await fake.histogramRequests.count == 2 }
 
         let request = await fake.histogramRequests.last

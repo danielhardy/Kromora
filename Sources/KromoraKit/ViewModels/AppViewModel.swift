@@ -4158,6 +4158,8 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionImageSource: ImageSource? { imageSource }
     var admissionSourceRevision: UInt64 { sourceRevision }
     var admissionDisplayRevision: UInt64 { displayRevision }
+    var admissionDisplayDocument: EditDocument { displayRequest.document }
+    var admissionDisplayLUT: CubeLUT? { displayRequest.lut }
     var admissionActiveAssetID: PhotoAssetID? { activeAssetID }
     var admissionLastPresentedRequest: RenderRequest? {
         previewPublicationCoordinator.lastPresentedVisibleRequest
