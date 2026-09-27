@@ -1,37 +1,6 @@
 import SwiftUI
-import AppKit
-import UniformTypeIdentifiers
 
 extension AppViewModel {
-    func importToneCurvePreset() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let preset = try JSONDecoder().decode(ToneCurvePreset.self, from: Data(contentsOf: url))
-            endUndoGrouping()
-            updateDocument { preset.apply(to: &$0.light) }
-        } catch {
-            NSApp.presentError(error)
-        }
-    }
-
-    func exportToneCurvePreset() {
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.json]
-        panel.nameFieldStringValue = "Tone Curves.json"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(ToneCurvePreset(light: document.light)).write(to: url, options: .atomic)
-        } catch {
-            NSApp.presentError(error)
-        }
-    }
-
     func lightValue(for control: LightControl) -> Double {
         control.value(in: document.light)
     }

@@ -136,8 +136,6 @@ private struct ToneCurveEditor: View {
                 .labelsHidden()
                 .pickerStyle(.segmented)
                 HStack(spacing: 12) {
-                    Button("Import…") { viewModel.importToneCurvePreset() }.buttonStyle(.link)
-                    Button("Export…") { viewModel.exportToneCurvePreset() }.buttonStyle(.link)
                     Spacer(minLength: 0)
                     Button("Reset") { viewModel.resetToneCurve(channel) }
                         .buttonStyle(.link)
