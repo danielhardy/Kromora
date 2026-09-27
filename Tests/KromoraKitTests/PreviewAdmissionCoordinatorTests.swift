@@ -201,6 +201,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var admissionInspectorPresented = false
     var admissionHistogramLoading = false
     var admissionHistogram: HistogramData?
+    var admissionOriginalPreviewImage: CIImage?
     var admissionHistogramErrorMessage: String?
     var admissionSourceName = "test"
     var admissionSourceSessionIsBusy = false
@@ -229,6 +230,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var admissionIsShuttingDown = false
     var cachePublicationCount = 0
     var histogramPublicationCount = 0
+    var originalHistogramPublicationCount = 0
     var statusMessage: String?
 
     init(
@@ -288,6 +290,9 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     func publishAdmissionHistogram(_ histogram: HistogramData?) {
         histogramPublicationCount += 1
         self.admissionHistogram = histogram
+    }
+    func publishAdmissionOriginalHistogram(_ histogram: HistogramData?) {
+        originalHistogramPublicationCount += 1
     }
     func publishAdmissionHistogramLoading(_ isLoading: Bool) { admissionHistogramLoading = isLoading }
     func publishAdmissionHistogramError(_ message: String?) { admissionHistogramErrorMessage = message }

@@ -12,7 +12,8 @@ struct LightInspectorView: View {
     @State private var curveSectionExpanded = true
 
     var body: some View {
-        ScrollView {
+        ScrollViewReader { scrollProxy in
+          ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 header
 
@@ -22,7 +23,7 @@ struct LightInspectorView: View {
                             controlRow(
                                 control,
                                 sortPriority: Double(LightControl.allCases.count - offset)
-                            )
+                            ).id(control)
                         }
                     }
                     .padding(.top, 10)
@@ -34,6 +35,10 @@ struct LightInspectorView: View {
                 }
             }
             .padding(16)
+          }
+          .onChange(of: viewModel.exposureScrollRequest) { _, _ in
+              scrollProxy.scrollTo(LightControl.exposure, anchor: .center)
+          }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Light adjustments")

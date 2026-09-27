@@ -63,6 +63,18 @@ the document untouched. Auto estimates from the currently rendered image region;
 the legacy post-render node on RAW); Custom leaves the current values available for fine adjustment.
 These controls use normal document history and package persistence.
 
+## Exposure and color scopes
+
+The Info histogram describes the settled rendered preview in the active working space. Its bounded
+RGBA sample (longest edge at most 512 pixels) also drives waveform, RGB parade, and vectorscope
+plots, plus hover sampling. Cursor RGB is encoded sRGB 8-bit (0–255); Lab is CIE L*a*b* using the
+D65 2° reference white (L* 0–100, signed a*/b*). Clipping totals are counts in that same bounded
+sample, not extrapolated full-resolution pixel counts: highlights mean any channel is 255, shadows
+mean all channels are 0, and per-channel totals count values at 255. The canvas alert is
+presentation-only and can be toggled from the Info histogram. The Exposure shortcut selects Light
+and scrolls to its Exposure row. Canvas hover coordinates are mapped through the active crop and
+zoom transform before looking up the sample.
+
 ## Auto and photo analysis
 
 `PhotoAnalysisCoordinator` owns Vision-backed analysis, semantic-mask generation, caching, and

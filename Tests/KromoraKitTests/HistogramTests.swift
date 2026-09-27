@@ -44,6 +44,16 @@ final class HistogramTests: TempDirectoryTestCase {
         // Rec.709 luma of pure red is 0.2126 → bin 54.
         XCTAssertEqual(histogram.luma.firstIndex { $0 > 0 }, 54)
         XCTAssertEqual(histogram.luma[54], width * height)
+        XCTAssertEqual(histogram.clippedHighlights, width * height)
+        XCTAssertEqual(histogram.clippedRed, width * height)
+        XCTAssertEqual(histogram.clippedGreen, 0)
+        XCTAssertEqual(histogram.clippedShadows, 0)
+        XCTAssertEqual(histogram.sampleWidth, width)
+        XCTAssertEqual(histogram.sampleHeight, height)
+        let readout = try XCTUnwrap(histogram.readout(x: 0, y: 0))
+        XCTAssertEqual([readout.red, readout.green, readout.blue], [255, 0, 0])
+        XCTAssertEqual(readout.lab.l, 53.24, accuracy: 0.1)
+        XCTAssertNil(histogram.readout(x: width, y: 0))
     }
 
     /// Rows can be padded, and reading past the end of a row would silently tally the wrong bytes.

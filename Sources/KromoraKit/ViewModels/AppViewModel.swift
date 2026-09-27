@@ -565,6 +565,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Histogram of the currently displayed image (graded result, or original
     /// while comparing). `nil` until computed / when no image is loaded.
     @Published var histogram: HistogramData?
+    @Published private(set) var originalHistogram: HistogramData?
+    @Published private(set) var pixelReadout: PixelReadout?
+    @Published private(set) var pixelReadoutBefore: PixelReadout?
+    @Published var showClippingAlerts = true
+    @Published private(set) var exposureScrollRequest = 0
     /// A nil histogram is otherwise ambiguous: it can mean loading, cancellation, an
     /// unsupported source, or a failed calculation. Keep the terminal UI state explicit.
     @Published private(set) var isHistogramLoading = false
@@ -3605,6 +3610,49 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     // MARK: - Inspector histogram
 
+    func updatePixelReadout(at point: CGPoint, viewportSize: CGSize) {
+        guard let histogram, let virtualExtent = previewSurface.presentationImageExtent,
+              viewportSize.width > 0, viewportSize.height > 0,
+              histogram.sampleWidth > 0, histogram.sampleHeight > 0 else {
+            pixelReadout = nil
+            pixelReadoutBefore = nil
+            return
+        }
+        let layoutExtent = previewSurface.layoutImageExtent ?? virtualExtent
+        let transform = canvasNavigation.transform(imageExtent: virtualExtent,
+                                                   viewportSize: viewportSize)
+        guard transform.scale > 0 else { pixelReadout = nil; pixelReadoutBefore = nil; return }
+        let x = (point.x - transform.origin.x) / transform.scale
+            - (layoutExtent.minX - virtualExtent.minX)
+        let y = (point.y - transform.origin.y) / transform.scale
+            - (virtualExtent.maxY - layoutExtent.maxY)
+        let u = x / layoutExtent.width
+        let v = y / layoutExtent.height
+        guard u >= 0, u < 1, v >= 0, v < 1 else {
+            pixelReadout = nil
+            pixelReadoutBefore = nil
+            return
+        }
+        pixelReadout = histogram.readout(
+            x: Int(u * CGFloat(histogram.sampleWidth)),
+            y: Int(v * CGFloat(histogram.sampleHeight)))
+        if let originalHistogram,
+           originalHistogram.sampleWidth == histogram.sampleWidth,
+           originalHistogram.sampleHeight == histogram.sampleHeight {
+            pixelReadoutBefore = originalHistogram.readout(
+                x: Int(u * CGFloat(originalHistogram.sampleWidth)),
+                y: Int(v * CGFloat(originalHistogram.sampleHeight)))
+        } else {
+            pixelReadoutBefore = nil
+        }
+    }
+
+    func showExposureControl() {
+        guard availableInspectorTabs.contains(.light) else { return }
+        inspectorTab = .light
+        exposureScrollRequest &+= 1
+    }
+
     func toggleInspector() {
         guard sourceImage != nil else {
             statusMessage = "Open an image first"
@@ -4341,6 +4389,7 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionInspectorPresented: Bool { isInspectorPresented }
     var admissionHistogramLoading: Bool { isHistogramLoading }
     var admissionHistogram: HistogramData? { histogram }
+    var admissionOriginalPreviewImage: CIImage? { originalPreviewSurface.image }
     var admissionHistogramErrorMessage: String? { histogramErrorMessage }
     var admissionSourceName: String { sourceName }
     var admissionCollection: ImageCollection { collection }
@@ -4434,6 +4483,7 @@ extension AppViewModel: PreviewAdmissionDestination {
     }
 
     func publishAdmissionHistogram(_ histogram: HistogramData?) { self.histogram = histogram }
+    func publishAdmissionOriginalHistogram(_ histogram: HistogramData?) { self.originalHistogram = histogram }
     func publishAdmissionHistogramLoading(_ isLoading: Bool) { isHistogramLoading = isLoading }
     func publishAdmissionHistogramError(_ message: String?) { histogramErrorMessage = message }
     func publishAdmissionStatus(_ message: String) { statusMessage = message }
