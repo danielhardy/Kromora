@@ -29,6 +29,21 @@ full-resolution Lab crop and refines leading choices within ±2 pixels. Automati
 deterministic initial offset for Remove's later correspondence-field solver. Analysis pixels and
 Core Image values stay inside `RenderEngine`; only Lab value buffers enter the Sendable picker.
 
+`PatchMatchInpainter` is the standalone Remove correspondence-field producer. It consumes full-res
+Lab values and byte masks, seeds from the source picker's offset, excludes every source patch that
+touches the destination or another excluded hole, and returns an absolute-pixel RG32F-compatible
+field over the hole bounds. Its three shrinking random-search windows, forward/reverse propagation,
+Lab SSD, gradient cost, seeded SplitMix generator, stable ties, and weighted field vote are
+deterministic. Cancellation throws `SolverError.cancelled` without returning a partial field.
+Thin masks select 5×5 patches; other masks use 7×7. This first
+implementation has not yet passed every quality row; KRMA-662 remains in review with the measured
+gaps listed below.
+
+Solver-only optimized Swift timings on an Apple M4 Pro (12 CPU cores), measured with `swiftc -O`
+and standalone synthetic buffers: a 60 × 60 dust mask in a 192 × 144 region took 24.1 ms; a
+3,000 × 12 px wire in a 3,000 × 64 region took 238.4 ms. Both are under the 50 ms and 400 ms
+targets. These timings exclude decode, Lab conversion, and the renderer's membrane composite.
+
 The Retouch inspector currently edits the first sample of a circular recipe and its source offset;
 freehand canvas creation, pin editing, and field solving are separate follow-up work. The Dust Finder shows a sharpened, high-contrast preview at pixel size, overlays
 visible spot markers, and scrolls between spot centers. It does not perform automatic face/pupil
@@ -67,7 +82,14 @@ inside every listed limit.
 | Skin-like | 3.0 | 28 | 0.55–1.65 | 0.025 |
 
 `Remove (no path)` is reported as the unchanged damaged image while the correspondence-field producer
-is pending in KRMA-662. That row deliberately fails the gate. The suite also asserts that the current
+is pending in KRMA-662. That row deliberately fails the gate. The solver-only table runs the field
+through a test helper that samples the live damaged image and applies an exterior-ring-only membrane
+colour correction. On the Apple M4 Pro, the current solver passes 32/36 rows. Four measured gaps
+remain: cloud/60 px dust (ΔE 6.15, limit 3.5), foliage/60 px dust (ΔE 4.85, limit 4.5), brick/60 px
+dust (ΔE 9.19, limit 4.0), and brick/sagging edge-crossing wire (ΔE 5.01, limit 4.0). The larger
+cloud and foliage masks hide most of their underlying texture and edge context; the brick dust hides
+repeating mortar/brick structure; the sagging wire still leaves too much error where it crosses the
+brick edge. All reported values use the unchanged KRMA-658 thresholds. The suite also asserts that the current
 Heal misses at least one case of every defect family; this records the remaining quality gap pending
 threshold review and later solver work. “Current” runs the default Heal recipe through the production
 renderer. The evaluation limits are intentionally not a timing benchmark.
