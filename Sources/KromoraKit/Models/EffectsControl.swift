@@ -72,7 +72,8 @@ enum DetailControl: String, CaseIterable, Hashable, Sendable {
     }
     var neutral: Double {
         switch self {
-        case .sharpeningRadius, .sharpeningDetail, .colorDetail, .luminanceDetail: 50
+        case .sharpeningRadius: 1
+        case .sharpeningDetail, .colorDetail, .luminanceDetail: 50
         default: 0
         }
     }
