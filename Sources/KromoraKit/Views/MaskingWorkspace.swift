@@ -2089,17 +2089,8 @@ struct MaskCanvasOverlay: View {
                 in: &context)
         }
 
-        let top = radialGuidePoint(
-            definition: definition, parameter: -.pi / 2, scale: 1, transform: transform)
-        let rotationHandle: CGPoint
-        if let top {
-            let dx = top.x - center.x
-            let dy = top.y - center.y
-            let length = max(hypot(dx, dy), 0.001)
-            rotationHandle = CGPoint(x: top.x + dx / length * 30, y: top.y + dy / length * 30)
-        } else {
-            rotationHandle = CGPoint(x: center.x, y: center.y - 30)
-        }
+        let (top, rotationHandle) = radialRotationHandle(
+            definition: definition, center: center, transform: transform)
         strokeGuide(
             Path { path in
                 path.move(to: top ?? center)
@@ -2241,6 +2232,23 @@ struct MaskCanvasOverlay: View {
         return transform.viewportPoint(forSourceNormalized: sourcePoint)
     }
 
+    private func radialRotationHandle(
+        definition: RadialGradientDefinition,
+        center: CGPoint,
+        transform: CanvasMaskTransform
+    ) -> (top: CGPoint?, handle: CGPoint) {
+        let top = radialGuidePoint(
+            definition: definition, parameter: -.pi / 2, scale: 1, transform: transform)
+        guard let top else {
+            return (nil, CGPoint(x: center.x, y: center.y - 30))
+        }
+        let dx = top.x - center.x
+        let dy = top.y - center.y
+        let length = max(hypot(dx, dy), 0.001)
+        let handle = CGPoint(x: top.x + dx / length * 30, y: top.y + dy / length * 30)
+        return (top, handle)
+    }
+
     private func radialHandle(
         at viewportPoint: CGPoint, transform: CanvasMaskTransform
     ) -> MaskInteractionState.RadialHandle? {
@@ -2251,21 +2259,8 @@ struct MaskCanvasOverlay: View {
               let center = transform.viewportPoint(forSourceNormalized: definition.center)
         else { return nil }
 
-        func distance(_ lhs: CGPoint, _ rhs: CGPoint) -> CGFloat {
-            hypot(lhs.x - rhs.x, lhs.y - rhs.y)
-        }
-
-        let top = radialGuidePoint(
-            definition: definition, parameter: -.pi / 2, scale: 1, transform: transform)
-        let rotation: CGPoint
-        if let top {
-            let dx = top.x - center.x
-            let dy = top.y - center.y
-            let length = max(hypot(dx, dy), 0.001)
-            rotation = CGPoint(x: top.x + dx / length * 30, y: top.y + dy / length * 30)
-        } else {
-            rotation = CGPoint(x: center.x, y: center.y - 30)
-        }
+        let rotation = radialRotationHandle(
+            definition: definition, center: center, transform: transform).handle
         if distance(viewportPoint, rotation) <= 16 { return .rotation }
         if distance(viewportPoint, center) <= 16 { return .center }
 
