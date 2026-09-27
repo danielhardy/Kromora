@@ -88,6 +88,13 @@ struct MaskingWorkspace: View {
                     }
                 }
             }
+            Section("Range selectors") {
+                ForEach(MaskCreationKind.rangeKinds, id: \.self) { kind in
+                    Button { create(kind) } label: {
+                        Label(kind.title, systemImage: kind.iconName)
+                    }
+                }
+            }
         } label: {
             Label("Add Mask", systemImage: "plus")
         }
@@ -174,7 +181,7 @@ struct MaskingWorkspace: View {
         switch layer.components[index].source {
         case .linear: return .linear
         case .radial: return .radial
-        case .brush, .semantic: return nil
+        case .brush, .semantic, .luminance, .color, .depth: return nil
         }
     }
 
@@ -483,6 +490,11 @@ struct MaskingWorkspace: View {
                     refineButton(kind, layer: layer, mode: mode)
                 }
             }
+            Section("Range selectors") {
+                ForEach(MaskCreationKind.rangeKinds, id: \.self) { kind in
+                    refineButton(kind, layer: layer, mode: mode)
+                }
+            }
             Section("Smart selections") {
                 ForEach(MaskCreationKind.smartKinds, id: \.self) { kind in
                     refineButton(kind, layer: layer, mode: mode)
@@ -676,6 +688,76 @@ struct MaskingWorkspace: View {
                             source = .radial(current)
                         }
                     }), range: 0...1)
+        case .luminance(let definition):
+            LuminanceRangeHistogram(
+                data: viewModel.histogram,
+                lower: componentValue(component.id, layerID: layerID,
+                    get: { if case .luminance(let value) = $0 { return value.lower }; return definition.lower },
+                set: { source, number in if case .luminance(var value) = source { value.lower = min(number, value.upper); source = .luminance(value) } }),
+                upper: componentValue(component.id, layerID: layerID,
+                    get: { if case .luminance(let value) = $0 { return value.upper }; return definition.upper },
+                set: { source, number in if case .luminance(var value) = source { value.upper = max(number, value.lower); source = .luminance(value) } })
+            )
+            Text("Select tones in the source image.")
+                .font(.caption).foregroundStyle(.secondary)
+            maskSlider("Shadows", value: componentValue(component.id, layerID: layerID,
+                get: { if case .luminance(let value) = $0 { return value.lower }; return definition.lower },
+                set: { source, number in if case .luminance(var value) = source { value.lower = min(number, value.upper); source = .luminance(value) } }), range: 0...1)
+            maskSlider("Highlights", value: componentValue(component.id, layerID: layerID,
+                get: { if case .luminance(let value) = $0 { return value.upper }; return definition.upper },
+                set: { source, number in if case .luminance(var value) = source { value.upper = max(number, value.lower); source = .luminance(value) } }), range: 0...1)
+            maskSlider("Smoothness", value: componentValue(component.id, layerID: layerID,
+                get: { if case .luminance(let value) = $0 { return value.smoothness }; return definition.smoothness },
+                set: { source, number in if case .luminance(var value) = source { value.smoothness = number; source = .luminance(value) } }), range: 0...0.5)
+        case .color(let definition):
+            Text("Sample colors from the image, then refine the selection.")
+                .font(.caption).foregroundStyle(.secondary)
+            ForEach(definition.samples) { sample in
+                HStack {
+                    ColorPicker("Sample", selection: colorSampleBinding(
+                        component.id, layerID: layerID, sampleID: sample.id
+                    ), supportsOpacity: false)
+                    if definition.samples.count > 1 {
+                        Button("Remove", systemImage: "minus.circle") {
+                            viewModel.updateMaskComponent(component.id, in: layerID) { component in
+                                guard case .color(var value) = component.source else { return }
+                                value.samples.removeAll { $0.id == sample.id }
+                                component.source = .color(value)
+                            }
+                        }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Remove color sample")
+                    }
+                }
+            }
+            if definition.samples.count < 8 {
+                Button("Add color sample", systemImage: "plus.circle") {
+                    viewModel.updateMaskComponent(component.id, in: layerID) { component in
+                        guard case .color(var value) = component.source,
+                              let sample = value.samples.last else { return }
+                        value.samples.append(ColorRangeSample(
+                            red: sample.red, green: sample.green, blue: sample.blue
+                        ))
+                        component.source = .color(value)
+                    }
+                }
+                .buttonStyle(.borderless)
+            }
+            maskSlider("Falloff", value: componentValue(component.id, layerID: layerID,
+                get: { if case .color(let value) = $0 { return value.falloff }; return definition.falloff },
+                set: { source, number in if case .color(var value) = source { value.falloff = number; source = .color(value) } }), range: 0.01...1)
+            maskSlider("Refine", value: componentValue(component.id, layerID: layerID,
+                get: { if case .color(let value) = $0 { return value.refinement }; return definition.refinement },
+                set: { source, number in if case .color(var value) = source { value.refinement = number; source = .color(value) } }), range: 0...0.5)
+        case .depth(let definition):
+            Text("Depth data is unavailable for this photo. Depth range masks need an embedded depth map.")
+                .font(.caption).foregroundStyle(.secondary)
+            maskSlider("Near", value: componentValue(component.id, layerID: layerID,
+                get: { if case .depth(let value) = $0 { return value.near }; return definition.near },
+                set: { source, number in if case .depth(var value) = source { value.near = min(number, value.far); source = .depth(value) } }), range: 0...1)
+            maskSlider("Far", value: componentValue(component.id, layerID: layerID,
+                get: { if case .depth(let value) = $0 { return value.far }; return definition.far },
+                set: { source, number in if case .depth(var value) = source { value.far = max(number, value.near); source = .depth(value) } }), range: 0...1)
         }
     }
 
@@ -795,7 +877,89 @@ struct MaskingWorkspace: View {
         )
     }
 
+    private func colorSampleBinding(
+        _ componentID: UUID, layerID: UUID, sampleID: UUID
+    ) -> Binding<Color> {
+        Binding(
+            get: {
+                guard let component = inspectorLayer(id: layerID)?.components.first(where: { $0.id == componentID }),
+                      case .color(let value) = component.source,
+                      let sample = value.samples.first(where: { $0.id == sampleID }) else { return .white }
+                return Color(.sRGB, red: sample.red, green: sample.green, blue: sample.blue, opacity: 1)
+            },
+            set: { color in
+                guard let rgb = NSColor(color).usingColorSpace(.deviceRGB) else { return }
+                viewModel.updateMaskComponent(componentID, in: layerID) { component in
+                    guard case .color(var value) = component.source,
+                          let index = value.samples.firstIndex(where: { $0.id == sampleID }) else { return }
+                    value.samples[index].red = Double(rgb.redComponent)
+                    value.samples[index].green = Double(rgb.greenComponent)
+                    value.samples[index].blue = Double(rgb.blueComponent)
+                    component.source = .color(value)
+                }
+            }
+        )
+    }
 
+
+}
+
+/// The current photo histogram is the range selector's backdrop; dragging either handle changes
+/// the persisted source-space thresholds through the same bindings as numeric controls.
+private struct LuminanceRangeHistogram: View {
+    let data: HistogramData?
+    @Binding var lower: Double
+    @Binding var upper: Double
+    @State private var draggedHandle: Handle?
+
+    private enum Handle { case lower, upper }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            GeometryReader { geometry in
+                Canvas { context, size in
+                    guard let data, !data.luma.isEmpty else { return }
+                    let bins = data.luma
+                    let peak = max(1, bins.max() ?? 0)
+                    let barWidth = size.width / CGFloat(bins.count)
+                    for index in bins.indices {
+                        let height = size.height * CGFloat(bins[index]) / CGFloat(peak)
+                        let rect = CGRect(x: CGFloat(index) * barWidth,
+                                          y: size.height - height,
+                                          width: max(1, barWidth), height: height)
+                        context.fill(Path(rect), with: .color(.secondary.opacity(0.6)))
+                    }
+                    let selected = CGRect(x: size.width * lower, y: 0,
+                                          width: size.width * max(0, upper - lower), height: size.height)
+                    context.fill(Path(selected), with: .color(.orange.opacity(0.22)))
+                    for value in [lower, upper] {
+                        var line = Path()
+                        line.move(to: CGPoint(x: size.width * value, y: 0))
+                        line.addLine(to: CGPoint(x: size.width * value, y: size.height))
+                        context.stroke(line, with: .color(.orange), lineWidth: 2)
+                    }
+                }
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let fraction = min(1, max(0, value.location.x / max(1, geometry.size.width)))
+                        if draggedHandle == nil {
+                            draggedHandle = abs(fraction - lower) <= abs(fraction - upper) ? .lower : .upper
+                        }
+                        switch draggedHandle {
+                        case .lower: lower = min(fraction, upper)
+                        case .upper: upper = max(fraction, lower)
+                        case nil: break
+                        }
+                    }
+                    .onEnded { _ in draggedHandle = nil })
+            }
+            .frame(height: 58)
+            Text(data == nil ? "Loading histogram" : "Drag handles to select tonal range")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .accessibilityLabel("Luminance range histogram")
+    }
 }
 
 /// How a mask slider reads out: amounts as a percentage of their range, angles in degrees.
@@ -1230,6 +1394,9 @@ extension MaskSource {
         case .brush: return "paintbrush"
         case .linear: return "line.diagonal"
         case .radial: return "oval"
+        case .luminance: return "circle.lefthalf.filled"
+        case .color: return "eyedropper"
+        case .depth: return "square.3.layers.3d"
         }
     }
 }
@@ -1239,7 +1406,8 @@ extension MaskCreationKind {
     /// subtracts from whichever mask is selected.
     fileprivate static let canvasKinds: [MaskCreationKind] = [.brush, .linear, .radial]
 
-    fileprivate static let allAddable: [MaskCreationKind] = smartKinds + canvasKinds
+    fileprivate static let rangeKinds: [MaskCreationKind] = [.luminance, .color, .depth]
+    fileprivate static let allAddable: [MaskCreationKind] = smartKinds + canvasKinds + rangeKinds
 
     fileprivate var iconName: String {
         switch self {
@@ -1252,6 +1420,9 @@ extension MaskCreationKind {
         case .erase: return "eraser"
         case .linear: return "line.diagonal"
         case .radial: return "oval"
+        case .luminance: return "circle.lefthalf.filled"
+        case .color: return "eyedropper"
+        case .depth: return "square.3.layers.3d"
         }
     }
 
@@ -1266,6 +1437,9 @@ extension MaskCreationKind {
         case .erase: return .brush(BrushMaskDefinition())
         case .linear: return .linear(LinearGradientDefinition())
         case .radial: return .radial(RadialGradientDefinition())
+        case .luminance: return .luminance(LuminanceRangeDefinition())
+        case .color: return .color(ColorRangeDefinition())
+        case .depth: return .depth(DepthRangeDefinition())
         }
     }
 }
@@ -1608,7 +1782,7 @@ struct MaskCanvasOverlay: View {
         switch draft.components[index].source {
         case .linear, .radial:
             return draft
-        case .brush, .semantic:
+        case .brush, .semantic, .luminance, .color, .depth:
             return nil
         }
     }
@@ -1693,7 +1867,7 @@ struct MaskCanvasOverlay: View {
             let index = layer.targetComponentIndex(selected: maskingState.selectedComponentID)
         else { return }
         switch layer.components[index].source {
-        case .semantic, .brush:
+        case .semantic, .brush, .luminance, .color, .depth:
             // The wash already shows these; a frame or stroke outline would only add noise.
             break
         case .linear(let definition):

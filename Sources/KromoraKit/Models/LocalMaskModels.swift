@@ -165,6 +165,60 @@ struct SemanticMaskDefinition: Codable, Sendable, Equatable {
     private static func unit(_ value: Double) -> Double { value.clamped(to: 0...1, default: 0) }
 }
 
+struct LuminanceRangeDefinition: Codable, Sendable, Equatable {
+    var lower: Double
+    var upper: Double
+    var smoothness: Double
+
+    init(lower: Double = 0.25, upper: Double = 0.75, smoothness: Double = 0.1) {
+        let low = lower.clamped(to: 0...1, default: 0.25)
+        let high = upper.clamped(to: 0...1, default: 0.75)
+        self.lower = min(low, high)
+        self.upper = max(low, high)
+        self.smoothness = smoothness.clamped(to: 0...0.5, default: 0.1)
+    }
+}
+
+struct ColorRangeSample: Codable, Sendable, Equatable, Identifiable {
+    var id: UUID
+    var red: Double
+    var green: Double
+    var blue: Double
+
+    init(id: UUID = UUID(), red: Double, green: Double, blue: Double) {
+        self.id = id
+        self.red = red.clamped(to: 0...1, default: 0)
+        self.green = green.clamped(to: 0...1, default: 0)
+        self.blue = blue.clamped(to: 0...1, default: 0)
+    }
+}
+
+struct ColorRangeDefinition: Codable, Sendable, Equatable {
+    var samples: [ColorRangeSample]
+    var falloff: Double
+    var refinement: Double
+
+    init(samples: [ColorRangeSample] = [ColorRangeSample(red: 0.2, green: 0.5, blue: 0.3)], falloff: Double = 0.25, refinement: Double = 0.1) {
+        self.samples = Array(samples.prefix(8))
+        self.falloff = falloff.clamped(to: 0.01...1, default: 0.25)
+        self.refinement = refinement.clamped(to: 0...0.5, default: 0.1)
+    }
+}
+
+struct DepthRangeDefinition: Codable, Sendable, Equatable {
+    var near: Double
+    var far: Double
+    var smoothness: Double
+
+    init(near: Double = 0, far: Double = 1, smoothness: Double = 0.1) {
+        let low = near.clamped(to: 0...1, default: 0)
+        let high = far.clamped(to: 0...1, default: 1)
+        self.near = min(low, high)
+        self.far = max(low, high)
+        self.smoothness = smoothness.clamped(to: 0...0.5, default: 0.1)
+    }
+}
+
 struct BrushSample: Codable, Sendable, Equatable {
     /// Upper-left oriented-source coordinates, normalized to 0...1.
     var point: CGPoint
@@ -414,16 +468,22 @@ struct RadialGradientDefinition: Codable, Sendable, Equatable {
 
 enum MaskSource: Codable, Sendable, Equatable {
     case semantic(SemanticMaskDefinition)
+    case luminance(LuminanceRangeDefinition)
+    case color(ColorRangeDefinition)
+    case depth(DepthRangeDefinition)
     case brush(BrushMaskDefinition)
     case linear(LinearGradientDefinition)
     case radial(RadialGradientDefinition)
 
-    private enum CodingKeys: String, CodingKey { case kind, semantic, brush, linear, radial }
-    private enum Kind: String, Codable { case semantic, brush, linear, radial }
+    private enum CodingKeys: String, CodingKey { case kind, semantic, luminance, color, depth, brush, linear, radial }
+    private enum Kind: String, Codable { case semantic, luminance, color, depth, brush, linear, radial }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         switch try c.decode(Kind.self, forKey: .kind) {
         case .semantic: self = .semantic(try c.decode(SemanticMaskDefinition.self, forKey: .semantic))
+        case .luminance: self = .luminance(try c.decode(LuminanceRangeDefinition.self, forKey: .luminance))
+        case .color: self = .color(try c.decode(ColorRangeDefinition.self, forKey: .color))
+        case .depth: self = .depth(try c.decode(DepthRangeDefinition.self, forKey: .depth))
         case .brush: self = .brush(try c.decode(BrushMaskDefinition.self, forKey: .brush))
         case .linear: self = .linear(try c.decode(LinearGradientDefinition.self, forKey: .linear))
         case .radial: self = .radial(try c.decode(RadialGradientDefinition.self, forKey: .radial))
@@ -433,6 +493,9 @@ enum MaskSource: Codable, Sendable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         switch self {
         case .semantic(let value): try c.encode(Kind.semantic, forKey: .kind); try c.encode(value, forKey: .semantic)
+        case .luminance(let value): try c.encode(Kind.luminance, forKey: .kind); try c.encode(value, forKey: .luminance)
+        case .color(let value): try c.encode(Kind.color, forKey: .kind); try c.encode(value, forKey: .color)
+        case .depth(let value): try c.encode(Kind.depth, forKey: .kind); try c.encode(value, forKey: .depth)
         case .brush(let value): try c.encode(Kind.brush, forKey: .kind); try c.encode(value, forKey: .brush)
         case .linear(let value): try c.encode(Kind.linear, forKey: .kind); try c.encode(value, forKey: .linear)
         case .radial(let value): try c.encode(Kind.radial, forKey: .kind); try c.encode(value, forKey: .radial)

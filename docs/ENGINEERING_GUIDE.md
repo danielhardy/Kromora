@@ -129,6 +129,15 @@ target part is that same gradient; otherwise it draws a new gradient mask, and a
 becomes a gradient restores the previous selection. Combine controls (mode, solo, invert, ordering) live
 on the part rows and appear only once a mask has more than one part.
 
+Range selectors are portable mask recipes. Luminance ranges keep normalized lower/upper thresholds
+and smoothness; the workspace shows the current luma histogram with draggable range handles. Color
+ranges retain up to eight sampled RGB values with falloff and refinement controls. Their mattes are
+derived from bounded, source-oriented ImageIO thumbnails and cached by source and recipe identity.
+Depth range recipes are retained, but the current import and render pipeline does not expose embedded
+depth maps; rendering one reports that depth data is unavailable rather than inventing coverage.
+Range selectors use the same ordered add, intersect, and subtract component composition as other
+mask sources.
+
 [`STORAGE_POLICY.md`](STORAGE_POLICY.md) is the source-of-truth matrix for the durable package,
 the Application Support projection, device caches, and user-visible output destinations.
 `PortableLibraryValidation` is the reusable read-only scrub boundary for package backup and restore.
