@@ -25,6 +25,28 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
         XCTAssertEqual(defaults.integer(forKey: "Kromora.settings.schemaVersion"), 1)
     }
 
+    func testClippingAlertVisibilityPersistsAcrossRelaunch() {
+        let defaults = makeDefaults()
+        let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+
+        XCTAssertFalse(first.showClippingAlerts)
+        first.showClippingAlerts = true
+
+        let relaunched = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+        XCTAssertTrue(relaunched.showClippingAlerts)
+    }
+
+    func testOpenFirstPhotoPreferencePersistsAcrossRelaunch() {
+        let defaults = makeDefaults()
+        let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+
+        XCTAssertFalse(first.openFirstPhotoWhenEnteringEdit)
+        first.openFirstPhotoWhenEnteringEdit = true
+
+        let relaunched = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
+        XCTAssertTrue(relaunched.openFirstPhotoWhenEnteringEdit)
+    }
+
     func testPhotoNameVisibilityPersistsAcrossRelaunch() {
         let defaults = makeDefaults()
         let first = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)

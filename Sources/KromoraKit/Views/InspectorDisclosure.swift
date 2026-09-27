@@ -55,3 +55,51 @@ struct InspectorDisclosure<Content: View>: View {
         }
     }
 }
+
+/// Vertical inspector scrolling that stays inside the column.
+///
+/// A wide row otherwise becomes the scroll document's width. The column then
+/// clips the leading edge, so labels slide out of the sidebar they belong to.
+struct InspectorScrollingContent<Content: View>: View {
+    @ViewBuilder private var content: () -> Content
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        ScrollView(.vertical) {
+            FitsProposedWidth {
+                content()
+            }
+        }
+        .contentMargins(.horizontal, 0, for: .scrollContent)
+    }
+}
+
+/// Reports the width the parent offered, even when a child would rather be wider.
+struct FitsProposedWidth: Layout {
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let width = proposal.width ?? child.sizeThatFits(.unspecified).width
+        let childSize = child.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
+        return CGSize(width: width, height: proposal.height ?? childSize.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        subviews.first?.place(
+            at: CGPoint(x: bounds.minX, y: bounds.minY),
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+        )
+    }
+}

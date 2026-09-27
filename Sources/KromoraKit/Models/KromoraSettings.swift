@@ -65,6 +65,8 @@ public final class KromoraSettings: ObservableObject {
         static let schemaVersion = "Kromora.settings.schemaVersion"
         static let alwaysDarkMode = "Kromora.settings.alwaysDarkMode"
         static let showPhotoNames = "Kromora.settings.showPhotoNames"
+        static let openFirstPhotoWhenEnteringEdit = "Kromora.settings.openFirstPhotoWhenEnteringEdit"
+        static let showClippingAlerts = "Kromora.settings.showClippingAlerts"
 #if KROMORA_DIRECT_DISTRIBUTION
         static let automaticUpdateChecks = "Kromora.settings.automaticUpdateChecks"
 #endif
@@ -92,6 +94,24 @@ public final class KromoraSettings: ObservableObject {
         didSet {
             guard showPhotoNames != oldValue else { return }
             preferences.set(showPhotoNames, forKey: Key.showPhotoNames)
+        }
+    }
+
+    /// Draws the highlight and shadow clipping counts on the photo. Off until chosen from the
+    /// View menu; the histogram header still shows the same counts.
+    @Published public var showClippingAlerts: Bool {
+        didSet {
+            guard showClippingAlerts != oldValue else { return }
+            preferences.set(showClippingAlerts, forKey: Key.showClippingAlerts)
+        }
+    }
+
+    /// When Edit is entered with no library selection, open the first photo. Off leaves Edit
+    /// unavailable until a photo is chosen.
+    @Published public var openFirstPhotoWhenEnteringEdit: Bool {
+        didSet {
+            guard openFirstPhotoWhenEnteringEdit != oldValue else { return }
+            preferences.set(openFirstPhotoWhenEnteringEdit, forKey: Key.openFirstPhotoWhenEnteringEdit)
         }
     }
 
@@ -166,6 +186,9 @@ public final class KromoraSettings: ObservableObject {
         // An absent key means the user has never chosen a value. Keep an explicit stored choice,
         // including `true`, so changing the default does not override an opt-in.
         self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
+        self.openFirstPhotoWhenEnteringEdit =
+            preferences.object(forKey: Key.openFirstPhotoWhenEnteringEdit) as? Bool ?? false
+        self.showClippingAlerts = preferences.object(forKey: Key.showClippingAlerts) as? Bool ?? false
         self.maskOverlayAppearance = Self.storedMaskOverlayAppearance(in: preferences)
 #if KROMORA_DIRECT_DISTRIBUTION
         self.automaticUpdateChecks = preferences.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true
@@ -177,6 +200,9 @@ public final class KromoraSettings: ObservableObject {
         // Migration may have supplied the appearance value.
         self.alwaysDarkMode = preferences.object(forKey: Key.alwaysDarkMode) as? Bool ?? false
         self.showPhotoNames = preferences.object(forKey: Key.showPhotoNames) as? Bool ?? false
+        self.openFirstPhotoWhenEnteringEdit =
+            preferences.object(forKey: Key.openFirstPhotoWhenEnteringEdit) as? Bool ?? false
+        self.showClippingAlerts = preferences.object(forKey: Key.showClippingAlerts) as? Bool ?? false
 #if KROMORA_DIRECT_DISTRIBUTION
         self.automaticUpdateChecks = preferences.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true
 #endif

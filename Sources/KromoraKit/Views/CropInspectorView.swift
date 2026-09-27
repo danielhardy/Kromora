@@ -41,7 +41,7 @@ struct CropInspectorView: View {
 
             Divider()
 
-            ScrollView {
+            InspectorScrollingContent {
                 VStack(alignment: .leading, spacing: 18) {
                     aspectSection
                     rotationAndFlipSection

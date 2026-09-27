@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationFlushInProgress = false
 
     override init() {
+        // Kromora is a single-window editor. Automatic window tabbing inserts
+        // Hide Tab Bar / Show All Tabs into the View menu before scenes build.
+        NSWindow.allowsAutomaticWindowTabbing = false
         // Unbundled `swift run` starts as a background process. AppViewModel init can present a
         // lease-recovery NSAlert before applicationDidFinishLaunching, and that alert is otherwise
         // invisible — the terminal prints "Build complete!" and appears hung.
@@ -27,6 +30,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.viewModel = viewModel
         self.appearanceController = KromoraWindowAppearanceController(settings: viewModel.settings)
         super.init()
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // AppKit adds Hide Tab Bar and Show All Tabs while building the main menu.
+        // The flag has to be false by then, not only before the first window exists.
+        NSWindow.allowsAutomaticWindowTabbing = false
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

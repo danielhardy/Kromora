@@ -15,7 +15,7 @@ struct EffectsInspectorView: View {
     @State private var grainExpanded = false
 
     var body: some View {
-        ScrollView {
+        InspectorScrollingContent {
             VStack(alignment: .leading, spacing: 12) {
                 header
                 detailSection

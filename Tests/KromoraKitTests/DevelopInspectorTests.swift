@@ -156,17 +156,17 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
             standardTabs,
             "a standard image must not offer Develop"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             AppViewModel.InspectorTab.availableTabs(
                 hasImage: true, developPanelState: .probing
             ).contains(.develop),
-            "a RAW stays reachable while its capabilities are being read"
+            "Develop stays out of the icon bar while showsDevelopTab is false"
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             AppViewModel.InspectorTab.availableTabs(
                 hasImage: true, developPanelState: .ready(supported)
             ).contains(.develop),
-            "a RAW with supported controls offers Develop"
+            "Develop stays out of the icon bar while showsDevelopTab is false"
         )
 
         let emptyRAW = State(

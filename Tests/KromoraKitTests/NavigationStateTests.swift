@@ -187,6 +187,41 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.isSourceBrowserPresented)
     }
 
+    func testEditOpensTheFirstPhotoOnlyWhenThatSettingIsOn() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "first.png", in: tempDirectory
+        )
+        try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "second.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+
+        viewModel.collection.select(at: 0, modifiers: [.command])
+        XCTAssertNil(viewModel.collection.selectedItem)
+        XCTAssertFalse(viewModel.settings.openFirstPhotoWhenEnteringEdit)
+        viewModel.isSourceBrowserPresented = true
+        viewModel.isInspectorPresented = false
+
+        XCTAssertFalse(viewModel.navigate(to: .edit))
+        XCTAssertEqual(viewModel.navigation.mode, .grid)
+        XCTAssertNil(viewModel.collection.selectedItem)
+
+        viewModel.settings.openFirstPhotoWhenEnteringEdit = true
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        XCTAssertEqual(viewModel.navigation.mode, .edit)
+        XCTAssertEqual(viewModel.collection.selectedItem?.url, first)
+        XCTAssertFalse(viewModel.isSourceBrowserPresented)
+        XCTAssertTrue(viewModel.isInspectorPresented)
+
+        viewModel.selectLibraryItem(at: 1)
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        XCTAssertEqual(viewModel.collection.selectedIndex, 1)
+    }
+
     func testLibraryDoubleClickOpensInspectorAndClosesSourceBrowser() async throws {
         try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "photo.png", in: tempDirectory

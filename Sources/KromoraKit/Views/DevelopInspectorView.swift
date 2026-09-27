@@ -23,7 +23,7 @@ struct DevelopInspectorView: View {
         Group {
             switch viewModel.developPanelState {
             case .ready(let capabilities):
-                ScrollView {
+                InspectorScrollingContent {
                     VStack(alignment: .leading, spacing: 14) {
                         header
                         ForEach(Array(DevelopControl.allCases.enumerated()), id: \.element) { offset, control in

@@ -11,7 +11,7 @@ struct RetouchInspectorView: View {
     @State private var isDustFinderPresented = false
 
     var body: some View {
-        ScrollView {
+        InspectorScrollingContent {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
                     Text("Retouch").font(.headline)
