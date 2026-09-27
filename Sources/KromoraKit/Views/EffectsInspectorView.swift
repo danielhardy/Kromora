@@ -60,7 +60,7 @@ struct EffectsInspectorView: View {
     private var vignetteSection: some View {
         InspectorDisclosure("Vignette", isExpanded: $vignetteExpanded) {
             VStack(alignment: .leading, spacing: 12) {
-                sectionResetButton(
+                InspectorSectionResetButton(
                     title: "Reset Vignette",
                     disabled: !viewModel.hasVignetteAdjustments,
                     action: viewModel.resetAllVignette
@@ -87,7 +87,7 @@ struct EffectsInspectorView: View {
     private var grainSection: some View {
         InspectorDisclosure("Grain", isExpanded: $grainExpanded) {
             VStack(alignment: .leading, spacing: 12) {
-                sectionResetButton(
+                InspectorSectionResetButton(
                     title: "Reset Grain",
                     disabled: !viewModel.hasGrainAdjustments,
                     action: viewModel.resetAllGrain
@@ -125,19 +125,6 @@ struct EffectsInspectorView: View {
             beginInteraction: viewModel.beginPreviewInteraction,
             endInteraction: viewModel.endPreviewInteraction
         )
-    }
-
-    private func sectionResetButton(
-        title: String,
-        disabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack {
-            Spacer()
-            Button(title, action: action)
-                .buttonStyle(.link)
-                .disabled(disabled)
-        }
     }
 
     private var signedWholeReadout: (Double) -> String {
