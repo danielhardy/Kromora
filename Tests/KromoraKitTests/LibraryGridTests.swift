@@ -253,7 +253,14 @@ final class LibraryGridTests: TempDirectoryTestCase {
         ))
         let collection = makeTestCollection(scheduler: scheduler)
         collection.beginThumbnailDemand()
-        collection.loadFromFolder(tempDirectory)
+        // The folder compatibility fixture selects the first item after loading, which also
+        // prepares adjacent filmstrip thumbnails. Keep this grid test unselected so only
+        // materialized-cell demand can admit thumbnail work.
+        collection.loadPortableAssets((0..<64).map { index in
+            PhotoAsset(url: tempDirectory.appendingPathComponent(
+                String(format: "photo-%03d.jpg", index)
+            ))
+        })
         await collection.scanCompletion()
 
         XCTAssertEqual(collection.items.count, 64)
@@ -268,7 +275,7 @@ final class LibraryGridTests: TempDirectoryTestCase {
         let deadline = Date().addingTimeInterval(5)
         while collection.items.first?.thumbnail == nil {
             if Date() > deadline { return XCTFail("the materialized cell thumbnail did not arrive") }
-            await Task.yield()
+            try await Task.sleep(for: .milliseconds(10))
         }
 
         XCTAssertTrue(
