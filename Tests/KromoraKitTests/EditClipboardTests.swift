@@ -73,6 +73,22 @@ final class EditClipboardTests: XCTestCase {
                        "RAW controls must not be written to a JPEG destination")
     }
 
+    func testRetouchRecipesCopyOnlyWhenRetouchCategoryIsSelected() {
+        let spot = RetouchSpot(mode: .clone, sourceOffset: CGVector(dx: 0.1, dy: -0.2))
+        let clipboard = EditClipboardPayload(document: EditDocument(
+            retouch: RetouchSettings(spots: [spot])
+        ))
+        let destination = EditDocument(retouch: .neutral)
+        XCTAssertEqual(
+            clipboard.applying(to: destination, destinationIsRAW: false, categories: [.retouch]).retouch,
+            clipboard.retouch
+        )
+        XCTAssertEqual(
+            clipboard.applying(to: destination, destinationIsRAW: false, categories: [.light]).retouch,
+            .neutral
+        )
+    }
+
     func testClipboardSchemaDefaultsMissingFieldsAndRejectsNewerVersions() throws {
         let legacy = try JSONDecoder().decode(
             EditClipboardPayload.self,

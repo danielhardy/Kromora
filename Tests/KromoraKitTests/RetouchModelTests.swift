@@ -15,6 +15,8 @@ final class RetouchModelTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(RetouchSettings.self, from: data), settings)
         XCTAssertFalse(settings.isIdentity)
         XCTAssertTrue(RetouchSettings(spots: [RetouchSpot(opacity: 0)], eyes: [EyeCorrection(isVisible: false)]).isIdentity)
+        XCTAssertTrue(RetouchSettings(spots: [RetouchSpot(shape: .stroke(points: []))]).isIdentity)
+        XCTAssertTrue(RetouchSettings(eyes: [EyeCorrection(darken: 0)]).isIdentity)
     }
 
     func testLegacyDocumentDefaultsRetouchAndNewerVersionIsRejected() throws {

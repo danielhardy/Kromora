@@ -34,6 +34,13 @@ enum SpotShape: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey { case kind, center, points }
     private enum Kind: String, Codable { case circle, stroke }
 
+    var hasGeometry: Bool {
+        switch self {
+        case .circle: return true
+        case .stroke(let points): return !points.isEmpty
+        }
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(Kind.self, forKey: .kind) {
@@ -100,7 +107,7 @@ struct RetouchSpot: Codable, Sendable, Equatable, Identifiable {
         self.sourceWasAutoPicked = sourceWasAutoPicked
     }
 
-    var isIdentity: Bool { !isVisible || opacity == 0 }
+    var isIdentity: Bool { !isVisible || opacity == 0 || !shape.hasGeometry }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, mode, shape, radius, sourceOffset, feather, opacity, isVisible, sourceWasAutoPicked
@@ -166,7 +173,7 @@ struct EyeCorrection: Codable, Sendable, Equatable, Identifiable {
         self.isVisible = isVisible
     }
 
-    var isIdentity: Bool { !isVisible }
+    var isIdentity: Bool { !isVisible || darken == 0 || pupilSize == 0 }
 
     private enum CodingKeys: String, CodingKey {
         case id, kind, center, radiusX, radiusY, pupilSize, darken, addCatchlight, catchlightOffset, isVisible

@@ -1209,7 +1209,8 @@ actor RenderEngine: RenderEngining {
         // the decoder/graph section so a future concurrent build worker can do this work without
         // borrowing the actor-owned Core Image resources.
         let plan = RenderBuildPlan.make(
-            source: source, document: document, scale: scale, sourceROI: sourceROI,
+            source: source, document: document, scale: scale,
+            sourceROI: document.retouch.isIdentity ? sourceROI : nil,
             presentationROI: presentationROI
         )
         let maskIdentity = plan.maskIdentity
@@ -1325,8 +1326,14 @@ actor RenderEngine: RenderEngining {
         } else {
             localAdjusted = localAdjustedGraph
         }
+        let retouched = RenderPipeline.applyRetouch(
+            document.retouch, to: localAdjusted, sourceSize: source.nativeExtent,
+            rotation: document.rotation, crop: document.crop
+        )
+        var finalDocument = document
+        finalDocument.retouch = .neutral
         let output = RenderStageFacade.buildFinalStages(
-            preLUT: localAdjusted, document: document, lut: lut, space: space, lutCache: lutCache,
+            preLUT: retouched, document: finalDocument, lut: lut, space: space, lutCache: lutCache,
             grainSeed: RenderPipeline.grainSeed(for: source),
             applyCommittedCrop: !hasEarlyCrop,
             finalFrameExtent: finalFrameExtent
