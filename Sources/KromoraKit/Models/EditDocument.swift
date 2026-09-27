@@ -47,15 +47,18 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// only semantic intent, vectors, and analytic geometry live in the document.
     var localAdjustments: [LocalAdjustmentLayer] = []
 
+    /// Ordered retouch recipes anchored to the oriented source image.
+    var retouch: RetouchSettings = .neutral
+
     /// Metadata from the last successful content-aware Auto run. It has no rendering effect and
     /// is excluded from `renderingHash`, so it can be used for repeat-run no-op detection without
     /// invalidating image caches.
     var lastAutoRunFingerprint: AutoRunFingerprint?
 
     /// v2 added the local-mask field. v3 added the image rotation field. v5 added continuous crop
-    /// geometry and v6 adds perspective; missing fields decode to neutral values so existing
-    /// records remain readable and are upgraded on save.
-    static let currentVersion = 6
+    /// geometry, v6 added perspective, and v7 adds retouch recipes. Missing fields decode to neutral
+    /// values so existing records remain readable and are upgraded on save.
+    static let currentVersion = 7
 
     init(
         version: Int = EditDocument.currentVersion,
@@ -68,6 +71,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         adjustments: [AdjustmentNode] = [],
         lut: LUTSettings = .none,
         localAdjustments: [LocalAdjustmentLayer] = [],
+        retouch: RetouchSettings = .neutral,
         lastAutoRunFingerprint: AutoRunFingerprint? = nil
     ) {
         self.version = version
@@ -80,6 +84,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.adjustments = adjustments
         self.lut = lut
         self.localAdjustments = localAdjustments
+        self.retouch = retouch
         self.lastAutoRunFingerprint = lastAutoRunFingerprint
     }
 
@@ -87,7 +92,8 @@ struct EditDocument: Codable, Sendable, Equatable {
     var isIdentity: Bool {
         rawDevelop.isNeutral && light.isIdentity && color.isIdentity && effects.isIdentity && crop.isIdentity &&
             rotation == .zero &&
-            adjustments.allSatisfy(\.isIdentity) && lut.isIdentity && localAdjustments.allSatisfy(\.isIdentity)
+            adjustments.allSatisfy(\.isIdentity) && lut.isIdentity && localAdjustments.allSatisfy(\.isIdentity) &&
+            retouch.isIdentity
     }
 
     /// True when the document contains an edit that changes the photographer-facing look.
@@ -95,7 +101,8 @@ struct EditDocument: Codable, Sendable, Equatable {
     /// developed source, so a develop-only comparison would show identical pixels.
     var hasVisibleLookEdits: Bool {
         !light.isIdentity || !color.isIdentity || !effects.isIdentity || !crop.isIdentity || rotation != .zero ||
-            !adjustments.allSatisfy(\.isIdentity) || !lut.isIdentity || localAdjustments.contains(where: \.hasVisibleLook)
+            !adjustments.allSatisfy(\.isIdentity) || !lut.isIdentity || localAdjustments.contains(where: \.hasVisibleLook) ||
+            !retouch.isIdentity
     }
 
     /// True when a visible local adjustment depends on a semantic mask provider. This is the
@@ -212,7 +219,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         EditDocument(
             version: version, rawDevelop: rawDevelop, light: .neutral, color: .neutral,
             effects: .neutral, crop: crop, rotation: rotation,
-            adjustments: [], lut: .none, localAdjustments: []
+            adjustments: [], lut: .none, localAdjustments: [], retouch: .neutral
         )
     }
 
@@ -223,7 +230,7 @@ struct EditDocument: Codable, Sendable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case version, rawDevelop, light, color, effects, crop, rotation, adjustments, lut,
-             localAdjustments, lastAutoRunFingerprint
+             localAdjustments, retouch, lastAutoRunFingerprint
     }
 
     /// Decoded field by field rather than by synthesis, for two reasons.
@@ -257,6 +264,7 @@ struct EditDocument: Codable, Sendable, Equatable {
         self.adjustments = try container.decodeIfPresent([AdjustmentNode].self, forKey: .adjustments) ?? []
         self.lut = try container.decodeIfPresent(LUTSettings.self, forKey: .lut) ?? .none
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustmentLayer].self, forKey: .localAdjustments) ?? []
+        self.retouch = try container.decodeIfPresent(RetouchSettings.self, forKey: .retouch) ?? .neutral
         self.lastAutoRunFingerprint = try container.decodeIfPresent(
             AutoRunFingerprint.self, forKey: .lastAutoRunFingerprint
         )
