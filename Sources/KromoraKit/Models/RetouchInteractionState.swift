@@ -29,6 +29,10 @@ final class RetouchInteractionState: ObservableObject {
     @Published private(set) var draftRadius = 0.012
     @Published private(set) var draftFeather = 0.35
     @Published private(set) var solvingSpotIDs: Set<UUID> = []
+    @Published private(set) var isRefiningWire = false
+    @Published private(set) var wireProposal: RetouchWireRefiner.Proposal?
+    @Published private(set) var wireProposalSpotID: UUID?
+    @Published private(set) var wireRefinementMessage: String?
     @Published private(set) var solveFailures: [UUID: String] = [:]
     @Published private(set) var shiftClickAnchor: CGPoint?
     @Published var overlayPolicy: OverlayPolicy = .auto
@@ -66,6 +70,18 @@ final class RetouchInteractionState: ObservableObject {
         if solving { solvingSpotIDs.insert(id) } else { solvingSpotIDs.remove(id) }
     }
     func setSolveFailure(_ id: UUID, _ message: String?) { solveFailures[id] = message }
+    func beginWireRefinement(_ id: UUID) {
+        isRefiningWire = true; wireProposal = nil; wireProposalSpotID = id; wireRefinementMessage = nil
+    }
+    func setWireProposal(_ proposal: RetouchWireRefiner.Proposal) {
+        isRefiningWire = false; wireProposal = proposal; wireRefinementMessage = nil
+    }
+    func failWireRefinement(_ message: String) {
+        isRefiningWire = false; wireProposal = nil; wireProposalSpotID = nil; wireRefinementMessage = message
+    }
+    func clearWireRefinement() {
+        isRefiningWire = false; wireProposal = nil; wireProposalSpotID = nil; wireRefinementMessage = nil
+    }
     func clearGesture() { activeHandle = nil; draftSamples = [] }
     func cycleOverlayPolicy() {
         let cases = OverlayPolicy.allCases

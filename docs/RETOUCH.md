@@ -121,10 +121,10 @@ inside every listed limit.
 | Brick/roof | 4.0 | 34 | 0.48–1.80 | 0.030 |
 | Skin-like | 3.0 | 28 | 0.55–1.65 | 0.025 |
 
-`Remove (no path)` is reported as the unchanged damaged image while the correspondence-field producer
-is pending in KRMA-662. That row deliberately fails the gate. The solver-only table runs the field
-through a test helper that samples the live damaged image and applies an exterior-ring-only membrane
-colour correction. On the Apple M4 Pro, the current solver passes 32/36 rows. Four measured gaps
+`Remove (no path)` is a baseline row that reports the unchanged damaged image; it deliberately fails
+the gate. The solver-only table runs the field through a test helper that samples the live damaged
+image and applies an exterior-ring-only membrane colour correction. On the Apple M4 Pro, the current
+solver passes 32/36 rows. Four measured gaps
 remain: cloud/60 px dust (ΔE 6.15, limit 3.5), foliage/60 px dust (ΔE 4.85, limit 4.5), brick/60 px
 dust (ΔE 9.19, limit 4.0), and brick/sagging edge-crossing wire (ΔE 5.01, limit 4.0). The larger
 cloud and foliage masks hide most of their underlying texture and edge context; the brick dust hides
@@ -136,10 +136,32 @@ renderer. The evaluation limits are intentionally not a timing benchmark.
 
 Threshold violations include their metric names in the XCTest report table. The manual fixture
 offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows. The
-remaining rows stay visible for later source-picking and quality work. Remove has no correspondence
-producer yet and remains unchanged, so its 36/36 rows fail. Keep the limits intact until the review
-tracked by KRMA-666, and record any justified changes with the corresponding ticket. The table is a
-quality gate, not a timing benchmark. For real-camera coverage, place
+Remove field integration is covered by preview/export and cache tests, but the complete KRMA-658
+quality corpus still runs through the standalone solver and test-local composite. Engine-level corpus
+quality remains open as KRMA-668. Keep the limits intact until the review tracked by KRMA-666, and
+record any justified changes with the corresponding ticket. The table is a quality gate, not a
+timing benchmark. For real-camera coverage, place
 licensed RAW fixtures outside the checkout and opt in with `KROMORA_RAW_FIXTURE_DIR`; the normal
 quality suite does not read or commit that directory. Generated fixtures are intentionally small,
 seeded, and bounded. No AI-generated or licensed image assets are currently required.
+
+## Optional wire refinement
+
+Multi-sample Remove strokes can be analyzed with **Refine to Wire**. The cancellable CPU pass reads
+the neutral Lab analysis proxy, searches across the original brush corridor for a coherent dark or
+light ridge, follows the intended path with a distance prior, recenters on the ridge support, and
+estimates a narrower radius. It refuses low-evidence or inconsistent corridors. The proposed
+boundary is drawn on the canvas; accepting replaces the ordinary `RetouchRegion`, while keeping the
+brush region clears the proposal without changing the document. The normal Remove fill pipeline
+handles accepted geometry. Single-point dust/speck spots are not eligible, so the optional action
+does not change that workflow.
+
+`swift test --filter RetouchWireRefinerTests` measures the deterministic KRMA-658 wire subset with
+four-pixel deliberate overspray. On the six generated backgrounds and two wire defects, 5/12
+corridors were unambiguous; centerline error improved in all five, from a mean 3.93 px to 0.59 px.
+The other seven were declined because the corridor evidence was ambiguous.
+Separate synthetic straight-wire checks centered all tested 1–8 px widths within 0.1 px; a low
+contrast sagging line crossing a horizontal edge also passed. These are centerline measurements, not
+Remove fill-quality metrics, and the six small generated backgrounds do not establish camera-image
+performance. The feature remains optional; use the original brush region whenever analysis declines
+or the proposed boundary does not match the intended wire.
