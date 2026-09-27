@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ImageIO
 
 /// The normalized transform used when a persisted mask definition is projected into a render.
 /// Mask definitions remain in oriented source coordinates; this value belongs to the render request
@@ -239,6 +240,7 @@ struct LocalMaskPayload: Sendable, Equatable, Codable {
 
 enum LocalMaskResolutionError: Error, Sendable, Equatable, CustomStringConvertible {
     case semanticMaskUnavailable(target: SemanticTarget, quality: MaskQuality)
+    case depthUnavailable
     case incompatibleDefinition(target: SemanticTarget, version: Int)
     case providerFailure(target: SemanticTarget, reason: String)
     case sourceMismatch
@@ -249,6 +251,8 @@ enum LocalMaskResolutionError: Error, Sendable, Equatable, CustomStringConvertib
         switch self {
         case .semanticMaskUnavailable(let target, let quality):
             return "The \(target.rawValue) mask is not available at \(quality.rawValue) quality for this source. Resolve it or choose an explicit lower-quality export."
+        case .depthUnavailable:
+            return "Depth range masks require embedded depth data. This photo has no supported depth data."
         case .incompatibleDefinition(let target, let version):
             return "The saved \(target.rawValue) mask was created by an incompatible generation version (\(version)). Retry regeneration after updating the definition."
         case .providerFailure(let target, let reason):
@@ -283,6 +287,16 @@ struct DefaultLocalMaskResolver: LocalMaskResolving {
             throw LocalMaskResolutionError.semanticMaskUnavailable(
                 target: definition.target, quality: request.quality.maskQuality
             )
+        case .luminance(let definition):
+            descriptor = .raster(try RangeMaskRasterizer.luminance(
+                source: request.source, size: request.targetSize, definition: definition
+            ))
+        case .color(let definition):
+            descriptor = .raster(try RangeMaskRasterizer.color(
+                source: request.source, size: request.targetSize, definition: definition
+            ))
+        case .depth:
+            throw LocalMaskResolutionError.depthUnavailable
         case .brush(let definition):
             descriptor = .brush(definition)
         case .linear(let definition):
@@ -298,6 +312,98 @@ struct DefaultLocalMaskResolver: LocalMaskResolving {
             assetID: request.assetID,
             descriptor: descriptor
         )
+    }
+}
+
+/// Builds range mattes at the render tier's requested size. The ImageIO thumbnail keeps memory
+/// bounded for large originals; recipes and generated pixels stay separate from edit documents.
+private enum RangeMaskRasterizer {
+    static func luminance(
+        source: ImageSource, size: PixelDimensions, definition: LuminanceRangeDefinition
+    ) throws -> NormalizedMask {
+        try build(source: source, size: size) { red, green, blue in
+            let value = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+            return band(value, lower: definition.lower, upper: definition.upper,
+                        softness: definition.smoothness)
+        }
+    }
+
+    static func color(
+        source: ImageSource, size: PixelDimensions, definition: ColorRangeDefinition
+    ) throws -> NormalizedMask {
+        guard !definition.samples.isEmpty else {
+            throw LocalMaskResolutionError.invalidPayload
+        }
+        return try build(source: source, size: size) { red, green, blue in
+            let nearest = definition.samples.map { sample in
+                sqrt(pow(red - sample.red, 2) + pow(green - sample.green, 2) + pow(blue - sample.blue, 2))
+            }.min() ?? 1
+            let core = 1 - min(1, nearest / definition.falloff)
+            return band(core, lower: definition.refinement, upper: 1,
+                        softness: min(0.5, definition.refinement))
+        }
+    }
+
+    private static func build(
+        source: ImageSource, size: PixelDimensions,
+        coverage: (Double, Double, Double) -> Double
+    ) throws -> NormalizedMask {
+        guard size.width > 0, size.height > 0,
+              size.width <= Int.max / 4, size.height <= Int.max / (size.width * 4),
+              let cgSource = imageSource(source), CGImageSourceGetCount(cgSource) > 0 else {
+            throw LocalMaskResolutionError.invalidPayload
+        }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(size.width, size.height),
+        ]
+        guard let thumbnail = CGImageSourceCreateThumbnailAtIndex(cgSource, 0, options as CFDictionary) else {
+            throw LocalMaskResolutionError.invalidPayload
+        }
+        let width = size.width
+        let height = size.height
+        var rgba = [UInt8](repeating: 0, count: width * height * 4)
+        let rendered = rgba.withUnsafeMutableBytes { bytes -> Bool in
+            guard let base = bytes.baseAddress,
+                  let context = CGContext(data: base, width: width, height: height,
+                    bitsPerComponent: 8, bytesPerRow: width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return false }
+            context.translateBy(x: 0, y: CGFloat(height))
+            context.scaleBy(x: 1, y: -1)
+            context.interpolationQuality = .medium
+            context.draw(thumbnail, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard rendered else { throw LocalMaskResolutionError.invalidPayload }
+        let values = stride(from: 0, to: rgba.count, by: 4).map { index in
+            let alpha = Double(rgba[index + 3]) / 255
+            guard alpha > 0 else { return Float(0) }
+            let red = Double(rgba[index]) / 255 / alpha
+            let green = Double(rgba[index + 1]) / 255 / alpha
+            let blue = Double(rgba[index + 2]) / 255 / alpha
+            return Float(coverage(red, green, blue).clamped(to: 0...1, default: 0))
+        }
+        return try NormalizedMask(size: size, values: values)
+    }
+
+    private static func imageSource(_ source: ImageSource) -> CGImageSource? {
+        switch source.backing {
+        case .url(let url): return CGImageSourceCreateWithURL(url as CFURL, nil)
+        case .data(let data): return CGImageSourceCreateWithData(data as CFData, nil)
+        }
+    }
+
+    private static func band(_ value: Double, lower: Double, upper: Double, softness: Double) -> Double {
+        func smooth(_ edge0: Double, _ edge1: Double, _ value: Double) -> Double {
+            guard edge1 > edge0 else { return value >= edge1 ? 1 : 0 }
+            let t = min(1, max(0, (value - edge0) / (edge1 - edge0)))
+            return t * t * (3 - 2 * t)
+        }
+        guard softness > 0 else { return value >= lower && value <= upper ? 1 : 0 }
+        return smooth(lower - softness, lower + softness, value)
+            * (1 - smooth(upper - softness, upper + softness, value))
     }
 }
 

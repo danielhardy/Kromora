@@ -26,6 +26,76 @@ final class LocalMaskTests: XCTestCase {
         XCTAssertEqual(sample.pressure, 1)
     }
 
+    func testRangeMaskRecipesRoundTripAndClampTheirControls() throws {
+        let color = ColorRangeDefinition(samples: [
+            ColorRangeSample(red: 1.2, green: 0.25, blue: -1),
+            ColorRangeSample(red: 0.1, green: 0.2, blue: 0.3)
+        ], falloff: 0, refinement: 2)
+        let layer = LocalAdjustmentLayer(components: [
+            MaskComponent(source: .luminance(LuminanceRangeDefinition(
+                lower: 0.8, upper: 0.2, smoothness: 0.7
+            ))),
+            MaskComponent(mode: .intersect, source: .color(color)),
+            MaskComponent(mode: .subtract, source: .depth(DepthRangeDefinition(
+                near: 0.9, far: 0.1, smoothness: -1
+            )))
+        ])
+        XCTAssertEqual(try roundTrip(layer), layer)
+        XCTAssertEqual(color.samples[0].red, 1)
+        XCTAssertEqual(color.samples[0].blue, 0)
+        XCTAssertEqual(color.falloff, 0.01)
+        XCTAssertEqual(layer.components[0].source, .luminance(
+            LuminanceRangeDefinition(lower: 0.2, upper: 0.8, smoothness: 0.5)
+        ))
+        XCTAssertEqual(layer.components[2].source, .depth(
+            DepthRangeDefinition(near: 0.1, far: 0.9, smoothness: 0)
+        ))
+    }
+
+    func testRangeResolverBuildsLuminanceAndColorRastersAndExplainsMissingDepth() async throws {
+        let directory = try Fixtures.makeTempDirectory("RangeMaskTests")
+        let url = try Fixtures.writeGradientPNG(
+            width: 16, height: 16, named: "range.png", in: directory
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 16, height: 16))
+        let resolver = DefaultLocalMaskResolver()
+        let request: (MaskSource) -> LocalMaskResolveRequest = { sourceDefinition in
+            LocalMaskResolveRequest(
+                source: source,
+                component: MaskComponent(source: sourceDefinition),
+                targetSize: PixelDimensions(width: 16, height: 16),
+                quality: .preview
+            )
+        }
+
+        let luminance = try await resolver.resolve(request(.luminance(
+            LuminanceRangeDefinition(lower: 0.1, upper: 0.8, smoothness: 0.05)
+        )))
+        guard case .raster(let lumaPixels) = luminance.descriptor else {
+            return XCTFail("Luminance range should resolve to a raster")
+        }
+        XCTAssertEqual(lumaPixels.size, PixelDimensions(width: 16, height: 16))
+        XCTAssertGreaterThan(lumaPixels.coverage, 0)
+        XCTAssertLessThanOrEqual(lumaPixels.coverage, 1)
+
+        let color = try await resolver.resolve(request(.color(ColorRangeDefinition(
+            samples: [ColorRangeSample(red: 0.9, green: 0.1, blue: 0.1)],
+            falloff: 0.4, refinement: 0.2
+        ))))
+        guard case .raster(let colorPixels) = color.descriptor else {
+            return XCTFail("Color range should resolve to a raster")
+        }
+        XCTAssertGreaterThan(colorPixels.coverage, 0)
+
+        do {
+            _ = try await resolver.resolve(request(.depth(DepthRangeDefinition())))
+            XCTFail("Depth should report that no depth data is available")
+        } catch let error as LocalMaskResolutionError {
+            XCTAssertEqual(error.description,
+                "Depth range masks require embedded depth data. This photo has no supported depth data.")
+        }
+    }
+
     func testNeutralAndDisabledLayersAreIdentity() {
         let source = MaskComponent(source: .radial(RadialGradientDefinition()))
         XCTAssertTrue(LocalAdjustmentLayer(components: [source]).isIdentity)

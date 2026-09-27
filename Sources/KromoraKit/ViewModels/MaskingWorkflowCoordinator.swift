@@ -7,6 +7,7 @@ import SwiftUI
 /// durable recipe immediately; semantic pixels and other render resources remain derived state.
 enum MaskCreationKind: String, CaseIterable, Sendable {
     case subject, person, face, foreground, background, brush, erase, linear, radial
+    case luminance, color, depth
 
     static let smartKinds: [MaskCreationKind] = [.subject, .person, .face, .foreground, .background]
 
@@ -19,7 +20,7 @@ enum MaskCreationKind: String, CaseIterable, Sendable {
         case .face: return .face
         case .foreground: return .foreground
         case .background: return .background
-        case .brush, .erase, .linear, .radial: return nil
+        case .brush, .erase, .linear, .radial, .luminance, .color, .depth: return nil
         }
     }
 
@@ -34,6 +35,9 @@ enum MaskCreationKind: String, CaseIterable, Sendable {
         case .erase: return "Erase Brush"
         case .linear: return "Linear Gradient"
         case .radial: return "Radial Gradient"
+        case .luminance: return "Luminance Range"
+        case .color: return "Color Range"
+        case .depth: return "Depth Range"
         }
     }
 }
@@ -51,6 +55,9 @@ extension MaskSource {
         switch self {
         case .semantic(let definition):
             return definition.target.rawValue.capitalized
+        case .luminance: return "Luminance Range"
+        case .color: return "Color Range"
+        case .depth: return "Depth Range"
         case .brush: return "Brush"
         case .linear: return "Linear Gradient"
         case .radial: return "Radial Gradient"
@@ -418,6 +425,12 @@ final class MaskingWorkflowCoordinator {
             source = .linear(LinearGradientDefinition())
         case .radial:
             source = .radial(RadialGradientDefinition())
+        case .luminance:
+            source = .luminance(LuminanceRangeDefinition())
+        case .color:
+            source = .color(ColorRangeDefinition())
+        case .depth:
+            source = .depth(DepthRangeDefinition())
         }
 
         let layerID = UUID()
@@ -772,6 +785,9 @@ final class MaskingWorkflowCoordinator {
         case .brush, .erase: source = .brush(BrushMaskDefinition())
         case .linear: source = .linear(LinearGradientDefinition())
         case .radial: source = .radial(RadialGradientDefinition())
+        case .luminance: source = .luminance(LuminanceRangeDefinition())
+        case .color: source = .color(ColorRangeDefinition())
+        case .depth: source = .depth(DepthRangeDefinition())
         }
         addMaskComponent(to: layerID, source: source, mode: mode)
     }
@@ -928,6 +944,12 @@ final class MaskingWorkflowCoordinator {
                 component.source = .brush(BrushMaskDefinition())
             case .semantic(let definition):
                 component.source = .semantic(SemanticMaskDefinition(target: definition.target))
+            case .luminance:
+                component.source = .luminance(LuminanceRangeDefinition())
+            case .color:
+                component.source = .color(ColorRangeDefinition())
+            case .depth:
+                component.source = .depth(DepthRangeDefinition())
             }
         }
     }
@@ -1138,7 +1160,7 @@ final class MaskingWorkflowCoordinator {
         switch layer.components[index].source {
         case .linear: return tool == .linear
         case .radial: return tool == .radial
-        case .brush, .semantic: return false
+        case .brush, .semantic, .luminance, .color, .depth: return false
         }
     }
 
