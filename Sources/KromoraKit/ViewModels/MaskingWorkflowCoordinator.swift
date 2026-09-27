@@ -1030,7 +1030,7 @@ final class MaskingWorkflowCoordinator {
         modifiers: NSEvent.ModifierFlags = []
     ) {
         guard let destination, interactionState.activeTool != .selection else { return }
-        let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
+        let clamped = NormalizedMaskPoint.clampedToUnitSquare(point)
 
         let layer: LocalAdjustmentLayer
         if let draft = interactionState.draftLayer,
@@ -1173,7 +1173,7 @@ final class MaskingWorkflowCoordinator {
             let componentIndex = draft.targetComponentIndex(
                 selected: interactionState.selectedComponentID)
         else { return }
-        let clamped = CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
+        let clamped = NormalizedMaskPoint.clampedToUnitSquare(point)
         switch interactionState.activeTool {
         case .brush, .erase:
             guard case .brush(var definition) = draft.components[componentIndex].source else {

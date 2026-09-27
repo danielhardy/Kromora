@@ -252,6 +252,15 @@ final class LocalMaskTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(crossed.falloff, 0)
     }
 
+    func testNormalizedMaskPointClampsToUnitSquare() {
+        XCTAssertEqual(
+            NormalizedMaskPoint.clampedToUnitSquare(CGPoint(x: -0.2, y: 1.2)),
+            CGPoint(x: 0, y: 1))
+        XCTAssertEqual(
+            NormalizedMaskPoint.clampedToUnitSquare(CGPoint(x: 0.25, y: 0.75)),
+            CGPoint(x: 0.25, y: 0.75))
+    }
+
     func testNewLinearGradientsDefaultToVerticalWithoutChangingEndpointSemantics() {
         let definition = LinearGradientDefinition()
 

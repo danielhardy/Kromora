@@ -31,12 +31,12 @@ enum LinearGradientMaskMath {
         _ definition: LinearGradientDefinition, by delta: CGPoint
     ) -> LinearGradientDefinition {
         var result = definition
-        result.zeroStrengthPoint = normalized(
+        result.zeroStrengthPoint = NormalizedMaskPoint.clampedToUnitSquare(
             CGPoint(
                 x: definition.zeroStrengthPoint.x + delta.x,
                 y: definition.zeroStrengthPoint.y + delta.y
             ))
-        result.fullStrengthPoint = normalized(
+        result.fullStrengthPoint = NormalizedMaskPoint.clampedToUnitSquare(
             CGPoint(
                 x: definition.fullStrengthPoint.x + delta.x,
                 y: definition.fullStrengthPoint.y + delta.y
@@ -81,9 +81,5 @@ enum LinearGradientMaskMath {
                 + (point.y - definition.zeroStrengthPoint.y) * direction.y
             return definition.changingFalloff(to: max(0, length), keeping: .zeroStrength)
         }
-    }
-
-    private static func normalized(_ point: CGPoint) -> CGPoint {
-        CGPoint(x: min(max(point.x, 0), 1), y: min(max(point.y, 0), 1))
     }
 }
