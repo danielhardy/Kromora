@@ -1210,7 +1210,7 @@ actor RenderEngine: RenderEngining {
         // borrowing the actor-owned Core Image resources.
         let plan = RenderBuildPlan.make(
             source: source, document: document, scale: scale,
-            sourceROI: document.retouch.isIdentity ? sourceROI : nil,
+            sourceROI: sourceROI,
             presentationROI: presentationROI
         )
         let maskIdentity = plan.maskIdentity
@@ -1238,7 +1238,11 @@ actor RenderEngine: RenderEngining {
             thumbnail: quality == .thumbnail
         ) else { return nil }
         try Task.checkCancellation()
-        let orientedDeveloped = RenderPipeline.applyingRotation(document.rotation, to: developedFull)
+        let retouchedSource = RetouchRenderer.apply(
+            document.retouch, to: developedFull, sourceSize: developedFull.extent.size,
+            maskRenderer: localMaskRenderer
+        )
+        let orientedDeveloped = RenderPipeline.applyingRotation(document.rotation, to: retouchedSource)
         let geometricallyDeveloped = RenderPipeline.applyingGeometry(document.crop, to: orientedDeveloped)
         let effectivePlan = plan.rebased(to: geometricallyDeveloped.extent, crop: document.crop)
         let effectiveROI = effectivePlan.sourceROI
@@ -1326,14 +1330,8 @@ actor RenderEngine: RenderEngining {
         } else {
             localAdjusted = localAdjustedGraph
         }
-        let retouched = RenderPipeline.applyRetouch(
-            document.retouch, to: localAdjusted, sourceSize: source.nativeExtent,
-            rotation: document.rotation, crop: document.crop
-        )
-        var finalDocument = document
-        finalDocument.retouch = .neutral
         let output = RenderStageFacade.buildFinalStages(
-            preLUT: retouched, document: finalDocument, lut: lut, space: space, lutCache: lutCache,
+            preLUT: localAdjusted, document: document, lut: lut, space: space, lutCache: lutCache,
             grainSeed: RenderPipeline.grainSeed(for: source),
             applyCommittedCrop: !hasEarlyCrop,
             finalFrameExtent: finalFrameExtent

@@ -24,115 +24,105 @@ struct RetouchSettings: Codable, Sendable, Equatable {
     var isIdentity: Bool { spots.allSatisfy(\.isIdentity) && eyes.allSatisfy(\.isIdentity) }
 }
 
-enum RetouchMode: String, Codable, Sendable, CaseIterable { case heal, clone }
+enum RetouchMode: String, Codable, Sendable, CaseIterable { case remove, heal, clone }
 enum EyeKind: String, Codable, Sendable, CaseIterable { case human, pet }
 
-enum SpotShape: Codable, Sendable, Equatable {
-    case circle(center: CGPoint)
-    case stroke(points: [CGPoint])
+struct RetouchRegion: Codable, Sendable, Equatable {
+    var samples: [BrushSample]
+    /// Fraction of the oriented source's shorter side.
+    var radius: Double
 
-    private enum CodingKeys: String, CodingKey { case kind, center, points }
-    private enum Kind: String, Codable { case circle, stroke }
-
-    var hasGeometry: Bool {
-        switch self {
-        case .circle: return true
-        case .stroke(let points): return !points.isEmpty
-        }
+    init(samples: [BrushSample] = [BrushSample(point: CGPoint(x: 0.5, y: 0.5))], radius: Double = 0.02) {
+        self.samples = Array(samples.prefix(4096))
+        self.radius = Self.clamp(radius, fallback: 0.02, range: 0.0005...0.25)
     }
 
+    private enum CodingKeys: String, CodingKey { case samples, radius }
     init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(Kind.self, forKey: .kind) {
-        case .circle:
-            self = .circle(center: Self.clamp(
-                try container.decodeIfPresent(CGPoint.self, forKey: .center) ?? .zero
-            ))
-        case .stroke:
-            let points = try container.decodeIfPresent([CGPoint].self, forKey: .points) ?? []
-            self = .stroke(points: Array(points.prefix(256)).map(Self.clamp))
-        }
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            samples: try c.decodeIfPresent([BrushSample].self, forKey: .samples) ?? [],
+            radius: try c.decodeIfPresent(Double.self, forKey: .radius) ?? 0.02
+        )
     }
 
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
+    private static func clamp(_ value: Double, fallback: Double, range: ClosedRange<Double>) -> Double {
+        value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : fallback
+    }
+}
+
+enum RetouchSource: Codable, Sendable, Equatable {
+    case auto(offset: CGVector, rank: Int)
+    case manual(offset: CGVector)
+
+    var offset: CGVector {
         switch self {
-        case .circle(let center):
-            try container.encode(Kind.circle, forKey: .kind)
-            try container.encode(Self.clamp(center), forKey: .center)
-        case .stroke(let points):
-            try container.encode(Kind.stroke, forKey: .kind)
-            try container.encode(Array(points.prefix(256)).map(Self.clamp), forKey: .points)
+        case .auto(let offset, _), .manual(let offset): return offset
         }
     }
 
-    private static func clamp(_ point: CGPoint) -> CGPoint {
-        func value(_ n: CGFloat) -> CGFloat {
-            n.isFinite ? min(max(n, -0.25), 1.25) : 0.5
+    private enum CodingKeys: String, CodingKey { case kind, offset, rank }
+    private enum Kind: String, Codable { case auto, manual }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let offset = Self.clamp(try c.decodeIfPresent(CGVector.self, forKey: .offset) ?? .zero)
+        switch try c.decodeIfPresent(Kind.self, forKey: .kind) ?? .manual {
+        case .auto: self = .auto(offset: offset, rank: max(0, try c.decodeIfPresent(Int.self, forKey: .rank) ?? 0))
+        case .manual: self = .manual(offset: offset)
         }
-        return CGPoint(x: value(point.x), y: value(point.y))
+    }
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .auto(let offset, let rank):
+            try c.encode(Kind.auto, forKey: .kind); try c.encode(Self.clamp(offset), forKey: .offset)
+            try c.encode(max(0, rank), forKey: .rank)
+        case .manual(let offset):
+            try c.encode(Kind.manual, forKey: .kind); try c.encode(Self.clamp(offset), forKey: .offset)
+        }
+    }
+    private static func clamp(_ v: CGVector) -> CGVector {
+        func c(_ n: CGFloat) -> CGFloat { n.isFinite ? min(max(n, -1.5), 1.5) : 0 }
+        return CGVector(dx: c(v.dx), dy: c(v.dy))
     }
 }
 
 struct RetouchSpot: Codable, Sendable, Equatable, Identifiable {
     var id: UUID
-    var name: String?
     var mode: RetouchMode
-    var shape: SpotShape
-    var radius: Double
-    var sourceOffset: CGVector
+    var region: RetouchRegion
+    var source: RetouchSource?
     var feather: Double
     var opacity: Double
     var isVisible: Bool
-    var sourceWasAutoPicked: Bool
+    var seed: UInt32
 
-    init(
-        id: UUID = UUID(), name: String? = nil, mode: RetouchMode = .heal,
-        shape: SpotShape = .circle(center: CGPoint(x: 0.5, y: 0.5)),
-        radius: Double = 0.02, sourceOffset: CGVector = .zero,
-        feather: Double? = nil, opacity: Double = 1, isVisible: Bool = true,
-        sourceWasAutoPicked: Bool = true
+    init(id: UUID = UUID(), mode: RetouchMode = .remove, region: RetouchRegion = RetouchRegion(
+        samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))]), source: RetouchSource? = nil,
+        feather: Double = 0.35, opacity: Double = 1, isVisible: Bool = true, seed: UInt32 = 0
     ) {
-        self.id = id
-        self.name = name
-        self.mode = mode
-        self.shape = shape
-        self.radius = Self.finiteClamp(radius, fallback: 0.02, range: 0.0005...0.25)
-        self.sourceOffset = CGVector(
-            dx: Self.coordinate(sourceOffset.dx), dy: Self.coordinate(sourceOffset.dy)
-        )
-        self.feather = Self.finiteClamp(feather ?? (mode == .heal ? 0.35 : 0.5), fallback: 0.35, range: 0...1)
-        self.opacity = Self.finiteClamp(opacity, fallback: 1, range: 0...1)
-        self.isVisible = isVisible
-        self.sourceWasAutoPicked = sourceWasAutoPicked
+        self.id = id; self.mode = mode; self.region = region; self.source = source
+        self.feather = Self.clamp(feather, fallback: 0.35, range: 0...1)
+        self.opacity = Self.clamp(opacity, fallback: 1, range: 0...1)
+        self.isVisible = isVisible; self.seed = seed
     }
 
-    var isIdentity: Bool { !isVisible || opacity == 0 || !shape.hasGeometry }
-
-    private enum CodingKeys: String, CodingKey {
-        case id, name, mode, shape, radius, sourceOffset, feather, opacity, isVisible, sourceWasAutoPicked
-    }
-
+    var isIdentity: Bool { !isVisible || opacity == 0 || region.samples.isEmpty }
+    private enum CodingKeys: String, CodingKey { case id, mode, region, source, feather, opacity, isVisible, seed }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             id: try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
-            name: try c.decodeIfPresent(String.self, forKey: .name),
-            mode: try c.decodeIfPresent(RetouchMode.self, forKey: .mode) ?? .heal,
-            shape: try c.decodeIfPresent(SpotShape.self, forKey: .shape) ?? .circle(center: CGPoint(x: 0.5, y: 0.5)),
-            radius: try c.decodeIfPresent(Double.self, forKey: .radius) ?? 0.02,
-            sourceOffset: try c.decodeIfPresent(CGVector.self, forKey: .sourceOffset) ?? .zero,
-            feather: try c.decodeIfPresent(Double.self, forKey: .feather),
+            mode: try c.decodeIfPresent(RetouchMode.self, forKey: .mode) ?? .remove,
+            region: try c.decodeIfPresent(RetouchRegion.self, forKey: .region) ?? RetouchRegion(),
+            source: try c.decodeIfPresent(RetouchSource.self, forKey: .source),
+            feather: try c.decodeIfPresent(Double.self, forKey: .feather) ?? 0.35,
             opacity: try c.decodeIfPresent(Double.self, forKey: .opacity) ?? 1,
             isVisible: try c.decodeIfPresent(Bool.self, forKey: .isVisible) ?? true,
-            sourceWasAutoPicked: try c.decodeIfPresent(Bool.self, forKey: .sourceWasAutoPicked) ?? false
+            seed: try c.decodeIfPresent(UInt32.self, forKey: .seed) ?? 0
         )
     }
-
-    private static func coordinate(_ value: CGFloat) -> CGFloat {
-        value.isFinite ? min(max(value, -1.5), 1.5) : 0
-    }
-    private static func finiteClamp(_ value: Double, fallback: Double, range: ClosedRange<Double>) -> Double {
+    private static func clamp(_ value: Double, fallback: Double, range: ClosedRange<Double>) -> Double {
         value.isFinite ? min(max(value, range.lowerBound), range.upperBound) : fallback
     }
 }

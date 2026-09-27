@@ -6,7 +6,7 @@ struct RetouchInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var selectedSpotID: UUID?
     @State private var selectedEyeID: UUID?
-    @State private var mode: RetouchMode = .heal
+    @State private var mode: RetouchMode = .remove
     @State private var eyeKind: EyeKind = .human
     @State private var isDustFinderPresented = false
 
@@ -22,6 +22,7 @@ struct RetouchInspectorView: View {
                 GroupBox("Spots") {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Method", selection: $mode) {
+                            Text("Remove").tag(RetouchMode.remove)
                             Text("Heal").tag(RetouchMode.heal)
                             Text("Clone").tag(RetouchMode.clone)
                         }
@@ -38,9 +39,9 @@ struct RetouchInspectorView: View {
                         }
                         if let spot = selectedSpot {
                             Toggle("Visible", isOn: spotBinding(\.isVisible))
-                            normalizedCoordinate("Center X", keyPath: \.shape, axis: .x)
-                            normalizedCoordinate("Center Y", keyPath: \.shape, axis: .y)
-                            slider("Size", value: spotBinding(\.radius), range: 0.0005...0.25, format: "%.3f")
+                            normalizedCoordinate("Center X", axis: .x)
+                            normalizedCoordinate("Center Y", axis: .y)
+                            slider("Size", value: spotRadiusBinding, range: 0.0005...0.25, format: "%.3f")
                             slider("Feather", value: spotBinding(\.feather), range: 0...1, format: "%.0f%%", scale: 100)
                             slider("Opacity", value: spotBinding(\.opacity), range: 0...1, format: "%.0f%%", scale: 100)
                             sourceOffsetSliders
@@ -139,9 +140,11 @@ struct RetouchInspectorView: View {
     }
 
     private func vectorBinding(_ keyPath: WritableKeyPath<CGVector, CGFloat>) -> Binding<Double> {
-        Binding(get: { Double(selectedSpot?.wrappedValue.sourceOffset[keyPath: keyPath] ?? 0) }, set: { value in
+        Binding(get: { Double(selectedSpot?.wrappedValue.source?.offset[keyPath: keyPath] ?? 0) }, set: { value in
             guard var spot = selectedSpot?.wrappedValue else { return }
-            spot.sourceOffset[keyPath: keyPath] = value
+            var offset = spot.source?.offset ?? .zero
+            offset[keyPath: keyPath] = value
+            spot.source = .manual(offset: offset)
             selectedSpot?.wrappedValue = spot
         })
     }
@@ -159,16 +162,23 @@ struct RetouchInspectorView: View {
         }), range: 0...1, format: "%.2f")
     }
 
-    private func normalizedCoordinate(
-        _ title: String, keyPath: WritableKeyPath<RetouchSpot, SpotShape>, axis: Axis
-    ) -> some View {
+    private var spotRadiusBinding: Binding<Double> {
+        Binding(get: { selectedSpot?.wrappedValue.region.radius ?? 0.02 }, set: { value in
+            guard var spot = selectedSpot?.wrappedValue else { return }
+            spot.region.radius = value
+            selectedSpot?.wrappedValue = spot
+        })
+    }
+
+    private func normalizedCoordinate(_ title: String, axis: Axis) -> some View {
         slider(title, value: Binding(get: {
-            guard case .circle(let point) = selectedSpot?.wrappedValue.shape else { return 0.5 }
+            guard let point = selectedSpot?.wrappedValue.region.samples.first?.point else { return 0.5 }
             return Double(axis == .x ? point.x : point.y)
         }, set: { value in
-            guard var spot = selectedSpot?.wrappedValue, case .circle(var point) = spot[keyPath: keyPath] else { return }
-            if axis == .x { point.x = value } else { point.y = value }
-            spot[keyPath: keyPath] = .circle(center: point)
+            guard var spot = selectedSpot?.wrappedValue, !spot.region.samples.isEmpty else { return }
+            var sample = spot.region.samples[0]
+            if axis == .x { sample.point.x = value } else { sample.point.y = value }
+            spot.region.samples[0] = sample
             selectedSpot?.wrappedValue = spot
         }), range: 0...1, format: "%.2f")
     }
@@ -194,7 +204,10 @@ struct RetouchInspectorView: View {
     }
 
     private func addSpot() {
-        let spot = RetouchSpot(mode: mode, shape: .circle(center: CGPoint(x: 0.5, y: 0.5)))
+        let spot = RetouchSpot(
+            mode: mode, region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))]),
+            source: mode == .remove ? nil : .manual(offset: .zero)
+        )
         viewModel.updateDocument { $0.retouch.spots.append(spot) }
         selectedSpotID = spot.id
     }

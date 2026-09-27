@@ -49,7 +49,7 @@ enum RenderPipeline {
     /// geometry AABB so post-geometry ROI previews share the planner's frame. v31 aligns the
     /// standard-image Tint sign with the green-to-magenta UI track; previously positive values
     /// rendered greener while RAW positive values rendered magenta.
-    static let cacheVersion = 32
+    static let cacheVersion = 33
 
     /// Build the graph for `document` over `source`.
     ///
@@ -86,7 +86,11 @@ enum RenderPipeline {
             return nil
         }
         let orientedNativeExtent = document.rotation.orientedExtent(source.nativeExtent)
-        let orientedDeveloped = applyingRotation(document.rotation, to: developed)
+        let retouchedSource = RetouchRenderer.apply(
+            document.retouch, to: developed, sourceSize: developed.extent.size,
+            maskRenderer: LocalMaskRenderer()
+        )
+        let orientedDeveloped = applyingRotation(document.rotation, to: retouchedSource)
         let geometricallyDeveloped = applyingGeometry(document.crop, to: orientedDeveloped)
         let geometryNativeExtent = geometryExtent(of: orientedNativeExtent, for: document.crop)
         let fullFrame = scaledSourceExtent(
@@ -122,7 +126,7 @@ enum RenderPipeline {
             grainSeed: grainSeed(for: source), applyCommittedCrop: !earlyCrop,
             spatialReferenceExtent: earlyCrop ? fullFrame : nil,
             finalFrameExtent: finalFrame, applyRotation: false,
-            retouchSourceSize: source.nativeExtent
+            retouchSourceSize: source.nativeExtent, retouchSourceAlreadyApplied: true
         )
         guard let visibleROI, earlyCrop else { return result }
         return result.cropped(to: scaledSourceRect(
@@ -153,11 +157,18 @@ enum RenderPipeline {
         spatialReferenceExtent: CGRect? = nil,
         finalFrameExtent: CGRect? = nil,
         applyRotation: Bool = true,
-        retouchSourceSize: CGSize? = nil
+        retouchSourceSize: CGSize? = nil,
+        retouchSourceAlreadyApplied: Bool = false
     ) -> CIImage {
+        let orientedSource = developed
+        let retouchedSource = retouchSourceAlreadyApplied ? orientedSource : RetouchRenderer.apply(
+            document.retouch, to: orientedSource,
+            sourceSize: retouchSourceSize ?? orientedSource.extent.size,
+            maskRenderer: LocalMaskRenderer()
+        )
         let developed = applyRotation
-            ? applyingGeometry(document.crop, to: applyingRotation(document.rotation, to: developed))
-            : developed
+            ? applyingGeometry(document.crop, to: applyingRotation(document.rotation, to: retouchedSource))
+            : retouchedSource
         let sourceSize = developed.extent.size
         let adjusted = buildPreLUTImage(
             developed: developed, document: document, toneCurveCache: toneCurveCache,
@@ -183,12 +194,7 @@ enum RenderPipeline {
         finalFrameExtent: CGRect? = nil,
         sourceSize: CGSize? = nil
     ) -> CIImage {
-        let retouched = applyRetouch(
-            document.retouch, to: preLUT,
-            sourceSize: sourceSize ?? preLUT.extent.size,
-            rotation: document.rotation, crop: document.crop
-        )
-        let lutAdjusted = applyLUT(document.lut, lut: lut, to: retouched, space: space, cache: lutCache)
+        let lutAdjusted = applyLUT(document.lut, lut: lut, to: preLUT, space: space, cache: lutCache)
         // Crop is a composition stage: all look work above is evaluated over the source, while
         // vignette and grain below describe the final cropped frame. This also keeps preview,
         // comparison, and full-resolution export on one extent-changing path.
@@ -276,19 +282,6 @@ enum RenderPipeline {
                 amount: CGFloat(layer.amount), mask: mask, extent: input.extent
             )
         }
-    }
-
-    /// Apply value-only spot and eye recipes after source geometry has been normalized and before
-    /// the final LUT/crop/vignette/grain stages. Coordinates in the document remain anchored to
-    /// the oriented original; this boundary projects them through rotation and continuous geometry.
-    static func applyRetouch(
-        _ settings: RetouchSettings,
-        to image: CIImage,
-        sourceSize: CGSize,
-        rotation: ImageRotation,
-        crop: CropAdjustments
-    ) -> CIImage {
-        RetouchRenderer.apply(settings, to: image, sourceSize: sourceSize, rotation: rotation, crop: crop)
     }
 
     /// Only cache a prefix when it contains work beyond the developed source. A neutral prefix is

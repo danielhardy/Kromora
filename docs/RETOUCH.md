@@ -1,22 +1,30 @@
 # Retouch recipes
 
 Retouch values are part of `EditDocument` and are persisted with each photo. A spot stores its
-heal/clone mode, normalized source shape, source offset, radius, feather, opacity, and visibility.
-Eye corrections store human/pet type, normalized center, pupil size, darkening, and visibility.
-These values participate in rendering hashes, undo, and selective copy/paste under the Retouch
-category.
+Remove/Heal/Clone mode, one `RetouchRegion` of oriented-source normalized brush samples and pressure,
+a normalized short-side radius, optional `RetouchSource` (manual or auto), feather, opacity,
+visibility, and deterministic seed. These values participate in rendering hashes, undo, and
+selective copy/paste under the Retouch category. V1 `shape`, spot `radius`, and `sourceOffset`
+fields are not decoded or migrated.
 
-`RetouchRenderer` builds Core Image graphs from those values inside the render boundary. The graph
-maps source points through rotation, straighten, flips, and perspective; it then applies spots and
-eye corrections before LUT, crop, vignette, and grain. Preview and export use the same render
-engine path. Recipe data remains portable and contains no Core Image objects.
+Spots render against the developed, EXIF-oriented source before user rotation, straighten, flips,
+perspective, crop, Light/Color, or local adjustments. This keeps a spot and its source relation
+attached to the same source content as geometry changes. Preview and export share this stage.
 
-The Retouch inspector edits spot centers/offsets and eye parameters with normalized controls. The
-Dust Finder shows a sharpened, high-contrast preview at pixel size, overlays visible spots, and
-scrolls between spot centers. It does not perform automatic face/pupil detection; eye centers are
-recipe values. Heal separates the sampled patch's texture detail from its broad color and light,
-then recombines that detail with the destination's local appearance before feathered blending.
-Clone retains the plain translated-patch result.
+Each spot's samples are rasterized as one feathered brush mask through `LocalMaskRenderer`; an
+entire stroke produces one fill and one blend. The renderer crops the fill, mask, membrane, and
+blend to the region bounds plus ring padding. Clone uses a direct translated source patch. Heal
+builds a normalized-convolution pull/push field from destination-minus-fill values weighted only
+outside the hole, then adds that field to the translated fill and composites with the feathered,
+opacity-scaled mask. Pixels under the hole do not contribute to the replacement tone. Remove is
+reserved for the correspondence-field producer in KRMA-662; its field sampling kernel interface is
+in place and an unresolved Remove spot currently leaves the image unchanged.
+
+The Retouch inspector currently edits the first sample of a circular recipe and its source offset;
+freehand canvas creation, pin editing, automatic source picking, and field solving are separate
+follow-up work. The Dust Finder shows a sharpened, high-contrast preview at pixel size, overlays
+visible spot markers, and scrolls between spot centers. It does not perform automatic face/pupil
+detection; eye centers are recipe values.
 
 ## Retouch quality evaluation
 
@@ -50,17 +58,18 @@ inside every listed limit.
 | Brick/roof | 4.0 | 34 | 0.48–1.80 | 0.030 |
 | Skin-like | 3.0 | 28 | 0.55–1.65 | 0.025 |
 
-`Remove (no path)` is reported as the unchanged damaged image because `RetouchMode` currently has
-only Heal and Clone. That row deliberately fails the gate and must be replaced with the real Remove
-render when that mode is implemented. The suite also asserts that the current Heal misses at least
-one case of every defect family; this is a passing XCTest behavior assertion documenting the
-baseline, not a permanently expected-failure test. “Current” runs the default Heal recipe through
-the production retouch renderer. Heal and Clone currently process each stroke sample as an
-individual spot, so wire/fibre rows also expose the current stroke behavior.
+`Remove (no path)` is reported as the unchanged damaged image while the correspondence-field producer
+is pending in KRMA-662. That row deliberately fails the gate. The suite also asserts that the current
+Heal misses at least one case of every defect family; this records the remaining quality gap pending
+threshold review and later solver work. “Current” runs the default Heal recipe through the production
+renderer. The evaluation limits are intentionally not a timing benchmark.
 
-Threshold violations include their metric names in the XCTest report table. The table is a quality
-gate, not a timing benchmark. Tighten limits as renderer work improves and record any justified
-threshold changes with the corresponding implementation ticket. For real-camera coverage, place
+Threshold violations include their metric names in the XCTest report table. On the KRMA-659
+implementation run, the manual fixture offsets passed 3/36 Heal rows and 7/36 Clone rows; the
+remaining rows stay visible for later source-picking and quality work. Remove has no correspondence
+producer yet and remains unchanged, so its 36/36 rows fail. Keep the limits intact until the review
+tracked by KRMA-666, and record any justified changes with the corresponding ticket. The table is a
+quality gate, not a timing benchmark. For real-camera coverage, place
 licensed RAW fixtures outside the checkout and opt in with `KROMORA_RAW_FIXTURE_DIR`; the normal
 quality suite does not read or commit that directory. Generated fixtures are intentionally small,
 seeded, and bounded. No AI-generated or licensed image assets are currently required.

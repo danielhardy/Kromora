@@ -116,7 +116,7 @@ final class EditClipboardTests: XCTestCase {
     }
 
     func testRetouchRecipesCopyOnlyWhenRetouchCategoryIsSelected() {
-        let spot = RetouchSpot(mode: .clone, sourceOffset: CGVector(dx: 0.1, dy: -0.2))
+        let spot = RetouchSpot(mode: .clone, source: .manual(offset: CGVector(dx: 0.1, dy: -0.2)))
         let clipboard = EditClipboardPayload(document: EditDocument(
             retouch: RetouchSettings(spots: [spot])
         ))
