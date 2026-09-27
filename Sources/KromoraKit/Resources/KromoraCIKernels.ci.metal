@@ -431,14 +431,17 @@ float4 retouchPull(sampler destination, sampler fill, sampler exteriorWeight) {
 }
 
 // The same blur/downsample chain is applied to numerator and confidence. The quotient is the
-// exterior-ring mean propagated inward through the pull/push levels.
+// exterior-ring mean propagated inward through the pull/push levels. Local confidence selects
+// between that local mean and the coarser propagated estimate rather than summing both, so a
+// pixel with full exterior support is not double-counted against its own coarse ancestor.
 float4 retouchPush(sampler fill, sampler coarse, sampler numerator, sampler confidence) {
     float4 base = sample(fill, samplerCoord(fill));
     float3 propagated = sample(coarse, samplerCoord(coarse)).rgb;
     float4 weighted = sample(numerator, samplerCoord(numerator));
-    float weight = sample(confidence, samplerCoord(confidence)).a;
-    float3 localMean = weight > 0.00001 ? weighted.rgb / weight : float3(0.0);
-    return float4(base.rgb + propagated + localMean, base.a);
+    float weight = clamp(sample(confidence, samplerCoord(confidence)).a, 0.0, 1.0);
+    float3 localMean = weight > 0.00001 ? weighted.rgb / weight : propagated;
+    float3 merged = mix(propagated, localMean, weight);
+    return float4(base.rgb + merged, base.a);
 }
 
 float4 retouchMembraneApply(sampler destination, sampler fill, sampler mask) {
