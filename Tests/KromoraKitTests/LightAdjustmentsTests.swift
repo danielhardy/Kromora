@@ -90,19 +90,6 @@ final class LightAdjustmentsTests: XCTestCase {
         XCTAssertTrue(decoded.parametricCurve.isIdentity)
     }
 
-    func testToneCurvePresetHasPortableVersionedJSONFormat() throws {
-        let preset = ToneCurvePreset(light: LightAdjustments(redToneCurve: LightToneCurve(points: [
-            LightCurvePoint(input: 0, output: 0), LightCurvePoint(input: 0.5, output: 0.8),
-            LightCurvePoint(input: 1, output: 1)
-        ])))
-        let restored = try JSONDecoder().decode(ToneCurvePreset.self, from: JSONEncoder().encode(preset))
-        XCTAssertEqual(restored, preset)
-        var applied = LightAdjustments(parametricCurve: ParametricToneCurve(shadows: 20))
-        restored.apply(to: &applied)
-        XCTAssertEqual(applied.redToneCurve, preset.red)
-        XCTAssertEqual(applied.parametricCurve.shadows, 20)
-    }
-
     func testMovableToneCurveEndpointsNormalizeAndRoundTrip() throws {
         let curve = LightToneCurve(points: [
             LightCurvePoint(input: 0.18, output: 0.12),

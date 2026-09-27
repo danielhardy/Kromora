@@ -50,6 +50,48 @@ final class EditClipboardTests: XCTestCase {
         XCTAssertEqual(result.lut, destination.lut)
     }
 
+    func testSelectiveLightCopyPasteTransfersEveryToneCurve() throws {
+        func curve(_ output: Double) -> LightToneCurve {
+            LightToneCurve(points: [
+                LightCurvePoint(input: 0, output: 0),
+                LightCurvePoint(input: 0.5, output: output),
+                LightCurvePoint(input: 1, output: 1),
+            ])
+        }
+        let sourceLight = LightAdjustments(
+            toneCurve: curve(0.61),
+            redToneCurve: curve(0.72),
+            greenToneCurve: curve(0.83),
+            blueToneCurve: curve(0.94),
+            parametricCurve: ParametricToneCurve(
+                highlights: 21, lights: -17, darks: 13, shadows: -9
+            )
+        )
+        let clipboard = EditClipboardPayload(document: EditDocument(light: sourceLight))
+        let restoredClipboard = try JSONDecoder().decode(
+            EditClipboardPayload.self,
+            from: JSONEncoder().encode(clipboard)
+        )
+        let destinationLight = LightAdjustments(
+            toneCurve: curve(0.11), redToneCurve: curve(0.22),
+            greenToneCurve: curve(0.33), blueToneCurve: curve(0.44),
+            parametricCurve: ParametricToneCurve(shadows: 30)
+        )
+        let destination = EditDocument(light: destinationLight)
+
+        let result = restoredClipboard.applying(
+            to: destination,
+            destinationIsRAW: false,
+            categories: [.light]
+        )
+
+        XCTAssertEqual(result.light.toneCurve, sourceLight.toneCurve)
+        XCTAssertEqual(result.light.redToneCurve, sourceLight.redToneCurve)
+        XCTAssertEqual(result.light.greenToneCurve, sourceLight.greenToneCurve)
+        XCTAssertEqual(result.light.blueToneCurve, sourceLight.blueToneCurve)
+        XCTAssertEqual(result.light.parametricCurve, sourceLight.parametricCurve)
+    }
+
     func testRAWDevelopCopiesExplicitEditsButPreservesThemForJPEGDestinations() {
         let clipboard = EditClipboardPayload(
             develop: RAWDevelopSettings(exposure: 1.25, baselineExposure: nil),

@@ -38,10 +38,8 @@ Light tone data keeps the legacy `toneCurve` key as the master RGB curve, then s
 `redToneCurve`, `greenToneCurve`, `blueToneCurve`, and `parametricCurve` values. Missing keys decode
 to identity, so existing edit documents retain their master curve unchanged. The renderer composes
 the parametric mapping, master mapping, and per-channel mappings into its sampled 1D texture, shared
-by preview and full-resolution export. Curve presets use UTF-8 JSON with `format` set to
-`kromora-tone-curves`, `version` set to `1`, and `master`, `red`, `green`, and `blue` members using
-the persisted `LightToneCurve` shape (`version` plus normalized `points` of `input`/`output`).
-Import replaces only those four curves; parametric controls remain with the current edit document.
+by preview and full-resolution export. Edit copy/paste transfers the full `LightAdjustments` value,
+including the master, per-channel, and parametric curves.
 
 `RenderPipeline` builds one lazy Core Image graph. `RenderEngine` evaluates that graph at the
 requested quality and output size; preview and export do not maintain separate edit logic. The

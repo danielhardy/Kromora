@@ -8,49 +8,6 @@ enum ToneCurveChannel: String, CaseIterable, Codable, Sendable, Identifiable {
     var id: String { rawValue }
 }
 
-/// Interchange format for the four editable RGB curves. Parametric controls remain document-local.
-struct ToneCurvePreset: Codable, Equatable, Sendable {
-    let format: String
-    let version: Int
-    let master: LightToneCurve
-    let red: LightToneCurve
-    let green: LightToneCurve
-    let blue: LightToneCurve
-
-    init(light: LightAdjustments) {
-        format = "kromora-tone-curves"
-        version = 1
-        master = light.toneCurve
-        red = light.redToneCurve
-        green = light.greenToneCurve
-        blue = light.blueToneCurve
-    }
-
-    func apply(to light: inout LightAdjustments) {
-        light.toneCurve = master
-        light.redToneCurve = red
-        light.greenToneCurve = green
-        light.blueToneCurve = blue
-    }
-
-    private enum CodingKeys: String, CodingKey { case format, version, master, red, green, blue }
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        let format = try c.decode(String.self, forKey: .format)
-        let version = try c.decode(Int.self, forKey: .version)
-        guard format == "kromora-tone-curves", version == 1 else {
-            throw DecodingError.dataCorruptedError(forKey: .format, in: c,
-                debugDescription: "Unsupported Kromora tone-curve preset format or version.")
-        }
-        self.format = format
-        self.version = version
-        master = try c.decode(LightToneCurve.self, forKey: .master)
-        red = try c.decode(LightToneCurve.self, forKey: .red)
-        green = try c.decode(LightToneCurve.self, forKey: .green)
-        blue = try c.decode(LightToneCurve.self, forKey: .blue)
-    }
-}
-
 /// A normalized point in the master RGB tone curve.
 ///
 /// The curve editor can replace points without knowing about Core Image; this value is the
