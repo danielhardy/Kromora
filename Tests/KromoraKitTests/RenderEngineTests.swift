@@ -40,6 +40,44 @@ final class RenderEngineTests: TempDirectoryTestCase {
 
     // MARK: - Parity
 
+    func testRemoveFillUsesOneFullResolutionFieldForPreviewAndExport() async throws {
+        let spot = RetouchSpot(
+            mode: .remove,
+            region: RetouchRegion(samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))], radius: 0.08),
+            seed: 17
+        )
+        let document = EditDocument(retouch: RetouchSettings(spots: [spot]))
+        let engine = RenderEngine()
+        let interactiveCandidate = await engine.makeCGImage(RenderRequest(
+            source: source, document: document, quality: .interactive, output: .raster
+        ))
+        let interactive = try XCTUnwrap(interactiveCandidate)
+        let baseline = try await render(engine, EditDocument(), scale: .full)
+        assertPixelsEqual(try Pixels.bytes(of: interactive), try Pixels.bytes(of: baseline),
+                          "interactive publication may leave the new Remove spot unfilled")
+        let interactiveSolveCount = await engine.retouchFillSolveCount
+        XCTAssertEqual(interactiveSolveCount, 0)
+        let preview = try await render(engine, document, scale: .full)
+        let exportCandidate = await engine.makeCGImage(RenderRequest(
+            source: source, document: document, quality: .export, output: .raster
+        ))
+        let export = try XCTUnwrap(exportCandidate)
+        let firstSolveCount = await engine.retouchFillSolveCount
+        XCTAssertEqual(firstSolveCount, 1, "the first request should solve one field")
+
+        assertPixelsEqual(try Pixels.bytes(of: preview), try Pixels.bytes(of: export),
+                          "the shared correspondence field must produce identical preview/export pixels")
+        XCTAssertNotEqual(try Pixels.bytes(of: preview), try Pixels.bytes(of: baseline),
+                          "a resolved Remove spot must sample its field into the developed image")
+        let cachedSolveCount = await engine.retouchFillSolveCount
+        XCTAssertEqual(cachedSolveCount, 1, "a matching export should hit the field cache")
+        var edited = spot
+        edited.seed &+= 1
+        _ = try await render(engine, EditDocument(retouch: RetouchSettings(spots: [edited])), scale: .full)
+        let invalidatedSolveCount = await engine.retouchFillSolveCount
+        XCTAssertEqual(invalidatedSolveCount, 2, "a changed seed must produce a cache miss")
+    }
+
     /// Display previews cross the actor boundary as completed GPU pixels, not as a lazy graph.
     /// The color-space metadata is retained on the texture-backed image so the presentation pass
     /// cannot silently fall back to the context's default space.

@@ -51,6 +51,10 @@ struct RetouchInspectorView: View {
                         slider("Opacity", value: opacityBinding, range: 0...1, format: "%.0f%%", scale: 100)
                         if let spot = selectedSpot {
                             Toggle("Visible", isOn: spotBinding(\.isVisible))
+                            if let failure = interaction.solveFailures[spot.wrappedValue.id] {
+                                Label(failure, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption).foregroundStyle(.red)
+                            }
                             Text("Drag the pin to move it; drag its source ring to choose a source.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Button("Delete Spot", role: .destructive) { removeSpot(spot.wrappedValue.id) }
