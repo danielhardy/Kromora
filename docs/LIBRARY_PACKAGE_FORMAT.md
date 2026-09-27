@@ -39,7 +39,10 @@ and filter work without opening `asset.json`.
 
 An `asset.json` record contains `identity` (the KRMA-390 opaque UUID plus immutable source
 fingerprint), `source` (embedded relative path or reserved referenced bookmark), `isRemoved`,
-`currentRevision`, and `editHistory` pointers. `isRemoved` is false for active records and true for
+`currentRevision`, and `editHistory` pointers. A virtual copy also has an optional `copyOfAssetID`
+link to its source asset; it owns a different UUID, original file, library metadata, and edit
+history. Its membership summary uses a copy-marked display name, while ratings and flags remain
+independent values on each member. `isRemoved` is false for active records and true for
 records retained in package-native quarantine (older records without the field decode as false).
 Each edit pointer has a revisioned Kromora JSON path and an optional XMP path. Paths are locators
 only. They are resolved against the package root at the render boundary and never enter portable
@@ -51,7 +54,11 @@ Every edit commit appends a new immutable `Edits/<revision>.json` document. The 
 the complete `EditDocument` plus content-addressed Look references. The matching
 `Metadata/<revision>.xmp` packet carries the asset UUID, revision, and the exact Kromora document in
 the `kromora:` namespace, so an XMP-aware tool can identify the revision without understanding
-Kromora's render graph. A reader validates that the two representations agree.
+Kromora's render graph, so a reader validates that the two representations agree. Native revision
+records may also carry an optional `snapshotName`; this names an intentional saved interpretation
+without changing the XMP edit payload. Named snapshots are retained during ordinary revision
+compaction. The editor's history browser reads the immutable revision list and restoring an older
+state appends a new revision, preserving the branch and its earlier commits.
 
 Malformed or truncated XMP is a critical edit-data error: it is reported as a typed read failure and
 can be moved to `Recovery/Quarantine/` for support/rebuild workflows. It is never replaced with a

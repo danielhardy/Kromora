@@ -130,6 +130,7 @@ struct InfoInspectorView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 identitySection
+                editHistorySection
                 metadataSection
                 if let assetID = viewModel.maskingAssetID,
                    let source = viewModel.maskingSource {
@@ -156,6 +157,70 @@ struct InfoInspectorView: View {
 
     /// Do not persist this state: a newly opened photo must never trigger analysis unexpectedly.
     @State private var analysisExpanded = false
+    @State private var snapshotName = ""
+
+    private var editHistorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Edit History").font(.headline)
+                Spacer()
+                Button { viewModel.refreshDurableEditHistory() } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.plain)
+                .help("Refresh edit history")
+            }
+            if let source = viewModel.virtualCopySourceDescription {
+                Label(source, systemImage: "square.on.square")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if viewModel.canCreateVirtualCopy {
+                Button {
+                    viewModel.createVirtualCopy()
+                } label: {
+                    Label("Create Virtual Copy", systemImage: "plus.square.on.square")
+                }
+                .buttonStyle(.plain)
+                .help("Create an independent library copy with its own edits and history")
+            }
+            HStack(spacing: 6) {
+                TextField("Snapshot name", text: $snapshotName)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") {
+                    let name = snapshotName.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !name.isEmpty else { return }
+                    viewModel.saveEditSnapshot(named: name)
+                    snapshotName = ""
+                }
+                .disabled(snapshotName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            if viewModel.durableEditHistory.isEmpty {
+                Text("No saved edits yet").font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(viewModel.durableEditHistory.reversed(), id: \.revision) { entry in
+                    Button {
+                        viewModel.restoreEditRevision(entry.revision)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.snapshotName ?? "Edit \(entry.revision)")
+                                    .lineLimit(1)
+                                Text(entry.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if entry.document == viewModel.document {
+                                Image(systemName: "checkmark").foregroundStyle(.secondary)
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Restore this edit state as a new history branch")
+                }
+            }
+        }
+    }
 
     // MARK: - Histogram
 

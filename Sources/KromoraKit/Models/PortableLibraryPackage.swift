@@ -238,6 +238,8 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     var isRemoved: Bool
     var currentRevision: UInt64
     var editHistory: PortablePackageEditHistoryPointers
+    /// Parent source asset for a virtual copy. The copy has its own asset UUID and edit history.
+    var copyOfAssetID: PortablePhotoAssetID?
     var unknownJSONFields: [String: Data] = [:]
 
     init(
@@ -245,17 +247,19 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
         source: PortablePackageSourceReference,
         isRemoved: Bool = false,
         currentRevision: UInt64 = 0,
-        editHistory: PortablePackageEditHistoryPointers = .init()
+        editHistory: PortablePackageEditHistoryPointers = .init(),
+        copyOfAssetID: PortablePhotoAssetID? = nil
     ) {
         self.identity = identity
         self.source = source
         self.isRemoved = isRemoved
         self.currentRevision = currentRevision
         self.editHistory = editHistory
+        self.copyOfAssetID = copyOfAssetID
     }
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case identity, source, isRemoved, currentRevision, editHistory
+        case identity, source, isRemoved, currentRevision, editHistory, copyOfAssetID
     }
 
     init(from decoder: Decoder) throws {
@@ -266,6 +270,7 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
         isRemoved = try c.decodeIfPresent(Bool.self, forKey: .isRemoved) ?? false
         currentRevision = try c.decode(UInt64.self, forKey: .currentRevision)
         editHistory = try c.decode(PortablePackageEditHistoryPointers.self, forKey: .editHistory)
+        copyOfAssetID = try c.decodeIfPresent(PortablePhotoAssetID.self, forKey: .copyOfAssetID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -275,6 +280,7 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
         try c.encode(isRemoved, forKey: .isRemoved)
         try c.encode(currentRevision, forKey: .currentRevision)
         try c.encode(editHistory, forKey: .editHistory)
+        try c.encodeIfPresent(copyOfAssetID, forKey: .copyOfAssetID)
     }
 }
 
@@ -286,6 +292,7 @@ enum PortablePackageError: Error, Equatable, CustomStringConvertible, LocalizedE
     case invalidRelativePath(String)
     case assetShardMismatch(asset: String, shard: String)
     case duplicateAsset(String)
+    case invalidVirtualCopy(String)
     case recordPathMismatch(String)
     case invalidEditRevision(String)
     case malformedXMP(String)
@@ -304,6 +311,7 @@ enum PortablePackageError: Error, Equatable, CustomStringConvertible, LocalizedE
         case .assetShardMismatch(let asset, let shard):
             return "Asset \(asset) does not belong to membership shard \(shard)"
         case .duplicateAsset(let asset): return "Membership shard contains duplicate asset \(asset)"
+        case .invalidVirtualCopy(let reason): return "Invalid virtual copy: \(reason)"
         case .recordPathMismatch(let path): return "Invalid asset record path '\(path)'"
         case .invalidEditRevision(let message): return "Invalid edit revision: \(message)"
         case .malformedXMP(let message): return "Malformed XMP edit sidecar: \(message)"

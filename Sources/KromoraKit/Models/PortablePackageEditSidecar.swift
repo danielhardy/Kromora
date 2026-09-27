@@ -15,13 +15,16 @@ struct PortablePackageEditRevision: Codable, Equatable, Sendable {
     let createdAt: Date
     let document: EditDocument
     let lookReferences: [PortablePackageLookReference]
+    /// User-authored snapshot label. Nil for ordinary edit commits.
+    var snapshotName: String? = nil
 
     init(
         assetID: PortablePhotoAssetID,
         revision: UInt64,
         createdAt: Date = Date(),
         document: EditDocument,
-        lookReferences: [PortablePackageLookReference] = []
+        lookReferences: [PortablePackageLookReference] = [],
+        snapshotName: String? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.assetID = assetID
@@ -29,6 +32,7 @@ struct PortablePackageEditRevision: Codable, Equatable, Sendable {
         self.createdAt = createdAt
         self.document = document
         self.lookReferences = lookReferences
+        self.snapshotName = snapshotName
     }
 }
 
@@ -196,6 +200,7 @@ extension PortableLibraryPackage {
     func appendEditRevision(
         for assetID: PortablePhotoAssetID,
         document: EditDocument,
+        snapshotName: String? = nil,
         lookBytes: [Data] = [],
         lease: PortablePackageLease,
         now: Date = Date(),
@@ -249,7 +254,7 @@ extension PortableLibraryPackage {
 
         let revision = PortablePackageEditRevision(
             assetID: assetID, revision: nextRevision, createdAt: now,
-            document: document, lookReferences: references
+            document: document, lookReferences: references, snapshotName: snapshotName
         )
         // JSON's ISO-8601 representation is the durable clock precision. Return the same decoded
         // value that a later reader will observe, rather than a pre-encoding Date with sub-second
@@ -331,6 +336,14 @@ extension PortableLibraryPackage {
         }
         for reference in revision.lookReferences { try validateLookReference(reference) }
         return revision
+    }
+
+    /// Returns durable revisions in package order, including named snapshots and branch points.
+    func readEditHistory(for assetID: PortablePhotoAssetID) throws -> [PortablePackageEditRevision] {
+        let record = try readAssetRecord(for: assetID)
+        return try record.editHistory.edits
+            .sorted { $0.revision < $1.revision }
+            .map { try readEditRevision(for: assetID, revision: $0.revision) }
     }
 
     func readEditSidecar(

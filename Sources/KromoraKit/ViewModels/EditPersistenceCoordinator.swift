@@ -27,6 +27,7 @@ final class EditPersistenceCoordinator {
 
     /// Called on the main actor when a user-facing store error changes.
     var onStatusChange: ((String?) -> Void)?
+    var onDurableWrite: ((EditSourceReference) -> Void)?
     /// Called on the main actor for a failed write, without making the coordinator depend on the
     /// view model's status-bar policy.
     var onFailure: ((String) -> Void)?
@@ -87,6 +88,7 @@ final class EditPersistenceCoordinator {
             do {
                 try await store.save(snapshot.document, for: snapshot.reference)
                 if pending[assetID] == snapshot { pending.removeValue(forKey: assetID) }
+                onDurableWrite?(snapshot.reference)
                 if snapshot.reportsStatus {
                     lastFailureMessage = nil
                     onStatusChange?(nil)
