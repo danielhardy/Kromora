@@ -12,36 +12,31 @@ struct LightInspectorView: View {
     @State private var curveSectionExpanded = true
 
     var body: some View {
-        ScrollViewReader { scrollProxy in
-            InspectorScrollingContent {
-                VStack(alignment: .leading, spacing: 12) {
-                    header
+        InspectorScrollingContent {
+            VStack(alignment: .leading, spacing: 12) {
+                header
 
-                    InspectorDisclosure("Tone", isExpanded: $toneSectionExpanded) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            ForEach(
-                                Array(LightControl.allCases.enumerated()),
-                                id: \.element
-                            ) { offset, control in
-                                controlRow(
-                                    control,
-                                    sortPriority: Double(LightControl.allCases.count - offset)
-                                ).id(control)
-                            }
+                InspectorDisclosure("Tone", isExpanded: $toneSectionExpanded) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(
+                            Array(LightControl.allCases.enumerated()),
+                            id: \.element
+                        ) { offset, control in
+                            controlRow(
+                                control,
+                                sortPriority: Double(LightControl.allCases.count - offset)
+                            )
                         }
-                        .padding(.top, 10)
                     }
-
-                    InspectorDisclosure("Tone Curve", isExpanded: $curveSectionExpanded) {
-                        ToneCurveEditor(viewModel: viewModel)
-                            .padding(.top, 10)
-                    }
+                    .padding(.top, 10)
                 }
-                .padding(16)
+
+                InspectorDisclosure("Tone Curve", isExpanded: $curveSectionExpanded) {
+                    ToneCurveEditor(viewModel: viewModel)
+                        .padding(.top, 10)
+                }
             }
-            .onChange(of: viewModel.exposureScrollRequest) { _, _ in
-                scrollProxy.scrollTo(LightControl.exposure, anchor: .center)
-            }
+            .padding(16)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Light adjustments")
