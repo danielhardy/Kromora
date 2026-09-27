@@ -276,7 +276,7 @@ struct PreviewView: View {
     private func canvasSurface(
         _ surface: PreviewSurface, showsMaskOverlay: Bool = true
     ) -> some View {
-        GeometryReader { _ in
+        GeometryReader { geometry in
             let preview = PreviewSurfaceView(
                 surface: surface,
                 navigation: canvasState.navigation,
@@ -293,6 +293,11 @@ struct PreviewView: View {
                 },
                 onMagnify: { factor, point, viewportSize in
                     viewModel.zoomCanvas(by: factor, at: point, viewportSize: viewportSize)
+                },
+                isWhiteBalanceSampling: viewModel.isWhiteBalanceSampling && showsMaskOverlay,
+                onWhiteBalanceSamplePoint: { point, viewportSize, commit in
+                    viewModel.updateWhiteBalanceSample(
+                        at: point, viewportSize: viewportSize, commit: commit)
                 },
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
                 viewSpaceRotationAngle: canvasState.isCropToolActive
@@ -328,6 +333,31 @@ struct PreviewView: View {
                     // clicks in the masking workspace; selection leaves canvas navigation to
                     // the preview surface (including double-click zoom).
                     .allowsHitTesting(maskingState.activeTool != .selection)
+                }
+
+                if showsMaskOverlay, viewModel.isWhiteBalanceSampling,
+                    let point = viewModel.whiteBalanceSamplerPoint,
+                    let image = viewModel.whiteBalanceLoupeImage
+                {
+                    Image(decorative: image, scale: 1)
+                        .resizable()
+                        .interpolation(.none)
+                        .frame(width: 132, height: 132)
+                        .clipShape(Circle())
+                        .overlay { Circle().strokeBorder(.white, lineWidth: 2) }
+                        .overlay {
+                            Image(systemName: "plus")
+                                .font(.system(size: 18, weight: .regular))
+                                .foregroundStyle(.white)
+                                .shadow(color: .black.opacity(0.8), radius: 2)
+                        }
+                        .shadow(radius: 5)
+                        .allowsHitTesting(false)
+                        .position(
+                            x: min(max(point.x + 78, 72), geometry.size.width - 72),
+                            y: min(max(point.y - 78, 72), geometry.size.height - 72)
+                        )
+                        .accessibilityLabel("White balance sampling loupe")
                 }
             }
         }

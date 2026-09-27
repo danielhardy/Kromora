@@ -46,6 +46,14 @@ post-crop composition effects. The exact order and cache invalidation version li
 Sendable request values and rendered values cross `RenderEngining`. New work should use the existing
 request funnel and injected protocol seams rather than adding a second renderer or context.
 
+White balance stays in the same `EditDocument`: RAW presets and samples write decoder temperature
+and tint overrides before RAW rendering; standard-image edits write the existing temperature/tint
+adjustment node. The Color inspector's eyedropper samples the currently rendered preview, averages
+an 11 × 11 display-pixel square, and shows a 3× loupe crop before the click commits. Cancel leaves
+the document untouched. Auto estimates from the currently rendered image region; As Shot clears the pair (and
+the legacy post-render node on RAW); Custom leaves the current values available for fine adjustment.
+These controls use normal document history and package persistence.
+
 ## Auto and photo analysis
 
 `PhotoAnalysisCoordinator` owns Vision-backed analysis, semantic-mask generation, caching, and

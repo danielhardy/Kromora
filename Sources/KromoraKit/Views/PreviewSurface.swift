@@ -706,6 +706,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
     var onCanvasInteractionEnded: (() -> Void)?
     var onPan: ((CGSize, CGSize) -> Void)?
     var onMagnify: ((CGFloat, CGPoint, CGSize) -> Void)?
+    var isWhiteBalanceSampling = false
+    var onWhiteBalanceSamplePoint: ((CGPoint, CGSize, Bool) -> Void)?
     /// The drawable reports backing pixels, which is the only reliable size across mixed-DPI
     /// windows and side-by-side panels. SwiftUI point geometry is not sufficient here.
     var onDrawableSizeChange: ((CGSize) -> Void)?
@@ -746,6 +748,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
         view.onCanvasInteractionEnded = onCanvasInteractionEnded
         view.onPan = onPan
         view.onMagnify = onMagnify
+        view.isWhiteBalanceSampling = isWhiteBalanceSampling
+        view.onWhiteBalanceSamplePoint = onWhiteBalanceSamplePoint
         view.ignoresHits = ignoresHits
         view.delegate = context.coordinator
         view.enableSetNeedsDisplay = true
@@ -776,6 +780,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
             view.onCanvasInteractionEnded = onCanvasInteractionEnded
             view.onPan = onPan
             view.onMagnify = onMagnify
+            view.isWhiteBalanceSampling = isWhiteBalanceSampling
+            view.onWhiteBalanceSamplePoint = onWhiteBalanceSamplePoint
             view.ignoresHits = ignoresHits
         }
         // SwiftUI may call updateNSView before the MTKView has a drawable (notably while a
@@ -1459,6 +1465,12 @@ final class PreviewMTKView: MTKView {
     var onCanvasInteractionEnded: (() -> Void)?
     var onPan: ((CGSize, CGSize) -> Void)?
     var onMagnify: ((CGFloat, CGPoint, CGSize) -> Void)?
+    var isWhiteBalanceSampling = false {
+        didSet { updateTrackingAreas() }
+    }
+    /// The final argument is true for the click that commits the sample.
+    var onWhiteBalanceSamplePoint: ((CGPoint, CGSize, Bool) -> Void)?
+    private var pointerTrackingArea: NSTrackingArea?
     var onEffectiveAppearanceChange: ((NSAppearance) -> Void)?
     var ignoresHits = false
 
@@ -1476,6 +1488,10 @@ final class PreviewMTKView: MTKView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if isWhiteBalanceSampling {
+            onWhiteBalanceSamplePoint?(canvasPoint(for: event), bounds.size, true)
+            return
+        }
         if event.clickCount == 2 {
             cancelPanWithoutEndingInteraction()
             onDoubleClick?(canvasPoint(for: event), bounds.size)
@@ -1488,6 +1504,10 @@ final class PreviewMTKView: MTKView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if isWhiteBalanceSampling {
+            onWhiteBalanceSamplePoint?(canvasPoint(for: event), bounds.size, false)
+            return
+        }
         let point = canvasPoint(for: event)
         guard let start = dragStartPoint else { return }
         if !isPanning {
@@ -1506,6 +1526,7 @@ final class PreviewMTKView: MTKView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if isWhiteBalanceSampling { return }
         // The last mouseDragged sample is the pointer position. mouseUp can arrive in a
         // different coordinate space than mouseDragged (SwiftUI hosting vs AppKit y-up), and
         // applying that delta inverts the vertical pan — landing near the start plus the
@@ -1546,6 +1567,7 @@ final class PreviewMTKView: MTKView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        updateTrackingAreas()
         onEffectiveAppearanceChange?(effectiveAppearance)
         setNeedsDisplay(bounds)
     }
@@ -1558,7 +1580,33 @@ final class PreviewMTKView: MTKView {
 
     override func layout() {
         super.layout()
+        updateTrackingAreas()
         setNeedsDisplay(bounds)
+    }
+
+    override func updateTrackingAreas() {
+        if let pointerTrackingArea { removeTrackingArea(pointerTrackingArea) }
+        pointerTrackingArea = nil
+        super.updateTrackingAreas()
+        guard isWhiteBalanceSampling else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        pointerTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard isWhiteBalanceSampling else { return }
+        onWhiteBalanceSamplePoint?(canvasPoint(for: event), bounds.size, false)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        guard isWhiteBalanceSampling else { return }
+        onWhiteBalanceSamplePoint?(canvasPoint(for: event), bounds.size, false)
     }
 
     private func canvasPoint(for event: NSEvent) -> CGPoint {

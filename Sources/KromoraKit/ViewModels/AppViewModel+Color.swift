@@ -1,3 +1,4 @@
+import CoreImage
 import SwiftUI
 
 /// The photographer-facing controls in the global Color stage.
@@ -135,6 +136,165 @@ enum ColorGradingGlobalControl: String, CaseIterable, Hashable, Sendable {
 
 extension AppViewModel {
     // MARK: - White balance
+
+    func applyWhiteBalancePreset(_ preset: WhiteBalancePreset) {
+        guard !sourceIsRAW || rawCapabilities != nil else { return }
+        cancelWhiteBalanceSampling()
+        switch preset {
+        case .asShot:
+            resetWhiteBalance()
+        case .custom:
+            break
+        case .auto:
+            guard let image = previewSurface.image else { return }
+            let extent = image.extent
+            guard let values = whiteBalanceSampleValues(
+                from: extent, image: image, loupeSide: 0
+            ) else { return }
+            commitWhiteBalanceSample(values)
+        case .daylight, .cloudy, .shade, .tungsten, .fluorescent, .flash:
+            guard let target = preset.temperature else { return }
+            // The standard-image node stores filter-native Kelvin, whose axis is reflected
+            // around D65. RAW's decoder setting is already in photographic Kelvin.
+            let temperature = sourceIsRAW ? target : 13000 - target
+            setWhiteBalance(temperature: temperature, tint: 0)
+        }
+    }
+
+    func beginWhiteBalanceSampling() {
+        guard sourceImage != nil, (!sourceIsRAW || rawCapabilities != nil) else { return }
+        isWhiteBalanceSampling = true
+        whiteBalanceSamplerPoint = nil
+        whiteBalanceLoupeImage = nil
+    }
+
+    func cancelWhiteBalanceSampling() {
+        isWhiteBalanceSampling = false
+        whiteBalanceSamplerPoint = nil
+        whiteBalanceLoupeImage = nil
+    }
+
+    /// The sampler's fixed 11 × 11 display-pixel square is averaged on the currently rendered
+    /// preview. That makes the visible loupe and the committed correction refer to the same edit.
+    func updateWhiteBalanceSample(at point: CGPoint, viewportSize: CGSize, commit: Bool) {
+        guard isWhiteBalanceSampling,
+              let image = previewSurface.image,
+              let virtualExtent = previewSurface.presentationImageExtent,
+              viewportSize.width > 0, viewportSize.height > 0
+        else { return }
+        let layoutExtent = previewSurface.layoutImageExtent ?? virtualExtent
+        let transform = canvasNavigation.transform(
+            imageExtent: virtualExtent, viewportSize: viewportSize)
+        guard transform.scale > 0 else { return }
+        let imagePointX = (point.x - transform.origin.x) / transform.scale
+            - (layoutExtent.minX - virtualExtent.minX)
+        let imagePointY = (point.y - transform.origin.y) / transform.scale
+            - (virtualExtent.maxY - layoutExtent.maxY)
+        let localX = imagePointX / layoutExtent.width
+        let localY = imagePointY / layoutExtent.height
+        guard localX >= 0, localX <= 1, localY >= 0, localY <= 1 else {
+            whiteBalanceSamplerPoint = nil
+            whiteBalanceLoupeImage = nil
+            return
+        }
+        let center = CGPoint(
+            x: image.extent.minX + localX * image.extent.width,
+            y: image.extent.maxY - localY * image.extent.height
+        )
+        let displayPixels = 11.0
+        let sampleSide = max(1, displayPixels * image.extent.width
+            / (layoutExtent.width * transform.scale))
+        let sampleRect = CGRect(
+            x: center.x - sampleSide / 2, y: center.y - sampleSide / 2,
+            width: sampleSide, height: sampleSide
+        ).intersection(image.extent)
+        guard let values = whiteBalanceSampleValues(
+            from: sampleRect, image: image, loupeSide: sampleSide * 3
+        ) else { return }
+        whiteBalanceSamplerPoint = point
+        whiteBalanceLoupeImage = values.loupe
+        if commit {
+            commitWhiteBalanceSample(values)
+            cancelWhiteBalanceSampling()
+        }
+    }
+
+    private func setWhiteBalance(temperature: Double, tint: Double) {
+        endUndoGrouping()
+        if sourceIsRAW {
+            updateDocument { document in
+                document.rawDevelop.neutralTemperature = temperature.clamped(
+                    to: DevelopControl.whiteBalance.range,
+                    default: developNeutral(for: .whiteBalance))
+                document.rawDevelop.neutralTint = tint.clamped(
+                    to: DevelopControl.tintRange, default: developTintNeutral)
+                document.adjustments.removeAll { $0.slot == .temperatureTint }
+            }
+        } else {
+            updateDocument { document in
+                document.adjustments = AdjustmentControl.temperature.setting(
+                    temperature.clamped(to: AdjustmentControl.temperature.range, default: 6500),
+                    in: document.adjustments)
+                document.adjustments = AdjustmentControl.tint.setting(
+                    tint.clamped(to: AdjustmentControl.tint.range, default: 0),
+                    in: document.adjustments)
+            }
+        }
+    }
+
+    private func commitWhiteBalanceSample(
+        _ sample: (red: Double, green: Double, blue: Double, loupe: CGImage?)
+    ) {
+        let estimate = WhiteBalanceEstimator.correction(
+            red: sample.red, green: sample.green, blue: sample.blue)
+        let temperature = sourceIsRAW ? estimate.temperature : 13000 - estimate.temperature
+        setWhiteBalance(temperature: temperature, tint: estimate.tint)
+    }
+
+    private func whiteBalanceSampleValues(
+        from rect: CGRect, image: CIImage, loupeSide: CGFloat
+    ) -> (red: Double, green: Double, blue: Double, loupe: CGImage?)? {
+        let crop = rect.intersection(image.extent)
+        guard !crop.isNull, crop.width >= 1, crop.height >= 1 else { return nil }
+        let context = RenderEngine.presentationContext
+        guard let sampleImage = context.createCGImage(image.cropped(to: crop), from: crop) else {
+            return nil
+        }
+        let width = sampleImage.width
+        let height = sampleImage.height
+        guard width > 0, height > 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+        let rendered = bytes.withUnsafeMutableBytes { storage -> Bool in
+            guard let bitmap = CGContext(
+                data: storage.baseAddress, width: width, height: height,
+                bitsPerComponent: 8, bytesPerRow: width * 4, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            bitmap.draw(sampleImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard rendered else { return nil }
+        var red = 0.0, green = 0.0, blue = 0.0, count = 0.0
+        for offset in stride(from: 0, to: bytes.count, by: 4) where bytes[offset + 3] > 0 {
+            red += Double(bytes[offset]) / 255
+            green += Double(bytes[offset + 1]) / 255
+            blue += Double(bytes[offset + 2]) / 255
+            count += 1
+        }
+        guard count > 0 else { return nil }
+        let loupe: CGImage?
+        if loupeSide > 1 {
+            let loupeRect = CGRect(
+                x: crop.midX - loupeSide / 2, y: crop.midY - loupeSide / 2,
+                width: loupeSide, height: loupeSide
+            ).intersection(image.extent)
+            loupe = context.createCGImage(image.cropped(to: loupeRect), from: loupeRect)
+        } else {
+            loupe = nil
+        }
+        return (red / count, green / count, blue / count, loupe)
+    }
 
     /// Whether the Color inspector's white-balance rows have a non-neutral value.
     ///

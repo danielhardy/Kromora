@@ -114,6 +114,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     @Published var sourceName: String = ""
     @Published var sourceSize: CGSize = .zero
     @Published var sourceURL: URL?
+    @Published var isWhiteBalanceSampling = false
+    @Published var whiteBalanceSamplerPoint: CGPoint?
+    @Published var whiteBalanceLoupeImage: CGImage?
 
     /// Identity shown by Inspect. Resolve through the durable collection record so Photos names
     /// and the library/filmstrip naming convention remain consistent during source navigation.
@@ -1856,6 +1859,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         maskInteractionState.resetForSource()
         restoreMaskSelection()
         resetResolutionPlanners()
+        cancelWhiteBalanceSampling()
         // Do not let the previous surface briefly show the photo we are leaving while the new
         // source is being decoded.
         sourceImage = nil
@@ -2698,6 +2702,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewPresentation.advanceDisplayRevision()
         cancelPendingPreviewDebounce()
         previewCoordinator.cancel()
+        cancelWhiteBalanceSampling()
         sourceImage = nil
         imageSource = nil
         sourceURL = nil
