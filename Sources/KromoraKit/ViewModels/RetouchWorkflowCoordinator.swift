@@ -8,9 +8,14 @@ protocol RetouchWorkflowDestination: AnyObject {
     var sourceSize: CGSize { get }
     func updateDocument(_ transform: (inout EditDocument) -> Void)
     func pickRetouchSource(spotID: UUID, rank: Int) async
+    func retouchAnalysisProxy() async -> RetouchAnalysisProxy?
     func setRetouchCanvasActive(_ active: Bool)
     func beginUndoGrouping()
     func endUndoGrouping()
+}
+
+extension RetouchWorkflowDestination {
+    func retouchAnalysisProxy() async -> RetouchAnalysisProxy? { nil }
 }
 
 /// Owns transient retouch selection and gestures; each completed pointer action is one document edit.
@@ -32,6 +37,8 @@ final class RetouchWorkflowCoordinator {
     private var startSuggestion: RetouchDustSuggestion?
     private var suggestionWasMoved = false
     private var isResizingSuggestion = false
+    private var wireRefinementTask: Task<Void, Never>?
+    private var wireAnalysisTask: Task<RetouchWireRefiner.Proposal, Error>?
 
     init(destination: (any RetouchWorkflowDestination)? = nil) {
         self.destination = destination
@@ -207,9 +214,60 @@ final class RetouchWorkflowCoordinator {
 
     func deleteSelected() { if let id = interactionState.selectedSpotID { deleteSpot(id) } }
     func deleteSpot(_ id: UUID) {
+        if interactionState.wireProposalSpotID == id { cancelWireRefinement() }
         destination?.updateDocument { $0.retouch.spots.removeAll { $0.id == id } }
         if interactionState.selectedSpotID == id { interactionState.select(nil) }
         if interactionState.shiftClickAnchor != nil { interactionState.setShiftClickAnchor(nil) }
+    }
+    func refineSelectedSpotToWire() {
+        guard let destination, let id = interactionState.selectedSpotID,
+              let spot = destination.document.retouch.spots.first(where: { $0.id == id }),
+              spot.mode == .remove, spot.region.samples.count >= 2 else { return }
+        wireRefinementTask?.cancel()
+        interactionState.beginWireRefinement(id)
+        let region = spot.region, sourceSize = destination.sourceSize
+        wireRefinementTask = Task { [weak self] in
+            let proxy = await destination.retouchAnalysisProxy()
+            guard !Task.isCancelled else { return }
+            guard let proxy else {
+                self?.interactionState.failWireRefinement("Wire analysis is unavailable for this source.")
+                return
+            }
+            do {
+                let analysisTask = Task.detached(priority: .userInitiated) {
+                    try RetouchWireRefiner.refine(
+                        region: region, in: proxy, sourceWidth: Int(sourceSize.width),
+                        sourceHeight: Int(sourceSize.height), isCancelled: { Task.isCancelled }
+                    )
+                }
+                self?.wireAnalysisTask = analysisTask
+                let proposal = try await analysisTask.value
+                guard !Task.isCancelled else { return }
+                self?.wireAnalysisTask = nil
+                self?.interactionState.setWireProposal(proposal)
+            } catch is CancellationError {
+                self?.wireAnalysisTask = nil
+                self?.interactionState.clearWireRefinement()
+            } catch RetouchWireRefiner.Failure.cancelled {
+                self?.wireAnalysisTask = nil
+                self?.interactionState.clearWireRefinement()
+            } catch {
+                self?.wireAnalysisTask = nil
+                self?.interactionState.failWireRefinement("No unambiguous wire ridge was found. The brush region is unchanged.")
+            }
+        }
+    }
+    func cancelWireRefinement() {
+        wireRefinementTask?.cancel(); wireRefinementTask = nil
+        wireAnalysisTask?.cancel(); wireAnalysisTask = nil
+        interactionState.clearWireRefinement()
+    }
+    func acceptWireRefinement() {
+        guard let destination, let id = interactionState.wireProposalSpotID,
+              let proposal = interactionState.wireProposal,
+              let index = destination.document.retouch.spots.firstIndex(where: { $0.id == id }) else { return }
+        destination.updateDocument { $0.retouch.spots[index].region = proposal.region }
+        interactionState.clearWireRefinement()
     }
     func acceptDustSuggestion(_ id: UUID) {
         guard let suggestion = interactionState.dustSuggestions.first(where: { $0.id == id }) else { return }

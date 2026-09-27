@@ -3147,6 +3147,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
+    func retouchAnalysisProxy() async -> RetouchAnalysisProxy? {
+        guard let source = imageSource else { return nil }
+        return await engine.retouchAnalysisProxy(source: source)
+    }
+
     private func isAutomaticRetouchSource(_ source: RetouchSource?) -> Bool {
         if case .auto? = source { return true }
         return false

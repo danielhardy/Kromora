@@ -122,6 +122,39 @@ final class RetouchWorkflowCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.pickedRanks, [3, 1])
     }
 
+    func testWireRefinementStaysProposedUntilAcceptedAndCanBeKeptOriginal() async throws {
+        let destination = FakeRetouchDestination()
+        let original = RetouchRegion(samples: [
+            BrushSample(point: CGPoint(x: 0.1, y: 0.45)), BrushSample(point: CGPoint(x: 0.9, y: 0.45)),
+        ], radius: 0.1)
+        let spot = RetouchSpot(mode: .remove, region: original)
+        destination.document.retouch.spots = [spot]
+        destination.analysisProxy = RetouchAnalysisProxy(width: 100, height: 80,
+            pixels: (0..<80).flatMap { y in (0..<100).map { _ in SIMD3<Float>(y >= 36 && y <= 40 ? 25 : 65, 0, 0) } })
+        let workflow = RetouchWorkflowCoordinator(destination: destination)
+        workflow.interactionState.select(spot.id)
+        workflow.refineSelectedSpotToWire()
+        for _ in 0..<50 where workflow.interactionState.isRefiningWire {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        XCTAssertNotNil(workflow.interactionState.wireProposal)
+        XCTAssertEqual(destination.document.retouch.spots.first?.region, original,
+                       "the proposal must not change the committed brush region")
+        workflow.cancelWireRefinement()
+        XCTAssertEqual(destination.document.retouch.spots.first?.region, original,
+                       "keeping the brush region must preserve its exact geometry")
+        XCTAssertNil(workflow.interactionState.wireProposal)
+
+        workflow.refineSelectedSpotToWire()
+        for _ in 0..<50 where workflow.interactionState.isRefiningWire {
+            try await Task.sleep(for: .milliseconds(2))
+        }
+        let proposal = try XCTUnwrap(workflow.interactionState.wireProposal?.region)
+        workflow.acceptWireRefinement()
+        XCTAssertEqual(destination.document.retouch.spots.first?.region, proposal)
+        XCTAssertEqual(destination.documentUpdates, 1)
+    }
+
     func testAcceptOneAcceptAllDismissAndDragSuggestion() throws {
         let destination = FakeRetouchDestination()
         let workflow = RetouchWorkflowCoordinator(destination: destination)
@@ -176,11 +209,13 @@ private final class FakeRetouchDestination: RetouchWorkflowDestination {
     var sourceSize = CGSize(width: 1000, height: 800)
     var documentUpdates = 0
     var pickedRanks: [Int] = []
+    var analysisProxy: RetouchAnalysisProxy?
     func updateDocument(_ transform: (inout EditDocument) -> Void) {
         documentUpdates += 1
         transform(&document)
     }
     func pickRetouchSource(spotID: UUID, rank: Int) async { pickedRanks.append(rank) }
+    func retouchAnalysisProxy() async -> RetouchAnalysisProxy? { analysisProxy }
     func setRetouchCanvasActive(_ active: Bool) {}
     var undoGroupingDepth = 0
     func beginUndoGrouping() { undoGroupingDepth += 1 }
