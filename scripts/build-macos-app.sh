@@ -81,6 +81,12 @@ cp -R "$resource_bundle" "$app_bundle/Contents/Resources/"
 cp "$info_plist" "$app_bundle/Contents/Info.plist"
 /usr/bin/plutil -replace CFBundleIconName -string Kromora "$app_bundle/Contents/Info.plist"
 /usr/bin/plutil -replace CFBundleIconFile -string Kromora.icns "$app_bundle/Contents/Info.plist"
+git_commit="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
+if [[ -n "$git_commit" ]]; then
+  /usr/bin/plutil -insert KromoraGitCommit -string "$git_commit" "$app_bundle/Contents/Info.plist"
+else
+  /usr/bin/plutil -remove KromoraGitCommit "$app_bundle/Contents/Info.plist" >/dev/null 2>&1 || true
+fi
 [[ -f "$app_bundle/Contents/Resources/Kromora.icns" ]] || {
   print -u2 "actool did not produce the Icon Composer ICNS output"
   exit 1
