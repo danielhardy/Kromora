@@ -50,10 +50,6 @@ final class HistogramTests: TempDirectoryTestCase {
         XCTAssertEqual(histogram.clippedShadows, 0)
         XCTAssertEqual(histogram.sampleWidth, width)
         XCTAssertEqual(histogram.sampleHeight, height)
-        let readout = try XCTUnwrap(histogram.readout(x: 0, y: 0))
-        XCTAssertEqual([readout.red, readout.green, readout.blue], [255, 0, 0])
-        XCTAssertEqual(readout.lab.l, 53.24, accuracy: 0.1)
-        XCTAssertNil(histogram.readout(x: width, y: 0))
     }
 
     /// Rows can be padded, and reading past the end of a row would silently tally the wrong bytes.

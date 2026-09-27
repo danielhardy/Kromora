@@ -281,31 +281,11 @@ struct InfoInspectorView: View {
             .labelsHidden()
             .padding(.horizontal, 12)
 
-            HStack(spacing: 8) {
-                if let readout = viewModel.pixelReadout {
-                    if let before = viewModel.pixelReadoutBefore {
-                        Text(String(format: "Pre RGB %03d %03d %03d", before.red, before.green, before.blue))
-                        Text(String(format: "Lab %5.1f %+.1f %+.1f", before.lab.l, before.lab.a, before.lab.b))
-                    }
-                    Text(String(format: "Post RGB %03d %03d %03d", readout.red, readout.green, readout.blue))
-                    Text(String(format: "Lab %5.1f %+.1f %+.1f", readout.lab.l, readout.lab.a, readout.lab.b))
-                } else {
-                    Text("Hover over photo for pixel readout")
-                }
-            }
-            .font(.system(size: 10, design: .monospaced))
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 12)
-
             if let histogram = viewModel.histogram {
                 HStack(spacing: 7) {
                     Text("R \(histogram.clippedRed)").foregroundStyle(.red)
                     Text("G \(histogram.clippedGreen)").foregroundStyle(.green)
                     Text("B \(histogram.clippedBlue)").foregroundStyle(.blue)
-                    Spacer(minLength: 2)
-                    Button("Exposure") { viewModel.showExposureControl() }
-                        .buttonStyle(.link)
-                        .help("Show the Exposure control")
                 }
                 .font(.system(size: 10, design: .monospaced))
                 .padding(.horizontal, 12)

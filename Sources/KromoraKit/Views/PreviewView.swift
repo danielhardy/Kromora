@@ -323,10 +323,6 @@ struct PreviewView: View {
                     viewModel.updateWhiteBalanceSample(
                         at: point, viewportSize: viewportSize, commit: commit)
                 },
-                onCursorPoint: { point, viewportSize in
-                    guard viewModel.isInspectorPresented, viewModel.inspectorTab == .info else { return }
-                    viewModel.updatePixelReadout(at: point, viewportSize: viewportSize)
-                },
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
                 viewSpaceRotationAngle: canvasState.isCropToolActive
                     ? canvasState.cropStraightenAngle : 0,

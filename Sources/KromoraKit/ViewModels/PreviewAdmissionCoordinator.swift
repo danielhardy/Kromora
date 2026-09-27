@@ -63,7 +63,6 @@ protocol PreviewAdmissionDestination: AnyObject {
         plan: ResolutionPlan, canonical: Bool
     ) -> RenderRequest
     func publishAdmissionHistogram(_ histogram: HistogramData?)
-    func publishAdmissionOriginalHistogram(_ histogram: HistogramData?)
     func publishAdmissionHistogramLoading(_ isLoading: Bool)
     func publishAdmissionHistogramError(_ message: String?)
     func publishAdmissionStatus(_ message: String)
@@ -178,7 +177,6 @@ final class PreviewAdmissionCoordinator {
         destination.publishAdmissionHistogramLoading(true)
         destination.publishAdmissionHistogramError(nil)
         let engine = self.engine
-        let originalImage = destination.admissionOriginalPreviewImage
         workScheduler.enqueue(id: histogramJobID, lane: .editor, priority: .histogram) {
             [weak self, weak destination, engine] in
             guard !Task.isCancelled, let self, let destination,
@@ -187,9 +185,6 @@ final class PreviewAdmissionCoordinator {
             let result = await engine.histogram(
                 presentedImage: image, space: request.space, maxDimension: 512
             )
-            let original: HistogramData? = if let originalImage {
-                await engine.histogram(presentedImage: originalImage, space: request.space, maxDimension: 512)
-            } else { nil }
             guard !Task.isCancelled, !destination.admissionIsShuttingDown,
                 destination.admissionInspectorPresented,
                 assetID == destination.admissionActiveAssetID,
@@ -202,7 +197,6 @@ final class PreviewAdmissionCoordinator {
             self.completedHistogramAssetID = assetID
             self.completedHistogramSourceRevision = sourceRevision
             destination.publishAdmissionHistogram(result)
-            destination.publishAdmissionOriginalHistogram(original)
             destination.publishAdmissionHistogramLoading(false)
             if result == nil {
                 let message = "Histogram unavailable for \(destination.admissionSourceName)."
@@ -229,7 +223,6 @@ final class PreviewAdmissionCoordinator {
         if clear, destination.admissionHistogram != nil {
             destination.publishAdmissionHistogram(nil)
         }
-        if clear { destination.publishAdmissionOriginalHistogram(nil) }
         if clear {
             completedHistogramRequest = nil
             completedHistogramAssetID = nil
