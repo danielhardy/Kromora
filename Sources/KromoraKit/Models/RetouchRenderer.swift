@@ -15,6 +15,9 @@ enum RetouchRenderer {
               sourceSize.width > 0, sourceSize.height > 0 else { return image }
         let mapping = GeometryPointMapping(sourceSize: sourceSize, rotation: rotation, crop: crop)
         var result = image
+        let healKernel = settings.spots.contains { $0.mode == .heal && !$0.isIdentity }
+            ? makeHealKernel()
+            : nil
         for spot in settings.spots where !spot.isIdentity {
             let points: [CGPoint]
             switch spot.shape {
@@ -46,10 +49,14 @@ enum RetouchRenderer {
                     center: destinationCI, radius: radius,
                     feather: CGFloat(spot.feather), opacity: CGFloat(spot.opacity), extent: image.extent
                 )
-                // Heal currently uses the same sampled patch as clone with a broader soft edge;
-                // retaining mode in the recipe leaves room for a dedicated texture synthesis
-                // kernel without changing document compatibility.
-                result = blend(patch, over: result, mask: mask, extent: image.extent)
+                let effect: CIImage
+                if spot.mode == .heal {
+                    effect = healedPatch(patch, over: result, radius: radius,
+                                         extent: image.extent, kernel: healKernel)
+                } else {
+                    effect = patch
+                }
+                result = blend(effect, over: result, mask: mask, extent: image.extent)
             }
         }
         for eye in settings.eyes where !eye.isIdentity {
@@ -96,6 +103,50 @@ enum RetouchRenderer {
     ) -> CIImage {
         featheredEllipse(center: center, radiusX: radius, radiusY: radius,
                          feather: feather, opacity: opacity, extent: extent)
+    }
+
+    /// Keeps the sampled patch's texture while matching its broad color and light to the
+    /// destination. This frequency-separated blend is the core content-aware difference from
+    /// Clone: the source supplies high-frequency detail, and the destination supplies its local
+    /// low-frequency appearance.
+    private static func makeHealKernel() -> CIKernel? {
+        let source = """
+            #include <CoreImage/CoreImage.h>
+            extern "C" {
+                namespace coreimage {
+                    float4 healTexture(sampler sampled, sampler sourceLow, sampler destinationLow) [[ stitchable ]] {
+                        float4 sourcePixel = sampled.sample(sampled.coord());
+                        float4 detail = sourcePixel - sourceLow.sample(sourceLow.coord());
+                        return float4(detail.rgb + destinationLow.sample(destinationLow.coord()).rgb,
+                                      sourcePixel.a);
+                    }
+                }
+            }
+            """
+        return (try? CIKernel.kernels(withMetalString: source))?.first
+    }
+
+    private static func healedPatch(
+        _ patch: CIImage, over destination: CIImage, radius: CGFloat, extent: CGRect,
+        kernel: CIKernel?
+    ) -> CIImage {
+        guard let kernel else { return patch }
+        let blurRadius = max(1, radius * 0.5)
+        let sourceLow = lowFrequencyImage(patch, radius: blurRadius, extent: extent)
+        let destinationLow = lowFrequencyImage(destination, radius: blurRadius, extent: extent)
+        return (kernel.apply(
+            extent: extent,
+            roiCallback: { _, rect in rect },
+            arguments: [patch, sourceLow, destinationLow]
+        ) ?? patch).cropped(to: extent)
+    }
+
+    private static func lowFrequencyImage(
+        _ image: CIImage, radius: CGFloat, extent: CGRect
+    ) -> CIImage {
+        image.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius])
+            .cropped(to: extent)
     }
 
     private static func featheredEllipse(

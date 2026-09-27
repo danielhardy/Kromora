@@ -14,5 +14,6 @@ engine path. Recipe data remains portable and contains no Core Image objects.
 The Retouch inspector edits spot centers/offsets and eye parameters with normalized controls. The
 Dust Finder shows a sharpened, high-contrast preview at pixel size, overlays visible spots, and
 scrolls between spot centers. It does not perform automatic face/pupil detection; eye centers are
-recipe values. The current heal mode uses a feathered source patch like clone, so content-aware
-texture synthesis remains a refinement for a later iteration.
+recipe values. Heal separates the sampled patch's texture detail from its broad color and light,
+then recombines that detail with the destination's local appearance before feathered blending.
+Clone retains the plain translated-patch result.
