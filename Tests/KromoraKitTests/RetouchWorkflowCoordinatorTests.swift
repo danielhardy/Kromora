@@ -84,6 +84,27 @@ final class RetouchWorkflowCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.documentUpdates, 1)
     }
 
+    func testAutomaticSourcePickGroupsWithGestureCommitForOneUndoEntry() async throws {
+        let destination = FakeRetouchDestination()
+        let workflow = RetouchWorkflowCoordinator(destination: destination)
+        workflow.setArmed(true)
+        workflow.beginGesture(at: CGPoint(x: 0.3, y: 0.3))
+        workflow.endGesture()
+        XCTAssertEqual(destination.undoGroupingDepth, 1)
+        try await Task.sleep(for: .milliseconds(5))
+        XCTAssertEqual(destination.undoGroupingDepth, 0)
+
+        var spot = try XCTUnwrap(destination.document.retouch.spots.first)
+        spot.source = .auto(offset: CGVector(dx: 0.05, dy: 0), rank: 0)
+        destination.document.retouch.spots = [spot]
+        workflow.beginGesture(at: CGPoint(x: 0.3, y: 0.3))
+        workflow.updateGesture(to: CGPoint(x: 0.35, y: 0.35))
+        workflow.endGesture()
+        XCTAssertEqual(destination.undoGroupingDepth, 1)
+        try await Task.sleep(for: .milliseconds(5))
+        XCTAssertEqual(destination.undoGroupingDepth, 0)
+    }
+
     func testNextSourceAdvancesAutomaticHealAndRemoveSeedRanks() async throws {
         let destination = FakeRetouchDestination()
         let heal = RetouchSpot(mode: .heal, source: .auto(offset: .zero, rank: 2))
@@ -113,4 +134,7 @@ private final class FakeRetouchDestination: RetouchWorkflowDestination {
     }
     func pickRetouchSource(spotID: UUID, rank: Int) async { pickedRanks.append(rank) }
     func setRetouchCanvasActive(_ active: Bool) {}
+    var undoGroupingDepth = 0
+    func beginUndoGrouping() { undoGroupingDepth += 1 }
+    func endUndoGrouping() { undoGroupingDepth -= 1 }
 }

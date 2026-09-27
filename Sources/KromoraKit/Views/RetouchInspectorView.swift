@@ -207,13 +207,6 @@ struct RetouchInspectorView: View {
     private func removeSpot(_ id: UUID) { viewModel.retouchWorkflow.deleteSpot(id) }
     private func removeEye(_ id: UUID) { viewModel.updateDocument { $0.retouch.eyes.removeAll { $0.id == id } } }
 
-    private func selectSpot(_ step: Int) {
-        let values = viewModel.document.retouch.spots
-        guard !values.isEmpty else { return }
-        let index = values.firstIndex(where: { $0.id == selectedSpotID }) ?? 0
-        selectedSpotID = values[(index + step + values.count) % values.count].id
-    }
-
     private func selectEye(_ step: Int) {
         let values = viewModel.document.retouch.eyes
         guard !values.isEmpty else { return }

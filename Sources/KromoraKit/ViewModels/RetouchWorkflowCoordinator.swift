@@ -9,6 +9,8 @@ protocol RetouchWorkflowDestination: AnyObject {
     func updateDocument(_ transform: (inout EditDocument) -> Void)
     func pickRetouchSource(spotID: UUID, rank: Int) async
     func setRetouchCanvasActive(_ active: Bool)
+    func beginUndoGrouping()
+    func endUndoGrouping()
 }
 
 /// Owns transient retouch selection and gestures; each completed pointer action is one document edit.
@@ -127,24 +129,34 @@ final class RetouchWorkflowCoordinator {
                                    feather: interactionState.feather, opacity: interactionState.opacity)
             if let pendingSource { spot.source = pendingSource }
             if samples.count == 1, pendingSource == nil { spot.source = nil }
+            let needsAutoPick = pendingSource == nil
+            if needsAutoPick { destination.beginUndoGrouping() }
             destination.updateDocument { $0.retouch.spots.append(spot) }
             interactionState.select(id)
             interactionState.setShiftClickAnchor(samples.last?.point)
-            if pendingSource == nil {
+            if needsAutoPick {
                 interactionState.setSolving(id, true)
                 Task { [weak self] in
                     await destination.pickRetouchSource(spotID: id, rank: 0)
                     self?.interactionState.setSolving(id, false)
+                    destination.endUndoGrouping()
                 }
             }
         case .move(let id):
+            let needsAutoPick: Bool = {
+                guard pendingSource == nil,
+                      case .auto? = destination.document.retouch.spots.first(where: { $0.id == id })?.source
+                else { return false }
+                return true
+            }()
+            if needsAutoPick { destination.beginUndoGrouping() }
             if let pendingRegion { updateSpot(id) { $0.region = pendingRegion; if let pendingSource { $0.source = pendingSource } } }
-            if let spot = destination.document.retouch.spots.first(where: { $0.id == id }),
-               case .auto? = spot.source {
+            if needsAutoPick {
                 interactionState.setSolving(id, true)
                 Task { [weak self] in
                     await destination.pickRetouchSource(spotID: id, rank: 0)
                     self?.interactionState.setSolving(id, false)
+                    destination.endUndoGrouping()
                 }
             }
         case .source(let id):
