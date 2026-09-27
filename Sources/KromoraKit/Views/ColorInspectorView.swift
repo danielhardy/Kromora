@@ -105,7 +105,7 @@ struct ColorInspectorView: View {
     private var colorSection: some View {
         InspectorDisclosure("Color", isExpanded: $colorExpanded) {
             VStack(alignment: .leading, spacing: 12) {
-                sectionResetButton(
+                InspectorSectionResetButton(
                     title: "Reset Color",
                     disabled: !viewModel.hasColorAdjustments,
                     action: viewModel.resetAllColor
@@ -130,7 +130,7 @@ struct ColorInspectorView: View {
     private var mixerSection: some View {
         InspectorDisclosure("Color Mixer / HSL", isExpanded: $mixerExpanded) {
             VStack(alignment: .leading, spacing: 8) {
-                sectionResetButton(
+                InspectorSectionResetButton(
                     title: "Reset Mixer",
                     disabled: !viewModel.hasMixerAdjustments,
                     action: viewModel.resetAllMixer
@@ -155,7 +155,7 @@ struct ColorInspectorView: View {
                                     }
                                 )
                             }
-                            sectionResetButton(
+                            InspectorSectionResetButton(
                                 title: "Reset \(channel.title)",
                                 disabled: viewModel.mixerChannelValue(channel).isIdentity,
                                 action: { viewModel.resetMixer(channel) }
@@ -173,7 +173,7 @@ struct ColorInspectorView: View {
     private var gradingSection: some View {
         InspectorDisclosure("Color Grading", isExpanded: $gradingExpanded) {
             VStack(alignment: .leading, spacing: 8) {
-                sectionResetButton(
+                InspectorSectionResetButton(
                     title: "Reset Grading",
                     disabled: !viewModel.hasGradingAdjustments,
                     action: viewModel.resetAllGrading
@@ -202,7 +202,7 @@ struct ColorInspectorView: View {
                                     reset: { viewModel.resetGrading(zone, control) }
                                 )
                             }
-                            sectionResetButton(
+                            InspectorSectionResetButton(
                                 title: "Reset \(zone.title)",
                                 disabled: viewModel.gradingWheelValue(zone).isIdentity,
                                 action: { viewModel.resetGrading(zone) }
@@ -225,19 +225,6 @@ struct ColorInspectorView: View {
                 }
             }
             .padding(.top, 10)
-        }
-    }
-
-    private func sectionResetButton(
-        title: String,
-        disabled: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        HStack {
-            Spacer()
-            Button(title, action: action)
-                .buttonStyle(.link)
-                .disabled(disabled)
         }
     }
 
