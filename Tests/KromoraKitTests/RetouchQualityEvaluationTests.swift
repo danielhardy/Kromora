@@ -45,6 +45,7 @@ final class RetouchQualityEvaluationTests: XCTestCase {
         var table: [(String, String, String, Metrics, [String])] = []
         var healFailuresByDefect: [String: Int] = [:]
         var removeFailuresByDefect: [String: Int] = [:]
+        var automaticHealPasses = 0
 
         for background in RetouchQualityFixtures.backgrounds {
             for defect in RetouchQualityFixtures.defects {
@@ -57,17 +58,23 @@ final class RetouchQualityEvaluationTests: XCTestCase {
                     ? [BrushSample(point: fixture.center)] : fixture.stroke.map { BrushSample(point: $0) }
                 let spotRadius = radius
                 let actualModes: [(String, RetouchMode?)] = [
-                    ("Remove (no path)", nil), ("Heal", .heal), ("Clone", .clone),
+                    ("Remove (no path)", nil), ("Heal", .heal), ("Heal (auto)", .heal), ("Clone", .clone),
                     ("Current", .heal),
                 ]
                 for (label, mode) in actualModes {
                     let output: [UInt8]
                     if let mode {
-                        let spot = RetouchSpot(
+                        var spot = RetouchSpot(
                             mode: mode,
                             region: RetouchRegion(samples: samples, radius: spotRadius),
                             source: .manual(offset: fixture.sourceOffset)
                         )
+                        if label == "Heal (auto)" {
+                            let proxy = RetouchAnalysisProxy.fromRGBA8(
+                                Data(damaged), width: fixture.width, height: fixture.height
+                            )
+                            spot.source = RetouchSourcePicker.source(for: spot, among: [spot], in: proxy)
+                        }
                         let rendered = RetouchRenderer.apply(
                             RetouchSettings(spots: [spot]), to: input,
                             sourceSize: CGSize(width: fixture.width, height: fixture.height),
@@ -82,6 +89,7 @@ final class RetouchQualityEvaluationTests: XCTestCase {
                     let values = measure(clean: clean, output: output, fixture: fixture)
                     let failed = values.failures(against: limits[background]!)
                     table.append((background, defect, label, values, failed))
+                    if label == "Heal (auto)" && failed.isEmpty { automaticHealPasses += 1 }
                     if label == "Heal" && !failed.isEmpty { healFailuresByDefect[defect, default: 0] += 1 }
                     if label == "Remove (no path)" && !failed.isEmpty { removeFailuresByDefect[defect, default: 0] += 1 }
                 }
@@ -96,6 +104,7 @@ final class RetouchQualityEvaluationTests: XCTestCase {
                 row.0, row.1, row.2, row.3.deltaE2000, row.3.gradientError,
                 row.3.varianceRatio, row.3.luminanceShift, result))
         }
+        print("Automatic Heal quality rows passing: \(automaticHealPasses)/\(RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count)")
 
         // These are behavior assertions about the current renderer, not XCTest expected failures:
         // Heal and the missing Remove implementation must continue to be exposed by the oracle.
@@ -105,7 +114,8 @@ final class RetouchQualityEvaluationTests: XCTestCase {
             XCTAssertEqual(removeFailuresByDefect[defect], RetouchQualityFixtures.backgrounds.count,
                 "prospective Remove no-op must fail all (defect) backgrounds")
         }
-        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count * 4)
+        XCTAssertGreaterThan(automaticHealPasses, 0, "automatic source picks should clear some KRMA-658 heal rows")
+        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count * 5)
     }
 
     func testSyntheticFixtureGenerationIsRepeatable() throws {
