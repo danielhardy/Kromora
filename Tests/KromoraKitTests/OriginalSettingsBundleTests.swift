@@ -3,14 +3,14 @@ import XCTest
 @testable import KromoraKit
 
 final class OriginalSettingsBundleTests: XCTestCase {
-    func testBundleIncludesUnmodifiedOriginalAndVerifiableSettings() throws {
+    func testBundleIncludesUnmodifiedOriginalAndVerifiableSettings() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let original = Data("original image bytes".utf8)
         let destination = root.appendingPathComponent("Photo.\(OriginalSettingsBundle.fileExtension)")
 
-        try OriginalSettingsBundle.create(
+        try await OriginalSettingsBundle.create(
             source: ImageSource(data: original, nativeExtent: .zero),
             sourceName: "Photo.raw",
             document: EditDocument(),
@@ -31,12 +31,12 @@ final class OriginalSettingsBundleTests: XCTestCase {
         ))
     }
 
-    func testVerificationRejectsChangedOriginal() throws {
+    func testVerificationRejectsChangedOriginal() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let destination = root.appendingPathComponent("Photo.\(OriginalSettingsBundle.fileExtension)")
-        try OriginalSettingsBundle.create(
+        try await OriginalSettingsBundle.create(
             source: ImageSource(data: Data("original".utf8), nativeExtent: .zero),
             sourceName: "Photo.raw",
             document: EditDocument(),
@@ -48,12 +48,12 @@ final class OriginalSettingsBundleTests: XCTestCase {
         XCTAssertThrowsError(try OriginalSettingsBundle.verify(at: destination))
     }
 
-    func testVerificationRejectsChangedSettings() throws {
+    func testVerificationRejectsChangedSettings() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
         let destination = root.appendingPathComponent("Photo.\(OriginalSettingsBundle.fileExtension)")
-        try OriginalSettingsBundle.create(
+        try await OriginalSettingsBundle.create(
             source: ImageSource(data: Data("original".utf8), nativeExtent: .zero),
             sourceName: "Photo.raw",
             document: EditDocument(),
