@@ -27,6 +27,7 @@ enum CIKernelLibrary {
         "localInvertMask",
         "localCombineMask",
         "applyToneCurve",
+        "healTexture",
     ]
 
     private static let libraryData: Data? = KromoraKitResourceBundle.data(
