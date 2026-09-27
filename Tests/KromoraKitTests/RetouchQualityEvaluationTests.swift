@@ -108,8 +108,8 @@ final class RetouchQualityEvaluationTests: XCTestCase {
     }
 
     func testSyntheticFixtureGenerationIsRepeatable() throws {
-        let first = RetouchQualityFixtures.make(background: "cloud", defect: "wire")
-        let second = RetouchQualityFixtures.make(background: "cloud", defect: "wire")
+        let first = RetouchQualityFixtures.make(background: "cloud", defect: "wire straight")
+        let second = RetouchQualityFixtures.make(background: "cloud", defect: "wire straight")
         XCTAssertEqual(try Pixels.bytes(of: first.clean), try Pixels.bytes(of: second.clean))
         XCTAssertEqual(try Pixels.bytes(of: first.damaged), try Pixels.bytes(of: second.damaged))
         XCTAssertEqual(first.mask, second.mask)
