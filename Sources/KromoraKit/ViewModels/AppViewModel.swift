@@ -158,6 +158,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// photo's Light, other edits, and history without carrying them onto a different frame.
     @Published private(set) var document = EditDocument()
     @Published private(set) var durableEditHistory: [PortablePackageEditRevision] = []
+    @Published private(set) var durableCurrentEditRevision: UInt64 = 0
 
     /// The last copied value-state payload. It contains no image or rendered data, so it remains
     /// safe to apply to several destinations and keeps future selective-copy UI on one stable seam.
@@ -3451,25 +3452,51 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func refreshDurableEditHistory() {
         guard let reference = activeSourceReference else {
             durableEditHistory = []
+            durableCurrentEditRevision = 0
             return
         }
         Task { [weak self, editStore] in
             do {
                 let history = try await editStore.history(for: reference)
+                let currentRevision = try await editStore.currentRevision(for: reference)
                 guard let self, self.activeSourceReference == reference else { return }
                 self.durableEditHistory = history
+                self.durableCurrentEditRevision = currentRevision
             } catch {
                 self?.durableEditHistory = []
+                self?.durableCurrentEditRevision = 0
             }
         }
     }
 
-    /// Preview a durable edit state and append the restored state as a new branch revision.
+    /// Navigate to a durable edit state without creating a new revision.
     func restoreEditRevision(_ revision: UInt64) {
         guard let value = durableEditHistory.first(where: { $0.revision == revision }) else { return }
         endUndoGrouping()
-        applyHistoryDocument(value.document)
-        refreshDurableEditHistory()
+        guard let reference = activeSourceReference else { return }
+        Task { [weak self, persistence, editStore] in
+            guard await persistence.flush() == .success else { return }
+            do {
+                try await editStore.selectRevision(revision, for: reference)
+                guard let self, self.activeSourceReference == reference else { return }
+                self.durableCurrentEditRevision = revision
+                if let activeAssetID = self.activeAssetID {
+                    let priorDocuments = self.durableEditHistory
+                        .filter { $0.revision < revision && $0.snapshotName == nil }
+                        .map(\.document)
+                    self.editorDocument.adoptHistoryPosition(
+                        value.document, priorDocuments: priorDocuments, for: activeAssetID
+                    )
+                    self.editorDocument.activate(
+                        session: self.editorDocument.session(for: activeAssetID)
+                    )
+                }
+                self.applyHistoryDocument(value.document, persist: false)
+                self.refreshDurableEditHistory()
+            } catch {
+                self?.statusMessage = "Could not navigate edit history: \(error.localizedDescription)"
+            }
+        }
     }
 
     func saveEditSnapshot(named name: String) {
@@ -3593,7 +3620,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    private func applyHistoryDocument(_ restored: EditDocument) {
+    private func applyHistoryDocument(_ restored: EditDocument, persist: Bool = true) {
         let comparisonChanged = ComparisonFramePolicy.changesBaseline(
             from: document, to: restored
         )
@@ -3618,7 +3645,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             previewAdmissionCoordinator.resetComparisonPreviewAdmission()
         }
         refreshLUTResolutionStatus()
-        saveActiveDocument(force: true)
+        if persist { saveActiveDocument(force: true) }
         documentRevision &+= 1
         if let activeAssetID {
             scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)

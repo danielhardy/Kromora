@@ -202,6 +202,7 @@ struct InfoInspectorView: View {
                 Text("No saved edits yet").font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(viewModel.durableEditHistory.reversed(), id: \.revision) { entry in
+                    let isCurrent = entry.revision == viewModel.durableCurrentEditRevision
                     Button {
                         viewModel.restoreEditRevision(entry.revision)
                     } label: {
@@ -213,14 +214,20 @@ struct InfoInspectorView: View {
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            if entry.document == viewModel.document {
-                                Image(systemName: "checkmark").foregroundStyle(.secondary)
+                            if isCurrent {
+                                Text("Current")
+                                    .font(.caption2.weight(.semibold))
+                                    .foregroundStyle(.tint)
                             }
                         }
                         .contentShape(Rectangle())
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                        .background(isCurrent ? Color.accentColor.opacity(0.12) : .clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
                     }
                     .buttonStyle(.plain)
-                    .help("Restore this edit state as a new history branch")
+                    .help(isCurrent ? "Current edit history position" : "Navigate to this edit state")
                 }
             }
         }

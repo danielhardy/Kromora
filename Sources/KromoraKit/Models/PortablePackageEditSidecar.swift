@@ -289,6 +289,19 @@ extension PortableLibraryPackage {
             try transaction.stage(data: xmpData, at: xmpPath)
             if isCancelled() { throw CancellationError() }
 
+            // A new edit after history navigation starts a branch at the selected revision.
+            // Keep named snapshots as durable, independently restorable states, while removing
+            // ordinary forward edits from the active timeline. Immutable sidecar files remain
+            // untouched for package recovery and any snapshot references.
+            var retainedPointers = record.editHistory.edits.filter {
+                $0.revision <= record.editHistory.currentRevision
+            }
+            for pointer in record.editHistory.edits where
+                pointer.revision > record.editHistory.currentRevision {
+                let forward = try readEditRevision(for: assetID, revision: pointer.revision)
+                if forward.snapshotName != nil { retainedPointers.append(pointer) }
+            }
+            record.editHistory.edits = retainedPointers
             record.currentRevision = max(record.currentRevision + 1, nextRevision)
             record.editHistory.currentRevision = nextRevision
             record.editHistory.edits.append(
@@ -344,6 +357,31 @@ extension PortableLibraryPackage {
         return try record.editHistory.edits
             .sorted { $0.revision < $1.revision }
             .map { try readEditRevision(for: assetID, revision: $0.revision) }
+    }
+
+    /// Moves the package's current edit position without creating a new revision.
+    func selectEditRevision(
+        for assetID: PortablePhotoAssetID,
+        revision: UInt64,
+        lease: PortablePackageLease,
+        now: Date = Date()
+    ) throws {
+        var record = try readAssetRecord(for: assetID)
+        guard record.editHistory.edits.contains(where: { $0.revision == revision }) else {
+            throw PortablePackageError.invalidEditRevision("revision \(revision) is not present")
+        }
+        record.currentRevision = revision
+        record.editHistory.currentRevision = revision
+        var transaction = try beginTransaction(lease: lease, now: now)
+        do {
+            try transaction.stage(
+                data: try encodedAssetRecord(record), at: assetRecordPath(for: assetID)
+            )
+            try transaction.commit(now: now)
+        } catch {
+            try? transaction.abort()
+            throw error
+        }
     }
 
     func readEditSidecar(

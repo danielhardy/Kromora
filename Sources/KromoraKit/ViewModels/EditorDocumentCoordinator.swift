@@ -48,6 +48,18 @@ final class EditorDocumentCoordinator: ObservableObject {
         sessions[assetID] = PhotoEditSession(document: document, history: activeHistory)
     }
 
+    func adoptHistoryPosition(
+        _ document: EditDocument,
+        priorDocuments: [EditDocument],
+        for assetID: PhotoAssetID
+    ) {
+        activeHistory = EditHistory()
+        activeHistory.adoptTimeline(before: priorDocuments)
+        sessions[assetID] = PhotoEditSession(document: document, history: activeHistory)
+        nextRevision &+= 1
+        sessionRevisions[assetID] = nextRevision
+    }
+
     func clearActiveHistory() {
         activeHistory = EditHistory()
     }
