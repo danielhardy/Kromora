@@ -113,6 +113,22 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             "neutral Light must leave the existing render untouched")
     }
 
+    func testRetouchSpotChangesRenderedPixelsAndNeutralRetouchIsIdentity() throws {
+        let baseline = try build(EditDocument())
+        let neutral = try build(EditDocument(retouch: .neutral))
+        assertPixelsEqual(try Pixels.bytes(of: baseline), try Pixels.bytes(of: neutral),
+                          "neutral retouch must preserve the source")
+        let spot = RetouchSpot(
+            mode: .clone,
+            shape: .circle(center: CGPoint(x: 0.35, y: 0.5)),
+            radius: 0.12,
+            sourceOffset: CGVector(dx: 0.35, dy: 0)
+        )
+        let retouched = try build(EditDocument(retouch: RetouchSettings(spots: [spot])))
+        XCTAssertNotEqual(try Pixels.bytes(of: retouched), try Pixels.bytes(of: baseline))
+        XCTAssertEqual(retouched.extent, baseline.extent)
+    }
+
     func testMasterToneCurveChangesAllRGBChannelsAndRemainsMonotonic() throws {
         let source = try linearRamp()
         let curve = LightToneCurve(points: [

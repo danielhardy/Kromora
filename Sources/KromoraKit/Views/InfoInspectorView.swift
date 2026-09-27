@@ -75,6 +75,8 @@ struct InfoInspectorView: View {
                         LookInspectorView(viewModel: viewModel)
                     case .masking:
                         MaskingWorkspace(viewModel: viewModel)
+                    case .retouch:
+                        RetouchInspectorView(viewModel: viewModel)
                     }
                 }
                 .frame(maxHeight: .infinity, alignment: .top)

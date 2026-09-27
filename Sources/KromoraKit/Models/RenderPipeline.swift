@@ -49,7 +49,7 @@ enum RenderPipeline {
     /// geometry AABB so post-geometry ROI previews share the planner's frame. v31 aligns the
     /// standard-image Tint sign with the green-to-magenta UI track; previously positive values
     /// rendered greener while RAW positive values rendered magenta.
-    static let cacheVersion = 31
+    static let cacheVersion = 32
 
     /// Build the graph for `document` over `source`.
     ///
@@ -121,7 +121,8 @@ enum RenderPipeline {
             includePostRenderWhiteBalance: source.kind == .standard,
             grainSeed: grainSeed(for: source), applyCommittedCrop: !earlyCrop,
             spatialReferenceExtent: earlyCrop ? fullFrame : nil,
-            finalFrameExtent: finalFrame, applyRotation: false
+            finalFrameExtent: finalFrame, applyRotation: false,
+            retouchSourceSize: source.nativeExtent
         )
         guard let visibleROI, earlyCrop else { return result }
         return result.cropped(to: scaledSourceRect(
@@ -151,11 +152,13 @@ enum RenderPipeline {
         applyCommittedCrop: Bool = true,
         spatialReferenceExtent: CGRect? = nil,
         finalFrameExtent: CGRect? = nil,
-        applyRotation: Bool = true
+        applyRotation: Bool = true,
+        retouchSourceSize: CGSize? = nil
     ) -> CIImage {
         let developed = applyRotation
             ? applyingGeometry(document.crop, to: applyingRotation(document.rotation, to: developed))
             : developed
+        let sourceSize = developed.extent.size
         let adjusted = buildPreLUTImage(
             developed: developed, document: document, toneCurveCache: toneCurveCache,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
@@ -164,7 +167,7 @@ enum RenderPipeline {
         return buildImage(
             preLUT: adjusted, document: document, lut: lut, space: space, lutCache: lutCache,
             grainSeed: grainSeed, applyCommittedCrop: applyCommittedCrop,
-            finalFrameExtent: finalFrameExtent
+            finalFrameExtent: finalFrameExtent, sourceSize: retouchSourceSize ?? sourceSize
         )
     }
 
@@ -177,10 +180,15 @@ enum RenderPipeline {
         lutCache: LUTFilterCache? = nil,
         grainSeed: UInt32 = 0,
         applyCommittedCrop: Bool = true,
-        finalFrameExtent: CGRect? = nil
+        finalFrameExtent: CGRect? = nil,
+        sourceSize: CGSize? = nil
     ) -> CIImage {
-        let adjusted = preLUT
-        let lutAdjusted = applyLUT(document.lut, lut: lut, to: adjusted, space: space, cache: lutCache)
+        let retouched = applyRetouch(
+            document.retouch, to: preLUT,
+            sourceSize: sourceSize ?? preLUT.extent.size,
+            rotation: document.rotation, crop: document.crop
+        )
+        let lutAdjusted = applyLUT(document.lut, lut: lut, to: retouched, space: space, cache: lutCache)
         // Crop is a composition stage: all look work above is evaluated over the source, while
         // vignette and grain below describe the final cropped frame. This also keeps preview,
         // comparison, and full-resolution export on one extent-changing path.
@@ -268,6 +276,19 @@ enum RenderPipeline {
                 amount: CGFloat(layer.amount), mask: mask, extent: input.extent
             )
         }
+    }
+
+    /// Apply value-only spot and eye recipes after source geometry has been normalized and before
+    /// the final LUT/crop/vignette/grain stages. Coordinates in the document remain anchored to
+    /// the oriented original; this boundary projects them through rotation and continuous geometry.
+    static func applyRetouch(
+        _ settings: RetouchSettings,
+        to image: CIImage,
+        sourceSize: CGSize,
+        rotation: ImageRotation,
+        crop: CropAdjustments
+    ) -> CIImage {
+        RetouchRenderer.apply(settings, to: image, sourceSize: sourceSize, rotation: rotation, crop: crop)
     }
 
     /// Only cache a prefix when it contains work beyond the developed source. A neutral prefix is

@@ -475,12 +475,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// for a panel nobody's looking at.
     enum InspectorTab: String, CaseIterable, Sendable {
         case info, light, develop, adjust
-        case effects, look, masking
+        case effects, look, masking, retouch
 
         /// The view surface selected by this tab. Keep `.adjust` as the stored compatibility case;
         /// its photographer-facing name is Color.
         enum Content: Equatable, Sendable {
-            case info, light, develop, color, effects, look, masking
+            case info, light, develop, color, effects, look, masking, retouch
         }
 
         var content: Content {
@@ -492,6 +492,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             case .effects: return .effects
             case .look: return .look
             case .masking: return .masking
+            case .retouch: return .retouch
             }
         }
 
@@ -504,6 +505,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             case .effects: return "sparkles"
             case .look: return "wand.and.stars"
             case .masking: return "wand.and.rays"
+            case .retouch: return "bandage"
             }
         }
 
@@ -516,6 +518,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             case .effects: return "Effects"
             case .look: return "Look"
             case .masking: return "Masking"
+            case .retouch: return "Retouch"
             }
         }
 
@@ -529,6 +532,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             case .effects: return "Texture, clarity, and dehaze effects"
             case .look: return "Browse and apply a Look"
             case .masking: return "Create and edit local masks"
+            case .retouch: return "Heal or clone spots and correct red-eye"
             }
         }
 
@@ -3575,6 +3579,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             resetLook()
         case .masking:
             resetSelectedMask()
+        case .retouch:
+            updateDocument { $0.retouch = .neutral }
         }
     }
 

@@ -8,7 +8,7 @@ import Foundation
 /// can later choose categories without replacing the clipboard schema or teaching every caller how
 /// to split an `EditDocument`.
 struct EditClipboardPayload: Codable, Sendable, Equatable {
-    static let currentVersion = 5
+    static let currentVersion = 6
 
     enum Category: String, Codable, CaseIterable, Hashable, Sendable {
         case light
@@ -19,6 +19,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         case lut
         case develop
         case localAdjustments
+        case retouch
 
         var title: String {
             switch self {
@@ -30,6 +31,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
             case .lut: return "Look / LUT"
             case .develop: return "Develop (RAW)"
             case .localAdjustments: return "Local adjustments / masks"
+            case .retouch: return "Retouch"
             }
         }
     }
@@ -116,6 +118,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
     var lut = LUTSettings.none
     var develop = RAWDevelopSettings.neutral
     var localAdjustments: [LocalAdjustmentLayer] = []
+    var retouch: RetouchSettings = .neutral
 
     /// Whether explicit RAW settings should replace the destination's settings when both photos
     /// are RAW. The default is to copy explicit user edits; `nil` values remain decoder defaults and
@@ -137,7 +140,8 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         lut: LUTSettings = .none,
         develop: RAWDevelopSettings = .neutral,
         developPolicy: DevelopPolicy = .copyExplicitSettings,
-        localAdjustments: [LocalAdjustmentLayer] = []
+        localAdjustments: [LocalAdjustmentLayer] = [],
+        retouch: RetouchSettings = .neutral
     ) {
         self.version = version
         self.light = light
@@ -149,11 +153,12 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.develop = develop
         self.developPolicy = developPolicy
         self.localAdjustments = localAdjustments
+        self.retouch = retouch
     }
 
     private enum CodingKeys: String, CodingKey {
         case version, light, color, effects, lightAdjustments, colorAdjustments, effectAdjustments,
-             crop, rotation, lut, develop, developPolicy, localAdjustments
+             crop, rotation, lut, develop, developPolicy, localAdjustments, retouch
     }
 
     init(from decoder: Decoder) throws {
@@ -179,6 +184,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         self.develop = try container.decodeIfPresent(RAWDevelopSettings.self, forKey: .develop) ?? .neutral
         self.developPolicy = try container.decodeIfPresent(DevelopPolicy.self, forKey: .developPolicy) ?? .copyExplicitSettings
         self.localAdjustments = try container.decodeIfPresent([LocalAdjustmentLayer].self, forKey: .localAdjustments) ?? []
+        self.retouch = try container.decodeIfPresent(RetouchSettings.self, forKey: .retouch) ?? .neutral
     }
 
     init(document: EditDocument, developPolicy: DevelopPolicy = .copyExplicitSettings) {
@@ -194,7 +200,8 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
             lut: document.lut,
             develop: document.rawDevelop,
             developPolicy: developPolicy,
-            localAdjustments: document.localAdjustments
+            localAdjustments: document.localAdjustments,
+            retouch: document.retouch
         )
         self.lightAdjustments = document.light
         self.colorAdjustments = document.color
@@ -264,6 +271,7 @@ struct EditClipboardPayload: Codable, Sendable, Equatable {
         if categories.contains(.localAdjustments) {
             result.localAdjustments = localAdjustments
         }
+        if categories.contains(.retouch) { result.retouch = retouch }
         return result
     }
 
