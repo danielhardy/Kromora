@@ -1,20 +1,25 @@
+import AppKit
 import SwiftUI
 import Foundation
 
 /// Bundle metadata used by the About window. Missing values identify an unbundled development run.
 struct KromoraAboutMetadata: Equatable {
     let version: String
-    let build: String
+    let commitIdentifier: String?
 
     init(infoDictionary: [String: Any]) {
         version = Self.value(for: "CFBundleShortVersionString", in: infoDictionary)
             ?? "Development build"
-        build = Self.value(for: "CFBundleVersion", in: infoDictionary)
-            ?? "Unavailable in development build"
+        commitIdentifier = Self.value(for: "KromoraGitCommit", in: infoDictionary)
     }
 
     init(bundle: Bundle = .main) {
         self.init(infoDictionary: bundle.infoDictionary ?? [:])
+    }
+
+    var versionLabel: String {
+        guard let commitIdentifier else { return "Version \(version)" }
+        return "Version \(version) · \(commitIdentifier)"
     }
 
     private static func value(for key: String, in infoDictionary: [String: Any]) -> String? {
@@ -29,80 +34,60 @@ public struct KromoraAboutView: View {
     public static let windowID = "kromora-about"
 
     private let metadata: KromoraAboutMetadata
-    private let licenseText: String
-    private let starterLookManifest: BundledLookManifest
 
     public init() {
         metadata = KromoraAboutMetadata()
-        licenseText = KromoraKitResourceBundle.data(forResource: "LICENSE", withExtension: "txt")
-            .flatMap { String(data: $0, encoding: .utf8) }
-            ?? "The MIT license text is available from the Kromora project license source."
-        starterLookManifest = BundledLookLibrary.loadManifestOnly()
     }
 
     public var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .center, spacing: 6) {
-                    Text("Kromora")
-                        .font(.largeTitle.weight(.semibold))
-                        .accessibilityAddTraits(.isHeader)
-                    Text("Version \(metadata.version) · Build \(metadata.build)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel("Version \(metadata.version), build \(metadata.build)")
-                }
-                .frame(maxWidth: .infinity)
+        VStack(spacing: 14) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: 76, height: 76)
+                .accessibilityHidden(true)
 
-                GroupBox("Developed by") {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Daniel Hardy")
-                        Text("Kromora began as a fork of LUTzy by tsvb. Original LUTzy copyright attribution to Tim is retained in the license.")
-                        Link("View the original LUTzy project", destination: Self.lutzyURL)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
-                }
-
-                GroupBox("MIT License") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Copyright © 2026 Tim and Daniel Hardy")
-                            .font(.subheadline)
-                        Text(licenseText)
-                            .font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .accessibilityLabel("Complete MIT License text")
-                        Link("Open the canonical license source", destination: Self.licenseURL)
-                    }
-                    .padding(.top, 4)
-                }
-
-                GroupBox("Bundled Starter Looks") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(starterLookManifest.acknowledgement)
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        ForEach(starterLookManifest.looks, id: \.id) { look in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(look.name)
-                                    .font(.subheadline.weight(.semibold))
-                                Text("License: \(look.license)")
-                                Text("Attribution: \(look.attribution)")
-                                Text("Redistribution: \(look.redistribution)")
-                            }
-                            .font(.caption)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityElement(children: .combine)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .padding(.top, 4)
-                }
+            VStack(spacing: 4) {
+                Text("Kromora")
+                    .font(.largeTitle.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Text(metadata.versionLabel)
+                    .font(.subheadline.monospaced())
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(metadata.versionLabel)
             }
-            .padding(20)
+
+            Divider()
+                .padding(.horizontal, 24)
+
+            VStack(spacing: 8) {
+                Text("Developed by Daniel Hardy")
+                    .font(.body.weight(.medium))
+                Text("Kromora began as a fork of LUTzy by tsvb. Original LUTzy copyright attribution to Tim is retained in the license.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                Link("View the original LUTzy project", destination: Self.lutzyURL)
+                    .font(.callout)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 8)
+
+            Text("All included LUTs are released under the MIT License.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+
+            Link("View the MIT License", destination: Self.licenseURL)
+                .font(.callout)
+
+            Spacer(minLength: 0)
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityLabel("About Kromora")
     }
 

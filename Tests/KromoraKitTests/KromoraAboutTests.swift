@@ -5,21 +5,23 @@ final class KromoraAboutTests: XCTestCase {
     func testAboutMetadataUsesBundleValues() {
         let metadata = KromoraAboutMetadata(infoDictionary: [
             "CFBundleShortVersionString": "0.1.4",
-            "CFBundleVersion": "27",
+            "KromoraGitCommit": "0123456789ab",
         ])
 
         XCTAssertEqual(metadata.version, "0.1.4")
-        XCTAssertEqual(metadata.build, "27")
+        XCTAssertEqual(metadata.commitIdentifier, "0123456789ab")
+        XCTAssertEqual(metadata.versionLabel, "Version 0.1.4 · 0123456789ab")
     }
 
     func testAboutMetadataFallsBackForMissingOrBlankDevelopmentValues() {
         let metadata = KromoraAboutMetadata(infoDictionary: [
             "CFBundleShortVersionString": "  ",
-            "CFBundleVersion": 3,
+            "KromoraGitCommit": " \n",
         ])
 
         XCTAssertEqual(metadata.version, "Development build")
-        XCTAssertEqual(metadata.build, "Unavailable in development build")
+        XCTAssertNil(metadata.commitIdentifier)
+        XCTAssertEqual(metadata.versionLabel, "Version Development build")
     }
 
     func testPackagedAboutLicenseMatchesTheRepositoryLicense() throws {
@@ -59,7 +61,7 @@ final class KromoraAboutTests: XCTestCase {
         XCTAssertTrue(menuCommands.contains("Button(\"Check for Updates…\") { updateCoordinator.checkNow() }"))
     }
 
-    func testStarterLookDisclosureLivesInAboutAndNotTheLooksInspector() throws {
+    func testAboutShowsConciseLUTLicenseDisclosureWithoutInventory() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -68,19 +70,18 @@ final class KromoraAboutTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/KromoraAboutView.swift"),
             encoding: .utf8
         )
-        let lookInspector = try String(
-            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/LookInspectorView.swift"),
+        let buildScript = try String(
+            contentsOf: packageRoot.appendingPathComponent("scripts/build-macos-app.sh"),
             encoding: .utf8
         )
-        let manifest = try BundledLookLibrary.validate()
 
-        XCTAssertTrue(aboutView.contains("GroupBox(\"Bundled Starter Looks\")"))
-        XCTAssertTrue(aboutView.contains("starterLookManifest.acknowledgement"))
-        XCTAssertTrue(aboutView.contains("look.license"))
-        XCTAssertTrue(aboutView.contains("look.attribution"))
-        XCTAssertTrue(aboutView.contains("look.redistribution"))
-        XCTAssertFalse(lookInspector.contains("bundledAcknowledgement"))
-        XCTAssertFalse(lookInspector.contains("starterAcknowledgement"))
-        XCTAssertTrue(manifest.looks.allSatisfy { !$0.license.isEmpty && !$0.attribution.isEmpty && !$0.redistribution.isEmpty })
+        XCTAssertTrue(aboutView.contains("Image(nsImage: NSApplication.shared.applicationIconImage)"))
+        XCTAssertTrue(aboutView.contains("Text(\"Kromora\")"))
+        XCTAssertTrue(aboutView.contains("All included LUTs are released under the MIT License."))
+        XCTAssertFalse(aboutView.contains("Bundled Starter Looks"))
+        XCTAssertFalse(aboutView.contains("look.attribution"))
+        XCTAssertFalse(aboutView.contains("textSelection(.enabled)"))
+        XCTAssertTrue(buildScript.contains("git rev-parse --short=12 HEAD"))
+        XCTAssertTrue(buildScript.contains("KromoraGitCommit"))
     }
 }
