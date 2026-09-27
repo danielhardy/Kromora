@@ -14,6 +14,7 @@ struct PreviewView: View {
     @State private var isDropTargeted = false
     @State private var isCaptureOverlayVisible = false
     @ObservedObject private var maskingState: MaskInteractionState
+    @ObservedObject private var settings: KromoraSettings
 
     init(viewModel: AppViewModel) {
         _viewModel = ObservedObject(wrappedValue: viewModel)
@@ -21,6 +22,7 @@ struct PreviewView: View {
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
         _originalPreviewSurface = ObservedObject(wrappedValue: viewModel.originalPreviewSurface)
         _maskingState = ObservedObject(wrappedValue: viewModel.maskInteractionState)
+        _settings = ObservedObject(wrappedValue: viewModel.settings)
     }
 
     private var maskOverlayBackingScale: CGFloat {
@@ -87,7 +89,7 @@ struct PreviewView: View {
                 .allowsHitTesting(false)
             }
 
-            if previewSurface.image != nil, viewModel.showClippingAlerts,
+            if previewSurface.image != nil, settings.showClippingAlerts,
                !canvasState.isCropToolActive, let histogram = viewModel.histogram,
                histogram.clippedHighlights + histogram.clippedShadows > 0 {
                 VStack {

@@ -17,7 +17,7 @@ struct ColorInspectorView: View {
     @State private var expandedGradingZones = Set(ColorGradingZone.allCases)
 
     var body: some View {
-        ScrollView {
+        InspectorScrollingContent {
             VStack(alignment: .leading, spacing: 12) {
                 header
                 whiteBalanceSection

@@ -13,32 +13,35 @@ struct LightInspectorView: View {
 
     var body: some View {
         ScrollViewReader { scrollProxy in
-          ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                header
+            InspectorScrollingContent {
+                VStack(alignment: .leading, spacing: 12) {
+                    header
 
-                InspectorDisclosure("Tone", isExpanded: $toneSectionExpanded) {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(Array(LightControl.allCases.enumerated()), id: \.element) { offset, control in
-                            controlRow(
-                                control,
-                                sortPriority: Double(LightControl.allCases.count - offset)
-                            ).id(control)
+                    InspectorDisclosure("Tone", isExpanded: $toneSectionExpanded) {
+                        VStack(alignment: .leading, spacing: 14) {
+                            ForEach(
+                                Array(LightControl.allCases.enumerated()),
+                                id: \.element
+                            ) { offset, control in
+                                controlRow(
+                                    control,
+                                    sortPriority: Double(LightControl.allCases.count - offset)
+                                ).id(control)
+                            }
                         }
-                    }
-                    .padding(.top, 10)
-                }
-
-                InspectorDisclosure("Tone Curve", isExpanded: $curveSectionExpanded) {
-                    ToneCurveEditor(viewModel: viewModel)
                         .padding(.top, 10)
+                    }
+
+                    InspectorDisclosure("Tone Curve", isExpanded: $curveSectionExpanded) {
+                        ToneCurveEditor(viewModel: viewModel)
+                            .padding(.top, 10)
+                    }
                 }
+                .padding(16)
             }
-            .padding(16)
-          }
-          .onChange(of: viewModel.exposureScrollRequest) { _, _ in
-              scrollProxy.scrollTo(LightControl.exposure, anchor: .center)
-          }
+            .onChange(of: viewModel.exposureScrollRequest) { _, _ in
+                scrollProxy.scrollTo(LightControl.exposure, anchor: .center)
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Light adjustments")
@@ -126,18 +129,20 @@ private struct ToneCurveEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
+            VStack(alignment: .leading, spacing: 8) {
                 Picker("Channel", selection: $channel) {
                     ForEach(ToneCurveChannel.allCases) { item in Text(item.rawValue).tag(item) }
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                Spacer()
-                Button("Import…") { viewModel.importToneCurvePreset() }.buttonStyle(.link)
-                Button("Export…") { viewModel.exportToneCurvePreset() }.buttonStyle(.link)
-                Button("Reset") { viewModel.resetToneCurve(channel) }
-                    .buttonStyle(.link)
-                    .disabled(viewModel.document.light.toneCurve(for: channel).isIdentity)
+                HStack(spacing: 12) {
+                    Button("Import…") { viewModel.importToneCurvePreset() }.buttonStyle(.link)
+                    Button("Export…") { viewModel.exportToneCurvePreset() }.buttonStyle(.link)
+                    Spacer(minLength: 0)
+                    Button("Reset") { viewModel.resetToneCurve(channel) }
+                        .buttonStyle(.link)
+                        .disabled(viewModel.document.light.toneCurve(for: channel).isIdentity)
+                }
             }
 
             GeometryReader { proxy in

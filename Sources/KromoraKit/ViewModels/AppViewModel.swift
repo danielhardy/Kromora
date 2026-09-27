@@ -298,9 +298,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    /// Tabs for the current image. Develop remains visible during a RAW capability probe so the
-    /// picker can honestly expose the loading state, but it disappears for standard images and for
-    /// RAW decoders with no actionable controls.
+    /// Tabs for the current image. Develop stays out of the icon bar until that row fits the
+    /// column; the develop stage itself is unchanged.
     var availableInspectorTabs: [InspectorTab] {
         guard !isCropToolActive else { return [] }
         return InspectorTab.availableTabs(
@@ -538,6 +537,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         var helpText: String { "\(title): \(purpose)" }
 
+        /// Develop is a real inspector stage, but its icon makes the tab bar wider than the
+        /// column. Keep the case and the capability gate; withhold the tab until the bar fits.
+        static let showsDevelopTab = false
+
         static func availableTabs(
             hasImage: Bool,
             developPanelState: DevelopPanelState,
@@ -547,7 +550,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return allCases.filter { tab in
                 switch tab {
                 case .develop:
-                    return developPanelState.offersDevelopTab
+                    return showsDevelopTab && developPanelState.offersDevelopTab
                 case .masking:
                     return hasMaskingTarget
                 default:
@@ -573,7 +576,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     @Published private(set) var originalHistogram: HistogramData?
     @Published private(set) var pixelReadout: PixelReadout?
     @Published private(set) var pixelReadoutBefore: PixelReadout?
-    @Published var showClippingAlerts = true
     @Published private(set) var exposureScrollRequest = 0
     /// A nil histogram is otherwise ambiguous: it can mean loading, cancellation, an
     /// unsupported source, or a failed calculation. Keep the terminal UI state explicit.
@@ -2609,9 +2611,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
     }
 
-    /// Move between the two top-level workspaces. Entering Edit always uses the collection's active
+    /// Move between the two top-level workspaces. Entering Edit uses the collection's active
     /// item, so a grid selection is handed off deterministically and never relies on a stale source
-    /// image. User-triggered transitions require an actual active item.
+    /// image. With no selection, Edit opens the first photo only when that Library setting is on.
     @discardableResult
     func navigate(to mode: NavigationState.Mode) -> Bool {
         switch mode {
@@ -2623,6 +2625,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return true
 
         case .edit:
+            if collection.isActive, collection.selectedItem == nil,
+                settings.openFirstPhotoWhenEnteringEdit, !collection.items.isEmpty
+            {
+                selectCollectionImage(at: 0)
+                openLibraryImageForEditing()
+                return collection.selectedItem != nil
+            }
             guard collection.isActive, collection.selectedItem != nil else {
                 return sourceImage != nil && setEditMode()
             }

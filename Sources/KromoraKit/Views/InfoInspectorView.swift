@@ -16,74 +16,76 @@ struct InfoInspectorView: View {
 
     var body: some View {
         let _ = RenderDiagnostics.noteInspectorBody()
-        return VStack(spacing: 0) {
-            if canvasState.isCropToolActive {
-                CropInspectorView(
-                    aspectRatio: canvasState.cropAspectRatio,
-                    orientation: canvasState.cropOrientation,
-                    imageSize: viewModel.cropSourceSize,
-                    straightenAngle: canvasState.cropStraightenAngle,
-                    flipHorizontal: canvasState.cropFlipHorizontal,
-                    flipVertical: canvasState.cropFlipVertical,
-                    verticalPerspective: canvasState.cropVerticalPerspective,
-                    horizontalPerspective: canvasState.cropHorizontalPerspective,
-                    onRotateCounterClockwise: viewModel.rotateCounterClockwise,
-                    onRotateClockwise: viewModel.rotateClockwise,
-                    onBeginInteraction: viewModel.beginPreviewInteraction,
-                    onEndInteraction: viewModel.endPreviewInteraction,
-                    onStraightenChange: viewModel.setCropStraightenAngle,
-                    onFlipHorizontal: { viewModel.toggleCropFlip(horizontal: true) },
-                    onFlipVertical: { viewModel.toggleCropFlip(horizontal: false) },
-                    onVerticalPerspectiveChange: viewModel.setCropVerticalPerspective,
-                    onHorizontalPerspectiveChange: viewModel.setCropHorizontalPerspective,
-                    onResetStraighten: { viewModel.setCropStraightenAngle(0) },
-                    onResetVerticalPerspective: { viewModel.setCropVerticalPerspective(0) },
-                    onResetHorizontalPerspective: { viewModel.setCropHorizontalPerspective(0) },
-                    onAuto: viewModel.runCropAuto,
-                    onAspectRatioChange: viewModel.selectCropAspectRatio,
-                    onReset: viewModel.resetCrop,
-                    onCancel: viewModel.cancelCrop,
-                    onDone: viewModel.commitCrop
-                )
-                .transition(inspectorTransition(edge: .trailing))
-            } else if viewModel.sourceImage == nil {
-                // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
-                // offers a trip to Develop to be told "this image is already rendered" about an image
-                // that does not exist. The empty state alone is the honest answer.
-                emptyState
-                    .transition(.opacity)
-            } else {
-                histogramSection
+        return FitsProposedWidth {
+            VStack(spacing: 0) {
+                if canvasState.isCropToolActive {
+                    CropInspectorView(
+                        aspectRatio: canvasState.cropAspectRatio,
+                        orientation: canvasState.cropOrientation,
+                        imageSize: viewModel.cropSourceSize,
+                        straightenAngle: canvasState.cropStraightenAngle,
+                        flipHorizontal: canvasState.cropFlipHorizontal,
+                        flipVertical: canvasState.cropFlipVertical,
+                        verticalPerspective: canvasState.cropVerticalPerspective,
+                        horizontalPerspective: canvasState.cropHorizontalPerspective,
+                        onRotateCounterClockwise: viewModel.rotateCounterClockwise,
+                        onRotateClockwise: viewModel.rotateClockwise,
+                        onBeginInteraction: viewModel.beginPreviewInteraction,
+                        onEndInteraction: viewModel.endPreviewInteraction,
+                        onStraightenChange: viewModel.setCropStraightenAngle,
+                        onFlipHorizontal: { viewModel.toggleCropFlip(horizontal: true) },
+                        onFlipVertical: { viewModel.toggleCropFlip(horizontal: false) },
+                        onVerticalPerspectiveChange: viewModel.setCropVerticalPerspective,
+                        onHorizontalPerspectiveChange: viewModel.setCropHorizontalPerspective,
+                        onResetStraighten: { viewModel.setCropStraightenAngle(0) },
+                        onResetVerticalPerspective: { viewModel.setCropVerticalPerspective(0) },
+                        onResetHorizontalPerspective: { viewModel.setCropHorizontalPerspective(0) },
+                        onAuto: viewModel.runCropAuto,
+                        onAspectRatioChange: viewModel.selectCropAspectRatio,
+                        onReset: viewModel.resetCrop,
+                        onCancel: viewModel.cancelCrop,
+                        onDone: viewModel.commitCrop
+                    )
+                    .transition(inspectorTransition(edge: .trailing))
+                } else if viewModel.sourceImage == nil {
+                    // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
+                    // offers a trip to Develop to be told "this image is already rendered" about an image
+                    // that does not exist. The empty state alone is the honest answer.
+                    emptyState
+                        .transition(.opacity)
+                } else {
+                    histogramSection
 
-                tabSwitcher
+                    tabSwitcher
 
-                Divider()
+                    Divider()
 
-                Group {
-                    switch inspectorState.tab.content {
-                    case .info:
-                        infoContent
-                    case .light:
-                        LightInspectorView(viewModel: viewModel)
-                    case .develop:
-                        DevelopInspectorView(viewModel: viewModel)
-                    case .color:
-                        ColorInspectorView(viewModel: viewModel)
-                    case .effects:
-                        EffectsInspectorView(viewModel: viewModel)
-                    case .look:
-                        LookInspectorView(viewModel: viewModel)
-                    case .masking:
-                        MaskingWorkspace(viewModel: viewModel)
-                    case .retouch:
-                        RetouchInspectorView(viewModel: viewModel)
+                    Group {
+                        switch inspectorState.tab.content {
+                        case .info:
+                            infoContent
+                        case .light:
+                            LightInspectorView(viewModel: viewModel)
+                        case .develop:
+                            DevelopInspectorView(viewModel: viewModel)
+                        case .color:
+                            ColorInspectorView(viewModel: viewModel)
+                        case .effects:
+                            EffectsInspectorView(viewModel: viewModel)
+                        case .look:
+                            LookInspectorView(viewModel: viewModel)
+                        case .masking:
+                            MaskingWorkspace(viewModel: viewModel)
+                        case .retouch:
+                            RetouchInspectorView(viewModel: viewModel)
+                        }
                     }
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .transition(inspectorTransition(edge: .leading))
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
-                .transition(inspectorTransition(edge: .leading))
             }
         }
-        .frame(minWidth: 240, idealWidth: 280)
+        .frame(minWidth: 240, idealWidth: 280, maxWidth: 360, alignment: .topLeading)
         // Leave the pane transparent so the native inspector material shows around the chart.
         // The plot extends into the toolbar band. The window title bar is transparent there so
         // AppKit does not composite a second layer over the histogram.
@@ -129,7 +131,7 @@ struct InfoInspectorView: View {
     /// Photo identity and EXIF content. Only reached with an image open — the no-image case is
     /// handled one level up, before the tab switcher exists.
     private var infoContent: some View {
-        ScrollView {
+        InspectorScrollingContent {
             VStack(alignment: .leading, spacing: 20) {
                 identitySection
                 editHistorySection
@@ -239,13 +241,6 @@ struct InfoInspectorView: View {
                     Label("\(histogram.clippedShadows)", systemImage: "moon.fill")
                         .foregroundStyle(histogram.clippedShadows > 0 ? .cyan : .secondary)
                         .help("\(histogram.clippedShadows) sampled shadow pixels")
-                    Button {
-                        viewModel.showClippingAlerts.toggle()
-                    } label: {
-                        Image(systemName: viewModel.showClippingAlerts ? "viewfinder" : "viewfinder.circle")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Toggle clipping alerts on the photo")
                 }
                 Text(histogramSourceLabel)
                     .font(.caption2)

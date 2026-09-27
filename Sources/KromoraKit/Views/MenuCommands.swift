@@ -46,7 +46,8 @@ public struct KromoraCommands: Commands {
             Button("About Kromora") { openWindow(id: KromoraAboutView.windowID) }
         }
 
-        CommandMenu("View") {
+        // These editor commands belong in AppKit's View menu, with Enter Full Screen.
+        CommandGroup(replacing: .sidebar) {
             Toggle("Show Photo Names", isOn: $settings.showPhotoNames)
                 .accessibilityLabel("Show Photo Names")
 
@@ -57,6 +58,13 @@ public struct KromoraCommands: Commands {
 
             Button("Capture Info Overlay (I)") { post(.toggleCaptureMetadataOverlay) }
                 .accessibilityLabel("Toggle capture information overlay")
+
+            Button(settings.showClippingAlerts ? "Hide Clipping Alerts" : "Show Clipping Alerts") {
+                settings.showClippingAlerts.toggle()
+            }
+            .accessibilityLabel(
+                settings.showClippingAlerts ? "Hide Clipping Alerts" : "Show Clipping Alerts"
+            )
 
             Button("Info Inspector") { post(.toggleInspector) }
                 .keyboardShortcut("i", modifiers: .command)

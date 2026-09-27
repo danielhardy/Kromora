@@ -116,23 +116,6 @@ struct LibraryGridView: View {
                     .background(KromoraTheme.windowBackground)
                 }
             }
-            .overlay(alignment: .bottom) {
-                if !entries.isEmpty && collection.selection.activeID == nil {
-                    HStack(spacing: 10) {
-                        Label("Choose a photo to open in Edit", systemImage: "cursorarrow.click")
-                            .font(.subheadline)
-                        Button("Open first photo") {
-                            viewModel.selectCollectionImage(at: 0)
-                            viewModel.openLibraryImageForEditing()
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                    .padding(12)
-                    .background(.regularMaterial, in: Capsule())
-                    .padding(.bottom, 18)
-                    .accessibilityElement(children: .contain)
-                }
-            }
         }
         .background(KromoraTheme.windowBackground)
         .onAppear {

@@ -61,11 +61,24 @@ final class MenuCommandTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
             encoding: .utf8
         )
+        let app = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/Kromora/KromoraApp.swift"),
+            encoding: .utf8
+        )
         let contentView = try String(
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift"),
             encoding: .utf8
         )
 
+        XCTAssertTrue(app.contains("NSWindow.allowsAutomaticWindowTabbing = false"))
+        XCTAssertTrue(menuCommands.contains("CommandGroup(replacing: .sidebar)"))
+        XCTAssertFalse(
+            menuCommands.contains("CommandMenu(\"View\")"),
+            "a CommandMenu named View sits beside AppKit's View menu"
+        )
+        XCTAssertTrue(menuCommands.contains("\"Hide Clipping Alerts\""))
+        XCTAssertTrue(menuCommands.contains("\"Show Clipping Alerts\""))
+        XCTAssertTrue(menuCommands.contains("settings.showClippingAlerts.toggle()"))
         XCTAssertTrue(menuCommands.contains("Button(\"Reset Rotation\") { post(.resetRotation) }"))
         XCTAssertTrue(menuCommands.contains("Button(\"Info Inspector\") { post(.toggleInspector) }"))
         XCTAssertTrue(menuCommands.contains(".keyboardShortcut(\"i\", modifiers: .command)"))

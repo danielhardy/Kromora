@@ -152,7 +152,7 @@ struct LookInspectorView: View {
             unresolvedLookSection
             intensitySection
         }
-        .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Look adjustments")
         .accessibilityValue(presentationState.title)

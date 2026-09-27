@@ -77,6 +77,24 @@ public struct KromoraSettingsView: View {
                 Text("When off, Kromora follows the macOS appearance setting.")
             }
 
+            Section {
+                Toggle(
+                    "Open the first photo when entering Edit",
+                    isOn: $settings.openFirstPhotoWhenEnteringEdit
+                )
+                .accessibilityLabel("Open the first photo when entering Edit")
+                .accessibilityHint(
+                    "When no photo is selected, switching to Edit opens the first photo in the library"
+                )
+            } header: {
+                Text("Library")
+            } footer: {
+                Text(
+                    "When no photo is selected, Edit opens the first photo in the library. "
+                        + "When off, choose a photo in the Library before switching to Edit."
+                )
+            }
+
             maskOverlaySection
 
 #if KROMORA_DIRECT_DISTRIBUTION

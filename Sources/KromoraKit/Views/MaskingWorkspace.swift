@@ -20,7 +20,7 @@ struct MaskingWorkspace: View {
     }
 
     var body: some View {
-        ScrollView {
+        InspectorScrollingContent {
             VStack(alignment: .leading, spacing: 12) {
                 header
                 if viewModel.sourceImage == nil {
@@ -37,7 +37,6 @@ struct MaskingWorkspace: View {
             }
             .padding(16)
         }
-        .frame(minWidth: 280, idealWidth: 320)
         .onAppear { viewModel.restoreMaskSelection() }
         .onChange(of: viewModel.document.localAdjustments) { _, _ in
             viewModel.restoreMaskSelection()
