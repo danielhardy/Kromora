@@ -134,6 +134,7 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
 
     /// Return a neutral full-resolution Lab crop in oriented-source pixel coordinates.
     func retouchAnalysisCrop(source: ImageSource, bounds: CGRect) async -> RetouchAnalysisRegion?
+    func retouchAnalysisProxy(source: ImageSource) async -> RetouchAnalysisProxy?
 }
 
 extension RenderEngining {
@@ -143,6 +144,7 @@ extension RenderEngining {
     func pickRetouchSource(source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int) async -> RetouchSource? { nil }
 
     func retouchAnalysisCrop(source: ImageSource, bounds: CGRect) async -> RetouchAnalysisRegion? { nil }
+    func retouchAnalysisProxy(source: ImageSource) async -> RetouchAnalysisProxy? { nil }
 }
 
 /// Actor-local counters used by performance captures to separate RAW configuration, decoder output
@@ -580,6 +582,15 @@ actor RenderEngine: RenderEngining {
         }
         guard ranked.indices.contains(rank) else { return nil }
         return .auto(offset: ranked[rank].offset, rank: rank)
+    }
+
+    func retouchAnalysisProxy(source: ImageSource) async -> RetouchAnalysisProxy? {
+        guard !Task.isCancelled,
+              let image = await developedSourceForBuild(
+                source, .neutral, .preview(maxSize: CGSize(width: 1024, height: 1024)), rotation: .zero,
+                space: .current, interactive: false, thumbnail: false
+              ) else { return nil }
+        return retouchProxy(image: image, fingerprint: source.cacheFingerprint)
     }
 
     func retouchAnalysisCrop(source: ImageSource, bounds: CGRect) async -> RetouchAnalysisRegion? {

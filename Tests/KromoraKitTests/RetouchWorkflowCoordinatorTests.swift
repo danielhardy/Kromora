@@ -121,6 +121,53 @@ final class RetouchWorkflowCoordinatorTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(1))
         XCTAssertEqual(destination.pickedRanks, [3, 1])
     }
+
+    func testAcceptOneAcceptAllDismissAndDragSuggestion() throws {
+        let destination = FakeRetouchDestination()
+        let workflow = RetouchWorkflowCoordinator(destination: destination)
+        let first = RetouchDustSuggestion(id: UUID(), point: CGPoint(x: 0.3, y: 0.4), radius: 0.02, confidence: 0.8, seed: 123)
+        let second = RetouchDustSuggestion(id: UUID(), point: CGPoint(x: 0.7, y: 0.6), radius: 0.03, confidence: 0.9, seed: 456)
+        workflow.interactionState.setDustSuggestions([first, second])
+        workflow.setArmed(true)
+        workflow.beginGesture(at: first.point)
+        workflow.updateGesture(to: CGPoint(x: 0.32, y: 0.42))
+        workflow.endGesture()
+        XCTAssertEqual(workflow.interactionState.dustSuggestions.first?.point, CGPoint(x: 0.32, y: 0.42))
+        workflow.beginGesture(at: CGPoint(x: 0.336, y: 0.42))
+        workflow.updateGesture(to: CGPoint(x: 0.344, y: 0.42))
+        workflow.endGesture()
+        XCTAssertEqual(workflow.interactionState.dustSuggestions.first?.point, CGPoint(x: 0.32, y: 0.42))
+        XCTAssertEqual(try XCTUnwrap(workflow.interactionState.dustSuggestions.first).radius, 0.03, accuracy: 0.0001)
+        workflow.acceptDustSuggestion(first.id)
+        let accepted = try XCTUnwrap(destination.document.retouch.spots.first)
+        XCTAssertEqual(accepted.id, first.id)
+        XCTAssertEqual(accepted.seed, first.seed)
+        XCTAssertEqual(accepted.mode, .remove)
+        XCTAssertEqual(accepted.region.samples.first?.point, CGPoint(x: 0.32, y: 0.42))
+        workflow.acceptAllDustSuggestions()
+        XCTAssertEqual(destination.document.retouch.spots.count, 2)
+        XCTAssertEqual(destination.undoGroupingDepth, 0)
+        XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
+
+        workflow.interactionState.setDustSuggestions([first])
+        workflow.dismissDustSuggestion(first.id)
+        XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
+        workflow.interactionState.setDustSuggestions([first])
+        workflow.dismissAllDustSuggestions()
+        XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
+    }
+
+    func testClickingCanvasSuggestionAcceptsIt() {
+        let destination = FakeRetouchDestination()
+        let workflow = RetouchWorkflowCoordinator(destination: destination)
+        let suggestion = RetouchDustSuggestion(id: UUID(), point: CGPoint(x: 0.4, y: 0.45), radius: 0.02, confidence: 0.8, seed: 71)
+        workflow.interactionState.setDustSuggestions([suggestion])
+        workflow.setArmed(true)
+        workflow.beginGesture(at: suggestion.point)
+        workflow.endGesture()
+        XCTAssertEqual(destination.document.retouch.spots.map(\.id), [suggestion.id])
+        XCTAssertTrue(workflow.interactionState.dustSuggestions.isEmpty)
+    }
 }
 
 @MainActor

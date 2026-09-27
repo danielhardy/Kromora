@@ -7,7 +7,6 @@ struct RetouchInspectorView: View {
     @State private var selectedSpotID: UUID?
     @State private var selectedEyeID: UUID?
     @State private var eyeKind: EyeKind = .human
-    @State private var isDustFinderPresented = false
     @ObservedObject private var interaction: RetouchInteractionState
 
     init(viewModel: AppViewModel) {
@@ -65,14 +64,43 @@ struct RetouchInspectorView: View {
                     }
                     .padding(.top, 4)
                 }
-                Button {
-                    isDustFinderPresented = true
-                } label: {
-                    Label("Dust Finder · 1:1", systemImage: "circle.dotted")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                GroupBox("Dust") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("A · Visualize Spots", isOn: Binding(
+                            get: { interaction.visualizationEnabled },
+                            set: { _ in viewModel.toggleRetouchVisualization() }
+                        ))
+                        slider("Threshold", value: Binding(
+                            get: { interaction.visualizationThreshold },
+                            set: { viewModel.setRetouchVisualizationThreshold($0) }
+                        ), range: 0.005...0.12, format: "%.3f")
+                        Button("Detect Dust") { viewModel.detectRetouchDust() }
+                            .disabled(viewModel.previewSurface.image == nil)
+                        if !interaction.dustSuggestions.isEmpty {
+                            HStack {
+                                Text("\(interaction.dustSuggestions.count) suggestions").font(.caption)
+                                Spacer()
+                                Button("Accept All") { viewModel.retouchWorkflow.acceptAllDustSuggestions() }
+                                Button("Dismiss") { viewModel.retouchWorkflow.dismissAllDustSuggestions() }
+                            }
+                            ForEach(interaction.dustSuggestions.prefix(12)) { suggestion in
+                                HStack(spacing: 5) {
+                                    Text(String(format: "%.0f%%", suggestion.confidence * 100)).font(.caption2)
+                                    Spacer()
+                                    Button("Accept") { viewModel.retouchWorkflow.acceptDustSuggestion(suggestion.id) }
+                                    Button("×") { viewModel.retouchWorkflow.dismissDustSuggestion(suggestion.id) }
+                                        .buttonStyle(.plain).help("Dismiss suggestion")
+                                }
+                            }
+                            Text("Drag a dashed pin to move it or its ring to resize it before accepting.")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        } else {
+                            Text("Visualization changes only the canvas overlay. Detect Dust adds editable suggestions; the brush remains available for missed spots.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 4)
                 }
-                .disabled(viewModel.previewSurface.image == nil)
-                .help("Open a high-contrast pixel-size view and navigate between retouch spots")
                 GroupBox("Red-Eye / Pet-Eye") {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Eye type", selection: $eyeKind) {
@@ -113,10 +141,6 @@ struct RetouchInspectorView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Retouch tools")
-        .sheet(isPresented: $isDustFinderPresented) {
-            DustFinderSheet(viewModel: viewModel)
-                .frame(minWidth: 720, minHeight: 520)
-        }
         .onChange(of: viewModel.document.retouch.spots) { _, spots in
             if !spots.contains(where: { $0.id == selectedSpotID }) { selectedSpotID = spots.last?.id }
         }
