@@ -452,9 +452,9 @@ float4 retouchMembraneApply(sampler destination, sampler fill, sampler mask) {
 }
 
 // Interface reserved for the correspondence field produced by KRMA-662.
-float4 retouchSampleField(sampler image, sampler field) {
+float4 retouchSampleField(sampler image, sampler field, float2 sourceScale) {
     float2 source = sample(field, samplerCoord(field)).rg;
-    return sample(image, source);
+    return sample(image, source * sourceScale);
 }
 
 // MARK: - Master RGB tone curve (ToneCurveFilterCache)

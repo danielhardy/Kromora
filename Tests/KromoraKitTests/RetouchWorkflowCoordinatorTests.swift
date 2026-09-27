@@ -87,6 +87,7 @@ final class RetouchWorkflowCoordinatorTests: XCTestCase {
     func testAutomaticSourcePickGroupsWithGestureCommitForOneUndoEntry() async throws {
         let destination = FakeRetouchDestination()
         let workflow = RetouchWorkflowCoordinator(destination: destination)
+        workflow.interactionState.mode = .heal
         workflow.setArmed(true)
         workflow.beginGesture(at: CGPoint(x: 0.3, y: 0.3))
         workflow.endGesture()

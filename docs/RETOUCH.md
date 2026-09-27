@@ -16,37 +16,53 @@ entire stroke produces one fill and one blend. The renderer crops the fill, mask
 blend to the region bounds plus ring padding. Clone uses a direct translated source patch. Heal
 builds a normalized-convolution pull/push field from destination-minus-fill values weighted only
 outside the hole, then adds that field to the translated fill and composites with the feathered,
-opacity-scaled mask. Pixels under the hole do not contribute to the replacement tone. Remove is
-reserved for the correspondence-field producer in KRMA-662; its field sampling kernel interface is
-in place and an unresolved Remove spot currently leaves the image unchanged.
+opacity-scaled mask. Pixels under the hole do not contribute to the replacement tone. Remove uses
+the engine-resolved correspondence field; an unresolved spot remains unchanged until its field
+publishes.
 
 Heal and Clone spots without a source are resolved during rendering by `RetouchSourcePicker` over a
 cached neutral-decode Lab proxy with a 1024 px maximum long edge. The picker searches deterministic
 nearby spiral and coarse-frame positions, excludes the destination and other visible holes, ranks
 ring colour/gradient and texture similarity with a distance cost, then requests a bounded neutral
 full-resolution Lab crop and refines leading choices within ±2 pixels. Automatic rank is carried by
-`RetouchSource.auto`; manually selected offsets remain authoritative. The same picker exposes a
-deterministic initial offset for Remove's later correspondence-field solver. Analysis pixels and
-Core Image values stay inside `RenderEngine`; only Lab value buffers enter the Sendable picker.
+`RetouchSource.auto`; manually selected offsets remain authoritative. The same picker supplies a
+deterministic initial offset for the correspondence-field solver. Analysis pixels and Core Image
+values stay inside `RenderEngine`; only Lab value buffers enter the Sendable analysis code.
 
-`PatchMatchInpainter` is the standalone Remove correspondence-field producer. It consumes full-res
-Lab values and byte masks, seeds from the source picker's offset, excludes every source patch that
-touches the destination or another excluded hole, and returns an absolute-pixel RG32F-compatible
-field over the hole bounds. Its three shrinking random-search windows, forward/reverse propagation,
-Lab SSD, gradient cost, seeded SplitMix generator, stable ties, and weighted field vote are
-deterministic. Cancellation throws `SolverError.cancelled` without returning a partial field.
-Thin masks select 5×5 patches; other masks use 7×7. This first
-implementation has not yet passed every quality row; KRMA-662 remains in review with the measured
-gaps listed below.
+`PatchMatchInpainter` produces Remove correspondence fields from bounded, full-resolution neutral
+Lab crops. `RenderEngine` excludes dilated holes from source patches, solves visible Remove spots
+in document order, and samples the live developed image through the resulting RG field before the
+shared membrane composite. The field cache is process-local and keyed by source fingerprint,
+region digest, seed, solver version, and earlier overlapping spot recipes. It is discarded with the
+engine and never enters the edit document or portable package. A changed source, including a pasted
+spot on another photo, therefore resolves a new field. Interactive frames can leave a spot
+unfilled while a settled preview or export resolves it.
+
+The solver's three shrinking random-search windows, forward/reverse propagation, Lab SSD, gradient
+cost, seeded SplitMix generator, stable ties, and weighted field vote are deterministic.
+Cancellation throws `SolverError.cancelled` without returning a partial field. Thin masks select
+5×5 patches; other masks use 7×7. The standalone solver has not passed every quality row; the
+remaining gaps are listed below. Engine-level miss/hit timings and the complete integration quality
+run remain to be measured against KRMA-665's targets.
 
 Solver-only optimized Swift timings on an Apple M4 Pro (12 CPU cores), measured with `swiftc -O`
 and standalone synthetic buffers: a 60 × 60 dust mask in a 192 × 144 region took 24.1 ms; a
-3,000 × 12 px wire in a 3,000 × 64 region took 238.4 ms. Both are under the 50 ms and 400 ms
-targets. These timings exclude decode, Lab conversion, and the renderer's membrane composite.
+3,000 × 12 px wire in a 3,000 × 64 region took 238.4 ms. These exclude decode, Lab conversion,
+and the renderer's membrane composite.
 
-The Retouch inspector currently edits the first sample of a circular recipe and its source offset;
-freehand canvas creation, pin editing, and field solving are separate follow-up work. The Dust Finder shows a sharpened, high-contrast preview at pixel size, overlays
-visible spot markers, and scrolls between spot centers. It does not perform automatic face/pupil
+Engine timing capture: `KROMORA_RUN_RETOUCH_ENGINE_BENCHMARK=1 swift test --filter
+RetouchEnginePerformanceTests/testRecordEngineRemoveTimings`. On the Apple M4 Pro reference setup,
+the debug test configuration measured a 60 px dust spot at 972 ms solver / 1,213 ms total on a
+3,200 × 900 source, with a 58 ms total cache hit. A 3,000 px wire measured 12,711 ms solver /
+13,686 ms total. These debug measurements exceed the solve targets and are not representative of
+the optimized app. `swift test -c release --filter ...` could not link the test bundle with this
+Xcode beta SDK (`SwiftUICore` opaque symbols are unavailable to the XCTest bundle); optimized
+engine timings remain unverified. The benchmark is opt-in so normal CI does not run the large
+synthetic source generation and solve.
+
+The Retouch inspector edits mode, size, feather, opacity, and visibility. Canvas strokes and pins are
+available; source handles apply to Heal and Clone. The Dust Finder shows a sharpened, high-contrast
+preview at pixel size, overlays visible spot markers, and scrolls between spot centers. It does not perform automatic face/pupil
 detection; eye centers are recipe values.
 
 ## Retouch quality evaluation

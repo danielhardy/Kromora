@@ -30,7 +30,10 @@ final class RetouchWorkflowCoordinator {
     private var isShiftSegment = false
     private var isCommandCreatingSource = false
 
-    init(destination: (any RetouchWorkflowDestination)? = nil) { self.destination = destination }
+    init(destination: (any RetouchWorkflowDestination)? = nil) {
+        self.destination = destination
+        RetouchInteractionState.active = interactionState
+    }
 
     func setArmed(_ armed: Bool) {
         if armed {
@@ -129,7 +132,7 @@ final class RetouchWorkflowCoordinator {
                                    feather: interactionState.feather, opacity: interactionState.opacity)
             if let pendingSource { spot.source = pendingSource }
             if samples.count == 1, pendingSource == nil { spot.source = nil }
-            let needsAutoPick = pendingSource == nil
+            let needsAutoPick = pendingSource == nil && spot.mode != .remove
             if needsAutoPick { destination.beginUndoGrouping() }
             destination.updateDocument { $0.retouch.spots.append(spot) }
             interactionState.select(id)
@@ -145,7 +148,9 @@ final class RetouchWorkflowCoordinator {
         case .move(let id):
             let needsAutoPick: Bool = {
                 guard pendingSource == nil,
-                      case .auto? = destination.document.retouch.spots.first(where: { $0.id == id })?.source
+                      let spot = destination.document.retouch.spots.first(where: { $0.id == id }),
+                      spot.mode != .remove,
+                      case .auto? = spot.source
                 else { return false }
                 return true
             }()
