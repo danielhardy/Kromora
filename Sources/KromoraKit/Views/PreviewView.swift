@@ -86,6 +86,28 @@ struct PreviewView: View {
                 .padding(20)
                 .allowsHitTesting(false)
             }
+
+            if previewSurface.image != nil, viewModel.showClippingAlerts,
+               !canvasState.isCropToolActive, let histogram = viewModel.histogram,
+               histogram.clippedHighlights + histogram.clippedShadows > 0 {
+                VStack {
+                    HStack(spacing: 8) {
+                        Label("\(histogram.clippedHighlights) highlights", systemImage: "sun.max.fill")
+                            .foregroundStyle(.orange)
+                        Label("\(histogram.clippedShadows) shadows", systemImage: "moon.fill")
+                            .foregroundStyle(.cyan)
+                    }
+                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .padding(.horizontal, 10).padding(.vertical, 7)
+                    .background(.black.opacity(0.76), in: Capsule())
+                    .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+                    .padding(.top, 14)
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Image clipping alerts")
+            }
         }
         .onDrop(
             of: ImageDrop.acceptedTypes,
@@ -298,6 +320,9 @@ struct PreviewView: View {
                 onWhiteBalanceSamplePoint: { point, viewportSize, commit in
                     viewModel.updateWhiteBalanceSample(
                         at: point, viewportSize: viewportSize, commit: commit)
+                },
+                onCursorPoint: { point, viewportSize in
+                    viewModel.updatePixelReadout(at: point, viewportSize: viewportSize)
                 },
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
                 viewSpaceRotationAngle: canvasState.isCropToolActive

@@ -165,6 +165,21 @@ struct InfoInspectorView: View {
                 Text("Histogram")
                     .font(.headline)
                 Spacer()
+                if let histogram = viewModel.histogram {
+                    Label("\(histogram.clippedHighlights)", systemImage: "sun.max.fill")
+                        .foregroundStyle(histogram.clippedHighlights > 0 ? .orange : .secondary)
+                        .help("\(histogram.clippedHighlights) sampled highlight pixels")
+                    Label("\(histogram.clippedShadows)", systemImage: "moon.fill")
+                        .foregroundStyle(histogram.clippedShadows > 0 ? .cyan : .secondary)
+                        .help("\(histogram.clippedShadows) sampled shadow pixels")
+                    Button {
+                        viewModel.showClippingAlerts.toggle()
+                    } label: {
+                        Image(systemName: viewModel.showClippingAlerts ? "viewfinder" : "viewfinder.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Toggle clipping alerts on the photo")
+                }
                 Text(histogramSourceLabel)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
@@ -189,10 +204,43 @@ struct InfoInspectorView: View {
                 Text("R").tag(HistogramChart.Mode.red)
                 Text("G").tag(HistogramChart.Mode.green)
                 Text("B").tag(HistogramChart.Mode.blue)
+                Text("Wave").tag(HistogramChart.Mode.waveform)
+                Text("Parade").tag(HistogramChart.Mode.parade)
+                Text("Vector").tag(HistogramChart.Mode.vectorscope)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .labelsHidden()
             .padding(.horizontal, 12)
+
+            HStack(spacing: 8) {
+                if let readout = viewModel.pixelReadout {
+                    if let before = viewModel.pixelReadoutBefore {
+                        Text(String(format: "Pre RGB %03d %03d %03d", before.red, before.green, before.blue))
+                        Text(String(format: "Lab %5.1f %+.1f %+.1f", before.lab.l, before.lab.a, before.lab.b))
+                    }
+                    Text(String(format: "Post RGB %03d %03d %03d", readout.red, readout.green, readout.blue))
+                    Text(String(format: "Lab %5.1f %+.1f %+.1f", readout.lab.l, readout.lab.a, readout.lab.b))
+                } else {
+                    Text("Hover over photo for pixel readout")
+                }
+            }
+            .font(.system(size: 10, design: .monospaced))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+
+            if let histogram = viewModel.histogram {
+                HStack(spacing: 7) {
+                    Text("R \(histogram.clippedRed)").foregroundStyle(.red)
+                    Text("G \(histogram.clippedGreen)").foregroundStyle(.green)
+                    Text("B \(histogram.clippedBlue)").foregroundStyle(.blue)
+                    Spacer(minLength: 2)
+                    Button("Exposure") { viewModel.showExposureControl() }
+                        .buttonStyle(.link)
+                        .help("Show the Exposure control")
+                }
+                .font(.system(size: 10, design: .monospaced))
+                .padding(.horizontal, 12)
+            }
         }
     }
 
@@ -295,7 +343,7 @@ struct InfoInspectorView: View {
 /// and luma modes draw one filled curve.
 struct HistogramChart: View {
     enum Mode: Hashable {
-        case rgb, luma, red, green, blue
+        case rgb, luma, red, green, blue, waveform, parade, vectorscope
     }
 
     let data: HistogramData
@@ -316,8 +364,73 @@ struct HistogramChart: View {
                 fill(.green, Color.green, in: context, size: size, blend: .normal)
             case .blue:
                 fill(.blue, Color.blue, in: context, size: size, blend: .normal)
+            case .waveform:
+                drawWaveform(in: context, size: size, channels: [.white])
+            case .parade:
+                for (index, color) in [Color.red, .green, .blue].enumerated() {
+                    var pane = context
+                    pane.translateBy(x: CGFloat(index) * size.width / 3, y: 0)
+                    drawWaveform(in: pane, size: CGSize(width: size.width / 3, height: size.height),
+                                 channels: [color], channelIndex: index)
+                }
+            case .vectorscope:
+                drawVectorscope(in: context, size: size)
             }
         }
+    }
+
+    private func drawWaveform(in context: GraphicsContext, size: CGSize, channels: [Color], channelIndex: Int? = nil) {
+        guard data.sampleWidth > 0, data.sampleHeight > 0,
+              data.samples.count >= data.sampleWidth * data.sampleHeight * 3 else { return }
+        var points = Path()
+        for y in 0..<data.sampleHeight {
+            for x in 0..<data.sampleWidth {
+                let offset = (y * data.sampleWidth + x) * 3
+                let red = Int(data.samples[offset])
+                let green = Int(data.samples[offset + 1])
+                let blue = Int(data.samples[offset + 2])
+                let channelValue: Int
+                if let channelIndex {
+                    channelValue = channelIndex == 0 ? red : (channelIndex == 1 ? green : blue)
+                } else {
+                    let weighted = 0.2126 * Double(red) + 0.7152 * Double(green) + 0.0722 * Double(blue)
+                    channelValue = Int(weighted.rounded())
+                }
+                let level = Double(channelValue) / 255.0
+                let px = CGFloat(x) / CGFloat(max(1, data.sampleWidth - 1)) * size.width
+                let py = size.height * (1 - CGFloat(level))
+                points.addEllipse(in: CGRect(x: px, y: py, width: 1.5, height: 1.5))
+            }
+        }
+        context.fill(points, with: .color(channels[0].opacity(0.22)))
+        if size.width > 30 {
+            var grid = Path()
+            for fraction in [0.25, 0.5, 0.75] {
+                grid.move(to: CGPoint(x: 0, y: size.height * fraction))
+                grid.addLine(to: CGPoint(x: size.width, y: size.height * fraction))
+            }
+            context.stroke(grid, with: .color(.white.opacity(0.12)), lineWidth: 0.5)
+        }
+    }
+
+    private func drawVectorscope(in context: GraphicsContext, size: CGSize) {
+        guard data.sampleWidth > 0, data.samples.count >= data.sampleWidth * data.sampleHeight * 3 else { return }
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let radius = min(size.width, size.height) * 0.45
+        var grid = Path()
+        grid.addEllipse(in: CGRect(x: center.x-radius, y: center.y-radius, width: radius*2, height: radius*2))
+        grid.move(to: CGPoint(x: center.x-radius, y: center.y)); grid.addLine(to: CGPoint(x: center.x+radius, y: center.y))
+        grid.move(to: CGPoint(x: center.x, y: center.y-radius)); grid.addLine(to: CGPoint(x: center.x, y: center.y+radius))
+        context.stroke(grid, with: .color(.white.opacity(0.22)), lineWidth: 0.6)
+        var points = Path()
+        for offset in stride(from: 0, to: data.sampleWidth * data.sampleHeight * 3, by: 3) {
+            let r = Double(data.samples[offset]) / 255, g = Double(data.samples[offset+1]) / 255, b = Double(data.samples[offset+2]) / 255
+            let u = (b - (0.299*r + 0.587*g + 0.114*b)) * 0.565
+            let v = (r - (0.299*r + 0.587*g + 0.114*b)) * 0.713
+            let p = CGPoint(x: center.x + CGFloat(u * 2) * radius, y: center.y - CGFloat(v * 2) * radius)
+            points.addEllipse(in: CGRect(x: p.x, y: p.y, width: 2, height: 2))
+        }
+        context.fill(points, with: .color(.cyan.opacity(0.34)))
     }
 
     private func fill(

@@ -1,6 +1,21 @@
 import CoreGraphics
 import Foundation
 
+struct PixelReadout: Equatable, Sendable {
+    let x: Int
+    let y: Int
+    let red: UInt8
+    let green: UInt8
+    let blue: UInt8
+    let lab: (l: Double, a: Double, b: Double)
+
+    static func == (lhs: PixelReadout, rhs: PixelReadout) -> Bool {
+        lhs.x == rhs.x && lhs.y == rhs.y && lhs.red == rhs.red
+            && lhs.green == rhs.green && lhs.blue == rhs.blue
+            && lhs.lab.l == rhs.lab.l && lhs.lab.a == rhs.lab.a && lhs.lab.b == rhs.lab.b
+    }
+}
+
 /// Per-channel tonal distribution of an image, in 256 bins (one per 8-bit
 /// level). Computed from a downscaled RGBA8 render — see
 /// `RenderEngine.histogram(source:document:lut:scale:space:maxDimension:)`.
@@ -8,6 +23,13 @@ import Foundation
 /// `Sendable` because the tally happens inside `actor RenderEngine`, where the `CIContext` lives,
 /// and the result crosses back to the main actor to be published.
 struct HistogramData: Equatable, Sendable {
+
+    /// Bounded row-major RGB samples from the exact rendered preview represented by this
+    /// histogram. Keeping these samples lets the inspector draw spatial scopes and answer cursor
+    /// queries without asking the renderer for another image or retaining framework objects.
+    let samples: [UInt8]
+    let sampleWidth: Int
+    let sampleHeight: Int
 
     /// Channels a histogram view can draw.
     enum Channel: CaseIterable {
@@ -20,13 +42,30 @@ struct HistogramData: Equatable, Sendable {
     /// Rec. 709 luminance (0.2126R + 0.7152G + 0.0722B).
     let luma: [Int]
 
+    let clippedHighlights: Int
+    let clippedShadows: Int
+    let clippedRed: Int
+    let clippedGreen: Int
+    let clippedBlue: Int
+
     var binCount: Int { red.count }
 
-    init(red: [Int], green: [Int], blue: [Int], luma: [Int]) {
+    init(red: [Int], green: [Int], blue: [Int], luma: [Int],
+         samples: [UInt8] = [], sampleWidth: Int = 0, sampleHeight: Int = 0,
+         clippedHighlights: Int = 0, clippedShadows: Int = 0,
+         clippedRed: Int = 0, clippedGreen: Int = 0, clippedBlue: Int = 0) {
         self.red = red
         self.green = green
         self.blue = blue
         self.luma = luma
+        self.samples = samples
+        self.sampleWidth = sampleWidth
+        self.sampleHeight = sampleHeight
+        self.clippedHighlights = clippedHighlights
+        self.clippedShadows = clippedShadows
+        self.clippedRed = clippedRed
+        self.clippedGreen = clippedGreen
+        self.clippedBlue = clippedBlue
     }
 
     /// Tally an already-rasterized RGBA8 buffer.
@@ -47,6 +86,11 @@ struct HistogramData: Equatable, Sendable {
         var green = [Int](repeating: 0, count: 256)
         var blue = [Int](repeating: 0, count: 256)
         var luma = [Int](repeating: 0, count: 256)
+        var clippedHighlights = 0
+        var clippedShadows = 0
+        var clippedRed = 0
+        var clippedGreen = 0
+        var clippedBlue = 0
 
         bytes.withUnsafeBufferPointer { buf in
             for y in 0..<height {
@@ -56,6 +100,11 @@ struct HistogramData: Equatable, Sendable {
                     let r = Int(buf[off])
                     let g = Int(buf[off + 1])
                     let b = Int(buf[off + 2])
+                    if r == 255 { clippedRed += 1 }
+                    if g == 255 { clippedGreen += 1 }
+                    if b == 255 { clippedBlue += 1 }
+                    if r == 255 || g == 255 || b == 255 { clippedHighlights += 1 }
+                    if r == 0 && g == 0 && b == 0 { clippedShadows += 1 }
                     red[r] += 1
                     green[g] += 1
                     blue[b] += 1
@@ -66,7 +115,20 @@ struct HistogramData: Equatable, Sendable {
             }
         }
 
-        self.init(red: red, green: green, blue: blue, luma: luma)
+        var samples = [UInt8](repeating: 0, count: width * height * 3)
+        for y in 0..<height {
+            for x in 0..<width {
+                let from = y * stride + x * 4
+                let to = (y * width + x) * 3
+                samples[to] = bytes[from]
+                samples[to + 1] = bytes[from + 1]
+                samples[to + 2] = bytes[from + 2]
+            }
+        }
+        self.init(red: red, green: green, blue: blue, luma: luma,
+                  samples: samples, sampleWidth: width, sampleHeight: height,
+                  clippedHighlights: clippedHighlights, clippedShadows: clippedShadows,
+                  clippedRed: clippedRed, clippedGreen: clippedGreen, clippedBlue: clippedBlue)
     }
 
     func bins(for channel: Channel) -> [Int] {
@@ -76,6 +138,30 @@ struct HistogramData: Equatable, Sendable {
         case .blue: return blue
         case .luma:  return luma
         }
+    }
+
+    /// Cursor samples use encoded sRGB 8-bit values and CIE Lab (D65, 2° observer).
+    func readout(x: Int, y: Int) -> PixelReadout? {
+        guard x >= 0, y >= 0, x < sampleWidth, y < sampleHeight,
+              samples.count >= sampleWidth * sampleHeight * 3 else { return nil }
+        let offset = (y * sampleWidth + x) * 3
+        let r = Double(samples[offset]) / 255
+        let g = Double(samples[offset + 1]) / 255
+        let b = Double(samples[offset + 2]) / 255
+        func linear(_ value: Double) -> Double {
+            value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
+        }
+        let rl = linear(r), gl = linear(g), bl = linear(b)
+        let xyzX = (0.4124564 * rl + 0.3575761 * gl + 0.1804375 * bl) / 0.95047
+        let xyzY = 0.2126729 * rl + 0.7151522 * gl + 0.0721750 * bl
+        let xyzZ = (0.0193339 * rl + 0.1191920 * gl + 0.9503041 * bl) / 1.08883
+        func labCurve(_ value: Double) -> Double {
+            value > 216.0 / 24389.0 ? cbrt(value) : (24389.0 / 27.0 * value + 16) / 116
+        }
+        let fx = labCurve(xyzX), fy = labCurve(xyzY), fz = labCurve(xyzZ)
+        return PixelReadout(x: x, y: y, red: samples[offset], green: samples[offset + 1],
+                            blue: samples[offset + 2],
+                            lab: (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)))
     }
 
     /// Display ceiling used to scale bar heights. The pure-black (0) and
