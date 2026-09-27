@@ -12574,3 +12574,5 @@
 {"id":"evt_muk05san_g1g0ba","type":"issue.updated","ts":"2026-09-27T15:57:53.663Z","actor":"human","issue_id":"KRMA-654","payload":{"before":{"status":"backlog","order":"zzzzv"},"after":{"status":"backlog","order":"zzzzv"},"fields":["body"]}}
 {"id":"evt_muk05xd2_t7m1fb","type":"issue.moved","ts":"2026-09-27T15:58:00.230Z","actor":"human","issue_id":"KRMA-654","payload":{"before":{"status":"backlog","order":"zzzzv"},"after":{"status":"ready","order":"zzzzv"},"fields":["status"]}}
 {"id":"evt_muk066la_szt3fo","type":"issue.moved","ts":"2026-09-27T15:58:12.190Z","actor":"human","issue_id":"KRMA-654","payload":{"before":{"status":"ready","order":"zzzzv"},"after":{"status":"backlog","order":"zzzzv"},"fields":["status"]}}
+{"id":"evt_muk0tck1_a0edc6","type":"issue.created","ts":"2026-09-27T16:16:13.009Z","actor":"codex","issue_id":"KRMA-655","payload":{"title":"Add animated zebra overlay for clipped highlights"}}
+{"id":"evt_muk0twpq_9wfwfh","type":"issue.updated","ts":"2026-09-27T16:16:39.134Z","actor":"human","issue_id":"KRMA-655","payload":{"before":{"status":"backlog","order":"zzzzx"},"after":{"status":"backlog","order":"zzzzx"},"fields":["body"]}}
