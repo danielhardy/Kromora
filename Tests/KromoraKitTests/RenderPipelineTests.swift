@@ -129,6 +129,30 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         XCTAssertEqual(retouched.extent, baseline.extent)
     }
 
+    func testHealPreservesDestinationAppearanceWhileCloneCopiesSampledPatch() throws {
+        let geometry = SpotShape.circle(center: CGPoint(x: 0.35, y: 0.5))
+        let common = (mode: RetouchMode.heal, shape: geometry, radius: 0.12,
+                      sourceOffset: CGVector(dx: 0.35, dy: 0), feather: 0.4)
+        let heal = RetouchSpot(
+            mode: common.mode, shape: common.shape, radius: common.radius,
+            sourceOffset: common.sourceOffset, feather: common.feather
+        )
+        let clone = RetouchSpot(
+            mode: .clone, shape: common.shape, radius: common.radius,
+            sourceOffset: common.sourceOffset, feather: common.feather
+        )
+
+        let healed = try Pixels.bytes(of: build(EditDocument(
+            retouch: RetouchSettings(spots: [heal])
+        )))
+        let cloned = try Pixels.bytes(of: build(EditDocument(
+            retouch: RetouchSettings(spots: [clone])
+        )))
+
+        XCTAssertNotEqual(healed, cloned,
+                          "Heal must adapt sampled texture to the destination's broad appearance")
+    }
+
     func testMasterToneCurveChangesAllRGBChannelsAndRemainsMonotonic() throws {
         let source = try linearRamp()
         let curve = LightToneCurve(points: [
