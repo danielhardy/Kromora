@@ -381,15 +381,7 @@ struct AutoEvaluationTargets: Codable, Sendable, Equatable {
 
     private static func colorfulnessTarget(facts: AutoEnhancementFacts) -> Double {
         let color = facts.color
-        let scene = facts.scene
-        let confidence = facts.signalConfidence
-        let darkChromaticEvidence = facts.hasDarkChromaticEvidence
-        guard !color.isMixed,
-              scene.monochromeLikelihood <= 0.5,
-              scene.sunsetWarmLikelihood <= 0.6,
-              scene.nightLikelihood <= 0.6 || darkChromaticEvidence,
-              confidence.colorNeutral >= 0.6,
-              color.colorfulness < 0.35,
+        guard AutoMutedColorEligibility.allowsVibranceLift(facts: facts),
               color.saturationP95 <= 0.85 else { return Double(color.colorfulness) }
         // Close most of the measured gap to a modestly colorful image, while leaving room
         // for intentional palette choices and the renderer's nonlinear vibrance response.

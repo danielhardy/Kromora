@@ -806,14 +806,13 @@ private enum ColorPlacement {
         let color = facts.color
         let scene = facts.scene
         let confidence = facts.signalConfidence
+        let darkChromaticEvidence = facts.hasDarkChromaticEvidence
         if color.isMixed { return nil }
         if scene.monochromeLikelihood > 0.5 { return nil }
         if scene.sunsetWarmLikelihood > 0.6 { return nil }
-        let darkChromaticEvidence = facts.hasDarkChromaticEvidence
         if scene.nightLikelihood > 0.6 && !darkChromaticEvidence { return nil }
         if confidence.colorNeutral < 0.4 { return nil }
 
-        let spread = Double(color.saturationP95 - color.saturationMedian)
         var vibrance: Double?
         var saturation: Double?
         var reasons: [String] = []
@@ -828,7 +827,7 @@ private enum ColorPlacement {
                 saturation = target
                 reasons.append("restrains clipped/over-saturated color")
             }
-        } else if color.colorfulness < 0.35, spread < 0.5, confidence.colorNeutral >= 0.6 {
+        } else if AutoMutedColorEligibility.allowsVibranceLift(facts: facts) {
             // Close most of the measured gap to a modestly colorful image. Very muted images
             // need a visible minimum because Core Image's vibrance response is nonlinear near
             // neutral; retain the smaller proportional response near the balanced boundary.
