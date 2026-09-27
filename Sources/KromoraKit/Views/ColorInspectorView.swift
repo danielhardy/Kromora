@@ -45,10 +45,34 @@ struct ColorInspectorView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("As Shot") { viewModel.resetWhiteBalance() }
-                        .buttonStyle(.link)
-                        .disabled(!viewModel.hasWhiteBalanceAdjustments)
-                        .accessibilityLabel("Reset white balance to As Shot")
+                    Menu("Preset") {
+                        ForEach(WhiteBalancePreset.allCases) { preset in
+                            Button(preset.rawValue) {
+                                viewModel.applyWhiteBalancePreset(preset)
+                            }
+                        }
+                    }
+                    .disabled(viewModel.sourceIsRAW && viewModel.rawCapabilities == nil)
+                    .accessibilityLabel("White balance preset")
+                }
+
+                HStack(spacing: 8) {
+                    if viewModel.isWhiteBalanceSampling {
+                        Button("Cancel Sample") { viewModel.cancelWhiteBalanceSampling() }
+                            .accessibilityLabel("Cancel white balance sample")
+                        Text("Click a neutral area in the photo to apply")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Button {
+                            viewModel.beginWhiteBalanceSampling()
+                        } label: {
+                            Label("Sample Neutral", systemImage: "eyedropper")
+                        }
+                        .disabled(viewModel.sourceImage == nil ||
+                            (viewModel.sourceIsRAW && viewModel.rawCapabilities == nil))
+                        .accessibilityHint("Click a neutral area in the photo; an 11 by 11 display pixel area is averaged")
+                    }
                 }
 
                 if viewModel.sourceIsRAW && viewModel.rawCapabilities == nil {

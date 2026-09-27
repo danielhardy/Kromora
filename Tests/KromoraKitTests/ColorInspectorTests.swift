@@ -35,6 +35,24 @@ final class ColorInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.color.saturation, -42.25, accuracy: 1e-12)
     }
 
+    func testWhiteBalancePresetsUseTheEditableDocumentAndUndoHistory() async throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        try await openStandardImage(viewModel)
+        viewModel.whiteBalanceBinding(for: .tint).wrappedValue = 24
+
+        viewModel.applyWhiteBalancePreset(.tungsten)
+
+        XCTAssertEqual(viewModel.adjustmentValue(for: .temperature), 3200, accuracy: 0.001)
+        XCTAssertEqual(viewModel.adjustmentValue(for: .tint), 0, accuracy: 0.001)
+        viewModel.undo()
+        XCTAssertEqual(viewModel.adjustmentValue(for: .tint), 24, accuracy: 0.001)
+        XCTAssertEqual(viewModel.adjustmentValue(for: .temperature), 6500, accuracy: 0.001)
+
+        viewModel.applyWhiteBalancePreset(.asShot)
+        XCTAssertEqual(viewModel.adjustmentValue(for: .temperature), 6500, accuracy: 0.001)
+        XCTAssertEqual(viewModel.adjustmentValue(for: .tint), 0, accuracy: 0.001)
+    }
+
     func testMixerAndGradingBindingsEditOnlyTheirNestedValues() async throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         try await openStandardImage(viewModel)
