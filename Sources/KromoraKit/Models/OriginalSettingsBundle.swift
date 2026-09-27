@@ -34,6 +34,24 @@ enum OriginalSettingsBundle {
         document: EditDocument,
         destination: URL,
         locationMetadataIncluded: Bool
+    ) async throws {
+        try await Task.detached(priority: .userInitiated) {
+            try createSynchronously(
+                source: source,
+                sourceName: sourceName,
+                document: document,
+                destination: destination,
+                locationMetadataIncluded: locationMetadataIncluded
+            )
+        }.value
+    }
+
+    private static func createSynchronously(
+        source: ImageSource,
+        sourceName: String,
+        document: EditDocument,
+        destination: URL,
+        locationMetadataIncluded: Bool
     ) throws {
         let original: Data
         switch source.backing {

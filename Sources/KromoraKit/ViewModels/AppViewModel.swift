@@ -3977,17 +3977,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let destination = parent.appendingPathComponent(
             "\(name).\(OriginalSettingsBundle.fileExtension)", isDirectory: true
         )
-        do {
-            try OriginalSettingsBundle.create(
-                source: request.source,
-                sourceName: sourceName,
-                document: request.document,
-                destination: destination,
-                locationMetadataIncluded: true
-            )
-            statusMessage = "Original + settings bundle exported; the original remains read-only."
-        } catch {
-            presentError("Bundle export failed: \(error.localizedDescription)")
+        statusMessage = "Preparing original + settings bundle…"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await OriginalSettingsBundle.create(
+                    source: request.source,
+                    sourceName: sourceName,
+                    document: request.document,
+                    destination: destination,
+                    locationMetadataIncluded: true
+                )
+                self.statusMessage = "Original + settings bundle exported; the original remains read-only."
+            } catch {
+                self.presentError("Bundle export failed: \(error.localizedDescription)")
+            }
         }
     }
 
