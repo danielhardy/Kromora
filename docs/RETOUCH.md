@@ -23,11 +23,11 @@ in place and an unresolved Remove spot currently leaves the image unchanged.
 Heal and Clone spots without a source are resolved during rendering by `RetouchSourcePicker` over a
 cached neutral-decode Lab proxy with a 1024 px maximum long edge. The picker searches deterministic
 nearby spiral and coarse-frame positions, excludes the destination and other visible holes, ranks
-ring colour/gradient and texture similarity with a distance cost, then refines leading choices at
-proxy pixel resolution. Automatic rank is carried by `RetouchSource.auto`; manually selected offsets
-remain authoritative. The same picker exposes a deterministic initial offset for Remove's later
-correspondence-field solver. Analysis pixels and Core Image values stay inside `RenderEngine`; only
-Lab value buffers enter the Sendable picker.
+ring colour/gradient and texture similarity with a distance cost, then requests a bounded neutral
+full-resolution Lab crop and refines leading choices within ±2 pixels. Automatic rank is carried by
+`RetouchSource.auto`; manually selected offsets remain authoritative. The same picker exposes a
+deterministic initial offset for Remove's later correspondence-field solver. Analysis pixels and
+Core Image values stay inside `RenderEngine`; only Lab value buffers enter the Sendable picker.
 
 The Retouch inspector currently edits the first sample of a circular recipe and its source offset;
 freehand canvas creation, pin editing, and field solving are separate follow-up work. The Dust Finder shows a sharpened, high-contrast preview at pixel size, overlays
