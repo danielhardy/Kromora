@@ -34,6 +34,12 @@ struct EditHistory: Sendable, Equatable {
         appendUndo(old)
     }
 
+    mutating func adoptTimeline(before documents: [EditDocument]) {
+        undoSnapshots = Array(documents.suffix(Self.maximumDepth))
+        redoSnapshots.removeAll(keepingCapacity: true)
+        groupingStart = nil
+    }
+
     mutating func undo(current: EditDocument) -> EditDocument? {
         guard let previous = undoSnapshots.popLast() else { return nil }
         appendRedo(current)

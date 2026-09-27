@@ -75,6 +75,63 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         XCTAssertEqual(reopenedHistory, history)
     }
 
+    func testHistoryNavigationBranchesWithoutWritingAndPreservesNamedSnapshots() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("HistoryTimeline.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = tempDirectory.appendingPathComponent("timeline.jpg")
+        try Data("timeline source".utf8).write(to: sourceURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let asset = try XCTUnwrap(imported.imported.first)
+        let identity = PortablePhotoIdentity(
+            assetID: asset.assetID,
+            sourceFingerprint: .data(Data("timeline source".utf8), decoderVersion: "test")
+        )
+        let reference = EditSourceReference(assetID: .file(sourceURL), portableIdentity: identity)
+        let store = EditDocumentStore(package: package, lease: lease)
+        let first = EditDocument(light: .init(exposure: 0.1))
+        // Equal values still occupy distinct history positions with distinct revision identities.
+        let second = first
+        let snapshot = EditDocument(light: .init(exposure: 0.3))
+        let fourth = EditDocument(light: .init(exposure: 0.4))
+        let branch = EditDocument(light: .init(exposure: 0.5))
+
+        try await store.save(first, for: reference)
+        try await store.save(second, for: reference)
+        try await store.saveSnapshot(snapshot, named: "Saved look", for: reference)
+        try await store.save(fourth, for: reference)
+        let beforeNavigation = try await store.history(for: reference)
+        XCTAssertEqual(beforeNavigation.map(\.document), [first, second, snapshot, fourth])
+
+        try await store.selectRevision(beforeNavigation[0].revision, for: reference)
+        let selectedRevision = try await store.currentRevision(for: reference)
+        XCTAssertEqual(selectedRevision, beforeNavigation[0].revision)
+        let unchangedHistory = try await store.history(for: reference)
+        XCTAssertEqual(unchangedHistory.count, beforeNavigation.count)
+
+        try await store.save(branch, for: reference)
+        let branchedHistory = try await store.history(for: reference)
+        XCTAssertEqual(branchedHistory.map(\.document), [first, snapshot, branch])
+        XCTAssertEqual(branchedHistory.compactMap(\.snapshotName), ["Saved look"])
+
+        let reopened = try PortableLibraryPackage.open(at: packageURL)
+        XCTAssertEqual(
+            try reopened.readAssetRecord(for: asset.assetID).editHistory.currentRevision,
+            branchedHistory.last?.revision
+        )
+        XCTAssertEqual(try reopened.readEditRevision(for: asset.assetID).document, branch)
+
+        try reopened.selectEditRevision(
+            for: asset.assetID, revision: branchedHistory[1].revision, lease: lease
+        )
+        let reopenedAgain = try PortableLibraryPackage.open(at: packageURL)
+        XCTAssertEqual(
+            try reopenedAgain.readEditRevision(for: asset.assetID).document, snapshot,
+            "a named snapshot remains independently restorable after branching"
+        )
+    }
+
     @MainActor
     func testVirtualCopyHasIndependentIdentityAndEditHistory() async throws {
         let packageURL = tempDirectory.appendingPathComponent("VirtualCopies.kromoralibrary")

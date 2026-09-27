@@ -266,6 +266,24 @@ actor EditDocumentStore {
         return try package.readEditHistory(for: source.portableAssetID)
     }
 
+    func currentRevision(for source: EditSourceReference) async throws -> UInt64 {
+        guard let packageRoot else {
+            throw StoreError.cannotWrite("the canonical edit package is unavailable")
+        }
+        let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+        return try package.readAssetRecord(for: source.portableAssetID).editHistory.currentRevision
+    }
+
+    func selectRevision(_ revision: UInt64, for source: EditSourceReference) async throws {
+        guard let packageRoot, let packageLease else {
+            throw StoreError.cannotWrite("the canonical edit package is unavailable")
+        }
+        let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
+        try package.selectEditRevision(
+            for: source.portableAssetID, revision: revision, lease: packageLease
+        )
+    }
+
     func save(_ document: EditDocument, for source: EditSourceReference) async throws {
         try await save(document, for: source, snapshotName: nil)
     }
