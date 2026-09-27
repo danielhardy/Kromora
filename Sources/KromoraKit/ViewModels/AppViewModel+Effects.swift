@@ -2,6 +2,27 @@ import SwiftUI
 
 /// Bindings for the photographer-facing Effects inspector.
 extension AppViewModel {
+    func detailBinding(for control: DetailControl) -> Binding<Double> {
+        Binding(
+            get: { control.value(in: self.document.effects.detail) },
+            set: { value in
+                self.updateDocument(debounced: true) { document in
+                    control.setting(value, in: &document.effects.detail)
+                }
+            }
+        )
+    }
+
+    func resetDetail(_ control: DetailControl) {
+        endUndoGrouping()
+        updateDocument { control.setting(control.neutral, in: &$0.effects.detail) }
+    }
+
+    func resetAllDetail() {
+        endUndoGrouping()
+        updateDocument { $0.effects.detail = .neutral }
+    }
+
     func effectsValue(for control: EffectsControl) -> Double {
         control.value(in: document.effects)
     }
@@ -86,7 +107,8 @@ extension AppViewModel {
     /// Includes retained subordinate values even while Vignette/Grain Amount is zero. Those values
     /// are intentionally persisted so turning a group back on restores its previous shape.
     var hasDetailEffects: Bool {
-        document.effects.texture != 0 || document.effects.clarity != 0 || document.effects.dehaze != 0
+        document.effects.texture != 0 || document.effects.clarity != 0 || document.effects.dehaze != 0 ||
+            !document.effects.detail.isIdentity
     }
 
     var hasVignetteAdjustments: Bool { document.effects.vignette != .neutral }

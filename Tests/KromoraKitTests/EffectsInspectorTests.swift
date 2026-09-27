@@ -48,6 +48,17 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(effects.dehaze, 48)
     }
 
+    func testDetailControlsRoundTripAndLegacyEffectsDecodeNeutralDetail() throws {
+        var detail = DetailAdjustments()
+        for control in DetailControl.allCases {
+            control.setting(control == .sharpeningRadius ? 3.2 : 64, in: &detail)
+            XCTAssertEqual(control.value(in: detail), control == .sharpeningRadius ? 3.2 : 64)
+        }
+        let legacy = Data(#"{"texture":0,"clarity":0,"dehaze":0}"#.utf8)
+        let decoded = try JSONDecoder().decode(EffectsAdjustments.self, from: legacy)
+        XCTAssertEqual(decoded.detail, .neutral)
+    }
+
     func testEffectsValuesRoundToWholeNumbersAtTheValueBoundary() throws {
         let effects = EffectsAdjustments(
             texture: 37.4,

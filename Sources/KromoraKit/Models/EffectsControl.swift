@@ -45,6 +45,67 @@ enum EffectsControl: String, CaseIterable, Hashable, Sendable {
     }
 }
 
+enum DetailControl: String, CaseIterable, Hashable, Sendable {
+    case sharpeningRadius, sharpeningAmount, sharpeningDetail, sharpeningMasking
+    case luminanceNoise, luminanceDetail, luminanceContrast, colorNoise, colorDetail, colorContrast
+
+    var title: String {
+        switch self {
+        case .sharpeningRadius: "Radius"
+        case .sharpeningAmount: "Amount"
+        case .sharpeningDetail: "Detail"
+        case .sharpeningMasking: "Masking"
+        case .luminanceNoise: "Luminance NR"
+        case .luminanceDetail: "Luminance Detail"
+        case .luminanceContrast: "Luminance Contrast"
+        case .colorNoise: "Color NR"
+        case .colorDetail: "Color Detail"
+        case .colorContrast: "Color Contrast"
+        }
+    }
+    var range: ClosedRange<Double> {
+        switch self {
+        case .sharpeningRadius: 0.1...5
+        case .sharpeningAmount, .sharpeningDetail, .sharpeningMasking, .luminanceNoise,
+             .luminanceDetail, .luminanceContrast, .colorNoise, .colorDetail, .colorContrast: 0...100
+        }
+    }
+    var neutral: Double {
+        switch self {
+        case .sharpeningRadius, .sharpeningDetail, .colorDetail, .luminanceDetail: 50
+        default: 0
+        }
+    }
+    func value(in detail: DetailAdjustments) -> Double {
+        switch self {
+        case .sharpeningRadius: detail.sharpeningRadius
+        case .sharpeningAmount: detail.sharpeningAmount
+        case .sharpeningDetail: detail.sharpeningDetail
+        case .sharpeningMasking: detail.sharpeningMasking
+        case .luminanceNoise: detail.luminanceNoise
+        case .luminanceDetail: detail.luminanceDetail
+        case .luminanceContrast: detail.luminanceContrast
+        case .colorNoise: detail.colorNoise
+        case .colorDetail: detail.colorDetail
+        case .colorContrast: detail.colorContrast
+        }
+    }
+    func setting(_ value: Double, in detail: inout DetailAdjustments) {
+        switch self {
+        case .sharpeningRadius: detail.sharpeningRadius = value
+        case .sharpeningAmount: detail.sharpeningAmount = value
+        case .sharpeningDetail: detail.sharpeningDetail = value
+        case .sharpeningMasking: detail.sharpeningMasking = value
+        case .luminanceNoise: detail.luminanceNoise = value
+        case .luminanceDetail: detail.luminanceDetail = value
+        case .luminanceContrast: detail.luminanceContrast = value
+        case .colorNoise: detail.colorNoise = value
+        case .colorDetail: detail.colorDetail = value
+        case .colorContrast: detail.colorContrast = value
+        }
+    }
+}
+
 enum VignetteControl: String, CaseIterable, Hashable, Sendable {
     case amount, midpoint, roundness, feather, highlights
 

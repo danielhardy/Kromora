@@ -17,7 +17,40 @@ final class ExportOptionsTests: TempDirectoryTestCase {
         XCTAssertEqual(options.filenamePolicy, .sourceNameWithLook)
         XCTAssertEqual(options.metadata, .preserve)
         XCTAssertEqual(options.location, .exclude)
+        XCTAssertEqual(options.outputSharpening, .none)
         try options.validate()
+    }
+
+    func testOutputSharpeningPolicyPersistsAllDeliveryChoices() throws {
+        let options = ExportOptions(
+            format: .jpeg,
+            outputSharpening: OutputSharpening(medium: .matte, strength: .high)
+        )
+        let decoded = try JSONDecoder().decode(ExportOptions.self, from: JSONEncoder().encode(options))
+        XCTAssertEqual(decoded.outputSharpening, OutputSharpening(medium: .matte, strength: .high))
+        XCTAssertEqual(OutputSharpeningMedium.allCases, [.none, .screen, .matte, .glossy])
+        XCTAssertEqual(OutputSharpeningStrength.allCases, [.low, .standard, .high])
+    }
+
+    func testOutputSharpeningChangesOnlyEncodedExportPixels() async throws {
+        let url = try Fixtures.writeClarityPNG(
+            width: 64, height: 48, named: "output-sharpening.png", in: tempDirectory
+        )
+        let source = ImageSource(url: url, nativeExtent: CGSize(width: 64, height: 48))
+        let engine = RenderEngine()
+        let neutral = try await engine.encode(
+            source: source, document: EditDocument(), lut: nil,
+            options: ExportOptions(format: .png)
+        )
+        let sharpened = try await engine.encode(
+            source: source, document: EditDocument(), lut: nil,
+            options: ExportOptions(
+                format: .png,
+                outputSharpening: OutputSharpening(medium: .screen, strength: .high)
+            )
+        )
+        XCTAssertNotEqual(neutral, sharpened)
+        XCTAssertTrue(EditDocument().isIdentity, "Output sharpening must not mutate the edit recipe")
     }
 
     func testCapabilityMatrixStatesPrecisionColorAndAlphaConstraints() {

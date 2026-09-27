@@ -213,7 +213,8 @@ final class ExportCoordinator {
                 destination: .file(url),
                 metadata: formatPicker.metadataPolicy,
                 location: formatPicker.locationPolicy,
-                photos: formatPicker.photosOptions
+                photos: formatPicker.photosOptions,
+                outputSharpening: formatPicker.outputSharpening
             ),
             to: url
         )
@@ -715,6 +716,8 @@ private final class ExportFormatAccessoryView: NSView {
     private let locationCheckbox: NSButton
     private let photosCheckbox: NSButton
     private let albumField: NSTextField
+    private let sharpeningMedium: NSPopUpButton
+    private let sharpeningStrength: NSPopUpButton
     var onSelectionChanged: ((ExportFormat) -> Void)?
 
     init(selectedFormat: ExportFormat) {
@@ -734,6 +737,8 @@ private final class ExportFormatAccessoryView: NSView {
             checkboxWithTitle: "Also add to Photos", target: nil, action: nil
         )
         albumField = NSTextField(string: "")
+        sharpeningMedium = NSPopUpButton(frame: .zero, pullsDown: false)
+        sharpeningStrength = NSPopUpButton(frame: .zero, pullsDown: false)
         super.init(frame: .zero)
 
         let label = NSTextField(labelWithString: "Export format:")
@@ -770,6 +775,13 @@ private final class ExportFormatAccessoryView: NSView {
         albumField.isEnabled = false
         albumField.setAccessibilityLabel("Photos album name")
 
+        sharpeningMedium.addItems(withTitles: ["None", "Screen", "Matte", "Glossy"])
+        sharpeningMedium.selectItem(at: 0)
+        sharpeningMedium.setAccessibilityLabel("Output sharpening medium")
+        sharpeningStrength.addItems(withTitles: ["Low", "Standard", "High"])
+        sharpeningStrength.selectItem(at: 1)
+        sharpeningStrength.setAccessibilityLabel("Output sharpening strength")
+
         let formatStack = NSStackView(views: [label, picker])
         formatStack.orientation = .horizontal
         formatStack.alignment = .centerY
@@ -782,7 +794,12 @@ private final class ExportFormatAccessoryView: NSView {
         privacyStack.orientation = .vertical
         privacyStack.alignment = .leading
         privacyStack.spacing = 2
-        let stack = NSStackView(views: [formatStack, privacyStack, photosStack])
+        let sharpeningLabel = NSTextField(labelWithString: "Output sharpening:")
+        let sharpeningStack = NSStackView(views: [sharpeningLabel, sharpeningMedium, sharpeningStrength])
+        sharpeningStack.orientation = .horizontal
+        sharpeningStack.alignment = .centerY
+        sharpeningStack.spacing = 8
+        let stack = NSStackView(views: [formatStack, privacyStack, photosStack, sharpeningStack])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
@@ -801,7 +818,7 @@ private final class ExportFormatAccessoryView: NSView {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: 480, height: 112)
+        NSSize(width: 480, height: 142)
     }
 
     var selectedFormat: ExportFormat {
@@ -821,6 +838,13 @@ private final class ExportFormatAccessoryView: NSView {
 
     var locationPolicy: ExportLocationPolicy {
         metadataCheckbox.state == .on && locationCheckbox.state == .on ? .include : .exclude
+    }
+
+    var outputSharpening: OutputSharpening {
+        let media = OutputSharpeningMedium.allCases[sharpeningMedium.indexOfSelectedItem]
+        let strengthIndex = max(0, min(OutputSharpeningStrength.allCases.count - 1,
+                                       sharpeningStrength.indexOfSelectedItem))
+        return OutputSharpening(medium: media, strength: OutputSharpeningStrength.allCases[strengthIndex])
     }
 
     @objc private func selectionChanged() {

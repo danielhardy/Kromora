@@ -20,6 +20,9 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
     case texture
     case clarity
     case dehaze
+    case sharpness
+    case noiseReduction
+    case moireReduction
 
     var title: String {
         switch self {
@@ -36,6 +39,9 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         case .texture: return "Texture"
         case .clarity: return "Clarity"
         case .dehaze: return "Dehaze"
+        case .sharpness: return "Sharpness"
+        case .noiseReduction: return "Noise Reduction"
+        case .moireReduction: return "Moiré Reduction"
         }
     }
 
@@ -54,13 +60,14 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         case .texture: return EffectsAdjustments.textureRange
         case .clarity: return EffectsAdjustments.clarityRange
         case .dehaze: return EffectsAdjustments.dehazeRange
+        case .sharpness, .noiseReduction, .moireReduction: return LocalAdjustments.detailRange
         }
     }
 
     var neutral: Double {
         switch self {
         case .exposure, .contrast, .highlights, .shadows, .whites, .blacks, .tint, .saturation,
-            .vibrance, .texture, .clarity, .dehaze:
+            .vibrance, .texture, .clarity, .dehaze, .sharpness, .noiseReduction, .moireReduction:
             return 0
         case .temperature: return AdjustmentControl.temperature.neutral
         }
@@ -84,6 +91,9 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         case .texture: return adjustments.texture
         case .clarity: return adjustments.clarity
         case .dehaze: return adjustments.dehaze
+        case .sharpness: return adjustments.sharpness
+        case .noiseReduction: return adjustments.noiseReduction
+        case .moireReduction: return adjustments.moireReduction
         }
     }
 
@@ -102,6 +112,9 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         case .texture: adjustments.texture = value
         case .clarity: adjustments.clarity = value
         case .dehaze: adjustments.dehaze = value
+        case .sharpness: adjustments.sharpness = value
+        case .noiseReduction: adjustments.noiseReduction = value
+        case .moireReduction: adjustments.moireReduction = value
         }
     }
 
@@ -113,7 +126,7 @@ enum LocalAdjustmentControl: String, CaseIterable, Hashable, Sendable {
         case .temperature:
             return String(format: "%.2f K", value)
         case .contrast, .highlights, .shadows, .whites, .blacks, .tint, .saturation, .vibrance,
-            .texture, .clarity, .dehaze:
+            .texture, .clarity, .dehaze, .sharpness, .noiseReduction, .moireReduction:
             return String(format: "%+.2f", value)
         }
     }

@@ -75,6 +75,25 @@ enum ExportMetadataPolicy: String, Codable, CaseIterable, Sendable, Equatable {
     case strip
 }
 
+enum OutputSharpeningMedium: String, Codable, CaseIterable, Sendable, Equatable {
+    case none, screen, matte, glossy
+}
+
+enum OutputSharpeningStrength: String, Codable, CaseIterable, Sendable, Equatable {
+    case low, standard, high
+
+    var amount: Double {
+        switch self { case .low: 0.25; case .standard: 0.5; case .high: 0.8 }
+    }
+}
+
+struct OutputSharpening: Codable, Sendable, Equatable {
+    var medium: OutputSharpeningMedium
+    var strength: OutputSharpeningStrength
+    static let none = OutputSharpening(medium: .none, strength: .standard)
+    var isEnabled: Bool { medium != .none }
+}
+
 /// Whether precise source location data may be copied to an export.
 ///
 /// Location is separate from camera metadata because preserving useful camera details (for
@@ -123,6 +142,7 @@ struct ExportOptions: Codable, Sendable, Equatable {
     let location: ExportLocationPolicy
     /// Optional post-export delivery. The file/folder destination is committed first.
     let photos: PhotosExportOptions?
+    let outputSharpening: OutputSharpening
 
     init(
         format: ExportFormat = .jpeg,
@@ -135,7 +155,8 @@ struct ExportOptions: Codable, Sendable, Equatable {
         destination: ExportDestination? = nil,
         metadata: ExportMetadataPolicy = .preserve,
         location: ExportLocationPolicy = .exclude,
-        photos: PhotosExportOptions? = nil
+        photos: PhotosExportOptions? = nil,
+        outputSharpening: OutputSharpening = .none
     ) {
         self.format = format
         self.quality = quality
@@ -148,13 +169,14 @@ struct ExportOptions: Codable, Sendable, Equatable {
         self.metadata = metadata
         self.location = location
         self.photos = photos
+        self.outputSharpening = outputSharpening
     }
 
     static let `default` = ExportOptions()
 
     private enum CodingKeys: String, CodingKey {
         case format, quality, sizing, colorSpace, bitDepth, alpha, filenamePolicy, destination
-        case metadata, location, photos
+        case metadata, location, photos, outputSharpening
     }
 
     /// Older queued/persisted export descriptions did not have a location field. Decoding those
@@ -172,6 +194,7 @@ struct ExportOptions: Codable, Sendable, Equatable {
         self.metadata = try values.decode(ExportMetadataPolicy.self, forKey: .metadata)
         self.location = try values.decodeIfPresent(ExportLocationPolicy.self, forKey: .location) ?? .exclude
         self.photos = try values.decodeIfPresent(PhotosExportOptions.self, forKey: .photos)
+        self.outputSharpening = try values.decodeIfPresent(OutputSharpening.self, forKey: .outputSharpening) ?? .none
     }
 
     func validate() throws {
