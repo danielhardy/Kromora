@@ -60,6 +60,25 @@ final class RetouchModelTests: XCTestCase {
         XCTAssertLessThan(bounds.width * bounds.height, 0.02 * 6000 * 4000)
     }
 
+    func testSpotWorkBoundsStayConstantForTheSamePixelRadiusAtHigherResolution() {
+        func bounds(width: CGFloat, height: CGFloat, radiusPixels: CGFloat) -> CGRect {
+            let spot = RetouchSpot(
+                mode: .heal,
+                region: RetouchRegion(
+                    samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))],
+                    radius: Double(radiusPixels / min(width, height))
+                ),
+                source: .manual(offset: CGVector(dx: 0.1, dy: 0))
+            )
+            return RetouchRenderer.workBounds(for: spot, extent: CGRect(x: 0, y: 0, width: width, height: height))
+        }
+
+        let standardResolution = bounds(width: 4000, height: 3000, radiusPixels: 60)
+        let doubleResolution = bounds(width: 8000, height: 6000, radiusPixels: 60)
+        XCTAssertEqual(doubleResolution.size, standardResolution.size,
+                       "a fixed pixel-radius spot should keep the same heal work-window size as source resolution grows")
+    }
+
     func testRetouchAffectsIdentityButComparisonRemovesItAndAutoKeepsIt() {
         let spot = RetouchSpot()
         var document = EditDocument(retouch: RetouchSettings(spots: [spot]))
