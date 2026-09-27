@@ -1,6 +1,6 @@
 // KromoraCIKernels.ci.metal
 //
-// The nine Core Image kernels behind RenderPipeline, LocalMaskRenderer, and
+// The Core Image kernels behind RenderPipeline, LocalMaskRenderer, RetouchRenderer, and
 // ToneCurveFilterCache, written for the Metal CI-kernel language mode.
 //
 // This is a mechanical port of the retired Core Image Kernel Language sources: same function
@@ -418,6 +418,17 @@ float4 localCombineMask(sampler current, sampler next, float4 controls) {
         result = min(a, b);         // intersect
     }
     return float4(0.0, 0.0, 0.0, clamp(result, 0.0, 1.0));
+}
+
+// MARK: - Heal texture synthesis (RetouchRenderer)
+
+// Recombines the sampled patch's high-frequency detail with the destination's low-frequency
+// appearance, so Heal keeps the source's texture while matching the surrounding light and color.
+float4 healTexture(sampler sampled, sampler sourceLow, sampler destinationLow) {
+    float4 sourcePixel = sample(sampled, samplerCoord(sampled));
+    float4 detail = sourcePixel - sample(sourceLow, samplerCoord(sourceLow));
+    float4 destLow = sample(destinationLow, samplerCoord(destinationLow));
+    return float4(detail.rgb + destLow.rgb, sourcePixel.a);
 }
 
 // MARK: - Master RGB tone curve (ToneCurveFilterCache)

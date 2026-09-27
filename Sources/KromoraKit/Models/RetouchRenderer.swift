@@ -16,7 +16,7 @@ enum RetouchRenderer {
         let mapping = GeometryPointMapping(sourceSize: sourceSize, rotation: rotation, crop: crop)
         var result = image
         let healKernel = settings.spots.contains { $0.mode == .heal && !$0.isIdentity }
-            ? makeHealKernel()
+            ? CIKernelLibrary.kernel(named: "healTexture")
             : nil
         for spot in settings.spots where !spot.isIdentity {
             let points: [CGPoint]
@@ -103,27 +103,6 @@ enum RetouchRenderer {
     ) -> CIImage {
         featheredEllipse(center: center, radiusX: radius, radiusY: radius,
                          feather: feather, opacity: opacity, extent: extent)
-    }
-
-    /// Keeps the sampled patch's texture while matching its broad color and light to the
-    /// destination. This frequency-separated blend is the core content-aware difference from
-    /// Clone: the source supplies high-frequency detail, and the destination supplies its local
-    /// low-frequency appearance.
-    private static func makeHealKernel() -> CIKernel? {
-        let source = """
-            #include <CoreImage/CoreImage.h>
-            extern "C" {
-                namespace coreimage {
-                    float4 healTexture(sampler sampled, sampler sourceLow, sampler destinationLow) [[ stitchable ]] {
-                        float4 sourcePixel = sampled.sample(sampled.coord());
-                        float4 detail = sourcePixel - sourceLow.sample(sourceLow.coord());
-                        return float4(detail.rgb + destinationLow.sample(destinationLow.coord()).rgb,
-                                      sourcePixel.a);
-                    }
-                }
-            }
-            """
-        return (try? CIKernel.kernels(withMetalString: source))?.first
     }
 
     private static func healedPatch(
