@@ -82,6 +82,32 @@ final class InfoInspectorPresentationTests: XCTestCase {
         XCTAssertFalse(source.contains("GroupBox("))
     }
 
+    func testLookAndHistogramHeadingsFollowSharedHierarchy() throws {
+        let root = packageRoot().appendingPathComponent("Sources/KromoraKit/Views")
+        let lookSource = try String(
+            contentsOf: root.appendingPathComponent("LookInspectorView.swift"),
+            encoding: .utf8
+        )
+        XCTAssertTrue(lookSource.contains("InspectorPanelHeading(title: \"Looks\")"))
+        XCTAssertTrue(lookSource.contains(".font(InspectorStyle.sectionTitle)"))
+        XCTAssertTrue(lookSource.contains(".font(InspectorStyle.nestedSectionTitle)"))
+
+        let infoSource = try infoInspectorSource()
+        let histogramHeading = try XCTUnwrap(infoSource.range(of: "Text(\"Histogram\")"))
+        let histogramSection = String(infoSource[histogramHeading.lowerBound...])
+        XCTAssertTrue(histogramSection.hasPrefix("Text(\"Histogram\")\n                    .font(InspectorStyle.sectionTitle)"))
+        XCTAssertTrue(histogramSection.contains(".accessibilityAddTraits(.isHeader)"))
+
+        let healSource = try String(
+            contentsOf: root.appendingPathComponent("RetouchInspectorView.swift"),
+            encoding: .utf8
+        )
+        let resetButton = try XCTUnwrap(healSource.range(of: "Button(\"Reset All\")"))
+        let resetSection = String(healSource[resetButton.lowerBound...])
+        XCTAssertTrue(resetSection.hasPrefix("Button(\"Reset All\") {"))
+        XCTAssertTrue(resetSection.contains(".buttonStyle(.link)"))
+    }
+
     private func infoInspectorSource() throws -> String {
         try String(
             contentsOf: packageRoot().appendingPathComponent("Sources/KromoraKit/Views/InfoInspectorView.swift"),
