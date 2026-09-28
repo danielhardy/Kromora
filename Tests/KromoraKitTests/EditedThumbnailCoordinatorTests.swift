@@ -105,6 +105,30 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         await fixture.scheduler.cancelAllAndWait()
     }
 
+    func testFailedEditedThumbnailDoesNotSettleFallbackAndVisibleDemandRetries() async throws {
+        let fixture = makeFixture(rendererNilResponses: 1, active: false)
+        let sourceThumbnail = NSImage(size: NSSize(width: 2, height: 2))
+        fixture.item.setOriginalThumbnail(sourceThumbnail)
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the failed thumbnail attempt") {
+            await fixture.engine.thumbnailRequestCount == 1
+                && fixture.item.editedThumbnailRevision != nil
+        }
+
+        XCTAssertFalse(fixture.item.shouldFillLibraryThumbnail)
+        XCTAssertTrue(fixture.item.thumbnail === sourceThumbnail)
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the retried edited thumbnail") {
+            await fixture.engine.thumbnailRequestCount == 2
+                && fixture.item.shouldFillLibraryThumbnail
+        }
+
+        XCTAssertFalse(fixture.item.thumbnail === sourceThumbnail)
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
     func testIdentityAndFailedEditedThumbnailsKeepSourceAspectFitted() {
         let fixture = makeFixture(document: EditDocument(), active: false)
         XCTAssertFalse(fixture.item.shouldFillLibraryThumbnail)
@@ -171,8 +195,8 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let packageURL = root.appendingPathComponent("Library.kromoralibrary")
         let indexURL = root.appendingPathComponent("LibraryIndex.store")
-        let sourceURL = try Fixtures.writeJPEG(
-            width: 32, height: 24, orientation: 1, named: "edited.jpg", in: root
+        let sourceURL = try Fixtures.writeClarityPNG(
+            width: 2_400, height: 1_600, named: "edited.png", in: root
         )
         let firstSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
         _ = try firstSession.importURLs([sourceURL])
@@ -195,8 +219,8 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         let reopenedSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
         var reopenedAsset = try XCTUnwrap(reopenedSession.materializedAssets().first)
         var sourceMetadata = ImageMetadata()
-        sourceMetadata.pixelWidth = 32
-        sourceMetadata.pixelHeight = 24
+        sourceMetadata.pixelWidth = 2_400
+        sourceMetadata.pixelHeight = 1_600
         reopenedAsset.updateMetadata(from: sourceMetadata)
         let collection = ImageCollection()
         collection.loadPortableAssets([reopenedAsset])
@@ -219,7 +243,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
             collection.setPresentedCrop(crop, rotation: rotation, for: assetID)
         }
         let scheduler = ImageWorkScheduler()
-        let engine = FakeEditedThumbnailRenderer(waits: false)
+        let engine = RecordingEditedThumbnailRenderer()
         let coordinator = EditedThumbnailCoordinator(
             workScheduler: scheduler,
             engine: engine,
@@ -248,12 +272,25 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.presentedRotation, savedDocument.rotation)
         XCTAssertEqual(
             item.libraryAspectRatio,
-            (24.0 / 32.0) * (0.54 / 0.72),
+            (1_600.0 / 2_400.0) * (0.54 / 0.72),
             accuracy: 0.000_001,
             "reopened Library geometry must include saved rotation before applying the crop"
         )
         XCTAssertFalse(destination.appliedWasNil)
         XCTAssertNotNil(item.thumbnail, "the edited raster must be published to the library item")
+        XCTAssertTrue(item.shouldFillLibraryThumbnail)
+        let thumbnail = try XCTUnwrap(item.thumbnail)
+        var proposedRect = CGRect(origin: .zero, size: thumbnail.size)
+        let cgThumbnail = try XCTUnwrap(thumbnail.cgImage(
+            forProposedRect: &proposedRect, context: nil, hints: nil
+        ))
+        XCTAssertGreaterThanOrEqual(cgThumbnail.width, 240)
+        XCTAssertLessThanOrEqual(cgThumbnail.width, 241)
+        XCTAssertGreaterThanOrEqual(cgThumbnail.height, Thumbnails.libraryMaxPixelSize)
+        XCTAssertLessThanOrEqual(
+            cgThumbnail.height, Thumbnails.libraryMaxPixelSize + 1,
+            "the reopened edited crop must retain detail through the rotated crop render"
+        )
         await scheduler.cancelAllAndWait()
         await reopenedSession.shutdown()
     }
@@ -262,6 +299,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         document: EditDocument = EditDocument(adjustments: [.exposure(ev: 0.2)]),
         lut: CubeLUT? = nil,
         rendererWaits: Bool = false,
+        rendererNilResponses: Int = 0,
         active: Bool = true
     ) -> Fixture {
         let assetID = PhotoAssetID.imported(UUID())
@@ -272,7 +310,9 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
             assetID: assetID, item: item, document: document, lut: lut, active: active
         )
         let scheduler = ImageWorkScheduler()
-        let engine = FakeEditedThumbnailRenderer(waits: rendererWaits)
+        let engine = FakeEditedThumbnailRenderer(
+            waits: rendererWaits, nilResponses: rendererNilResponses
+        )
         let coordinator = EditedThumbnailCoordinator(
             workScheduler: scheduler, engine: engine,
             editStore: EditDocumentStore.makeInMemoryProjectionStore(), destination: destination
@@ -365,12 +405,16 @@ private final class FakeDestination: EditedThumbnailDestination {
 
 private actor FakeEditedThumbnailRenderer: EditedThumbnailRendering {
     private let waits: Bool
+    private var nilResponsesRemaining: Int
     private(set) var thumbnailRequestCount = 0
     private(set) var renderedEditHashes: [String] = []
     private(set) var renderedCrops: [CropAdjustments] = []
     private var continuation: CheckedContinuation<Void, Never>?
 
-    init(waits: Bool) { self.waits = waits }
+    init(waits: Bool, nilResponses: Int = 0) {
+        self.waits = waits
+        self.nilResponsesRemaining = max(0, nilResponses)
+    }
 
     var hasThumbnailRequest: Bool { thumbnailRequestCount > 0 }
 
@@ -382,6 +426,10 @@ private actor FakeEditedThumbnailRenderer: EditedThumbnailRendering {
         renderedCrops.append(request.document.crop)
         if waits {
             await withCheckedContinuation { continuation = $0 }
+        }
+        if nilResponsesRemaining > 0 {
+            nilResponsesRemaining -= 1
+            return nil
         }
         let context = CGContext(
             data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
@@ -395,5 +443,21 @@ private actor FakeEditedThumbnailRenderer: EditedThumbnailRendering {
     func releaseThumbnail() {
         continuation?.resume()
         continuation = nil
+    }
+}
+
+private actor RecordingEditedThumbnailRenderer: EditedThumbnailRendering {
+    private let renderer = RenderEngine()
+    private(set) var renderedEditHashes: [String] = []
+    private(set) var renderedCrops: [CropAdjustments] = []
+
+    func prepareSource(_ source: ImageSource) async -> ImageSourcePreparation? {
+        await renderer.prepareSource(source)
+    }
+
+    func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage? {
+        renderedEditHashes.append(request.document.editHash)
+        renderedCrops.append(request.document.crop)
+        return await renderer.makeThumbnailCGImage(request)
     }
 }

@@ -282,7 +282,14 @@ final class EditedThumbnailCoordinator {
             ), let destination = self.destination
             else { return }
             destination.applyEditedThumbnail(image, for: assetID, revision: revision)
-            self.materializedThumbnails[assetID] = materialized
+            // A failed render publishes the original as a temporary fallback. It has the current
+            // document revision for display bookkeeping, but it is not a materialized edited
+            // thumbnail: the next visible demand must be allowed to retry the render.
+            if image != nil {
+                self.materializedThumbnails[assetID] = materialized
+            } else {
+                self.materializedThumbnails.removeValue(forKey: assetID)
+            }
         }
     }
 
