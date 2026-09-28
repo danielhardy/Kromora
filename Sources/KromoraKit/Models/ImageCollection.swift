@@ -80,6 +80,12 @@ final class ImageCollectionPresentationModel {
             guard let dimensions = asset.dimensions else { return false }
             return dimensions.width > 0 && dimensions.height > 0
         }
+        /// A settled edited raster has the same crop/rotation geometry as the Library cell, so it
+        /// should fill that frame. Original and fallback thumbnails can still have source geometry
+        /// while an edit is loading (or when rendering failed), and must remain fitted in that gap.
+        var shouldFillLibraryThumbnail: Bool {
+            editedThumbnailRevision != nil && !editedThumbnailUsesFallback
+        }
         var libraryAspectRatio: Double {
             guard hasResolvedLibraryAspect, let dimensions = asset.dimensions else { return 4.0 / 3.0 }
             return LibraryGridLayout.presentedAspectRatio(
