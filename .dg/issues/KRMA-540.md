@@ -45,9 +45,10 @@ labels:
   - regression
   - open-image
 created: 2026-09-22T17:35:56.384Z
-updated: 2026-09-22T19:44:59.815Z
+updated: 2026-09-28T14:41:36.110Z
+blockers: []
 estimate: 3
-order: y
+order: r2z0bw0s
 board: product
 ---
 

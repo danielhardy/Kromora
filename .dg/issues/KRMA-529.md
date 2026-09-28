@@ -56,12 +56,13 @@ labels:
   - architecture
   - app-model
 created: 2026-09-21T20:33:09.664Z
-updated: 2026-09-23T08:08:49.475Z
+updated: 2026-09-28T14:41:36.049Z
 depends_on:
   - KRMA-520
   - KRMA-528
+blockers: []
 estimate: 13
-order: y
+order: qx0zo3y5
 board: product
 commits:
   - 5f1903d

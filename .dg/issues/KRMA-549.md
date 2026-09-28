@@ -50,9 +50,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-23T02:54:02.696Z
-updated: 2026-09-23T12:39:51.478Z
+updated: 2026-09-28T14:41:36.242Z
 parent: KRMA-545
-order: y
+blockers: []
+order: rev1ng62
 board: product
 commits:
   - 872127e

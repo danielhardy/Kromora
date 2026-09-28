@@ -33,10 +33,11 @@ labels:
   - library
   - testing
 created: 2026-09-14T09:37:25.415Z
-updated: 2026-09-14T13:43:11.328Z
+updated: 2026-09-28T14:41:27.581Z
 depends_on:
   - KRMA-431
-order: a0
+blockers: []
+order: 2t2b898v
 board: product
 ---
 

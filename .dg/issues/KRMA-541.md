@@ -45,9 +45,10 @@ labels:
   - regression
   - package
 created: 2026-09-22T17:35:56.844Z
-updated: 2026-09-22T19:48:16.590Z
+updated: 2026-09-28T14:41:36.716Z
+blockers: []
 estimate: 3
-order: z
+order: sqf6xor6
 board: product
 ---
 

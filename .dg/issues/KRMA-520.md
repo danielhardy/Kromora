@@ -44,12 +44,13 @@ labels:
   - architecture
   - library
 created: 2026-09-21T20:33:01.740Z
-updated: 2026-09-21T23:48:18.505Z
+updated: 2026-09-28T14:41:35.774Z
 depends_on:
   - KRMA-517
   - KRMA-519
+blockers: []
 estimate: 13
-order: w
+order: q3awd7ky
 board: product
 ---
 

@@ -42,10 +42,11 @@ labels:
   - crop
   - editor
 created: 2026-09-19T22:18:54.081Z
-updated: 2026-09-20T02:57:14.078Z
+updated: 2026-09-28T14:41:35.110Z
 depends_on:
   - KRMA-471
-order: t
+blockers: []
+order: o9wp3mrx
 board: product
 ---
 

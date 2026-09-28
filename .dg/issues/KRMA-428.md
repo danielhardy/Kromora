@@ -46,11 +46,12 @@ labels:
   - library
   - architecture
 created: 2026-09-13T18:30:02.102Z
-updated: 2026-09-13T23:20:04.350Z
+updated: 2026-09-28T14:41:27.153Z
 parent: KRMA-415
 depends_on:
   - KRMA-415
-order: a0
+blockers: []
+order: 1ng6lsqe
 board: product
 ---
 

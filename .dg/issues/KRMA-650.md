@@ -41,10 +41,10 @@ labels:
   - verification
   - professional-polish
 created: 2026-09-27T07:14:01.020Z
-updated: 2026-09-27T17:38:09.797Z
+updated: 2026-09-28T14:41:33.451Z
 parent: KRMA-599
 blockers: []
-order: a0
+order: jhi5y0ne
 board: product
 commits:
   - 96a14e9

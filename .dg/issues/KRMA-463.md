@@ -48,8 +48,9 @@ labels:
   - crop
   - editor
 created: 2026-09-19T15:50:10.713Z
-updated: 2026-09-19T16:52:20.741Z
-order: a0
+updated: 2026-09-28T14:41:28.769Z
+blockers: []
+order: 69wp3msa
 board: product
 ---
 

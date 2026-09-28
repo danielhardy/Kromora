@@ -58,10 +58,11 @@ labels:
   - performance
   - preview
 created: 2026-09-14T03:07:28.871Z
-updated: 2026-09-21T02:09:44.690Z
+updated: 2026-09-28T14:41:35.533Z
 depends_on:
   - KRMA-430
-order: w
+blockers: []
+order: pfitq3ae
 board: product
 ---
 

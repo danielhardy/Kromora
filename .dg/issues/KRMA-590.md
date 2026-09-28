@@ -42,9 +42,9 @@ labels:
   - color
   - white-balance
 created: 2026-09-26T01:15:28.546Z
-updated: 2026-09-26T17:12:10.600Z
+updated: 2026-09-28T14:41:37.074Z
 blockers: []
-order: zh
+order: tq3awd70
 board: product
 ---
 

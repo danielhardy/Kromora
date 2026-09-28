@@ -44,9 +44,10 @@ labels:
   - chrome
   - inspector
 created: 2026-09-21T19:16:35.880Z
-updated: 2026-09-21T20:12:20.178Z
+updated: 2026-09-28T14:41:34.464Z
 parent: KRMA-512
-order: n
+blockers: []
+order: mgihu1yw
 board: product
 commits:
   - 04ff35a

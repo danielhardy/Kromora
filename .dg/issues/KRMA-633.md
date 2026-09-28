@@ -37,10 +37,10 @@ labels:
   - verification
   - masking
 created: 2026-09-26T15:32:08.505Z
-updated: 2026-09-26T16:54:01.402Z
+updated: 2026-09-28T14:41:35.824Z
 parent: KRMA-589
 blockers: []
-order: w
+order: q98x0znl
 board: product
 ---
 

@@ -49,10 +49,11 @@ labels:
   - photo-analysis
   - correctness
 created: 2026-09-20T12:06:38.123Z
-updated: 2026-09-20T14:49:28.087Z
+updated: 2026-09-28T14:41:29.055Z
 depends_on:
   - KRMA-475
-order: a0
+blockers: []
+order: 73msej5h
 board: product
 ---
 

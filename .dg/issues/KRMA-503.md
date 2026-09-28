@@ -47,8 +47,9 @@ labels:
   - local-adjustments
   - precision
 created: 2026-09-21T02:40:07.976Z
-updated: 2026-09-21T04:12:16.157Z
-order: a0
+updated: 2026-09-28T14:41:30.323Z
+blockers: []
+order: aqf6xorj
 board: product
 commits:
   - 9f67f00

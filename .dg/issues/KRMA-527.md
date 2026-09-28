@@ -52,11 +52,12 @@ labels:
   - architecture
   - diagnostics
 created: 2026-09-21T20:33:07.860Z
-updated: 2026-09-23T05:50:02.990Z
+updated: 2026-09-28T14:41:35.996Z
 depends_on:
   - KRMA-544
+blockers: []
 estimate: 8
-order: y
+order: qr2z0bvi
 board: product
 ---
 

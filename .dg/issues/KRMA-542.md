@@ -35,9 +35,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-22T19:34:05.202Z
-updated: 2026-09-23T06:18:43.812Z
+updated: 2026-09-28T14:41:37.197Z
 parent: KRMA-537
-order: zq
+blockers: []
+order: u1zc7xca
 board: product
 ---
 

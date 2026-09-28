@@ -47,12 +47,13 @@ labels:
   - backup
   - recovery
 created: 2026-09-12T19:19:25.898Z
-updated: 2026-09-21T02:09:32.023Z
+updated: 2026-09-28T14:41:38.606Z
 depends_on:
   - KRMA-413
   - KRMA-414
   - KRMA-415
-order: zzzzzx
+blockers: []
+order: xuprev0z
 board: product
 commits:
   - 5128a3f

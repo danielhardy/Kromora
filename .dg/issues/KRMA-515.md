@@ -41,9 +41,10 @@ labels:
   - chrome
   - theme
 created: 2026-09-21T19:16:36.777Z
-updated: 2026-09-21T20:12:11.786Z
+updated: 2026-09-28T14:41:35.711Z
 parent: KRMA-512
-order: w
+blockers: []
+order: pxcvpfib
 board: product
 commits:
   - 04ff35a

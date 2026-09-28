@@ -13,10 +13,11 @@ labels:
   - library
   - performance
 created: 2026-09-14T09:20:26.016Z
-updated: 2026-09-14T13:37:20.543Z
+updated: 2026-09-28T14:41:27.531Z
 depends_on:
   - KRMA-430
-order: a0
+blockers: []
+order: 2n4akh68
 board: product
 commits:
   - 672b0ac

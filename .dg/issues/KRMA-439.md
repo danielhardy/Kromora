@@ -42,8 +42,9 @@ labels:
   - editor
   - navigation
 created: 2026-09-18T02:22:53.361Z
-updated: 2026-09-18T15:14:24.982Z
-order: a0
+updated: 2026-09-28T14:41:27.750Z
+blockers: []
+order: 3awd7lgs
 board: product
 commits:
   - 53684b6

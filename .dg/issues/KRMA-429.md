@@ -52,8 +52,9 @@ labels:
   - ui
   - white-balance
 created: 2026-09-14T02:17:51.506Z
-updated: 2026-09-14T11:59:02.909Z
-order: a0
+updated: 2026-09-28T14:41:27.206Z
+blockers: []
+order: 1te79kt1
 board: product
 ---
 

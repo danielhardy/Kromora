@@ -2,7 +2,7 @@
 id: KRMA-674
 title: Order inspector panels with Light first
 type: task
-status: ready
+status: done
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,8 +13,9 @@ labels:
   - inspector
   - usability
 created: 2026-09-28T02:20:23.380Z
-updated: 2026-09-28T02:20:34.239Z
-order: zq
+updated: 2026-09-28T14:41:39.330Z
+blockers: []
+order: zu1zc7wn
 board: product
 ---
 

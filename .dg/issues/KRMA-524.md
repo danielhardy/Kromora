@@ -48,12 +48,13 @@ labels:
   - rendering
   - metal
 created: 2026-09-21T20:33:05.437Z
-updated: 2026-09-22T15:39:19.328Z
+updated: 2026-09-28T14:41:31.163Z
 depends_on:
   - KRMA-522
   - KRMA-523
+blockers: []
 estimate: 8
-order: a0
+order: d1ng6lsh
 board: product
 ---
 

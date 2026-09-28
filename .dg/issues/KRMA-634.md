@@ -46,9 +46,9 @@ labels:
   - chrome
   - filmstrip
 created: 2026-09-26T16:04:50.399Z
-updated: 2026-09-26T16:33:48.488Z
+updated: 2026-09-28T14:41:34.808Z
 blockers: []
-order: n
+order: ng6lsqeq
 board: product
 commits:
   - 65f25ed

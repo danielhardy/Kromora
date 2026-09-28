@@ -52,9 +52,9 @@ labels:
   - ux
   - color
 created: 2026-09-25T02:34:22.155Z
-updated: 2026-09-25T06:14:40.236Z
+updated: 2026-09-28T14:41:31.739Z
 blockers: []
-order: a0
+order: ep3mseiv
 board: product
 ---
 

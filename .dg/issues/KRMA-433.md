@@ -64,11 +64,12 @@ labels:
   - library
   - lifecycle
 created: 2026-09-14T03:08:00.703Z
-updated: 2026-09-14T10:59:55.842Z
+updated: 2026-09-28T14:41:27.385Z
 depends_on:
   - KRMA-432
   - KRMA-431
-order: a0
+blockers: []
+order: 2b898x0y
 board: product
 ---
 

@@ -41,9 +41,10 @@ labels:
   - library
   - performance
 created: 2026-09-13T14:00:40.426Z
-updated: 2026-09-21T02:09:31.488Z
+updated: 2026-09-28T14:41:38.769Z
 parent: KRMA-406
-order: zzzzzzw
+blockers: []
+order: ycjte78w
 board: product
 commits:
   - 1f90c7c

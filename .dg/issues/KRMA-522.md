@@ -49,9 +49,10 @@ labels:
   - performance
   - rendering
 created: 2026-09-21T20:33:03.509Z
-updated: 2026-09-22T10:28:32.765Z
+updated: 2026-09-28T14:41:31.034Z
+blockers: []
 estimate: 8
-order: a0
+order: cprev1n7
 board: product
 ---
 

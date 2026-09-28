@@ -13,8 +13,9 @@ labels:
   - security
   - distribution
 created: 2026-09-23T01:34:35.820Z
-updated: 2026-09-23T22:36:13.451Z
-order: zzzzzzz
+updated: 2026-09-28T14:41:38.906Z
+blockers: []
+order: yofupre6
 board: product
 blocked_reason: "The required signed, sandboxed release install test cannot run in this environment: no Developer ID signing identity, matching provisioning profile, or notary credential is available, so hdiutil and /Applications replacement behavior remain unverified."
 blocked_action: Provide/configure the Developer ID Application identity, matching sandbox provisioning profile, and notary profile; then run the PACKAGING.md sandbox test and record the per-stage outcome.

@@ -2,8 +2,46 @@
 id: KRMA-586
 title: "Stage 6: Extract Photos import batch presentation state from AppViewModel"
 type: task
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: A focused Photos batch owner holds the batch flags and first-asset/inspector-once state; it does not store AppViewModel, a second library/document store, or a package import worker.
+      result: pass
+      notes: PhotosImportBatchCoordinator holds only Batch{operationID, packageWasEmpty, needsRefresh, firstAssetID} and didPresentInspector, and calls back through the narrow PhotosImportBatchDestination protocol; it stores no AppViewModel reference, store, or worker.
+    - criterion: Sync and async item insertion publish the same inserted/duplicate/failure outcome and update the batch state consistently.
+      result: pass
+      notes: insert()/insertAsync() share the publish() mapping (imported/duplicate/failure/cancelled outcomes) and the same batch-state update; verified by testMapsInsertedDuplicateAndFailureResults and testAsyncInsertionUsesTheSameOutcomeMappingAndBatchState.
+    - criterion: Batch finish commits at most one coalesced library refresh, opens the first accepted asset only when the package was empty at batch start, and presents the inspector at most once.
+      result: pass
+      notes: finish() calls refreshPhotosImportCollection once when needsRefresh, opens firstAssetID only if packageWasEmpty, and presentInspectorOnce() guards on didPresentInspector; covered by testBatchRefreshesOnceAndOpensFirstAssetOnlyForInitiallyEmptyPackage.
+    - criterion: Empty batches, failures, duplicates, cancellation, and refresh errors close/reset the batch without leaving stale flags for the next Photos operation.
+      result: pass
+      notes: reset() runs via defer in finish() on every path; testDuplicateOnlyAndEmptyBatchesResetWithoutRefresh and testSupersededAsyncInsertAndRefreshFailureCannotOpenAsset cover empty/duplicate-only batches and a refresh error, confirming isBatchActive is false afterward and no asset opens.
+    - criterion: Existing source/document revision and import-operation fences remain intact; stale callbacks cannot refresh the collection or open an asset for a superseded operation.
+      result: pass
+      notes: isCurrentBatch()/isCurrent() re-check destination.isCurrentPhotosImportBatch after every suspension point; testSupersededAsyncInsertAndRefreshFailureCannotOpenAsset shows a superseded async insert returns .failed without ever calling refresh or open. PhotosImportCoordinator.appendAsync also gained an operationID recheck after the destination call.
+    - criterion: Fake-based owner tests cover batch initialization, result mapping, coalesced finish, first asset/inspector behavior, and stale or failed completion. Existing Photos/AppViewModel integration coverage remains green.
+      result: pass
+      notes: PhotosImportBatchCoordinatorTests.swift (5 tests, all fakes, no AppViewModel/PhotoKit) covers all listed cases. PhotosImportTests (9) and LibraryImportCoordinatorTests (2) integration suites pass unchanged.
+    - criterion: swift build, the focused Photos/import suites, the fast CI lane, dg validate, and git diff --check pass.
+      result: pass
+      notes: "swift build passed. swift test --filter 'PhotosImportTests|LibraryImportCoordinatorTests|PhotosImportBatchCoordinatorTests' passed (16 tests). scripts/ci-tests.sh fast has 2 pre-existing unrelated failures (CropWorkflowTests display-generation count, DevelopInspectorTests tab fallback) already tracked in KRMA-479/487/508 and untouched by this diff (dc35149 only touches AppViewModel.swift, PhotosImportCoordinator.swift, PhotosImportBatchCoordinatorTests.swift, docs/APP_ARCHITECTURE.md). dg validate: OK with only pre-existing unrelated model/context warnings. git diff --check: pass."
+  checks_run:
+    - "swift build: pass"
+    - "swift test --filter 'PhotosImportTests|LibraryImportCoordinatorTests|PhotosImportBatchCoordinatorTests': pass (16 tests)"
+    - "scripts/ci-tests.sh fast: 2 pre-existing unrelated failures (CropWorkflowTests, DevelopInspectorTests), unrelated to this diff and already tracked in KRMA-479/487/508"
+    - "dg validate: OK (pre-existing unrelated model-name/context-completeness warnings only)"
+    - "git diff --check: pass"
+  findings:
+    - "minor: publish()'s no-active-batch else branch (PhotosImportBatchCoordinator.swift:135) is unreachable dead code today since insert()/insertAsync() only call publish() after confirming an active batch; it also uses a different open condition (result.imported.count > 0) than finish()'s packageWasEmpty check, which could silently diverge from the documented contract if ever exercised. Non-blocking."
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-28T15:06:24.842Z
+  session: 01MULDKSJRH4OOI7HX
 creation_provenance:
   runner: codex
   model: gpt-6-luna
@@ -13,11 +51,11 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-25T05:51:26.616Z
-updated: 2026-09-27T23:58:17.393Z
+updated: 2026-09-28T15:06:24.844Z
 depends_on:
   - KRMA-469
 blockers: []
-order: t
+order: a0
 board: product
 context:
   files:
@@ -108,6 +146,37 @@ independently testable without constructing `AppViewModel` or PhotoKit.
 - A second package importer, document store, event bus, or render/scheduler resource.
 - Broad import/deletion cleanup beyond this Photos batch lifecycle.
 
+### Comment — codex @ 2026-09-28T15:00:55.878Z
+
+Implementation is present in f656ef0: PhotosImportBatchCoordinator owns streamed batch state, outcome mapping, coalesced refresh, and initial editor handoff; AppViewModel remains the adapter. Checks: swift build passed; swift test --filter 'PhotosImportTests|LibraryImportCoordinatorTests' passed (11 tests); swift test --filter PhotosImportBatchCoordinatorTests passed (5 tests); dg validate passed with existing model/context warnings; git diff --check passed. scripts/ci-tests.sh fast completed but failed unrelated parallel assertions in CropWorkflowTests (display generation count) and DevelopInspectorTests (tab fallback). No code changes were needed in this pickup.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-28T15:06:24.842Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] A focused Photos batch owner holds the batch flags and first-asset/inspector-once state; it does not store AppViewModel, a second library/document store, or a package import worker. (pass) — PhotosImportBatchCoordinator holds only Batch{operationID, packageWasEmpty, needsRefresh, firstAssetID} and didPresentInspector, and calls back through the narrow PhotosImportBatchDestination protocol; it stores no AppViewModel reference, store, or worker.
+- [x] Sync and async item insertion publish the same inserted/duplicate/failure outcome and update the batch state consistently. (pass) — insert()/insertAsync() share the publish() mapping (imported/duplicate/failure/cancelled outcomes) and the same batch-state update; verified by testMapsInsertedDuplicateAndFailureResults and testAsyncInsertionUsesTheSameOutcomeMappingAndBatchState.
+- [x] Batch finish commits at most one coalesced library refresh, opens the first accepted asset only when the package was empty at batch start, and presents the inspector at most once. (pass) — finish() calls refreshPhotosImportCollection once when needsRefresh, opens firstAssetID only if packageWasEmpty, and presentInspectorOnce() guards on didPresentInspector; covered by testBatchRefreshesOnceAndOpensFirstAssetOnlyForInitiallyEmptyPackage.
+- [x] Empty batches, failures, duplicates, cancellation, and refresh errors close/reset the batch without leaving stale flags for the next Photos operation. (pass) — reset() runs via defer in finish() on every path; testDuplicateOnlyAndEmptyBatchesResetWithoutRefresh and testSupersededAsyncInsertAndRefreshFailureCannotOpenAsset cover empty/duplicate-only batches and a refresh error, confirming isBatchActive is false afterward and no asset opens.
+- [x] Existing source/document revision and import-operation fences remain intact; stale callbacks cannot refresh the collection or open an asset for a superseded operation. (pass) — isCurrentBatch()/isCurrent() re-check destination.isCurrentPhotosImportBatch after every suspension point; testSupersededAsyncInsertAndRefreshFailureCannotOpenAsset shows a superseded async insert returns .failed without ever calling refresh or open. PhotosImportCoordinator.appendAsync also gained an operationID recheck after the destination call.
+- [x] Fake-based owner tests cover batch initialization, result mapping, coalesced finish, first asset/inspector behavior, and stale or failed completion. Existing Photos/AppViewModel integration coverage remains green. (pass) — PhotosImportBatchCoordinatorTests.swift (5 tests, all fakes, no AppViewModel/PhotoKit) covers all listed cases. PhotosImportTests (9) and LibraryImportCoordinatorTests (2) integration suites pass unchanged.
+- [x] swift build, the focused Photos/import suites, the fast CI lane, dg validate, and git diff --check pass. (pass) — swift build passed. swift test --filter 'PhotosImportTests|LibraryImportCoordinatorTests|PhotosImportBatchCoordinatorTests' passed (16 tests). scripts/ci-tests.sh fast has 2 pre-existing unrelated failures (CropWorkflowTests display-generation count, DevelopInspectorTests tab fallback) already tracked in KRMA-479/487/508 and untouched by this diff (dc35149 only touches AppViewModel.swift, PhotosImportCoordinator.swift, PhotosImportBatchCoordinatorTests.swift, docs/APP_ARCHITECTURE.md). dg validate: OK with only pre-existing unrelated model/context warnings. git diff --check: pass.
+Checks run:
+- swift build: pass
+- swift test --filter 'PhotosImportTests|LibraryImportCoordinatorTests|PhotosImportBatchCoordinatorTests': pass (16 tests)
+- scripts/ci-tests.sh fast: 2 pre-existing unrelated failures (CropWorkflowTests, DevelopInspectorTests), unrelated to this diff and already tracked in KRMA-479/487/508
+- dg validate: OK (pre-existing unrelated model-name/context-completeness warnings only)
+- git diff --check: pass
+Findings:
+- minor: publish()'s no-active-batch else branch (PhotosImportBatchCoordinator.swift:135) is unreachable dead code today since insert()/insertAsync() only call publish() after confirming an active batch; it also uses a different open condition (result.imported.count > 0) than finish()'s packageWasEmpty check, which could silently diverge from the documented contract if ever exercised. Non-blocking.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MULDKSJRH4OOI7HX
+Summary: Photos batch coordinator extraction verified: build, focused suites, dg validate, and git diff --check all pass; the two fast-lane failures are pre-existing and unrelated (already tracked). One minor non-blocking dead-code observation noted.

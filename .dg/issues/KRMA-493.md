@@ -32,9 +32,10 @@ labels:
   - verification
   - tests
 created: 2026-09-20T23:01:36.497Z
-updated: 2026-09-21T00:00:24.458Z
+updated: 2026-09-28T14:41:29.817Z
 parent: KRMA-492
-order: a0
+blockers: []
+order: 98x0zo3s
 board: product
 commits:
   - f50c81b

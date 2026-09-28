@@ -49,11 +49,12 @@ labels:
   - dead-code
   - masks
 created: 2026-09-21T20:33:06.322Z
-updated: 2026-09-23T03:04:01.598Z
+updated: 2026-09-28T14:41:34.288Z
 depends_on:
   - KRMA-543
+blockers: []
 estimate: 3
-order: l
+order: lyofupqz
 board: product
 ---
 

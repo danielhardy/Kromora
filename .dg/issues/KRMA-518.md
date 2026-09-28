@@ -25,11 +25,12 @@ labels:
   - performance
   - import
 created: 2026-09-21T20:32:59.907Z
-updated: 2026-09-21T22:17:25.680Z
+updated: 2026-09-28T14:41:34.574Z
 depends_on:
   - KRMA-517
+blockers: []
 estimate: 8
-order: n
+order: msej5m46
 board: product
 ---
 

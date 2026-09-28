@@ -11,10 +11,11 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-18T15:02:23.986Z
-updated: 2026-09-19T02:29:33.106Z
+updated: 2026-09-28T14:41:38.846Z
 depends_on:
   - KRMA-443
-order: zzzzzzy
+blockers: []
+order: yihu1zbj
 board: product
 ---
 

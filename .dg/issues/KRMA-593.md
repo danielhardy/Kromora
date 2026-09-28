@@ -49,11 +49,11 @@ labels:
   - auto
   - quality
 created: 2026-09-26T03:05:01.511Z
-updated: 2026-09-26T16:30:12.337Z
+updated: 2026-09-28T14:41:32.227Z
 depends_on:
   - KRMA-635
 blockers: []
-order: a0
+order: g0ns2n3z
 board: product
 context:
   files:

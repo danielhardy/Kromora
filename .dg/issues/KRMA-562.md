@@ -40,9 +40,9 @@ labels:
   - architecture
   - verification
 created: 2026-09-24T03:54:41.695Z
-updated: 2026-09-24T14:06:56.105Z
+updated: 2026-09-28T14:41:31.268Z
 blockers: []
-order: a0
+order: ddjhi5xr
 board: product
 ---
 

@@ -73,8 +73,9 @@ labels:
   - photo-analysis
   - fixtures
 created: 2026-09-19T03:12:04.258Z
-updated: 2026-09-20T04:16:14.089Z
-order: a0
+updated: 2026-09-28T14:41:28.597Z
+blockers: []
+order: 5s2n4akd
 board: product
 blocked_reason: "Part C is human-gated: the repository policy still says fixtures are generated and not committed, and no human confirmation of the proposed AI-fixture commit or generator terms is recorded."
 blocked_action: Confirm that up to 5 MB of AI-generated JPEG fixtures may be committed and that the chosen generator/model terms permit open-source test-fixture use; then generate the six required photographs plus two derived clipping images and approve the corresponding CLAUDE.md/docs/TESTING.md policy update.

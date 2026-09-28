@@ -42,11 +42,12 @@ labels:
   - security
   - distribution
 created: 2026-09-21T20:33:13.027Z
-updated: 2026-09-23T22:43:12.467Z
+updated: 2026-09-28T14:41:37.407Z
 depends_on:
   - KRMA-546
+blockers: []
 estimate: 3
-order: zv
+order: ujte79k7
 board: product
 commits:
   - a9cb803598235c3a60ee11445102b63bf0c9b73e

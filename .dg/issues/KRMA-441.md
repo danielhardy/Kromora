@@ -35,8 +35,9 @@ labels:
   - editor
   - macos
 created: 2026-09-18T02:23:01.268Z
-updated: 2026-09-18T15:36:16.290Z
-order: a0
+updated: 2026-09-28T14:41:27.859Z
+blockers: []
+order: 3msej5m2
 board: product
 ---
 

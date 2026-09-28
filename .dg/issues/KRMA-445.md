@@ -35,8 +35,9 @@ labels:
   - editor
   - ux
 created: 2026-09-18T02:23:04.353Z
-updated: 2026-09-18T16:44:20.991Z
-order: a0
+updated: 2026-09-28T14:41:28.034Z
+blockers: []
+order: 44mgihtz
 board: product
 ---
 

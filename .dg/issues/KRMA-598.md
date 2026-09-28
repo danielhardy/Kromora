@@ -47,9 +47,9 @@ labels:
   - professional-polish
   - evaluation-2026-09
 created: 2026-09-26T13:56:27.694Z
-updated: 2026-09-27T06:29:39.734Z
+updated: 2026-09-28T14:41:32.471Z
 blockers: []
-order: a0
+order: gofuprej
 board: product
 commits:
   - cb17a01

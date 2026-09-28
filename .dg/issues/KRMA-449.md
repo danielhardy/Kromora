@@ -74,8 +74,9 @@ labels:
   - ux
   - library
 created: 2026-09-18T22:38:53.577Z
-updated: 2026-09-18T23:29:25.489Z
-order: a0
+updated: 2026-09-28T14:41:28.201Z
+blockers: []
+order: 4mgihu1w
 board: product
 commits:
   - b26624f4a9ce115dd8750452d2173f45bc87114a

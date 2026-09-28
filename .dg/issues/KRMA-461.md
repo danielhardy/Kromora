@@ -48,8 +48,9 @@ labels:
   - crop
   - ui
 created: 2026-09-19T15:35:56.481Z
-updated: 2026-09-19T16:02:23.222Z
-order: a0
+updated: 2026-09-28T14:41:28.657Z
+blockers: []
+order: 5y0ns2n0
 board: product
 commits:
   - 10d2533f892244d6190376fd34973ba613de9c43

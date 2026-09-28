@@ -44,8 +44,9 @@ labels:
   - ux
   - chrome
 created: 2026-09-21T19:16:35.437Z
-updated: 2026-09-21T20:12:37.942Z
-order: a0
+updated: 2026-09-28T14:41:30.850Z
+blockers: []
+order: c7xcvpfa
 board: product
 commits:
   - 04ff35a

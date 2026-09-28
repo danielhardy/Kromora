@@ -14,10 +14,11 @@ labels:
   - updater
   - security
 created: 2026-09-18T22:38:54.334Z
-updated: 2026-09-19T01:36:50.564Z
+updated: 2026-09-28T14:41:35.931Z
 depends_on:
   - KRMA-450
-order: y
+blockers: []
+order: ql4ycjsv
 board: product
 ---
 
