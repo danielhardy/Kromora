@@ -244,7 +244,8 @@ struct InfoInspectorView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text("Histogram")
-                    .font(.headline)
+                    .font(InspectorStyle.sectionTitle)
+                    .accessibilityAddTraits(.isHeader)
                 Spacer()
                 if let histogram = viewModel.histogram {
                     Label("\(histogram.clippedHighlights)", systemImage: "sun.max.fill")

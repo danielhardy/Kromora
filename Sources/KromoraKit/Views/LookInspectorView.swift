@@ -160,10 +160,7 @@ struct LookInspectorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("Looks")
-                .font(InspectorStyle.panelTitle)
-                .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
+            InspectorPanelHeading(title: "Looks")
 
             Spacer()
 
@@ -383,7 +380,7 @@ struct LookInspectorView: View {
     ) -> some View {
         HStack {
             Text(collection.title)
-                .font(.caption.weight(.semibold))
+                .font(InspectorStyle.sectionTitle)
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
             if collection.isReadOnly {
@@ -414,7 +411,7 @@ struct LookInspectorView: View {
                 if includesCollectionLabel {
                     HStack(spacing: 5) {
                         Text("Starter Looks")
-                            .font(.caption.weight(.semibold))
+                            .font(InspectorStyle.sectionTitle)
                             .foregroundStyle(.secondary)
                         Text("Read-only")
                             .font(.caption2)
@@ -425,7 +422,7 @@ struct LookInspectorView: View {
                     }
                 }
                 Text(category.name)
-                    .font(.caption.weight(.semibold))
+                    .font(InspectorStyle.nestedSectionTitle)
                     .foregroundStyle(.secondary)
                     .accessibilityAddTraits(.isHeader)
             }

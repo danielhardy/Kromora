@@ -27,6 +27,7 @@ struct RetouchInspectorView: View {
                         viewModel.updateDocument { $0.retouch = .neutral }
                         interaction.select(nil)
                     }
+                        .buttonStyle(.link)
                         .disabled(viewModel.document.retouch.isIdentity)
                 }
                 InspectorDisclosure("Spots", isExpanded: $spotsExpanded) {
@@ -210,7 +211,7 @@ struct RetouchInspectorView: View {
     ) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack { Text(title); Spacer(); Text(String(format: format, value.wrappedValue * scale)).monospacedDigit().foregroundStyle(.secondary) }
-                .font(.caption)
+                .font(InspectorStyle.fieldLabel)
             Slider(value: value, in: range)
         }
     }
