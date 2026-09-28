@@ -2,8 +2,32 @@
 id: KRMA-647
 title: Edit history compaction reads every revision file to check for named snapshots
 type: task
-status: backlog
+status: done
 priority: low
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Compaction determines named-snapshot status from pointer/record metadata already resident in asset.json, without decoding the revision file, so a maintenance pass with nothing to compact does no extra disk I/O per revision.
+      result: pass
+      notes: PortablePackageEditPointer.isNamedSnapshot is set on write (PortablePackageEditSidecar.swift:307-314). compactRevisions computes protected/newest retention and short-circuits via `guard !stale.isEmpty` before ever touching named-snapshot state (PortablePackageMaintenance.swift:600-626); only when an asset actually needs compaction does it consult pointer.isNamedSnapshot, and it only falls back to readEditRevision for pointers with a nil (legacy) value.
+    - criterion: New pointer field decodes existing packages without it, defaulting consistently with today's behavior (no named snapshots), verified by a round-trip test.
+      result: pass
+      notes: Custom Codable init/encode decodeIfPresent/encodeIfPresent isNamedSnapshot (PortableLibraryPackage.swift:228-250). testLegacyEditPointerDecodesAndRoundTripsAsNotNamedSnapshot confirms a pre-field JSON payload decodes to nil and round-trips as nil, and compactRevisions treats nil as 'unknown, fall back to reading the revision' rather than 'not a snapshot', preserving legacy behavior.
+    - criterion: New PortablePackageMaintenanceTests case seeds a named snapshot among more revisions than maximumEditRevisions and asserts it survives compaction while other stale revisions are pruned.
+      result: pass
+      notes: "testRevisionCompactionRetainsNamedSnapshotsAndPrunesOtherStaleRevisions: 5 revisions with maximumEditRevisions=2, revision 2 named; asserts revisions [2,4,5] survive, 1 and 3 are pruned and unreadable, and the named snapshot's content is still fetchable post-compaction."
+  checks_run:
+    - swift build (debug) - success
+    - swift test --filter 'PortablePackageMaintenanceTests|PortableLibraryPackageTests' - 17/17 passed
+    - scripts/ci-tests.sh fast - 1279/1279 tests, exit 0, no failures
+  findings:
+    - "low: A separate, pre-existing code path (branch-on-history-navigation in appendEditRevision, PortablePackageEditSidecar.swift:299-303) still calls readEditRevision per forward pointer to check snapshotName when starting a new edit branch. Out of scope for this ticket (not part of ordinary maintenance/compactRevisions), but could reuse the new isNamedSnapshot pointer field in a future ticket."
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-27T17:53:27.609Z
+  session: 01MUK43NK9YGGTMSTQ
 creation_provenance:
   runner: claude
   model: sonnet
@@ -11,11 +35,11 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-27T05:51:35.817Z
-updated: 2026-09-27T05:51:35.817Z
-blockers: []
-order: zzzv
-board: product
+updated: 2026-09-27T17:53:27.611Z
 parent: KRMA-604
+blockers: []
+order: a0
+board: product
 ---
 
 ## Objective
@@ -69,6 +93,31 @@ out of scope for a verification-stage fix) and `compactRevisions` in `PortablePa
 Keep the `readEditRevision` fallback for old packages whose pointers predate the new field, if any
 are expected to exist on disk already.
 
+### Comment — codex @ 2026-09-27T17:48:03.622Z
+
+Implemented pointer-level named snapshot metadata and retained legacy sidecar fallback only when compaction is needed. Added legacy pointer round-trip and named snapshot compaction coverage. Focused verification passed: 8 tests, 0 failures. Commit: 25a6fb9.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-27T17:53:27.609Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Compaction determines named-snapshot status from pointer/record metadata already resident in asset.json, without decoding the revision file, so a maintenance pass with nothing to compact does no extra disk I/O per revision. (pass) — PortablePackageEditPointer.isNamedSnapshot is set on write (PortablePackageEditSidecar.swift:307-314). compactRevisions computes protected/newest retention and short-circuits via `guard !stale.isEmpty` before ever touching named-snapshot state (PortablePackageMaintenance.swift:600-626); only when an asset actually needs compaction does it consult pointer.isNamedSnapshot, and it only falls back to readEditRevision for pointers with a nil (legacy) value.
+- [x] New pointer field decodes existing packages without it, defaulting consistently with today's behavior (no named snapshots), verified by a round-trip test. (pass) — Custom Codable init/encode decodeIfPresent/encodeIfPresent isNamedSnapshot (PortableLibraryPackage.swift:228-250). testLegacyEditPointerDecodesAndRoundTripsAsNotNamedSnapshot confirms a pre-field JSON payload decodes to nil and round-trips as nil, and compactRevisions treats nil as 'unknown, fall back to reading the revision' rather than 'not a snapshot', preserving legacy behavior.
+- [x] New PortablePackageMaintenanceTests case seeds a named snapshot among more revisions than maximumEditRevisions and asserts it survives compaction while other stale revisions are pruned. (pass) — testRevisionCompactionRetainsNamedSnapshotsAndPrunesOtherStaleRevisions: 5 revisions with maximumEditRevisions=2, revision 2 named; asserts revisions [2,4,5] survive, 1 and 3 are pruned and unreadable, and the named snapshot's content is still fetchable post-compaction.
+Checks run:
+- swift build (debug) - success
+- swift test --filter 'PortablePackageMaintenanceTests|PortableLibraryPackageTests' - 17/17 passed
+- scripts/ci-tests.sh fast - 1279/1279 tests, exit 0, no failures
+Findings:
+- low: A separate, pre-existing code path (branch-on-history-navigation in appendEditRevision, PortablePackageEditSidecar.swift:299-303) still calls readEditRevision per forward pointer to check snapshotName when starting a new edit branch. Out of scope for this ticket (not part of ordinary maintenance/compactRevisions), but could reuse the new isNamedSnapshot pointer field in a future ticket.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUK43NK9YGGTMSTQ
+Summary: Verified: compaction reads pointer-level isNamedSnapshot instead of decoding revisions; legacy nil field falls back only when compaction is actually needed; build + focused tests + full fast CI lane all pass.

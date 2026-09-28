@@ -18,31 +18,34 @@ board: product
 
 ## Objective
 
-Build a durable non-redistributable/local test-set process and review rubric covering the scenes named in the concept.
+Create a small, repeatable image-quality check for representative inputs and the core edit workflow.
 
 ## Context
 
-Part of **Epic 10 — Image quality, performance, and MVP release gate**. The source product brief is `.context/initial_concept.md`. Work from the existing LUTzy-derived implementation; preserve working behavior and inspect only the smallest relevant file set before changing code.
+Part of **Epic 10 — Image quality, performance, and MVP release gate**. Use the current README and render/storage contracts as product context. `.context/initial_concept.md` is historical provenance, not a current feature checklist. Preserve existing image behavior unless a reproducible defect is found.
 
 ## Scope
 
-- Cover clipping highlights, deep shadows, underexposure, high ISO, skin, foliage, reds, sky, sunset, mixed WB, HDR, and haze.
-- Define consistent comparison captures against Apple Photos, Lightroom, and camera JPEG where available.
-- Record expected behavior for every major adjustment without demanding pixel matching.
+- Select a modest set of representative RAW and standard-image examples, including difficult exposure and color cases relevant to shipped controls.
+- Define a concise qualitative review rubric for correct adjustment behavior and preview/export consistency.
+- Keep local/licensed samples out of the repository unless their redistribution is explicitly approved.
+- Record only reproducible correctness failures as follow-up issues.
 
 ## Acceptance criteria
 
-- [ ] Every required scene and major control has a review entry.
-- [ ] Licensing/privacy rules prevent accidental fixture redistribution.
-- [ ] Reviewers can reproduce comparisons from documented steps.
-- [ ] Failures become scoped dg bugs rather than undocumented taste notes.
+- [ ] The chosen sample set and its licensing/storage rules are documented.
+- [ ] A reviewer can repeat the checks and record a clear pass, failure, or subjective observation.
+- [ ] The core edit path and preview/export parity receive a baseline review.
+- [ ] Any reported defect includes a reproducible image/workflow and expected behavior.
 
 ## Verification
 
-- Complete one baseline review pass and attach summarized results/approved sample assets.
+- Complete one baseline review pass and record summarized results without committing unlicensed source photos.
 
 ## Out of scope
 
+- Exhaustive coverage of every control and scene combination.
+- Pixel matching against Lightroom, Apple Photos, or camera JPEGs.
 - Automated aesthetic scoring.
 
 ## Agent log

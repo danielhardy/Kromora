@@ -21,7 +21,7 @@ board: product
 
 ## Objective
 
-Use Instruments evidence to address the bottlenecks that prevent the MVP targets, with before/after proof.
+Fix only measured performance problems that materially harm the core MVP workflow, with before/after evidence.
 
 ## Context
 
@@ -29,21 +29,21 @@ Part of **Epic 10 — Image quality, performance, and MVP release gate**. The so
 
 ## Scope
 
-- Inspect main-thread stalls, render/decode time, cache behavior, thumbnail queues, memory growth, and export throughput.
-- Prioritize user-perceived latency and >100 ms main-thread stalls.
-- Make narrow fixes and rerun the same scenario after each change.
-- Open separate bugs for lower-impact findings rather than expanding scope.
+- Start from a bottleneck observed in KRMA-057 or a reproducible user-facing failure.
+- Use an appropriate profiler to identify the cause before changing code.
+- Make a narrow fix and repeat the same scenario on the same hardware/configuration.
+- Track unrelated or lower-impact observations separately; do not optimize speculative paths.
 
 ## Acceptance criteria
 
-- [ ] No known >100 ms main-thread stall remains in the core workflow without a documented blocker.
-- [ ] Cached photo switch, slider response, and interactive render targets are met or have evidence-backed exceptions.
-- [ ] Memory is bounded in 1,000-photo navigation and long batch export.
-- [ ] Before/after measurements accompany each optimization.
+- [ ] Each change addresses a reproducible, user-visible bottleneck or a target justified by KRMA-057.
+- [ ] Before/after measurements use the same documented workload and machine.
+- [ ] Core workflow behavior and correctness remain intact.
+- [ ] Remaining performance findings are prioritized by user impact rather than arbitrary thresholds.
 
 ## Verification
 
-- Repeat benchmark scenarios and inspect Time Profiler, Core Image, and memory traces.
+- Repeat only the affected KRMA-057 scenario and inspect profiler evidence relevant to the identified bottleneck.
 
 ## Out of scope
 
