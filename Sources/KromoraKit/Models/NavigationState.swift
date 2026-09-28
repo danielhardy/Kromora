@@ -29,7 +29,8 @@ struct NavigationState: Equatable, Sendable {
 
     var mode: Mode
 
-    init(mode: Mode = .edit) {
+    /// A fresh app window starts in the Library. Explicit photo-opening actions move into Edit.
+    init(mode: Mode = .grid) {
         self.mode = mode
     }
 

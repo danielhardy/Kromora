@@ -5,9 +5,9 @@ final class NavigationStateTests: XCTestCase {
     func testModeIsAnExplicitSmallValueState() {
         var state = NavigationState()
 
-        XCTAssertEqual(state.mode, .edit)
-        XCTAssertTrue(state.isEdit)
-        XCTAssertFalse(state.isGrid)
+        XCTAssertEqual(state.mode, .grid)
+        XCTAssertTrue(state.isGrid)
+        XCTAssertFalse(state.isEdit)
 
         state.move(to: .grid)
         XCTAssertEqual(state.mode, .grid)
@@ -21,6 +21,40 @@ final class NavigationStateTests: XCTestCase {
 
 @MainActor
 final class WorkspaceNavigationTests: TempDirectoryTestCase {
+    func testLaunchDestinationIsLibraryForAnEmptyLibrary() {
+        let packageURL = tempDirectory.appendingPathComponent(
+            "Empty.kromoralibrary", isDirectory: true
+        )
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), portablePackageURL: packageURL
+        )
+
+        XCTAssertTrue(viewModel.navigation.isGrid)
+        XCTAssertTrue(viewModel.collection.items.isEmpty)
+    }
+
+    func testLaunchDestinationIsLibraryWhenThePackageHasPhotos() async throws {
+        let packageURL = tempDirectory.appendingPathComponent(
+            "Populated.kromoralibrary", isDirectory: true
+        )
+        let source = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "launch-photo.png", in: tempDirectory
+        )
+        let seededLibrary = try PortableLibrarySession(at: packageURL)
+        _ = try seededLibrary.importURLs([source])
+        try seededLibrary.lease.release()
+
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(), portablePackageURL: packageURL
+        )
+        try await waitUntil("the startup library photo") {
+            viewModel.collection.items.count == 1
+        }
+
+        XCTAssertTrue(viewModel.navigation.isGrid)
+        XCTAssertEqual(viewModel.collection.items.first?.displayName, "launch-photo.png")
+    }
+
     func testGridSelectionHandsTheActivePhotoToEdit() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "first.png", in: tempDirectory
@@ -167,7 +201,7 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
 
         XCTAssertFalse(viewModel.navigate(to: .grid))
-        XCTAssertEqual(viewModel.navigation.mode, .edit)
+        XCTAssertEqual(viewModel.navigation.mode, .grid)
         XCTAssertFalse(viewModel.navigate(to: .edit))
     }
 

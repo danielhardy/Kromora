@@ -250,7 +250,7 @@ public struct ContentView: View {
 
     private var detailContent: some View {
         Group {
-            if viewModel.navigation.isGrid && collection.isActive {
+            if viewModel.navigation.isGrid {
                 VStack(spacing: 0) {
                     LibraryGridView(
                         collection: collection,
