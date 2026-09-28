@@ -191,7 +191,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         try await openStandardImage(viewModel)
 
         XCTAssertFalse(viewModel.availableInspectorTabs.contains(.develop))
-        XCTAssertEqual(viewModel.inspectorTab, .info)
+        XCTAssertEqual(viewModel.inspectorTab, .light)
         XCTAssertEqual(viewModel.developPanelState, .noDevelopStage)
     }
 
