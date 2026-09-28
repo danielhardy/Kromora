@@ -521,12 +521,19 @@ final class PreviewAdmissionCoordinator {
         destination.admissionPresentation.lookupCache(for: key) { [weak self, weak destination] cached in
             guard let self, let destination, !destination.admissionIsShuttingDown,
                 destination.admissionSourceRevision == sourceRevision,
-                destination.admissionDisplayRevision == displayRevision,
                 destination.admissionActiveAssetID == assetID,
-                destination.admissionImageSource == request.source,
-                self.displayRequest.document == request.document
+                destination.admissionImageSource == request.source
             else { return }
             self.pendingPreviewCacheLookup = nil
+            guard destination.admissionDisplayRevision == displayRevision,
+                self.displayRequest.document == request.document
+            else {
+                // The lookup's revision was already consumed. Leaving here dropped the only
+                // canvas render while the edited thumbnail, admitted above, still ran.
+                guard !self.isPreviewInteractionActive else { return }
+                self.submitSettledPreview(preemptsPredecessor: true)
+                return
+            }
             if let cached {
                 destination.admissionPreviewCoordinator.cancel()
                 destination.admissionPresentCacheRaster(
@@ -580,7 +587,11 @@ final class PreviewAdmissionCoordinator {
     func scheduleInteractivePreview() {
         guard let destination, let source = destination.admissionImageSource else { return }
         cancelIdlePreviewBuild()
-        if !isPreviewInteractionActive { destination.admissionPresentation.advanceDisplayRevision() }
+        // This revision is also RenderEngine's source-wide supersession fence. Advance it for
+        // every interactive value, including values inside one drag, so work for an older slider
+        // position can stop at the engine's next cancellation boundary instead of delaying the
+        // newest value behind a long retouch or RAW render.
+        destination.admissionPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         let (requested, lut) = displayRequest
         let plan = destination.admissionPresentation.plan(
@@ -641,6 +652,12 @@ final class PreviewAdmissionCoordinator {
 
     func beginInteraction() {
         cancelIdlePreviewBuild()
+        // A slider's first value is delivered before tracking reports that a drag started, so a
+        // settled debounce is already queued. If it fires mid-drag it advances the display
+        // revision and the engine discards every interactive frame for the gesture.
+        cancelPreviewDebounce()
+        destination?.admissionPresentation.cancelCacheLookup()
+        pendingPreviewCacheLookup = nil
         destination?.admissionPresentation.advanceDisplayRevision()
         isPreviewInteractionActive = true
         destination?.admissionPreviewCoordinator.beginInteraction()

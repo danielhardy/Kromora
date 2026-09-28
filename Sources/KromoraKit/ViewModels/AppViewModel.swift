@@ -4478,7 +4478,6 @@ extension AppViewModel: CanvasWorkflowDestination {
                 scheduleSettledPreviewAfterDebounce()
             }
         case .pan:
-            if isPreviewInteractionActive { previewPresentation.advanceDisplayRevision() }
             scheduleInteractivePreview()
         }
     }

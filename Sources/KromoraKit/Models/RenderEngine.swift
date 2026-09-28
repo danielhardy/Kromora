@@ -541,12 +541,18 @@ actor RenderEngine: RenderEngining {
         guard let textureImage = CIImage(
             mtlTexture: texture, options: [.colorSpace: request.space.cgColorSpace]
         ) else { return nil }
+        // `CIImage(mtlTexture:)` can report an infinite extent. The presentation surface refuses
+        // that image and keeps the previous frame, which is how a finished render stayed invisible
+        // on the canvas while the thumbnail (rasterized before this wrap) updated.
+        let finite = textureImage.cropped(to: CGRect(origin: .zero, size: CGSize(
+            width: rect.width, height: rect.height
+        )))
         // Metal textures start at (0, 0), while an ROI retains its source-space origin in the
         // Core Image graph. Restore that origin so the presentation surface can place the ROI
         // inside the virtual committed-crop extent without shifting it to the frame corner.
         return rect.origin == .zero
-            ? textureImage
-            : textureImage.transformed(by: CGAffineTransform(
+            ? finite
+            : finite.transformed(by: CGAffineTransform(
                 translationX: rect.minX, y: rect.minY
             ))
     }
