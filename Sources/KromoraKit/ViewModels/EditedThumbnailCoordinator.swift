@@ -241,8 +241,8 @@ final class EditedThumbnailCoordinator {
                 document: document,
                 lut: lut,
                 targetSize: CGSize(
-                    width: Thumbnails.defaultMaxPixelSize,
-                    height: Thumbnails.defaultMaxPixelSize),
+                    width: Thumbnails.libraryMaxPixelSize,
+                    height: Thumbnails.libraryMaxPixelSize),
                 quality: .thumbnail,
                 output: .raster, space: .current
             )

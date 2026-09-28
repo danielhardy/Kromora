@@ -109,7 +109,12 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         let firstSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
         _ = try firstSession.importURLs([sourceURL])
         let firstAsset = try XCTUnwrap(firstSession.materializedAssets().first)
-        let savedDocument = EditDocument(adjustments: [.exposure(ev: 0.6)])
+        let savedDocument = EditDocument(
+            crop: CropAdjustments(normalizedRect: CGRect(
+                x: 0.18, y: 0.12, width: 0.54, height: 0.72
+            )),
+            adjustments: [.exposure(ev: 0.6)]
+        )
         let firstStore = EditDocumentStore(package: firstSession.package, lease: firstSession.lease)
         try await firstStore.save(savedDocument, for: EditSourceReference(
             assetID: firstAsset.id,
@@ -157,6 +162,13 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         XCTAssertNil(collection.selection.activeID, "visible demand must not require selection")
         let renderedEditHashes = await engine.renderedEditHashes
         XCTAssertEqual(renderedEditHashes, [savedDocument.editHash])
+        let renderedCrops = await engine.renderedCrops
+        XCTAssertEqual(renderedCrops, [savedDocument.crop])
+        XCTAssertEqual(
+            destination.presentedCrop,
+            savedDocument.crop,
+            "reopening must adopt the saved crop for Library cell geometry"
+        )
         XCTAssertFalse(destination.appliedWasNil)
         XCTAssertNotNil(item.thumbnail, "the edited raster must be published to the library item")
         await scheduler.cancelAllAndWait()
@@ -224,6 +236,7 @@ private final class FakeDestination: EditedThumbnailDestination {
     private let lut: CubeLUT?
     private(set) var appliedRevisions: [String] = []
     private(set) var appliedWasNil = false
+    private(set) var presentedCrop = CropAdjustments.neutral
     var onApply: ((NSImage?, String) -> Void)?
 
     init(
@@ -251,7 +264,9 @@ private final class FakeDestination: EditedThumbnailDestination {
         appliedRevisions.append(revision)
         onApply?(image, revision)
     }
-    func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID) {}
+    func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID) {
+        presentedCrop = crop
+    }
 
     private var storedDocument: EditDocument?
 }
@@ -260,6 +275,7 @@ private actor FakeEditedThumbnailRenderer: EditedThumbnailRendering {
     private let waits: Bool
     private(set) var thumbnailRequestCount = 0
     private(set) var renderedEditHashes: [String] = []
+    private(set) var renderedCrops: [CropAdjustments] = []
     private var continuation: CheckedContinuation<Void, Never>?
 
     init(waits: Bool) { self.waits = waits }
@@ -271,6 +287,7 @@ private actor FakeEditedThumbnailRenderer: EditedThumbnailRendering {
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage? {
         thumbnailRequestCount += 1
         renderedEditHashes.append(request.document.editHash)
+        renderedCrops.append(request.document.crop)
         if waits {
             await withCheckedContinuation { continuation = $0 }
         }

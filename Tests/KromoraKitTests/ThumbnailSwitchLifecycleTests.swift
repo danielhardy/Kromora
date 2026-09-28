@@ -135,12 +135,12 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             (
                 "small",
                 CGRect(x: 0.25, y: 0.25, width: 0.25, height: 0.25),
-                CGSize(width: 240, height: 160)
+                CGSize(width: 480, height: 320)
             ),
             (
                 "aspect-ratio-changing",
                 CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.3),
-                CGSize(width: 240, height: 60)
+                CGSize(width: 480, height: 120)
             ),
         ]
 

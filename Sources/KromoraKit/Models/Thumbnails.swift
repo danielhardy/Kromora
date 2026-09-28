@@ -31,6 +31,11 @@ enum PlatformThumbnailProvider {
     /// The filmstrip's thumbnail size, in pixels on the long edge.
     static let defaultMaxPixelSize = 240
 
+    /// Library mosaic thumbnails are displayed in substantially larger cells than filmstrip
+    /// thumbnails. Reserve a 2× pixel budget for the 240-point mosaic target so Retina displays
+    /// do not enlarge a low-resolution source or settled edit.
+    static let libraryMaxPixelSize = 480
+
     /// Long-edge cap for the RAW-open first frame. Large enough to fill a Retina editor
     /// canvas at Fit, small enough that it is not a native 24–60MP GPU upload. ImageIO
     /// will not invent pixels: a camera JPEG that is already 1616px stays 1616px.
