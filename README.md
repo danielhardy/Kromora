@@ -84,7 +84,7 @@ See [`docs/ONBOARDING.md`](docs/ONBOARDING.md), [`docs/LOOKS.md`](docs/LOOKS.md)
   scope.
 - Decoder and output capabilities vary by format and macOS codecs. Kromora does not promise pixel
   matching with another RAW processor or universal camera-feature parity.
-- The app requires the current Xcode 26+ SDK to build, although its deployment target is macOS 14.
+- The app requires Xcode 26+ and macOS 26 (Tahoe) to build and run.
 
 These boundaries are product choices and current constraints, not a competitor parity checklist.
 The deferred idea archive is not an active roadmap.
@@ -99,7 +99,7 @@ swift run
 swift test
 ```
 
-Requirements: macOS 14 or newer to run, Xcode 26 or newer with the macOS 26 SDK to build, and Swift
+Requirements: macOS 26 (Tahoe) or newer to run, Xcode 26 or newer with the macOS 26 SDK to build, and Swift
 6 language mode. `swift run` is useful for iteration but does not include the packaged app's asset
 catalog or App Sandbox entitlements. Open `Package.swift` in Xcode and run the **Kromora** scheme to
 exercise bundled-app behavior.

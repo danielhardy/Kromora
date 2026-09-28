@@ -1,6 +1,6 @@
 # CLAUDE.md — project guidance for AI agents
 
-Kromora is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**) with a package-backed Library/Edit/Export workflow. The open package owns library membership, originals, metadata, and edit revisions; folder, Photos, and removable-volume choices are import sources. Local indexes and caches are projections. Existing `EditStore*.store` files remain untouched and are not read as a library fallback. See [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md) for MVP intent and boundaries, [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for current coordinator ownership, [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) for durable storage, and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for format history.
+Kromora is a native **macOS 26 (Tahoe)+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**) with a package-backed Library/Edit/Export workflow. The open package owns library membership, originals, metadata, and edit revisions; folder, Photos, and removable-volume choices are import sources. Local indexes and caches are projections. Existing `EditStore*.store` files remain untouched and are not read as a library fallback. See [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md) for MVP intent and boundaries, [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for current coordinator ownership, [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) for durable storage, and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for format history.
 
 ## Build / run / test
 
@@ -12,13 +12,11 @@ Kromora is a native **macOS 14+** RAW photo editor (**Swift 6 language mode**, S
   RAW-fixture and benchmark methods are opt-in through `scripts/ci-tests.sh optional`, then CI
   builds and verifies the packaged app.
 
-**SDK and deployment target are different things — don't conflate them.** CI runs on `macos-26`
-(Xcode 26.x, macOS 26 SDK); `Package.swift` deploys to **macOS 14**. Building against a current SDK
-while deploying to 14 is the normal Apple model and is the *stricter* arrangement: the compiler
-refuses any API newer than the deployment target unless it is `#available`-guarded, so the guard is
-enforced rather than remembered. Use newer API behind `#available` — don't avoid it.
+CI runs on `macos-26` with Xcode 26 and the macOS 26 SDK. The package, app bundle, and distributable
+build all target **macOS 26 (Tahoe)**, so the SDK and deployment floor match and Tahoe APIs can be
+used unconditionally.
 
-**Requires Xcode 26 or newer to build.** That is the cost of the above: `RAWDevelopSettings` references
+**Requires Xcode 26 or newer to build.** `RAWDevelopSettings` references
 `CIRAWFilter.isHighlightRecoveryEnabled`, which only exists in the macOS 26 SDK. On an older Xcode the
 package will not compile, and no availability check can change that — `#available` gates a call at
 runtime; it cannot conjure a symbol the SDK never declared. That distinction cost a red build in Phase 2
@@ -68,7 +66,7 @@ When a test needs to exercise private behavior, first consider testing through t
 Widen an implementation detail only when that makes the production boundary clearer and the test
 needs the seam; document why, and keep test-only helpers in the test target when possible.
 
-Constraints that must hold: **macOS 14 minimum**, **zero third-party dependencies** (Apple frameworks only). Don't introduce SPM/CocoaPods/Carthage deps.
+Constraints that must hold: **macOS 26 (Tahoe) minimum**, **zero third-party dependencies** (Apple frameworks only). Don't introduce SPM/CocoaPods/Carthage deps.
 
 ## Agent and workflow safety
 

@@ -60,8 +60,8 @@ in `optional_filter` so the required fast/serial gates never pay for it.
 ## Vision aesthetics scores
 
 `VisionAestheticsDiagnostics.scores(for:)` collects `VNCalculateImageAestheticsScoresRequest`
-results for diagnostics/fixtures only. It is `#available(macOS 15, *)`-guarded (nil on
-macOS 14), returns nil when Vision declines, and is never referenced by any production
+results for diagnostics/fixtures only. It is `#available(macOS 15, *)`-guarded (all supported
+systems satisfy that guard), returns nil when Vision declines, and is never referenced by any production
 selection path — policy, scoring, and the coordinator take rendered samples, frozen targets,
 and pixel baselines only. The score is recorded beside renderer output to correlate perceived
 quality later; it must never steer a candidate. Do not optimize it.

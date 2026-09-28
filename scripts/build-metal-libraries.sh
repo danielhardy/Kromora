@@ -20,7 +20,7 @@ project_root="${0:A:h}/.."
 cd "$project_root"
 
 resources="Sources/KromoraKit/Resources"
-min_version="14.0"
+min_version="26.0"
 
 ci_source="$resources/KromoraCIKernels.ci.metal"
 ci_library="$resources/KromoraCIKernels.ci.metallib"

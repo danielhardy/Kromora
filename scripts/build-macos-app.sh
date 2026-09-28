@@ -47,10 +47,10 @@ else
     scratch_path=".build/swiftpm-$arch"
     swift build -c release --product Kromora \
       --scratch-path "$scratch_path" \
-      --triple "$arch-apple-macosx14.0"
+      --triple "$arch-apple-macosx26.0"
     arch_bin_path="$(swift build -c release --product Kromora \
       --scratch-path "$scratch_path" \
-      --triple "$arch-apple-macosx14.0" --show-bin-path)"
+      --triple "$arch-apple-macosx26.0" --show-bin-path)"
     universal_inputs+=("$arch_bin_path/Kromora")
     [[ -n "$resource_bundle" ]] || resource_bundle="$arch_bin_path/Kromora_KromoraKit.bundle"
   done
@@ -71,7 +71,7 @@ cp -R "$resource_bundle" "$app_bundle/Contents/Resources/"
 # Xcode-provided compiler explicitly through xcrun.
 /usr/bin/xcrun actool "$icon_composer" \
   --platform macosx \
-  --minimum-deployment-target 14.0 \
+  --minimum-deployment-target 26.0 \
   --target-device mac \
   --app-icon Kromora \
   --include-all-app-icons \
