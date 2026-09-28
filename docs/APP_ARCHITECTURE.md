@@ -1,5 +1,8 @@
 # Application ownership boundaries
 
+Product intent and explicit scope boundaries are in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This
+guide describes current code ownership; the package library is the only production library mode.
+
 ## Library product boundary (KRMA-520)
 
 The library product is package-backed. Referenced-folder browsing has no product future and is not

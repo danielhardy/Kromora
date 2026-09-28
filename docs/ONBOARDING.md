@@ -1,5 +1,8 @@
 # First-run onboarding
 
+The onboarding surface supports the Library → Edit → Export MVP described in
+[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md).
+
 Kromora's first-run welcome offers three package-backed starting points: import files, import
 from Photos, or copy the bundled CC0 sample photos into the open library. The sample photographs
 and source/license records live in `Sources/KromoraKit/Resources/SamplePhotos`; the manifest

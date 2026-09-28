@@ -1,5 +1,9 @@
 # Testing and profiling
 
+The release bar and interpretation of required versus optional checks are summarized in
+[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This document is authoritative for verification commands
+and lane requirements.
+
 The required checks are deterministic build/test lanes. Hardware, AppKit, RAW, and Instruments
 work is opt-in because it needs a logged-in display or licensed local fixtures.
 
@@ -52,7 +56,7 @@ support code under `Tests/KromoraKitTests/Support`. `KromoraKit` keeps only the 
 `AutoCandidateEvaluation` document/geometry transform needed by runtime measurement; a package
 settings test guards this shipping boundary.
 
-The standing Phase 1 identity gate is IdentityRegressionGateTests. It generates a disposable
+The standing identity regression gate is IdentityRegressionGateTests. It generates a disposable
 1,000-asset library and verifies full-library relocation, duplicate/collision handling, render and
 thumbnail mask supersession, preview publication supersession, and direct edit-store recovery. It
 is included in serial and can also be run directly with scripts/ci-tests.sh identity.

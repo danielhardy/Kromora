@@ -1,5 +1,9 @@
 # Kromora engineering guide
 
+The product audience, MVP, release bar, and post-MVP boundaries are in
+[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This guide records durable implementation constraints for
+the current product; completed issue sequences and dated review proposals are not requirements.
+
 This is the durable contributor guide for Kromora's current architecture. The source tree and test
 suite are authoritative when implementation changes; this document records the boundaries that a
 change must preserve.

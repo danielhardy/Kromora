@@ -1,5 +1,10 @@
 # Kromora Professional Polish Evaluation — 2026-09-22
 
+> **Deferred idea archive, not the MVP roadmap.** This dated competitor-gap evaluation and its
+> preserved proposal specifications are retained for possible future reconsideration. Current
+> product intent and exclusions are defined by [`PRODUCT_SCOPE.md`](../docs/PRODUCT_SCOPE.md);
+> proposals below are not commitments unless separately accepted through a new product decision.
+
 **Scope:** what would it take for Kromora to play at the level of Lightroom (Classic / CC), Darkroom, and Darktable — judged only on **quality, performance, ease of use, and stability**. Effort is deliberately out of scope.
 
 **Method:** cold read of `README.md`, `docs/ENGINEERING_GUIDE.md`, `docs/APP_ARCHITECTURE.md`, `docs/STORAGE_POLICY.md`, the `EditDocument` / `RenderPipeline` / `RenderEngine` boundary, all inspector views, `LocalMaskModels`, `ExportOptions`, `LibraryFilter` / `LibraryQueryController`, `Histogram`, `CropAdjustments`, `MenuCommands`, `KeyboardShortcuts`, and the Library/Edit surfaces on 2026-09-22. Anything listed as "missing" was not found in code or docs; anything listed as "present" is credited so this reads as a gap analysis, not a rewrite brief.
@@ -257,38 +262,38 @@ Pros entrust irreplaceable files. Kromora's validation + trash + termination-flu
 | Tethered capture | ✅ Classic | ❌ | ✅ | ❌ |
 | Performance at 100k+ (smart previews) | ✅ | ✅ | partial | partial (windowed query, no smart previews) |
 
-**Read the table as a roadmap:** rows with ❌ are exactly the "play at their level" list. The top three rows to flip first on photographer value are **retouch (§3)**, **presets/history/versions (§5)**, and **range masks (§4.1)** — not because they are cheap, but because every wedding/portrait/landscape pro hits them on day one.
+**Historical gap snapshot from 2026-09-22:** this table records the review's competitive framing at that time. It is not a product roadmap or a statement of current capabilities; see the archive notice above and the current [MVP scope](../docs/PRODUCT_SCOPE.md).
 
 ---
 
 ## 15. Suggested "polish" punchlist (grouped by photographer pain, not cost)
 
 **Can't call it pro without these:**
-1. Spot heal/clone/red-eye + visualize spots. — [KRMA-599](../.dg/issues/KRMA-599.md)
-2. User presets + preset browser + sync/auto-sync + history panel + snapshots + virtual copies. — [KRMA-603](../.dg/issues/KRMA-603.md), [KRMA-604](../.dg/issues/KRMA-604.md), [KRMA-605](../.dg/issues/KRMA-605.md)
-3. Luminance + color range masks; one-click Subject/Sky/People targets. — [KRMA-600](../.dg/issues/KRMA-600.md), [KRMA-601](../.dg/issues/KRMA-601.md); Sky selection is also tracked in [KRMA-580](../.dg/issues/KRMA-580.md), [KRMA-583](../.dg/issues/KRMA-583.md), and [KRMA-584](../.dg/issues/KRMA-584.md)
-4. WB eyedropper + preset menu; per-channel + parametric curves; clipping overlays + RGB/Lab readout; camera profiles/DCP selection. — [KRMA-594](../.dg/issues/KRMA-594.md), [KRMA-595](../.dg/issues/KRMA-595.md), [KRMA-597](../.dg/issues/KRMA-597.md), [KRMA-629](../.dg/issues/KRMA-629.md)
-5. Lens auto-profiles + CA/defringe; Upright auto/level/guided. — [KRMA-627](../.dg/issues/KRMA-627.md), [KRMA-628](../.dg/issues/KRMA-628.md)
-6. Sharpening radius/masking/detail + output sharpening; B&W mixer; calibration panel. — [KRMA-598](../.dg/issues/KRMA-598.md), [KRMA-596](../.dg/issues/KRMA-596.md), [KRMA-602](../.dg/issues/KRMA-602.md)
-7. Export presets + queue + naming tokens + sharpen-for + watermark + AdobeRGB/ProPhoto targets + print. — [KRMA-612](../.dg/issues/KRMA-612.md), [KRMA-613](../.dg/issues/KRMA-613.md), [KRMA-614](../.dg/issues/KRMA-614.md), [KRMA-625](../.dg/issues/KRMA-625.md)
-8. Keywords/labels/faces + collections/smart collections + stacks + editable IPTC + XMP round-trip. — [KRMA-606](../.dg/issues/KRMA-606.md), [KRMA-607](../.dg/issues/KRMA-607.md), [KRMA-608](../.dg/issues/KRMA-608.md), [KRMA-609](../.dg/issues/KRMA-609.md)
-9. Import dialog with previews/dupe-guard/rename/date-folders/backup-copy/apply-on-import; tethered capture. — [KRMA-610](../.dg/issues/KRMA-610.md), [KRMA-611](../.dg/issues/KRMA-611.md)
-10. Backup/versioning + crash recovery + health dashboard + diagnostics bundle + rollback-safe updates. — [KRMA-622](../.dg/issues/KRMA-622.md), [KRMA-623](../.dg/issues/KRMA-623.md), [KRMA-624](../.dg/issues/KRMA-624.md)
+1. Spot heal/clone/red-eye + visualize spots. — KRMA-599
+2. User presets + preset browser + sync/auto-sync + history panel + snapshots + virtual copies. — KRMA-603, KRMA-604, KRMA-605
+3. Luminance + color range masks; one-click Subject/Sky/People targets. — KRMA-600, KRMA-601; Sky selection is also tracked in KRMA-580, KRMA-583, and KRMA-584
+4. WB eyedropper + preset menu; per-channel + parametric curves; clipping overlays + RGB/Lab readout; camera profiles/DCP selection. — KRMA-594, KRMA-595, KRMA-597, KRMA-629
+5. Lens auto-profiles + CA/defringe; Upright auto/level/guided. — KRMA-627, KRMA-628
+6. Sharpening radius/masking/detail + output sharpening; B&W mixer; calibration panel. — KRMA-598, KRMA-596, KRMA-602
+7. Export presets + queue + naming tokens + sharpen-for + watermark + AdobeRGB/ProPhoto targets + print. — KRMA-612, KRMA-613, KRMA-614, KRMA-625
+8. Keywords/labels/faces + collections/smart collections + stacks + editable IPTC + XMP round-trip. — KRMA-606, KRMA-607, KRMA-608, KRMA-609
+9. Import dialog with previews/dupe-guard/rename/date-folders/backup-copy/apply-on-import; tethered capture. — KRMA-610, KRMA-611
+10. Backup/versioning + crash recovery + health dashboard + diagnostics bundle + rollback-safe updates. — KRMA-622, KRMA-623, KRMA-624
 
 **Turns powerful into pleasant:**
-11. Reference view, split before/after divider, survey grid, fullscreen/lights-out, second display, navigator, 1:1/2:1 loupe. — [KRMA-615](../.dg/issues/KRMA-615.md), [KRMA-616](../.dg/issues/KRMA-616.md)
-12. Histogram scopes (waveform/parade/vectorscope), proof preview, HDR story, overlay guides (thirds/golden/diagonal/safe). — [KRMA-597](../.dg/issues/KRMA-597.md), [KRMA-613](../.dg/issues/KRMA-613.md), [KRMA-616](../.dg/issues/KRMA-616.md)
-13. Brush cursor ring + auto-mask + flow controls + Pencil support; crop commit keys + invert-aspect key + straighten-line. — [KRMA-601](../.dg/issues/KRMA-601.md), [KRMA-602](../.dg/issues/KRMA-602.md), [KRMA-628](../.dg/issues/KRMA-628.md), [KRMA-630](../.dg/issues/KRMA-630.md)
-14. Smart-preview pyramid + activity center + cache settings + cold-open budget. — [KRMA-617](../.dg/issues/KRMA-617.md), [KRMA-618](../.dg/issues/KRMA-618.md)
-15. Command palette, saved workspaces, guided-edit cards, first-run sample library, in-app shortcut sheet. — [KRMA-619](../.dg/issues/KRMA-619.md), [KRMA-620](../.dg/issues/KRMA-620.md)
-16. External-editor round-trip, drag-out/Share/Shortcuts actions, standard-mapped XMP, original+settings bundle, camera/lens profile freshness, and explicit video support policy. — [KRMA-609](../.dg/issues/KRMA-609.md), [KRMA-625](../.dg/issues/KRMA-625.md), [KRMA-626](../.dg/issues/KRMA-626.md)
-17. VoiceOver/Dynamic Type/reduced-motion/localization pass; privacy page (on-device, no analytics). — [KRMA-621](../.dg/issues/KRMA-621.md)
+11. Reference view, split before/after divider, survey grid, fullscreen/lights-out, second display, navigator, 1:1/2:1 loupe. — KRMA-615, KRMA-616
+12. Histogram scopes (waveform/parade/vectorscope), proof preview, HDR story, overlay guides (thirds/golden/diagonal/safe). — KRMA-597, KRMA-613, KRMA-616
+13. Brush cursor ring + auto-mask + flow controls + Pencil support; crop commit keys + invert-aspect key + straighten-line. — KRMA-601, KRMA-602, KRMA-628, KRMA-630
+14. Smart-preview pyramid + activity center + cache settings + cold-open budget. — KRMA-617, KRMA-618
+15. Command palette, saved workspaces, guided-edit cards, first-run sample library, in-app shortcut sheet. — KRMA-619, KRMA-620
+16. External-editor round-trip, drag-out/Share/Shortcuts actions, standard-mapped XMP, original+settings bundle, camera/lens profile freshness, and explicit video support policy. — KRMA-609, KRMA-625, KRMA-626
+17. VoiceOver/Dynamic Type/reduced-motion/localization pass; privacy page (on-device, no analytics). — KRMA-621
 
-The linked tickets are backlog candidates derived from this evaluation, not an implementation sequence. Related recommendations are grouped where one ticket owns the shared workflow. Existing Sky-selection tickets are linked under item 3.
+The issue identifiers are historical references. This punchlist groups proposal material preserved in this archive; it does not identify live DispatchGraph tickets or an implementation sequence. Related recommendations are grouped where one ticket previously owned the shared workflow.
 
 ---
 
-*End of evaluation. No implementation, sequencing, or cost judgments were made — that belongs to planning. The next artifact after this should be product decisions (which rows are in-scope for Kromora's identity), not task breakdowns.*
+*End of the dated evaluation. No implementation, sequencing, or cost judgments were made at that time. Current product intent is recorded separately in [PRODUCT_SCOPE.md](../docs/PRODUCT_SCOPE.md); this archive retains the proposals and original issue specifications for reconsideration.*
 
 ---
 

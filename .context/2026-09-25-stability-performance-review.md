@@ -1,5 +1,9 @@
 # Kromora release readiness: stability and performance review
 
+> **Dated review evidence:** findings describe the recorded checkout and environment below. Later
+> changes may have resolved or changed them; verify against current source, tests, and issue status
+> before treating a finding as open work. This review is not a product roadmap.
+
 **Reviewed:** 2026-09-25, commit `b879cbc`, initially clean working tree.  
 **Priority:** prevent data loss and incorrect output first, then responsiveness and resource use, then usability and maintainability. Implementation effort does not determine the ranking.  
 **Recommendation:** resolve the P0 findings and the P1 correctness failures before calling this build shippable.

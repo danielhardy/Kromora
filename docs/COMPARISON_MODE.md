@@ -1,5 +1,8 @@
 # Comparison mode decision
 
+This is the current editor interaction contract; product intent is summarized in
+[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md).
+
 KRMA-358 selects the **always-both model** for the editor. Side-by-side is the primary comparison
 presentation whenever a meaningful before/after exists, while single-photo viewing is the alternate
 presentation. This keeps the comparison action and the two available surfaces consistent across

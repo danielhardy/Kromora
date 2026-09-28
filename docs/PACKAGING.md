@@ -1,5 +1,8 @@
 # Packaging and product identity
 
+Packaging is part of the MVP release bar in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This guide owns
+the current bundle, signing, and entitlement procedure.
+
 The distributable app is built by [`scripts/build-macos-app.sh`](../scripts/build-macos-app.sh).
 The script stages the SwiftPM release product, asset catalog, entitlements, and icon into the
 disposable `.build/Kromora.app` bundle. It does not modify tracked source assets.

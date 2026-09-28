@@ -1,5 +1,10 @@
 # Remove / Heal / Clone — Lightroom-style brush retouch plan
 
+> **Historical implementation plan.** Shipped Retouch behavior and measured limits are described in
+> [`docs/RETOUCH.md`](../docs/RETOUCH.md). The phases below record implementation provenance and are
+> not an open execution queue. Current product boundaries are in
+> [`docs/PRODUCT_SCOPE.md`](../docs/PRODUCT_SCOPE.md).
+
 Date: 2026-09-27 · Parent: KRMA-599 · Supersedes the slider-driven Retouch spot UI (29c44da, aed117d, 96a14e9)
 
 ## Goal

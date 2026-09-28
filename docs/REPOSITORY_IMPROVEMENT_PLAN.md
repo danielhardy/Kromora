@@ -7,6 +7,10 @@
 > item. Reopen or create a scoped issue before treating any remaining historical acceptance text as
 > current work.
 
+Product intent and active scope are centralized in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). The
+historical findings below are not a roadmap; re-triage proposed work against current code and
+DispatchGraph before scheduling it.
+
 ## Historical work-package status
 
 | Item | Status | Current record / disposition |
