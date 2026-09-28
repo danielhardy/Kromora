@@ -305,7 +305,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var availableInspectorTabs: [InspectorTab] {
         guard !isCropToolActive else { return [] }
         return InspectorTab.availableTabs(
-            hasImage: sourceImage != nil,
+            // Retain the visible tab set across a photo cutover. The histogram remains published
+            // until the new source's histogram is ready, so it marks this brief loading interval.
+            hasImage: sourceImage != nil || histogram != nil,
             developPanelState: developPanelState,
             hasMaskingTarget: maskingAssetID != nil
         )
@@ -1908,8 +1910,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.cancel()
         invalidateEditedThumbnailWork(for: previousActiveAssetID)
         editedThumbnailCoordinator.clearPendingRequest()
-        previewSurface.clear()
-        originalPreviewSurface.clear()
+        // Keep the last presented frame beneath the loading indicator until this source publishes
+        // its replacement. The render publication gate prevents an obsolete in-flight request
+        // from taking its place.
         if canvasState.isCropToolActive {
             canvasWorkflow.discardCropForSourceChange()
         }
@@ -1918,8 +1921,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         restoreMaskSelection()
         resetResolutionPlanners()
         cancelWhiteBalanceSampling()
-        // Do not let the previous surface briefly show the photo we are leaving while the new
-        // source is being decoded.
+        // No source pixels are available to editing tools during the transition. PreviewView may
+        // still display the last confirmed frame with a loading indicator over it.
         sourceImage = nil
         previewState = .loading
         // The old source must not describe the empty/loading state or gate the new image's
