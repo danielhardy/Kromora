@@ -100,11 +100,16 @@ struct InspectorDisclosure<Content: View>: View {
                     .transition(.opacity)
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: isExpanded)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func toggle() {
+        // The sole animation source for expand/collapse. A previous revision also applied
+        // `.animation(..., value: isExpanded)` here; every expansion write already funnels
+        // through this method, so the modifier only duplicated the transaction. Keeping one
+        // explicit source avoids stacking overlapping animated transactions on the scroll
+        // view's content size — overlapping size transactions are what widen the window for
+        // AppKit's display-cycle constraint re-entrancy (KRMA-687).
         withAnimation(.easeInOut(duration: 0.2)) {
             isExpanded.toggle()
         }
@@ -134,14 +139,29 @@ struct InspectorScrollingContent<Content: View>: View {
 
 /// Reports the width the parent offered, even when a child would rather be wider.
 struct FitsProposedWidth: Layout {
+    /// The proposal the child was last measured with. `placeSubviews` reuses it verbatim
+    /// so the child is never measured with one proposal and placed with another: a
+    /// measure/place mismatch reports a new size after placement, which keeps the
+    /// surrounding scroll view's content size churning and schedules extra
+    /// ScrollViewHelper transactions — the update class at the center of KRMA-687.
+    struct Cache {
+        var proposal: ProposedViewSize = .unspecified
+    }
+
+    func makeCache(subviews: Subviews) -> Cache {
+        Cache()
+    }
+
     func sizeThatFits(
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) -> CGSize {
         guard let child = subviews.first else { return .zero }
         let width = proposal.width ?? child.sizeThatFits(.unspecified).width
-        let childSize = child.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
+        let measure = ProposedViewSize(width: width, height: proposal.height)
+        cache.proposal = measure
+        let childSize = child.sizeThatFits(measure)
         return CGSize(width: width, height: proposal.height ?? childSize.height)
     }
 
@@ -149,12 +169,12 @@ struct FitsProposedWidth: Layout {
         in bounds: CGRect,
         proposal: ProposedViewSize,
         subviews: Subviews,
-        cache: inout ()
+        cache: inout Cache
     ) {
         subviews.first?.place(
             at: CGPoint(x: bounds.minX, y: bounds.minY),
             anchor: .topLeading,
-            proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+            proposal: cache.proposal
         )
     }
 }
