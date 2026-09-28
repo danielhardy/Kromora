@@ -66,6 +66,27 @@ final class LibraryGridTests: TempDirectoryTestCase {
         )
     }
 
+    func testPresentedAspectRatioAppliesDocumentRotationBeforeCrop() {
+        let crop = CropAdjustments(
+            normalizedRect: CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.4)
+        )
+
+        XCTAssertEqual(
+            LibraryGridLayout.presentedAspectRatio(
+                sourceAspectRatio: 3.0 / 2.0, crop: crop, rotation: .clockwise90
+            ),
+            4.0 / 3.0,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            LibraryGridLayout.presentedAspectRatio(
+                sourceAspectRatio: 3.0 / 2.0, crop: .neutral, rotation: .counterClockwise90
+            ),
+            2.0 / 3.0,
+            accuracy: 0.000_001
+        )
+    }
+
     func testMosaicCacheRebuildsWhenPlaceholderAspectBecomesResolved() {
         let cache = LibraryMosaicLayoutCache()
         let layout = LibraryGridLayout()

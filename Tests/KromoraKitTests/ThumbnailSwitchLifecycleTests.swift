@@ -114,7 +114,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let peer = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "crop-aware-peer.png", in: tempDirectory
         )
-        let viewModel = makeAppViewModel(engine: RenderEngine())
+        let engine = RenderEngine()
+        let viewModel = makeAppViewModel(engine: engine)
         try await loadCollection(viewModel, first: peer, second: source)
         viewModel.collection.beginThumbnailDemand()
 
@@ -166,6 +167,33 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             XCTAssertEqual(
                 max(settledImage.width, settledImage.height), originalLongEdge,
                 "the \(name) crop must not be softer than the original at the displayed long edge"
+            )
+            XCTAssertEqual(
+                viewModel.collection.items[sourceIndex].libraryAspectRatio,
+                min(3.0, (2_400.0 / 1_600.0) * Double(rect.width / rect.height)),
+                accuracy: 0.000_001,
+                "the \(name) cell geometry must match the rendered crop"
+            )
+
+            let currentRenderCandidate = await engine.makeThumbnailCGImage(RenderRequest(
+                source: ImageSource(
+                    url: source,
+                    nativeExtent: CGSize(width: 2_400, height: 1_600),
+                    portableIdentity: viewModel.collection.items[sourceIndex].asset.source.portableIdentity
+                ),
+                assetID: assetID,
+                document: viewModel.document,
+                targetSize: CGSize(
+                    width: Thumbnails.libraryMaxPixelSize,
+                    height: Thumbnails.libraryMaxPixelSize
+                ),
+                quality: .thumbnail,
+                output: .raster
+            ))
+            let currentRender = try XCTUnwrap(currentRenderCandidate)
+            XCTAssertEqual(
+                try Pixels.bytes(of: settledImage), try Pixels.bytes(of: currentRender),
+                "the published \(name) pixels must match the current edited render"
             )
             previousRevision = viewModel.collection.items[sourceIndex].editedThumbnailRevision
         }

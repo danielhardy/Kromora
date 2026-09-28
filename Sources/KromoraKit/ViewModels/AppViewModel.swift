@@ -788,8 +788,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         collection.applyEditedThumbnail(image, for: assetID, revision: revision)
     }
-    func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID) {
-        collection.setPresentedCrop(crop, for: assetID)
+    func setEditedThumbnailPresentedCrop(
+        _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
+    ) {
+        collection.setPresentedCrop(crop, rotation: rotation, for: assetID)
     }
 
     func setMaskingStatusMessage(_ message: String) { statusMessage = message }
@@ -1896,7 +1898,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         document = session?.document ?? EditDocument()
         comparisonBaselineDocument = document.comparisonBaseline
         editorDocument.activate(session: session)
-        collection.setPresentedCrop(document.crop, for: assetID)
+        collection.setPresentedCrop(document.crop, rotation: document.rotation, for: assetID)
         refreshDurableEditHistory()
         lastReportedMissingLUT = nil
         lutResolutionStatus = nil
@@ -2061,7 +2063,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
             comparisonBaselineDocument = document.comparisonBaseline
             editorDocument.adoptStoredDocument(document, for: request.assetID)
-            collection.setPresentedCrop(document.crop, for: request.assetID)
+            collection.setPresentedCrop(document.crop, rotation: document.rotation, for: request.assetID)
             restoreMaskSelection()
             refreshLUTResolutionStatus()
             if documentChanged {
@@ -3263,7 +3265,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         editorDocument.recordChange(from: document, to: updated)
         document = updated
         if let activeAssetID {
-            collection.setPresentedCrop(document.crop, for: activeAssetID)
+            collection.setPresentedCrop(document.crop, rotation: document.rotation, for: activeAssetID)
         }
         if rotationChanged {
             sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
@@ -3735,7 +3737,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancelHistogram(clear: false, pump: false)
         document = restored
         if let activeAssetID {
-            collection.setPresentedCrop(document.crop, for: activeAssetID)
+            collection.setPresentedCrop(document.crop, rotation: document.rotation, for: activeAssetID)
         }
         sourceSize = restored.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
         let cropToolRemainsActive = canvasState.isCropToolActive

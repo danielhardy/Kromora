@@ -130,6 +130,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
             crop: CropAdjustments(normalizedRect: CGRect(
                 x: 0.18, y: 0.12, width: 0.54, height: 0.72
             )),
+            rotation: .clockwise90,
             adjustments: [.exposure(ev: 0.6)]
         )
         let firstStore = EditDocumentStore(package: firstSession.package, lease: firstSession.lease)
@@ -141,7 +142,11 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         await firstSession.shutdown()
 
         let reopenedSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
-        let reopenedAsset = try XCTUnwrap(reopenedSession.materializedAssets().first)
+        var reopenedAsset = try XCTUnwrap(reopenedSession.materializedAssets().first)
+        var sourceMetadata = ImageMetadata()
+        sourceMetadata.pixelWidth = 32
+        sourceMetadata.pixelHeight = 24
+        reopenedAsset.updateMetadata(from: sourceMetadata)
         let collection = ImageCollection()
         collection.loadPortableAssets([reopenedAsset])
         await collection.scanCompletion()
@@ -158,6 +163,9 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         )
         destination.onApply = { image, revision in
             collection.applyEditedThumbnail(image, for: assetID, revision: revision)
+        }
+        destination.onSetPresentedGeometry = { crop, rotation in
+            collection.setPresentedCrop(crop, rotation: rotation, for: assetID)
         }
         let scheduler = ImageWorkScheduler()
         let engine = FakeEditedThumbnailRenderer(waits: false)
@@ -185,6 +193,13 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
             destination.presentedCrop,
             savedDocument.crop,
             "reopening must adopt the saved crop for Library cell geometry"
+        )
+        XCTAssertEqual(destination.presentedRotation, savedDocument.rotation)
+        XCTAssertEqual(
+            item.libraryAspectRatio,
+            (24.0 / 32.0) * (0.54 / 0.72),
+            accuracy: 0.000_001,
+            "reopened Library geometry must include saved rotation before applying the crop"
         )
         XCTAssertFalse(destination.appliedWasNil)
         XCTAssertNotNil(item.thumbnail, "the edited raster must be published to the library item")
@@ -254,7 +269,9 @@ private final class FakeDestination: EditedThumbnailDestination {
     private(set) var appliedRevisions: [String] = []
     private(set) var appliedWasNil = false
     private(set) var presentedCrop = CropAdjustments.neutral
+    private(set) var presentedRotation = ImageRotation.zero
     var onApply: ((NSImage?, String) -> Void)?
+    var onSetPresentedGeometry: ((CropAdjustments, ImageRotation) -> Void)?
 
     init(
         assetID: PhotoAssetID, item: ImageCollection.Item, document: EditDocument?,
@@ -284,8 +301,12 @@ private final class FakeDestination: EditedThumbnailDestination {
         item.applyEditedThumbnail(image, revision: revision)
         onApply?(image, revision)
     }
-    func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID) {
+    func setEditedThumbnailPresentedCrop(
+        _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
+    ) {
         presentedCrop = crop
+        presentedRotation = rotation
+        onSetPresentedGeometry?(crop, rotation)
     }
 
     private var storedDocument: EditDocument?
