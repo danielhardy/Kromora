@@ -56,6 +56,30 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.light.whites, 20)
     }
 
+    func testToneCurveResetClearsOnlySelectedChannelAndIsUndoable() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let redCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.25, output: 0.35),
+            LightCurvePoint(input: 0.75, output: 0.8),
+        ])
+        let blueCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.25, output: 0.2),
+            LightCurvePoint(input: 0.75, output: 0.65),
+        ])
+        viewModel.updateDocument {
+            $0.light.setToneCurve(redCurve, for: .red)
+            $0.light.setToneCurve(blueCurve, for: .blue)
+        }
+
+        viewModel.resetToneCurve(.red)
+
+        XCTAssertTrue(viewModel.document.light.toneCurve(for: .red).isIdentity)
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
+        viewModel.undo()
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .red), redCurve)
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
+    }
+
     func testLightSliderGestureIsOneUndoOperation() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.beginPreviewInteraction()

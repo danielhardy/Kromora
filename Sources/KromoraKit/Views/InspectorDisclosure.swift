@@ -8,37 +8,62 @@ import SwiftUI
 struct InspectorDisclosure<Content: View>: View {
     let title: String
     @Binding var isExpanded: Bool
+    var trailingActionTitle: String?
+    var trailingActionEnabled: Bool
+    var trailingAction: (() -> Void)?
     @ViewBuilder let content: () -> Content
 
     init(
         _ title: String,
         isExpanded: Binding<Bool>,
+        trailingActionTitle: String? = nil,
+        trailingActionEnabled: Bool = true,
+        trailingAction: (() -> Void)? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
         self._isExpanded = isExpanded
+        self.trailingActionTitle = trailingActionTitle
+        self.trailingActionEnabled = trailingActionEnabled
+        self.trailingAction = trailingAction
         self.content = content
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: toggle) {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .accessibilityHidden(true)
-                    Text(title)
-                    Spacer(minLength: 0)
+            HStack(spacing: 8) {
+                Button(action: toggle) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                            .accessibilityHidden(true)
+                        Text(title)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .accessibilityLabel(title)
+                .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+                .accessibilityHint("Double-tap to \(isExpanded ? "collapse" : "expand")")
+                .accessibilityAddTraits(.isToggle)
+                .accessibilityRemoveTraits(.isButton)
+
+                if let trailingActionTitle, let trailingAction {
+                    Button(action: trailingAction) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(.system(size: 11, weight: .medium))
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .disabled(!trailingActionEnabled)
+                    .help(trailingActionTitle)
+                    .accessibilityLabel(trailingActionTitle)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(title)
-            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
-            .accessibilityHint("Double-tap to \(isExpanded ? "collapse" : "expand")")
-            .accessibilityAddTraits(.isToggle)
-            .accessibilityRemoveTraits(.isButton)
 
             if isExpanded {
                 content()
