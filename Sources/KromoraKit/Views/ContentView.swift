@@ -60,7 +60,6 @@ public struct ContentView: View {
                         ToolbarItem(placement: .navigation) {
                             workspaceModePicker
                         }
-                        .sharedBackgroundVisibility(.hidden)
                         ToolbarSpacer(.flexible)
                     } else {
                         ToolbarItem(placement: .navigation) {
@@ -72,20 +71,12 @@ public struct ContentView: View {
                     ToolbarItemGroup(placement: .primaryAction) {
                         toolbarContent
                     }
-                    // The native toolbar owns the full-width surface. macOS 26 otherwise adds
-                    // a separate shared glass plate behind this trailing action group.
-                    .sharedBackgroundVisibility(.hidden)
                 } else {
                     ToolbarItemGroup(placement: .primaryAction) {
                         toolbarContent
                     }
                 }
             }
-            // The histogram occupies the toolbar band in the inspector. A visible toolbar
-            // background is a second layer over that band, and dragging the window opens a
-            // one-pixel gap between the layers. The title bar stays transparent so the plot
-            // is the only thing drawn there.
-            .toolbarBackground(.hidden, for: .windowToolbar)
             .background(TitlebarSeparatorSuppression())
             .photosPicker(
                 isPresented: $viewModel.isPhotosPickerPresented,
