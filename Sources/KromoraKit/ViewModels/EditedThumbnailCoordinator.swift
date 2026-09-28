@@ -133,10 +133,11 @@ final class EditedThumbnailCoordinator {
                     id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw),
                     pump: false
                 )
-            } else if item.editedThumbnailRevision == nil {
+            } else {
                 // The editor owns the renderer during an interaction. Keep visible-library
-                // demand as value state so a cached original thumbnail cannot make the request
-                // disappear when the viewport callback does not fire again after settling.
+                // demand as value state even when an older edited bitmap is already published:
+                // that bitmap may no longer match the saved document, and the viewport callback
+                // does not have to fire again after settling.
                 let previous = deferredEditedThumbnailPriorities[assetID]
                 if let previous {
                     deferredEditedThumbnailPriorities[assetID] =

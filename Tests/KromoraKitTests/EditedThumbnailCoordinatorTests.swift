@@ -143,6 +143,29 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         await fixture.scheduler.cancelAllAndWait()
     }
 
+    func testVisibleRefreshWithOlderEditedThumbnailSurvivesPreviewInteraction() async throws {
+        let fixture = makeFixture(active: false)
+        fixture.item.applyEditedThumbnail(nil, revision: "older-saved-edit")
+        fixture.destination.isEditedThumbnailInteractionActive = true
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+
+        XCTAssertTrue(fixture.destination.appliedRevisions.isEmpty)
+        XCTAssertEqual(fixture.item.editedThumbnailRevision, "older-saved-edit")
+
+        fixture.destination.isEditedThumbnailInteractionActive = false
+        fixture.coordinator.admitDeferredDemands()
+        try await waitUntil("the refreshed visible thumbnail") {
+            fixture.item.editedThumbnailRevision
+                == fixture.destination.document.editHash + ":unresolved"
+        }
+
+        let renderedEditHashes = await fixture.engine.renderedEditHashes
+        XCTAssertEqual(renderedEditHashes, [fixture.destination.document.editHash])
+        XCTAssertFalse(fixture.destination.appliedWasNil)
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
     func testInitialVisibleDemandUsesPersistedEditsAfterPackageReopen() async throws {
         let root = try Fixtures.makeTempDirectory("EditedThumbnailRelaunch")
         defer { try? FileManager.default.removeItem(at: root) }
