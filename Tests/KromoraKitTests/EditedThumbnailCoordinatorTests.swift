@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import XCTest
 @testable import KromoraKit
 
@@ -76,17 +77,104 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         XCTAssertEqual(requestCount, 0)
     }
 
+    func testVisibleDemandSurvivesPreviewInteractionUntilSettled() async throws {
+        let fixture = makeFixture(active: false)
+        fixture.destination.isEditedThumbnailInteractionActive = true
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+
+        XCTAssertTrue(fixture.destination.appliedRevisions.isEmpty)
+        let initialRequestCount = await fixture.engine.thumbnailRequestCount
+        XCTAssertEqual(initialRequestCount, 0)
+
+        fixture.destination.isEditedThumbnailInteractionActive = false
+        fixture.coordinator.admitDeferredDemands()
+        try await waitUntil("the deferred visible thumbnail") {
+            !fixture.destination.appliedRevisions.isEmpty
+        }
+
+        let renderedEditHashes = await fixture.engine.renderedEditHashes
+        XCTAssertEqual(renderedEditHashes, [fixture.destination.document.editHash])
+        XCTAssertFalse(fixture.destination.appliedWasNil)
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
+    func testInitialVisibleDemandUsesPersistedEditsAfterPackageReopen() async throws {
+        let root = try Fixtures.makeTempDirectory("EditedThumbnailRelaunch")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let packageURL = root.appendingPathComponent("Library.kromoralibrary")
+        let indexURL = root.appendingPathComponent("LibraryIndex.store")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "edited.jpg", in: root
+        )
+        let firstSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        _ = try firstSession.importURLs([sourceURL])
+        let firstAsset = try XCTUnwrap(firstSession.materializedAssets().first)
+        let savedDocument = EditDocument(adjustments: [.exposure(ev: 0.6)])
+        let firstStore = EditDocumentStore(package: firstSession.package, lease: firstSession.lease)
+        try await firstStore.save(savedDocument, for: EditSourceReference(
+            assetID: firstAsset.id,
+            portableIdentity: firstAsset.source.portableIdentity,
+            url: firstAsset.url
+        ))
+        await firstSession.shutdown()
+
+        let reopenedSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let reopenedAsset = try XCTUnwrap(reopenedSession.materializedAssets().first)
+        let collection = ImageCollection()
+        collection.loadPortableAssets([reopenedAsset])
+        await collection.scanCompletion()
+        collection.beginThumbnailDemand()
+        let item = try XCTUnwrap(collection.items.first)
+        XCTAssertNotNil(item.url, "the reopened package asset must expose its source")
+        let reopenedStore = EditDocumentStore(
+            package: reopenedSession.package, lease: reopenedSession.lease
+        )
+
+        let assetID = reopenedAsset.id
+        let destination = FakeDestination(
+            assetID: assetID, item: item, document: nil, lut: nil, active: false
+        )
+        destination.onApply = { image, revision in
+            collection.applyEditedThumbnail(image, for: assetID, revision: revision)
+        }
+        let scheduler = ImageWorkScheduler()
+        let engine = FakeEditedThumbnailRenderer(waits: false)
+        let coordinator = EditedThumbnailCoordinator(
+            workScheduler: scheduler,
+            engine: engine,
+            editStore: reopenedStore,
+            destination: destination
+        )
+        collection.onThumbnailDemand = { demandedID, priority in
+            coordinator.request(for: demandedID, priority: priority)
+        }
+        collection.requestVisibleThumbnails(for: [assetID])
+
+        try await waitUntil("the persisted edited thumbnail") {
+            item.editedThumbnailRevision != nil
+        }
+
+        XCTAssertNil(collection.selection.activeID, "visible demand must not require selection")
+        let renderedEditHashes = await engine.renderedEditHashes
+        XCTAssertEqual(renderedEditHashes, [savedDocument.editHash])
+        XCTAssertFalse(destination.appliedWasNil)
+        XCTAssertNotNil(item.thumbnail, "the edited raster must be published to the library item")
+        await scheduler.cancelAllAndWait()
+        await reopenedSession.shutdown()
+    }
+
     private func makeFixture(
         document: EditDocument = EditDocument(adjustments: [.exposure(ev: 0.2)]),
         lut: CubeLUT? = nil,
-        rendererWaits: Bool = false
+        rendererWaits: Bool = false,
+        active: Bool = true
     ) -> Fixture {
         let assetID = PhotoAssetID.imported(UUID())
         let item = ImageCollection.Item(
             asset: PhotoAsset(data: Data([1, 2, 3]), filename: "sample.jpg")
         )
         let destination = FakeDestination(
-            assetID: assetID, item: item, document: document, lut: lut
+            assetID: assetID, item: item, document: document, lut: lut, active: active
         )
         let scheduler = ImageWorkScheduler()
         let engine = FakeEditedThumbnailRenderer(waits: rendererWaits)
@@ -132,34 +220,46 @@ private final class FakeDestination: EditedThumbnailDestination {
     var isEditedThumbnailInteractionActive = false
     var isEditedThumbnailPreviewDebouncing = false
     let item: ImageCollection.Item
-    private let document: EditDocument
+    let document: EditDocument
     private let lut: CubeLUT?
     private(set) var appliedRevisions: [String] = []
     private(set) var appliedWasNil = false
+    var onApply: ((NSImage?, String) -> Void)?
 
-    init(assetID: PhotoAssetID, item: ImageCollection.Item, document: EditDocument, lut: CubeLUT?) {
-        self.activeEditedThumbnailAssetID = assetID
+    init(
+        assetID: PhotoAssetID, item: ImageCollection.Item, document: EditDocument?,
+        lut: CubeLUT?, active: Bool = true
+    ) {
+        self.activeEditedThumbnailAssetID = active ? assetID : nil
         self.item = item
-        self.document = document
+        self.document = document ?? EditDocument()
         self.lut = lut
+        storedDocument = document
     }
 
     var editedThumbnailItems: [ImageCollection.Item] { [item] }
     func editedThumbnailItem(for assetID: PhotoAssetID) -> ImageCollection.Item? { item }
-    func editedThumbnailDocument(for assetID: PhotoAssetID) -> EditDocument? { document }
+    func editedThumbnailDocument(for assetID: PhotoAssetID) -> EditDocument? {
+        // A nil document models a cold item whose current document must come from the package.
+        storedDocument
+    }
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64 { 1 }
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { lut }
     func invalidateEditedThumbnail(for assetID: PhotoAssetID) {}
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         appliedWasNil = image == nil
         appliedRevisions.append(revision)
+        onApply?(image, revision)
     }
     func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID) {}
+
+    private var storedDocument: EditDocument?
 }
 
 private actor FakeEditedThumbnailRenderer: EditedThumbnailRendering {
     private let waits: Bool
     private(set) var thumbnailRequestCount = 0
+    private(set) var renderedEditHashes: [String] = []
     private var continuation: CheckedContinuation<Void, Never>?
 
     init(waits: Bool) { self.waits = waits }
@@ -170,10 +270,17 @@ private actor FakeEditedThumbnailRenderer: EditedThumbnailRendering {
 
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage? {
         thumbnailRequestCount += 1
+        renderedEditHashes.append(request.document.editHash)
         if waits {
             await withCheckedContinuation { continuation = $0 }
         }
-        return nil
+        let context = CGContext(
+            data: nil, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        )
+        context?.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.8, alpha: 1))
+        context?.fill(CGRect(x: 0, y: 0, width: 1, height: 1))
+        return context?.makeImage()
     }
 
     func releaseThumbnail() {

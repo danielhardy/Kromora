@@ -35,6 +35,7 @@ protocol EditedThumbnailDestination: AnyObject {
 final class EditedThumbnailCoordinator {
     private var editedThumbnailGenerations: [PhotoAssetID: UInt64] = [:]
     private var editedThumbnailDebounceTasks: [PhotoAssetID: Task<Void, Never>] = [:]
+    private var deferredEditedThumbnailPriorities: [PhotoAssetID: ImageWorkScheduler.Priority] = [:]
     private var pendingEditedThumbnailAssetID: PhotoAssetID?
     private let editedThumbnailJobPrefix = "edited-thumbnail-"
 
@@ -85,6 +86,7 @@ final class EditedThumbnailCoordinator {
             editedThumbnailDebounceTasks[id]?.cancel()
             editedThumbnailDebounceTasks.removeValue(forKey: id)
             editedThumbnailGenerations.removeValue(forKey: id)
+            deferredEditedThumbnailPriorities.removeValue(forKey: id)
             workScheduler.cancel(
                 id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
             )
@@ -122,6 +124,17 @@ final class EditedThumbnailCoordinator {
                     id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw),
                     pump: false
                 )
+            } else if item.editedThumbnailRevision == nil {
+                // The editor owns the renderer during an interaction. Keep visible-library
+                // demand as value state so a cached original thumbnail cannot make the request
+                // disappear when the viewport callback does not fire again after settling.
+                let previous = deferredEditedThumbnailPriorities[assetID]
+                if let previous {
+                    deferredEditedThumbnailPriorities[assetID] =
+                        previous.rawValue <= priority.rawValue ? previous : priority
+                } else {
+                    deferredEditedThumbnailPriorities[assetID] = priority
+                }
             }
             return
         }
@@ -347,6 +360,21 @@ final class EditedThumbnailCoordinator {
         }
     }
 
+    /// Admit library thumbnails that arrived while the editor owned preview rendering.
+    /// Their demand was already bounded by the visible grid/filmstrip window.
+    func admitDeferredDemands() {
+        guard let destination, !destination.isEditedThumbnailShuttingDown,
+            !destination.isEditedThumbnailInteractionActive,
+            !destination.isEditedThumbnailPreviewDebouncing
+        else { return }
+        let deferred = deferredEditedThumbnailPriorities
+            .sorted { $0.value.rawValue < $1.value.rawValue }
+        deferredEditedThumbnailPriorities.removeAll(keepingCapacity: true)
+        for (assetID, priority) in deferred {
+            request(for: assetID, priority: priority)
+        }
+    }
+
     func shutdown() async {
         let debounceTasks = Array(editedThumbnailDebounceTasks.values)
         for task in debounceTasks { task.cancel() }
@@ -358,6 +386,7 @@ final class EditedThumbnailCoordinator {
             )
         }
         pendingEditedThumbnailAssetID = nil
+        deferredEditedThumbnailPriorities.removeAll()
         for task in debounceTasks { await task.value }
     }
 }

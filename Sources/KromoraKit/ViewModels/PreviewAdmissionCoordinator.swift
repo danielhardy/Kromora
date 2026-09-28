@@ -48,6 +48,7 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionPreviewCoordinator: PreviewCoordinator { get }
     var pendingEditedThumbnailAssetID: PhotoAssetID? { get }
     func admitSettledEditedThumbnail(_ assetID: PhotoAssetID)
+    func admitDeferredEditedThumbnails()
     func admissionClearPreview()
     func admissionPresentCacheRaster(
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
@@ -644,6 +645,7 @@ final class PreviewAdmissionCoordinator {
             self.previewDebounceTask = nil
             self.schedulePreview()
             destination.admissionScheduleOriginalPreview()
+            destination.admitDeferredEditedThumbnails()
             if let assetID = destination.pendingEditedThumbnailAssetID {
                 destination.admitSettledEditedThumbnail(assetID)
             }
