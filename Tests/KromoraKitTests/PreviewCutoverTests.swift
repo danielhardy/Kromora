@@ -654,4 +654,50 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
                       "browsing thumbnails stay on the exact path")
     }
 
+    /// A Library click can load and settle the selected photo while Edit is hidden. The explicit
+    /// double-click transition must admit a histogram from that retained frame without requiring
+    /// another edit or a second render interaction.
+    func testLibraryDoubleClickPublishesHistogramForAlreadyLoadedPhoto() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        // Model the app's drawable-managed surface: an image can be published to the surface while
+        // its presentation callback waits for Edit to attach the drawable.
+        viewModel.previewSurface.attachPresentationLifecycle()
+        let libraryFolder = tempDirectory.appendingPathComponent("library", isDirectory: true)
+        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+        let photo = try Fixtures.writeGradientPNG(
+            width: 48, height: 32, named: "library-photo.png", in: libraryFolder
+        )
+        viewModel.collection.loadFromFolder(libraryFolder)
+        await viewModel.collection.scanCompletion()
+        let item = try XCTUnwrap(viewModel.collection.items.first)
+
+        // Selecting a Library item prepares and renders it with the inspector closed.
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the Library photo preview to publish") {
+            let rendered = await fake.previewRequests.contains {
+                $0.source?.backing == .url(photo)
+            }
+            return viewModel.previewSurface.image != nil && rendered
+        }
+        XCTAssertFalse(viewModel.isInspectorPresented)
+        XCTAssertNil(viewModel.histogram)
+        let hiddenHistogramRequests = await fake.histogramRequests
+        XCTAssertEqual(hiddenHistogramRequests.count, 0)
+
+        // This is the grid's double-click callback, after the selected item is already loaded.
+        viewModel.openLibraryImageForEditing()
+        XCTAssertTrue(viewModel.navigation.isEdit)
+        XCTAssertTrue(viewModel.isInspectorPresented)
+        try await waitUntil("the initial Library-open histogram") {
+            viewModel.histogram != nil && !viewModel.isHistogramLoading
+        }
+
+        let requests = await fake.histogramRequests
+        XCTAssertEqual(requests.count, 1)
+        XCTAssertEqual(requests[0].source?.backing, .url(photo))
+        XCTAssertEqual(requests[0].document, viewModel.document)
+        XCTAssertEqual(item.url, photo)
+    }
+
 }
