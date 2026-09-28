@@ -64,6 +64,7 @@ final class ImageCollectionPresentationModel {
         private var editedThumbnailUsesFallback = false
         private(set) var editedThumbnailRevision: String?
         private var presentedCrop = CropAdjustments.neutral
+        private var presentedRotation = ImageRotation.zero
 
         var id: PhotoAssetID { asset.id }
         var url: URL? { asset.url }
@@ -83,7 +84,8 @@ final class ImageCollectionPresentationModel {
             guard hasResolvedLibraryAspect, let dimensions = asset.dimensions else { return 4.0 / 3.0 }
             return LibraryGridLayout.presentedAspectRatio(
                 sourceAspectRatio: Double(dimensions.width) / Double(dimensions.height),
-                crop: presentedCrop
+                crop: presentedCrop,
+                rotation: presentedRotation
             )
         }
 
@@ -142,9 +144,10 @@ final class ImageCollectionPresentationModel {
         }
 
         @discardableResult
-        func setPresentedCrop(_ crop: CropAdjustments) -> Bool {
-            guard presentedCrop != crop else { return false }
+        func setPresentedCrop(_ crop: CropAdjustments, rotation: ImageRotation) -> Bool {
+            guard presentedCrop != crop || presentedRotation != rotation else { return false }
             presentedCrop = crop
+            presentedRotation = rotation
             return true
         }
     }
@@ -542,8 +545,11 @@ final class ImageCollectionPresentationModel {
     func applyEditedThumbnail(_ thumbnail: NSImage?, for id: PhotoAssetID, revision: String) {
         items.first { $0.id == id }?.applyEditedThumbnail(thumbnail, revision: revision)
     }
-    func setPresentedCrop(_ crop: CropAdjustments, for id: PhotoAssetID) {
-        guard let item = items.first(where: { $0.id == id }), item.setPresentedCrop(crop) else { return }
+    func setPresentedCrop(
+        _ crop: CropAdjustments, rotation: ImageRotation = .zero, for id: PhotoAssetID
+    ) {
+        guard let item = items.first(where: { $0.id == id }),
+              item.setPresentedCrop(crop, rotation: rotation) else { return }
         cropGeneration += 1
         invalidateCollectionProjection(notify: true)
     }

@@ -249,9 +249,11 @@ struct LibraryGridLayout: Sendable, Equatable {
     /// source pixel ratio before it can drive the mosaic geometry.
     static func presentedAspectRatio(
         sourceAspectRatio: Double,
-        crop: CropAdjustments
+        crop: CropAdjustments,
+        rotation: ImageRotation = .zero
     ) -> Double {
-        let sourceRatio = normalizedAspectRatio(sourceAspectRatio)
+        let unrotatedSourceRatio = normalizedAspectRatio(sourceAspectRatio)
+        let sourceRatio = rotation.swapsDimensions ? 1 / unrotatedSourceRatio : unrotatedSourceRatio
         guard !crop.isIdentity,
               let rect = crop.normalizedRect,
               rect.width.isFinite, rect.height.isFinite,

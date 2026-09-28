@@ -26,7 +26,9 @@ protocol EditedThumbnailDestination: AnyObject {
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT?
     func invalidateEditedThumbnail(for assetID: PhotoAssetID)
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String)
-    func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID)
+    func setEditedThumbnailPresentedCrop(
+        _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
+    )
 }
 
 /// Owns demand admission, debounce tasks, generations, and job IDs for edit-aware collection
@@ -225,7 +227,9 @@ final class EditedThumbnailCoordinator {
             ), let destination = self.destination
             else { return }
 
-            destination.setEditedThumbnailPresentedCrop(document.crop, for: assetID)
+            destination.setEditedThumbnailPresentedCrop(
+                document.crop, rotation: document.rotation, for: assetID
+            )
             let lut = destination.resolvedEditedThumbnailLUT(document.lut.lutID)
             let revision = self.editedThumbnailRevision(document: document, lut: lut)
             let materialized = MaterializedThumbnail(
