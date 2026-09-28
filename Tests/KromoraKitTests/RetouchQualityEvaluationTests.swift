@@ -41,10 +41,9 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
         "skin": Limits(deltaE: 3.0, gradient: 28, variance: 0.55...1.65, luminance: 0.025),
     ]
 
-    func testGroundTruthGateReportsCurrentHealAndRemoveFailures() throws {
+    func testGroundTruthGateReportsCurrentHealAndCloneResults() throws {
         var table: [(String, String, String, Metrics, [String])] = []
         var healFailuresByDefect: [String: Int] = [:]
-        var removeFailuresByDefect: [String: Int] = [:]
         var automaticHealPasses = 0
 
         for background in RetouchQualityFixtures.backgrounds {
@@ -58,7 +57,7 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
                     ? [BrushSample(point: fixture.center)] : fixture.stroke.map { BrushSample(point: $0) }
                 let spotRadius = radius
                 let actualModes: [(String, RetouchMode?)] = [
-                    ("Remove (no path)", nil), ("Heal", .heal), ("Heal (auto)", .heal), ("Clone", .clone),
+                    ("Heal", .heal), ("Heal (auto)", .heal), ("Clone", .clone),
                     ("Current", .heal),
                 ]
                 for (label, mode) in actualModes {
@@ -81,17 +80,12 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
                             maskRenderer: LocalMaskRenderer()
                         )
                         output = try Pixels.bytes(of: rendered)
-                    } else {
-                        // Remove is prospective. Measuring the unchanged damaged image makes the
-                        // absent inpainting path visible as a threshold failure, not a false pass.
-                        output = damaged
-                    }
+                    } else { continue }
                     let values = measure(clean: clean, output: output, fixture: fixture)
                     let failed = values.failures(against: limits[background]!)
                     table.append((background, defect, label, values, failed))
                     if label == "Heal (auto)" && failed.isEmpty { automaticHealPasses += 1 }
                     if label == "Heal" && !failed.isEmpty { healFailuresByDefect[defect, default: 0] += 1 }
-                    if label == "Remove (no path)" && !failed.isEmpty { removeFailuresByDefect[defect, default: 0] += 1 }
                 }
             }
         }
@@ -106,16 +100,13 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
         }
         print("Automatic Heal quality rows passing: \(automaticHealPasses)/\(RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count)")
 
-        // These are behavior assertions about the current renderer, not XCTest expected failures:
-        // Heal and the missing Remove implementation must continue to be exposed by the oracle.
+        // These are behavior assertions about the current Heal renderer.
         for defect in RetouchQualityFixtures.defects {
             XCTAssertGreaterThan(healFailuresByDefect[defect, default: 0], 0,
                 "current Heal must miss at least one (defect) case")
-            XCTAssertEqual(removeFailuresByDefect[defect], RetouchQualityFixtures.backgrounds.count,
-                "prospective Remove no-op must fail all (defect) backgrounds")
         }
         XCTAssertGreaterThan(automaticHealPasses, 0, "automatic source picks should clear some KRMA-658 heal rows")
-        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count * 5)
+        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count * 4)
     }
 
     func testSyntheticFixtureGenerationIsRepeatable() throws {
@@ -124,175 +115,6 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
         XCTAssertEqual(try Pixels.bytes(of: first.clean), try Pixels.bytes(of: second.clean))
         XCTAssertEqual(try Pixels.bytes(of: first.damaged), try Pixels.bytes(of: second.damaged))
         XCTAssertEqual(first.mask, second.mask)
-    }
-
-    func testPatchMatchRemoveQualityAcrossGroundTruthCorpus() throws {
-        var table: [(String, String, Metrics, [String])] = []
-        for background in RetouchQualityFixtures.backgrounds {
-            for defect in RetouchQualityFixtures.defects {
-                let fixture = RetouchQualityFixtures.make(background: background, defect: defect)
-                let clean = try Pixels.bytes(of: fixture.clean)
-                let damaged = try Pixels.bytes(of: fixture.damaged)
-                let proxy = RetouchAnalysisProxy.fromRGBA8(Data(damaged), width: fixture.width, height: fixture.height)
-                let hole = fixture.mask.map { $0 ? UInt8(1) : 0 }
-                let samples = fixture.stroke.isEmpty ? [fixture.center] : fixture.stroke
-                let spot = RetouchSpot(mode: .remove, region: RetouchRegion(
-                    samples: samples.map { BrushSample(point: $0) }, radius: fixture.radius
-                ))
-                let pickedOffset: CGVector
-                if case .auto(let offset, _)? = RetouchSourcePicker.source(for: spot, among: [spot], in: proxy) {
-                    pickedOffset = offset
-                } else {
-                    pickedOffset = fixture.sourceOffset
-                }
-                let field = try PatchMatchInpainter.solve(.init(
-                    image: .init(width: fixture.width, height: fixture.height, lab: proxy.pixels),
-                    holeMask: hole, exclusionMask: [UInt8](repeating: 0, count: hole.count), seed: 658,
-                    initialOffset: SIMD2(Int((pickedOffset.dx * Double(fixture.width)).rounded()),
-                                         -Int((pickedOffset.dy * Double(fixture.height)).rounded()))
-                ))
-                let output = compositeRemove(damaged: damaged, field: field, fixture: fixture, sourceOffset: pickedOffset)
-                let metrics = measure(clean: clean, output: output, fixture: fixture)
-                let failures = metrics.failures(against: limits[background]!)
-                table.append((background, defect, metrics, failures))
-            }
-        }
-        print("\nPATCHMATCH REMOVE QUALITY — BG / DEFECT | ΔE2000 | GRADIENT | VAR RATIO | LUMA SHIFT | RESULT")
-        for row in table {
-            print(String(format: "%@ / %@ | %.2f | %.2f | %.2f | %+.4f | %@", row.0, row.1,
-                row.2.deltaE2000, row.2.gradientError, row.2.varianceRatio, row.2.luminanceShift,
-                row.3.isEmpty ? "PASS" : "FAIL: " + row.3.joined(separator: ",")))
-        }
-        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count)
-
-        // Four cases remain documented gaps (docs/RETOUCH.md, KRMA-662): the 60 px dust masks over
-        // cloud/foliage/brick hide most of their texture and edge context, and the brick sagging
-        // wire still leaves excess error crossing the brick edge. This is a behavior assertion, not
-        // a permanent expected-failure: it fails loudly (a) if any other case regresses, so new
-        // gaps cannot appear silently, and (b) if a documented gap starts failing on a metric other
-        // than ΔE, since that would mean the shortfall changed in kind, not just in degree.
-        let documentedGaps: Set<String> = [
-            "cloud/soft dust 60px", "foliage/soft dust 60px", "brick/soft dust 60px", "brick/wire sagging edge",
-        ]
-        var actualFailures: Set<String> = []
-        for row in table where !row.3.isEmpty {
-            actualFailures.insert("\(row.0)/\(row.1)")
-            XCTAssertEqual(row.3, ["ΔE"], "\(row.0)/\(row.1) failed on an undocumented metric: \(row.3)")
-        }
-        XCTAssertEqual(actualFailures, documentedGaps,
-            "PatchMatch Remove must pass every KRMA-658 case except the documented gaps")
-    }
-
-    func testRemoveQualityAcrossGroundTruthCorpusThroughRenderEngine() async throws {
-        var table: [(String, String, Metrics, [String], Metrics, [String])] = []
-        var disagreements: [String] = []
-        let engine = RenderEngine()
-
-        for background in RetouchQualityFixtures.backgrounds {
-            for defect in RetouchQualityFixtures.defects {
-                let fixture = RetouchQualityFixtures.make(background: background, defect: defect)
-                let damaged = try Pixels.bytes(of: fixture.damaged)
-                let proxy = RetouchAnalysisProxy.fromRGBA8(Data(damaged), width: fixture.width, height: fixture.height)
-                let hole = fixture.mask.map { $0 ? UInt8(1) : 0 }
-                let samples = fixture.stroke.isEmpty ? [fixture.center] : fixture.stroke
-                let region = RetouchRegion(
-                    samples: samples.map { BrushSample(point: $0) }, radius: fixture.radius
-                )
-                let spot = RetouchSpot(mode: .remove, region: region, seed: 658)
-
-                // Keep the existing pure solver result beside the production path so rows whose
-                // threshold verdict changes identify a render integration discrepancy.
-                let pickedOffset: CGVector
-                if case .auto(let offset, _)? = RetouchSourcePicker.source(for: spot, among: [spot], in: proxy) {
-                    pickedOffset = offset
-                } else {
-                    pickedOffset = fixture.sourceOffset
-                }
-                let standaloneField = try PatchMatchInpainter.solve(.init(
-                    image: .init(width: fixture.width, height: fixture.height, lab: proxy.pixels),
-                    holeMask: hole, exclusionMask: [UInt8](repeating: 0, count: hole.count), seed: 658,
-                    initialOffset: SIMD2(Int((pickedOffset.dx * Double(fixture.width)).rounded()),
-                                         -Int((pickedOffset.dy * Double(fixture.height)).rounded()))
-                ))
-                let standalonePixels = compositeRemove(
-                    damaged: damaged, field: standaloneField, fixture: fixture, sourceOffset: pickedOffset
-                )
-                let url = try Fixtures.writePNG(
-                    fixture.damaged,
-                    named: "engine-\(background)-\(defect.replacingOccurrences(of: "/", with: "-")).png",
-                    in: tempDirectory
-                )
-                let source = ImageSource(url: url, nativeExtent: CGSize(width: fixture.width, height: fixture.height))
-                let cleanURL = try Fixtures.writePNG(
-                    fixture.clean,
-                    named: "clean-\(background)-\(defect.replacingOccurrences(of: "/", with: "-")).png",
-                    in: tempDirectory
-                )
-                let cleanSource = ImageSource(
-                    url: cleanURL, nativeExtent: CGSize(width: fixture.width, height: fixture.height)
-                )
-                let cleanResult = await engine.makeCGImage(RenderRequest(
-                    source: cleanSource, document: EditDocument(), quality: .fullResolution
-                ))
-                let engineClean = try Pixels.bytes(of: XCTUnwrap(cleanResult))
-                let standaloneMetrics = measure(clean: engineClean, output: standalonePixels, fixture: fixture)
-                let standaloneFailures = standaloneMetrics.failures(against: limits[background]!)
-                let result = await engine.makeCGImage(RenderRequest(
-                    source: source, document: EditDocument(retouch: RetouchSettings(spots: [spot])),
-                    quality: .fullResolution
-                ))
-                let rendered = try XCTUnwrap(result, "RenderEngine did not produce \(background)/\(defect)")
-                let enginePixels = try Pixels.bytes(of: rendered)
-                let engineMetrics = measure(clean: engineClean, output: enginePixels, fixture: fixture)
-                let engineFailures = engineMetrics.failures(against: limits[background]!)
-                if engineFailures.isEmpty != standaloneFailures.isEmpty {
-                    disagreements.append("\(background)/\(defect): standalone=\(standaloneFailures) engine=\(engineFailures)")
-                }
-                table.append((background, defect, engineMetrics, engineFailures, standaloneMetrics, standaloneFailures))
-            }
-        }
-
-        print("\nRENDER ENGINE REMOVE QUALITY — BG / DEFECT | ENGINE ΔE / GRAD / VAR / LUMA | ENGINE RESULT | STANDALONE RESULT")
-        for row in table {
-            print(String(format: "%@ / %@ | %.2f / %.2f / %.2f / %+.4f | %@ | %@",
-                row.0, row.1, row.2.deltaE2000, row.2.gradientError, row.2.varianceRatio,
-                row.2.luminanceShift,
-                row.3.isEmpty ? "PASS" : "FAIL: " + row.3.joined(separator: ","),
-                row.5.isEmpty ? "PASS" : "FAIL: " + row.5.joined(separator: ",")))
-        }
-        print("Render-engine vs standalone pass/fail disagreements (\(disagreements.count)): \(disagreements.isEmpty ? "none" : disagreements.joined(separator: "; "))")
-        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count)
-    }
-
-    /// Test-only live-image sampling followed by an exterior-ring membrane colour correction.
-    private func compositeRemove(damaged: [UInt8], field: PatchMatchInpainter.Field,
-                                 fixture: RetouchQualityFixtures.Case, sourceOffset: CGVector) -> [UInt8] {
-        let w = fixture.width, h = fixture.height
-        var output = damaged
-        // Estimate the membrane's local offset exclusively from the one-pixel exterior ring.
-        var correction = [Double](repeating: 0, count: 3), count = 0.0
-        for y in max(0, field.y - 1)..<min(h, field.y + field.height + 1) {
-            for x in max(0, field.x - 1)..<min(w, field.x + field.width + 1) {
-                guard fixture.mask[y * w + x] == false else { continue }
-                let dx = Int((sourceOffset.dx * Double(w)).rounded())
-                let dy = -Int((sourceOffset.dy * Double(h)).rounded())
-                let sx = x + dx, sy = y + dy
-                guard sx >= 0, sy >= 0, sx < w, sy < h else { continue }
-                for c in 0..<3 {
-                    correction[c] += Double(Int(damaged[(y * w + x) * 4 + c]) - Int(damaged[(sy * w + sx) * 4 + c]))
-                }
-                count += 1
-            }
-        }
-        if count > 0 { correction = correction.map { $0 / count } }
-        for y in 0..<h { for x in 0..<w where fixture.mask[y * w + x] {
-            guard let p = field[x, y], p.x >= 0 else { continue }
-            let sx = Int(p.x), sy = Int(p.y), destination = (y * w + x) * 4, source = (sy * w + sx) * 4
-            for c in 0..<3 {
-                output[destination + c] = UInt8(min(255, max(0, Double(damaged[source + c]) + correction[c].rounded())))
-            }
-        } }
-        return output
     }
 
     private func measure(clean: [UInt8], output: [UInt8], fixture: RetouchQualityFixtures.Case) -> Metrics {

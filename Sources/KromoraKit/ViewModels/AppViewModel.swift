@@ -478,6 +478,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             if requestedTab == .retouch, inspectorState.isMaskingWorkspacePresented {
                 closeMaskingWorkspace()
             }
+            if requestedTab == .retouch {
+                retouchInteractionState.mode = .heal
+            }
             inspectorState.select(requestedTab)
             retouchWorkflow.setArmed(requestedTab == .retouch)
         }
@@ -3157,11 +3160,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                   document.retouch.spots[index].source == nil || isAutomaticRetouchSource(document.retouch.spots[index].source) else { return }
             document.retouch.spots[index].source = picked
         }
-    }
-
-    func retouchAnalysisProxy() async -> RetouchAnalysisProxy? {
-        guard let source = imageSource else { return nil }
-        return await engine.retouchAnalysisProxy(source: source)
     }
 
     func toggleRetouchVisualization() {

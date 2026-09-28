@@ -24,7 +24,26 @@ struct RetouchSettings: Codable, Sendable, Equatable {
     var isIdentity: Bool { spots.allSatisfy(\.isIdentity) && eyes.allSatisfy(\.isIdentity) }
 }
 
-enum RetouchMode: String, Codable, Sendable, CaseIterable { case remove, heal, clone }
+enum RetouchMode: String, Sendable, CaseIterable, Codable {
+    case heal, clone
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        // Older packages stored Remove. Map it to the supported Heal behavior as they are read.
+        switch rawValue {
+        case "remove", "heal": self = .heal
+        case "clone": self = .clone
+        default:
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown retouch mode: \(rawValue)")
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
 enum EyeKind: String, Codable, Sendable, CaseIterable { case human, pet }
 
 struct RetouchRegion: Codable, Sendable, Equatable {
@@ -97,7 +116,7 @@ struct RetouchSpot: Codable, Sendable, Equatable, Identifiable {
     var isVisible: Bool
     var seed: UInt32
 
-    init(id: UUID = UUID(), mode: RetouchMode = .remove, region: RetouchRegion = RetouchRegion(
+    init(id: UUID = UUID(), mode: RetouchMode = .heal, region: RetouchRegion = RetouchRegion(
         samples: [BrushSample(point: CGPoint(x: 0.5, y: 0.5))]), source: RetouchSource? = nil,
         feather: Double = 0.35, opacity: Double = 1, isVisible: Bool = true, seed: UInt32 = 0
     ) {
@@ -113,7 +132,7 @@ struct RetouchSpot: Codable, Sendable, Equatable, Identifiable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.init(
             id: try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID(),
-            mode: try c.decodeIfPresent(RetouchMode.self, forKey: .mode) ?? .remove,
+            mode: try c.decodeIfPresent(RetouchMode.self, forKey: .mode) ?? .heal,
             region: try c.decodeIfPresent(RetouchRegion.self, forKey: .region) ?? RetouchRegion(),
             source: try c.decodeIfPresent(RetouchSource.self, forKey: .source),
             feather: try c.decodeIfPresent(Double.self, forKey: .feather) ?? 0.35,

@@ -5,18 +5,12 @@ import Foundation
 /// Pointer-frequency state for the retouch canvas. Drafts and selection never enter the recipe.
 @MainActor
 final class RetouchInteractionState: ObservableObject {
-    @MainActor static weak var active: RetouchInteractionState?
-    @MainActor static func reportSolve(_ id: UUID, solving: Bool, failure: String? = nil) {
-        guard let active else { return }
-        active.setSolving(id, solving)
-        active.solveFailures[id] = failure
-    }
     enum OverlayPolicy: String, CaseIterable, Sendable { case auto, always, selected, never
         var title: String { rawValue.capitalized }
     }
     enum Handle: Sendable, Equatable { case destination(UUID), source(UUID), create }
 
-    @Published var mode: RetouchMode = .remove
+    @Published var mode: RetouchMode = .heal
     @Published var radius = 0.012
     @Published var feather = 0.35
     @Published var opacity = 1.0
@@ -29,11 +23,6 @@ final class RetouchInteractionState: ObservableObject {
     @Published private(set) var draftRadius = 0.012
     @Published private(set) var draftFeather = 0.35
     @Published private(set) var solvingSpotIDs: Set<UUID> = []
-    @Published private(set) var isRefiningWire = false
-    @Published private(set) var wireProposal: RetouchWireRefiner.Proposal?
-    @Published private(set) var wireProposalSpotID: UUID?
-    @Published private(set) var wireRefinementMessage: String?
-    @Published private(set) var solveFailures: [UUID: String] = [:]
     @Published private(set) var shiftClickAnchor: CGPoint?
     @Published var overlayPolicy: OverlayPolicy = .auto
     @Published var visualizationEnabled = false
@@ -55,7 +44,7 @@ final class RetouchInteractionState: ObservableObject {
     func setSpacePanning(_ value: Bool) { isSpacePanning = value }
     func disarm() {
         isArmed = false; selectedSpotID = nil; hoveredSpotID = nil; hoverPoint = nil
-        activeHandle = nil; draftSamples = []; shiftClickAnchor = nil; solvingSpotIDs = []; solveFailures = [:]
+        activeHandle = nil; draftSamples = []; shiftClickAnchor = nil; solvingSpotIDs = []
         isSpacePanning = false
     }
     func select(_ id: UUID?) { selectedSpotID = id }
@@ -68,19 +57,6 @@ final class RetouchInteractionState: ObservableObject {
     func setShiftClickAnchor(_ point: CGPoint?) { shiftClickAnchor = point }
     func setSolving(_ id: UUID, _ solving: Bool) {
         if solving { solvingSpotIDs.insert(id) } else { solvingSpotIDs.remove(id) }
-    }
-    func setSolveFailure(_ id: UUID, _ message: String?) { solveFailures[id] = message }
-    func beginWireRefinement(_ id: UUID) {
-        isRefiningWire = true; wireProposal = nil; wireProposalSpotID = id; wireRefinementMessage = nil
-    }
-    func setWireProposal(_ proposal: RetouchWireRefiner.Proposal) {
-        isRefiningWire = false; wireProposal = proposal; wireRefinementMessage = nil
-    }
-    func failWireRefinement(_ message: String) {
-        isRefiningWire = false; wireProposal = nil; wireProposalSpotID = nil; wireRefinementMessage = message
-    }
-    func clearWireRefinement() {
-        isRefiningWire = false; wireProposal = nil; wireProposalSpotID = nil; wireRefinementMessage = nil
     }
     func clearGesture() { activeHandle = nil; draftSamples = [] }
     func cycleOverlayPolicy() {

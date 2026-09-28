@@ -8,17 +8,13 @@ enum RetouchRenderer {
         to image: CIImage,
         sourceSize: CGSize,
         maskRenderer: LocalMaskRenderer,
-        removeFields: [UUID: PatchMatchInpainter.Field] = [:],
         nativeSourceSize: CGSize? = nil
     ) -> CIImage {
         guard !settings.isIdentity, image.extent.width > 0, image.extent.height > 0,
               sourceSize.width > 0, sourceSize.height > 0 else { return image }
         var result = image
         for spot in settings.spots where !spot.isIdentity {
-            let source: RetouchSource?
-            if spot.mode == .remove { source = nil }
-            else { source = spot.source }
-            guard spot.mode == .remove ? removeFields[spot.id] != nil : source != nil else { continue }
+            guard let source = spot.source else { continue }
             let maskStroke = BrushStroke(
                 id: spot.id, samples: spot.region.samples, radius: spot.region.radius,
                 feather: spot.feather, flow: 1, density: 1
@@ -43,7 +39,6 @@ enum RetouchRenderer {
             guard let holeMask = maskRenderer.image(
                 for: holePayload, extent: image.extent, transform: .identity
             ) else { continue }
-            let sourceOffset = source?.offset ?? .zero
             let radius = CGFloat(spot.region.radius) * min(image.extent.width, image.extent.height)
             let bounds = workBounds(for: spot, extent: image.extent)
             guard bounds.width > 0, bounds.height > 0 else { continue }
@@ -51,33 +46,14 @@ enum RetouchRenderer {
             // window. Core Image can then evaluate the pull/push field locally instead of doing
             // a full-frame frequency-separation pass for every spot.
             let destination = result.cropped(to: bounds)
-            let dx = sourceOffset.dx * image.extent.width
-            let dy = sourceOffset.dy * image.extent.height
-            let fill: CIImage
-            if let field = removeFields[spot.id], let kernel = CIKernelLibrary.kernel(named: "retouchSampleField") {
-                let values = field.rg32f
-                let bytes = values.withUnsafeBytes { Data($0) }
-                let raster = CIImage(bitmapData: bytes, bytesPerRow: field.width * 8,
-                                     size: CGSize(width: field.width, height: field.height),
-                                     format: .RGf, colorSpace: nil)
-                let native = nativeSourceSize ?? sourceSize
-                let sx = sourceSize.width / max(native.width, 1)
-                let sy = sourceSize.height / max(native.height, 1)
-                let fieldImage = raster.transformed(by: CGAffineTransform(translationX: CGFloat(field.x), y: CGFloat(field.y)))
-                    .transformed(by: CGAffineTransform(scaleX: sx, y: sy))
-                    .cropped(to: bounds)
-                fill = kernel.apply(
-                    extent: bounds, roiCallback: { _, rect in rect },
-                    arguments: [result, fieldImage, CIVector(x: sx, y: sy)]
-                )?.cropped(to: bounds) ?? result.cropped(to: bounds)
-            } else {
-                fill = result.transformed(by: CGAffineTransform(translationX: -dx, y: -dy))
-                    .cropped(to: bounds)
-            }
+            let dx = source.offset.dx * image.extent.width
+            let dy = source.offset.dy * image.extent.height
+            let fill = result.transformed(by: CGAffineTransform(translationX: -dx, y: -dy))
+                .cropped(to: bounds)
             let mask = fullMask.cropped(to: bounds).applyingFilter("CIColorMatrix", parameters: [
                 "inputAVector": CIVector(x: 0, y: 0, z: 0, w: spot.opacity)
             ]).cropped(to: bounds)
-            let effect = spot.mode == .heal || spot.mode == .remove
+            let effect = spot.mode == .heal
                 ? healedFill(fill, destination: destination, mask: holeMask.cropped(to: bounds), bounds: bounds, radius: radius)
                 : fill
             result = blend(effect, over: result, mask: mask, bounds: bounds)

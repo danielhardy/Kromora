@@ -29,7 +29,6 @@ struct RetouchInspectorView: View {
                 GroupBox("Spots") {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Method", selection: $interaction.mode) {
-                            Text("Remove").tag(RetouchMode.remove)
                             Text("Heal").tag(RetouchMode.heal)
                             Text("Clone").tag(RetouchMode.clone)
                         }
@@ -50,29 +49,6 @@ struct RetouchInspectorView: View {
                         slider("Opacity", value: opacityBinding, range: 0...1, format: "%.0f%%", scale: 100)
                         if let spot = selectedSpot {
                             Toggle("Visible", isOn: spotBinding(\.isVisible))
-                            if let failure = interaction.solveFailures[spot.wrappedValue.id] {
-                                Label(failure, systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption).foregroundStyle(.red)
-                            }
-                            if spot.wrappedValue.mode == .remove, spot.wrappedValue.region.samples.count > 1 {
-                                if interaction.isRefiningWire, interaction.wireProposalSpotID == spot.wrappedValue.id {
-                                    Button("Cancel Wire Refinement") { viewModel.retouchWorkflow.cancelWireRefinement() }
-                                } else if interaction.wireProposalSpotID == spot.wrappedValue.id,
-                                          let proposal = interaction.wireProposal {
-                                    Text(String(format: "Proposed wire boundary · %.0f%% confidence", proposal.confidence * 100))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                    HStack {
-                                        Button("Keep Brush Region") { viewModel.retouchWorkflow.cancelWireRefinement() }
-                                        Button("Accept Refinement") { viewModel.retouchWorkflow.acceptWireRefinement() }
-                                            .buttonStyle(.borderedProminent)
-                                    }
-                                } else {
-                                    Button("Refine to Wire") { viewModel.retouchWorkflow.refineSelectedSpotToWire() }
-                                }
-                                if let message = interaction.wireRefinementMessage {
-                                    Text(message).font(.caption).foregroundStyle(.secondary)
-                                }
-                            }
                             Text("Drag the pin to move it; drag its source ring to choose a source.")
                                 .font(.caption).foregroundStyle(.secondary)
                             Button("Delete Spot", role: .destructive) { removeSpot(spot.wrappedValue.id) }

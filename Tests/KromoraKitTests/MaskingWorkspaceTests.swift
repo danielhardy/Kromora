@@ -6,6 +6,16 @@ import XCTest
 
 @MainActor
 final class MaskingWorkspaceTests: TempDirectoryTestCase {
+    func testEnteringRetouchSelectsHealByDefault() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+
+        viewModel.retouchInteractionState.mode = .clone
+        viewModel.selectInspectorTab(.effects)
+        viewModel.selectInspectorTab(.retouch)
+
+        XCTAssertEqual(viewModel.retouchInteractionState.mode, .heal)
+    }
+
     private func waitUntil(
         _ description: String,
         timeout: TimeInterval = 5,

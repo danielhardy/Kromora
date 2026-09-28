@@ -6,7 +6,7 @@ struct RetouchSourceCandidate: Sendable, Equatable {
     let score: Double
 }
 
-/// Stable patch source search shared by Heal/Clone and Remove's future PatchMatch initializer.
+/// Stable patch source search shared by Heal and Clone.
 enum RetouchSourcePicker {
     static func candidates(
         for spot: RetouchSpot, among spots: [RetouchSpot], in proxy: RetouchAnalysisProxy,
