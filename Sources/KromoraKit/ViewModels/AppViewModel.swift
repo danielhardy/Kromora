@@ -1901,7 +1901,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         previewPresentation.resetForSource()
         storedEditsResolvedSourceRevision = nil
-        cancelHistogram(clear: true, pump: false)
+        // Keep the last published chart visible while the newly selected source prepares and
+        // renders. Histogram admission still checks the active asset and source revision before
+        // publishing, so only the current photo can replace it.
+        cancelHistogram(clear: false, pump: false)
         previewCoordinator.cancel()
         invalidateEditedThumbnailWork(for: previousActiveAssetID)
         editedThumbnailCoordinator.clearPendingRequest()

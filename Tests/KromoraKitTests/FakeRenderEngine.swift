@@ -97,6 +97,7 @@ actor FakeRenderEngine: RenderEngining {
     private var histogramIsGated = false
     private var parkedHistograms: [CheckedContinuation<Void, Never>] = []
     private var shouldFailHistogram = false
+    private var histogramMarkersByURL: [URL: Int] = [:]
     private var previewIsGated = false
     private var parkedPreviews: [CheckedContinuation<Void, Never>] = []
     private var thumbnailIsGated = false
@@ -312,8 +313,19 @@ actor FakeRenderEngine: RenderEngining {
             guard case .exposure(let ev) = node else { return partial }
             return partial + ev
         }
+        let sourceMarker: Int
+        if case .url(let url)? = record.source?.backing {
+            sourceMarker = histogramMarkersByURL[url] ?? 0
+        } else {
+            sourceMarker = 0
+        }
         let marker = max(
-            0, min(255, Int(((record.document.rawDevelop.exposure ?? 0) + adjustmentExposure + 10) * 10))
+            0,
+            min(
+                255,
+                Int(((record.document.rawDevelop.exposure ?? 0) + adjustmentExposure + 10) * 10)
+                    + sourceMarker
+            )
         )
         bins[marker] = 1
         let result = HistogramData(red: bins, green: bins, blue: bins, luma: bins)
@@ -325,6 +337,10 @@ actor FakeRenderEngine: RenderEngining {
     func gateHistogram() { histogramIsGated = true }
 
     func setShouldFailHistogram(_ value: Bool) { shouldFailHistogram = value }
+
+    func setHistogramMarker(_ marker: Int, for url: URL) {
+        histogramMarkersByURL[url] = marker
+    }
 
     /// Release only the oldest parked response while leaving the gate closed. This is useful for
     /// proving that an obsolete response cannot publish over a newer request that is still running.

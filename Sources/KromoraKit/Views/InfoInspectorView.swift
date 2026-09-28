@@ -411,29 +411,37 @@ struct InfoInspectorView: View {
 /// Canvas-drawn histogram. RGB mode overlays the three channels with additive
 /// blending (overlaps brighten toward white, the classic look); single-channel
 /// and luma modes draw one filled curve.
-struct HistogramChart: View {
+struct HistogramChart: View, @MainActor Animatable {
     enum Mode: Hashable {
         case rgb, luma, red, green, blue, waveform, parade, vectorscope
     }
 
     let data: HistogramData
     let channel: Mode
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @State private var animatedValues: HistogramPlotValues?
+
+    var animatableData: HistogramPlotValues {
+        get { HistogramPlotValues(data: data) }
+        set { animatedValues = newValue }
+    }
 
     var body: some View {
+        let values = animatedValues ?? HistogramPlotValues(data: data)
         Canvas { context, size in
             switch channel {
             case .rgb:
-                fill(.red,   Color.red,   in: context, size: size, blend: .plusLighter)
-                fill(.green, Color.green, in: context, size: size, blend: .plusLighter)
-                fill(.blue,  Color.blue,  in: context, size: size, blend: .plusLighter)
+                fill(values.red, Color.red, in: context, size: size, blend: .plusLighter)
+                fill(values.green, Color.green, in: context, size: size, blend: .plusLighter)
+                fill(values.blue, Color.blue, in: context, size: size, blend: .plusLighter)
             case .luma:
-                fill(.luma, Color.white.opacity(0.85), in: context, size: size, blend: .normal)
+                fill(values.luma, Color.white.opacity(0.85), in: context, size: size, blend: .normal)
             case .red:
-                fill(.red, Color.red, in: context, size: size, blend: .normal)
+                fill(values.red, Color.red, in: context, size: size, blend: .normal)
             case .green:
-                fill(.green, Color.green, in: context, size: size, blend: .normal)
+                fill(values.green, Color.green, in: context, size: size, blend: .normal)
             case .blue:
-                fill(.blue, Color.blue, in: context, size: size, blend: .normal)
+                fill(values.blue, Color.blue, in: context, size: size, blend: .normal)
             case .waveform:
                 drawWaveform(in: context, size: size, channels: [.white])
             case .parade:
@@ -447,6 +455,10 @@ struct HistogramChart: View {
                 drawVectorscope(in: context, size: size)
             }
         }
+        .animation(
+            accessibilityReduceMotion ? nil : .easeInOut(duration: 0.35),
+            value: data
+        )
     }
 
     private func drawWaveform(in context: GraphicsContext, size: CGSize, channels: [Color], channelIndex: Int? = nil) {
@@ -504,13 +516,12 @@ struct HistogramChart: View {
     }
 
     private func fill(
-        _ ch: HistogramData.Channel,
+        _ norm: [CGFloat],
         _ color: Color,
         in context: GraphicsContext,
         size: CGSize,
         blend: GraphicsContext.BlendMode
     ) {
-        let norm = data.normalized(ch)
         guard norm.count > 1 else { return }
         let w = size.width
         let h = size.height
@@ -529,5 +540,50 @@ struct HistogramChart: View {
         var ctx = context
         ctx.blendMode = blend
         ctx.fill(path, with: .color(color.opacity(channel == .rgb ? 0.75 : 0.9)))
+    }
+}
+
+/// Four fixed-size normalized channels form the chart's animatable value. Keeping the vector in
+/// normalized display space makes each transition independent of the source photo's pixel count.
+struct HistogramPlotValues: VectorArithmetic {
+    private static let binsPerChannel = 256
+    private var bins: [CGFloat]
+
+    var red: [CGFloat] { Array(bins[0..<Self.binsPerChannel]) }
+    var green: [CGFloat] { Array(bins[Self.binsPerChannel..<(2 * Self.binsPerChannel)]) }
+    var blue: [CGFloat] { Array(bins[(2 * Self.binsPerChannel)..<(3 * Self.binsPerChannel)]) }
+    var luma: [CGFloat] { Array(bins[(3 * Self.binsPerChannel)..<(4 * Self.binsPerChannel)]) }
+
+    static var zero: HistogramPlotValues {
+        HistogramPlotValues(bins: Array(repeating: 0, count: binsPerChannel * 4))
+    }
+
+    init(data: HistogramData) {
+        bins = data.normalized(.red) + data.normalized(.green)
+            + data.normalized(.blue) + data.normalized(.luma)
+        guard bins.count == Self.binsPerChannel * 4 else {
+            bins = Array(repeating: 0, count: Self.binsPerChannel * 4)
+            return
+        }
+    }
+
+    private init(bins: [CGFloat]) {
+        self.bins = bins
+    }
+
+    static func + (lhs: HistogramPlotValues, rhs: HistogramPlotValues) -> HistogramPlotValues {
+        HistogramPlotValues(bins: zip(lhs.bins, rhs.bins).map(+))
+    }
+
+    static func - (lhs: HistogramPlotValues, rhs: HistogramPlotValues) -> HistogramPlotValues {
+        HistogramPlotValues(bins: zip(lhs.bins, rhs.bins).map(-))
+    }
+
+    mutating func scale(by rhs: Double) {
+        bins = bins.map { $0 * CGFloat(rhs) }
+    }
+
+    var magnitudeSquared: Double {
+        bins.reduce(0) { $0 + Double($1 * $1) }
     }
 }

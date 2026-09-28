@@ -700,4 +700,93 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         XCTAssertEqual(item.url, photo)
     }
 
+    func testPhotoSwitchRetainsHistogramAndRejectsAnObsoleteResult() async throws {
+        let libraryFolder = tempDirectory.appendingPathComponent("histogram-library", isDirectory: true)
+        try FileManager.default.createDirectory(at: libraryFolder, withIntermediateDirectories: true)
+        let firstPhoto = try Fixtures.writeGradientPNG(
+            width: 48, height: 32, named: "histogram-first.png", in: libraryFolder
+        )
+        let secondPhoto = try Fixtures.writeGradientPNG(
+            width: 48, height: 32, named: "histogram-second.png", in: libraryFolder
+        )
+        let thirdPhoto = try Fixtures.writeGradientPNG(
+            width: 48, height: 32, named: "histogram-third.png", in: libraryFolder
+        )
+        let fourthPhoto = try Fixtures.writeGradientPNG(
+            width: 48, height: 32, named: "histogram-fourth.png", in: libraryFolder
+        )
+
+        let fake = FakeRenderEngine()
+        await fake.setHistogramMarker(1, for: firstPhoto)
+        await fake.setHistogramMarker(2, for: secondPhoto)
+        await fake.setHistogramMarker(3, for: thirdPhoto)
+        await fake.setHistogramMarker(4, for: fourthPhoto)
+        let reader = FakeRenderEventReader(await fake.eventStream())
+        let viewModel = makeAppViewModel(engine: fake)
+        viewModel.collection.loadFromFolder(libraryFolder)
+        await viewModel.collection.scanCompletion()
+        let firstIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == firstPhoto })
+        let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == secondPhoto })
+        let thirdIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == thirdPhoto })
+        let fourthIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == fourthPhoto })
+
+        viewModel.selectCollectionImage(at: firstIndex)
+        try await waitUntil("the first photo preview") { viewModel.previewSurface.image != nil }
+        viewModel.openLibraryImageForEditing()
+        try await waitUntil("the first photo histogram") {
+            viewModel.histogram != nil && !viewModel.isHistogramLoading
+        }
+        let firstHistogram = try XCTUnwrap(viewModel.histogram)
+        XCTAssertEqual(firstHistogram.red[101], 1)
+
+        // Hold the next tally so the chart can be checked during the photo transition.
+        await fake.gateHistogram()
+        viewModel.selectCollectionImage(at: secondIndex)
+        _ = try await TestSynchronization.nextEvent(from: reader, "second photo histogram request") {
+            if case .histogramRequested(let request) = $0 {
+                return request.source?.backing == .url(secondPhoto)
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests)"
+        }
+        XCTAssertEqual(viewModel.histogram, firstHistogram,
+                       "a pending photo switch keeps the last published chart visible")
+        XCTAssertTrue(viewModel.isHistogramLoading)
+
+        await fake.releaseNextHistogram()
+        try await waitUntil("the current second photo histogram result") {
+            viewModel.histogram?.red[102] == 1 && !viewModel.isHistogramLoading
+        }
+
+        // Start another request for the third photo, then advance to a fourth photo before it
+        // returns. The late third-photo result must not replace the fourth photo's chart.
+        await fake.gateHistogram()
+        viewModel.selectCollectionImage(at: thirdIndex)
+        _ = try await TestSynchronization.nextEvent(from: reader, "obsolete third photo histogram request") {
+            if case .histogramRequested(let request) = $0 {
+                return request.source?.backing == .url(thirdPhoto)
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests)"
+        }
+        viewModel.selectCollectionImage(at: fourthIndex)
+        await fake.releaseNextHistogram()
+        _ = try await TestSynchronization.nextEvent(from: reader, "current fourth photo histogram request") {
+            if case .histogramRequested(let request) = $0 {
+                return request.source?.backing == .url(fourthPhoto)
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await fake.histogramRequests)"
+        }
+        await fake.releaseNextHistogram()
+        try await waitUntil("the current fourth photo histogram result after the stale response") {
+            viewModel.histogram?.red[104] == 1 && !viewModel.isHistogramLoading
+        }
+        XCTAssertEqual(viewModel.histogram?.red[103], 0,
+                       "the obsolete third photo result must not be published")
+    }
+
 }
