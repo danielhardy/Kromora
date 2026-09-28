@@ -89,7 +89,7 @@ inside every listed limit.
 | Brick/roof | 4.0 | 34 | 0.48–1.80 | 0.030 |
 | Skin-like | 3.0 | 28 | 0.55–1.65 | 0.025 |
 
-### Threshold achievability for wires and hair
+### Threshold achievability for wires, hair, dust, and speck
 
 The limits are achievable as image metrics: replacing the measured defect-plus-boundary region
 with its clean reference produces ΔE2000 0, gradient error 0, variance ratio 1, and luma shift 0
@@ -103,15 +103,24 @@ across the six backgrounds. No plausible fill has yet been evaluated by this gat
 per-background repairability result remains unproven; in particular, current baselines provide no
 passing wire/hair example for sky, cloud, water, or skin. Failure is not proof that no fill can pass.
 
+The gap is wider than wire/hair on three of the six backgrounds. Sky, cloud, and skin currently pass
+zero of their 24 rows each across *every* defect family, including soft dust and hard speck, not only
+wire/hair; foliage, water, and brick each pass at least one dust or speck row. The same high-frequency
+per-pixel grain that blocks a wire/hair repair from matching the exact clean-reference samples also
+inflates gradient and variance error for dust and speck on these three backgrounds, so the proposed
+low-frequency-grain repairability profile below should cover soft dust and hard speck on sky, cloud,
+and skin as well, not line defects alone.
+
 The principal fixture limitation is the independent per-pixel hash grain (amplitude 0.055): its
 exact high-frequency pattern is absent from the damaged image inside the mask, so a repair cannot
 recover those particular grain samples from the observed neighborhood. The gradient and variance
 checks compare the repair with those exact clean-reference samples. The current results therefore
 cannot distinguish a wire/hair remnant from error caused by the unobservable grain realization; the
 oracle pass does not resolve that ambiguity. Keep the current seeded fixtures as a deterministic
-stress lane. Add a separate repairability profile for line defects before using these limits to gate
-renderer progress across all backgrounds. Generate the second profile with deterministic
-low-frequency correlated grain, such as a fixed smooth noise field sampled on an 8 px lattice and
+stress lane. Add a separate repairability profile — covering wire/hair, dust, and speck on sky,
+cloud, and skin — before using these limits to gate renderer progress across all backgrounds.
+Generate the second profile with deterministic low-frequency correlated grain, such as a fixed
+smooth noise field sampled on an 8 px lattice and
 interpolated between lattice points. This retains seed-based repeatability and requires no photo
 assets. First measure a documented hand-built interpolation or texture-extension fill against the
 existing limits; tune thresholds only if that explicit baseline shows a mismatch between the metrics
