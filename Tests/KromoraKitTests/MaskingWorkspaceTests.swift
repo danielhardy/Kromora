@@ -97,10 +97,12 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.isMaskingWorkspaceActive)
         XCTAssertTrue(viewModel.maskingState.showOverlay)
         let layerID = try XCTUnwrap(viewModel.maskingState.selectedLayerID)
+        viewModel.updateMask(layerID) { $0.adjustments.exposure = 0.75 }
 
         viewModel.selectInspectorTab(.effects)
         XCTAssertFalse(viewModel.isMaskingWorkspaceActive)
         XCTAssertEqual(viewModel.maskingState.selectedLayerID, layerID)
+        XCTAssertEqual(viewModel.document.localAdjustments.first?.adjustments.exposure, 0.75)
         XCTAssertTrue(viewModel.maskingState.showOverlay)
 
         viewModel.navigate(to: .grid)
