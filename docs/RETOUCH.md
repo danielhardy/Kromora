@@ -139,6 +139,19 @@ renderer. The evaluation limits are intentionally not a timing benchmark.
 Threshold violations include their metric names in the XCTest report table. The manual fixture
 offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows.
 
+KRMA-666 checked whether the unchanged limits are attainable on the deterministic fixtures using
+the PatchMatch solver and the test-only live-image composite. The focused run
+`swift test --filter RetouchQualityEvaluationTests/testPatchMatchRemoveQualityAcrossGroundTruthCorpus`
+passed, with a passing `hair/fibre` repair for every background: sky (ΔE 0.86, gradient 2.58,
+variance 1.54, luma −0.0115), cloud (0.65, 2.95, 1.27, +0.0060), foliage (1.69, 5.47, 0.93,
++0.0048), water (0.97, 3.65, 0.92, +0.0028), brick (2.64, 8.37, 1.10, +0.0116), and skin
+(0.84, 2.51, 1.10, +0.0044). All are within their background's limits. The solver-only corpus
+passes 32/36 overall; its other four failures are the large-dust and brick sagging-wire gaps listed
+above. The line-family failures from the naive Heal/Clone baselines therefore do not show that the
+thresholds are unattainable. No threshold or fixture adjustment is recommended. This establishes
+attainability for the seeded synthetic corpus; the test-local composite is not evidence that the
+current production render-engine path passes these rows.
+
 `swift test --filter RetouchQualityEvaluationTests/testRemoveQualityAcrossGroundTruthCorpusThroughRenderEngine`
 runs the same 36 KRMA-658 cases through `RenderEngine.makeCGImage`, including engine extraction,
 `retouchSampleField`, and the production `RetouchRenderer` membrane/composite. Each damaged render is
