@@ -705,13 +705,19 @@ final class ImageCollectionPresentationModel {
             let thumbnail: NSImage?
             if let url = item.url {
                 let identity = item.asset.source.portableIdentity
-                thumbnail = await Task.detached { PlatformThumbnailProvider.generate(from: url, portableIdentity: identity) }.value
+                thumbnail = await Task.detached {
+                    PlatformThumbnailProvider.generate(
+                        from: url, maxPixelSize: PlatformThumbnailProvider.libraryMaxPixelSize,
+                        portableIdentity: identity
+                    )
+                }.value
             } else if let data = item.imageData {
                 let identity = item.asset.source.portableIdentity
                 let fingerprint = item.dataFingerprint
                 thumbnail = await Task.detached {
                     PlatformThumbnailProvider.generate(
-                        from: data, dataFingerprint: fingerprint, portableIdentity: identity
+                        from: data, maxPixelSize: PlatformThumbnailProvider.libraryMaxPixelSize,
+                        dataFingerprint: fingerprint, portableIdentity: identity
                     )
                 }.value
             } else { thumbnail = nil }
