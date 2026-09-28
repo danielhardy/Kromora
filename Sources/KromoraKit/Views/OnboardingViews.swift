@@ -47,7 +47,7 @@ struct WelcomeView: View {
                 )
                 choiceCard(
                     title: "Sample Library",
-                    detail: "Explore sample photos",
+                    detail: "\(StarterSampleLibrary.urls.count) photos to explore",
                     symbol: "square.stack.3d.up",
                     action: onSamples
                 )
