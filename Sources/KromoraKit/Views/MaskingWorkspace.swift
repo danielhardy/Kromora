@@ -61,9 +61,6 @@ struct MaskingWorkspace: View {
             .accessibilityValue(maskingState.showOverlay ? "On" : "Off")
             .accessibilityHint("Presentation only; does not change the saved mask or export")
             addMaskMenu
-            Button("Done") { viewModel.closeMaskingWorkspace() }
-                .buttonStyle(.borderless)
-                .accessibilityLabel("Close masking workspace")
         }
     }
 
@@ -95,11 +92,11 @@ struct MaskingWorkspace: View {
                 }
             }
         } label: {
-            Label("Add Mask", systemImage: "plus")
+            Image(systemName: "plus")
         }
         .fixedSize()
-        .accessibilityLabel("Add mask layer")
-        .help("Create a new mask")
+        .accessibilityLabel("Add Mask")
+        .help("Add Mask")
     }
 
     /// Smart masks are preflighted by the analysis provider before they enter the document; the
