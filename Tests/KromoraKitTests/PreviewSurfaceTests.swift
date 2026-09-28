@@ -785,6 +785,61 @@ final class PreviewSurfaceTests: XCTestCase {
         }
     }
 
+    func testPresentationFallbackDoesNotBlendCanvasIntoPhotoPerimeter() async throws {
+        let surface = PreviewSurface()
+        let image = try makeOrientationAsymmetricFixture()
+        XCTAssertTrue(surface.present(image))
+        _ = try await waitForPresentationTexture(surface)
+
+        let size = CGSize(width: 12, height: 12)
+        let destination = CGRect(origin: .zero, size: size)
+        let navigation = CanvasNavigation()
+        let fallback = try XCTUnwrap(
+            PreviewSurfaceView.Coordinator.presentationImage(
+                image, navigation: navigation, destination: destination
+            ))
+        let fallbackPixels = try Pixels.bytes(of: XCTUnwrap(
+            RenderEngine.presentationContext.createCGImage(fallback, from: destination)
+        ))
+        let metal = try XCTUnwrap(
+            PreviewSurfaceView.Coordinator().renderRetainedTexture(
+                surface: surface, navigation: navigation, destinationSize: size
+            ))
+        var metalPixels = [UInt8](repeating: 0, count: Int(size.width * size.height * 4))
+        metalPixels.withUnsafeMutableBytes { raw in
+            metal.getBytes(
+                raw.baseAddress!, bytesPerRow: Int(size.width) * 4,
+                from: MTLRegionMake2D(0, 0, Int(size.width), Int(size.height)), mipmapLevel: 0
+            )
+        }
+
+        let transform = navigation.transform(imageExtent: image.extent, viewportSize: size)
+        let minX = Int(ceil(transform.origin.x))
+        let maxX = Int(ceil(transform.origin.x + transform.imageSize.width)) - 1
+        let minY = Int(ceil(transform.origin.y))
+        let maxY = Int(ceil(transform.origin.y + transform.imageSize.height)) - 1
+        var perimeter: [(Int, Int)] = []
+        for x in minX...maxX {
+            perimeter.append((x, minY))
+            perimeter.append((x, maxY))
+        }
+        for y in minY...maxY {
+            perimeter.append((minX, y))
+            perimeter.append((maxX, y))
+        }
+        for (x, y) in perimeter {
+            let offset = (y * Int(size.width) + x) * 4
+            let metalRGBA = rgba(fromBGRA: metalPixels, width: Int(size.width), at: (x, y))
+            for channel in 0..<3 {
+                XCTAssertLessThanOrEqual(
+                    abs(Int(fallbackPixels[offset + channel]) - Int(metalRGBA[channel])),
+                    2,
+                    "fallback and Metal must preserve the same photo perimeter at (\(x), \(y))"
+                )
+            }
+        }
+    }
+
     func testEffectiveAppearanceResolvesTheSameLetterboxForMetalAndCoreImage() async throws {
         let surface = PreviewSurface()
         let image = CIImage(cgImage: try makeOrientationAsymmetricCGImage(width: 8, height: 12))
