@@ -159,6 +159,9 @@ public struct ContentView: View {
             .sheet(isPresented: $isShortcutReferencePresented) {
                 KeyboardShortcutReferenceView()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .showKeyboardShortcuts)) { _ in
+                isShortcutReferencePresented = true
+            }
             .onAppear {
                 viewModel.refreshRemovableMedia()
                 if !hasSeenWelcome { isWelcomePresented = true }
@@ -495,12 +498,6 @@ public struct ContentView: View {
                     // Binding it here too gave the window two competing handlers.
                     .help("Export the graded image (⌘S)")
 
-                    Button {
-                        isShortcutReferencePresented = true
-                    } label: {
-                        Label("Keyboard Shortcuts", systemImage: "keyboard")
-                    }
-                    .help("Search keyboard shortcuts")
                 }
                 .transition(.opacity)
             }
