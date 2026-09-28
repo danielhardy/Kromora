@@ -2578,6 +2578,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         case .grid:
             if isCropToolActive { cancelCrop() }
             guard collection.isActive else { return false }
+            // Release the editor inspector before composing the Library viewport. If it closes
+            // after the workspace changes, SwiftUI first lays the grid out beside the inspector
+            // and then animates its width, rebuilding the mosaic rows during the return.
+            inspectorState.isPresented = false
             navigation.move(to: .grid)
             collection.beginThumbnailDemand()
             return true

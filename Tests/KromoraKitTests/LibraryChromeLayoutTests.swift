@@ -9,6 +9,54 @@ import XCTest
 /// must not keep evaluating inside that transaction.
 @MainActor
 final class LibraryChromeLayoutTests: TempDirectoryTestCase {
+    func testReturningFromEditRestoresTheSameLibraryViewportWidth() async throws {
+        let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
+        try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
+        try Fixtures.writeJPEG(
+            width: 32, height: 24, orientation: 1, named: "photo.jpg", in: sourceFolder
+        )
+
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(sourceFolder)
+        await viewModel.collection.scanCompletion()
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+        viewModel.collection.select(at: 0)
+
+        let hosting = NSHostingView(rootView: ContentView(viewModel: viewModel))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hosting
+        hosting.frame = window.contentView?.bounds ?? .zero
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        Self.pumpMainRunLoop()
+
+        let initialWidth = try XCTUnwrap(Self.libraryScrollView(in: hosting)).frame.width
+        viewModel.isInspectorPresented = true
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        Self.pumpMainRunLoop()
+
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        Self.pumpMainRunLoop(for: 0.1)
+
+        let transitionWidth = try XCTUnwrap(Self.libraryScrollView(in: hosting)).frame.width
+        XCTAssertEqual(
+            transitionWidth, initialWidth, accuracy: 1,
+            "the grid must not pass through an inspector-constrained width"
+        )
+
+        Self.pumpMainRunLoop()
+        let returnedWidth = try XCTUnwrap(Self.libraryScrollView(in: hosting)).frame.width
+        XCTAssertEqual(returnedWidth, initialWidth, accuracy: 1)
+        XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[0].id)
+    }
+
     func testLibraryChromeSecondUpdateFinishes() async throws {
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
@@ -53,7 +101,14 @@ final class LibraryChromeLayoutTests: TempDirectoryTestCase {
 
     /// SwiftUI applies the published change on the main run loop. `RunLoop.run` is unavailable
     /// directly inside an async test.
-    private static func pumpMainRunLoop() {
-        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    private static func pumpMainRunLoop(for duration: TimeInterval = 0.4) {
+        RunLoop.current.run(until: Date().addingTimeInterval(duration))
+    }
+
+    private static func libraryScrollView(in view: NSView) -> NSScrollView? {
+        if let scrollView = view as? NSScrollView { return scrollView }
+        return view.subviews
+            .compactMap(libraryScrollView(in:))
+            .max { $0.frame.width < $1.frame.width }
     }
 }
