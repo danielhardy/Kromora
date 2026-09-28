@@ -541,6 +541,7 @@ final class KeyMonitorTests: TempDirectoryTestCase {
     func testRetouchShortcutsArmCycleOverlayAndExitInTwoSteps() throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        XCTAssertTrue(viewModel.navigate(to: .edit))
         let monitor = KeyMonitor(viewModel: viewModel)
         defer { monitor.stop() }
 
@@ -565,6 +566,7 @@ final class KeyMonitorTests: TempDirectoryTestCase {
     func testArmingRetouchClosesAnActiveCropSoOnlyOneCanvasToolOwnsInputAtATime() throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.sourceImage = CIImage(color: .gray).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8))
+        XCTAssertTrue(viewModel.navigate(to: .edit))
         let monitor = KeyMonitor(viewModel: viewModel)
         defer { monitor.stop() }
 
