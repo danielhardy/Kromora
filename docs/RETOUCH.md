@@ -96,6 +96,11 @@ with its clean reference produces ΔE2000 0, gradient error 0, variance ratio 1,
 for every generated background and defect. This is an oracle ceiling, not evidence that a practical
 repair can infer the hidden pixels. In the current renderer baseline, wire/hair rows still fail on
 sky, cloud, water, and skin; foliage hair and brick straight-wire Clone are passing examples.
+The latest `RetouchQualityEvaluationTests` run passed both test methods and measured 4 passing
+wire/hair rows out of 72 mode/background/defect rows: Heal and Clone on foliage hair, plus Clone
+on brick straight wire (the duplicate `Current` Heal row is also a pass). This
+corrects the earlier report that all wire/hair rows failed; it does not establish a plausible
+repair for each background.
 
 The principal fixture limitation is the independent per-pixel hash grain (amplitude 0.055): its
 exact high-frequency pattern is absent from the damaged image inside the mask, so no neighborhood
