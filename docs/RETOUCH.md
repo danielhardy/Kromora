@@ -50,15 +50,17 @@ and standalone synthetic buffers: a 60 × 60 dust mask in a 192 × 144 region to
 3,000 × 12 px wire in a 3,000 × 64 region took 238.4 ms. These exclude decode, Lab conversion,
 and the renderer's membrane composite.
 
-Engine timing capture: `KROMORA_RUN_RETOUCH_ENGINE_BENCHMARK=1 swift test --filter
-RetouchEnginePerformanceTests/testRecordEngineRemoveTimings`. On the Apple M4 Pro reference setup,
-the debug test configuration measured a 60 px dust spot at 972 ms solver / 1,213 ms total on a
-3,200 × 900 source, with a 58 ms total cache hit. A 3,000 px wire measured 12,711 ms solver /
-13,686 ms total. These debug measurements exceed the solve targets and are not representative of
-the optimized app. `swift test -c release --filter ...` could not link the test bundle with this
-Xcode beta SDK (`SwiftUICore` opaque symbols are unavailable to the XCTest bundle); optimized
-engine timings remain unverified. The benchmark is opt-in so normal CI does not run the large
-synthetic source generation and solve.
+Engine timing capture: `KROMORA_RUN_RETOUCH_ENGINE_BENCHMARK=1 swift test -Xswiftc -O --filter
+RetouchEnginePerformanceTests/testRecordEngineRemoveTimings` runs the XCTest bundle with Swift
+optimization enabled. On the Apple M4 Pro reference setup, a 60 px dust spot on a 3,200 × 900
+source measured 15.0 ms solve / 85.6 ms cache-miss total and 24.0 ms cache-hit total. A 3,000 px
+wire measured 189.7 ms solve / 252.2 ms cache-miss total and 35.5 ms cache-hit total. Both
+optimized solve times meet KRMA-665's targets (< 50 ms for dust and < 400 ms for wire); cache hits
+add no solve time. These totals include full-resolution rendering, so they exceed solver time.
+The plain `swift test -c release --filter ...` command still cannot link the test bundle with this
+Xcode beta SDK (`SwiftUICore` opaque symbols are unavailable to the XCTest bundle); `-Xswiftc -O`
+provides an optimized test build without that release-bundle linker failure. The benchmark is
+opt-in so normal CI does not run the large synthetic source generation and solve.
 
 The Retouch inspector edits mode, size, feather, opacity, and visibility. Canvas strokes and pins are
 available; source handles apply to Heal and Clone. `A` toggles the in-canvas Visualize Spots mode;
@@ -135,10 +137,18 @@ threshold review and later solver work. “Current” runs the default Heal reci
 renderer. The evaluation limits are intentionally not a timing benchmark.
 
 Threshold violations include their metric names in the XCTest report table. The manual fixture
-offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows. The
-Remove field integration is covered by preview/export and cache tests, but the complete KRMA-658
-quality corpus still runs through the standalone solver and test-local composite. Engine-level corpus
-quality remains open as KRMA-668. Keep the limits intact until the review tracked by KRMA-666, and
+offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows.
+
+`swift test --filter RetouchQualityEvaluationTests/testRemoveQualityAcrossGroundTruthCorpusThroughRenderEngine`
+runs the same 36 KRMA-658 cases through `RenderEngine.makeCGImage`, including engine extraction,
+`retouchSampleField`, and the production `RetouchRenderer` membrane/composite. Each damaged render is
+compared with a clean render through the same engine pipeline to factor out decode and color
+conversion. In the current Apple M4 Pro run, only 5/36 engine rows pass the unchanged limits,
+compared with 32/36 through the standalone solver and test-local composite. The pass/fail verdicts
+differ on 27 rows; the engine path regresses most line defects and several small dust/speck cases.
+This is an engine-path quality gap, not a changed threshold or a solver-only failure. Follow-up
+KRMA-683 tracks investigation of the engine sampling/composition path; no solver internals or
+thresholds were changed here. Keep the limits intact until the review tracked by KRMA-666, and
 record any justified changes with the corresponding ticket. The table is a quality gate, not a
 timing benchmark. For real-camera coverage, place
 licensed RAW fixtures outside the checkout and opt in with `KROMORA_RAW_FIXTURE_DIR`; the normal

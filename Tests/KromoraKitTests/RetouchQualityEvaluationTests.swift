@@ -6,7 +6,7 @@ import XCTest
 
 /// Deterministic, image-quality oracle for the small-defect retouch lane. This is deliberately
 /// separate from renderer timing tests; it compares rendered pixels with known clean references.
-final class RetouchQualityEvaluationTests: XCTestCase {
+final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
     private struct Metrics {
         let deltaE2000: Double
         let gradientError: Double
@@ -181,6 +181,87 @@ final class RetouchQualityEvaluationTests: XCTestCase {
         }
         XCTAssertEqual(actualFailures, documentedGaps,
             "PatchMatch Remove must pass every KRMA-658 case except the documented gaps")
+    }
+
+    func testRemoveQualityAcrossGroundTruthCorpusThroughRenderEngine() async throws {
+        var table: [(String, String, Metrics, [String], Metrics, [String])] = []
+        var disagreements: [String] = []
+        let engine = RenderEngine()
+
+        for background in RetouchQualityFixtures.backgrounds {
+            for defect in RetouchQualityFixtures.defects {
+                let fixture = RetouchQualityFixtures.make(background: background, defect: defect)
+                let damaged = try Pixels.bytes(of: fixture.damaged)
+                let proxy = RetouchAnalysisProxy.fromRGBA8(Data(damaged), width: fixture.width, height: fixture.height)
+                let hole = fixture.mask.map { $0 ? UInt8(1) : 0 }
+                let samples = fixture.stroke.isEmpty ? [fixture.center] : fixture.stroke
+                let region = RetouchRegion(
+                    samples: samples.map { BrushSample(point: $0) }, radius: fixture.radius
+                )
+                let spot = RetouchSpot(mode: .remove, region: region, seed: 658)
+
+                // Keep the existing pure solver result beside the production path so rows whose
+                // threshold verdict changes identify a render integration discrepancy.
+                let pickedOffset: CGVector
+                if case .auto(let offset, _)? = RetouchSourcePicker.source(for: spot, among: [spot], in: proxy) {
+                    pickedOffset = offset
+                } else {
+                    pickedOffset = fixture.sourceOffset
+                }
+                let standaloneField = try PatchMatchInpainter.solve(.init(
+                    image: .init(width: fixture.width, height: fixture.height, lab: proxy.pixels),
+                    holeMask: hole, exclusionMask: [UInt8](repeating: 0, count: hole.count), seed: 658,
+                    initialOffset: SIMD2(Int((pickedOffset.dx * Double(fixture.width)).rounded()),
+                                         -Int((pickedOffset.dy * Double(fixture.height)).rounded()))
+                ))
+                let standalonePixels = compositeRemove(
+                    damaged: damaged, field: standaloneField, fixture: fixture, sourceOffset: pickedOffset
+                )
+                let url = try Fixtures.writePNG(
+                    fixture.damaged,
+                    named: "engine-\(background)-\(defect.replacingOccurrences(of: "/", with: "-")).png",
+                    in: tempDirectory
+                )
+                let source = ImageSource(url: url, nativeExtent: CGSize(width: fixture.width, height: fixture.height))
+                let cleanURL = try Fixtures.writePNG(
+                    fixture.clean,
+                    named: "clean-\(background)-\(defect.replacingOccurrences(of: "/", with: "-")).png",
+                    in: tempDirectory
+                )
+                let cleanSource = ImageSource(
+                    url: cleanURL, nativeExtent: CGSize(width: fixture.width, height: fixture.height)
+                )
+                let cleanResult = await engine.makeCGImage(RenderRequest(
+                    source: cleanSource, document: EditDocument(), quality: .fullResolution
+                ))
+                let engineClean = try Pixels.bytes(of: XCTUnwrap(cleanResult))
+                let standaloneMetrics = measure(clean: engineClean, output: standalonePixels, fixture: fixture)
+                let standaloneFailures = standaloneMetrics.failures(against: limits[background]!)
+                let result = await engine.makeCGImage(RenderRequest(
+                    source: source, document: EditDocument(retouch: RetouchSettings(spots: [spot])),
+                    quality: .fullResolution
+                ))
+                let rendered = try XCTUnwrap(result, "RenderEngine did not produce \(background)/\(defect)")
+                let enginePixels = try Pixels.bytes(of: rendered)
+                let engineMetrics = measure(clean: engineClean, output: enginePixels, fixture: fixture)
+                let engineFailures = engineMetrics.failures(against: limits[background]!)
+                if engineFailures.isEmpty != standaloneFailures.isEmpty {
+                    disagreements.append("\(background)/\(defect): standalone=\(standaloneFailures) engine=\(engineFailures)")
+                }
+                table.append((background, defect, engineMetrics, engineFailures, standaloneMetrics, standaloneFailures))
+            }
+        }
+
+        print("\nRENDER ENGINE REMOVE QUALITY — BG / DEFECT | ENGINE ΔE / GRAD / VAR / LUMA | ENGINE RESULT | STANDALONE RESULT")
+        for row in table {
+            print(String(format: "%@ / %@ | %.2f / %.2f / %.2f / %+.4f | %@ | %@",
+                row.0, row.1, row.2.deltaE2000, row.2.gradientError, row.2.varianceRatio,
+                row.2.luminanceShift,
+                row.3.isEmpty ? "PASS" : "FAIL: " + row.3.joined(separator: ","),
+                row.5.isEmpty ? "PASS" : "FAIL: " + row.5.joined(separator: ",")))
+        }
+        print("Render-engine vs standalone pass/fail disagreements (\(disagreements.count)): \(disagreements.isEmpty ? "none" : disagreements.joined(separator: "; "))")
+        XCTAssertEqual(table.count, RetouchQualityFixtures.backgrounds.count * RetouchQualityFixtures.defects.count)
     }
 
     /// Test-only live-image sampling followed by an exterior-ring membrane colour correction.

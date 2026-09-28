@@ -21,6 +21,7 @@ final class RetouchEnginePerformanceTests: TempDirectoryTestCase {
         let t0 = ProcessInfo.processInfo.systemUptime
         try await render(dust)
         let dustMiss = (ProcessInfo.processInfo.systemUptime - t0) * 1_000
+        let dustSolver = await engine.retouchSolveDurationsMilliseconds.last ?? -1
         let t1 = ProcessInfo.processInfo.systemUptime
         try await render(dust)
         let dustHit = (ProcessInfo.processInfo.systemUptime - t1) * 1_000
@@ -33,7 +34,12 @@ final class RetouchEnginePerformanceTests: TempDirectoryTestCase {
         let t2 = ProcessInfo.processInfo.systemUptime
         try await render(wire)
         let wireMiss = (ProcessInfo.processInfo.systemUptime - t2) * 1_000
+        let t3 = ProcessInfo.processInfo.systemUptime
+        try await render(wire)
+        let wireHit = (ProcessInfo.processInfo.systemUptime - t3) * 1_000
         let solverTimes = await engine.retouchSolveDurationsMilliseconds
-        print("REMOVE_ENGINE_TIMING setup=Apple-M4-Pro-12-core dust_miss_ms=\(dustMiss) dust_solver_ms=\(solverTimes.first ?? -1) dust_hit_ms=\(dustHit) wire3000_miss_ms=\(wireMiss) wire_solver_ms=\(solverTimes.last ?? -1)")
+        let wireSolver = solverTimes.last ?? -1
+        let optimization = ProcessInfo.processInfo.environment["KROMORA_BENCHMARK_OPTIMIZATION"] ?? "debug"
+        print("REMOVE_ENGINE_TIMING optimization=\(optimization) setup=Apple-M4-Pro-12-core dust_miss_total_ms=\(dustMiss) dust_solve_ms=\(dustSolver) dust_hit_total_ms=\(dustHit) wire3000_miss_total_ms=\(wireMiss) wire_solve_ms=\(wireSolver) wire_hit_total_ms=\(wireHit) cache_hit_solve_ms=0")
     }
 }
