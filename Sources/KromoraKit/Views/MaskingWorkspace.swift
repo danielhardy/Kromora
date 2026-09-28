@@ -47,7 +47,7 @@ struct MaskingWorkspace: View {
 
     private var header: some View {
         HStack(spacing: 10) {
-            Text("Masking")
+            Text("Masks")
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
             Spacer()

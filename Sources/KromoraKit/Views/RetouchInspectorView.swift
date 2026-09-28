@@ -18,7 +18,7 @@ struct RetouchInspectorView: View {
         InspectorScrollingContent {
             VStack(alignment: .leading, spacing: 14) {
                 HStack {
-                    Text("Retouch").font(.headline)
+                    Text("Heal").font(.headline)
                     Spacer()
                     Button("Reset All") {
                         viewModel.updateDocument { $0.retouch = .neutral }
