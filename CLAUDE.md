@@ -1,6 +1,8 @@
 # CLAUDE.md — project guidance for AI agents
 
-Kromora is a native **macOS 26 (Tahoe)+** RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**) with a package-backed Library/Edit/Export workflow. The open package owns library membership, originals, metadata, and edit revisions; folder, Photos, and removable-volume choices are import sources. Local indexes and caches are projections. Existing `EditStore*.store` files remain untouched and are not read as a library fallback. See [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md) for MVP intent and boundaries, [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for current coordinator ownership, [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) for durable storage, and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for format history.
+Kromora targets **macOS 26 (Tahoe) and later on Apple Silicon only**. Prefer current-platform APIs and simplicity over backwards compatibility. Do not implement fallbacks for earlier macOS releases or Intel hardware. Focus on exceptional code quality using the modern API, and recommend current best practices.
+
+Kromora is a native RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**) with a package-backed Library/Edit/Export workflow. The open package owns library membership, originals, metadata, and edit revisions; folder, Photos, and removable-volume choices are import sources. Local indexes and caches are projections. Existing `EditStore*.store` files remain untouched and are not read as a library fallback. See [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md) for MVP intent and boundaries, [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for current coordinator ownership, [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) for durable storage, and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for format history.
 
 ## Build / run / test
 
@@ -13,20 +15,17 @@ Kromora is a native **macOS 26 (Tahoe)+** RAW photo editor (**Swift 6 language m
   builds and verifies the packaged app.
 
 CI runs on `macos-26` with Xcode 26 and the macOS 26 SDK. The package, app bundle, and distributable
-build all target **macOS 26 (Tahoe)**, so the SDK and deployment floor match and Tahoe APIs can be
-used unconditionally.
+build all target **macOS 26 (Tahoe) on Apple Silicon**, so the SDK and deployment floor match and Tahoe
+APIs are used directly. Do not add `#available` branches, alternate code paths, or universal-binary
+support to keep an older OS or Intel Mac working.
 
-**Requires Xcode 26 or newer to build.** `RAWDevelopSettings` references
-`CIRAWFilter.isHighlightRecoveryEnabled`, which only exists in the macOS 26 SDK. On an older Xcode the
-package will not compile, and no availability check can change that — `#available` gates a call at
-runtime; it cannot conjure a symbol the SDK never declared. That distinction cost a red build in Phase 2
-Step 2, when CI still ran `macos-14` (Xcode 15.4 / macOS 14.5 SDK) and the code built clean locally.
-
-If CI ever needs to move back to an older image, that reference is the thing that has to go with it.
+**Requires Xcode 26 or newer to build.** Symbols that exist only in the macOS 26 SDK, such as
+`CIRAWFilter.isHighlightRecoveryEnabled`, are part of the product baseline. An availability check cannot
+supply a symbol the SDK never declared, and this project does not keep a fallback for that case.
 
 ## Swift 6 language mode is on, for every target
 
-`Package.swift` is a 6.0 tools version and declares `.swiftLanguageMode(.v6)` on `KromoraKit`, `Kromora`
+`Package.swift` is a 6.2 tools version and declares `.swiftLanguageMode(.v6)` on `KromoraKit`, `Kromora`
 and `KromoraKitTests`. Data-race safety is **errors, not warnings**, and the module compiles with **zero** diagnostics
 and **zero** escape hatches: no `@unchecked Sendable`, no `nonisolated(unsafe)`, no
 `@preconcurrency`. `PackageSettingsTests` fails if any of that changes, because none of it is
@@ -66,7 +65,7 @@ When a test needs to exercise private behavior, first consider testing through t
 Widen an implementation detail only when that makes the production boundary clearer and the test
 needs the seam; document why, and keep test-only helpers in the test target when possible.
 
-Constraints that must hold: **macOS 26 (Tahoe) minimum**, **zero third-party dependencies** (Apple frameworks only). Don't introduce SPM/CocoaPods/Carthage deps.
+Constraints that must hold: **macOS 26 (Tahoe) and later, Apple Silicon only**, **zero third-party dependencies** (Apple frameworks only). Don't introduce SPM/CocoaPods/Carthage deps, and don't add compatibility shims for earlier macOS releases or Intel hardware.
 
 ## Agent and workflow safety
 

@@ -8,7 +8,7 @@ Browse a small or growing photo library, make non-destructive global and local e
 finished images. Kromora uses SwiftUI, Core Image, Metal, AppKit, and other Apple frameworks, with
 no third-party runtime dependencies.
 
-![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
+![Platform](https://img.shields.io/badge/platform-macOS%2026%2B%20Apple%20Silicon-blue)
 ![Swift](https://img.shields.io/badge/Swift-6-orange)
 ![Dependencies](https://img.shields.io/badge/runtime%20dependencies-none-brightgreen)
 
@@ -84,7 +84,7 @@ See [`docs/ONBOARDING.md`](docs/ONBOARDING.md), [`docs/LOOKS.md`](docs/LOOKS.md)
   scope.
 - Decoder and output capabilities vary by format and macOS codecs. Kromora does not promise pixel
   matching with another RAW processor or universal camera-feature parity.
-- The app requires Xcode 26+ and macOS 26 (Tahoe) to build and run.
+- The app requires Xcode 26+ and macOS 26 (Tahoe) on Apple Silicon to build and run.
 
 These boundaries are product choices and current constraints, not a competitor parity checklist.
 The deferred idea archive is not an active roadmap.
@@ -99,7 +99,7 @@ swift run
 swift test
 ```
 
-Requirements: macOS 26 (Tahoe) or newer to run, Xcode 26 or newer with the macOS 26 SDK to build, and Swift
+Requirements: macOS 26 (Tahoe) or newer on Apple Silicon to run, Xcode 26 or newer with the macOS 26 SDK to build, and Swift
 6 language mode. `swift run` is useful for iteration but does not include the packaged app's asset
 catalog or App Sandbox entitlements. Open `Package.swift` in Xcode and run the **Kromora** scheme to
 exercise bundled-app behavior.
