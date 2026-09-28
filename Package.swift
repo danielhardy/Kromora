@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.2
 import PackageDescription
 import Foundation
 
@@ -122,7 +122,7 @@ do {
 // point, the app delegate, and the asset catalog.
 let package = Package(
     name: "Kromora",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v26)],
     products: [
         .executable(name: "Kromora", targets: ["Kromora"]),
         .library(name: "KromoraKit", targets: ["KromoraKit"]),
