@@ -371,7 +371,7 @@ final class PortableLibrarySession {
         pageIndex: Int, query: LibraryQuery = .all
     ) throws -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
         let page = self.page(at: pageIndex, query: query)
-        let assets = try page.items.map { try Self.browsingAsset(for: $0, package: package) }
+        let assets = try page.items.map { try browsingAsset(for: $0) }
         return (assets, page.totalCount, page.pageSize)
     }
 
@@ -632,6 +632,16 @@ final class PortableLibrarySession {
         return handle
     }
 
+    /// "IMG_1370.DNG" becomes "IMG_1370 — Copy.DNG", so the copy keeps a real extension.
+    static func virtualCopyDisplayName(for sourceFilename: String) -> String {
+        let url = URL(fileURLWithPath: sourceFilename)
+        let base = url.deletingPathExtension().lastPathComponent
+        let stem = base.isEmpty ? "Copy" : base
+        let ext = url.pathExtension
+        if ext.isEmpty { return "\(stem) — Copy" }
+        return "\(stem) — Copy.\(ext)"
+    }
+
     @discardableResult
     func importURLs(
         _ urls: [URL],
@@ -639,8 +649,22 @@ final class PortableLibrarySession {
         isCancelled: @Sendable () -> Bool = { false },
         progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in }
     ) throws -> PortablePackageImportResult {
+        try importPackageSources(
+            urls.map { PortablePackageImportSource(url: $0) },
+            duplicatePolicy: duplicatePolicy,
+            isCancelled: isCancelled,
+            progress: progress
+        )
+    }
+
+    @discardableResult
+    func importPackageSources(
+        _ sources: [PortablePackageImportSource],
+        duplicatePolicy: PortablePackageDuplicatePolicy = .skip,
+        isCancelled: @Sendable () -> Bool = { false },
+        progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in }
+    ) throws -> PortablePackageImportResult {
         try ensureWritableLease()
-        let sources = urls.map { PortablePackageImportSource(url: $0) }
         let result: PortablePackageImportResult
         do {
             result = try package.importSources(
@@ -665,12 +689,15 @@ final class PortableLibrarySession {
     {
         let sourceRecord = try package.readAssetRecord(for: sourceID)
         let sourceURL = try package.embeddedSourceURL(for: sourceRecord)
-        let sourceName = sourceURL.lastPathComponent
-        let imported = try importURLs([sourceURL], duplicatePolicy: .importAnyway)
+        // Keep the extension at the end. "IMG_1370.DNG — Copy" has no path extension, so the
+        // browsing locator and RAW classifier both miss the embedded file.
+        let displayName = Self.virtualCopyDisplayName(for: sourceURL.lastPathComponent)
+        let imported = try importPackageSources(
+            [.init(url: sourceURL, name: displayName)], duplicatePolicy: .importAnyway
+        )
         guard let copy = imported.imported.first else {
             throw PortablePackageError.invalidVirtualCopy("the source original could not be copied")
         }
-        let displayName = "\(sourceName) — Copy"
         try package.markVirtualCopy(
             copy.assetID, of: sourceID, displayName: displayName, lease: lease,
             now: clock.now()
@@ -774,9 +801,7 @@ final class PortableLibrarySession {
         var pageIndex = 0
         while true {
             let page = self.page(at: pageIndex, query: query)
-            assets.append(
-                contentsOf: try page.items.map { try Self.browsingAsset(for: $0, package: package) }
-            )
+            assets.append(contentsOf: try page.items.map { try browsingAsset(for: $0) })
             guard page.hasNextPage else { return assets }
             pageIndex += 1
         }
@@ -786,9 +811,7 @@ final class PortableLibrarySession {
     /// page; stable `PhotoAssetID` identity (`portable:<uuid>`) keeps selection coherent as
     /// further pages fault in.
     func browsingAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
-        try page(at: pageIndex, query: query).items.map {
-            try Self.browsingAsset(for: $0, package: package)
-        }
+        try page(at: pageIndex, query: query).items.map { try browsingAsset(for: $0) }
     }
 
     /// Canonical source URL for opening, exporting, or editing one asset. The derived browsing
@@ -812,13 +835,18 @@ final class PortableLibrarySession {
         return try package.embeddedSourceURL(for: package.readAssetRecord(for: assetID))
     }
 
-    private static func browsingAsset(
-        for item: LibraryQueryItem, package: PortableLibraryPackage
-    ) throws -> PhotoAsset {
+    private func browsingAsset(for item: LibraryQueryItem) throws -> PhotoAsset {
         let summary = item.summary
-        let embeddedURL = try package.browsingOriginalURL(
-            for: item.assetID, displayName: summary.displayName
-        )
+        // Names such as "IMG_1370.DNG — Copy" have no path extension. The derived
+        // Original/ filename is then not the embedded file, so resolve the record.
+        let embeddedURL: URL
+        if URL(fileURLWithPath: summary.displayName).pathExtension.isEmpty {
+            embeddedURL = try resolveEmbeddedSourceURL(for: item.assetID)
+        } else {
+            embeddedURL = try package.browsingOriginalURL(
+                for: item.assetID, displayName: summary.displayName
+            )
+        }
         let source = PhotoAssetSource(
             browsingPortableAsset: item.assetID,
             embeddedURL: embeddedURL,
