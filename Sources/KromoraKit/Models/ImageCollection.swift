@@ -143,7 +143,7 @@ final class ImageCollectionPresentationModel {
         }
 
         func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
-            guard editedThumbnailRevision == nil || editedThumbnailRevision != revision else { return }
+            guard editedThumbnailRevision != revision || editedThumbnailUsesFallback else { return }
             editedThumbnailRevision = revision
             editedThumbnailUsesFallback = thumbnail == nil
             self.thumbnail = thumbnail ?? originalThumbnail

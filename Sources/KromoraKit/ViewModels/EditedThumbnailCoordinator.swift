@@ -250,7 +250,13 @@ final class EditedThumbnailCoordinator {
                 return
             }
 
-            destination.invalidateEditedThumbnail(for: assetID)
+            // A request for an already-published revision can be a repeated appearance/selection
+            // demand after the in-memory materialization cache was lost. Keep that bitmap visible
+            // while confirming or rebuilding the same revision. A genuinely different edit (or a
+            // forced refresh) invalidates it so an obsolete edit is never presented as current.
+            if force || item.editedThumbnailRevision != revision {
+                destination.invalidateEditedThumbnail(for: assetID)
+            }
 
             // Metadata normally supplies the extent before a cell appears. Preparing the source
             // here is the safe fallback for a just-discovered cell and keeps the thumbnail render
