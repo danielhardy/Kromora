@@ -216,7 +216,8 @@ final class PhotosImportCoordinator {
                             contentDigest: contentDigest,
                             calculateContentDigest: contentDigest != nil
                         ),
-                        ordinal: selection.ordinal
+                        ordinal: selection.ordinal,
+                        operationID: currentOperationID
                     )
                 } catch is CancellationError {
                     transferInterval.end()
@@ -301,7 +302,7 @@ final class PhotosImportCoordinator {
     }
 
     private func appendAsync(
-        _ item: ImageCollection.PhotoImportItem, ordinal: Int
+        _ item: ImageCollection.PhotoImportItem, ordinal: Int, operationID: UUID
     ) async {
         let outcome: PhotosImportInsertionOutcome?
         if let destination = destination as? any AsyncPhotosImportDestination {
@@ -309,6 +310,7 @@ final class PhotosImportCoordinator {
         } else {
             outcome = destination?.insertPhotosImport(item, ordinal: ordinal)
         }
+        guard isCurrent(operationID), !Task.isCancelled else { return }
         append(outcome: outcome, item: item, ordinal: ordinal)
     }
 

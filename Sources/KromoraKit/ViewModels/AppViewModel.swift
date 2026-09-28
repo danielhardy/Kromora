@@ -63,7 +63,8 @@ public enum PersistenceFlushResult: Equatable, Sendable {
 /// Central state for the Kromora app.
 @MainActor
 public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosImportDestination,
-    AsyncPhotosImportDestination, MaskingWorkflowDestination, RetouchWorkflowDestination, EditedThumbnailDestination
+    AsyncPhotosImportDestination, PhotosImportBatchDestination, MaskingWorkflowDestination,
+    RetouchWorkflowDestination, EditedThumbnailDestination
 {
 
     var packageImportDoesNotNeedDigest: Bool { true }
@@ -632,16 +633,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Compatibility projection for the import coordinator's operation state. The coordinator is
     /// the single owner so the picker and status bar cannot observe competing progress values.
     var photosImportProgress: PhotosImportProgress? { photosImportCoordinator.progress }
-    /// Presentation is a property of the import operation, not of each item. This prevents a
-    /// later streamed arrival (or a second load triggered by metadata work) from reopening or
-    /// retargeting the inspector after the first accepted item has established the active photo.
-    private var didPresentInspectorForPhotosImport = false
-    /// Portable Photos imports commit each item's package transaction immediately, but defer the
-    /// disposable index/collection refresh until the streamed batch finishes.
-    private var isPortablePhotosImportActive = false
-    private var portablePhotosImportNeedsRefresh = false
-    private var portablePhotosImportWasEmpty = false
-    private var portablePhotosImportFirstAssetID: PortablePhotoAssetID?
+    /// Bridges streamed Photos package results to one deferred collection refresh and source
+    /// handoff. Package writes and collection/document ownership remain with their coordinators.
+    private let photosImportBatchCoordinator = PhotosImportBatchCoordinator()
     private var droppedPromiseTask: Task<Void, Never>?
     /// Every asynchronous import handoff captures this token. A late provider result can never
     /// publish into a newer import operation.
@@ -1039,6 +1033,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             allowsUnregisteredSourceDeletion: self.usesInjectedEditStore
         )
         self.photosImportCoordinator.destination = self
+        self.photosImportBatchCoordinator.destination = self
         self.photosImportCoordinator.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
@@ -2232,62 +2227,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     func preparePhotosImport(totalCount: Int) {
-        _ = beginImportOperation()
+        let operationID = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
-        didPresentInspectorForPhotosImport = false
+        photosImportBatchCoordinator.begin(
+            operationID: operationID,
+            totalCount: totalCount,
+            packageWasEmpty: collection.items.isEmpty,
+            packageAvailable: portableLibrary != nil
+        )
         guard portableLibrary != nil else {
             reportPortableLibraryUnavailable()
-            isPortablePhotosImportActive = false
             return
         }
-        isPortablePhotosImportActive = true
-        portablePhotosImportNeedsRefresh = false
-        portablePhotosImportWasEmpty = collection.items.isEmpty
-        portablePhotosImportFirstAssetID = nil
     }
 
     func insertPhotosImport(
         _ item: ImageCollection.PhotoImportItem, ordinal: Int
     ) -> PhotosImportInsertionOutcome {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return .failed(portableLibraryUnavailableMessage)
-        }
-        do {
-            let result = try libraryImportCoordinator.importData(
-                item.data,
-                name: item.name,
-                rebuildIndex: !isPortablePhotosImportActive
-            )
-            let assetID =
-                result.imported.first?.assetID
-                ?? result.duplicates.first?.existingAssetID
-            if isPortablePhotosImportActive {
-                if let assetID, portablePhotosImportFirstAssetID == nil {
-                    portablePhotosImportFirstAssetID = assetID
-                }
-                portablePhotosImportNeedsRefresh =
-                    portablePhotosImportNeedsRefresh || !result.imported.isEmpty
-            } else {
-                try reloadPortableCollection()
-                if collection.items.count == 1, let assetID {
-                    openPortableAsset(assetID)
-                    presentInspectorForFirstPhotosImportItem()
-                }
-            }
-            if let assetID = result.imported.first?.assetID {
-                return .inserted("portable:\(assetID.raw)")
-            }
-            if let assetID = result.duplicates.first?.existingAssetID {
-                return .duplicate("portable:\(assetID.raw)")
-            }
-            if let failure = result.failures.first { return .failed(failure.reason) }
-            return result.cancelled
-                ? .failed("Photos import was cancelled before the package write completed.")
-                : .failed("The package did not report an import outcome.")
-        } catch {
-            return .failed(error.localizedDescription)
-        }
+        photosImportBatchCoordinator.insert(item, ordinal: ordinal)
     }
 
     /// Package Photos imports await the detached package worker before updating the presentation
@@ -2296,57 +2253,48 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func insertPhotosImportAsync(
         _ item: ImageCollection.PhotoImportItem, ordinal: Int
     ) async -> PhotosImportInsertionOutcome {
-        guard portableLibrary != nil else {
-            reportPortableLibraryUnavailable()
-            return .failed(portableLibraryUnavailableMessage)
-        }
-        do {
-            let result = try libraryImportCoordinator.startImportData(
-                item.data,
-                name: item.name,
-                rebuildIndex: !isPortablePhotosImportActive
-            )
-            let outcome = try await result.value()
-            let assetID =
-                outcome.imported.first?.assetID
-                ?? outcome.duplicates.first?.existingAssetID
-            if isPortablePhotosImportActive {
-                if let assetID, portablePhotosImportFirstAssetID == nil {
-                    portablePhotosImportFirstAssetID = assetID
-                }
-                portablePhotosImportNeedsRefresh =
-                    portablePhotosImportNeedsRefresh || !outcome.imported.isEmpty
-            } else {
-                try reloadPortableCollection()
-                if collection.items.count == 1, let assetID {
-                    openPortableAsset(assetID)
-                    presentInspectorForFirstPhotosImportItem()
-                }
-            }
-            if let assetID = outcome.imported.first?.assetID {
-                return .inserted("portable:\(assetID.raw)")
-            }
-            if let assetID = outcome.duplicates.first?.existingAssetID {
-                return .duplicate("portable:\(assetID.raw)")
-            }
-            if let failure = outcome.failures.first { return .failed(failure.reason) }
-            return outcome.cancelled
-                ? .failed("Photos import was cancelled before the package write completed.")
-                : .failed("The package did not report an import outcome.")
-        } catch {
-            return .failed(error.localizedDescription)
-        }
+        await photosImportBatchCoordinator.insertAsync(item, ordinal: ordinal)
     }
 
-    /// Present the existing inspector exactly once for the first accepted Photos payload. The
-    /// selected tab belongs to the user's inspector preferences, so opening the panel must not
-    /// force Info or disturb it; `load()` has already cleared metadata and histogram state for the
-    /// new active source before this presentation change is published.
-    private func presentInspectorForFirstPhotosImportItem() {
-        guard !didPresentInspectorForPhotosImport else { return }
-        didPresentInspectorForPhotosImport = true
-        guard !inspectorState.isPresented else { return }
+    func isCurrentPhotosImportBatch(_ operationID: UUID) -> Bool {
+        isCurrentImport(operationID)
+    }
+
+    func writePhotosImportItem(
+        _ item: ImageCollection.PhotoImportItem, rebuildIndex: Bool
+    ) throws -> PortablePackageImportResult {
+        try libraryImportCoordinator.importData(
+            item.data, name: item.name, rebuildIndex: rebuildIndex
+        )
+    }
+
+    func writePhotosImportItemAsync(
+        _ item: ImageCollection.PhotoImportItem, rebuildIndex: Bool
+    ) async throws -> PortablePackageImportResult {
+        let handle = try libraryImportCoordinator.startImportData(
+            item.data, name: item.name, rebuildIndex: rebuildIndex
+        )
+        return try await handle.value()
+    }
+
+    func refreshPhotosImportCollection() throws {
+        // Commit the coalesced package membership delta before the presentation bridge snapshots
+        // the index generation.
+        libraryImportCoordinator.finishImportBatch()
+        try reloadPortableCollection()
+    }
+
+    func openPhotosImportAsset(_ assetID: PortablePhotoAssetID) {
+        openPortableAsset(assetID)
+    }
+
+    func presentPhotosImportInspector() {
+        // Keep the user's selected inspector tab unchanged.
         inspectorState.isPresented = true
+    }
+
+    func reportPhotosImportBatchError(_ message: String) {
+        presentError(message)
     }
 
     func recordPhotosImportFailureDestination(name: String, ordinal: Int?, reason: String) {
@@ -2356,33 +2304,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     func finishPhotosImportDestination(summary: ImportOutcomeSummary) {
         _ = summary
-        guard isPortablePhotosImportActive, portableLibrary != nil else { return }
-        do {
-            defer {
-                isPortablePhotosImportActive = false
-                portablePhotosImportNeedsRefresh = false
-                portablePhotosImportWasEmpty = false
-                portablePhotosImportFirstAssetID = nil
-            }
-            guard portablePhotosImportNeedsRefresh else { return }
-            do {
-                // Publish the coalesced membership delta before materializing the presentation
-                // bridge; otherwise the bridge would snapshot the previous index generation.
-                libraryImportCoordinator.finishImportBatch()
-                try reloadPortableCollection()
-                if portablePhotosImportWasEmpty,
-                   let assetID = portablePhotosImportFirstAssetID
-                {
-                    openPortableAsset(assetID)
-                    presentInspectorForFirstPhotosImportItem()
-                }
-            } catch {
-                presentError(
-                    "Kromora could not refresh the library after Photos import: "
-                        + error.localizedDescription
-                )
-            }
-        }
+        photosImportBatchCoordinator.finish()
     }
 
     // MARK: - Removable media import
@@ -4412,6 +4334,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await export.shutdown()
         canvasWorkflow.shutdown()
         await photosImportCoordinator.shutdown()
+        photosImportBatchCoordinator.shutdown()
         await derive.shutdown()
         await lookSave.shutdown()
         await photoAnalysisCoordinator.shutdown()

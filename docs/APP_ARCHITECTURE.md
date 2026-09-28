@@ -111,11 +111,14 @@ discarding only explicitly abandoned persistence snapshots.
 Open, folders, Photos, and removable media. It owns the replaceable import generation, active
 worker handle, progress observation task, and progress publication; starting or adopting a newer
 operation cancels the previous worker and fences its late callbacks. Its command surface is limited
-to the package session's import and batch-finish entry points. `AppViewModel` remains responsible
-for collection refresh, active-asset selection, display-name overrides, outcome presentation, and
-the compatibility entry points used by views and provider coordinators. Worker cancellation is
-cooperative and shutdown cancels and awaits the progress observer; the package session's shared
-scheduler continues to bound actual I/O admission.
+to the package session's import and batch-finish entry points. `PhotosImportBatchCoordinator` owns
+only the streamed Photos batch snapshot, insertion-result mapping, first accepted asset, and the
+once-per-batch refresh/source/inspector decision. It calls back through the narrow
+`PhotosImportBatchDestination` protocol; it stores neither the app model nor a package session or
+import worker. `AppViewModel` adapts that protocol to the existing library import and
+collection/editor presentation boundaries. Worker cancellation is cooperative and shutdown cancels
+and awaits the library progress observer; the package session's shared scheduler continues to bound
+actual I/O admission.
 
 ## Masking-workflow ownership
 
@@ -181,7 +184,7 @@ after the ownership stages; the main file is 4,293 lines, recorded here only as 
 | Error presentation | The root maps hard failures to its status bar and alert; collaborators report outcomes. |
 | Auto adjustment | `AutoWorkflowCoordinator` owns invocation state and cancellation. `runAutoAdjustment` snapshots source/document identity, fences completion, presents status, and commits a successful value through `updateDocument`. |
 | Image loading and source changes | `load` is the root sequencer: it closes undo, flushes the previous edit, activates the session, invalidates old source/display work, clears surfaces, then starts `SourceSessionCoordinator`. Root installation and stored-edit adoption publish the active document and schedule the corrective render. `SourceSessionCoordinator` owns replaceable source preparation and its worker tasks. |
-| Import and library commands | `LibraryImportCoordinator`, `PhotosImportCoordinator`, `LibraryMediaWorkflowCoordinator`, and `LibraryBrowsingCoordinator` own their worker, provider, validation, query-window, and selection state. The root keeps view-compatible entry points, final package/import publication, source-to-edit handoff, and cross-feature deletion cleanup. |
+| Import and library commands | `LibraryImportCoordinator`, `PhotosImportCoordinator`, `PhotosImportBatchCoordinator`, `LibraryMediaWorkflowCoordinator`, and `LibraryBrowsingCoordinator` own their worker, provider, batch bridge, validation, query-window, and selection state. The root keeps view-compatible entry points, final package/import publication, source-to-edit handoff, and cross-feature deletion cleanup. |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns request state. Root demand, refresh, debounce, and invalidation hooks are forwards; collection/document publication remains at the root boundary. |
 | Copy/paste and Looks | `EditorDocumentCoordinator` owns per-photo sessions, history, and clipboard. Root commands translate UI actions into document mutations, preserve multi-photo persistence semantics, and resolve Looks against `LUTLibrary`/`DerivedLUTRegistry`. |
 | Document commit and history | `updateDocument` is the sole ordinary edit commit path: it records history, updates the published document and crop, queues persistence, advances revisions, and admits preview/thumbnail work. `applyHistoryDocument` is the restore sequencer for undo/redo and reset, using the same published document, persistence, revision, and render boundaries. |
