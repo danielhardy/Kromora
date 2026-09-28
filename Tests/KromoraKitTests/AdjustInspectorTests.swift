@@ -211,10 +211,17 @@ extension AdjustInspectorTests {
         let state = AppViewModel.InspectorState()
         XCTAssertEqual(state.tab, .light)
 
-        for tab in AppViewModel.InspectorTab.availableTabs(
+        let tabs = AppViewModel.InspectorTab.availableTabs(
             hasImage: true,
             developPanelState: .noDevelopStage
-        ) {
+        )
+        let expectedContent: [AppViewModel.InspectorTab.Content] = [
+            .light, .color, .effects, .masking, .retouch, .look, .info
+        ]
+
+        XCTAssertEqual(tabs.map(\.content), expectedContent)
+
+        for tab in tabs {
             state.select(tab)
             XCTAssertEqual(state.tab, tab)
         }
