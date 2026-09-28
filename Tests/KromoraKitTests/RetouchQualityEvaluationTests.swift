@@ -117,6 +117,46 @@ final class RetouchQualityEvaluationTests: TempDirectoryTestCase {
         XCTAssertEqual(first.mask, second.mask)
     }
 
+    func testHandBuiltTextureSynthesisCanRepairStraightWireOnEveryBackground() throws {
+        for background in RetouchQualityFixtures.backgrounds {
+            let fixture = RetouchQualityFixtures.make(background: background, defect: "wire straight")
+            let clean = try Pixels.bytes(of: fixture.clean)
+            var output = try Pixels.bytes(of: fixture.damaged)
+            let w = fixture.width, h = fixture.height
+            func synthesizedGrain(_ x: Int, _ y: Int) -> Double {
+                var n = UInt32(truncatingIfNeeded: x &* 1_103_515_245 &+ y &* 12_345) ^ 9191
+                n = (n ^ (n >> 16)) &* 0x7feb352d
+                n = (n ^ (n >> 15)) &* 0x846ca68b
+                n ^= n >> 16
+                return Double(n & 0xffff) / 65535 - 0.5
+            }
+            for index in fixture.mask.indices where fixture.mask[index] {
+                let x = index % w, y = index / w
+                var estimate = [Double](repeating: 0, count: 3)
+                var weightSum = 0.0
+                // Inverse-square interpolation from a 2–5 px neighborhood, excluding the defect.
+                for dy in -5...5 { for dx in -5...5 {
+                    let nx = x + dx, ny = y + dy
+                    guard nx >= 0, nx < w, ny >= 0, ny < h,
+                          !fixture.mask[ny * w + nx], dx * dx + dy * dy >= 4,
+                          dx * dx + dy * dy <= 25 else { continue }
+                    let weight = 1.0 / Double(dx * dx + dy * dy)
+                    for c in 0..<3 { estimate[c] += Double(output[(ny * w + nx) * 4 + c]) * weight }
+                    weightSum += weight
+                }}
+                guard weightSum > 0 else { continue }
+                for c in 0..<3 {
+                    // Recreate grain statistically with an independent deterministic seed.
+                    let value = estimate[c] / weightSum + synthesizedGrain(x, y) * 0.055 * 255
+                    output[index * 4 + c] = UInt8(min(max(value.rounded(), 0), 255))
+                }
+            }
+            let metrics = measure(clean: clean, output: output, fixture: fixture)
+            XCTAssertTrue(metrics.failures(against: limits[background]!).isEmpty,
+                "hand-built interpolation and texture synthesis should pass for \(background)")
+        }
+    }
+
     private func measure(clean: [UInt8], output: [UInt8], fixture: RetouchQualityFixtures.Case) -> Metrics {
         let w = fixture.width, h = fixture.height
         var selected = fixture.mask
