@@ -17,31 +17,115 @@ struct WelcomeView: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Label("Welcome to Kromora", systemImage: "camera.aperture")
-                .font(.largeTitle.weight(.semibold))
+        VStack(alignment: .leading, spacing: 22) {
+            HStack(spacing: 16) {
+                Image(systemName: "camera.aperture")
+                    .font(.system(size: 36, weight: .regular))
+                    .foregroundStyle(KromoraTheme.primaryAccent)
+                    .accessibilityHidden(true)
+                Text("Welcome to Kromora")
+                    .font(.largeTitle.weight(.semibold))
+            }
+
             Text("Build a portable photo library, make a first edit, and export a finished image.")
                 .foregroundStyle(.secondary)
+                .font(.body.weight(.medium))
 
-            VStack(alignment: .leading, spacing: 10) {
-                Button(action: onImport) { Label("Import photos…", systemImage: "photo.badge.plus") }
-                    .buttonStyle(.borderedProminent)
-                Button(action: onPhotos) { Label("Import from Photos…", systemImage: "photo.on.rectangle") }
-                    .buttonStyle(.bordered)
-                Button(action: onSamples) { Label("Try the sample library", systemImage: "sparkles.rectangle.stack") }
-                    .buttonStyle(.bordered)
+            HStack(alignment: .top, spacing: 16) {
+                choiceCard(
+                    title: "Import Photos",
+                    detail: "From your computer",
+                    symbol: "photo.badge.plus",
+                    recommended: true,
+                    action: onImport
+                )
+                choiceCard(
+                    title: "From Photos Library",
+                    detail: "Already on this Mac",
+                    symbol: "photo.on.rectangle",
+                    action: onPhotos
+                )
+                choiceCard(
+                    title: "Sample Library",
+                    detail: "Explore sample photos",
+                    symbol: "square.stack.3d.up",
+                    action: onSamples
+                )
             }
 
-            HStack {
-                Button("Take the quick tour", action: onTour)
-                    .buttonStyle(.link)
-                Spacer()
+            Divider()
+
+            HStack(spacing: 12) {
                 Button("Start with an empty library", action: onDismiss)
-                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.plain)
+                Text("·")
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+                Button("Take the quick tour", action: onTour)
+                    .buttonStyle(.plain)
             }
+            .font(.body.weight(.semibold))
+            .foregroundStyle(KromoraTheme.primaryAccent)
+            .frame(maxWidth: .infinity)
         }
-        .padding(28)
-        .frame(width: 440)
+        .padding(32)
+        .frame(width: 760)
+        .tint(KromoraTheme.primaryAccent)
+    }
+
+    private func choiceCard(
+        title: String,
+        detail: String,
+        symbol: String,
+        recommended: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 12) {
+                Image(systemName: symbol)
+                    .font(.system(size: 21, weight: .medium))
+                    .foregroundStyle(KromoraTheme.primaryAccent)
+                    .frame(width: 54, height: 54)
+                    .background(KromoraTheme.primaryAccent.opacity(0.13), in: Circle())
+
+                Text(title)
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity, minHeight: 150)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 18)
+            .background(KromoraTheme.secondaryChrome, in: RoundedRectangle(cornerRadius: 14))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(
+                        recommended ? KromoraTheme.primaryAccent : Color.clear,
+                        lineWidth: 2
+                    )
+            }
+            .overlay(alignment: .top) {
+                if recommended {
+                    Text("RECOMMENDED")
+                        .font(.caption2.weight(.bold))
+                        .tracking(0.3)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(KromoraTheme.primaryAccent, in: Capsule())
+                        .offset(y: -11)
+                }
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(recommended ? "Import Photos, recommended. \(detail)" : "\(title). \(detail)")
     }
 }
 
