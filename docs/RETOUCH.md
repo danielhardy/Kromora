@@ -53,8 +53,8 @@ and the renderer's membrane composite.
 Engine timing capture: `KROMORA_RUN_RETOUCH_ENGINE_BENCHMARK=1 swift test -Xswiftc -O --filter
 RetouchEnginePerformanceTests/testRecordEngineRemoveTimings` runs the XCTest bundle with Swift
 optimization enabled. On the Apple M4 Pro reference setup, a 60 px dust spot on a 3,200 × 900
-source measured 15.0 ms solve / 85.6 ms cache-miss total and 24.0 ms cache-hit total. A 3,000 px
-wire measured 189.7 ms solve / 252.2 ms cache-miss total and 35.5 ms cache-hit total. Both
+source measured 15.6 ms solve / 81.6 ms cache-miss total and 22.8 ms cache-hit total. A 3,000 px
+wire measured 170.7 ms solve / 229.7 ms cache-miss total and 33.6 ms cache-hit total. Both
 optimized solve times meet KRMA-665's targets (< 50 ms for dust and < 400 ms for wire); cache hits
 add no solve time. These totals include full-resolution rendering, so they exceed solver time.
 The plain `swift test -c release --filter ...` command still cannot link the test bundle with this
