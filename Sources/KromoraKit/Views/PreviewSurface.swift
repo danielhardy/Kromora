@@ -1221,8 +1221,22 @@ struct PreviewSurfaceView: NSViewRepresentable {
             } else {
                 presentationImage = image
             }
-            let displayed = presentationImage
+            let transformed = presentationImage
                 .transformed(by: transform.affineTransform(for: transformExtent))
+            // Core Image's transformed image can sample transparent pixels just beyond its
+            // finite extent while the destination compositor filters the perimeter. The Metal
+            // quad clamps to the edge texel, so the fallback otherwise blends the canvas color
+            // into the outer photo pixels at fractional fit scales. Extend edge samples for
+            // filtering, then clip back to the original transformed bounds so framing and alpha
+            // outside the image remain unchanged.
+            let samplingPadding: CGFloat = 2
+            let paddedExtent = presentationImage.extent.insetBy(
+                dx: -samplingPadding, dy: -samplingPadding
+            )
+            let edgeExtended = presentationImage.clampedToExtent().cropped(to: paddedExtent)
+            let displayed = edgeExtended
+                .transformed(by: transform.affineTransform(for: transformExtent))
+                .cropped(to: transformed.extent)
                 .cropped(to: destination)
             // Resolve the dedicated canvas color against the editor view's effective appearance.
             // Resolving without that appearance is not reliable at the native presentation
