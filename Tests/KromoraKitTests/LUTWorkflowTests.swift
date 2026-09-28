@@ -46,7 +46,7 @@ final class LUTWorkflowTests: TempDirectoryTestCase {
             [.look],
             "the inspector must expose exactly one Look entry point"
         )
-        XCTAssertEqual(AppViewModel.InspectorTab.look.title, "Look")
+        XCTAssertEqual(AppViewModel.InspectorTab.look.title, "Looks")
         XCTAssertEqual(AppViewModel.InspectorTab.look.iconName, "wand.and.stars")
         XCTAssertEqual(AppViewModel.InspectorTab.look.purpose, "Browse and apply a Look")
     }

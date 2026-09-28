@@ -33,10 +33,10 @@ final class MaskingWorkspaceTests: TempDirectoryTestCase {
 
         XCTAssertEqual(viewModel.inspectorTab, .masking)
         XCTAssertTrue(viewModel.inspectorState.isMaskingWorkspacePresented)
-        XCTAssertEqual(AppViewModel.InspectorTab.masking.title, "Masking")
+        XCTAssertEqual(AppViewModel.InspectorTab.masking.title, "Masks")
         XCTAssertEqual(
             AppViewModel.InspectorTab.masking.helpText,
-            "Masking: Create and edit local masks"
+            "Masks: Create and edit local masks"
         )
 
         viewModel.closeMaskingWorkspace()
