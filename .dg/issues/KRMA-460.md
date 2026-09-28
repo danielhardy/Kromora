@@ -142,7 +142,7 @@ After stages 1–4, list remaining root methods. Expected leftover: `init`/wirin
 - Collaborators exchange `Sendable` values or narrow protocols. No untyped backchannel into root `@Published` state.
 - Persistence, export, comparison, undo/redo, navigation, managed-vs-referenced deletion, and package storage stay semantically unchanged.
 - New collaborator tests use fakes; keep existing AppViewModel integration tests for navigation-during-load, Auto, undo grouping, comparison, persistence failure, and shutdown.
-- Swift 6 language mode, macOS 14+, zero third-party dependencies.
+- Swift 6 language mode, macOS 26+ on Apple Silicon, zero third-party dependencies. Do not add fallbacks for earlier macOS releases or Intel hardware.
 
 ## Acceptance criteria (parent)
 

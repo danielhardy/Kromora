@@ -172,7 +172,7 @@ slider to a left-origin fill with the arithmetic still passing.
 
 ## Change checklist
 
-- Keep the macOS 26 (Tahoe) deployment target, Swift 6 language mode, and Apple-only dependency policy.
+- Keep the macOS 26 (Tahoe) Apple Silicon deployment target, Swift 6 language mode, and Apple-only dependency policy. Do not add fallbacks for earlier macOS releases or Intel hardware.
 - Keep non-Sendable image/GPU objects behind the render actor; do not add concurrency escape hatches.
 - Preserve source/document/revision checks at every asynchronous publication boundary.
 - Keep neutral documents and unsupported optional capabilities as no-ops.
