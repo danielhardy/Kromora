@@ -32,7 +32,9 @@ struct ColorInspectorView: View {
     }
 
     private var header: some View {
-        InspectorPanelHeading(title: "Color")
+        Text("Color")
+            .font(.title3.weight(.bold))
+            .accessibilityAddTraits(.isHeader)
     }
 
     private var whiteBalanceSection: some View {
