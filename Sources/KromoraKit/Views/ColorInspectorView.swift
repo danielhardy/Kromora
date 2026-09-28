@@ -33,12 +33,16 @@ struct ColorInspectorView: View {
 
     private var header: some View {
         Text("Color")
-            .font(.title2.weight(.semibold))
+            .font(.title2.weight(.bold))
             .accessibilityAddTraits(.isHeader)
     }
 
     private var whiteBalanceSection: some View {
-        InspectorDisclosure("White Balance", isExpanded: $whiteBalanceExpanded) {
+        InspectorDisclosure(
+            "White Balance",
+            isExpanded: $whiteBalanceExpanded,
+            titleFont: .subheadline.weight(.semibold)
+        ) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
                     Menu("Preset") {
@@ -132,7 +136,11 @@ struct ColorInspectorView: View {
     }
 
     private var colorSection: some View {
-        InspectorDisclosure("Color Adjustments", isExpanded: $colorExpanded) {
+        InspectorDisclosure(
+            "Adjustments",
+            isExpanded: $colorExpanded,
+            titleFont: .subheadline.weight(.semibold)
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 InspectorSectionResetButton(
                     title: "Reset Color",
@@ -157,7 +165,11 @@ struct ColorInspectorView: View {
     }
 
     private var mixerSection: some View {
-        InspectorDisclosure("Color Mixer / HSL", isExpanded: $mixerExpanded) {
+        InspectorDisclosure(
+            "Color Mixer / HSL",
+            isExpanded: $mixerExpanded,
+            titleFont: .subheadline.weight(.semibold)
+        ) {
             VStack(alignment: .leading, spacing: 8) {
                 InspectorSectionResetButton(
                     title: "Reset Mixer",
@@ -200,7 +212,11 @@ struct ColorInspectorView: View {
     }
 
     private var gradingSection: some View {
-        InspectorDisclosure("Color Grading", isExpanded: $gradingExpanded) {
+        InspectorDisclosure(
+            "Color Grading",
+            isExpanded: $gradingExpanded,
+            titleFont: .subheadline.weight(.semibold)
+        ) {
             VStack(alignment: .leading, spacing: 8) {
                 InspectorSectionResetButton(
                     title: "Reset Grading",

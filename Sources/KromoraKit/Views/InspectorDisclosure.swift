@@ -8,6 +8,7 @@ import SwiftUI
 struct InspectorDisclosure<Content: View>: View {
     let title: String
     @Binding var isExpanded: Bool
+    var titleFont: Font
     var trailingActionTitle: String?
     var trailingActionEnabled: Bool
     var trailingAction: (() -> Void)?
@@ -16,6 +17,7 @@ struct InspectorDisclosure<Content: View>: View {
     init(
         _ title: String,
         isExpanded: Binding<Bool>,
+        titleFont: Font = .body,
         trailingActionTitle: String? = nil,
         trailingActionEnabled: Bool = true,
         trailingAction: (() -> Void)? = nil,
@@ -23,6 +25,7 @@ struct InspectorDisclosure<Content: View>: View {
     ) {
         self.title = title
         self._isExpanded = isExpanded
+        self.titleFont = titleFont
         self.trailingActionTitle = trailingActionTitle
         self.trailingActionEnabled = trailingActionEnabled
         self.trailingAction = trailingAction
@@ -37,7 +40,7 @@ struct InspectorDisclosure<Content: View>: View {
                         Image(systemName: "chevron.right")
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                             .accessibilityHidden(true)
-                        Text(title)
+                        Text(title).font(titleFont)
                         Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
