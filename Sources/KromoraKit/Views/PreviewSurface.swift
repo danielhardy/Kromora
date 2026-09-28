@@ -455,7 +455,17 @@ final class PreviewSurface: ObservableObject {
                 lastValidPresentationTextureExtent = materialization.extent
             }
             requestDisplay()
+        } else if isCurrentMaterialization, let pendingDisplayID {
+            // The Core Image fallback may have skipped rollback because this texture was still
+            // outstanding. Once materialization itself fails, the previous frame has to return.
+            rejectPresentation(displayRevision: pendingDisplayID)
         }
+    }
+
+    /// True while the publication at `surfaceRevision` is waiting for its display texture.
+    /// A failed drawable command buffer must not roll the canvas back until that texture lands.
+    fileprivate func isAwaitingPresentationTexture(surfaceRevision: UInt64) -> Bool {
+        pendingPresentationMaterializationRevision == surfaceRevision && revision == surfaceRevision
     }
 
     private func trimTelemetry() {
@@ -994,7 +1004,13 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         func draw(in view: MTKView) {
             self.view = view
-            guard !isDrawing else { return }
+            guard !isDrawing else {
+                // A publication or texture can arrive while the previous command buffer is still
+                // committing. Dropping that display request left the new edit in `surface.image`
+                // and the previous photo on the drawable.
+                needsDisplayAfterInFlightDraw = true
+                return
+            }
             guard let surface, let stack = surface.presentationStack(for: navigation) else { return }
             let frame = stack.detail
             let drawableAcquisitionStart = LiveEditTelemetryClock.now
@@ -1060,7 +1076,11 @@ struct PreviewSurfaceView: NSViewRepresentable {
             renderPass?.colorAttachments[0].storeAction = .store
 
             let metalFrames = Self.metalFrames(in: stack)
-            if !metalFrames.isEmpty, pipeline != nil, samplerState != nil,
+            // A retained complete-frame texture must not be the only thing drawn while the new
+            // publication is still a Core Image image. Otherwise an edit stays on the previous
+            // photo until that detail texture materializes — and never appears if it does not.
+            let detailIsTextured = stack.detail.texture != nil && stack.detail.textureExtent != nil
+            if detailIsTextured, !metalFrames.isEmpty, pipeline != nil, samplerState != nil,
                 let encoder = renderPass.flatMap({
                     commandBuffer.makeRenderCommandEncoder(descriptor: $0)
                 })
@@ -1114,10 +1134,13 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     if let surface {
                         if succeeded, let displayRevision {
                             surface.markPresentationSucceeded(displayRevision: displayRevision)
-                        } else if let displayRevision {
+                        } else if let displayRevision,
+                            !surface.isAwaitingPresentationTexture(surfaceRevision: drawRevision)
+                        {
                             // A failed Core Image command buffer must not poison the drawable's
                             // last valid frame. Reject only the candidate this draw attempted;
-                            // a newer publication may already be waiting behind it.
+                            // a newer publication may already be waiting behind it. A texture
+                            // materialization still in flight gets to draw before that rollback.
                             surface.rejectPresentation(displayRevision: displayRevision)
                         }
                         if let revision = presentationRevision {
