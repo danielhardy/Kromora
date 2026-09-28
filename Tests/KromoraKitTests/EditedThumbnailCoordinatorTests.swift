@@ -291,6 +291,27 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
             cgThumbnail.height, Thumbnails.libraryMaxPixelSize + 1,
             "the reopened edited crop must retain detail through the rotated crop render"
         )
+
+        let expectedImage = await engine.makeThumbnailCGImage(RenderRequest(
+            source: ImageSource(
+                url: try XCTUnwrap(item.url),
+                nativeExtent: item.thumbnailNativeExtent,
+                portableIdentity: item.asset.source.portableIdentity
+            ),
+            assetID: assetID,
+            document: savedDocument,
+            targetSize: CGSize(
+                width: Thumbnails.libraryMaxPixelSize,
+                height: Thumbnails.libraryMaxPixelSize
+            ),
+            quality: .thumbnail,
+            output: .raster
+        ))
+        XCTAssertEqual(
+            try Pixels.bytes(of: cgThumbnail),
+            try Pixels.bytes(of: XCTUnwrap(expectedImage)),
+            "the reopened Library thumbnail must match the saved crop's edited pixels"
+        )
         await scheduler.cancelAllAndWait()
         await reopenedSession.shutdown()
     }
