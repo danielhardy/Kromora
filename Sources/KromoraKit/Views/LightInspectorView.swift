@@ -10,6 +10,7 @@ struct LightInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var toneSectionExpanded = true
     @State private var curveSectionExpanded = true
+    @State private var advancedCurveSectionExpanded = false
     @State private var selectedToneCurveChannel: ToneCurveChannel = .master
 
     var body: some View {
@@ -43,6 +44,11 @@ struct LightInspectorView: View {
                     }
                 ) {
                     ToneCurveEditor(viewModel: viewModel, channel: $selectedToneCurveChannel)
+                        .padding(.top, 10)
+                }
+
+                InspectorDisclosure("Advanced Curve", isExpanded: $advancedCurveSectionExpanded) {
+                    ParametricToneCurveControls(viewModel: viewModel)
                         .padding(.top, 10)
                 }
             }
@@ -182,64 +188,11 @@ private struct ToneCurveEditor: View {
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
-
-            Text("Parametric regions").font(.caption).foregroundStyle(.secondary)
-            ForEach(["Highlights", "Lights", "Darks", "Shadows"], id: \.self) { name in
-                regionSlider(name, amount: true)
-            }
-            Text("Region splits").font(.caption).foregroundStyle(.secondary)
-            ForEach(["Shadow split", "Dark split", "Light split", "Highlight split"], id: \.self) { name in
-                regionSlider(name, amount: false)
-            }
         }
     }
 
     private var editablePoints: [LightCurvePoint] {
         viewModel.document.light.toneCurve(for: channel).points
-    }
-
-    private func regionSlider(_ title: String, amount: Bool) -> some View {
-        let keyPath: WritableKeyPath<ParametricToneCurve, Double>
-        switch title {
-        case "Highlights": keyPath = \.highlights
-        case "Lights": keyPath = \.lights
-        case "Darks": keyPath = \.darks
-        case "Shadows": keyPath = \.shadows
-        case "Shadow split": keyPath = \.shadowSplit
-        case "Dark split": keyPath = \.darkSplit
-        case "Light split": keyPath = \.lightSplit
-        default: keyPath = \.highlightSplit
-        }
-        let value = viewModel.document.light.parametricCurve[keyPath: keyPath]
-        let range = amount ? ParametricToneCurve.amountRange : 0...1
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(title)
-                Spacer()
-                Text(amount ? String(format: "%+.0f", value) : String(format: "%.2f", value))
-                    .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
-            }
-            NeutralOriginSlider(value: Binding(
-                get: { viewModel.document.light.parametricCurve[keyPath: keyPath] },
-                set: { next in
-                    viewModel.updateDocument(debounced: true) {
-                        var curve = $0.light.parametricCurve
-                        let gap = 0.02
-                        let bounded: Double
-                        switch title {
-                        case "Shadow split": bounded = min(max(next, 0.02), curve.darkSplit - gap)
-                        case "Dark split": bounded = min(max(next, curve.shadowSplit + gap), curve.lightSplit - gap)
-                        case "Light split": bounded = min(max(next, curve.darkSplit + gap), curve.highlightSplit - gap)
-                        case "Highlight split": bounded = min(max(next, curve.lightSplit + gap), 0.98)
-                        default: bounded = next
-                        }
-                        curve[keyPath: keyPath] = bounded
-                        $0.light.parametricCurve = curve
-                    }
-                }
-            ), in: range, neutral: amount ? 0 : 0,
-               accessibilityTitle: title, accessibilityReadout: String(format: "%.2f", value))
-        }
     }
 
     private func curveGraph(size: CGSize) -> some View {
@@ -384,5 +337,68 @@ private struct ToneCurveEditor: View {
         viewModel.beginPreviewInteraction()
         viewModel.removeToneCurvePoint(atInput: point.input, channel: channel)
         viewModel.endPreviewInteraction()
+    }
+}
+
+/// Parametric region amounts and split points are secondary to direct curve editing, so they live
+/// in their own collapsed-by-default inspector section.
+struct ParametricToneCurveControls: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Parametric regions").font(.caption).foregroundStyle(.secondary)
+            ForEach(["Highlights", "Lights", "Darks", "Shadows"], id: \.self) { name in
+                regionSlider(name, amount: true)
+            }
+            Text("Region splits").font(.caption).foregroundStyle(.secondary)
+            ForEach(["Shadow split", "Dark split", "Light split", "Highlight split"], id: \.self) { name in
+                regionSlider(name, amount: false)
+            }
+        }
+    }
+
+    private func regionSlider(_ title: String, amount: Bool) -> some View {
+        let keyPath: WritableKeyPath<ParametricToneCurve, Double>
+        switch title {
+        case "Highlights": keyPath = \.highlights
+        case "Lights": keyPath = \.lights
+        case "Darks": keyPath = \.darks
+        case "Shadows": keyPath = \.shadows
+        case "Shadow split": keyPath = \.shadowSplit
+        case "Dark split": keyPath = \.darkSplit
+        case "Light split": keyPath = \.lightSplit
+        default: keyPath = \.highlightSplit
+        }
+        let value = viewModel.document.light.parametricCurve[keyPath: keyPath]
+        let range = amount ? ParametricToneCurve.amountRange : 0...1
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(amount ? String(format: "%+.0f", value) : String(format: "%.2f", value))
+                    .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+            }
+            NeutralOriginSlider(value: Binding(
+                get: { viewModel.document.light.parametricCurve[keyPath: keyPath] },
+                set: { next in
+                    viewModel.updateDocument(debounced: true) {
+                        var curve = $0.light.parametricCurve
+                        let gap = 0.02
+                        let bounded: Double
+                        switch title {
+                        case "Shadow split": bounded = min(max(next, 0.02), curve.darkSplit - gap)
+                        case "Dark split": bounded = min(max(next, curve.shadowSplit + gap), curve.lightSplit - gap)
+                        case "Light split": bounded = min(max(next, curve.darkSplit + gap), curve.highlightSplit - gap)
+                        case "Highlight split": bounded = min(max(next, curve.lightSplit + gap), 0.98)
+                        default: bounded = next
+                        }
+                        curve[keyPath: keyPath] = bounded
+                        $0.light.parametricCurve = curve
+                    }
+                }
+            ), in: range, neutral: amount ? 0 : 0,
+               accessibilityTitle: title, accessibilityReadout: String(format: "%.2f", value))
+        }
     }
 }

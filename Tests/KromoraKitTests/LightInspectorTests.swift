@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import KromoraKit
 
@@ -78,6 +80,42 @@ final class LightInspectorTests: TempDirectoryTestCase {
         viewModel.undo()
         XCTAssertEqual(viewModel.document.light.toneCurve(for: .red), redCurve)
         XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
+    }
+
+    func testAdvancedCurveControlsAreCollapsedUntilExpanded() throws {
+        let source = try lightInspectorSource()
+        XCTAssertTrue(source.contains("@State private var advancedCurveSectionExpanded = false"))
+        XCTAssertTrue(source.contains(
+            "InspectorDisclosure(\"Advanced Curve\", isExpanded: $advancedCurveSectionExpanded)"
+        ))
+
+        let curveEditor = try XCTUnwrap(source.range(of: "private struct ToneCurveEditor"))
+        let parametricControls = try XCTUnwrap(source.range(of: "struct ParametricToneCurveControls"))
+        let editorSource = source[curveEditor.lowerBound..<parametricControls.lowerBound]
+        XCTAssertTrue(editorSource.contains("Picker(\"Channel\""))
+        XCTAssertTrue(editorSource.contains("curveGraph(size: size)"))
+        XCTAssertFalse(editorSource.contains("Parametric regions"))
+        XCTAssertFalse(editorSource.contains("Region splits"))
+
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        var isExpanded = false
+        let binding = Binding(get: { isExpanded }, set: { isExpanded = $0 })
+        let hosting = NSHostingView(rootView: InspectorDisclosure("Advanced Curve", isExpanded: binding) {
+            ParametricToneCurveControls(viewModel: viewModel)
+        })
+        let collapsedHeight = hosting.fittingSize.height
+
+        isExpanded = true
+        hosting.rootView = InspectorDisclosure("Advanced Curve", isExpanded: binding) {
+            ParametricToneCurveControls(viewModel: viewModel)
+        }
+        let expandedHeight = hosting.fittingSize.height
+
+        XCTAssertGreaterThan(expandedHeight, collapsedHeight)
+        XCTAssertTrue(source.contains("[\"Highlights\", \"Lights\", \"Darks\", \"Shadows\"]"))
+        XCTAssertTrue(source.contains(
+            "[\"Shadow split\", \"Dark split\", \"Light split\", \"Highlight split\"]"
+        ))
     }
 
     func testLightSliderGestureIsOneUndoOperation() {
@@ -174,6 +212,17 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.document.light.toneCurve.isIdentity,
                       "all curve drag ticks should undo as one gesture")
         XCTAssertFalse(viewModel.canUndo)
+    }
+
+    private func lightInspectorSource() throws -> String {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        return try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/LightInspectorView.swift"),
+            encoding: .utf8
+        )
     }
 
     func testCurveDragKeepsMonotonicControlPointsOrderedAndBounded() {
