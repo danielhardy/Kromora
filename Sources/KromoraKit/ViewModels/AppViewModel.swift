@@ -4690,7 +4690,8 @@ extension AppViewModel: LibraryBrowsingDestination {
     var isLibraryGridShowing: Bool { navigation.isGrid }
 
     func showLibraryGridIfActive() {
-        if collection.isActive { navigation.move(to: .grid) }
+        // Launch chooses the Library on its own. A collection reload must not change workspace:
+        // leaving Edit also makes the workspace picker reopen the selected photo.
     }
 
     func openPortableLibraryAsset(url: URL, assetID: PhotoAssetID) {
