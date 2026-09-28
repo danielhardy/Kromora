@@ -33,18 +33,14 @@ struct ColorInspectorView: View {
 
     private var header: some View {
         Text("Color")
-            .font(.headline)
+            .font(.title2.weight(.semibold))
             .accessibilityAddTraits(.isHeader)
     }
 
     private var whiteBalanceSection: some View {
         InspectorDisclosure("White Balance", isExpanded: $whiteBalanceExpanded) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(viewModel.sourceIsRAW ? "RAW decoder" : "Standard image")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                HStack(spacing: 6) {
                     Menu("Preset") {
                         ForEach(WhiteBalancePreset.allCases) { preset in
                             Button(preset.rawValue) {
@@ -54,25 +50,34 @@ struct ColorInspectorView: View {
                     }
                     .disabled(viewModel.sourceIsRAW && viewModel.rawCapabilities == nil)
                     .accessibilityLabel("White balance preset")
+                    Button {
+                        if viewModel.isWhiteBalanceSampling {
+                            viewModel.cancelWhiteBalanceSampling()
+                        } else {
+                            viewModel.beginWhiteBalanceSampling()
+                        }
+                    } label: {
+                        Image(systemName: viewModel.isWhiteBalanceSampling ? "xmark" : "eyedropper")
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(width: 24, height: 22)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(viewModel.isWhiteBalanceSampling
+                        ? false
+                        : viewModel.sourceImage == nil ||
+                            (viewModel.sourceIsRAW && viewModel.rawCapabilities == nil))
+                    .help(viewModel.isWhiteBalanceSampling ? "Cancel Sample" : "Sample Neutral")
+                    .accessibilityLabel(viewModel.isWhiteBalanceSampling ? "Cancel white balance sample" : "Sample Neutral")
+                    .accessibilityHint(viewModel.isWhiteBalanceSampling
+                        ? "Cancel sampling a neutral area"
+                        : "Click a neutral area in the photo; an 11 by 11 display pixel area is averaged")
                 }
 
-                HStack(spacing: 8) {
-                    if viewModel.isWhiteBalanceSampling {
-                        Button("Cancel Sample") { viewModel.cancelWhiteBalanceSampling() }
-                            .accessibilityLabel("Cancel white balance sample")
-                        Text("Click a neutral area in the photo to apply")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Button {
-                            viewModel.beginWhiteBalanceSampling()
-                        } label: {
-                            Label("Sample Neutral", systemImage: "eyedropper")
-                        }
-                        .disabled(viewModel.sourceImage == nil ||
-                            (viewModel.sourceIsRAW && viewModel.rawCapabilities == nil))
-                        .accessibilityHint("Click a neutral area in the photo; an 11 by 11 display pixel area is averaged")
-                    }
+                if viewModel.isWhiteBalanceSampling {
+                    Text("Click a neutral area in the photo to apply")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 if viewModel.sourceIsRAW && viewModel.rawCapabilities == nil {
@@ -127,7 +132,7 @@ struct ColorInspectorView: View {
     }
 
     private var colorSection: some View {
-        InspectorDisclosure("Color", isExpanded: $colorExpanded) {
+        InspectorDisclosure("Color Adjustments", isExpanded: $colorExpanded) {
             VStack(alignment: .leading, spacing: 12) {
                 InspectorSectionResetButton(
                     title: "Reset Color",
