@@ -32,6 +32,34 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         XCTAssertTrue(fixture.destination.appliedRevisions.isEmpty)
     }
 
+    func testMatchingEditedThumbnailStaysVisibleDuringRepeatedDemand() async throws {
+        let document = EditDocument(adjustments: [.exposure(ev: 0.2)])
+        let fixture = makeFixture(document: document, rendererWaits: true)
+        let previouslyPublished = NSImage(size: NSSize(width: 3, height: 2))
+        fixture.item.applyEditedThumbnail(
+            previouslyPublished, revision: document.editHash + ":unresolved"
+        )
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
+        try await waitUntil("the held repeated render") {
+            await fixture.engine.hasThumbnailRequest
+        }
+
+        XCTAssertTrue(fixture.item.thumbnail === previouslyPublished)
+        XCTAssertEqual(
+            fixture.item.editedThumbnailRevision, document.editHash + ":unresolved"
+        )
+
+        await fixture.engine.releaseThumbnail()
+        try await waitUntil("the completed matching render") {
+            fixture.item.editedThumbnailRevision
+                == fixture.destination.document.editHash + ":unresolved"
+        }
+
+        XCTAssertTrue(fixture.item.thumbnail === previouslyPublished)
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
     func testSourceIdentityChangeRejectsLateResult() async throws {
         let fixture = makeFixture(rendererWaits: true)
         fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
