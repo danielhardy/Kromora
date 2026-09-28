@@ -10,6 +10,7 @@ struct LightInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var toneSectionExpanded = true
     @State private var curveSectionExpanded = true
+    @State private var selectedToneCurveChannel: ToneCurveChannel = .master
 
     var body: some View {
         InspectorScrollingContent {
@@ -31,8 +32,17 @@ struct LightInspectorView: View {
                     .padding(.top, 10)
                 }
 
-                InspectorDisclosure("Tone Curve", isExpanded: $curveSectionExpanded) {
-                    ToneCurveEditor(viewModel: viewModel)
+                InspectorDisclosure(
+                    "Tone Curve",
+                    isExpanded: $curveSectionExpanded,
+                    trailingActionTitle: "Reset \(selectedToneCurveChannel.rawValue) tone curve",
+                    trailingActionEnabled: !viewModel.document.light
+                        .toneCurve(for: selectedToneCurveChannel).isIdentity,
+                    trailingAction: {
+                        viewModel.resetToneCurve(selectedToneCurveChannel)
+                    }
+                ) {
+                    ToneCurveEditor(viewModel: viewModel, channel: $selectedToneCurveChannel)
                         .padding(.top, 10)
                 }
             }
@@ -110,7 +120,7 @@ struct LightInspectorView: View {
 private struct ToneCurveEditor: View {
     @ObservedObject var viewModel: AppViewModel
     @State private var curveDrag: CurveDragState?
-    @State private var channel: ToneCurveChannel = .master
+    @Binding var channel: ToneCurveChannel
 
     private enum CurveDragState: Equatable {
         case ignored
@@ -130,12 +140,6 @@ private struct ToneCurveEditor: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.segmented)
-                HStack(spacing: 12) {
-                    Spacer(minLength: 0)
-                    Button("Reset") { viewModel.resetToneCurve(channel) }
-                        .buttonStyle(.link)
-                        .disabled(viewModel.document.light.toneCurve(for: channel).isIdentity)
-                }
             }
 
             GeometryReader { proxy in
