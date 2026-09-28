@@ -93,29 +93,30 @@ inside every listed limit.
 
 The limits are achievable as image metrics: replacing the measured defect-plus-boundary region
 with its clean reference produces ΔE2000 0, gradient error 0, variance ratio 1, and luma shift 0
-for every generated background and defect. This is an oracle ceiling only; the test has not
-demonstrated that a plausible repair can infer the hidden pixels. The latest
-`swift test --filter RetouchQualityEvaluationTests` run passed both test methods and measured 4
+for every generated background and defect. This is an oracle ceiling only; it does not demonstrate
+that a plausible repair can infer the hidden pixels. The focused
+`swift test --filter RetouchQualityEvaluationTests` run passes both test methods and measures 4
 passing wire/hair rows out of 72 mode/background/defect rows: Heal, Clone, and the duplicate
 `Current` Heal row on foliage hair, plus Clone on brick straight wire. The other 68 rows fail at
-least one limit. These passes are examples of the current renderer baseline, not evidence of a repair
-that generalizes across the six backgrounds. In particular, the test does not yet satisfy the
-repairability question for wire/hair; it measures only Heal/Clone with their current source choices.
+least one limit. These are current-renderer examples, not evidence of a repair that generalizes
+across the six backgrounds. No plausible fill has yet been evaluated by this gate, so the requested
+per-background repairability result remains unproven; in particular, current baselines provide no
+passing wire/hair example for sky, cloud, water, or skin. Failure is not proof that no fill can pass.
 
 The principal fixture limitation is the independent per-pixel hash grain (amplitude 0.055): its
 exact high-frequency pattern is absent from the damaged image inside the mask, so a repair cannot
 recover those particular grain samples from the observed neighborhood. The gradient and variance
-checks compare the repair with those exact clean-reference samples. As a result, the current results
-cannot tell whether remaining error is a wire/hair remnant or the unobservable grain realization;
-the oracle pass does not resolve that ambiguity. Keep the current seeded fixtures as a deterministic
-stress lane, and add a separate repairability profile for line defects before using these limits to
-gate renderer progress across all backgrounds. A concrete profile is seeded, low-frequency
-correlated grain (for example, a fixed smooth noise field sampled on an 8 px lattice and
-interpolated between lattice points), preserving deterministic generation and the no-photo-assets
-property. Evaluate a documented hand-built interpolation or texture-extension fill on this profile
-first. Use the existing limits initially and tune them only from measured results on that explicit
-baseline. This separates an unobservable random-grain reconstruction penalty from actual line
-remnants, halos, and broken background structure without weakening the stress lane.
+checks compare the repair with those exact clean-reference samples. The current results therefore
+cannot distinguish a wire/hair remnant from error caused by the unobservable grain realization; the
+oracle pass does not resolve that ambiguity. Keep the current seeded fixtures as a deterministic
+stress lane. Add a separate repairability profile for line defects before using these limits to gate
+renderer progress across all backgrounds. Generate the second profile with deterministic
+low-frequency correlated grain, such as a fixed smooth noise field sampled on an 8 px lattice and
+interpolated between lattice points. This retains seed-based repeatability and requires no photo
+assets. First measure a documented hand-built interpolation or texture-extension fill against the
+existing limits; tune thresholds only if that explicit baseline shows a mismatch between the metrics
+and visible repair quality. This isolates the random-grain reconstruction penalty while preserving
+the current stress lane and avoids weakening limits without evidence.
 
 The gate measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual fixture
 offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
