@@ -3032,6 +3032,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 if previewSurface.image == nil {
                     previewState = .loading
                     schedulePreview()
+                } else if inspectorState.isPresented, !isCropToolActive {
+                    // Library selection can settle and present this frame while the inspector
+                    // is hidden. Re-admit that retained frame after the explicit Library → Edit
+                    // transition, since its original presentation callback correctly skipped
+                    // histogram work while the inspector was closed.
+                    updateHistogram(
+                        for: previewPublicationCoordinator.lastPublishedVisibleRequest,
+                        presentedImage: previewSurface.image
+                    )
                 }
                 return
             }

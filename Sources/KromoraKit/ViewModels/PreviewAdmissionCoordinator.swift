@@ -148,9 +148,13 @@ final class PreviewAdmissionCoordinator {
             cancelHistogram(clear: true)
             return
         }
-        guard let lastPresentedRequest = destination.admissionLastPresentedRequest else { return }
-        let request = displayedRequest ?? lastPresentedRequest
-        guard request.source == imageSource else {
+        guard let request = displayedRequest ?? destination.admissionLastPresentedRequest else {
+            return
+        }
+        guard request.source == imageSource,
+            request.document == destination.admissionDisplayDocument,
+            request.lut == destination.admissionDisplayLUT
+        else {
             cancelHistogram(clear: true)
             return
         }
