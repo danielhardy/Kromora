@@ -91,41 +91,53 @@ inside every listed limit.
 
 ### Threshold achievability for wires, hair, dust, and speck
 
-The limits are achievable as image metrics: replacing the measured defect-plus-boundary region
-with its clean reference produces ΔE2000 0, gradient error 0, variance ratio 1, and luma shift 0
-for every generated background and defect. This is an oracle ceiling only; it does not demonstrate
-that a plausible repair can infer the hidden pixels. The focused
-`swift test --filter RetouchQualityEvaluationTests` run passes both test methods and measures 4
-passing wire/hair rows out of 72 mode/background/defect rows: Heal, Clone, and the duplicate
-`Current` Heal row on foliage hair, plus Clone on brick straight wire. The other 68 rows fail at
-least one limit. These are current-renderer examples, not evidence of a repair that generalizes
-across the six backgrounds. No plausible fill has yet been evaluated by this gate, so the requested
-per-background repairability result remains unproven; in particular, current baselines provide no
-passing wire/hair example for sky, cloud, water, or skin. Failure is not proof that no fill can pass.
+The focused `swift test --filter RetouchQualityEvaluationTests` run passes its three test methods.
+The current renderer measures 4 passing wire/hair rows out of 72 mode/background/defect rows:
+Heal, Clone, and the duplicate `Current` Heal row on foliage hair, plus Clone on brick straight
+wire. The other 68 rows fail at least one limit. Those results describe current renderer behavior,
+not the achievable quality ceiling.
 
-The gap is wider than wire/hair on three of the six backgrounds. Sky, cloud, and skin currently pass
-zero of their 24 rows each across *every* defect family, including soft dust and hard speck, not only
-wire/hair; foliage, water, and brick each pass at least one dust or speck row. The same high-frequency
-per-pixel grain that blocks a wire/hair repair from matching the exact clean-reference samples also
-inflates gradient and variance error for dust and speck on these three backgrounds, so the proposed
-low-frequency-grain repairability profile below should cover soft dust and hard speck on sky, cloud,
-and skin as well, not line defects alone.
+A separate deterministic experiment now checks that ceiling with a hand-built repair for straight
+wire on every background. For masked pixels, it takes an inverse-square weighted color estimate
+from undamaged pixels 2–5 px away, then adds independent deterministic high-frequency grain with
+the fixture's 0.055 amplitude and seed 9191. It reads no clean-reference pixels; the only known
+inputs are the defect mask and the synthetic grain scale. This is a controlled interpolation and
+texture-synthesis example, not evidence that the production renderer or a real photograph will
+always admit this repair. It passes all four limits on all six backgrounds:
 
-The principal fixture limitation is the independent per-pixel hash grain (amplitude 0.055): its
-exact high-frequency pattern is absent from the damaged image inside the mask, so a repair cannot
-recover those particular grain samples from the observed neighborhood. The gradient and variance
-checks compare the repair with those exact clean-reference samples. The current results therefore
-cannot distinguish a wire/hair remnant from error caused by the unobservable grain realization; the
-oracle pass does not resolve that ambiguity. Keep the current seeded fixtures as a deterministic
-stress lane. Add a separate repairability profile — covering wire/hair, dust, and speck on sky,
-cloud, and skin — before using these limits to gate renderer progress across all backgrounds.
-Generate the second profile with deterministic low-frequency correlated grain, such as a fixed
-smooth noise field sampled on an 8 px lattice and
-interpolated between lattice points. This retains seed-based repeatability and requires no photo
-assets. First measure a documented hand-built interpolation or texture-extension fill against the
-existing limits; tune thresholds only if that explicit baseline shows a mismatch between the metrics
-and visible repair quality. This isolates the random-grain reconstruction penalty while preserving
-the current stress lane and avoids weakening limits without evidence.
+| Background | ΔE2000 | Gradient | Variance ratio | Luma shift |
+|---|---:|---:|---:|---:|
+| Smooth sky | 0.35 | 1.89 | 1.01 | -0.0006 |
+| Cloud boundary | 0.75 | 3.06 | 0.85 | -0.0012 |
+| Foliage | 1.42 | 4.29 | 0.73 | -0.0005 |
+| Water | 0.71 | 2.66 | 0.77 | -0.0007 |
+| Brick/roof | 2.39 | 5.26 | 0.91 | +0.0100 |
+| Skin-like | 0.65 | 2.07 | 0.93 | +0.0034 |
+
+The exact per-pixel grain realization is hidden inside the defect, but these limits tolerate a
+statistically recreated texture when the surrounding color can be interpolated. No threshold or
+fixture adjustment is indicated by this experiment; retain the fixed-seed stress corpus and its
+no-photo-assets property. This experiment covers straight wire only. It does not establish
+repairability for sagging wire, hair/fibre, or dust, and passing a synthetic case is not a claim
+about camera-image performance.
+
+The gap remains wider for dust and speck on three backgrounds. Sky, cloud, and skin currently pass
+zero of their 24 rows each across every defect family, including soft dust and hard speck; foliage,
+water, and brick each pass at least one dust or speck row. These current-renderer failures do not
+show that a capable dust or speck repair cannot meet the limits. If a concrete repair later reveals
+that high-frequency grain reconstruction dominates those cases, the separate profile described
+below is a targeted way to isolate that effect.
+
+The corpus still serves as a deterministic stress lane: its independent per-pixel hash grain
+(amplitude 0.055) hides the exact high-frequency samples under a defect. The repairability
+experiment shows that an independently synthesized texture can satisfy the existing limits for
+straight wire without recovering those samples. The current renderer still passes zero of 24 rows
+on sky, cloud, and skin across all defect families, including dust and hard speck, so those baseline
+failures remain useful gap reports rather than proof that the limits are impossible. Keep the
+current limits unless a concrete repair with visibly acceptable output fails them; if a future dust
+or speck repair cannot separate texture-reconstruction error from a defect remnant, evaluate a
+separate deterministic low-frequency-grain profile (for example, smooth noise sampled on an 8 px
+lattice and interpolated between points) before changing thresholds.
 
 The gate measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual fixture
 offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
