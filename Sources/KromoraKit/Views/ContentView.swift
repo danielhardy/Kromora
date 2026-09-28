@@ -243,12 +243,6 @@ public struct ContentView: View {
                 .ignoresSafeArea(.container, edges: .top)
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
-        .onChange(of: viewModel.navigation.mode) { _, mode in
-            guard mode == .grid, inspectorState.isPresented else { return }
-            withAnimation(chromeAnimation) {
-                inspectorState.isPresented = false
-            }
-        }
     }
 
     private var detailContent: some View {
