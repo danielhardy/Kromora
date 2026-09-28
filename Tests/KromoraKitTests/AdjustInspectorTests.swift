@@ -185,19 +185,39 @@ final class AdjustInspectorTests: TempDirectoryTestCase {
 
 extension AdjustInspectorTests {
 
-    /// Look, Masking, and Retouch join the existing inspector tabs in render-workflow order.
-    func testTheInspectorHasEightTabsInPipelineOrder() {
+    /// Inspector controls follow the requested editing order; hidden Develop stays last.
+    func testInspectorPanelsAppearInRequestedOrder() {
         XCTAssertEqual(
             AppViewModel.InspectorTab.allCases,
-            [.info, .light, .develop, .adjust, .effects, .look, .masking, .retouch]
+            [.light, .adjust, .effects, .masking, .retouch, .look, .info, .develop]
+        )
+        XCTAssertEqual(
+            AppViewModel.InspectorTab.availableTabs(
+                hasImage: true,
+                developPanelState: .noDevelopStage
+            ),
+            [.light, .adjust, .effects, .masking, .retouch, .look, .info]
         )
         XCTAssertEqual(AppViewModel.InspectorTab.adjust.rawValue, "adjust")
         XCTAssertEqual(AppViewModel.InspectorTab.adjust.title, "Color")
         XCTAssertEqual(AppViewModel.InspectorTab.adjust.content, .color)
         XCTAssertEqual(AppViewModel.InspectorTab.effects.title, "Effects")
-        XCTAssertEqual(AppViewModel.InspectorTab.look.title, "Look")
-        XCTAssertEqual(AppViewModel.InspectorTab.masking.title, "Masking")
-        XCTAssertEqual(AppViewModel.InspectorTab.retouch.title, "Retouch")
+        XCTAssertEqual(AppViewModel.InspectorTab.look.title, "Looks")
+        XCTAssertEqual(AppViewModel.InspectorTab.masking.title, "Masks")
+        XCTAssertEqual(AppViewModel.InspectorTab.retouch.title, "Heal")
+    }
+
+    func testLightIsTheInitialInspectorPanelAndEveryPanelCanBeSelected() {
+        let state = AppViewModel.InspectorState()
+        XCTAssertEqual(state.tab, .light)
+
+        for tab in AppViewModel.InspectorTab.availableTabs(
+            hasImage: true,
+            developPanelState: .noDevelopStage
+        ) {
+            state.select(tab)
+            XCTAssertEqual(state.tab, tab)
+        }
     }
 
     func testInspectorTabsExposeCompactSymbolsAndAccessiblePurposes() {

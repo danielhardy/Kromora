@@ -79,11 +79,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         @Published var isPresented = false {
             didSet { onPresentationChange?() }
         }
-        @Published var tab: InspectorTab = .info
+        @Published var tab: InspectorTab = .light
 
         /// Masking is an inspector tab, not a second presentation mode. Keep the previous tab so
         /// Done/Escape can return to the edit control the user came from.
-        private var tabBeforeMasking: InspectorTab = .info
+        private var tabBeforeMasking: InspectorTab = .light
 
         /// Compatibility access for masking commands and tests. `tab` remains the one source of
         /// truth for which inspector surface is active; changing this value only translates the
@@ -488,8 +488,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Inspector visibility. Computing the histogram is gated on this so we don't tally pixels
     /// for a panel nobody's looking at.
     enum InspectorTab: String, CaseIterable, Sendable {
-        case info, light, develop, adjust
-        case effects, look, masking, retouch
+        // Case order is the visible inspector order. Develop remains hidden by its capability
+        // gate, so keep it last without changing the order users see.
+        case light, adjust, effects, masking, retouch, look, info, develop
 
         /// The view surface selected by this tab. Keep `.adjust` as the stored compatibility case;
         /// its photographer-facing name is Color.
@@ -530,9 +531,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             case .develop: return "Develop"
             case .adjust: return "Color"
             case .effects: return "Effects"
-            case .look: return "Look"
-            case .masking: return "Masking"
-            case .retouch: return "Retouch"
+            case .look: return "Looks"
+            case .masking: return "Masks"
+            case .retouch: return "Heal"
             }
         }
 
