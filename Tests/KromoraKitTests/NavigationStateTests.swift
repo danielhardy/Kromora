@@ -86,6 +86,27 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
         }
     }
 
+    func testReturningToLibraryClosesInspectorBeforeSwitchingWorkspace() async throws {
+        try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "photo.png", in: tempDirectory
+        )
+
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+        viewModel.collection.select(at: 0)
+
+        XCTAssertTrue(viewModel.navigate(to: .edit))
+        viewModel.isInspectorPresented = true
+        XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[0].id)
+
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+        XCTAssertFalse(viewModel.isInspectorPresented)
+        XCTAssertTrue(viewModel.navigation.isGrid)
+        XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[0].id)
+    }
+
     func testReturningToEditKeepsTheWholeSelectionAndUsesTheActiveID() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "first.png", in: tempDirectory
