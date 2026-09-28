@@ -89,6 +89,26 @@ inside every listed limit.
 | Brick/roof | 4.0 | 34 | 0.48–1.80 | 0.030 |
 | Skin-like | 3.0 | 28 | 0.55–1.65 | 0.025 |
 
+### Threshold achievability for wires and hair
+
+The limits are achievable as image metrics: replacing the measured defect-plus-boundary region
+with its clean reference produces ΔE2000 0, gradient error 0, variance ratio 1, and luma shift 0
+for every generated background and defect. This is an oracle ceiling, not evidence that a practical
+repair can infer the hidden pixels. In the current renderer baseline, wire/hair rows still fail on
+sky, cloud, water, and skin; foliage hair and brick straight-wire Clone are passing examples.
+
+The principal fixture limitation is the independent per-pixel hash grain (amplitude 0.055): its
+exact high-frequency pattern is absent from the damaged image inside the mask, so no neighborhood
+fill can recover those particular grain samples. The gradient and variance checks compare that
+pattern with exact clean-reference samples. Keep the current seeded fixtures as a deterministic
+stress lane, and add a separate repairability profile for line defects before using these limits to
+gate renderer progress across all backgrounds. A concrete profile is seeded, low-frequency
+correlated grain (for example, a fixed smooth noise field sampled on an 8 px lattice and
+interpolated between lattice points), preserving deterministic generation and the no-photo-assets
+property. Use the existing limits initially; tune them only from measured results on an explicit
+hand-built repair baseline. This separates an unobservable random-grain reconstruction penalty from
+actual line remnants, halos, and broken background structure without weakening the stress lane.
+
 The gate measures Heal and Clone quality against the unchanged KRMA-658 limits. Manual fixture
 offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
 the last recorded full corpus run. These are generated-fixture results, not claims about
