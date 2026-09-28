@@ -89,6 +89,32 @@ final class PhotosImportBatchCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.isBatchActive)
     }
 
+    func testAsyncInsertionUsesTheSameOutcomeMappingAndBatchState() async {
+        let destination = PhotosImportBatchDestinationFake()
+        let coordinator = PhotosImportBatchCoordinator(destination: destination)
+        let operationID = destination.currentOperationID
+        let insertedID = PortablePhotoAssetID()
+        let duplicateID = PortablePhotoAssetID()
+        coordinator.begin(
+            operationID: operationID, totalCount: 2,
+            packageWasEmpty: true, packageAvailable: true
+        )
+        destination.results = [result(imported: [importedAsset(insertedID)])]
+        destination.asyncResult = result(duplicates: [duplicate(duplicateID)])
+
+        XCTAssertEqual(
+            coordinator.insert(item(), ordinal: 0), .inserted("portable:\(insertedID.raw)")
+        )
+        let asyncOutcome = await coordinator.insertAsync(item(), ordinal: 1)
+        XCTAssertEqual(asyncOutcome, .duplicate("portable:\(duplicateID.raw)"))
+        XCTAssertEqual(destination.rebuildIndexValues, [false, false])
+
+        coordinator.finish()
+        XCTAssertEqual(destination.refreshCount, 1)
+        XCTAssertEqual(destination.openedAssets, [insertedID])
+        XCTAssertEqual(destination.inspectorPresentationCount, 1)
+    }
+
     func testDuplicateOnlyAndEmptyBatchesResetWithoutRefresh() {
         let destination = PhotosImportBatchDestinationFake()
         let coordinator = PhotosImportBatchCoordinator(destination: destination)
