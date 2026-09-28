@@ -343,11 +343,10 @@ private struct LibraryGridCell: View {
         if let thumbnail = item.thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
-                // The mosaic adopts pixel dimensions when the metadata burst settles. Until
-                // then a cell can still be a 4:3 placeholder, and a crop can change the
-                // bitmap before the row rebuilds. Fit keeps the whole photo visible in
-                // that frame instead of cropping it.
-                .aspectRatio(contentMode: .fit)
+                // Provisional source pixels can still have the original aspect while crop
+                // geometry is loading. Once the edited raster is published, its crop and the
+                // cell frame agree, so fill removes the letterboxing without trimming the edit.
+                .aspectRatio(contentMode: item.shouldFillLibraryThumbnail ? .fill : .fit)
         } else if item.asset.thumbnailState == .failed {
             Rectangle()
                 .fill(Color.secondary.opacity(0.12))

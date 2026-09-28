@@ -86,12 +86,14 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
 
     func testLateOriginalThumbnailDoesNotReplaceSettledEditedThumbnail() async throws {
         let fixture = makeFixture(active: false)
+        XCTAssertFalse(fixture.item.shouldFillLibraryThumbnail)
         fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
         try await waitUntil("the current edited thumbnail") {
             fixture.item.editedThumbnailRevision
                 == fixture.destination.document.editHash + ":unresolved"
         }
 
+        XCTAssertTrue(fixture.item.shouldFillLibraryThumbnail)
         let editedThumbnail = try XCTUnwrap(fixture.item.thumbnail)
         fixture.item.setOriginalThumbnail(NSImage(size: NSSize(width: 2, height: 2)))
 
@@ -99,7 +101,15 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
             fixture.item.thumbnail === editedThumbnail,
             "a late source thumbnail must not replace the settled edited result"
         )
+        XCTAssertTrue(fixture.item.shouldFillLibraryThumbnail)
         await fixture.scheduler.cancelAllAndWait()
+    }
+
+    func testIdentityAndFailedEditedThumbnailsKeepSourceAspectFitted() {
+        let fixture = makeFixture(document: EditDocument(), active: false)
+        XCTAssertFalse(fixture.item.shouldFillLibraryThumbnail)
+        fixture.item.applyEditedThumbnail(nil, revision: "failed-edit")
+        XCTAssertFalse(fixture.item.shouldFillLibraryThumbnail)
     }
 
     func testIdentityDocumentPublishesNilWithoutRendering() async throws {
