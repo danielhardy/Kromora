@@ -46,11 +46,11 @@ labels:
   - masking
   - ui-ux
 created: 2026-09-25T00:33:17.575Z
-updated: 2026-09-27T02:40:34.288Z
+updated: 2026-09-28T14:41:31.443Z
 depends_on:
   - KRMA-563
 blockers: []
-order: a0
+order: dvdjhi5o
 board: product
 ---
 

@@ -42,9 +42,10 @@ labels:
   - regression
   - import
 created: 2026-09-22T17:35:54.949Z
-updated: 2026-09-22T19:35:21.456Z
+updated: 2026-09-28T14:41:34.686Z
+blockers: []
 estimate: 3
-order: n
+order: n4akh69g
 board: product
 ---
 

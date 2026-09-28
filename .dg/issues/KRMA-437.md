@@ -43,10 +43,11 @@ labels:
   - library
   - testing
 created: 2026-09-14T10:58:41.190Z
-updated: 2026-09-14T13:56:13.337Z
+updated: 2026-09-28T14:41:27.635Z
 depends_on:
   - KRMA-433
-order: a0
+blockers: []
+order: 2z0bw1bi
 board: product
 commits:
   - 5f9bc56

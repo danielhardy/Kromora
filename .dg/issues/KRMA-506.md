@@ -48,8 +48,9 @@ labels:
   - view-mode
   - ux
 created: 2026-09-21T02:40:17.132Z
-updated: 2026-09-21T04:39:42.966Z
-order: a0
+updated: 2026-09-28T14:41:30.504Z
+blockers: []
+order: b898x0zg
 board: product
 commits:
   - 019759b

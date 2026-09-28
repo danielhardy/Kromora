@@ -59,11 +59,11 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-24T15:18:53.177Z
-updated: 2026-09-25T05:47:29.556Z
+updated: 2026-09-28T14:41:31.390Z
 depends_on:
   - KRMA-467
 blockers: []
-order: a0
+order: dpfitq31
 board: product
 context:
   files:

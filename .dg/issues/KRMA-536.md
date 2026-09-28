@@ -39,10 +39,11 @@ labels:
   - performance
   - observation
 created: 2026-09-22T15:24:15.625Z
-updated: 2026-09-22T17:38:03.288Z
+updated: 2026-09-28T14:41:34.631Z
 depends_on:
   - KRMA-521
-order: n
+blockers: []
+order: mycjte6t
 board: product
 ---
 

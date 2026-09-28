@@ -34,9 +34,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-18T23:28:13.089Z
-updated: 2026-09-19T02:00:59.987Z
+updated: 2026-09-28T14:41:36.821Z
 parent: KRMA-449
-order: z8
+blockers: []
+order: t2b898wg
 board: product
 commits:
   - 6c3f777

@@ -26,8 +26,9 @@ labels:
   - regression
   - ui
 created: 2026-09-20T23:33:06.656Z
-updated: 2026-09-20T23:54:30.744Z
-order: a0
+updated: 2026-09-28T14:41:29.920Z
+blockers: []
+order: 9kt2b892
 board: product
 commits:
   - 36ae15f45f97d78b2a15963353340834251c2cab

@@ -9,8 +9,9 @@ labels:
   - looks
   - ux
 created: 2026-09-18T02:23:02.036Z
-updated: 2026-09-18T17:02:16.947Z
-order: w
+updated: 2026-09-28T14:41:35.586Z
+blockers: []
+order: plgudvd1
 board: product
 ---
 

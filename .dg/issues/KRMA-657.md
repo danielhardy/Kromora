@@ -35,10 +35,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-27T17:30:27.451Z
-updated: 2026-09-27T21:41:27.807Z
+updated: 2026-09-28T14:41:34.921Z
 parent: KRMA-650
 blockers: []
-order: n
+order: ns2n4ak0
 board: product
 ---
 

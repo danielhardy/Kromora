@@ -24,10 +24,11 @@ labels:
   - architecture
   - app-model
 created: 2026-09-23T07:59:55.004Z
-updated: 2026-09-23T12:03:21.950Z
+updated: 2026-09-28T14:41:36.413Z
 depends_on:
   - KRMA-529
-order: y
+blockers: []
+order: rwp3msdz
 board: product
 ---
 

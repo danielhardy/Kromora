@@ -36,9 +36,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-23T12:39:30.292Z
-updated: 2026-09-23T16:38:03.826Z
+updated: 2026-09-28T14:41:37.522Z
 parent: KRMA-549
-order: zv
+blockers: []
+order: uvpfitph
 board: product
 ---
 

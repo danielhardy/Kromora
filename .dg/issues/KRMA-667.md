@@ -32,10 +32,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-27T19:40:17.340Z
-updated: 2026-09-27T21:36:47.776Z
+updated: 2026-09-28T14:41:35.030Z
 parent: KRMA-659
 blockers: []
-order: n
+order: o3yofupa
 board: product
 ---
 

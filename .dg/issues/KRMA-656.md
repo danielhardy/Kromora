@@ -34,9 +34,9 @@ creation_provenance:
   model: gpt-6-luna
   actor: codex
 created: 2026-09-27T17:17:48.860Z
-updated: 2026-09-27T17:45:37.037Z
+updated: 2026-09-28T14:41:33.671Z
 blockers: []
-order: a0
+order: k5a8l4xy
 board: product
 ---
 

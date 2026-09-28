@@ -52,8 +52,9 @@ labels:
   - ui
   - ux
 created: 2026-09-20T12:17:43.276Z
-updated: 2026-09-20T12:46:39.566Z
-order: a0
+updated: 2026-09-28T14:41:29.181Z
+blockers: []
+order: 7fitq3ar
 board: product
 commits:
   - d11a595

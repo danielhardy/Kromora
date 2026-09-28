@@ -49,11 +49,12 @@ labels:
   - architecture
   - auto
 created: 2026-09-21T20:33:08.755Z
-updated: 2026-09-23T07:23:15.681Z
+updated: 2026-09-28T14:41:37.880Z
 depends_on:
   - KRMA-527
+blockers: []
 estimate: 8
-order: zx
+order: vvdjhi5b
 board: product
 ---
 

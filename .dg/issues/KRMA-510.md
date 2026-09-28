@@ -47,8 +47,9 @@ labels:
   - zoom
   - ux
 created: 2026-09-21T19:09:09.021Z
-updated: 2026-09-21T19:21:05.371Z
-order: a0
+updated: 2026-09-28T14:41:30.746Z
+blockers: []
+order: bw1bk5a0
 board: product
 commits:
   - d6e4977

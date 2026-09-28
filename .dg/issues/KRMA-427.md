@@ -9,8 +9,9 @@ creation_provenance:
   model: sonnet
   actor: claude
 created: 2026-09-13T16:51:11.496Z
-updated: 2026-09-13T17:56:06.087Z
-order: zzzzzs
+updated: 2026-09-28T14:41:38.551Z
+blockers: []
+order: xorqr2yc
 board: product
 commits:
   - f0683726f2cd69ef4f2f50e7d78b9df01d91e11d

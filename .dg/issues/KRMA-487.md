@@ -48,8 +48,9 @@ labels:
   - ui
   - regression
 created: 2026-09-20T22:10:24.868Z
-updated: 2026-09-20T22:35:09.664Z
-order: a0
+updated: 2026-09-28T14:41:29.524Z
+blockers: []
+order: 8f6xorql
 board: product
 ---
 

@@ -40,8 +40,9 @@ labels:
   - ui
   - ux
 created: 2026-09-21T02:40:14.388Z
-updated: 2026-09-21T04:41:53.145Z
-order: a0
+updated: 2026-09-28T14:41:30.429Z
+blockers: []
+order: b2b898wt
 board: product
 ---
 

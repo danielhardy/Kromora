@@ -41,10 +41,11 @@ labels:
   - crop
   - testing
 created: 2026-09-14T11:12:40.928Z
-updated: 2026-09-14T14:10:48.479Z
+updated: 2026-09-28T14:41:27.688Z
 depends_on:
   - KRMA-434
-order: a0
+blockers: []
+order: 34ycjte5
 board: product
 ---
 

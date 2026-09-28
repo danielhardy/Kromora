@@ -49,10 +49,10 @@ labels:
   - retouch
   - remove-heal-clone
 created: 2026-09-27T18:53:53.312Z
-updated: 2026-09-27T19:16:41.200Z
+updated: 2026-09-28T14:41:33.733Z
 parent: KRMA-599
 blockers: []
-order: a0
+order: kb898x0l
 board: product
 context:
   files:

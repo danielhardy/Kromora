@@ -46,13 +46,13 @@ labels:
   - retouch
   - remove-heal-clone
 created: 2026-09-27T18:53:56.169Z
-updated: 2026-09-27T23:22:29.735Z
+updated: 2026-09-28T14:41:33.974Z
 parent: KRMA-599
 depends_on:
   - KRMA-661
   - KRMA-665
 blockers: []
-order: a0
+order: kz0bw1b5
 board: product
 context:
   files:

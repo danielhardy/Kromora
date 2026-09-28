@@ -38,9 +38,9 @@ labels:
   - sidebar
   - animation
 created: 2026-09-26T02:56:21.124Z
-updated: 2026-09-26T17:50:37.608Z
+updated: 2026-09-28T14:41:37.763Z
 blockers: []
-order: zv
+order: vjhi5y01
 board: product
 ---
 

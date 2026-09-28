@@ -50,11 +50,12 @@ labels:
   - correctness
   - import
 created: 2026-09-21T20:32:59.030Z
-updated: 2026-09-21T21:52:36.058Z
+updated: 2026-09-28T14:41:30.925Z
 depends_on:
   - KRMA-516
+blockers: []
 estimate: 8
-order: a0
+order: cdvdjhhx
 board: product
 ---
 

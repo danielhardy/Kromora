@@ -45,14 +45,15 @@ labels:
   - architecture
   - rendering
 created: 2026-09-21T20:33:10.575Z
-updated: 2026-09-23T15:52:25.118Z
+updated: 2026-09-28T14:41:36.952Z
 depends_on:
   - KRMA-522
   - KRMA-523
   - KRMA-524
   - KRMA-550
+blockers: []
 estimate: 8
-order: zh
+order: te79kt1q
 board: product
 ---
 

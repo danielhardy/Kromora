@@ -47,9 +47,9 @@ labels:
   - professional-polish
   - evaluation-2026-09
 created: 2026-09-26T13:56:47.802Z
-updated: 2026-09-27T04:55:08.632Z
+updated: 2026-09-28T14:41:32.698Z
 blockers: []
-order: a0
+order: hc7xcvp3
 board: product
 commits:
   - ad539f5

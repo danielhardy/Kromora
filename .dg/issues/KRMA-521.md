@@ -50,11 +50,12 @@ labels:
   - performance
   - observation
 created: 2026-09-21T20:33:02.623Z
-updated: 2026-09-22T15:25:09.197Z
+updated: 2026-09-28T14:41:30.978Z
 depends_on:
   - KRMA-520
+blockers: []
 estimate: 13
-order: a0
+order: cjte79kk
 board: product
 ---
 

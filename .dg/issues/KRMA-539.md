@@ -44,9 +44,10 @@ labels:
   - regression
   - masking
 created: 2026-09-22T17:35:55.872Z
-updated: 2026-09-22T20:35:47.948Z
+updated: 2026-09-28T14:41:34.744Z
+blockers: []
 estimate: 3
-order: n
+order: na8l4yc3
 board: product
 ---
 

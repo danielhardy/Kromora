@@ -52,13 +52,14 @@ labels:
   - documentation
   - architecture
 created: 2026-09-21T20:33:14.597Z
-updated: 2026-09-23T06:22:40.581Z
+updated: 2026-09-28T14:41:37.462Z
 depends_on:
   - KRMA-519
   - KRMA-520
   - KRMA-531
+blockers: []
 estimate: 3
-order: zv
+order: uprev1mu
 board: product
 commits:
   - e2489bf

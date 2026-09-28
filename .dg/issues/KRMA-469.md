@@ -44,7 +44,7 @@ labels:
   - maintainability
   - appviewmodel
 created: 2026-09-19T16:27:26.087Z
-updated: 2026-09-25T05:53:47.403Z
+updated: 2026-09-28T14:41:28.947Z
 depends_on:
   - KRMA-465
   - KRMA-466
@@ -53,7 +53,7 @@ depends_on:
   - KRMA-564
   - KRMA-565
 blockers: []
-order: a0
+order: 6rqr2z07
 board: product
 context:
   files:

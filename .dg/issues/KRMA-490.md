@@ -49,8 +49,9 @@ labels:
   - ux
   - library
 created: 2026-09-20T22:28:19.129Z
-updated: 2026-09-20T23:21:16.298Z
-order: a0
+updated: 2026-09-28T14:41:29.687Z
+blockers: []
+order: 8x0zo3yi
 board: product
 commits:
   - 18dd515

@@ -59,8 +59,9 @@ labels:
   - rendering
   - quality
 created: 2026-09-14T03:23:50.169Z
-updated: 2026-09-14T11:13:38.176Z
-order: a0
+updated: 2026-09-28T14:41:27.468Z
+blockers: []
+order: 2h69wp3l
 board: product
 ---
 

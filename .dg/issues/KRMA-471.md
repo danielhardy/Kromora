@@ -53,8 +53,9 @@ labels:
   - crop
   - editor
 created: 2026-09-19T22:18:53.228Z
-updated: 2026-09-20T02:31:11.594Z
-order: a0
+updated: 2026-09-28T14:41:29.002Z
+blockers: []
+order: 6xorqr2u
 board: product
 ---
 

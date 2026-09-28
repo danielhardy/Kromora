@@ -14,11 +14,12 @@ labels:
   - performance
   - library
 created: 2026-09-21T20:33:00.855Z
-updated: 2026-09-21T23:15:04.347Z
+updated: 2026-09-28T14:41:35.230Z
 depends_on:
   - KRMA-518
+blockers: []
 estimate: 13
-order: t
+order: olsqf6x7
 board: product
 commits:
   - 6dfc38d

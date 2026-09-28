@@ -2,8 +2,47 @@
 id: KRMA-669
 title: Radically rewrite product documentation around the current MVP
 type: task
-status: backlog
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Inventory README/docs/.context and classify each
+      result: pass
+      notes: docs/DOCUMENTATION_AUDIT.md provides a full classification table (current guidance, historical record, dated evidence, deferred idea) covering docs/, .context/, and top-level files.
+    - criterion: Rewrite README product story and feature list accurately
+      result: pass
+      notes: README.md rewritten around Library->Edit->Export workflow. Spot-checked 6 factual claims (Metal usage, export formats/GPS default, Heal/Clone + dust-as-suggestion, Auto guardrails/unchanged path, verified backup/restore, external-editor TIFF handoff) against Sources/KromoraKit and docs/INTEROP_EXPORT.md; all supported.
+    - criterion: Establish one clear MVP intent source with audience/workflow/release bar/post-MVP boundaries
+      result: pass
+      notes: docs/PRODUCT_SCOPE.md added; explicitly states no Lightroom parity goal, defines release bar and post-MVP boundaries.
+    - criterion: Reconcile cross-links and status language across topical guides
+      result: pass
+      notes: APP_ARCHITECTURE.md, ENGINEERING_GUIDE.md, STORAGE_POLICY.md, LIBRARY_PACKAGE_BASELINE.md, REPOSITORY_IMPROVEMENT_PLAN.md, and others gained short PRODUCT_SCOPE.md cross-links and historical/current labeling headers; RETOUCH.md/TESTING.md/PACKAGING.md linked from README and audit table.
+    - criterion: Keep durable engineering constraints discoverable
+      result: pass
+      notes: macOS 14+, Swift 6, zero third-party deps, package ownership rules, shared render pipeline, and CI verification lanes all remain stated in README and CLAUDE.md.
+    - criterion: Review and update DOCUMENTATION_AUDIT.md
+      result: pass
+      notes: Rewritten with current/historical/deferred tables and a consolidation section explaining what changed and why.
+    - criterion: Keep deferred proposal spec recoverable and separate from MVP roadmap
+      result: pass
+      notes: .context/2026-09-22-professional-polish-evaluation.md retained and explicitly labeled as an idea archive, linked from README/PRODUCT_SCOPE/audit, not folded into MVP scope.
+    - criterion: Check internal links/command examples; run dg validate and git diff --check
+      result: pass
+      notes: "Re-ran both independently: dg validate returns OK (only pre-existing unrelated model-name warnings); git diff --check on the doc commit is clean. Also independently re-verified every markdown link in README.md, PRODUCT_SCOPE.md, and DOCUMENTATION_AUDIT.md resolves to an existing file."
+  checks_run:
+    - dg validate -> OK (only pre-existing unrelated model-name warnings)
+    - git diff --check ac819e8^ ac819e8 -> clean, no whitespace errors
+    - custom markdown link resolution check over README.md, docs/PRODUCT_SCOPE.md, docs/DOCUMENTATION_AUDIT.md -> all relative links resolve
+    - source cross-check of 6 README factual capability claims (Metal, export/GPS default, Heal/Clone+dust suggestion, Auto guardrails, verified backup/restore, external-editor TIFF handoff) against Sources/KromoraKit and docs/INTEROP_EXPORT.md -> all supported
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-28T16:23:19.000Z
+  session: 01MULGG45NECLFZOLD
 creation_provenance:
   runner: codex
   model: gpt-6-luna
@@ -13,9 +52,9 @@ labels:
   - mvp
   - product-scope
 created: 2026-09-28T00:06:24.095Z
-updated: 2026-09-28T00:06:24.095Z
+updated: 2026-09-28T16:23:19.002Z
 blockers: []
-order: zzzv
+order: a0
 board: product
 ---
 
@@ -47,6 +86,36 @@ Use this issue to establish a coherent documentation hierarchy and update the do
 - Keep product-facing prose direct and specific. Put implementation detail in the relevant guide and ideas in the deferred-proposal section.
 - Preserve provenance where historical files remain useful; do not delete context needed to recover decisions or deferred proposals.
 
+### Comment — codex @ 2026-09-28T16:21:24.188Z
+
+Rewrote the README around the current Library → Edit → Export workflow; added docs/PRODUCT_SCOPE.md for MVP intent, release bar, and post-MVP boundaries; updated DOCUMENTATION_AUDIT.md and relabeled historical plans, dated reviews, and the deferred proposal archive. Internal Markdown links checked across 28 files; dg validate passes with existing model-name warnings; git diff --check passes. Commit: ac819e8.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-28T16:23:19.000Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Inventory README/docs/.context and classify each (pass) — docs/DOCUMENTATION_AUDIT.md provides a full classification table (current guidance, historical record, dated evidence, deferred idea) covering docs/, .context/, and top-level files.
+- [x] Rewrite README product story and feature list accurately (pass) — README.md rewritten around Library->Edit->Export workflow. Spot-checked 6 factual claims (Metal usage, export formats/GPS default, Heal/Clone + dust-as-suggestion, Auto guardrails/unchanged path, verified backup/restore, external-editor TIFF handoff) against Sources/KromoraKit and docs/INTEROP_EXPORT.md; all supported.
+- [x] Establish one clear MVP intent source with audience/workflow/release bar/post-MVP boundaries (pass) — docs/PRODUCT_SCOPE.md added; explicitly states no Lightroom parity goal, defines release bar and post-MVP boundaries.
+- [x] Reconcile cross-links and status language across topical guides (pass) — APP_ARCHITECTURE.md, ENGINEERING_GUIDE.md, STORAGE_POLICY.md, LIBRARY_PACKAGE_BASELINE.md, REPOSITORY_IMPROVEMENT_PLAN.md, and others gained short PRODUCT_SCOPE.md cross-links and historical/current labeling headers; RETOUCH.md/TESTING.md/PACKAGING.md linked from README and audit table.
+- [x] Keep durable engineering constraints discoverable (pass) — macOS 14+, Swift 6, zero third-party deps, package ownership rules, shared render pipeline, and CI verification lanes all remain stated in README and CLAUDE.md.
+- [x] Review and update DOCUMENTATION_AUDIT.md (pass) — Rewritten with current/historical/deferred tables and a consolidation section explaining what changed and why.
+- [x] Keep deferred proposal spec recoverable and separate from MVP roadmap (pass) — .context/2026-09-22-professional-polish-evaluation.md retained and explicitly labeled as an idea archive, linked from README/PRODUCT_SCOPE/audit, not folded into MVP scope.
+- [x] Check internal links/command examples; run dg validate and git diff --check (pass) — Re-ran both independently: dg validate returns OK (only pre-existing unrelated model-name warnings); git diff --check on the doc commit is clean. Also independently re-verified every markdown link in README.md, PRODUCT_SCOPE.md, and DOCUMENTATION_AUDIT.md resolves to an existing file.
+Checks run:
+- dg validate -> OK (only pre-existing unrelated model-name warnings)
+- git diff --check ac819e8^ ac819e8 -> clean, no whitespace errors
+- custom markdown link resolution check over README.md, docs/PRODUCT_SCOPE.md, docs/DOCUMENTATION_AUDIT.md -> all relative links resolve
+- source cross-check of 6 README factual capability claims (Metal, export/GPS default, Heal/Clone+dust suggestion, Auto guardrails, verified backup/restore, external-editor TIFF handoff) against Sources/KromoraKit and docs/INTEROP_EXPORT.md -> all supported
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MULGG45NECLFZOLD

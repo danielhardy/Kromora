@@ -47,9 +47,10 @@ labels:
   - performance
   - masks
 created: 2026-09-21T20:33:04.494Z
-updated: 2026-09-22T10:43:07.476Z
+updated: 2026-09-28T14:41:31.099Z
+blockers: []
 estimate: 8
-order: a0
+order: cvpfitpu
 board: product
 branch: main
 commits:

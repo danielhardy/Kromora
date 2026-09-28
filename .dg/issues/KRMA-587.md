@@ -35,11 +35,11 @@ labels:
   - masking
   - performance
 created: 2026-09-25T10:09:06.269Z
-updated: 2026-09-26T16:38:02.372Z
+updated: 2026-09-28T14:41:35.455Z
 depends_on:
   - KRMA-582
 blockers: []
-order: t
+order: p9kt2b7r
 board: product
 ---
 

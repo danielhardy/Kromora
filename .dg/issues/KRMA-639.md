@@ -36,10 +36,10 @@ labels:
   - verification
   - auto
 created: 2026-09-26T17:49:53.301Z
-updated: 2026-09-27T03:38:20.890Z
+updated: 2026-09-28T14:41:32.992Z
 parent: KRMA-592
 blockers: []
-order: a0
+order: i5y0ns2a
 board: product
 ---
 

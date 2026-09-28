@@ -45,9 +45,10 @@ labels:
   - regression
   - lut
 created: 2026-09-22T17:35:55.413Z
-updated: 2026-09-22T19:40:47.188Z
+updated: 2026-09-28T14:41:35.348Z
+blockers: []
 estimate: 3
-order: t
+order: oxorqr2h
 board: product
 ---
 

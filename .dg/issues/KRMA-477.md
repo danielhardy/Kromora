@@ -24,8 +24,9 @@ labels:
   - ui
   - ux
 created: 2026-09-20T12:17:44.106Z
-updated: 2026-09-20T13:11:56.842Z
-order: n
+updated: 2026-09-28T14:41:34.354Z
+blockers: []
+order: m4mgihtm
 board: product
 ---
 

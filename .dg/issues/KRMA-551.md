@@ -45,10 +45,11 @@ labels:
   - architecture
   - app-model
 created: 2026-09-23T07:59:54.627Z
-updated: 2026-09-23T11:54:04.341Z
+updated: 2026-09-28T14:41:36.346Z
 depends_on:
   - KRMA-529
-order: y
+blockers: []
+order: rqr2z0bc
 board: product
 commits:
   - cbd9e5b

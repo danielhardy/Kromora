@@ -47,12 +47,13 @@ labels:
   - hygiene
   - ci
 created: 2026-09-21T20:33:12.132Z
-updated: 2026-09-22T22:14:28.643Z
+updated: 2026-09-28T14:41:35.295Z
 depends_on:
   - KRMA-524
   - KRMA-517
+blockers: []
 estimate: 5
-order: t
+order: orqr2yzu
 board: product
 ---
 

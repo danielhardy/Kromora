@@ -48,8 +48,9 @@ labels:
   - ui
   - ux
 created: 2026-09-20T12:17:46.049Z
-updated: 2026-09-20T13:35:07.437Z
-order: a0
+updated: 2026-09-28T14:41:29.242Z
+blockers: []
+order: 7lgudvde
 board: product
 ---
 

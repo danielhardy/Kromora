@@ -54,14 +54,14 @@ labels:
   - retouch
   - remove-heal-clone
 created: 2026-09-27T18:53:55.583Z
-updated: 2026-09-27T21:28:10.780Z
+updated: 2026-09-28T14:41:34.974Z
 parent: KRMA-599
 depends_on:
   - KRMA-658
   - KRMA-659
   - KRMA-660
 blockers: []
-order: n
+order: ny0ns2mn
 board: product
 context:
   files:

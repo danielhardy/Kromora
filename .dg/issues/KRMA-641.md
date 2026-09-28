@@ -28,10 +28,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-26T21:20:58.902Z
-updated: 2026-09-27T03:14:32.815Z
+updated: 2026-09-28T14:41:33.098Z
 parent: KRMA-637
 blockers: []
-order: a0
+order: ihu1zc7k
 board: product
 ---
 

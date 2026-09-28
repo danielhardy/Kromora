@@ -47,11 +47,12 @@ labels:
   - crop
   - editor
 created: 2026-09-19T22:18:54.945Z
-updated: 2026-09-20T03:50:43.505Z
+updated: 2026-09-28T14:41:35.645Z
 depends_on:
   - KRMA-471
   - KRMA-472
-order: w
+blockers: []
+order: prev1nfo
 board: product
 ---
 
