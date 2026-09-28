@@ -18,7 +18,7 @@ board: product
 
 ## Objective
 
-Measure launch, scanning, thumbnails, switch latency, slider response, interactive FPS, cache behavior, memory, decode, and export throughput.
+Record a repeatable performance baseline for the shipped MVP workflow on representative hardware and library sizes.
 
 ## Context
 
@@ -26,21 +26,22 @@ Part of **Epic 10 — Image quality, performance, and MVP release gate**. The so
 
 ## Scope
 
-- Provide scenarios for 100, 500, and 1,000+ images plus 24 MP and 40–50+ MP sources.
-- Use signpost-driven scripts/checklists with warm/cold cache distinctions.
-- Record hardware, OS, build configuration, and dataset characteristics.
-- Avoid asserting universal wall-clock thresholds in flaky unit tests.
+- Select one normal-use dataset and one stress dataset based on the current MVP's intended audience; document why those sizes and source images were chosen.
+- Measure the user-visible path: open/import, grid browsing/culling, photo switch, representative adjustment response, and export.
+- Record warm/cold cache state, hardware, OS, build configuration, and dataset characteristics.
+- Use existing signposts and profiling tools; keep performance measurements out of timing-sensitive unit-test assertions.
+- Propose concrete release targets only after the baseline is measured and reviewed.
 
 ## Acceptance criteria
 
-- [ ] Each target metric has a repeatable measurement procedure.
-- [ ] Results distinguish UI input latency from render completion.
-- [ ] Memory is sampled across long navigation and export sessions.
-- [ ] A baseline report identifies the highest-impact bottlenecks.
+- [ ] Chosen workloads and repeatable steps are documented.
+- [ ] Results distinguish input-to-presentation latency from background render completion.
+- [ ] A short report records responsiveness, memory/resource observations, and any visible failures.
+- [ ] Any proposed target has a user-facing rationale and a reference machine.
 
 ## Verification
 
-- Run the suite on at least one modern Apple Silicon Mac and archive summarized results.
+- Run the chosen scenarios on at least one supported Apple Silicon Mac and record summarized results.
 
 ## Out of scope
 

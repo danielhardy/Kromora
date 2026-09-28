@@ -21,7 +21,7 @@ board: product
 
 ## Objective
 
-Prove the Definition of Done and safe failure behavior from a clean install through relaunch and export.
+Verify the core MVP workflow and a focused set of data-safety failures before release.
 
 ## Context
 
@@ -29,21 +29,21 @@ Part of **Epic 10 — Image quality, performance, and MVP release gate**. The so
 
 ## Scope
 
-- Exercise missing/moved sources, stale bookmarks, corrupt edits, missing LUTs, unsupported files, disk-full/write denial, cancellation, and app restart.
-- Walk all 18 Definition of Done outcomes from the concept.
-- Verify no explicitly excluded V2 capability slipped into the critical path.
-- Produce concise release notes, known limitations, and follow-up tickets.
+- On a clean profile, import representative photos, cull, edit, compare, relaunch, and export.
+- Exercise the highest-risk package/edit persistence and export failures that can affect user data; confirm originals remain unchanged and failures are understandable.
+- Confirm unsupported inputs are rejected clearly and cancellation does not leave partial or misleading state.
+- Record known release limitations and open only actionable critical blockers.
 
 ## Acceptance criteria
 
-- [ ] The complete shoot→open→cull→edit→copy→select→export workflow passes on a clean profile.
-- [ ] Every tested fault yields recovery or a clear non-destructive error.
-- [ ] All required automated tests/builds are green.
-- [ ] Known limitations are explicit and no critical/urgent blocker remains open.
+- [ ] The documented import→cull→edit→compare→export path passes on a clean profile and after relaunch.
+- [ ] Focused data-safety failures preserve existing originals/edits or produce clear, non-destructive errors.
+- [ ] Required project CI/build checks for release are green.
+- [ ] Known limitations are recorded and no unresolved critical release blocker remains.
 
 ## Verification
 
-- Run clean-profile manual acceptance, full tests, debug/release builds, and CI.
+- Run clean-profile manual acceptance and the release-required build/CI checks; add focused checks for selected failure modes.
 
 ## Out of scope
 
