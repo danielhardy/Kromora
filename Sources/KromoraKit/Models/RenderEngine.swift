@@ -2472,13 +2472,17 @@ actor RenderEngine: RenderEngining {
                 if case .temperatureTint = $0 { return false }
                 return true
             }
+        // Retouch is already composited into the developed image this cache stores. Leaving it
+        // out reused the pre-spot bitmap, so a heal or clone stayed invisible until a later
+        // navigation missed the entry.
         return RenderCacheHash.digest(EditDocument(
             version: document.version, rawDevelop: .neutral, light: document.light,
             color: document.color,
             effects: EffectsAdjustments(
                 texture: document.effects.texture, clarity: document.effects.clarity,
                 dehaze: document.effects.dehaze
-            ), crop: .neutral, adjustments: adjustments, lut: .none
+            ), crop: .neutral, adjustments: adjustments, lut: .none,
+            retouch: document.retouch
         ))
     }
 
