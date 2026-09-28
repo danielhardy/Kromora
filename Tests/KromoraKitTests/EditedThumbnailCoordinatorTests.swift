@@ -67,6 +67,23 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         await fixture.scheduler.cancelAllAndWait()
     }
 
+    func testVisibleDemandReplacesAnOlderMaterializedRevisionWithoutInteraction() async throws {
+        let currentDocument = EditDocument(adjustments: [.exposure(ev: 0.65)])
+        let fixture = makeFixture(document: currentDocument, active: false)
+        fixture.item.applyEditedThumbnail(nil, revision: "older-saved-edit")
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the current saved edit thumbnail") {
+            fixture.item.editedThumbnailRevision
+                == currentDocument.editHash + ":unresolved"
+        }
+
+        let renderedEditHashes = await fixture.engine.renderedEditHashes
+        XCTAssertEqual(renderedEditHashes, [currentDocument.editHash])
+        XCTAssertFalse(fixture.destination.appliedWasNil)
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
     func testIdentityDocumentPublishesNilWithoutRendering() async throws {
         let fixture = makeFixture(document: EditDocument())
         fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
@@ -258,10 +275,13 @@ private final class FakeDestination: EditedThumbnailDestination {
     }
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64 { 1 }
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { lut }
-    func invalidateEditedThumbnail(for assetID: PhotoAssetID) {}
+    func invalidateEditedThumbnail(for assetID: PhotoAssetID) {
+        item.invalidateEditedThumbnail()
+    }
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         appliedWasNil = image == nil
         appliedRevisions.append(revision)
+        item.applyEditedThumbnail(image, revision: revision)
         onApply?(image, revision)
     }
     func setEditedThumbnailPresentedCrop(_ crop: CropAdjustments, for assetID: PhotoAssetID) {

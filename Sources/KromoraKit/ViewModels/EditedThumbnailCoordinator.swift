@@ -33,7 +33,13 @@ protocol EditedThumbnailDestination: AnyObject {
 /// thumbnails. Documents and collection presentation remain with the application model.
 @MainActor
 final class EditedThumbnailCoordinator {
+    private struct MaterializedThumbnail: Equatable {
+        let sourceIdentity: PortablePhotoIdentity
+        let revision: String
+    }
+
     private var editedThumbnailGenerations: [PhotoAssetID: UInt64] = [:]
+    private var materializedThumbnails: [PhotoAssetID: MaterializedThumbnail] = [:]
     private var editedThumbnailDebounceTasks: [PhotoAssetID: Task<Void, Never>] = [:]
     private var deferredEditedThumbnailPriorities: [PhotoAssetID: ImageWorkScheduler.Priority] = [:]
     private var pendingEditedThumbnailAssetID: PhotoAssetID?
@@ -86,6 +92,7 @@ final class EditedThumbnailCoordinator {
             editedThumbnailDebounceTasks[id]?.cancel()
             editedThumbnailDebounceTasks.removeValue(forKey: id)
             editedThumbnailGenerations.removeValue(forKey: id)
+            materializedThumbnails.removeValue(forKey: id)
             deferredEditedThumbnailPriorities.removeValue(forKey: id)
             workScheduler.cancel(
                 id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + id.raw), pump: false
@@ -149,13 +156,8 @@ final class EditedThumbnailCoordinator {
             }
         }
 
-        // A completed result is shared by both surfaces. Repeated SwiftUI appearance callbacks
-        // should not re-render it; a force request is reserved for explicit edit/look changes.
-        if !force, item.editedThumbnailRevision != nil { return }
-
         let generation = (editedThumbnailGenerations[assetID] ?? 0) &+ 1
         editedThumbnailGenerations[assetID] = generation
-        destination.invalidateEditedThumbnail(for: assetID)
 
         let source: ImageSource?
         if let url = item.url {
@@ -226,10 +228,24 @@ final class EditedThumbnailCoordinator {
             destination.setEditedThumbnailPresentedCrop(document.crop, for: assetID)
             let lut = destination.resolvedEditedThumbnailLUT(document.lut.lutID)
             let revision = self.editedThumbnailRevision(document: document, lut: lut)
-            guard !document.isIdentity else {
-                destination.applyEditedThumbnail(nil, for: assetID, revision: revision)
+            let materialized = MaterializedThumbnail(
+                sourceIdentity: thumbnailSourceIdentity, revision: revision
+            )
+            // Appearance callbacks are repeated by both browsing surfaces. Reuse only a result
+            // whose edit/LUT revision and source identity still match; a non-nil revision alone
+            // can describe an older saved edit or an earlier source at the same asset ID.
+            if !force, item.editedThumbnailRevision == revision,
+                self.materializedThumbnails[assetID] == materialized
+            {
                 return
             }
+            guard !document.isIdentity else {
+                destination.applyEditedThumbnail(nil, for: assetID, revision: revision)
+                self.materializedThumbnails[assetID] = materialized
+                return
+            }
+
+            destination.invalidateEditedThumbnail(for: assetID)
 
             // Metadata normally supplies the extent before a cell appears. Preparing the source
             // here is the safe fallback for a just-discovered cell and keeps the thumbnail render
@@ -261,6 +277,7 @@ final class EditedThumbnailCoordinator {
             ), let destination = self.destination
             else { return }
             destination.applyEditedThumbnail(image, for: assetID, revision: revision)
+            self.materializedThumbnails[assetID] = materialized
         }
     }
 
@@ -385,6 +402,7 @@ final class EditedThumbnailCoordinator {
                 id: ImageWorkScheduler.JobID(editedThumbnailJobPrefix + assetID.raw), pump: false
             )
         }
+        materializedThumbnails.removeAll()
         pendingEditedThumbnailAssetID = nil
         deferredEditedThumbnailPriorities.removeAll()
         for task in debounceTasks { await task.value }
