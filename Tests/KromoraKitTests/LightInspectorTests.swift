@@ -82,6 +82,27 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
     }
 
+    func testToneCurveResetUsesAccessibleTrailingDisclosureAction() throws {
+        let source = try lightInspectorSource()
+        let toneCurveStart = try XCTUnwrap(
+            source.range(of: "InspectorDisclosure(\n                    \"Tone Curve\"")
+        )
+        let advancedCurveStart = try XCTUnwrap(
+            source.range(of: "InspectorDisclosure(\"Advanced Curve\"")
+        )
+        let toneCurveSection = source[toneCurveStart.lowerBound..<advancedCurveStart.lowerBound]
+
+        XCTAssertTrue(toneCurveSection.contains("trailingActionTitle: \"Reset "))
+        XCTAssertTrue(toneCurveSection.contains(
+            "viewModel.resetToneCurve(selectedToneCurveChannel)"
+        ))
+        XCTAssertFalse(toneCurveSection.contains("Button(\"Reset\")"))
+
+        let disclosureSource = try inspectorDisclosureSource()
+        XCTAssertTrue(disclosureSource.contains("Image(systemName: \"arrow.counterclockwise\")"))
+        XCTAssertTrue(disclosureSource.contains(".accessibilityLabel(trailingActionTitle)"))
+    }
+
     func testAdvancedCurveControlsAreCollapsedUntilExpanded() throws {
         let source = try lightInspectorSource()
         XCTAssertTrue(source.contains("@State private var advancedCurveSectionExpanded = false"))
@@ -215,12 +236,20 @@ final class LightInspectorTests: TempDirectoryTestCase {
     }
 
     private func lightInspectorSource() throws -> String {
+        try inspectorSource(named: "LightInspectorView.swift")
+    }
+
+    private func inspectorDisclosureSource() throws -> String {
+        try inspectorSource(named: "InspectorDisclosure.swift")
+    }
+
+    private func inspectorSource(named fileName: String) throws -> String {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         return try String(
-            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/LightInspectorView.swift"),
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/\(fileName)"),
             encoding: .utf8
         )
     }
