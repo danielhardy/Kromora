@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+struct SliderSourceAnimation: Equatable, Sendable {
+    let assetID: PhotoAssetID?
+    let isEnabled: Bool
+}
+
+private struct SliderSourceAnimationKey: EnvironmentKey {
+    static let defaultValue = SliderSourceAnimation(assetID: nil, isEnabled: false)
+}
+
+extension EnvironmentValues {
+    var sliderSourceAnimation: SliderSourceAnimation {
+        get { self[SliderSourceAnimationKey.self] }
+        set { self[SliderSourceAnimationKey.self] = newValue }
+    }
+}
+
 /// A slider whose filled track starts at the control's neutral value rather than at the left edge.
 ///
 /// `SwiftUI.Slider` on macOS always fills from the minimum, so a bipolar control sitting on its
@@ -74,7 +90,10 @@ struct NeutralOriginSlider: NSViewRepresentable {
         cell.trackingDidChange = { [weak coordinator = context.coordinator] isTracking in
             coordinator?.trackingChanged(isTracking)
         }
-        apply(to: slider, coordinator: context.coordinator)
+        _ = context.coordinator.updateAnimationAssetID(
+            context.environment.sliderSourceAnimation.assetID
+        )
+        apply(to: slider, coordinator: context.coordinator, animated: false)
         return slider
     }
 
@@ -82,10 +101,19 @@ struct NeutralOriginSlider: NSViewRepresentable {
         context.coordinator.value = $value
         context.coordinator.step = step
         context.coordinator.onEditingChanged = onEditingChanged
-        apply(to: slider, coordinator: context.coordinator)
+        _ = context.coordinator.updateAnimationAssetID(
+            context.environment.sliderSourceAnimation.assetID
+        )
+        apply(
+            to: slider,
+            coordinator: context.coordinator,
+            animated: (context.coordinator.isSourceAnimationActive
+                && context.environment.sliderSourceAnimation.isEnabled)
+                || (context.transaction.animation != nil && !context.transaction.disablesAnimations)
+        )
     }
 
-    private func apply(to slider: NSSlider, coordinator: Coordinator) {
+    private func apply(to slider: NSSlider, coordinator: Coordinator, animated: Bool) {
         slider.minValue = range.lowerBound
         slider.maxValue = max(range.upperBound, range.lowerBound)
         (slider.cell as? NeutralOriginSliderCell)?.neutral = neutral
@@ -94,7 +122,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
         // Never fight the drag: while the knob is being tracked the slider is the source of truth,
         // and the binding behind it is debounced, so writing back mid-gesture would stutter.
         if !coordinator.isTracking, slider.doubleValue != value {
-            slider.doubleValue = value
+            coordinator.present(value, on: slider, animated: animated)
         }
 
         if let accessibilityTitle { slider.setAccessibilityLabel(accessibilityTitle) }
@@ -108,6 +136,24 @@ struct NeutralOriginSlider: NSViewRepresentable {
         var step: Double?
         var onEditingChanged: (Bool) -> Void
         private(set) var isTracking = false
+        private var valueAnimation: Task<Void, Never>?
+        private var animationAssetID: PhotoAssetID?
+        private var sourceAnimationDeadline = 0.0
+
+        var isSourceAnimationActive: Bool {
+            ProcessInfo.processInfo.systemUptime < sourceAnimationDeadline
+        }
+
+        func updateAnimationAssetID(_ assetID: PhotoAssetID?) -> Bool {
+            let changed = animationAssetID != nil && animationAssetID != assetID
+            if changed {
+                // The document and AppKit representables can update in separate SwiftUI passes.
+                // Keep the source-switch animation window open long enough to catch both.
+                sourceAnimationDeadline = ProcessInfo.processInfo.systemUptime + 1.2
+            }
+            animationAssetID = assetID
+            return changed
+        }
 
         init(
             value: Binding<Double>,
@@ -129,6 +175,42 @@ struct NeutralOriginSlider: NSViewRepresentable {
             value.wrappedValue = snapped
         }
 
+        func present(_ target: Double, on slider: NSSlider, animated: Bool) {
+            valueAnimation?.cancel()
+            valueAnimation = nil
+
+            guard animated else {
+                slider.doubleValue = target
+                slider.needsDisplay = true
+                return
+            }
+
+            let start = slider.doubleValue
+            let startTime = ProcessInfo.processInfo.systemUptime
+            let duration = 0.38
+            valueAnimation = Task { @MainActor [weak self, weak slider] in
+                while !Task.isCancelled {
+                    guard let slider else { return }
+                    let progress = min(
+                        (ProcessInfo.processInfo.systemUptime - startTime) / duration, 1
+                    )
+                    let eased = progress * progress * (3 - 2 * progress)
+                    slider.doubleValue = start + (target - start) * eased
+                    slider.needsDisplay = true
+                    guard progress < 1 else { break }
+                    do {
+                        try await Task.sleep(for: .milliseconds(16))
+                    } catch {
+                        return
+                    }
+                }
+                guard !Task.isCancelled, let self, let slider else { return }
+                slider.doubleValue = target
+                slider.needsDisplay = true
+                self.valueAnimation = nil
+            }
+        }
+
         private static func snapped(
             _ value: Double,
             step: Double?,
@@ -144,6 +226,10 @@ struct NeutralOriginSlider: NSViewRepresentable {
         func trackingChanged(_ tracking: Bool) {
             guard tracking != isTracking else { return }
             isTracking = tracking
+            if tracking {
+                valueAnimation?.cancel()
+                valueAnimation = nil
+            }
             onEditingChanged(tracking)
         }
     }

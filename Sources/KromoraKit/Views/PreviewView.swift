@@ -35,29 +35,47 @@ struct PreviewView: View {
     /// The Metal surface resolves the same token for its letterbox; see `PreviewSurfaceView`.
     private var bgColor: Color { KromoraTheme.canvasBackground }
 
+    private var isPreviewLoading: Bool {
+        viewModel.isLoading || viewModel.previewState == .loading
+    }
+
     var body: some View {
         ZStack {
             bgColor
 
-            if previewSurface.image != nil {
-                if canvasState.isCropToolActive {
-                    singleView
-                } else if viewModel.isSideBySideVisible {
-                    sideBySideView
+            Group {
+                if previewSurface.image != nil {
+                    if canvasState.isCropToolActive {
+                        singleView
+                    } else if viewModel.isSideBySideVisible {
+                        sideBySideView
+                    } else {
+                        singleView
+                    }
+                } else if isPreviewLoading {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .progressViewStyle(.circular)
+                } else if viewModel.previewState == .failed {
+                    failedState
                 } else {
-                    singleView
+                    emptyState
                 }
-            } else if viewModel.isLoading || viewModel.previewState == .loading {
+            }
+            .allowsHitTesting(!isPreviewLoading)
+
+            if previewSurface.image != nil && isPreviewLoading {
                 ProgressView()
-                    .scaleEffect(1.5)
-                    .progressViewStyle(.circular)
-            } else if viewModel.previewState == .failed {
-                failedState
-            } else {
-                emptyState
+                    .controlSize(.large)
+                    .scaleEffect(1.35)
+                    .padding(18)
+                    .background(.regularMaterial, in: Circle())
+                    .accessibilityLabel("Loading selected photo preview")
+                    .allowsHitTesting(false)
             }
 
             if previewSurface.image != nil,
+                !isPreviewLoading,
                 !canvasState.isCropToolActive,
                 viewModel.collection.selectedItem?.asset.flag == .reject
             {
@@ -76,6 +94,7 @@ struct PreviewView: View {
             }
 
             if previewSurface.image != nil,
+                !isPreviewLoading,
                 !canvasState.isCropToolActive,
                 isCaptureOverlayVisible,
                 !viewModel.metadata.captureOverlayRows.isEmpty
@@ -91,7 +110,7 @@ struct PreviewView: View {
                 .allowsHitTesting(false)
             }
 
-            if previewSurface.image != nil, settings.showClippingAlerts,
+            if previewSurface.image != nil, !isPreviewLoading, settings.showClippingAlerts,
                !canvasState.isCropToolActive, let histogram = viewModel.histogram,
                histogram.clippedHighlights + histogram.clippedShadows > 0 {
                 VStack {

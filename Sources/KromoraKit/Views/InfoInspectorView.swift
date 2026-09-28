@@ -47,7 +47,7 @@ struct InfoInspectorView: View {
                         onDone: viewModel.commitCrop
                     )
                     .transition(inspectorTransition(edge: .trailing))
-                } else if viewModel.sourceImage == nil {
+                } else if viewModel.sourceImage == nil && viewModel.histogram == nil {
                     // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
                     // offers a trip to Develop to be told "this image is already rendered" about an image
                     // that does not exist. The empty state alone is the honest answer.
@@ -82,6 +82,17 @@ struct InfoInspectorView: View {
                     }
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transition(inspectorTransition(edge: .leading))
+                    // A source switch briefly clears sourceImage while the replacement decodes.
+                    // The retained histogram tells us this is a cutover, so keep the editor
+                    // controls mounted and let their values settle onto the new document.
+                    .environment(
+                        \.sliderSourceAnimation,
+                        SliderSourceAnimation(
+                            assetID: viewModel.maskingAssetID,
+                            isEnabled: !accessibilityReduceMotion
+                        )
+                    )
+                    .animation(inspectorAnimation, value: viewModel.maskingAssetID)
                 }
             }
         }
@@ -285,17 +296,8 @@ struct InfoInspectorView: View {
             }
             .pickerStyle(.menu)
             .labelsHidden()
+            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
             .padding(.horizontal, 12)
-
-            if let histogram = viewModel.histogram {
-                HStack(spacing: 7) {
-                    Text("R \(histogram.clippedRed)").foregroundStyle(.red)
-                    Text("G \(histogram.clippedGreen)").foregroundStyle(.green)
-                    Text("B \(histogram.clippedBlue)").foregroundStyle(.blue)
-                }
-                .font(.system(size: 10, design: .monospaced))
-                .padding(.horizontal, 12)
-            }
         }
     }
 
@@ -303,6 +305,10 @@ struct InfoInspectorView: View {
     private var histogramPlot: some View {
         if let histogram = viewModel.histogram {
             HistogramChart(data: histogram, channel: channel)
+                .animation(
+                    accessibilityReduceMotion ? nil : .easeInOut(duration: 0.45),
+                    value: histogram
+                )
         } else if viewModel.isHistogramLoading {
             ProgressView().controlSize(.small)
         } else {
@@ -455,10 +461,6 @@ struct HistogramChart: View, @MainActor Animatable {
                 drawVectorscope(in: context, size: size)
             }
         }
-        .animation(
-            accessibilityReduceMotion ? nil : .easeInOut(duration: 0.35),
-            value: data
-        )
     }
 
     private func drawWaveform(in context: GraphicsContext, size: CGSize, channels: [Color], channelIndex: Int? = nil) {
