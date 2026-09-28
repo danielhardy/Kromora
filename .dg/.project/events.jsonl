@@ -12996,3 +12996,6 @@
 {"id":"evt_mukna227_ifo4kt","type":"issue.created","ts":"2026-09-28T02:45:04.111Z","actor":"codex","issue_id":"KRMA-682","payload":{"title":"Make inspector tab styling and grouping more consistent"}}
 {"id":"evt_muknae8k_zwdy7o","type":"issue.updated","ts":"2026-09-28T02:45:19.892Z","actor":"human","issue_id":"KRMA-682","payload":{"before":{"status":"backlog","order":"zzzx"},"after":{"status":"backlog","order":"zzzx"},"fields":["body"]}}
 {"id":"evt_muknaeug_saz4id","type":"issue.moved","ts":"2026-09-28T02:45:20.680Z","actor":"human","issue_id":"KRMA-682","payload":{"before":{"status":"backlog","order":"zzzx"},"after":{"status":"ready","order":"zzx"},"fields":["status","order"]}}
+{"id":"evt_mulblpz4_q1j2l4","type":"issue.created","ts":"2026-09-28T14:05:59.104Z","actor":"codex","issue_id":"KRMA-685","payload":{"title":"Animate histogram transitions when switching photos"}}
+{"id":"evt_mulbmvgd_pvjq81","type":"issue.moved","ts":"2026-09-28T14:06:52.861Z","actor":"human","issue_id":"KRMA-685","payload":{"before":{"status":"backlog","order":"zzy"},"after":{"status":"ready","order":"zzy"},"fields":["status","order"]}}
+{"id":"evt_mulbovei_4vnv3w","type":"issue.updated","ts":"2026-09-28T14:08:26.106Z","actor":"human","issue_id":"KRMA-685","payload":{"before":{"status":"ready","order":"zzy"},"after":{"status":"ready","order":"zzy"},"fields":["body"]}}
