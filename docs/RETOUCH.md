@@ -96,9 +96,9 @@ with its clean reference produces ΔE2000 0, gradient error 0, variance ratio 1,
 for every generated background and defect. This is an oracle ceiling only; the test has not
 demonstrated that a plausible repair can infer the hidden pixels. The latest
 `swift test --filter RetouchQualityEvaluationTests` run passed both test methods and measured 4
-passing wire/hair rows out of 72 mode/background/defect rows: Heal and Clone on foliage hair, plus
-Clone and the duplicate `Current` Heal row on brick straight wire. The other 68 rows fail at least
-one limit. These passes are examples of the current renderer baseline, not evidence of a repair
+passing wire/hair rows out of 72 mode/background/defect rows: Heal, Clone, and the duplicate
+`Current` Heal row on foliage hair, plus Clone on brick straight wire. The other 68 rows fail at
+least one limit. These passes are examples of the current renderer baseline, not evidence of a repair
 that generalizes across the six backgrounds. In particular, the test does not yet satisfy the
 repairability question for wire/hair; it measures only Heal/Clone with their current source choices.
 
