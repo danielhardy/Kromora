@@ -18,30 +18,27 @@ struct ColorInspectorView: View {
 
     var body: some View {
         InspectorScrollingContent {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: InspectorStyle.contentSpacing) {
                 header
                 whiteBalanceSection
                 colorSection
                 mixerSection
                 gradingSection
             }
-            .padding(16)
+            .padding(InspectorStyle.contentInset)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Color adjustments")
     }
 
     private var header: some View {
-        Text("Color")
-            .font(.title2.weight(.bold))
-            .accessibilityAddTraits(.isHeader)
+        InspectorPanelHeading(title: "Color")
     }
 
     private var whiteBalanceSection: some View {
         InspectorDisclosure(
             "White Balance",
-            isExpanded: $whiteBalanceExpanded,
-            titleFont: .subheadline.weight(.semibold)
+            isExpanded: $whiteBalanceExpanded
         ) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
@@ -138,8 +135,7 @@ struct ColorInspectorView: View {
     private var colorSection: some View {
         InspectorDisclosure(
             "Adjustments",
-            isExpanded: $colorExpanded,
-            titleFont: .subheadline.weight(.semibold)
+            isExpanded: $colorExpanded
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 InspectorSectionResetButton(
@@ -167,8 +163,7 @@ struct ColorInspectorView: View {
     private var mixerSection: some View {
         InspectorDisclosure(
             "Color Mixer / HSL",
-            isExpanded: $mixerExpanded,
-            titleFont: .subheadline.weight(.semibold)
+            isExpanded: $mixerExpanded
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 InspectorSectionResetButton(
@@ -179,7 +174,8 @@ struct ColorInspectorView: View {
                 ForEach(ColorMixerChannelName.allCases, id: \.self) { channel in
                     InspectorDisclosure(
                         channel.title,
-                        isExpanded: mixerExpansion(for: channel)
+                        isExpanded: mixerExpansion(for: channel),
+                        titleFont: InspectorStyle.nestedSectionTitle
                     ) {
                         VStack(alignment: .leading, spacing: 10) {
                             ForEach(ColorMixerControl.allCases, id: \.self) { control in
@@ -214,8 +210,7 @@ struct ColorInspectorView: View {
     private var gradingSection: some View {
         InspectorDisclosure(
             "Color Grading",
-            isExpanded: $gradingExpanded,
-            titleFont: .subheadline.weight(.semibold)
+            isExpanded: $gradingExpanded
         ) {
             VStack(alignment: .leading, spacing: 8) {
                 InspectorSectionResetButton(
@@ -226,7 +221,8 @@ struct ColorInspectorView: View {
                 ForEach(ColorGradingZone.allCases, id: \.self) { zone in
                     InspectorDisclosure(
                         zone.title,
-                        isExpanded: gradingExpansion(for: zone)
+                        isExpanded: gradingExpansion(for: zone),
+                        titleFont: InspectorStyle.nestedSectionTitle
                     ) {
                         VStack(alignment: .leading, spacing: 10) {
                             ColorGradingWheelControl(

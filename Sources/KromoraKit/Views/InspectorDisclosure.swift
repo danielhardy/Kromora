@@ -1,5 +1,32 @@
 import SwiftUI
 
+/// Shared type and spacing scale for the inspector's tab content. Custom layouts can still differ,
+/// while headings, controls, and supporting copy keep the same visual rhythm.
+enum InspectorStyle {
+    static let panelTitle = Font.headline
+    static let sectionTitle = Font.body.weight(.semibold)
+    static let nestedSectionTitle = Font.subheadline.weight(.semibold)
+    static let fieldLabel = Font.caption
+    static let fieldValue = Font.callout
+    static let helperText = Font.caption
+    static let secondaryHelperText = Font.caption2
+
+    static let contentSpacing: CGFloat = 12
+    static let sectionSpacing: CGFloat = 12
+    static let contentInset: CGFloat = 16
+    static let sectionContentInset: CGFloat = 10
+}
+
+struct InspectorPanelHeading: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(InspectorStyle.panelTitle)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// A full-width inspector disclosure row.
 ///
 /// The row is one keyboard-operable toggle, rather than a native disclosure whose hit target can
@@ -17,7 +44,7 @@ struct InspectorDisclosure<Content: View>: View {
     init(
         _ title: String,
         isExpanded: Binding<Bool>,
-        titleFont: Font = .body,
+        titleFont: Font = InspectorStyle.sectionTitle,
         trailingActionTitle: String? = nil,
         trailingActionEnabled: Bool = true,
         trailingAction: (() -> Void)? = nil,

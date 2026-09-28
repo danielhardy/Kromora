@@ -15,7 +15,7 @@ struct LightInspectorView: View {
 
     var body: some View {
         InspectorScrollingContent {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: InspectorStyle.contentSpacing) {
                 header
 
                 InspectorDisclosure("Tone", isExpanded: $toneSectionExpanded) {
@@ -52,7 +52,7 @@ struct LightInspectorView: View {
                         .padding(.top, 10)
                 }
             }
-            .padding(16)
+            .padding(InspectorStyle.contentInset)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Light adjustments")
@@ -61,7 +61,7 @@ struct LightInspectorView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Light").font(.headline)
+                Text("Light").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
                 Spacer()
                 Button("Reset Light") { viewModel.resetAllLight() }
                     .buttonStyle(.link)
@@ -69,7 +69,7 @@ struct LightInspectorView: View {
                     .accessibilityHint("Reset all Light controls, including the tone curve")
             }
             Text("Auto replaces global Light and Color values; other edits stay unchanged.")
-                .font(.caption2)
+                .font(InspectorStyle.secondaryHelperText)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
