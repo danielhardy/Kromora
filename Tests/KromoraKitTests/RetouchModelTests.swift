@@ -23,6 +23,22 @@ final class RetouchModelTests: XCTestCase {
         XCTAssertTrue(RetouchSettings(eyes: [EyeCorrection(darken: 0)]).isIdentity)
     }
 
+    func testLegacyRemoveSpotsMigrateToHealWhenDecoded() throws {
+        let legacy = Data(#"{"spots":[{"id":"00000000-0000-0000-0000-000000000001","mode":"remove","region":{"samples":[{"point":[0.4,0.6]}],"radius":0.03},"seed":7}]}"#.utf8)
+        let settings = try JSONDecoder().decode(RetouchSettings.self, from: legacy)
+        let spot = try XCTUnwrap(settings.spots.first)
+        XCTAssertEqual(spot.mode, .heal)
+        XCTAssertEqual(spot.region.radius, 0.03)
+        XCTAssertEqual(spot.seed, 7)
+        let migrated = try JSONEncoder().encode(settings)
+        XCTAssertTrue(String(decoding: migrated, as: UTF8.self).contains("\"mode\":\"heal\""))
+        XCTAssertFalse(String(decoding: migrated, as: UTF8.self).contains("remove"))
+    }
+
+    func testNewRetouchSpotsDefaultToHeal() {
+        XCTAssertEqual(RetouchSpot().mode, .heal)
+    }
+
     func testLegacyDocumentDefaultsRetouchAndNewerVersionIsRejected() throws {
         let legacy = Data(#"{"version":6,"light":{},"color":{},"effects":{},"crop":{},"rotation":0,"adjustments":[],"lut":{},"localAdjustments":[]}"#.utf8)
         let decoded = try JSONDecoder().decode(EditDocument.self, from: legacy)

@@ -34,29 +34,6 @@ struct RetouchCanvasOverlay: View {
             mapping.viewportPoint(forRetouchPoint: point, navigation: navigation,
                                   viewportSize: size, backingScale: backingScale)
         }
-        if let proposal = state.wireProposal, state.wireProposalSpotID == state.selectedSpotID,
-           proposal.region.samples.count > 1 {
-            let points = proposal.region.samples.map(\.point)
-            var upper = Path(), lower = Path()
-            for index in points.indices {
-                let before = points[max(0, index - 1)], after = points[min(points.count - 1, index + 1)]
-                let dx = (after.x - before.x) * sourceSize.width
-                let dy = (after.y - before.y) * sourceSize.height
-                let length = max(0.000001, hypot(dx, dy))
-                let offset = proposal.region.radius * min(sourceSize.width, sourceSize.height) * 0.8
-                let normalX = -dy / length, normalY = dx / length
-                let a = CGPoint(x: points[index].x + normalX * offset / sourceSize.width,
-                                y: points[index].y + normalY * offset / sourceSize.height)
-                let b = CGPoint(x: points[index].x - normalX * offset / sourceSize.width,
-                                y: points[index].y - normalY * offset / sourceSize.height)
-                if let pa = viewport(a), let pb = viewport(b) {
-                    if index == 0 { upper.move(to: pa); lower.move(to: pb) }
-                    else { upper.addLine(to: pa); lower.addLine(to: pb) }
-                }
-            }
-            context.stroke(upper, with: .color(.mint), style: StrokeStyle(lineWidth: 2, dash: [5, 3]))
-            context.stroke(lower, with: .color(.mint), style: StrokeStyle(lineWidth: 2, dash: [5, 3]))
-        }
         if let sample = state.draftSamples.first, let center = viewport(sample.point) {
             let radius = screenRadius(state.draftRadius, center: sample.point, size: size, mapping: mapping)
             let rect = CGRect(x: center.x-radius, y: center.y-radius, width: radius*2, height: radius*2)
@@ -113,7 +90,7 @@ struct RetouchCanvasOverlay: View {
                                style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
             }
             context.fill(Path(ellipseIn: CGRect(x:center.x-3,y:center.y-3,width:6,height:6)), with: .color(selected ? .yellow : .white))
-            if selected, spot.mode != .remove, let source = spot.source {
+            if selected, let source = spot.source {
                 let offset = source.offset
                 let src = CGPoint(x: point.x + offset.dx, y: point.y + offset.dy)
                 if let sourceCenter = viewport(src) {

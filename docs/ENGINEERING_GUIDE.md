@@ -192,4 +192,4 @@ before global or local tone adjustments. Spots carry normalized oriented-source 
 an optional source relation, so a geometry edit transforms the finished retouch together with its
 source content. The renderer rasterizes one brush mask per spot and limits its fill and membrane
 graph to the spot bounds plus padding. Heal derives its correction from the exterior ring only;
-Clone uses the translated patch directly. Remove's correspondence field is produced in KRMA-662.
+Clone uses the translated patch directly.

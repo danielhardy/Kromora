@@ -8,14 +8,12 @@ protocol RetouchWorkflowDestination: AnyObject {
     var sourceSize: CGSize { get }
     func updateDocument(_ transform: (inout EditDocument) -> Void)
     func pickRetouchSource(spotID: UUID, rank: Int) async
-    func retouchAnalysisProxy() async -> RetouchAnalysisProxy?
     func setRetouchCanvasActive(_ active: Bool)
     func beginUndoGrouping()
     func endUndoGrouping()
 }
 
 extension RetouchWorkflowDestination {
-    func retouchAnalysisProxy() async -> RetouchAnalysisProxy? { nil }
 }
 
 /// Owns transient retouch selection and gestures; each completed pointer action is one document edit.
@@ -37,12 +35,9 @@ final class RetouchWorkflowCoordinator {
     private var startSuggestion: RetouchDustSuggestion?
     private var suggestionWasMoved = false
     private var isResizingSuggestion = false
-    private var wireRefinementTask: Task<Void, Never>?
-    private var wireAnalysisTask: Task<RetouchWireRefiner.Proposal, Error>?
 
     init(destination: (any RetouchWorkflowDestination)? = nil) {
         self.destination = destination
-        RetouchInteractionState.active = interactionState
     }
 
     func setArmed(_ armed: Bool) {
@@ -74,7 +69,7 @@ final class RetouchWorkflowCoordinator {
             deleteSpot(hit.id); return
         }
         if let sourceHit = destination.document.retouch.spots.reversed().first(where: {
-            $0.mode != .remove && $0.source != nil && distance(point, sourcePoint(of: $0)) < max($0.region.radius * 1.5, 0.006)
+            $0.source != nil && distance(point, sourcePoint(of: $0)) < max($0.region.radius * 1.5, 0.006)
         }) {
             interactionState.select(sourceHit.id)
             gesture = .source(sourceHit.id); startSource = sourceHit.source
@@ -83,8 +78,7 @@ final class RetouchWorkflowCoordinator {
         }
         if let hit = hitTest(point, spots: destination.document.retouch.spots) {
             interactionState.select(hit.id)
-            if let source = hit.source, hit.mode != .remove,
-               distance(point, sourcePoint(of: hit)) < max(hit.region.radius * 1.5, 0.006) {
+            if let source = hit.source, distance(point, sourcePoint(of: hit)) < max(hit.region.radius * 1.5, 0.006) {
                 gesture = .source(hit.id); startSource = source
                 interactionState.setHandle(.source(hit.id))
             } else {
@@ -165,7 +159,7 @@ final class RetouchWorkflowCoordinator {
                                    feather: interactionState.feather, opacity: interactionState.opacity)
             if let pendingSource { spot.source = pendingSource }
             if samples.count == 1, pendingSource == nil { spot.source = nil }
-            let needsAutoPick = pendingSource == nil && spot.mode != .remove
+            let needsAutoPick = pendingSource == nil
             if needsAutoPick { destination.beginUndoGrouping() }
             destination.updateDocument { $0.retouch.spots.append(spot) }
             interactionState.select(id)
@@ -182,7 +176,6 @@ final class RetouchWorkflowCoordinator {
             let needsAutoPick: Bool = {
                 guard pendingSource == nil,
                       let spot = destination.document.retouch.spots.first(where: { $0.id == id }),
-                      spot.mode != .remove,
                       case .auto? = spot.source
                 else { return false }
                 return true
@@ -214,61 +207,9 @@ final class RetouchWorkflowCoordinator {
 
     func deleteSelected() { if let id = interactionState.selectedSpotID { deleteSpot(id) } }
     func deleteSpot(_ id: UUID) {
-        if interactionState.wireProposalSpotID == id { cancelWireRefinement() }
         destination?.updateDocument { $0.retouch.spots.removeAll { $0.id == id } }
         if interactionState.selectedSpotID == id { interactionState.select(nil) }
         if interactionState.shiftClickAnchor != nil { interactionState.setShiftClickAnchor(nil) }
-    }
-    func refineSelectedSpotToWire() {
-        guard let destination, let id = interactionState.selectedSpotID,
-              let spot = destination.document.retouch.spots.first(where: { $0.id == id }),
-              spot.mode == .remove, spot.region.samples.count >= 2 else { return }
-        wireRefinementTask?.cancel(); wireRefinementTask = nil
-        wireAnalysisTask?.cancel(); wireAnalysisTask = nil
-        interactionState.beginWireRefinement(id)
-        let region = spot.region, sourceSize = destination.sourceSize
-        wireRefinementTask = Task { [weak self] in
-            let proxy = await destination.retouchAnalysisProxy()
-            guard !Task.isCancelled else { return }
-            guard let proxy else {
-                self?.interactionState.failWireRefinement("Wire analysis is unavailable for this source.")
-                return
-            }
-            do {
-                let analysisTask = Task.detached(priority: .userInitiated) {
-                    try RetouchWireRefiner.refine(
-                        region: region, in: proxy, sourceWidth: Int(sourceSize.width),
-                        sourceHeight: Int(sourceSize.height), isCancelled: { Task.isCancelled }
-                    )
-                }
-                self?.wireAnalysisTask = analysisTask
-                let proposal = try await analysisTask.value
-                guard !Task.isCancelled else { return }
-                self?.wireAnalysisTask = nil
-                self?.interactionState.setWireProposal(proposal)
-            } catch is CancellationError {
-                self?.wireAnalysisTask = nil
-                self?.interactionState.clearWireRefinement()
-            } catch RetouchWireRefiner.Failure.cancelled {
-                self?.wireAnalysisTask = nil
-                self?.interactionState.clearWireRefinement()
-            } catch {
-                self?.wireAnalysisTask = nil
-                self?.interactionState.failWireRefinement("No unambiguous wire ridge was found. The brush region is unchanged.")
-            }
-        }
-    }
-    func cancelWireRefinement() {
-        wireRefinementTask?.cancel(); wireRefinementTask = nil
-        wireAnalysisTask?.cancel(); wireAnalysisTask = nil
-        interactionState.clearWireRefinement()
-    }
-    func acceptWireRefinement() {
-        guard let destination, let id = interactionState.wireProposalSpotID,
-              let proposal = interactionState.wireProposal,
-              let index = destination.document.retouch.spots.firstIndex(where: { $0.id == id }) else { return }
-        destination.updateDocument { $0.retouch.spots[index].region = proposal.region }
-        interactionState.clearWireRefinement()
     }
     func acceptDustSuggestion(_ id: UUID) {
         guard let suggestion = interactionState.dustSuggestions.first(where: { $0.id == id }) else { return }
@@ -287,7 +228,7 @@ final class RetouchWorkflowCoordinator {
     func dismissAllDustSuggestions() { interactionState.setDustSuggestions([]) }
     private func addDustSpot(_ suggestion: RetouchDustSuggestion) {
         let sample = BrushSample(point: suggestion.point)
-        let spot = RetouchSpot(id: suggestion.id, mode: .remove,
+        let spot = RetouchSpot(id: suggestion.id, mode: .heal,
             region: RetouchRegion(samples: [sample], radius: suggestion.radius), seed: suggestion.seed)
         destination?.updateDocument { $0.retouch.spots.append(spot) }
         interactionState.select(spot.id)
