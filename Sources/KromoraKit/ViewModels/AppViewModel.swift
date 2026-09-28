@@ -3154,6 +3154,42 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         return await engine.retouchAnalysisProxy(source: source)
     }
 
+    func toggleRetouchVisualization() {
+        retouchInteractionState.visualizationEnabled.toggle()
+        Task { await refreshRetouchVisualization() }
+    }
+
+    func setRetouchVisualizationThreshold(_ threshold: Double) {
+        retouchInteractionState.visualizationThreshold = min(0.12, max(0.005, threshold))
+        guard retouchInteractionState.visualizationEnabled else { return }
+        Task { await refreshRetouchVisualization() }
+    }
+
+    func detectRetouchDust() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            guard let source = self.imageSource,
+                  let proxy = await self.engine.retouchAnalysisProxy(source: source) else {
+                self.statusMessage = "Dust detection could not analyze this photo"
+                return
+            }
+            let found = RetouchDustDetector.detect(in: proxy, threshold: self.retouchInteractionState.visualizationThreshold)
+            self.retouchInteractionState.setDustSuggestions(found)
+            self.statusMessage = "Found \(found.count) dust suggestions"
+        }
+    }
+
+    private func refreshRetouchVisualization() async {
+        guard retouchInteractionState.visualizationEnabled, let source = imageSource,
+              let proxy = await engine.retouchAnalysisProxy(source: source) else {
+            retouchInteractionState.setVisualizationCandidates([])
+            return
+        }
+        retouchInteractionState.setVisualizationCandidates(
+            RetouchDustDetector.detect(in: proxy, threshold: retouchInteractionState.visualizationThreshold, maximum: 1_000)
+        )
+    }
+
     private func isAutomaticRetouchSource(_ source: RetouchSource?) -> Bool {
         if case .auto? = source { return true }
         return false

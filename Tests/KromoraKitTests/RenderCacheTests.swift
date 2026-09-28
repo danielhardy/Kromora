@@ -341,6 +341,44 @@ final class RenderCacheTests: TempDirectoryTestCase {
                        "grain-only edits must not rebuild the completed pre-LUT prefix")
     }
 
+    func testRetouchEditMissesTheProcessingPrefixAndChangesPixels() async throws {
+        let source = try makeSource()
+        let engine = RenderEngine()
+        let plain = EditDocument(light: LightAdjustments(exposure: 0.4))
+        let healed = EditDocument(
+            light: LightAdjustments(exposure: 0.4),
+            retouch: RetouchSettings(spots: [
+                RetouchSpot(
+                    mode: .clone,
+                    region: RetouchRegion(
+                        samples: [BrushSample(point: CGPoint(x: 0.35, y: 0.45))],
+                        radius: 0.12
+                    ),
+                    source: .manual(offset: CGVector(dx: 0.28, dy: -0.05)),
+                    feather: 0.1
+                )
+            ])
+        )
+
+        let plainRendered = await engine.makeCGImage(request(source: source, document: plain))
+        let plainImage = try XCTUnwrap(plainRendered)
+        let healedRendered = await engine.makeCGImage(request(source: source, document: healed))
+        let healedImage = try XCTUnwrap(healedRendered)
+        XCTAssertNotEqual(
+            try Pixels.bytes(of: plainImage), try Pixels.bytes(of: healedImage),
+            "a spot has to change the preview instead of reusing the pre-retouch prefix"
+        )
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.processingPrefix.misses, 2,
+                       "retouch is inside the cached prefix, so a new spot needs its own entry")
+        XCTAssertEqual(stats.processingPrefix.hits, 0)
+
+        _ = await engine.makeCGImage(request(source: source, document: healed))
+        let reused = await engine.cacheStatistics()
+        XCTAssertEqual(reused.processingPrefix.hits, 1,
+                       "an unchanged spot can still reuse its prefix")
+    }
+
     func testCachedPrefixPreservesDownstreamCropGrainAndLUTPixels() async throws {
         let source = try makeSource()
         let lut = TestImages.warmLUT()
