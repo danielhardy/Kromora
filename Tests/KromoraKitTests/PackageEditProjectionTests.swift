@@ -146,16 +146,24 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         let session = try PortableLibrarySession(at: packageURL)
         let copy = try session.createVirtualCopy(of: original.assetID)
         XCTAssertNotEqual(copy.assetID, original.assetID)
-        XCTAssertTrue(copy.displayName.contains("Copy"))
+        XCTAssertEqual(copy.displayName, "portrait — Copy.jpg")
         XCTAssertEqual(
             try package.readAssetRecord(for: copy.assetID).copyOfAssetID, original.assetID
         )
+        let embeddedURL = try package.embeddedSourceURL(
+            for: package.readAssetRecord(for: copy.assetID)
+        )
+        XCTAssertEqual(embeddedURL.lastPathComponent, "portrait — Copy.jpg")
+        XCTAssertEqual(embeddedURL.pathExtension, "jpg")
         XCTAssertEqual(
-            try Data(contentsOf: package.embeddedSourceURL(
-                for: package.readAssetRecord(for: copy.assetID)
-            )),
+            try Data(contentsOf: embeddedURL),
             Data("portable portrait".utf8)
         )
+        let browsed = try session.browsingAssets().first {
+            $0.source.portableIdentity.assetID == copy.assetID
+        }
+        XCTAssertEqual(browsed?.url?.lastPathComponent, "portrait — Copy.jpg")
+        XCTAssertEqual(browsed?.url?.pathExtension, "jpg")
 
         let store = EditDocumentStore(package: package, lease: session.lease)
         let originalDocument = EditDocument(light: .init(exposure: -0.4))
@@ -172,6 +180,35 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
             membership.entries.first(where: { $0.assetID == copy.assetID })?.summary.displayName,
             copy.displayName
         )
+        await session.shutdown()
+    }
+
+    @MainActor
+    func testLegacyVirtualCopyNameResolvesToEmbeddedFile() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LegacyVirtualCopy.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = tempDirectory.appendingPathComponent("IMG_1370.DNG")
+        try Data("raw stand-in".utf8).write(to: sourceURL)
+        let importLease = try PortablePackageLease.acquire(at: packageURL)
+        let imported = try package.importSources([.init(url: sourceURL)], lease: importLease)
+        try importLease.release()
+        let original = try XCTUnwrap(imported.imported.first)
+
+        let session = try PortableLibrarySession(at: packageURL)
+        let copy = try session.createVirtualCopy(of: original.assetID)
+        let legacyName = "IMG_1370.DNG — Copy"
+        try package.markVirtualCopy(
+            copy.assetID, of: original.assetID, displayName: legacyName, lease: session.lease
+        )
+        _ = try session.refreshIndex()
+
+        let browsed = try XCTUnwrap(session.browsingAssets().first {
+            $0.source.portableIdentity.assetID == copy.assetID
+        })
+        XCTAssertEqual(browsed.displayName, legacyName)
+        XCTAssertEqual(browsed.url?.lastPathComponent, "IMG_1370 — Copy.DNG")
+        XCTAssertEqual(browsed.url?.pathExtension, "DNG")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: browsed.url?.path ?? ""))
         await session.shutdown()
     }
 

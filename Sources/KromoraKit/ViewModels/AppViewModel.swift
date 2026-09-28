@@ -1805,12 +1805,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let itemName = item?.displayName
         let name =
             itemName.map { displayName in
-                guard !url.pathExtension.isEmpty,
-                    !displayName.lowercased().hasSuffix(".\(url.pathExtension.lowercased())")
-                else {
+                let ext = url.pathExtension
+                guard !ext.isEmpty else { return displayName }
+                let dotted = ".\(ext.lowercased())"
+                let lowercased = displayName.lowercased()
+                if lowercased.hasSuffix(dotted) || lowercased.contains(dotted) {
                     return displayName
                 }
-                return "\(displayName).\(url.pathExtension)"
+                return "\(displayName).\(ext)"
             } ?? url.lastPathComponent
         load(
             name: name, url: url, data: nil, assetID: assetID,
