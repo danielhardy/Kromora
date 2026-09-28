@@ -1,5 +1,9 @@
 # Portable library package format
 
+> **Format reference, not an implementation-phase plan.** The phase wording below records the
+> format's design origin. Current runtime ownership and backup/restore behavior are specified in
+> [`STORAGE_POLICY.md`](STORAGE_POLICY.md) and [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md).
+
 Phase 2.1 defines the format-only layer. It is a read/write contract; transaction journals, import,
 edit sidecars, and catalog canonicalisation are separate phases.
 

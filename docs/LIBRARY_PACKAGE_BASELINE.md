@@ -1,5 +1,10 @@
 # Folder-backed library baseline (KRMA-395)
 
+> **Historical baseline:** the folder-backed implementation described here was replaced by the
+> package-backed library. This file preserves pre-cutover measurements only; see
+> [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md) and [`STORAGE_POLICY.md`](STORAGE_POLICY.md) for current
+> product and storage behavior.
+
 This is the frozen pre-package baseline for the current `ImageCollection` folder-backed library and
 the `AppViewModel` interactive preview submission path. It was captured on 2026-09-12 from commit
 `d4ef55b5df9c0375899db682a6a5fca857823125`, before the package/index phases begin.

@@ -1,5 +1,9 @@
 # Content-aware Auto policy
 
+Auto is a current MVP editing capability. Product-level scope is in
+[`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md); this guide defines its renderer-backed behavior and quality
+guardrails.
+
 Content-aware Auto is a renderer-backed, non-destructive candidate selection workflow. The policy
 proposes an editable document, then `ContentAwareAutoEngine` and its
 `AutoEnhancementCoordinator` render the unchanged,

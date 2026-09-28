@@ -1,5 +1,9 @@
 # Kromora storage policy
 
+The MVP intent is summarized in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This document is the current
+runtime authority for package ownership and data safety; historical format proposals do not override
+the behavior described here or in the shipped code.
+
 This is the runtime storage contract for the portable library cutover. A path is not authoritative
 because it happens to be under a familiar directory: the owner and lifecycle below determine what a
 backup must preserve.

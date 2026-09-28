@@ -1,5 +1,9 @@
 # Package-backed library scale regression (KRMA-410)
 
+> **Dated benchmark evidence:** the phases and measurements below explain the regression harness and
+> its recorded samples. They are not general product latency promises. Current library behavior is
+> defined in [`APP_ARCHITECTURE.md`](APP_ARCHITECTURE.md) and [`STORAGE_POLICY.md`](STORAGE_POLICY.md).
+
 This is the Phase 3.5 scale and concurrency gate. It uses the deterministic generator from KRMA-389
 at 1,000, 10,000, and 100,000 assets, writes only membership summaries and a local index, and then
 measures the package-backed query path. The fixture deliberately has no asset records, originals,
