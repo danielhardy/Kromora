@@ -33,7 +33,7 @@ struct ColorInspectorView: View {
 
     private var header: some View {
         Text("Color")
-            .font(.title3.weight(.bold))
+            .font(InspectorStyle.panelTitle)
             .accessibilityAddTraits(.isHeader)
     }
 
