@@ -250,6 +250,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
 
     var source: ImageSource { admissionImageSource! }
     func admitSettledEditedThumbnail(_ assetID: PhotoAssetID) {}
+    func admitDeferredEditedThumbnails() {}
     func admissionClearPreview() {}
     func admissionScheduleOriginalPreview() {}
     func admissionPresentCacheRaster(

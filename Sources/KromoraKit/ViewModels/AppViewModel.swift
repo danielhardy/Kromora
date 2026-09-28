@@ -3453,6 +3453,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func endPreviewInteraction() {
         previewAdmissionCoordinator.endInteraction()
         endUndoGrouping()
+        editedThumbnailCoordinator.admitDeferredDemands()
         if let assetID = editedThumbnailCoordinator.pendingAssetID {
             scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
         }
@@ -3517,6 +3518,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func endCanvasInteraction() {
         isPreviewInteractionActive = false
         previewCoordinator.endInteraction()
+        editedThumbnailCoordinator.admitDeferredDemands()
     }
 
     /// Pan is presentation-only and is coordinated with the current rendered image extent.
@@ -4611,7 +4613,11 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionPreviewCoordinator: PreviewCoordinator { previewCoordinator }
     var pendingEditedThumbnailAssetID: PhotoAssetID? { editedThumbnailCoordinator.pendingAssetID }
     func admitSettledEditedThumbnail(_ assetID: PhotoAssetID) {
+        editedThumbnailCoordinator.admitDeferredDemands()
         scheduleEditedThumbnailAfterSettle(for: assetID, priority: .activeEditor)
+    }
+    func admitDeferredEditedThumbnails() {
+        editedThumbnailCoordinator.admitDeferredDemands()
     }
     func admissionClearPreview() { previewSurface.clear() }
     func admissionPresentCacheRaster(
