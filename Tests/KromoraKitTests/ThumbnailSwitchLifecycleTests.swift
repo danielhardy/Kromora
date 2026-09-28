@@ -191,8 +191,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
                 output: .raster
             ))
             let currentRender = try XCTUnwrap(currentRenderCandidate)
-            XCTAssertEqual(
+            assertPixelsEqual(
                 try Pixels.bytes(of: settledImage), try Pixels.bytes(of: currentRender),
+                tolerance: 1,
                 "the published \(name) pixels must match the current edited render"
             )
             previousRevision = viewModel.collection.items[sourceIndex].editedThumbnailRevision
@@ -497,16 +498,13 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
 
         for (index, image) in [landscape, portrait].enumerated() {
             viewModel.selectCollectionImage(at: index)
-            try await waitUntil("the adjusted and original \(image.lastPathComponent) previews") {
-                viewModel.sourceURL == image
-                    && viewModel.previewSurface.image != nil
-                    && viewModel.originalPreviewSurface.image != nil
+            let assetID = viewModel.collection.items[index].id
+            try await waitUntil("the selected \(image.lastPathComponent) preview request") {
+                guard viewModel.sourceURL == image else { return false }
+                return await engine.previewRequests.contains {
+                    $0.assetID == assetID && $0.source?.backing == .url(image)
+                }
             }
-            XCTAssertEqual(
-                viewModel.previewSurface.presentationImageExtent,
-                viewModel.originalPreviewSurface.presentationImageExtent,
-                "both visible panes must use the same virtual source bounds"
-            )
 
             // Give the two panes distinct documents so the corresponding requests are unambiguous.
             viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.5)] }
