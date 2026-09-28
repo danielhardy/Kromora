@@ -161,8 +161,8 @@ compared with 32/36 through the standalone solver and test-local composite. The 
 differ on 27 rows; the engine path regresses most line defects and several small dust/speck cases.
 This is an engine-path quality gap, not a changed threshold or a solver-only failure. Follow-up
 KRMA-683 tracks investigation of the engine sampling/composition path; no solver internals or
-thresholds were changed here. Keep the limits intact until the review tracked by KRMA-666, and
-record any justified changes with the corresponding ticket. The table is a quality gate, not a
+thresholds were changed here. Keep the limits intact; record any future justified changes with the
+corresponding ticket. The table is a quality gate, not a
 timing benchmark. For real-camera coverage, place
 licensed RAW fixtures outside the checkout and opt in with `KROMORA_RAW_FIXTURE_DIR`; the normal
 quality suite does not read or commit that directory. Generated fixtures are intentionally small,
