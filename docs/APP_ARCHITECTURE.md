@@ -117,20 +117,6 @@ the compatibility entry points used by views and provider coordinators. Worker c
 cooperative and shutdown cancels and awaits the progress observer; the package session's shared
 scheduler continues to bound actual I/O admission.
 
-`PhotosImportBatchCoordinator` owns the per-operation bridge state for streamed Photos package
-imports: whether the package was empty at batch start, whether accepted writes need a final
-collection refresh, the first accepted asset, and once-per-batch inspector presentation. It maps
-sync and async package write results consistently and checks the existing library import operation
-token after async suspension, so superseded callbacks cannot refresh or open an asset. The
-coordinator holds no package, importer, document store, or `AppViewModel`; its narrow destination
-lets `AppViewModel` keep the actual `LibraryImportCoordinator` calls, collection refresh, source
-opening, inspector chrome, and user-visible errors. Successful package writes still commit as they
-arrive, while `finishImportBatch()` and the visible collection refresh happen at most once after
-the batch has accepted an imported item. Duplicate-only, failed, empty, cancelled, and stale batches
-close without retaining state for the next Photos operation. The owner has fake-based coverage in
-`PhotosImportBatchCoordinatorTests`; provider iteration and progress remain in
-`PhotosImportCoordinator`.
-
 ## Masking-workflow ownership
 
 `MaskingWorkflowCoordinator` owns the masking workspace: layer/component selection and transient
