@@ -24,7 +24,7 @@ struct DevelopInspectorView: View {
             switch viewModel.developPanelState {
             case .ready(let capabilities):
                 InspectorScrollingContent {
-                    VStack(alignment: .leading, spacing: 14) {
+                    VStack(alignment: .leading, spacing: InspectorStyle.contentSpacing) {
                         header
                         ForEach(Array(DevelopControl.allCases.enumerated()), id: \.element) { offset, control in
                             controlRow(
@@ -34,7 +34,7 @@ struct DevelopInspectorView: View {
                             )
                         }
                     }
-                    .padding(16)
+                    .padding(InspectorStyle.contentInset)
                 }
             case .probing:
                 probing
@@ -48,7 +48,7 @@ struct DevelopInspectorView: View {
 
     private var header: some View {
         HStack {
-            Text("RAW Develop").font(.headline)
+            Text("RAW Develop").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
             Spacer()
             Button("Reset") { viewModel.resetAllDevelop() }
                 .buttonStyle(.link)
@@ -90,7 +90,7 @@ struct DevelopInspectorView: View {
                 .font(.largeTitle)
                 .foregroundStyle(.tertiary)
             Text("No develop stage")
-                .font(.headline)
+                .font(InspectorStyle.panelTitle)
             Text("Develop controls come from the RAW decoder. This image is already rendered.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -106,7 +106,7 @@ struct DevelopInspectorView: View {
                 .font(.largeTitle)
                 .foregroundStyle(.tertiary)
             Text("No supported develop controls")
-                .font(.headline)
+                .font(InspectorStyle.panelTitle)
             Text("This RAW decoder does not expose controls Kromora can edit.")
                 .font(.caption)
                 .foregroundStyle(.secondary)

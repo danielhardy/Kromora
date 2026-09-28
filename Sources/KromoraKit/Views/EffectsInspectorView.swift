@@ -16,7 +16,7 @@ struct EffectsInspectorView: View {
 
     var body: some View {
         InspectorScrollingContent {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: InspectorStyle.contentSpacing) {
                 header
                 detailSection
                 sharpeningSection
@@ -24,7 +24,7 @@ struct EffectsInspectorView: View {
                 vignetteSection
                 grainSection
             }
-            .padding(16)
+            .padding(InspectorStyle.contentInset)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Effects adjustments")
@@ -33,7 +33,7 @@ struct EffectsInspectorView: View {
     private var header: some View {
         HStack {
             Text("Effects")
-                .font(.headline)
+                .font(InspectorStyle.panelTitle)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             Button("Reset Effects") { viewModel.resetAllEffects() }

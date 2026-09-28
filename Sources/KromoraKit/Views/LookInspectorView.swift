@@ -160,8 +160,8 @@ struct LookInspectorView: View {
 
     private var header: some View {
         HStack(spacing: 8) {
-            Text("Look")
-                .font(.headline)
+            Text("Looks")
+                .font(InspectorStyle.panelTitle)
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
 
@@ -497,8 +497,7 @@ struct LookInspectorView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("Intensity")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(InspectorStyle.sectionTitle)
                 Spacer()
                 Text("\(Int((viewModel.lookIntensity * 100).rounded()))%")
                     .font(.system(.caption, design: .monospaced))
@@ -536,7 +535,7 @@ struct LookInspectorView: View {
     @ViewBuilder
     private var unresolvedLookSection: some View {
         if viewModel.selectedLookID != nil && viewModel.selectedLook == nil {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: InspectorStyle.sectionContentInset) {
                 Label(
                     viewModel.lutResolutionStatus ?? "This Look is still resolving.",
                     systemImage: "exclamationmark.triangle"

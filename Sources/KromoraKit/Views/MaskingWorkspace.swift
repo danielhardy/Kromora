@@ -21,7 +21,7 @@ struct MaskingWorkspace: View {
 
     var body: some View {
         InspectorScrollingContent {
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: InspectorStyle.contentSpacing) {
                 header
                 if viewModel.sourceImage == nil {
                     ContentUnavailableView(
@@ -35,7 +35,7 @@ struct MaskingWorkspace: View {
                     selectedInspector
                 }
             }
-            .padding(16)
+            .padding(InspectorStyle.contentInset)
         }
         .onAppear { viewModel.restoreMaskSelection() }
         .onChange(of: viewModel.document.localAdjustments) { _, _ in
@@ -48,7 +48,7 @@ struct MaskingWorkspace: View {
     private var header: some View {
         HStack(spacing: 10) {
             Text("Masks")
-                .font(.headline)
+                .font(InspectorStyle.panelTitle)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             Toggle(isOn: $maskingState.showOverlay) {
@@ -379,7 +379,7 @@ struct MaskingWorkspace: View {
                 Divider()
                 HStack(alignment: .firstTextBaseline) {
                     Text(layer.name)
-                        .font(.headline)
+                        .font(InspectorStyle.sectionTitle)
                         .lineLimit(1)
                         .accessibilityAddTraits(.isHeader)
                     Spacer()
@@ -397,7 +397,7 @@ struct MaskingWorkspace: View {
                         .help("How strongly this mask's adjustments apply")
                         ForEach(LocalAdjustmentControl.inspectorGroups, id: \.title) { group in
                             Text(group.title)
-                                .font(.caption.weight(.semibold))
+                                .font(InspectorStyle.nestedSectionTitle)
                                 .foregroundStyle(.secondary)
                                 .padding(.top, 4)
                                 .accessibilityAddTraits(.isHeader)

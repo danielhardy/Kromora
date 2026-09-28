@@ -7,6 +7,9 @@ struct RetouchInspectorView: View {
     @State private var selectedSpotID: UUID?
     @State private var selectedEyeID: UUID?
     @State private var eyeKind: EyeKind = .human
+    @State private var spotsExpanded = true
+    @State private var dustExpanded = false
+    @State private var eyesExpanded = false
     @ObservedObject private var interaction: RetouchInteractionState
 
     init(viewModel: AppViewModel) {
@@ -16,9 +19,9 @@ struct RetouchInspectorView: View {
 
     var body: some View {
         InspectorScrollingContent {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: InspectorStyle.contentSpacing) {
                 HStack {
-                    Text("Heal").font(.headline)
+                    Text("Heal").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
                     Spacer()
                     Button("Reset All") {
                         viewModel.updateDocument { $0.retouch = .neutral }
@@ -26,7 +29,7 @@ struct RetouchInspectorView: View {
                     }
                         .disabled(viewModel.document.retouch.isIdentity)
                 }
-                GroupBox("Spots") {
+                InspectorDisclosure("Spots", isExpanded: $spotsExpanded) {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Method", selection: $interaction.mode) {
                             Text("Heal").tag(RetouchMode.heal)
@@ -57,9 +60,9 @@ struct RetouchInspectorView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, InspectorStyle.sectionContentInset)
                 }
-                GroupBox("Dust") {
+                InspectorDisclosure("Dust", isExpanded: $dustExpanded) {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle("A · Visualize Spots", isOn: Binding(
                             get: { interaction.visualizationEnabled },
@@ -94,9 +97,9 @@ struct RetouchInspectorView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, InspectorStyle.sectionContentInset)
                 }
-                GroupBox("Red-Eye / Pet-Eye") {
+                InspectorDisclosure("Red-Eye / Pet-Eye", isExpanded: $eyesExpanded) {
                     VStack(alignment: .leading, spacing: 10) {
                         Picker("Eye type", selection: $eyeKind) {
                             Text("Human").tag(EyeKind.human)
@@ -127,12 +130,12 @@ struct RetouchInspectorView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.top, InspectorStyle.sectionContentInset)
                 }
                 Text("Coordinates use the uncropped source image. Use 1:1 zoom when placing fine corrections.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
-            .padding(16)
+            .padding(InspectorStyle.contentInset)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Retouch tools")

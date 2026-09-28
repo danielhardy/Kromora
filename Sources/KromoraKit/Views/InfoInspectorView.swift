@@ -132,7 +132,8 @@ struct InfoInspectorView: View {
     /// handled one level up, before the tab switcher exists.
     private var infoContent: some View {
         InspectorScrollingContent {
-            VStack(alignment: .leading, spacing: 20) {
+            VStack(alignment: .leading, spacing: InspectorStyle.sectionSpacing) {
+                InspectorPanelHeading(title: "Info")
                 identitySection
                 if let assetID = viewModel.maskingAssetID,
                    let source = viewModel.maskingSource {
@@ -155,7 +156,7 @@ struct InfoInspectorView: View {
                 editHistorySection
                 metadataSection
             }
-            .padding(16)
+            .padding(InspectorStyle.contentInset)
         }
     }
 
@@ -163,6 +164,7 @@ struct InfoInspectorView: View {
     @State private var analysisExpanded = false
     @State private var editHistoryExpanded = false
     @State private var snapshotName = ""
+    @State private var expandedMetadataSections: Set<String> = ["Camera & Lens", "Exposure"]
 
     private var editHistorySection: some View {
         InspectorDisclosure("Edit History", isExpanded: $editHistoryExpanded) {
@@ -324,7 +326,7 @@ struct InfoInspectorView: View {
     private var identitySection: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Photo")
-                .font(.headline)
+                .font(InspectorStyle.sectionTitle)
             metadataRow(ImageMetadata.Row(label: "Name", value: viewModel.currentPhotoName))
             metadataRow(ImageMetadata.Row(label: "File Type", value: viewModel.currentPhotoFileType))
         }
@@ -336,21 +338,23 @@ struct InfoInspectorView: View {
         let sections = viewModel.metadata.sections
         if sections.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Info")
-                    .font(.headline)
                 Text("No metadata available for this image.")
-                    .font(.caption)
+                    .font(InspectorStyle.helperText)
                     .foregroundStyle(.secondary)
             }
         } else {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: InspectorStyle.sectionSpacing) {
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(section.title)
-                            .font(.subheadline.weight(.semibold))
-                        ForEach(section.rows) { row in
-                            metadataRow(row)
+                    InspectorDisclosure(
+                        section.title,
+                        isExpanded: metadataExpansion(for: section.id)
+                    ) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(section.rows) { row in
+                                metadataRow(row)
+                            }
                         }
+                        .padding(.top, InspectorStyle.sectionContentInset)
                     }
                 }
             }
@@ -360,15 +364,28 @@ struct InfoInspectorView: View {
     private func metadataRow(_ row: ImageMetadata.Row) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(row.label)
-                .font(.caption)
+                .font(InspectorStyle.fieldLabel)
                 .foregroundStyle(.secondary)
                 .frame(width: 92, alignment: .leading)
             Text(row.value)
-                .font(.caption)
+                .font(InspectorStyle.fieldValue)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private func metadataExpansion(for sectionID: String) -> Binding<Bool> {
+        Binding(
+            get: { expandedMetadataSections.contains(sectionID) },
+            set: { isExpanded in
+                if isExpanded {
+                    expandedMetadataSections.insert(sectionID)
+                } else {
+                    expandedMetadataSections.remove(sectionID)
+                }
+            }
+        )
     }
 
     // MARK: - Empty state
