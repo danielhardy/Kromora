@@ -69,16 +69,14 @@ struct RAWDevelopSettings: Codable, Sendable, Equatable {
     var gamutMappingEnabled: Bool?
     /// 0…2 (0 = no EDR, 1 = default, 2 = maximum). Default: 0.
     ///
-    /// This is the *only* EDR knob `CIRAWFilter` has, it carries no availability macro, and it is
-    /// callable unguarded on the macOS 14 deployment target. There is no `enableEDR` or
+    /// This is the *only* EDR knob `CIRAWFilter` has. There is no `enableEDR` or
     /// `isEDRModeEnabled`; the spec's earlier draft invented both.
     var extendedDynamicRangeAmount: Double?
 
-    /// The one knob here that is newer than the deployment target — see `apply(to:)`. Default: true.
+    /// Only applied when `isHighlightRecoverySupported`. Default: true.
     ///
-    /// Stored unconditionally, applied only where the OS has it. A document is a value, not a
-    /// capability probe: the same edit opened on macOS 26 and on macOS 14 should be the same
-    /// document, so a machine that gains the API honours a document written before it.
+    /// Stored unconditionally so the same edit remains intact across RAW decoders, and applied only
+    /// when the current decoder reports support.
     var highlightRecoveryEnabled: Bool?
 
     // MARK: - Neutral
@@ -141,17 +139,8 @@ struct RAWDevelopSettings: Codable, Sendable, Equatable {
             filter.isLensCorrectionEnabled = lensCorrectionEnabled
         }
 
-        // The only knob newer than the macOS 14 deployment target, so the only one needing
-        // `#available`. The SDK header still marks it `16_0`, which the Swift importer maps onto the
-        // renumbered macOS 26 — `26` is written because that is the version the compiler enforces.
-        //
-        // This guard is not optional politeness: with a 14.0 deployment target the compiler *refuses*
-        // the reference without it. That is the point of building against a current SDK — the
-        // requirement is checked rather than remembered. (It also means this file needs Xcode 26 or
-        // newer to compile at all; see CLAUDE.md.)
-        //
-        // A no-op on macOS 14/15, where the document keeps the setting and the decoder never sees it.
-        if let highlightRecoveryEnabled, #available(macOS 26, *), filter.isHighlightRecoverySupported {
+        // Capability varies by RAW decoder, so retain the per-filter support check.
+        if let highlightRecoveryEnabled, filter.isHighlightRecoverySupported {
             filter.isHighlightRecoveryEnabled = highlightRecoveryEnabled
         }
     }

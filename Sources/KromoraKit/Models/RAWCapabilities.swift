@@ -145,7 +145,7 @@ struct RAWCapabilities: Sendable, Equatable {
     var isLuminanceNoiseReductionSupported: Bool = false
     var isColorNoiseReductionSupported: Bool = false
     var isLensCorrectionSupported: Bool = false
-    /// Always false below macOS 26, where the property is not in the imported interface at all.
+    /// True when this RAW decoder supports highlight recovery.
     var isHighlightRecoverySupported: Bool = false
 
     // MARK: - Per-image seeds

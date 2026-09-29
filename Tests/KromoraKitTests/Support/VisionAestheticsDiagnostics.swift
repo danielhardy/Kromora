@@ -9,13 +9,20 @@ struct VisionAestheticsScores: Sendable, Equatable {
 }
 
 enum VisionAestheticsDiagnostics {
-    /// Returns nil on macOS 14, request failure, or when Vision produces no observation.
+    /// Returns nil when Vision declines the request or produces no observation.
     static func scores(for image: CGImage) -> VisionAestheticsScores? {
-        guard #available(macOS 15, *) else { return nil }
-        let request = VNCalculateImageAestheticsScoresRequest()
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
-        do {
+        return scores { request in
             try handler.perform([request])
+        }
+    }
+
+    static func scores(
+        performRequest: (VNCalculateImageAestheticsScoresRequest) throws -> Void
+    ) -> VisionAestheticsScores? {
+        let request = VNCalculateImageAestheticsScoresRequest()
+        do {
+            try performRequest(request)
         } catch {
             return nil
         }

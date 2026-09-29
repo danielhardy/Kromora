@@ -4,8 +4,8 @@ import Foundation
 import Vision
 import os
 
-/// The revisions that participate in mask cache identity. Revision 2 of attention saliency is
-/// available on macOS 14. Changing one invalidates only the affected cached masks.
+/// The revisions that participate in mask cache identity. Changing one invalidates only the
+/// affected cached masks.
 struct VisionConfiguration: Codable, Sendable, Equatable, Hashable {
     let attentionRevision: Int
     let foregroundRevision: Int
@@ -239,9 +239,6 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             return cached
         }
 
-        guard #available(macOS 14.0, *) else {
-            throw VisionSemanticMaskError.requestFailed("Foreground instance masks require macOS 14 or newer")
-        }
         let request = VNGenerateForegroundInstanceMaskRequest()
         guard VNGenerateForegroundInstanceMaskRequest.supportedRevisions.contains(configuration.foregroundRevision) else {
             throw VisionSemanticMaskError.requestFailed(
@@ -460,9 +457,6 @@ actor VisionSemanticMaskProvider: SemanticMaskProviding {
             throw VisionSemanticMaskError.personNotApplicable
         }
 
-        guard #available(macOS 12.0, *) else {
-            throw VisionSemanticMaskError.requestFailed("Person segmentation requires macOS 12 or newer")
-        }
         let request = VNGeneratePersonSegmentationRequest()
         guard VNGeneratePersonSegmentationRequest.supportedRevisions.contains(configuration.personRevision) else {
             throw VisionSemanticMaskError.requestFailed(

@@ -2447,10 +2447,6 @@ actor RenderEngine: RenderEngining {
         }
 
         private static func captureCapabilities(_ filter: CIRAWFilter) -> RAWCapabilities {
-            var highlightRecovery = false
-            if #available(macOS 26, *) {
-                highlightRecovery = filter.isHighlightRecoverySupported
-            }
             return RAWCapabilities(
                 isSharpnessSupported: filter.isSharpnessSupported,
                 isContrastSupported: filter.isContrastSupported,
@@ -2460,7 +2456,7 @@ actor RenderEngine: RenderEngining {
                 isLuminanceNoiseReductionSupported: filter.isLuminanceNoiseReductionSupported,
                 isColorNoiseReductionSupported: filter.isColorNoiseReductionSupported,
                 isLensCorrectionSupported: filter.isLensCorrectionSupported,
-                isHighlightRecoverySupported: highlightRecovery,
+                isHighlightRecoverySupported: filter.isHighlightRecoverySupported,
                 asShotTemperature: Double(filter.neutralTemperature),
                 asShotTint: Double(filter.neutralTint),
                 baselineExposure: Double(filter.baselineExposure),
@@ -2567,9 +2563,11 @@ actor RenderEngine: RenderEngining {
             luminanceNoiseReductionAmount = filter.luminanceNoiseReductionAmount
             colorNoiseReductionAmount = filter.colorNoiseReductionAmount
             lensCorrectionEnabled = filter.isLensCorrectionEnabled
-            if #available(macOS 26, *), filter.isHighlightRecoverySupported {
+            if filter.isHighlightRecoverySupported {
                 highlightRecoveryEnabled = filter.isHighlightRecoveryEnabled
-            } else { highlightRecoveryEnabled = nil }
+            } else {
+                highlightRecoveryEnabled = nil
+            }
         }
 
         func apply(
@@ -2654,7 +2652,7 @@ actor RenderEngine: RenderEngining {
             }
             if previous?.highlightRecoveryEnabled != next.highlightRecoveryEnabled,
                let baseline = highlightRecoveryEnabled,
-               #available(macOS 26, *), filter.isHighlightRecoverySupported {
+               filter.isHighlightRecoverySupported {
                 writeCount += 1
                 filter.isHighlightRecoveryEnabled = next.highlightRecoveryEnabled ?? baseline
             }

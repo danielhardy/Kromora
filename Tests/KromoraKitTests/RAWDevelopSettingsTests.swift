@@ -161,7 +161,7 @@ final class RAWDevelopSettingsTests: XCTestCase {
             XCTAssertEqual(filter.colorNoiseReductionAmount, 0.8, accuracy: 0.0001)
         }
         if filter.isLensCorrectionSupported { XCTAssertFalse(filter.isLensCorrectionEnabled) }
-        if #available(macOS 26, *), filter.isHighlightRecoverySupported {
+        if filter.isHighlightRecoverySupported {
             XCTAssertFalse(filter.isHighlightRecoveryEnabled)
         }
 
@@ -197,9 +197,7 @@ final class RAWDevelopSettingsTests: XCTestCase {
         XCTAssertEqual(subject.isLensCorrectionEnabled, reference.isLensCorrectionEnabled)
         XCTAssertEqual(subject.isGamutMappingEnabled, reference.isGamutMappingEnabled)
         XCTAssertEqual(subject.extendedDynamicRangeAmount, reference.extendedDynamicRangeAmount)
-        if #available(macOS 26, *) {
-            XCTAssertEqual(subject.isHighlightRecoveryEnabled, reference.isHighlightRecoveryEnabled)
-        }
+        XCTAssertEqual(subject.isHighlightRecoveryEnabled, reference.isHighlightRecoveryEnabled)
     }
 
     // MARK: - The gates themselves, which leave no runtime trace to assert on
@@ -286,19 +284,17 @@ final class RAWDevelopSettingsTests: XCTestCase {
             )
         }
 
-        // `highlightRecoveryEnabled` is gated on BOTH `#available(macOS 26, *)` and its own
-        // `isHighlightRecoverySupported` flag — the only knob newer than the deployment target. Both
-        // conditions have to survive, or the test would pass against code that dropped either one.
+        // Highlight recovery is gated by the current decoder's capability, like the other
+        // decoder-dependent knobs.
         let highlightCondition = try condition(for: "highlightRecoveryEnabled")
         XCTAssertTrue(
             highlightCondition.contains("isHighlightRecoverySupported"),
             "highlightRecoveryEnabled is written without checking isHighlightRecoverySupported. "
             + "Condition found: \"\(highlightCondition.trimmingCharacters(in: .whitespacesAndNewlines))\""
         )
-        XCTAssertTrue(
+        XCTAssertFalse(
             highlightCondition.contains("#available"),
-            "highlightRecoveryEnabled is written without an #available guard — this is the one knob "
-            + "newer than the macOS 14 deployment target. "
+            "highlightRecoveryEnabled should depend on decoder capability, not OS availability. "
             + "Condition found: \"\(highlightCondition.trimmingCharacters(in: .whitespacesAndNewlines))\""
         )
 
