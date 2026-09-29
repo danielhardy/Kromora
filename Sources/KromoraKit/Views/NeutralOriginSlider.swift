@@ -6,6 +6,57 @@ struct SliderSourceAnimation: Equatable, Sendable {
     let isEnabled: Bool
 }
 
+/// A cubic Hermite segment lets a changing bound value retarget an in-flight presentation without
+/// resetting its position or velocity. The view can keep one frame loop alive while SwiftUI sends
+/// newer targets during a source change.
+struct SliderValueAnimation: Equatable, Sendable {
+    private(set) var startValue: Double
+    private(set) var targetValue: Double
+    private(set) var startTime: Double
+    private(set) var duration: Double
+    private(set) var startVelocity: Double
+
+    init(from startValue: Double, to targetValue: Double, at startTime: Double, duration: Double) {
+        self.startValue = startValue
+        self.targetValue = targetValue
+        self.startTime = startTime
+        self.duration = duration
+        self.startVelocity = 0
+    }
+
+    func value(at time: Double) -> Double {
+        let progress = min(max((time - startTime) / duration, 0), 1)
+        let progressSquared = progress * progress
+        let progressCubed = progressSquared * progress
+        let startWeight = 2 * progressCubed - 3 * progressSquared + 1
+        let velocityWeight = progressCubed - 2 * progressSquared + progress
+        let targetWeight = -2 * progressCubed + 3 * progressSquared
+        return startWeight * startValue
+            + velocityWeight * duration * startVelocity
+            + targetWeight * targetValue
+    }
+
+    func velocity(at time: Double) -> Double {
+        let progress = min(max((time - startTime) / duration, 0), 1)
+        let progressSquared = progress * progress
+        let startWeight = 6 * progressSquared - 6 * progress
+        let velocityWeight = 3 * progressSquared - 4 * progress + 1
+        let targetWeight = -6 * progressSquared + 6 * progress
+        return (startWeight * startValue + targetWeight * targetValue) / duration
+            + velocityWeight * startVelocity
+    }
+
+    mutating func retarget(to target: Double, at time: Double, duration: Double) {
+        let currentValue = value(at: time)
+        let currentVelocity = velocity(at: time)
+        startValue = currentValue
+        targetValue = target
+        startTime = time
+        self.duration = duration
+        startVelocity = currentVelocity
+    }
+}
+
 private struct SliderSourceAnimationKey: EnvironmentKey {
     static let defaultValue = SliderSourceAnimation(assetID: nil, isEnabled: false)
 }
@@ -138,6 +189,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
         private(set) var isTracking = false
         private var valueAnimation: Task<Void, Never>?
         private var valueAnimationTarget: Double?
+        private var valueAnimationState: SliderValueAnimation?
         private var animationAssetID: PhotoAssetID?
         private var sourceAnimationDeadline = 0.0
 
@@ -177,47 +229,65 @@ struct NeutralOriginSlider: NSViewRepresentable {
         }
 
         func present(_ target: Double, on slider: NSSlider, animated: Bool) {
-            // SwiftUI may update the representable several times while one presentation is in
-            // flight. Re-applying its bound target must not restart the easing curve from the
-            // slider's intermediate value; doing so repeatedly makes the knob appear to pause.
-            if animated, valueAnimation != nil, valueAnimationTarget == target { return }
-
-            valueAnimation?.cancel()
-            valueAnimation = nil
-            valueAnimationTarget = nil
-
             guard animated else {
+                cancelValueAnimation()
                 slider.doubleValue = target
                 slider.needsDisplay = true
                 return
             }
 
+            if var animation = valueAnimationState {
+                guard valueAnimationTarget != target else { return }
+                animation.retarget(
+                    to: target,
+                    at: ProcessInfo.processInfo.systemUptime,
+                    duration: Self.valueAnimationDuration
+                )
+                valueAnimationState = animation
+                valueAnimationTarget = target
+                return
+            }
+
             let start = slider.doubleValue
             let startTime = ProcessInfo.processInfo.systemUptime
-            let duration = 0.38
+            let duration = Self.valueAnimationDuration
+            valueAnimationState = SliderValueAnimation(
+                from: start, to: target, at: startTime, duration: duration
+            )
             valueAnimationTarget = target
             valueAnimation = Task { @MainActor [weak self, weak slider] in
                 while !Task.isCancelled {
-                    guard let slider else { return }
-                    let progress = min(
-                        (ProcessInfo.processInfo.systemUptime - startTime) / duration, 1
-                    )
-                    let eased = progress * progress * (3 - 2 * progress)
-                    slider.doubleValue = start + (target - start) * eased
+                    guard let self, let slider, let animation = self.valueAnimationState else {
+                        return
+                    }
+                    let now = ProcessInfo.processInfo.systemUptime
+                    slider.doubleValue = animation.value(at: now)
                     slider.needsDisplay = true
-                    guard progress < 1 else { break }
+                    guard now < animation.startTime + animation.duration else { break }
                     do {
                         try await Task.sleep(for: .milliseconds(16))
                     } catch {
                         return
                     }
                 }
-                guard !Task.isCancelled, let self, let slider else { return }
-                slider.doubleValue = target
+                guard !Task.isCancelled, let self, let slider,
+                      let animation = self.valueAnimationState
+                else { return }
+                slider.doubleValue = animation.targetValue
                 slider.needsDisplay = true
                 self.valueAnimation = nil
                 self.valueAnimationTarget = nil
+                self.valueAnimationState = nil
             }
+        }
+
+        private static let valueAnimationDuration = 0.38
+
+        private func cancelValueAnimation() {
+            valueAnimation?.cancel()
+            valueAnimation = nil
+            valueAnimationTarget = nil
+            valueAnimationState = nil
         }
 
         private static func snapped(
@@ -236,9 +306,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
             guard tracking != isTracking else { return }
             isTracking = tracking
             if tracking {
-                valueAnimation?.cancel()
-                valueAnimation = nil
-                valueAnimationTarget = nil
+                cancelValueAnimation()
             }
             onEditingChanged(tracking)
         }
