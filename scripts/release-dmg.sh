@@ -8,7 +8,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/release-dmg.sh [version]
 
-Build, sign, notarize, staple, and verify a universal Kromora DMG.
+Build, sign, notarize, staple, and verify an Apple Silicon Kromora DMG.
 
 Environment:
   KROMORA_VERSION                 Version override when no positional version is given
@@ -19,9 +19,10 @@ Environment:
   KROMORA_BUNDLE_IDENTIFIER        Optional bundle identifier override
   KROMORA_SKIP_NOTARIZE=1          Local signed dry-run; never suitable for shipping
   KROMORA_RELEASE_DIR              Output directory (default: .build/releases)
+  KROMORA_BUILD_ARCHS              Must be arm64 (default: arm64)
 
-The default build is arm64+x86_64. Set KROMORA_SKIP_NOTARIZE=1 to build locally
-without contacting Apple; an identity is optional in that mode and defaults to ad hoc.
+The build is arm64 only. Set KROMORA_SKIP_NOTARIZE=1 to build locally without
+contacting Apple; an identity is optional in that mode and defaults to ad hoc.
 EOF
 }
 
@@ -35,7 +36,13 @@ entitlements="Sources/Kromora/Kromora.entitlements"
 app_bundle=".build/Kromora.app"
 release_dir="${KROMORA_RELEASE_DIR:-.build/releases}"
 skip_notarize="${KROMORA_SKIP_NOTARIZE:-0}"
+build_arches="${KROMORA_BUILD_ARCHS:-arm64}"
 version="${1:-${KROMORA_VERSION:-}}"
+
+[[ "$build_arches" == "arm64" ]] || {
+  print -u2 "KROMORA_BUILD_ARCHS must be arm64; x86_64 and universal builds are unsupported"
+  exit 1
+}
 
 [[ -f "$info_plist" ]] || { print -u2 "missing bundle metadata: $info_plist"; exit 1; }
 [[ -f "$entitlements" ]] || { print -u2 "missing entitlements: $entitlements"; exit 1; }
@@ -114,7 +121,7 @@ trap cleanup EXIT INT TERM
 
 print "Building Kromora $version (build $build_number; identity: $signing_identity)"
 KROMORA_CODESIGN_IDENTITY="$signing_identity" \
-KROMORA_BUILD_ARCHS="arm64,x86_64" \
+KROMORA_BUILD_ARCHS="$build_arches" \
 KROMORA_DIRECT_DISTRIBUTION=1 \
   scripts/build-macos-app.sh
 
@@ -157,8 +164,8 @@ if [[ "$signing_identity" != "-" ]]; then
 fi
 
 archs="$(/usr/bin/lipo -archs "$app_bundle/Contents/MacOS/Kromora")"
-[[ "$archs" == *"arm64"* && "$archs" == *"x86_64"* ]] || {
-  print -u2 "app executable is not universal (reported architectures: $archs)"
+[[ "$archs" == "arm64" ]] || {
+  print -u2 "app executable must contain only arm64 (reported architectures: $archs)"
   exit 1
 }
 

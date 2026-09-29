@@ -94,8 +94,8 @@ to macOS 26 (Tahoe), matching the SDK and allowing Tahoe APIs to be used uncondi
 
 ## Signed DMG releases
 
-[`scripts/release-dmg.sh`](../scripts/release-dmg.sh) composes the app bundler into a reproducible
-arm64 + x86_64 release. It sets the requested version in `CFBundleShortVersionString`, derives
+[`scripts/release-dmg.sh`](../scripts/release-dmg.sh) composes the app bundler into an Apple Silicon
+arm64-only release. It sets the requested version in `CFBundleShortVersionString`, derives
 `CFBundleVersion` from the git commit count unless overridden, signs with Developer ID Application
 and hardened runtime, creates `Kromora-<version>.dmg`, and prints the exact asset path when complete.
 The DMG contains `Kromora.app` and an `Applications` shortcut. The bundle identifier remains the
@@ -103,8 +103,8 @@ project value (`com.last8.kromora.photo`) unless `KROMORA_BUNDLE_IDENTIFIER` is 
 
 Prerequisites:
 
-- macOS with SwiftPM, Xcode command-line tools (`xcrun actool`, `notarytool`, `stapler`), `codesign`,
-  `hdiutil`, and `lipo`.
+- Apple Silicon Mac with SwiftPM, Xcode command-line tools (`xcrun actool`, `notarytool`, `stapler`),
+  `codesign`, and `hdiutil`.
 - A Developer ID Application certificate installed in the login keychain. Set
   `KROMORA_CODESIGN_IDENTITY` to its exact identity (the script rejects non-Developer-ID identities
   for distribution), plus the matching App Sandbox provisioning profile in
@@ -136,6 +136,6 @@ KROMORA_SKIP_NOTARIZE=1 scripts/release-dmg.sh 1.2.3
 
 That output is explicitly non-ship: it has no notarization ticket or stapled ticket. The normal
 `scripts/build-macos-app.sh` remains the lower-level disposable `.build/Kromora.app` workflow for
-local/CI structural checks; `release-dmg.sh` adds versioning, universal builds, DMG packaging, and
-distribution validation around it. `create-dmg` is not required because the supported fallback uses
-the macOS built-in `hdiutil` path.
+local/CI structural checks; `release-dmg.sh` adds versioning, DMG packaging, and distribution
+validation around it. Both package arm64 only. `create-dmg` is not required because the supported
+fallback uses the macOS built-in `hdiutil` path.
