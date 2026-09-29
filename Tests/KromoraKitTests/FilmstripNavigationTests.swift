@@ -7,6 +7,7 @@ import XCTest
 final class FilmstripNavigationTests: TempDirectoryTestCase {
     func testFilmstripLayoutUsesLargerCellsWithoutAStatusRow() {
         XCTAssertEqual(FilmstripLayout.thumbnailSize, 96)
+        XCTAssertEqual(FilmstripLayout.horizontalContentInset, 12)
         XCTAssertGreaterThan(FilmstripLayout.thumbnailSize, 72)
         XCTAssertEqual(FilmstripLayout.stripHeight(showPhotoNames: false), 103)
         XCTAssertEqual(FilmstripLayout.stripHeight(showPhotoNames: true), 118)
