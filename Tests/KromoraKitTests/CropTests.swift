@@ -1048,25 +1048,6 @@ final class CropWorkflowTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.document.crop.flipVertical)
     }
 
-    func testCropAutoNoOpDoesNotTouchGeometryOrGlobalTone() async throws {
-        let url = try Fixtures.writeGradientPNG(
-            width: 32, height: 24, named: "auto-no-op.png", in: tempDirectory)
-        let viewModel = makeAppViewModel(
-            engine: FakeRenderEngine(), editStore: makeInMemoryEditStore())
-        viewModel.openImage(url: url)
-        try await waitUntil("the source image") { viewModel.sourceImage != nil }
-
-        viewModel.beginCrop()
-        let before = viewModel.document
-        viewModel.runCropAuto()
-
-        XCTAssertEqual(viewModel.document, before)
-        XCTAssertEqual(viewModel.cropStraightenAngle, 0)
-        XCTAssertEqual(viewModel.cropVerticalPerspective, 0)
-        XCTAssertEqual(viewModel.cropHorizontalPerspective, 0)
-        XCTAssertEqual(viewModel.statusMessage, "Auto crop: no reliable horizon detected")
-    }
-
     /// Covers the LUMO-115 fix directly: while Crop is open, the pixels under the full-source
     /// overlay must come from the same adjusted stage with the composition crop stripped, not the
     /// already-cropped committed render. Asserting on the render *request* handed to the engine

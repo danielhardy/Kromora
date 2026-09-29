@@ -24,7 +24,6 @@ struct CropInspectorView: View {
     let onResetStraighten: () -> Void
     let onResetVerticalPerspective: () -> Void
     let onResetHorizontalPerspective: () -> Void
-    let onAuto: () -> Void
     let onAspectRatioChange: (CropAspectRatio, CropAspectRatioOrientation) -> Void
     let onReset: () -> Void
     let onCancel: () -> Void
@@ -56,14 +55,6 @@ struct CropInspectorView: View {
                     rotationAndFlipSection
                     straightenSection
                     perspectiveSection
-
-                    Divider()
-
-                    Button(action: onAuto) {
-                        Label("Auto", systemImage: "wand.and.stars")
-                    }
-                    .accessibilityHint(
-                        "Suggest a horizon straighten when reliable evidence is available")
                 }
                 .padding(16)
             }

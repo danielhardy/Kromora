@@ -40,7 +40,6 @@ struct InfoInspectorView: View {
                         onResetStraighten: { viewModel.setCropStraightenAngle(0) },
                         onResetVerticalPerspective: { viewModel.setCropVerticalPerspective(0) },
                         onResetHorizontalPerspective: { viewModel.setCropHorizontalPerspective(0) },
-                        onAuto: viewModel.runCropAuto,
                         onAspectRatioChange: viewModel.selectCropAspectRatio,
                         onReset: viewModel.resetCrop,
                         onCancel: viewModel.cancelCrop,

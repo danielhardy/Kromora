@@ -3470,7 +3470,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func setCropHorizontalPerspective(_ value: Double) {
         canvasWorkflow.setCropHorizontalPerspective(value)
     }
-    func runCropAuto() { canvasWorkflow.runCropAuto() }
     func toggleCropFlip(horizontal: Bool) { canvasWorkflow.toggleCropFlip(horizontal: horizontal) }
     func commitCrop() { canvasWorkflow.commitCrop() }
     func cancelCrop() { canvasWorkflow.cancelCrop() }

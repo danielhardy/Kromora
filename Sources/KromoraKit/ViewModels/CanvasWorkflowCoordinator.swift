@@ -126,11 +126,6 @@ final class CanvasWorkflowCoordinator {
         destination?.scheduleCanvasWorkflowInteractivePreview()
     }
 
-    func runCropAuto() {
-        guard interactionState.isCropToolActive else { return }
-        destination?.setCanvasWorkflowStatus("Auto crop: no reliable horizon detected")
-    }
-
     func toggleCropFlip(horizontal: Bool) {
         interactionState.toggleCropFlip(horizontal: horizontal)
         destination?.scheduleCanvasWorkflowPreview()
