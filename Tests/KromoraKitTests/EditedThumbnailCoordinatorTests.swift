@@ -60,6 +60,32 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         await fixture.scheduler.cancelAllAndWait()
     }
 
+    func testPreviousEditedThumbnailStaysVisibleUntilReplacementCompletes() async throws {
+        let document = EditDocument(adjustments: [.exposure(ev: 0.65)])
+        let fixture = makeFixture(document: document, rendererWaits: true)
+        let sourceThumbnail = NSImage(size: NSSize(width: 2, height: 2))
+        let previousEditedThumbnail = NSImage(size: NSSize(width: 3, height: 2))
+        fixture.item.setOriginalThumbnail(sourceThumbnail)
+        fixture.item.applyEditedThumbnail(previousEditedThumbnail, revision: "older-edit")
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
+        try await waitUntil("the held replacement render") {
+            await fixture.engine.hasThumbnailRequest
+        }
+
+        XCTAssertTrue(fixture.item.thumbnail === previousEditedThumbnail)
+        XCTAssertEqual(fixture.item.editedThumbnailRevision, "older-edit")
+
+        await fixture.engine.releaseThumbnail()
+        try await waitUntil("the replacement thumbnail publication") {
+            fixture.item.editedThumbnailRevision == document.editHash + ":unresolved"
+        }
+
+        XCTAssertFalse(fixture.item.thumbnail === sourceThumbnail)
+        XCTAssertFalse(fixture.item.thumbnail === previousEditedThumbnail)
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
     func testSourceIdentityChangeRejectsLateResult() async throws {
         let fixture = makeFixture(rendererWaits: true)
         fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
@@ -141,11 +167,11 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
         try await waitUntil("the failed thumbnail attempt") {
             await fixture.engine.thumbnailRequestCount == 1
-                && fixture.item.editedThumbnailRevision != nil
         }
 
         XCTAssertFalse(fixture.item.shouldFillLibraryThumbnail)
         XCTAssertTrue(fixture.item.thumbnail === sourceThumbnail)
+        XCTAssertNil(fixture.item.editedThumbnailRevision)
 
         fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
         try await waitUntil("the retried edited thumbnail") {
@@ -432,9 +458,6 @@ private final class FakeDestination: EditedThumbnailDestination {
     }
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64 { 1 }
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { lut }
-    func invalidateEditedThumbnail(for assetID: PhotoAssetID) {
-        item.invalidateEditedThumbnail()
-    }
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         appliedWasNil = image == nil
         appliedRevisions.append(revision)

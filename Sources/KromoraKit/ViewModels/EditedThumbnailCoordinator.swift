@@ -24,7 +24,6 @@ protocol EditedThumbnailDestination: AnyObject {
     func editedThumbnailDocument(for assetID: PhotoAssetID) -> EditDocument?
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT?
-    func invalidateEditedThumbnail(for assetID: PhotoAssetID)
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String)
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
@@ -250,13 +249,10 @@ final class EditedThumbnailCoordinator {
                 return
             }
 
-            // A request for an already-published revision can be a repeated appearance/selection
-            // demand after the in-memory materialization cache was lost. Keep that bitmap visible
-            // while confirming or rebuilding the same revision. A genuinely different edit (or a
-            // forced refresh) invalidates it so an obsolete edit is never presented as current.
-            if force || item.editedThumbnailRevision != revision {
-                destination.invalidateEditedThumbnail(for: assetID)
-            }
+            // Keep the last published raster visible while a replacement is prepared. It belongs
+            // to this item, and the generation/source/document fences below ensure that only the
+            // current request can replace it. Clearing to the source here makes both navigation
+            // refreshes and ordinary edit changes visibly cycle through an unedited frame.
 
             // Metadata normally supplies the extent before a cell appears. Preparing the source
             // here is the safe fallback for a just-discovered cell and keeps the thumbnail render
@@ -287,11 +283,11 @@ final class EditedThumbnailCoordinator {
                 sourceIdentity: thumbnailSourceIdentity
             ), let destination = self.destination
             else { return }
-            destination.applyEditedThumbnail(image, for: assetID, revision: revision)
-            // A failed render publishes the original as a temporary fallback. It has the current
-            // document revision for display bookkeeping, but it is not a materialized edited
-            // thumbnail: the next visible demand must be allowed to retry the render.
+            // A failed render leaves the last published image in place (or the original source if
+            // this item has never had a successful edit render). Its revision remains unchanged,
+            // so the next visible demand can retry this request.
             if image != nil {
+                destination.applyEditedThumbnail(image, for: assetID, revision: revision)
                 self.materializedThumbnails[assetID] = materialized
             } else {
                 self.materializedThumbnails.removeValue(forKey: assetID)
