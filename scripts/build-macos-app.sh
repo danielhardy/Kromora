@@ -11,7 +11,12 @@ asset_output=".build/kromora-icon-asset-validation"
 app_bundle=".build/Kromora.app"
 signing_identity="${KROMORA_CODESIGN_IDENTITY:-${CODE_SIGN_IDENTITY:--}}"
 provisioning_profile="${KROMORA_PROVISIONING_PROFILE:-${PROVISIONING_PROFILE:-}}"
-build_arches="${KROMORA_BUILD_ARCHS:-native}"
+build_arches="${KROMORA_BUILD_ARCHS:-arm64}"
+
+[[ "$build_arches" == "arm64" ]] || {
+  print -u2 "KROMORA_BUILD_ARCHS must be arm64"
+  exit 1
+}
 
 [[ -d "$icon_composer" ]] || { print -u2 "missing Icon Composer asset: $icon_composer"; exit 1; }
 [[ -f "$icon_composer/icon.json" ]] || { print -u2 "missing Icon Composer manifest: $icon_composer/icon.json"; exit 1; }
@@ -26,36 +31,13 @@ fi
 rm -rf "$asset_output" "$app_bundle"
 mkdir -p "$asset_output" "$app_bundle/Contents/MacOS" "$app_bundle/Contents/Resources"
 
-# Build the executable through SwiftPM, then put it in a normal macOS bundle.
+# Build the arm64 executable through SwiftPM, then put it in a normal macOS bundle.
 # SPM intentionally has no app-bundle Info.plist phase, so this small
 # packaging step is the reproducible bridge used by local/archive workflows.
-if [[ "$build_arches" == "native" ]]; then
-  swift build -c release --product Kromora
-  bin_path="$(swift build -c release --show-bin-path)"
-  cp "$bin_path/Kromora" "$app_bundle/Contents/MacOS/Kromora"
-  resource_bundle="$bin_path/Kromora_KromoraKit.bundle"
-else
-  [[ "$build_arches" == "arm64,x86_64" ]] || {
-    print -u2 "KROMORA_BUILD_ARCHS must be native or arm64,x86_64"
-    exit 1
-  }
-  command -v lipo >/dev/null || { print -u2 "missing lipo for a universal build"; exit 1; }
-
-  universal_inputs=()
-  resource_bundle=""
-  for arch in arm64 x86_64; do
-    scratch_path=".build/swiftpm-$arch"
-    swift build -c release --product Kromora \
-      --scratch-path "$scratch_path" \
-      --triple "$arch-apple-macosx26.0"
-    arch_bin_path="$(swift build -c release --product Kromora \
-      --scratch-path "$scratch_path" \
-      --triple "$arch-apple-macosx26.0" --show-bin-path)"
-    universal_inputs+=("$arch_bin_path/Kromora")
-    [[ -n "$resource_bundle" ]] || resource_bundle="$arch_bin_path/Kromora_KromoraKit.bundle"
-  done
-  lipo -create "${universal_inputs[@]}" -output "$app_bundle/Contents/MacOS/Kromora"
-fi
+swift build -c release --product Kromora
+bin_path="$(swift build -c release --show-bin-path)"
+cp "$bin_path/Kromora" "$app_bundle/Contents/MacOS/Kromora"
+resource_bundle="$bin_path/Kromora_KromoraKit.bundle"
 
 # SwiftPM emits resources for the KromoraKit target as a sibling bundle next to
 # the executable. Package code resolves it from Bundle.main.resourceURL when
