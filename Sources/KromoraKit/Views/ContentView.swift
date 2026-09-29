@@ -354,7 +354,7 @@ public struct ContentView: View {
 
     private var editToolbarPill: some View {
         GlassEffectContainer(spacing: 10) {
-            HStack(spacing: 10) {
+            HStack {
                 Button {
                     viewModel.toggleCropTool()
                 } label: {
@@ -395,6 +395,7 @@ public struct ContentView: View {
                 .disabled(!viewModel.isComparisonPresentationAvailable)
                 .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
             }
+            .labelStyle(.iconOnly)
             .buttonStyle(.glass)
         }
         .transition(.opacity)
@@ -572,6 +573,8 @@ private struct CanvasToolbarControls: View {
             Label("\(canvasState.navigation.zoomPercent)%", systemImage: "magnifyingglass")
         }
         .help("Canvas zoom: fit, fill, or explicit zoom")
+        .accessibilityLabel("Canvas zoom")
+        .accessibilityValue("\(canvasState.navigation.zoomPercent)%")
         .disabled(!hasImage)
     }
 }
