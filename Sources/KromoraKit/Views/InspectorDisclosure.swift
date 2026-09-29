@@ -67,7 +67,7 @@ struct InspectorDisclosure<Content: View>: View {
                         Image(systemName: "chevron.right")
                             .rotationEffect(.degrees(isExpanded ? 90 : 0))
                             .accessibilityHidden(true)
-                        Text(title).font(titleFont)
+                        Text(title).font(titleFont).lineLimit(1)
                         Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)

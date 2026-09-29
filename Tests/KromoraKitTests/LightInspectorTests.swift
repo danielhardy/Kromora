@@ -141,7 +141,7 @@ final class LightInspectorTests: TempDirectoryTestCase {
 
     func testToneCurveGraphPinsItsVerticalSizeInsideTheScrollingInspector() throws {
         let source = try lightInspectorSource()
-        let sizingComment = try XCTUnwrap(source.range(of: "// Keep the graph square while"))
+        let sizingComment = try XCTUnwrap(source.range(of: "// Keep the graph square and exactly"))
         let notificationHandler = try XCTUnwrap(
             source.range(
                 of: ".onReceive(NotificationCenter.default.publisher",
@@ -151,8 +151,17 @@ final class LightInspectorTests: TempDirectoryTestCase {
         let sizing = source[sizingComment.lowerBound..<notificationHandler.lowerBound]
 
         XCTAssertTrue(sizing.contains(".aspectRatio(1, contentMode: .fit)"))
-        XCTAssertTrue(sizing.contains(".frame(maxWidth: 220, alignment: .center)"))
+        // KRMA-716: the map fills the tab width (equal gutters) instead of a leading-aligned cap.
+        XCTAssertFalse(sizing.contains(".frame(maxWidth: 220"))
+        XCTAssertTrue(sizing.contains(".frame(maxWidth: .infinity)"))
         XCTAssertTrue(sizing.contains(".fixedSize(horizontal: false, vertical: true)"))
+        XCTAssertTrue(sizing.contains(".padding(.top, 6)"))
+
+        // The channel tabs take the offered width so they cannot resize with parent proposals.
+        let pickerStart = try XCTUnwrap(source.range(of: "Picker(\"Channel\""))
+        let graphStart = try XCTUnwrap(source.range(of: "GeometryReader { proxy in"))
+        let picker = source[pickerStart.lowerBound..<graphStart.lowerBound]
+        XCTAssertTrue(picker.contains(".pickerStyle(.segmented)\n            .frame(maxWidth: .infinity)"))
 
         // Visual check: with Light > Tone Curve expanded, move between photos with the arrow keys,
         // then drag Exposure through several values. The square graph and controls below it should
