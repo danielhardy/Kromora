@@ -421,6 +421,7 @@ public struct ContentView: View {
                 } label: {
                     Label("Reset", systemImage: "arrow.counterclockwise")
                 }
+                .toolbarMenuTreatment()
                 .help("Reset the current adjustment section or the whole photo")
                 .disabled(viewModel.sourceImage == nil)
                 .glassEffectUnion(id: "view", namespace: toolbarGlassNamespace)
@@ -492,6 +493,7 @@ public struct ContentView: View {
                 } label: {
                     Label("Import", systemImage: "photo.on.rectangle")
                 }
+                .toolbarMenuTreatment()
                 .help("Import images from a file, Photos, folder, or removable media")
                 .glassEffectUnion(id: "transfer", namespace: toolbarGlassNamespace)
 
@@ -575,7 +577,25 @@ private struct CanvasToolbarControls: View {
         .help("Canvas zoom: fit, fill, or explicit zoom")
         .accessibilityLabel("Canvas zoom")
         .accessibilityValue("\(canvasState.navigation.zoomPercent)%")
+        .toolbarMenuTreatment()
         .disabled(!hasImage)
+    }
+}
+
+/// Toolbar menus use the native button menu style for its trailing disclosure arrow, while the
+/// fixed-size proposal lets each control occupy the width of its label and that native indicator.
+private struct ToolbarMenuTreatment: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .menuStyle(.button)
+            .buttonStyle(.glass)
+            .fixedSize(horizontal: true, vertical: false)
+    }
+}
+
+private extension View {
+    func toolbarMenuTreatment() -> some View {
+        modifier(ToolbarMenuTreatment())
     }
 }
 
