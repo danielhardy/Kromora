@@ -51,3 +51,17 @@ Xcode does none of this: `NSToolbarStyle.unified` draws an opaque bar; split col
 ## Implementation notes
 
 Deletion-first diff: remove the representable, the `.background(...)`, the `.ignoresSafeArea(.top)`, then re-verify the histogram section (`InfoInspectorView.swift:252-290`) in its new home — it may want a small top inset to replace the band it lost. Keep `inspectorColumnWidth` and the crop-owns-inspector gating in `mainContent` unchanged. Watch `PreviewSurface.swift:798` (`NavigationSplitView` replacing selected image) if migrating the sidebar.
+
+
+### Comment — codex @ 2026-09-29T00:33:03.216Z
+
+Implemented and committed as 1e26938: removed titlebar bleed suppression and inspector top safe-area override, documented the optional editor pane rationale, and added native toolbar geometry coverage. Verification: scripts/ci-tests.sh fast (1,332 tests), scripts/ci-tests.sh serial (443 tests, 1 skipped), and LibraryChromeLayoutTests (3 tests) passed. A visible manual pass is still needed for the requested window-size, appearance, resize/drag, and tab checks.
+
+## Comment - human @2026-09-29
+Reviewed and it is functional and has the correct glass effect. The sidebar currently covers the content breaking teh usability a fair bit. You can see in the attached screenshot that the thumbnails and image goes under the controls. This is not ideal and should be corrected.  
+
+I have attached two additional images that demonstrate how xcode solves this. The first shows the sidebar (right) open. You can see the sidebar button aligned all the way to the right at the top of the sidebar. The second is the sidebar closed. You can see the button is still aligned to the right but now appears on the top bar. I think this model could be good for Kromora.
+
+![Xcode reference with the right sidebar open](../assets/KRMA-697/xcode-sidebar-open.png)
+
+![Xcode reference with the sidebar closed and its toggle remaining at the right edge of the toolbar](../assets/KRMA-697/xcode-sidebar-closed.png)

@@ -17,10 +17,10 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         try transaction.commit(now: now)
 
         XCTAssertEqual(
-            try String(contentsOf: packageURL.appendingPathComponent("Assets/aa/asset.json")),
+            try String(contentsOf: packageURL.appendingPathComponent("Assets/aa/asset.json"), encoding: .utf8),
             "new asset")
         XCTAssertEqual(
-            try String(contentsOf: packageURL.appendingPathComponent("Catalog/Membership/aa.json")),
+            try String(contentsOf: packageURL.appendingPathComponent("Catalog/Membership/aa.json"), encoding: .utf8),
             "new membership"
         )
         XCTAssertFalse(
@@ -73,7 +73,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
             try lease.release()
             let report = try PortablePackageTransaction.recover(at: packageURL)
             XCTAssertEqual(report.recoveredTransactionIDs.count, 1, "boundary \(boundary)")
-            XCTAssertEqual(try String(contentsOf: stateURL), "old", "boundary \(boundary)")
+            XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old", "boundary \(boundary)")
             XCTAssertFalse(
                 FileManager.default.fileExists(
                     atPath: packageURL.appendingPathComponent("State/b.txt").path),
@@ -135,7 +135,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
 
         let later = now.addingTimeInterval(11)
         try PortablePackageLease.recoverExpiredWriter(at: packageURL, now: later)
-        XCTAssertEqual(try String(contentsOf: stateURL), "old")
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old")
         let replacement = try PortablePackageLease.acquire(at: packageURL, now: later)
         try replacement.release()
         _ = stale
@@ -163,7 +163,7 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         XCTAssertThrowsError(try transaction.commit(now: now))
 
         try PortablePackageLease.recoverDeadWriter(at: packageURL)
-        XCTAssertEqual(try String(contentsOf: stateURL), "old")
+        XCTAssertEqual(try String(contentsOf: stateURL, encoding: .utf8), "old")
         let replacement = try PortablePackageLease.acquire(at: packageURL, now: now)
         try replacement.release()
         _ = deadLease
