@@ -61,6 +61,12 @@ public struct ContentView: View {
                     ToolbarItem(placement: .navigation) {
                         editToolbarPill
                     }
+                    if inspectorState.isPresented {
+                        ToolbarSpacer(.fixed)
+                        ToolbarItem(placement: .navigation) {
+                            transferToolbarPill
+                        }
+                    }
                 }
                 ToolbarSpacer(.flexible)
                 if Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) == .crop {
@@ -71,9 +77,11 @@ public struct ContentView: View {
                     ToolbarItem(placement: .primaryAction) {
                         viewToolbarPill
                     }
-                    ToolbarSpacer(.fixed)
-                    ToolbarItem(placement: .primaryAction) {
-                        transferToolbarPill
+                    if !inspectorState.isPresented {
+                        ToolbarSpacer(.fixed)
+                        ToolbarItem(placement: .primaryAction) {
+                            transferToolbarPill
+                        }
                     }
                     ToolbarSpacer(.fixed)
                     ToolbarItem(placement: .primaryAction) {
