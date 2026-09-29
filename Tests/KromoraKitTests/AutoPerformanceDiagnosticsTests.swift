@@ -12,8 +12,8 @@ import XCTest
 ///   recorded, never read by selection, so attaching it cannot change candidate behavior.
 /// - Decode is reported separately from Auto work; cold and warm runs are measured separately
 ///   through the shared analysis cache.
-/// - `VisionAestheticsDiagnostics` is `#available`-guarded, diagnostics-only, and never an
-///   optimization target in production selection.
+/// - `VisionAestheticsDiagnostics` is diagnostics-only and never an optimization target in
+///   production selection.
 /// - The full-hardware end-to-end benchmark is opt-in
 ///   (`AutoPerformanceDiagnosticsTests/testAutoEndToEndBenchmark` in the optional lane) and
 ///   records medians in the release report; the fast lane pins invariants, never ceilings.
@@ -186,7 +186,7 @@ final class AutoPerformanceDiagnosticsTests: TempDirectoryTestCase {
             ))
     }
 
-    // MARK: - Aesthetics diagnostics (macOS 15+, never selection)
+    // MARK: - Aesthetics diagnostics (never selection)
 
     func testAestheticsScoresAreDiagnosticOnly() async {
         let image = try? Fixtures.makeParametricCGImage(width: 64, height: 48) { nx, ny in
@@ -194,15 +194,10 @@ final class AutoPerformanceDiagnosticsTests: TempDirectoryTestCase {
             return (0.2 + 0.5 * t, 0.2 + 0.5 * t, 0.2 + 0.48 * t)
         }
         let scores = image.flatMap(VisionAestheticsDiagnostics.scores(for:))
-        if #available(macOS 15, *) {
-            // On this gate's hardware the request succeeds; a nil here only means Vision
-            // declined the fixture, which must never fail the run.
-            if let scores {
-                XCTAssertGreaterThanOrEqual(scores.overallScore, -1)
-                XCTAssertLessThanOrEqual(scores.overallScore, 1)
-            }
-        } else {
-            XCTAssertNil(scores, "macOS 14 has no aesthetics request; diagnostics stay silent")
+        // Vision may decline the fixture; nil is a valid diagnostics outcome.
+        if let scores {
+            XCTAssertGreaterThanOrEqual(scores.overallScore, -1)
+            XCTAssertLessThanOrEqual(scores.overallScore, 1)
         }
 
         // Non-interference is structural: scoring takes rendered samples, frozen targets, and
@@ -230,6 +225,14 @@ final class AutoPerformanceDiagnosticsTests: TempDirectoryTestCase {
         let after = await evaluate()
         XCTAssertEqual(before.document, after.document)
         XCTAssertEqual(before.selectedScore?.total, after.selectedScore?.total)
+    }
+
+    func testAestheticsDiagnosticsReturnNilWhenVisionDeclines() {
+        enum VisionDeclined: Error { case requestFailed }
+        let scores = VisionAestheticsDiagnostics.scores { _ in
+            throw VisionDeclined.requestFailed
+        }
+        XCTAssertNil(scores)
     }
 
     // MARK: - Persistence timing and lifecycle
@@ -329,7 +332,7 @@ final class AutoPerformanceDiagnosticsTests: TempDirectoryTestCase {
                     scores.overallScore, scores.isUtility ? "yes" : "no"
                 ))
         } else {
-            print("AUTO_BENCHMARK aesthetics unavailable (macOS 14 or Vision declined)")
+            print("AUTO_BENCHMARK aesthetics unavailable (Vision declined)")
         }
         XCTAssertLessThan(cold.timings.totalSeconds, 120)
         XCTAssertLessThanOrEqual(cold.timings.smallRenders, 24)

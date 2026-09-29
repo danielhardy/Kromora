@@ -15,7 +15,7 @@
 //       Sources/KromoraKit/Resources/KromoraCIKernels.ci.metal \
 //       -o Sources/KromoraKit/Resources/KromoraCIKernels.ci.metallib
 //
-// The `-mmacosx-version-min=14.0` flag matches Package.swift's deployment target so the
+// The `-mmacosx-version-min=26.0` flag matches Package.swift's deployment target so the
 // resulting library loads on every supported macOS release, not just the building SDK.
 
 #include <metal_stdlib>

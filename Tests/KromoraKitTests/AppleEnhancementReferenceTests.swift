@@ -134,31 +134,6 @@ final class AppleEnhancementReferenceTests: XCTestCase {
 
     // MARK: - Unavailable paths (never block native proposals)
 
-    func testUnsupportedRuntimeReturnsUnavailable() async {
-        let (adapter, _) = await configured(
-            baseline: solid(128),
-            reference: AppleReferenceRender(intent: AppleReferenceIntent(effects: [.toneCurve]))
-        )
-        let gated = AppleEnhancementReferenceAdapter(
-            engine: adapter.engine, descriptor: StubDescriptor(render: nil),
-            availabilityOverride: false
-        )
-        let result = await gated.referenceProposal(
-            source: standardSource(), document: EditDocument(), sourceKind: .standard
-        )
-        guard case .unavailable(let code, _) = result else {
-            return XCTFail("expected unavailable, got \(result)")
-        }
-        XCTAssertEqual(code, .unsupportedOS)
-    }
-
-    func testSupportedRuntimeGateIsOpen() {
-        XCTAssertTrue(
-            AppleEnhancementReferenceAdapter.isSupportedRuntime,
-            "the deployment target postdates the availability gate"
-        )
-    }
-
     func testNilBaselineSamplesReturnRenderUnavailable() async {
         let (adapter, _) = await configured(baseline: nil, reference: nil)
         let result = await adapter.referenceProposal(

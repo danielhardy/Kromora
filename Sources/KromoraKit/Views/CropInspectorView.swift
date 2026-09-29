@@ -158,15 +158,15 @@ struct CropInspectorView: View {
     }
 
     private var landscapeOrientationSystemImage: String {
-        Self.isSystemImageAvailable("rectangle.landscape") ? "rectangle.landscape" : "rectangle"
+        "rectangle.landscape"
     }
 
     private var portraitOrientationSystemImage: String {
-        Self.isSystemImageAvailable("rectangle.portrait") ? "rectangle.portrait" : "rectangle"
+        "rectangle.portrait"
     }
 
     private var portraitOrientationSymbolRotation: Angle {
-        Self.isSystemImageAvailable("rectangle.portrait") ? .zero : .degrees(90)
+        .zero
     }
 
     /// Legacy documents can use automatic orientation. Resolve that state for the control from
@@ -209,7 +209,7 @@ struct CropInspectorView: View {
                 flipButton(
                     "Flip vertical",
                     systemImage: flipVerticalSystemImage,
-                    rotation: flipVerticalSymbolUsesRotation ? .degrees(90) : .zero,
+                    rotation: .degrees(90),
                     help: "Flip vertically",
                     isOn: flipVertical,
                     action: onFlipVertical
@@ -219,19 +219,11 @@ struct CropInspectorView: View {
     }
 
     private var flipHorizontalSystemImage: String {
-        Self.isSystemImageAvailable("flip.horizontal") ? "flip.horizontal" : "arrow.left.and.right"
+        "flip.horizontal"
     }
 
     private var flipVerticalSystemImage: String {
-        Self.isSystemImageAvailable("flip.horizontal") ? "flip.horizontal" : "arrow.up.and.down"
-    }
-
-    private var flipVerticalSymbolUsesRotation: Bool {
-        Self.isSystemImageAvailable("flip.horizontal")
-    }
-
-    private static func isSystemImageAvailable(_ name: String) -> Bool {
-        NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil
+        "flip.horizontal"
     }
 
     private func orientationButton(

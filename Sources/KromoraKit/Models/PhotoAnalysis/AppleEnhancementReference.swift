@@ -348,8 +348,6 @@ struct AppleReferenceProposal: Codable, Sendable, Equatable {
 /// Machine-readable unavailable reasons. Every failure degrades to "no Apple reference" so the
 /// coordinator falls through to native proposals; none of them blocks Auto.
 enum AppleReferenceUnavailableCode: String, Codable, Sendable, Equatable, CaseIterable {
-    /// The OS/runtime combination does not support Core Image automatic enhancement.
-    case unsupportedOS
     /// The analysis-view edit could not be rendered for fitting.
     case renderUnavailable
     /// The source has no measurable extent, or the rendered samples are malformed.
@@ -935,32 +933,14 @@ struct AppleEnhancementReferenceAdapter: Sendable {
     let engine: any RenderEngining & CurrentEditSampling
     let descriptor: any AppleAutoAdjustmentDescribing
     let space: WorkingSpace
-    /// Test seam for the OS/runtime gate. `nil` (production) consults `isSupportedRuntime`.
-    let availabilityOverride: Bool?
-
     init(
         engine: any RenderEngining & CurrentEditSampling,
         descriptor: any AppleAutoAdjustmentDescribing = CIAutoAdjustmentDescriptor(),
-        space: WorkingSpace = .sRGB,
-        availabilityOverride: Bool? = nil
+        space: WorkingSpace = .sRGB
     ) {
         self.engine = engine
         self.descriptor = descriptor
         self.space = space
-        self.availabilityOverride = availabilityOverride
-    }
-
-    /// Core Image automatic enhancement has shipped since OS X 10.8 / iOS 5, so on the macOS 14
-    /// deployment target the gate is always open in practice. It stays explicit — with an
-    /// injectable override — because the ticket requires an unavailable path on unsupported
-    /// OS/runtime combinations, and an unconditional `true` cannot be tested.
-    static var isSupportedRuntime: Bool {
-        if #available(macOS 13, *) { return true }
-        return false
-    }
-
-    var isAvailable: Bool {
-        availabilityOverride ?? Self.isSupportedRuntime
     }
 
     /// Produce one Apple-informed proposal for `document` over `source`.
@@ -979,12 +959,6 @@ struct AppleEnhancementReferenceAdapter: Sendable {
         asShotTemperature: Double? = nil,
         asShotTint: Double? = nil
     ) async -> AppleReferenceResult {
-        guard isAvailable else {
-            return .unavailable(
-                code: .unsupportedOS,
-                message: "Core Image automatic enhancement is unavailable on this OS/runtime."
-            )
-        }
         guard source.nativeExtent.width >= 1, source.nativeExtent.height >= 1,
               source.nativeExtent.width.isFinite, source.nativeExtent.height.isFinite
         else {
