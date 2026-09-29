@@ -356,6 +356,22 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(slider.doubleValue, -0.5, accuracy: 0.0001)
     }
 
+    func testRetargetingAnAnimationPreservesItsCurrentValueAndVelocity() {
+        var animation = SliderValueAnimation(from: 0, to: 1, at: 0, duration: 0.38)
+        let retargetTime = 0.16
+        let valueBeforeRetarget = animation.value(at: retargetTime)
+        let velocityBeforeRetarget = animation.velocity(at: retargetTime)
+
+        animation.retarget(to: 0.4, at: retargetTime, duration: 0.38)
+
+        XCTAssertEqual(animation.value(at: retargetTime), valueBeforeRetarget, accuracy: 0.000_001)
+        XCTAssertEqual(
+            animation.velocity(at: retargetTime), velocityBeforeRetarget, accuracy: 0.000_001
+        )
+        XCTAssertEqual(animation.value(at: retargetTime + 0.38), 0.4, accuracy: 0.000_001)
+        XCTAssertEqual(animation.velocity(at: retargetTime + 0.38), 0, accuracy: 0.000_001)
+    }
+
     // MARK: - Harness
 
     /// Rasterised geometry lands within a pixel or two of the arithmetic, and the fill's rounded
