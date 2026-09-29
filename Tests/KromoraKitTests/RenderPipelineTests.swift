@@ -81,6 +81,92 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         return stride(from: 0, to: pixels.count, by: 4).map { pixels[$0] }
     }
 
+    /// Deterministic floating-point raster with a hard luminance edge and either luminance or
+    /// chroma-only high-frequency noise. `CINoiseReduction` is measured before 8-bit encoding.
+    private func noisyDetailFixture(chromaNoise: Bool, width: Int = 96, height: Int = 64) -> CIImage {
+        var state: UInt32 = 0x714
+        var pixels = [Float](repeating: 0, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                state = state &* 1_664_525 &+ 1_013_904_223
+                let noise = (Float(state >> 8) / Float(0x00FF_FFFF) - 0.5) * 0.20
+                let base: Float = x < width / 2 ? 0.32 : 0.68
+                let offset = (y * width + x) * 4
+                if chromaNoise {
+                    pixels[offset] = base + noise
+                    pixels[offset + 1] = base - noise * 0.7
+                    pixels[offset + 2] = base - noise * 0.3
+                } else {
+                    pixels[offset] = base + noise
+                    pixels[offset + 1] = base + noise
+                    pixels[offset + 2] = base + noise
+                }
+                pixels[offset + 3] = 1
+            }
+        }
+        let data = pixels.withUnsafeBytes { Data($0) }
+        return CIImage(
+            bitmapData: data,
+            bytesPerRow: width * 4 * MemoryLayout<Float>.size,
+            size: CGSize(width: width, height: height),
+            format: .RGBAf,
+            colorSpace: nil
+        )
+    }
+
+    private func detailPixels(_ image: CIImage, width: Int = 96, height: Int = 64) -> [Float] {
+        var pixels = [Float](repeating: 0, count: width * height * 4)
+        pixels.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            Pixels.context.render(
+                image, toBitmap: base, rowBytes: width * 4 * MemoryLayout<Float>.size,
+                bounds: CGRect(x: 0, y: 0, width: width, height: height),
+                format: .RGBAf, colorSpace: nil
+            )
+        }
+        return pixels
+    }
+
+    private func detailNoiseEnergy(_ pixels: [Float], chroma: Bool, width: Int = 96, height: Int = 64) -> Double {
+        var energy = 0.0
+        var count = 0
+        for y in 2..<(height - 2) {
+            for x in 2..<(width - 2) where abs(x - width / 2) > 3 {
+                let offset = (y * width + x) * 4
+                let red = Double(pixels[offset])
+                let green = Double(pixels[offset + 1])
+                let blue = Double(pixels[offset + 2])
+                if chroma {
+                    energy += (red - green) * (red - green) + (blue - green) * (blue - green)
+                } else {
+                    let luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722
+                    let target = x < width / 2 ? 0.32 : 0.68
+                    energy += (luminance - target) * (luminance - target)
+                }
+                count += 1
+            }
+        }
+        return energy / Double(count)
+    }
+
+    private func detailEdgeContrast(_ pixels: [Float], width: Int = 96, height: Int = 64) -> Double {
+        func mean(in columns: Range<Int>) -> Double {
+            var total = 0.0
+            var count = 0
+            for y in 0..<height {
+                for x in columns {
+                    let offset = (y * width + x) * 4
+                    total += Double(pixels[offset]) * 0.2126
+                        + Double(pixels[offset + 1]) * 0.7152
+                        + Double(pixels[offset + 2]) * 0.0722
+                    count += 1
+                }
+            }
+            return total / Double(count)
+        }
+        return mean(in: 55..<60) - mean(in: 36..<41)
+    }
+
     private func ciImage(from thumbnail: NSImage) throws -> CIImage {
         var proposedRect = NSRect(origin: .zero, size: thumbnail.size)
         let cgImage = try XCTUnwrap(
@@ -111,6 +197,41 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         assertPixelsEqual(
             try Pixels.bytes(of: built), try Pixels.bytes(of: expected),
             "neutral Light must leave the existing render untouched")
+    }
+
+    func testNoiseReductionReducesLuminanceAndChromaNoiseWithoutLosingTheEdge() throws {
+        for chromaNoise in [false, true] {
+            let input = noisyDetailFixture(chromaNoise: chromaNoise)
+            let baseline = detailPixels(input)
+            let noiseEnergy = detailNoiseEnergy(baseline, chroma: chromaNoise)
+            let detail = DetailAdjustments(
+                luminanceNoise: chromaNoise ? 0 : 70,
+                colorNoise: chromaNoise ? 70 : 0
+            )
+            let output = RenderPipeline.applyDetailControls(
+                detail, to: input, referenceExtent: input.extent
+            )
+            let reduced = detailPixels(output)
+            let reducedEnergy = detailNoiseEnergy(reduced, chroma: chromaNoise)
+
+            XCTAssertLessThan(
+                reducedEnergy, noiseEnergy * 0.8,
+                chromaNoise ? "Color NR should reduce chroma noise" : "Luminance NR should reduce luminance noise"
+            )
+            XCTAssertGreaterThan(
+                detailEdgeContrast(reduced), detailEdgeContrast(baseline) * 0.8,
+                "Noise reduction should retain at least 80% of the hard-edge contrast"
+            )
+        }
+
+        let neutral = noisyDetailFixture(chromaNoise: false)
+        let zero = RenderPipeline.applyDetailControls(
+            .neutral, to: neutral, referenceExtent: neutral.extent
+        )
+        assertPixelsEqual(
+            try Pixels.bytes(of: zero), try Pixels.bytes(of: neutral),
+            "zero noise reduction must remain neutral"
+        )
     }
 
     func testRetouchSpotChangesRenderedPixelsAndNeutralRetouchIsIdentity() throws {
