@@ -170,10 +170,12 @@ private struct ToneCurveEditor: View {
                 .accessibilityLabel("\(channel.rawValue) tone curve")
             }
             // Keep the graph square while allowing it to shrink and grow with the inspector.
-            // GeometryReader receives the resulting square size, so the normalized coordinate
-            // mapping used by both the handles and drag gesture remains in one coordinate space.
+            // The scrolling inspector recomputes its content size while a source loads and while
+            // previews publish. Pin the graph's vertical ideal size to its width so those parent
+            // height proposals cannot stretch the chart or move the controls below it.
             .aspectRatio(1, contentMode: .fit)
-            .frame(maxWidth: .infinity, alignment: .center)
+            .frame(maxWidth: 220, alignment: .center)
+            .fixedSize(horizontal: false, vertical: true)
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
                 finishCurveDrag()
             }
