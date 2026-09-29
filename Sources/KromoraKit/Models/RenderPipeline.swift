@@ -1120,7 +1120,7 @@ enum RenderPipeline {
             let referenceShortSide = max(1, min(referenceExtent.width, referenceExtent.height))
             let radius = normalizedRadius(detail.sharpeningRadius / referenceShortSide, for: referenceExtent)
             let amount = CGFloat(detail.sharpeningAmount / 100 * (0.5 + detail.sharpeningDetail / 100))
-            let sharpened = image.applyingFilter("CIUnsharpMask", parameters: [
+            let sharpened = result.applyingFilter("CIUnsharpMask", parameters: [
                 "inputRadius": max(0.1, radius),
                 "inputIntensity": amount,
             ]).cropped(to: extent)

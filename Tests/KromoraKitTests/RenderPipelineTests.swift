@@ -167,6 +167,31 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         return mean(in: 55..<60) - mean(in: 36..<41)
     }
 
+    private func detailHighFrequencyEnergy(_ pixels: [Float], width: Int = 96, height: Int = 64) -> Double {
+        var energy = 0.0
+        var count = 0
+        for y in 1..<(height - 1) {
+            for x in 1..<(width - 1) {
+                let offset = (y * width + x) * 4
+                let right = offset + 4
+                let below = offset + width * 4
+                let centerLuma = Double(pixels[offset]) * 0.2126
+                    + Double(pixels[offset + 1]) * 0.7152
+                    + Double(pixels[offset + 2]) * 0.0722
+                let rightLuma = Double(pixels[right]) * 0.2126
+                    + Double(pixels[right + 1]) * 0.7152
+                    + Double(pixels[right + 2]) * 0.0722
+                let belowLuma = Double(pixels[below]) * 0.2126
+                    + Double(pixels[below + 1]) * 0.7152
+                    + Double(pixels[below + 2]) * 0.0722
+                energy += (rightLuma - centerLuma) * (rightLuma - centerLuma)
+                    + (belowLuma - centerLuma) * (belowLuma - centerLuma)
+                count += 2
+            }
+        }
+        return energy / Double(count)
+    }
+
     private func ciImage(from thumbnail: NSImage) throws -> CIImage {
         var proposedRect = NSRect(origin: .zero, size: thumbnail.size)
         let cgImage = try XCTUnwrap(
@@ -232,6 +257,34 @@ final class RenderPipelineTests: TempDirectoryTestCase {
             try Pixels.bytes(of: zero), try Pixels.bytes(of: neutral),
             "zero noise reduction must remain neutral"
         )
+    }
+
+    func testSharpeningIncreasesFineDetailMonotonicallyAndNeutralPreservesPixels() throws {
+        let input = noisyDetailFixture(chromaNoise: false)
+        let baseline = detailPixels(input)
+        let baselineEnergy = detailHighFrequencyEnergy(baseline)
+        var sharpenedEnergies: [Double] = []
+
+        for amount in [25.0, 50.0, 100.0] {
+            let output = RenderPipeline.applyDetailControls(
+                DetailAdjustments(sharpeningAmount: amount), to: input,
+                referenceExtent: input.extent
+            )
+            let outputPixels = detailPixels(output)
+            let outputEnergy = detailHighFrequencyEnergy(outputPixels)
+            XCTAssertNotEqual(outputPixels, baseline, "Amount \(amount) must change rendered pixels")
+            XCTAssertGreaterThan(outputEnergy, baselineEnergy * 1.05,
+                                 "Amount \(amount) should measurably increase fine detail")
+            sharpenedEnergies.append(outputEnergy)
+        }
+        XCTAssertLessThan(sharpenedEnergies[0], sharpenedEnergies[1])
+        XCTAssertLessThan(sharpenedEnergies[1], sharpenedEnergies[2])
+
+        let neutral = RenderPipeline.applyDetailControls(
+            .neutral, to: input, referenceExtent: input.extent
+        )
+        assertPixelsEqual(try Pixels.bytes(of: neutral), try Pixels.bytes(of: input),
+                          "neutral sharpening must preserve the unsharpened pixels")
     }
 
     func testRetouchSpotChangesRenderedPixelsAndNeutralRetouchIsIdentity() throws {
