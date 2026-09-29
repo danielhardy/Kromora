@@ -30,6 +30,44 @@ final class LibraryChromeLayoutTests: TempDirectoryTestCase {
         XCTAssertNotNil(window.toolbar)
     }
 
+    func testInspectorReservesItsColumnAndKeepsItsToggleAtTheToolbarEdge() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let contentViewURL = packageRoot
+            .appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift")
+        let contentView = try String(
+            contentsOf: contentViewURL,
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(
+            contentView.contains(".ignoresSafeArea(.container, edges: .trailing)"),
+            "the preview must stay inside the width left by the inspector"
+        )
+        let toolbar = try XCTUnwrap(contentView.range(of: ".toolbar {"))
+        let toolbarContents = toolbar.upperBound..<contentView.endIndex
+        let transferButton = try XCTUnwrap(
+            contentView.range(of: "transferToolbarPill", range: toolbarContents)
+        )
+        let inspectorButton = try XCTUnwrap(
+            contentView.range(
+                of: "inspectorToolbarButton",
+                range: transferButton.upperBound..<contentView.endIndex
+            )
+        )
+        XCTAssertLessThan(transferButton.lowerBound, inspectorButton.lowerBound)
+        XCTAssertTrue(
+            contentView[transferButton.upperBound..<inspectorButton.lowerBound]
+                .contains("ToolbarSpacer(.fixed)"),
+            "the inspector toggle is separated from the other toolbar controls"
+        )
+        XCTAssertTrue(
+            contentView.contains(".inspectorColumnWidth(min: 240, ideal: 280, max: 360)")
+        )
+    }
+
     func testReturningFromEditRestoresTheSameLibraryViewportWidth() async throws {
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)

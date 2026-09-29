@@ -75,6 +75,10 @@ public struct ContentView: View {
                     ToolbarItem(placement: .primaryAction) {
                         transferToolbarPill
                     }
+                    ToolbarSpacer(.fixed)
+                    ToolbarItem(placement: .primaryAction) {
+                        inspectorToolbarButton
+                    }
                 }
             }
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
@@ -215,10 +219,7 @@ public struct ContentView: View {
 
     private var mainContent: some View {
         NavigationStack {
-            // The detail column's trailing safe area is an empty inset between the photo and the
-            // inspector. The preview should meet the divider.
             detailContent
-                .ignoresSafeArea(.container, edges: .trailing)
         }
         .background(KromoraTheme.windowBackground)
         .inspector(isPresented: Binding(
@@ -394,18 +395,6 @@ public struct ContentView: View {
     private var viewToolbarPill: some View {
         GlassEffectContainer(spacing: 10) {
             HStack(spacing: 10) {
-                Button {
-                    viewModel.toggleInspector()
-                } label: {
-                    Label("Info", systemImage: "sidebar.right")
-                }
-                .accessibilityLabel("Editor sidebar")
-                .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
-                .accessibilityHint("Show or hide the editor sidebar")
-                .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
-                .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
-                .glassEffectUnion(id: "view", namespace: toolbarGlassNamespace)
-
                 Menu {
                     Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
                         if canvasState.isCropToolActive {
@@ -428,6 +417,21 @@ public struct ContentView: View {
             }
             .buttonStyle(.glass)
         }
+    }
+
+    private var inspectorToolbarButton: some View {
+        Button {
+            viewModel.toggleInspector()
+        } label: {
+            Label("Info", systemImage: "sidebar.right")
+                .labelStyle(.iconOnly)
+        }
+        .accessibilityLabel("Editor sidebar")
+        .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
+        .accessibilityHint("Show or hide the editor sidebar")
+        .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
+        .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
+        .buttonStyle(.glass)
     }
 
     private var transferToolbarPill: some View {
