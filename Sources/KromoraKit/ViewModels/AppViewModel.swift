@@ -625,6 +625,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// the transparent source marker from making a not-yet-presented canvas look like a black one.
     @Published private(set) var previewState: PreviewState = .empty
     @Published var statusMessage: String = "Open an image to get started"
+    private var pendingImportOutcome: (summary: ImportOutcomeSummary, prefix: String)?
 
     /// Non-nil when a hard failure should be surfaced as a dismissible alert.
     /// Bound to an `.alert` in ContentView; cleared when the user dismisses it.
@@ -1115,6 +1116,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 .unavailable("Auto is unavailable because the photo preview failed."))
             self.statusMessage =
                 "Could not display \(self.sourceName). Try Fit or reload the photo."
+            self.presentPendingImportOutcome()
         }
         originalPreviewSurface.onPresentationFailure = { [weak self] in
             guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
@@ -1162,6 +1164,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self.isNavigationLoading = false
             self.previewState = .failed
             self.presentError(message)
+            self.presentPendingImportOutcome()
         }
 
         // KRMA-521: High-frequency children (collection/items, import, export, canvas) are
@@ -1224,6 +1227,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             } else {
                 self.statusMessage = "Could not render \(self.sourceName)"
             }
+            self.presentPendingImportOutcome()
         }
 
         wireCoordinators()
@@ -1622,11 +1626,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func presentImportOutcome(_ summary: ImportOutcomeSummary, prefix: String) {
-        // Opening an imported photo immediately enters the source-loading state. The operation's
-        // terminal summary can arrive after that transition, but it must not replace the more
-        // useful loading status for the photo now on screen.
-        if statusMessage.hasPrefix("Loading ") { return }
+        // Opening an imported photo immediately enters the source-loading state. Keep terminal
+        // import outcomes until its first preview settles so partial failures remain visible.
+        guard previewState != .loading, !statusMessage.hasPrefix("Loading ") else {
+            pendingImportOutcome = (summary, prefix)
+            return
+        }
         statusMessage = summary.status(prefix: prefix)
+    }
+
+    private func presentPendingImportOutcome() {
+        guard previewState != .loading,
+            !statusMessage.hasPrefix("Loading "),
+            let pendingImportOutcome
+        else { return }
+        self.pendingImportOutcome = nil
+        statusMessage = pendingImportOutcome.summary.status(prefix: pendingImportOutcome.prefix)
     }
 
     private func failOpenImage(_ url: URL, reason: String) {
@@ -4464,10 +4479,12 @@ extension AppViewModel: PreviewPublicationDestination {
     func publishPreviewReady() {
         isNavigationLoading = false
         previewState = .ready
+        presentPendingImportOutcome()
     }
     func publishPreviewFailure() {
         isNavigationLoading = false
         previewState = .failed
+        presentPendingImportOutcome()
     }
     func publishAutoAdjustmentReady() {
         publishAutoAdjustmentState(.ready)
