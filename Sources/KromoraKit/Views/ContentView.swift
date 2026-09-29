@@ -360,7 +360,7 @@ public struct ContentView: View {
                     Label("Crop", systemImage: "crop")
                 }
                 .help("Crop the photo with a freeform or preset frame")
-                .disabled(viewModel.sourceImage == nil)
+                .disabled(!viewModel.toolbarPhotoActionsAvailable)
                 .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
 
                 AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
@@ -369,13 +369,17 @@ public struct ContentView: View {
                 .accessibilityLabel("Auto photo adjustment")
                 .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
                 .help(viewModel.autoAdjustmentHelp)
-                .disabled(!viewModel.canRunAutoAdjustment)
+                .disabled(
+                    !viewModel.toolbarPhotoActionsAvailable
+                        || (!viewModel.canRunAutoAdjustment && !viewModel.isToolbarPhotoTransitioning)
+                        || viewModel.isAutoAdjustmentInProgress
+                )
                 .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
 
                 CanvasToolbarControls(
                     viewModel: viewModel,
                     canvasState: viewModel.canvasState,
-                    hasImage: viewModel.sourceImage != nil
+                    hasImage: viewModel.toolbarPhotoActionsAvailable
                 )
                 .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
 
@@ -391,7 +395,7 @@ public struct ContentView: View {
                 .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
                 .accessibilityHint("Switch comparison view (V)")
                 .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
-                .disabled(!viewModel.isComparisonPresentationAvailable)
+                .disabled(!viewModel.toolbarPhotoActionsAvailable)
                 .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
             }
             .labelStyle(.iconOnly)
@@ -422,7 +426,7 @@ public struct ContentView: View {
                 }
                 .toolbarMenuTreatment()
                 .help("Reset the current adjustment section or the whole photo")
-                .disabled(viewModel.sourceImage == nil)
+                .disabled(!viewModel.toolbarPhotoActionsAvailable)
                 .glassEffectUnion(id: "view", namespace: toolbarGlassNamespace)
             }
             .buttonStyle(.glass)
@@ -501,7 +505,7 @@ public struct ContentView: View {
                 } label: {
                     Label("Export", systemImage: "square.and.arrow.up")
                 }
-                .disabled(viewModel.sourceImage == nil)
+                .disabled(!viewModel.toolbarPhotoActionsAvailable)
                 // ⌘S remains bound only to the File ▸ Export menu item.
                 .help("Export the graded image (⌘S)")
                 .glassEffectUnion(id: "transfer", namespace: toolbarGlassNamespace)
@@ -514,7 +518,7 @@ public struct ContentView: View {
         GlassEffectContainer(spacing: 10) {
             CropToolbarControls(
                 viewModel: viewModel,
-                hasImage: viewModel.sourceImage != nil,
+                hasImage: viewModel.toolbarPhotoActionsAvailable,
                 glassNamespace: toolbarGlassNamespace
             )
             .buttonStyle(.glass)

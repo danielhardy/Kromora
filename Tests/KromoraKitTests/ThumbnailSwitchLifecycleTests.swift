@@ -400,6 +400,55 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         XCTAssertTrue(requests.last?.source?.backing == .url(second))
     }
 
+    func testToolbarPhotoAvailabilityStaysSettledDuringSlowPhotoNavigation() async throws {
+        let first = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "toolbar-first.png", in: tempDirectory
+        )
+        let second = try Fixtures.writeClarityPNG(
+            width: 16, height: 12, named: "toolbar-second.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
+        let viewModel = makeAppViewModel(engine: engine)
+        try await loadCollection(viewModel, first: first, second: second)
+
+        XCTAssertFalse(viewModel.toolbarPhotoActionsAvailable)
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the first toolbar photo") {
+            viewModel.previewState == .ready && viewModel.toolbarPhotoActionsAvailable
+        }
+
+        await engine.gatePreviews()
+        viewModel.selectCollectionImage(at: 1)
+        XCTAssertTrue(viewModel.isToolbarPhotoTransitioning)
+        XCTAssertTrue(viewModel.toolbarPhotoActionsAvailable)
+        XCTAssertNil(viewModel.sourceImage, "the previous source is fenced during preparation")
+        XCTAssertFalse(viewModel.canRunAutoAdjustment)
+        _ = try await TestSynchronization.nextEvent(from: reader, "the second photo render") {
+            if case .previewRequested(let request) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: {
+            "preview requests=\(await engine.previewRequests.count)"
+        }
+
+        XCTAssertTrue(viewModel.isToolbarPhotoTransitioning)
+        XCTAssertTrue(viewModel.toolbarPhotoActionsAvailable)
+        XCTAssertNotNil(viewModel.sourceImage, "preparation installs only the availability marker")
+        XCTAssertEqual(viewModel.previewState, .loading)
+        XCTAssertFalse(viewModel.canRunAutoAdjustment)
+        viewModel.runAutoAdjustment()
+        XCTAssertFalse(viewModel.isAutoAdjustmentInProgress, "Auto must reject a loading preview")
+
+        await engine.releasePreviews()
+        try await waitUntil("the settled second toolbar photo") {
+            viewModel.previewState == .ready && viewModel.toolbarPhotoActionsAvailable
+        }
+        XCTAssertFalse(viewModel.isToolbarPhotoTransitioning)
+        XCTAssertTrue(viewModel.canRunAutoAdjustment)
+    }
+
     func testFilmstripSelectionKeepsOriginalComparisonInSync() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "comparison-first.png", in: tempDirectory
