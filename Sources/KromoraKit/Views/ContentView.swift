@@ -285,8 +285,7 @@ public struct ContentView: View {
                                 Divider()
                                 FilmstripView(
                                     collection: collection,
-                                    settings: viewModel.settings,
-                                    inspectorIsPresented: inspectorState.isPresented
+                                    settings: viewModel.settings
                                 ) { index, modifiers in
                                     viewModel.selectCollectionImage(at: index, modifiers: modifiers)
                                 }
