@@ -72,6 +72,47 @@ final class EditPersistenceIntegrationTests: TempDirectoryTestCase {
         }
     }
 
+    func testNoiseInspectorEditsSurviveAPackageRelaunch() async throws {
+        let imageURL = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "noise-relaunch.png", in: tempDirectory
+        )
+        let packageURL = tempDirectory.appendingPathComponent("NoiseRelaunch.kromoralibrary")
+        let firstSession = try PortableLibrarySession(at: packageURL)
+        _ = try firstSession.importURLs([imageURL])
+
+        let firstLaunch = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            portablePackageURL: packageURL,
+            portableLibrarySession: firstSession
+        )
+        firstLaunch.collection.loadPortableAssets(try firstSession.materializedAssets())
+        await firstLaunch.collection.scanCompletion()
+        firstLaunch.collection.setSelection(at: 0)
+        firstLaunch.openActiveCollectionImage()
+        try await waitUntil("the first image") { firstLaunch.sourceImage != nil }
+        firstLaunch.detailBinding(for: .luminanceNoise).wrappedValue = 70
+        firstLaunch.detailBinding(for: .colorNoise).wrappedValue = 35
+        let flushResult = await firstLaunch.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
+        await firstLaunch.shutdown()
+
+        let secondSession = try PortableLibrarySession(at: packageURL)
+        let secondLaunch = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            portablePackageURL: packageURL,
+            portableLibrarySession: secondSession
+        )
+        secondLaunch.collection.loadPortableAssets(try secondSession.materializedAssets())
+        await secondLaunch.collection.scanCompletion()
+        secondLaunch.collection.setSelection(at: 0)
+        secondLaunch.openActiveCollectionImage()
+        try await waitUntil("the restored Noise Reduction edit") {
+            secondLaunch.sourceName == imageURL.lastPathComponent
+                && secondLaunch.document.effects.detail.luminanceNoise == 70
+                && secondLaunch.document.effects.detail.colorNoise == 35
+        }
+    }
+
     func testImmediateEditCanBeFlushedBeforeRelaunch() async throws {
         let imageURL = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "immediate.png", in: tempDirectory
