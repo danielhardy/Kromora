@@ -98,8 +98,6 @@ struct InfoInspectorView: View {
         }
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 360, alignment: .topLeading)
         // Leave the pane transparent so the native inspector material shows around the chart.
-        // The plot extends into the toolbar band. The window title bar is transparent there so
-        // AppKit does not composite a second layer over the histogram.
         .animation(inspectorAnimation, value: canvasState.isCropToolActive)
     }
 

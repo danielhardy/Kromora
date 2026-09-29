@@ -9,6 +9,27 @@ import XCTest
 /// must not keep evaluating inside that transaction.
 @MainActor
 final class LibraryChromeLayoutTests: TempDirectoryTestCase {
+    func testEditorKeepsContentBelowTheNativeWindowToolbar() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let hosting = NSHostingView(rootView: ContentView(viewModel: viewModel))
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1100, height: 720),
+            styleMask: [.titled, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hosting
+        hosting.frame = window.contentView?.bounds ?? .zero
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        Self.pumpMainRunLoop()
+
+        XCTAssertFalse(window.styleMask.contains(.fullSizeContentView))
+        XCTAssertFalse(window.titlebarAppearsTransparent)
+        XCTAssertNotEqual(window.titlebarSeparatorStyle, .none)
+        XCTAssertNotNil(window.toolbar)
+    }
+
     func testReturningFromEditRestoresTheSameLibraryViewportWidth() async throws {
         let sourceFolder = tempDirectory.appendingPathComponent("source", isDirectory: true)
         try FileManager.default.createDirectory(at: sourceFolder, withIntermediateDirectories: true)

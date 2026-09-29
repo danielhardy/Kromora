@@ -1,6 +1,5 @@
 import SwiftUI
 import PhotosUI
-import AppKit
 
 /// Main window layout: sidebar + preview + toolbar.
 ///
@@ -80,7 +79,6 @@ public struct ContentView: View {
             }
             .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
             .toolbarBackground(.regularMaterial, for: .windowToolbar)
-            .background(TitlebarSeparatorSuppression())
             .photosPicker(
                 isPresented: $viewModel.isPhotosPickerPresented,
                 selection: $photosSelection,
@@ -233,8 +231,6 @@ public struct ContentView: View {
             }
         )) {
             InfoInspectorView(viewModel: viewModel, inspectorState: inspectorState)
-                // The plot occupies the band beside the toolbar controls.
-                .ignoresSafeArea(.container, edges: .top)
                 .inspectorColumnWidth(min: 240, ideal: 280, max: 360)
         }
     }
@@ -258,6 +254,10 @@ public struct ContentView: View {
                 HStack(spacing: 0) {
                     if !canvasState.isCropToolActive,
                         viewModel.isSourceBrowserPresented && !collection.items.isEmpty {
+                        // This is a transient image browser beside the active editor, sharing
+                        // selection with the filmstrip; it is not a navigation hierarchy for the
+                        // Grid/Edit workspaces. Keep its independent toggle and crop-mode behavior.
+                        // The window toolbar's native safe area docks it below the bar.
                         HStack(spacing: 0) {
                             SourceBrowserView(viewModel: viewModel)
                                 .frame(width: 240)
@@ -606,87 +606,3 @@ private struct CropToolbarControls: View {
 
 // The File menu, its notification names, and `MenuCommandReceivers` live in
 // MenuCommands.swift.
-
-/// The histogram draws in the title-bar band. AppKit otherwise composites that band as its own
-/// layer, and dragging the window opens a one-pixel gap through the plot. A transparent title
-/// bar leaves the plot as the single layer.
-private struct TitlebarSeparatorSuppression: NSViewRepresentable {
-    func makeNSView(context: Context) -> TitlebarSeparatorSuppressionView {
-        TitlebarSeparatorSuppressionView()
-    }
-
-    func updateNSView(_ nsView: TitlebarSeparatorSuppressionView, context: Context) {
-        nsView.suppressSeparator()
-    }
-
-    static func dismantleNSView(_ nsView: TitlebarSeparatorSuppressionView, coordinator: ()) {
-        nsView.detach()
-    }
-}
-
-private final class TitlebarSeparatorSuppressionView: NSView {
-    private weak var observedWindow: NSWindow?
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        if let observedWindow {
-            NotificationCenter.default.removeObserver(
-                self, name: NSWindow.didMoveNotification, object: observedWindow
-            )
-            NotificationCenter.default.removeObserver(
-                self, name: NSWindow.didBecomeKeyNotification, object: observedWindow
-            )
-        }
-        observedWindow = window
-        if let window {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(windowChanged(_:)),
-                name: NSWindow.didMoveNotification,
-                object: window
-            )
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(windowChanged(_:)),
-                name: NSWindow.didBecomeKeyNotification,
-                object: window
-            )
-        }
-        suppressSeparator()
-    }
-
-    override func layout() {
-        super.layout()
-        suppressSeparator()
-    }
-
-    override func viewWillDraw() {
-        super.viewWillDraw()
-        suppressSeparator()
-    }
-
-    func detach() {
-        NotificationCenter.default.removeObserver(self)
-        observedWindow = nil
-    }
-
-    func suppressSeparator() {
-        guard let window else { return }
-        window.styleMask.insert(.fullSizeContentView)
-        window.titlebarAppearsTransparent = true
-        window.titlebarSeparatorStyle = .none
-        window.isOpaque = true
-        // A clear window background is what shows through the drag gap as a black line.
-        if window.backgroundColor == nil || window.backgroundColor?.alphaComponent == 0 {
-            window.backgroundColor = .windowBackgroundColor
-        }
-    }
-
-    @objc private func windowChanged(_ notification: Notification) {
-        suppressSeparator()
-    }
-
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-}
