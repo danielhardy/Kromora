@@ -5,6 +5,7 @@ import AppKit
 struct FilmstripView: View {
     @Bindable var collection: ImageCollection
     @ObservedObject var settings: KromoraSettings
+    let inspectorIsPresented: Bool
     let onSelect: (Int, LibrarySelectionModel.Modifiers) -> Void
 
     var body: some View {
@@ -83,6 +84,12 @@ struct FilmstripView: View {
                     }
                 }
                 .padding(.horizontal, 12)
+                // The native inspector can cover the trailing part of the filmstrip's scroll
+                // viewport. Keep enough scrollable tail to bring the final thumbnail clear of it.
+                .padding(
+                    .trailing,
+                    inspectorIsPresented ? FilmstripLayout.inspectorTrailingInset : 0
+                )
                 .padding(.vertical, FilmstripLayout.stripVerticalPadding)
             }
             .background(KromoraTheme.secondaryChrome)
@@ -101,6 +108,7 @@ struct FilmstripView: View {
 /// caption so status badges do not reserve a second row below every thumbnail.
 enum FilmstripLayout {
     static let thumbnailSize: CGFloat = 96
+    static let inspectorTrailingInset: CGFloat = 280
     static let stripVerticalPadding: CGFloat = 3
     static let captionSpacing: CGFloat = 3
     static let captionHeight: CGFloat = 12
