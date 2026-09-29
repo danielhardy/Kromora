@@ -205,6 +205,41 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(Notification.Name.toggleInspector.rawValue, "Kromora.toggleInspector")
     }
 
+    func testCropInspectorDoesNotAdvertiseUnavailableAutoAction() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        let cropInspector = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/CropInspectorView.swift"),
+            encoding: .utf8
+        )
+        let canvasWorkflow = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/ViewModels/CanvasWorkflowCoordinator.swift"),
+            encoding: .utf8
+        )
+        let appViewModel = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/ViewModels/AppViewModel.swift"),
+            encoding: .utf8
+        )
+        let infoInspector = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/InfoInspectorView.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(cropInspector.contains("onAuto"))
+        XCTAssertFalse(cropInspector.contains("Label(\"Auto\""))
+        XCTAssertFalse(cropInspector.contains("Suggest a horizon straighten"))
+        XCTAssertFalse(canvasWorkflow.contains("runCropAuto"))
+        XCTAssertFalse(canvasWorkflow.contains("Auto crop:"))
+        XCTAssertFalse(appViewModel.contains("runCropAuto"))
+        XCTAssertFalse(infoInspector.contains("runCropAuto"))
+        XCTAssertFalse(infoInspector.contains("onAuto:"))
+        XCTAssertTrue(cropInspector.contains("Button(\"Cancel\", action: onCancel)"))
+        XCTAssertTrue(cropInspector.contains("Button(\"Save\", action: onDone)"))
+        XCTAssertTrue(cropInspector.contains("ResettableAdjustmentLabel(title: \"Straighten\""))
+    }
+
     @MainActor
     func testAutoToolbarButtonKeepsItsFittingSizeAcrossProgressState() {
         let idle = NSHostingView(rootView: AutoToolbarButton(isInProgress: false, action: {}))
