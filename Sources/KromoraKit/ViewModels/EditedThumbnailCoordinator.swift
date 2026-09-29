@@ -24,6 +24,7 @@ protocol EditedThumbnailDestination: AnyObject {
     func editedThumbnailDocument(for assetID: PhotoAssetID) -> EditDocument?
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT?
+    func markEditedThumbnailStale(for assetID: PhotoAssetID)
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String)
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
@@ -67,12 +68,14 @@ final class EditedThumbnailCoordinator {
 
     func clearPendingRequest() { pendingEditedThumbnailAssetID = nil }
 
-    /// Invalidate an edited-thumbnail operation without removing a bitmap that has already been
-    /// published for the item. Cancellation is cooperative — a renderer may still be returning
-    /// from a framework call — so the generation bump is the durable fence for that late result.
+    /// Invalidate an edited-thumbnail operation while keeping its current bitmap visible. The
+    /// revision marker is cleared so demand can replace stale pixels. Cancellation is cooperative
+    /// — a renderer may still be returning from a framework call — so the generation bump is the
+    /// durable fence for that late result.
     func invalidateWork(for assetID: PhotoAssetID?) {
         guard let assetID else { return }
         editedThumbnailGenerations[assetID] = (editedThumbnailGenerations[assetID] ?? 0) &+ 1
+        destination?.markEditedThumbnailStale(for: assetID)
         editedThumbnailDebounceTasks[assetID]?.cancel()
         editedThumbnailDebounceTasks[assetID] = nil
         workScheduler.cancel(

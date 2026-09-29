@@ -787,6 +787,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         editorDocument.revision(for: assetID)
     }
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
+    func markEditedThumbnailStale(for assetID: PhotoAssetID) {
+        editedThumbnailItem(for: assetID)?.markEditedThumbnailStale()
+    }
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         collection.applyEditedThumbnail(image, for: assetID, revision: revision)
     }
@@ -3246,6 +3249,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         refreshLUTResolutionStatus()
         saveActiveDocument()
         documentRevision &+= 1
+        // Fence any thumbnail already admitted for the active photo immediately. The trailing
+        // replacement request is intentionally debounced, but an older renderer may finish during
+        // that quiet period and must not publish its captured document.
+        invalidateEditedThumbnailWork(for: activeAssetID)
         // Look edits and RAW Temperature/Tint leave the baseline unchanged, so an in-flight
         // baseline remains useful. Other RAW develop edits change the explicit before-image and
         // must invalidate that work; it will be queued again after the new visible result publishes.

@@ -142,6 +142,12 @@ final class ImageCollectionPresentationModel {
             self.thumbnail = thumbnail ?? originalThumbnail
         }
 
+        /// Keep the displayed raster while marking its edit revision as stale. A replacement can
+        /// then be admitted without treating the retained pixels as a match for the new document.
+        func markEditedThumbnailStale() {
+            editedThumbnailRevision = nil
+        }
+
         @discardableResult
         func setPresentedCrop(_ crop: CropAdjustments, rotation: ImageRotation) -> Bool {
             guard presentedCrop != crop || presentedRotation != rotation else { return false }

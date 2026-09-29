@@ -32,6 +32,17 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         XCTAssertTrue(fixture.destination.appliedRevisions.isEmpty)
     }
 
+    func testInvalidationKeepsPublishedBitmapButClearsItsRevision() {
+        let fixture = makeFixture(document: EditDocument(adjustments: [.exposure(ev: 0.2)]))
+        let thumbnail = NSImage(size: NSSize(width: 3, height: 2))
+        fixture.item.applyEditedThumbnail(thumbnail, revision: "previous-document")
+
+        fixture.coordinator.invalidateWork(for: fixture.assetID)
+
+        XCTAssertTrue(fixture.item.thumbnail === thumbnail)
+        XCTAssertNil(fixture.item.editedThumbnailRevision)
+    }
+
     func testMatchingEditedThumbnailStaysVisibleDuringRepeatedDemand() async throws {
         let document = EditDocument(adjustments: [.exposure(ev: 0.2)])
         let fixture = makeFixture(document: document, rendererWaits: true)
@@ -458,6 +469,9 @@ private final class FakeDestination: EditedThumbnailDestination {
     }
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64 { 1 }
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { lut }
+    func markEditedThumbnailStale(for assetID: PhotoAssetID) {
+        item.markEditedThumbnailStale()
+    }
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         appliedWasNil = image == nil
         appliedRevisions.append(revision)
