@@ -19,6 +19,7 @@ public struct ContentView: View {
     @State private var isWelcomePresented = false
     @State private var isTourPresented = false
     @State private var isShortcutReferencePresented = false
+    @Namespace private var toolbarGlassNamespace
 
     /// The window toolbar has a deliberately small crop-mode surface. Keep this as a named seam
     /// so the crop branch cannot accidentally grow the normal Edit chrome back into the workspace.
@@ -53,30 +54,32 @@ public struct ContentView: View {
             .navigationTitle("")
             .tint(KromoraTheme.primaryAccent)
             .toolbar {
-                // Only Library and Edit sit on the leading edge. Everything else stays
-                // in the trailing group.
-                if !canvasState.isCropToolActive {
-                    if #available(macOS 26.0, *) {
-                        ToolbarItem(placement: .navigation) {
-                            workspaceModePicker
-                        }
-                        ToolbarSpacer(.flexible)
-                    } else {
-                        ToolbarItem(placement: .navigation) {
-                            workspaceModePicker
-                        }
+                if Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) == .edit {
+                    ToolbarItem(placement: .navigation) {
+                        workspaceModePicker
+                    }
+                    ToolbarSpacer(.fixed)
+                    ToolbarItem(placement: .navigation) {
+                        editToolbarPill
                     }
                 }
-                if #available(macOS 26.0, *) {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        toolbarContent
+                ToolbarSpacer(.flexible)
+                if Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) == .crop {
+                    ToolbarItem(placement: .primaryAction) {
+                        cropToolbarPill
                     }
                 } else {
-                    ToolbarItemGroup(placement: .primaryAction) {
-                        toolbarContent
+                    ToolbarItem(placement: .primaryAction) {
+                        viewToolbarPill
+                    }
+                    ToolbarSpacer(.fixed)
+                    ToolbarItem(placement: .primaryAction) {
+                        transferToolbarPill
                     }
                 }
             }
+            .toolbarBackgroundVisibility(.visible, for: .windowToolbar)
+            .toolbarBackground(.regularMaterial, for: .windowToolbar)
             .background(TitlebarSeparatorSuppression())
             .photosPicker(
                 isPresented: $viewModel.isPhotosPickerPresented,
@@ -339,154 +342,169 @@ public struct ContentView: View {
         .help("Library (G) or Edit (E)")
     }
 
-    private var toolbarContent: some View {
-        Group {
-            switch Self.toolbarMode(isCropToolActive: canvasState.isCropToolActive) {
-            case .crop:
-                CropToolbarControls(
+    private var editToolbarPill: some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    viewModel.toggleCropTool()
+                } label: {
+                    Label("Crop", systemImage: "crop")
+                }
+                .help("Crop the photo with a freeform or preset frame")
+                .disabled(viewModel.sourceImage == nil)
+                .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
+
+                AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
+                    viewModel.runAutoAdjustment()
+                }
+                .accessibilityLabel("Auto photo adjustment")
+                .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
+                .help(viewModel.autoAdjustmentHelp)
+                .disabled(!viewModel.canRunAutoAdjustment)
+                .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
+
+                CanvasToolbarControls(
                     viewModel: viewModel,
+                    canvasState: viewModel.canvasState,
                     hasImage: viewModel.sourceImage != nil
                 )
-                .transition(.opacity)
-            case .edit:
-                Group {
-                    Button {
-                        viewModel.toggleCropTool()
-                    } label: {
-                        Label("Crop", systemImage: "crop")
-                    }
-                    .help("Crop the photo with a freeform or preset frame")
-                    .disabled(viewModel.sourceImage == nil)
+                .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
 
-                    AutoToolbarButton(isInProgress: viewModel.isAutoAdjustmentInProgress) {
-                        viewModel.runAutoAdjustment()
-                    }
-                    .accessibilityLabel("Auto photo adjustment")
-                    .accessibilityHint("Analyze the source and replace global Light and Color controls; other edits remain unchanged")
-                    .help(viewModel.autoAdjustmentHelp)
-                    .disabled(!viewModel.canRunAutoAdjustment)
-
-                    CanvasToolbarControls(
-                        viewModel: viewModel,
-                        canvasState: viewModel.canvasState,
-                        hasImage: viewModel.sourceImage != nil
+                Button {
+                    viewModel.toggleSideBySide()
+                } label: {
+                    Label(
+                        viewModel.isSideBySide ? "Single View" : "Side by Side",
+                        systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
                     )
-
-                    // Comparison stays beside zoom. The model still guards the action until a
-                    // source is loaded; an untouched source is valid split-view input.
-                    Button {
-                        viewModel.toggleSideBySide()
-                    } label: {
-                        Label(
-                            viewModel.isSideBySide ? "Single View" : "Side by Side",
-                            systemImage: viewModel.isSideBySide ? "rectangle" : "rectangle.split.2x1"
-                        )
-                    }
-                    .accessibilityLabel("Comparison view")
-                    .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
-                    .accessibilityHint("Switch comparison view (V)")
-                    .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
-                    .disabled(!viewModel.isComparisonPresentationAvailable)
-
-                    // Keep the editor controls on the trailing side of the toolbar. Source-folder browsing
-                    // remains available from Import, while this button reveals the editor's inspector.
-                    Button {
-                        viewModel.toggleInspector()
-                    } label: {
-                        Label("Info", systemImage: "sidebar.right")
-                    }
-                    .accessibilityLabel("Editor sidebar")
-                    .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
-                    .accessibilityHint("Show or hide the editor sidebar")
-                    .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
-                    .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
-
-                    // Keep reset scopes together and visible: the panel reset affects only the current stage,
-                    // while Reset Photo clears every edit on the active source. The File menu retains the
-                    // keyboard shortcut for the latter.
-                    Menu {
-                        Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
-                            if canvasState.isCropToolActive {
-                                viewModel.resetCrop()
-                            } else {
-                                viewModel.resetInspectorSection()
-                            }
-                        }
-                        .disabled(!canvasState.isCropToolActive && inspectorState.tab == .info)
-
-                        Divider()
-
-                        Button("Reset Photo") {
-                            viewModel.resetPhoto()
-                        }
-                    } label: {
-                        Label("Reset", systemImage: "arrow.counterclockwise")
-                    }
-                    .help("Reset the current adjustment section or the whole photo")
-                    .disabled(viewModel.sourceImage == nil)
-
-                    // Import menu
-                    Menu {
-                        Button("Open Image...") {
-                            viewModel.openImageDialog()
-                        }
-                        .disabled(!viewModel.canImportIntoPortableLibrary)
-                        Divider()
-                        Button("Import from Photos...") {
-                            viewModel.importFromPhotos()
-                        }
-                        .disabled(!viewModel.canImportIntoPortableLibrary)
-                        Button("Open Source Folder...") {
-                            viewModel.chooseSourceFolder()
-                        }
-                        .disabled(!viewModel.canImportIntoPortableLibrary)
-                        Menu("Removable Media") {
-                            if viewModel.removableMediaVolumes.isEmpty {
-                                Text("No supported media mounted")
-                            } else {
-                                ForEach(viewModel.removableMediaVolumes) { volume in
-                                    Button(volume.menuLabel) {
-                                        viewModel.openRemovableMedia(volume)
-                                    }
-                                    .disabled(!viewModel.canImportIntoPortableLibrary)
-                                }
-                            }
-                            Divider()
-                            Button("Refresh Removable Media") {
-                                viewModel.refreshRemovableMedia()
-                            }
-                        }
-                        .disabled(!viewModel.canImportIntoPortableLibrary)
-                        if !collection.items.isEmpty {
-                            Button("Refresh Source Folder") {
-                                viewModel.refreshSource()
-                            }
-                        }
-                        if photosImportCoordinator.progress != nil {
-                            Divider()
-                            Button("Cancel Photos Import") {
-                                cancelPhotosImport()
-                            }
-                        }
-                    } label: {
-                        Label("Import", systemImage: "photo.on.rectangle")
-                    }
-
-                    // Export
-                    Button {
-                        viewModel.shareDialog()
-                    } label: {
-                        Label("Export", systemImage: "square.and.arrow.up")
-                    }
-                    .disabled(viewModel.sourceImage == nil)
-                    // ⌘S is bound once, on the File ▸ Export menu item (KromoraApp.swift).
-                    // Binding it here too gave the window two competing handlers.
-                    .help("Export the graded image (⌘S)")
-
                 }
-                .transition(.opacity)
+                .accessibilityLabel("Comparison view")
+                .accessibilityValue(viewModel.isSideBySide ? "Side by side" : "Single photo")
+                .accessibilityHint("Switch comparison view (V)")
+                .help("Switch between single-photo and side-by-side comparison (V). Hold ⌘\\ or Space to show original in single view.")
+                .disabled(!viewModel.isComparisonPresentationAvailable)
+                .glassEffectUnion(id: "edit", namespace: toolbarGlassNamespace)
             }
+            .buttonStyle(.glass)
         }
+        .transition(.opacity)
+        .animation(chromeAnimation, value: canvasState.isCropToolActive)
+    }
+
+    private var viewToolbarPill: some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                Button {
+                    viewModel.toggleInspector()
+                } label: {
+                    Label("Info", systemImage: "sidebar.right")
+                }
+                .accessibilityLabel("Editor sidebar")
+                .accessibilityValue(inspectorState.isPresented ? "Shown" : "Hidden")
+                .accessibilityHint("Show or hide the editor sidebar")
+                .help(inspectorState.isPresented ? "Hide the editor sidebar" : "Show the editor sidebar")
+                .disabled(viewModel.sourceImage == nil || canvasState.isCropToolActive)
+                .glassEffectUnion(id: "view", namespace: toolbarGlassNamespace)
+
+                Menu {
+                    Button(canvasState.isCropToolActive ? "Reset Crop" : "Reset " + inspectorState.tab.title) {
+                        if canvasState.isCropToolActive {
+                            viewModel.resetCrop()
+                        } else {
+                            viewModel.resetInspectorSection()
+                        }
+                    }
+                    .disabled(!canvasState.isCropToolActive && inspectorState.tab == .info)
+                    Divider()
+                    Button("Reset Photo") {
+                        viewModel.resetPhoto()
+                    }
+                } label: {
+                    Label("Reset", systemImage: "arrow.counterclockwise")
+                }
+                .help("Reset the current adjustment section or the whole photo")
+                .disabled(viewModel.sourceImage == nil)
+                .glassEffectUnion(id: "view", namespace: toolbarGlassNamespace)
+            }
+            .buttonStyle(.glass)
+        }
+    }
+
+    private var transferToolbarPill: some View {
+        GlassEffectContainer(spacing: 10) {
+            HStack(spacing: 10) {
+                Menu {
+                    Button("Open Image...") {
+                        viewModel.openImageDialog()
+                    }
+                    .disabled(!viewModel.canImportIntoPortableLibrary)
+                    Divider()
+                    Button("Import from Photos...") {
+                        viewModel.importFromPhotos()
+                    }
+                    .disabled(!viewModel.canImportIntoPortableLibrary)
+                    Button("Open Source Folder...") {
+                        viewModel.chooseSourceFolder()
+                    }
+                    .disabled(!viewModel.canImportIntoPortableLibrary)
+                    Menu("Removable Media") {
+                        if viewModel.removableMediaVolumes.isEmpty {
+                            Text("No supported media mounted")
+                        } else {
+                            ForEach(viewModel.removableMediaVolumes) { volume in
+                                Button(volume.menuLabel) {
+                                    viewModel.openRemovableMedia(volume)
+                                }
+                                .disabled(!viewModel.canImportIntoPortableLibrary)
+                            }
+                        }
+                        Divider()
+                        Button("Refresh Removable Media") {
+                            viewModel.refreshRemovableMedia()
+                        }
+                    }
+                    .disabled(!viewModel.canImportIntoPortableLibrary)
+                    if !collection.items.isEmpty {
+                        Button("Refresh Source Folder") {
+                            viewModel.refreshSource()
+                        }
+                    }
+                    if photosImportCoordinator.progress != nil {
+                        Divider()
+                        Button("Cancel Photos Import") {
+                            cancelPhotosImport()
+                        }
+                    }
+                } label: {
+                    Label("Import", systemImage: "photo.on.rectangle")
+                }
+                .help("Import images from a file, Photos, folder, or removable media")
+                .glassEffectUnion(id: "transfer", namespace: toolbarGlassNamespace)
+
+                Button {
+                    viewModel.shareDialog()
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+                .disabled(viewModel.sourceImage == nil)
+                // ⌘S remains bound only to the File ▸ Export menu item.
+                .help("Export the graded image (⌘S)")
+                .glassEffectUnion(id: "transfer", namespace: toolbarGlassNamespace)
+            }
+            .buttonStyle(.glass)
+        }
+    }
+
+    private var cropToolbarPill: some View {
+        GlassEffectContainer(spacing: 10) {
+            CropToolbarControls(
+                viewModel: viewModel,
+                hasImage: viewModel.sourceImage != nil,
+                glassNamespace: toolbarGlassNamespace
+            )
+            .buttonStyle(.glass)
+        }
+        .transition(.opacity)
         .animation(chromeAnimation, value: canvasState.isCropToolActive)
     }
 }
@@ -550,6 +568,7 @@ private struct CanvasToolbarControls: View {
 private struct CropToolbarControls: View {
     let viewModel: AppViewModel
     let hasImage: Bool
+    let glassNamespace: Namespace.ID
 
     var body: some View {
         Button {
@@ -557,10 +576,11 @@ private struct CropToolbarControls: View {
         } label: {
             Label("Save", systemImage: "checkmark")
         }
-        .buttonStyle(.borderedProminent)
+        .buttonStyle(.glassProminent)
         .accessibilityLabel("Save")
         .help("Apply the crop and return to Edit (Return)")
         .disabled(!hasImage)
+        .glassEffectUnion(id: "crop", namespace: glassNamespace)
 
         Button {
             viewModel.cancelCrop()
@@ -570,6 +590,7 @@ private struct CropToolbarControls: View {
         .accessibilityLabel("Cancel")
         .help("Cancel the current crop (Escape)")
         .disabled(!hasImage)
+        .glassEffectUnion(id: "crop", namespace: glassNamespace)
 
         Button {
             viewModel.undo()
@@ -579,6 +600,7 @@ private struct CropToolbarControls: View {
         .accessibilityLabel("Undo")
         .help("Undo the last committed edit")
         .disabled(!hasImage || !viewModel.canUndo)
+        .glassEffectUnion(id: "crop", namespace: glassNamespace)
     }
 }
 

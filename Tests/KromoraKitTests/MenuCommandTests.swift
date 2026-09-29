@@ -106,16 +106,16 @@ final class MenuCommandTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift"),
             encoding: .utf8
         )
-        let importControl = try XCTUnwrap(
-            contentView.components(separatedBy: "Label(\"Import\", systemImage: \"photo.on.rectangle\")")
-                .dropFirst().first
+        let transferPill = try XCTUnwrap(
+            contentView.components(separatedBy: "private var transferToolbarPill: some View {")
+                .dropFirst().first?
+                .components(separatedBy: "private var cropToolbarPill: some View {").first
         )
-        let exportControl = try XCTUnwrap(
-            importControl.components(separatedBy: "// Export").first
-        )
-
-        XCTAssertFalse(exportControl.contains("Divider()"),
-                       "Import and Export must not be separated by a standalone toolbar divider")
+        XCTAssertTrue(transferPill.contains("GlassEffectContainer"))
+        XCTAssertTrue(transferPill.contains("glassEffectUnion(id: \"transfer\""))
+        XCTAssertFalse(transferPill.components(separatedBy: "Label(\"Import\"").dropFirst().first?
+            .components(separatedBy: "Label(\"Export\"").first?.contains("Divider()") ?? true,
+            "Import and Export remain adjacent members of one glass pill")
         XCTAssertTrue(contentView.contains("viewModel.importFromPhotos()"))
         XCTAssertTrue(contentView.contains("viewModel.shareDialog()"))
         XCTAssertTrue(contentView.contains("Label(\"Import\", systemImage: \"photo.on.rectangle\")"))
@@ -135,39 +135,24 @@ final class MenuCommandTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ContentView.swift"),
             encoding: .utf8
         )
-        let cropBranch = try XCTUnwrap(
-            contentView
-                .components(separatedBy: "case .crop:")
-                .dropFirst()
-                .first?
-                .components(separatedBy: "case .edit:")
-                .first
-        )
-
-        XCTAssertTrue(cropBranch.contains("CropToolbarControls("))
-        XCTAssertFalse(cropBranch.contains("Picker(\"Workspace\""))
+        XCTAssertTrue(contentView.contains("private var cropToolbarPill: some View"))
+        XCTAssertTrue(contentView.contains("CropToolbarControls("))
         XCTAssertTrue(
             contentView.contains("ToolbarItem(placement: .navigation)"),
-            "Only Library and Edit sit on the leading edge of the window toolbar"
+            "The workspace picker and edit controls sit on the leading edge"
         )
         XCTAssertFalse(
             contentView.contains("ToolbarItemGroup(placement: .navigation)"),
             "Crop and the other edit actions stay in the trailing toolbar group"
         )
-        let toolbarContent = try XCTUnwrap(
-            contentView
-                .components(separatedBy: "private var toolbarContent: some View {")
-                .dropFirst()
-                .first?
-                .components(separatedBy: "\nenum EditorToolbarMode")
-                .first
-        )
-        XCTAssertFalse(
-            toolbarContent.contains("Picker(\"Workspace\""),
-            "the workspace switcher is a leading toolbar item, not part of the trailing edit actions"
-        )
-        XCTAssertFalse(cropBranch.contains("AutoToolbarButton"))
-        XCTAssertFalse(cropBranch.contains("Export Selected"))
+        XCTAssertTrue(contentView.contains("ToolbarSpacer(.fixed)"))
+        XCTAssertTrue(contentView.contains("ToolbarSpacer(.flexible)"))
+        XCTAssertTrue(contentView.contains(".toolbarBackgroundVisibility(.visible, for: .windowToolbar)"))
+        XCTAssertTrue(contentView.contains(".toolbarBackground(.regularMaterial, for: .windowToolbar)"))
+        XCTAssertTrue(contentView.contains("GlassEffectContainer(spacing: 10)"))
+        XCTAssertTrue(contentView.contains(".buttonStyle(.glass)"))
+        XCTAssertTrue(contentView.contains(".buttonStyle(.glassProminent)"))
+        XCTAssertFalse(contentView.contains("#available(macOS 26.0"))
         XCTAssertTrue(contentView.contains("Label(\"Save\", systemImage: \"checkmark\")"))
         XCTAssertTrue(contentView.contains("Label(\"Cancel\", systemImage: \"xmark\")"))
         XCTAssertTrue(contentView.contains("Label(\"Undo\", systemImage: \"arrow.uturn.backward\")"))

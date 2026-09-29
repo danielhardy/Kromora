@@ -10,7 +10,9 @@ import SwiftUI
 enum KromoraTheme {
     // Surface roles for the editor shell:
     //
-    // - Window toolbar: full-width native toolbar material; do not paint a custom fill.
+    // - Window toolbar: `.regularMaterial` behind the native full-width toolbar, with regular
+    //   glass-effect groups in the controls. Keep the material solid enough to protect labels
+    //   from busy canvas imagery while allowing `.tint(primaryAccent)` to carry through the glass.
     // - Inspector: the system inspector material. The histogram occupies the band beside the
     //   toolbar; the window hides the title-bar separator so it is not drawn through the plot.
     // - Canvas surround: the dedicated recessed stage below, kept distinct from chrome.
