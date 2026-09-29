@@ -372,6 +372,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             width: 16, height: 12, named: "second.png", in: tempDirectory
         )
         let engine = FakeRenderEngine()
+        let reader = FakeRenderEventReader(await engine.eventStream())
         let viewModel = makeAppViewModel(engine: engine)
         try await loadCollection(viewModel, first: first, second: second)
 
@@ -390,6 +391,19 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             viewModel.sourceURL == second && viewModel.previewState == .ready
                 && viewModel.previewSurface.image != nil
                 && viewModel.histogram != nil
+        }
+        _ = try await TestSynchronization.nextEvent(
+            from: reader, "the second photo histogram completion"
+        ) {
+            if case .histogramCompleted(let request, _) = $0 {
+                return request.source?.backing == .url(second)
+            }
+            return false
+        } diagnostics: {
+            "histogram requests=\(await engine.histogramRequests)"
+        }
+        try await waitUntil("the settled second photo histogram") {
+            viewModel.histogram != nil && !viewModel.isHistogramLoading
         }
 
         XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[1].id)
