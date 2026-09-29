@@ -166,6 +166,40 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertFalse(cropInspector.contains("Button(\"Done\", action: onDone)"))
     }
 
+    func testCropResetLivesInPinnedInspectorTitleRow() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        let cropInspector = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/CropInspectorView.swift"),
+            encoding: .utf8
+        )
+
+        let titleRowStart = try XCTUnwrap(
+            cropInspector.range(of: "HStack {\n                Text(\"Crop\")")
+        )
+        let titleRowEnd = try XCTUnwrap(
+            cropInspector[titleRowStart.upperBound...].range(of: "\n\n            Divider()")
+        )
+        let titleRow = cropInspector[titleRowStart.lowerBound..<titleRowEnd.lowerBound]
+
+        XCTAssertTrue(titleRow.contains("Button(\"Reset\", action: onReset)"))
+        XCTAssertTrue(titleRow.contains(".buttonStyle(.link)"))
+        XCTAssertTrue(titleRow.contains(".accessibilityLabel(\"Reset crop\")"))
+        XCTAssertTrue(
+            titleRow.contains(".accessibilityHint(\"Return the crop frame to the full image\")")
+        )
+        XCTAssertTrue(titleRow.contains("Spacer(minLength: 8)"))
+        XCTAssertEqual(
+            cropInspector.components(separatedBy: "Button(\"Reset\", action: onReset)").count - 1,
+            1
+        )
+        XCTAssertTrue(cropInspector.contains("onResetStraighten"))
+        XCTAssertTrue(cropInspector.contains("onResetVerticalPerspective"))
+        XCTAssertTrue(cropInspector.contains("onResetHorizontalPerspective"))
+    }
+
     func testRelocatedViewActionsHaveStableNotificationNames() {
         XCTAssertEqual(Notification.Name.resetRotation.rawValue, "Kromora.resetRotation")
         XCTAssertEqual(Notification.Name.toggleInspector.rawValue, "Kromora.toggleInspector")

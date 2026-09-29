@@ -32,12 +32,21 @@ struct CropInspectorView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Crop")
-                .font(.title3.weight(.semibold))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
+            HStack {
+                Text("Crop")
+                    .font(.title3.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Button("Reset", action: onReset)
+                    .font(.callout)
+                    .buttonStyle(.link)
+                    .accessibilityLabel("Reset crop")
+                    .accessibilityHint("Return the crop frame to the full image")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 16)
+            .padding(.bottom, 12)
 
             Divider()
 
@@ -49,10 +58,6 @@ struct CropInspectorView: View {
                     perspectiveSection
 
                     Divider()
-
-                    Button("Reset", action: onReset)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityHint("Return the crop frame to the full image")
 
                     Button(action: onAuto) {
                         Label("Auto", systemImage: "wand.and.stars")
