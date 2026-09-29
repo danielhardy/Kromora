@@ -140,13 +140,14 @@ private struct ToneCurveEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("Channel", selection: $channel) {
-                    ForEach(ToneCurveChannel.allCases) { item in Text(item.rawValue).tag(item) }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
+            // The segmented control takes exactly the width the inspector offers instead of its
+            // intrinsic segment width, so it cannot resize when a parent re-proposes sizes.
+            Picker("Channel", selection: $channel) {
+                ForEach(ToneCurveChannel.allCases) { item in Text(item.rawValue).tag(item) }
             }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+            .frame(maxWidth: .infinity)
 
             GeometryReader { proxy in
                 let size = proxy.size
@@ -169,13 +170,17 @@ private struct ToneCurveEditor: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel("\(channel.rawValue) tone curve")
             }
-            // Keep the graph square while allowing it to shrink and grow with the inspector.
-            // The scrolling inspector recomputes its content size while a source loads and while
-            // previews publish. Pin the graph's vertical ideal size to its width so those parent
-            // height proposals cannot stretch the chart or move the controls below it.
+            // Keep the graph square and exactly as wide as the channel tabs above it, so both
+            // edges share the same gutters. The scrolling inspector recomputes its content size
+            // while a source loads and while previews publish. Pin the graph's vertical ideal
+            // size to its width so those parent height proposals cannot stretch the chart or
+            // move the controls below it. The inspector column is width-capped, so no extra
+            // graph width cap is needed.
             .aspectRatio(1, contentMode: .fit)
-            .frame(maxWidth: 220, alignment: .center)
+            .frame(maxWidth: .infinity)
             .fixedSize(horizontal: false, vertical: true)
+            // Extra air between the channel tabs and the map, on top of the stack spacing.
+            .padding(.top, 6)
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
                 finishCurveDrag()
             }
@@ -191,6 +196,7 @@ private struct ToneCurveEditor: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var editablePoints: [LightCurvePoint] {
