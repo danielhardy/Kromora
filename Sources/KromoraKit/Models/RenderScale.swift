@@ -12,10 +12,16 @@ import CoreGraphics
 /// image rather than the full extent. That is what makes every `AdjustmentNode`'s
 /// resolution-independence a hard requirement rather than a nicety (§5).
 enum RenderScale: Sendable, Equatable {
+    /// Whole-frame budget for a fit view, where the preview is being downscaled to the canvas anyway.
     private static let interactivePixelsPerFrameBudget = 1_500_000.0
+    /// Budget for the visible region of a zoomed view. A retina viewport is several megapixels, so
+    /// the fit-view budget would upscale the ROI texture ~2x and read as blur while a slider drags.
+    private static let interactiveVisiblePixelsBudget = 4_000_000.0
     /// ROI scaling can spend more decode work on the visible region, but rapid edits still need
     /// a source-wide ceiling so a tiny ROI cannot turn an interactive render into a large decode.
-    private static let interactiveAbsolutePixelCeiling = 6_000_000.0
+    /// The ceiling is high enough that a ~45 MP body stays near 1:1 at deep zoom; the decoded
+    /// source is cached across a drag, so it is paid once per gesture for non-RAW-develop controls.
+    private static let interactiveAbsolutePixelCeiling = 36_000_000.0
 
     /// Fit within `maxSize`, never upscaling.
     case preview(maxSize: CGSize)
@@ -42,13 +48,14 @@ enum RenderScale: Sendable, Equatable {
         case .preview(let maxSize): return maxSize
         case .interactive(let maxSize, let budget, let budgetAreaFraction):
             let safeBudget = budget.isFinite && budget > 0 ? budget : 16.7
-            // Spend the 1.5 MP budget on the visible ROI rather than the complete source, while
-            // retaining a 6 MP source-wide ceiling for predictable interactive decode cost.
+            // Spend the pixel budget on the visible ROI rather than the complete source, while
+            // retaining a source-wide ceiling for predictable interactive decode cost.
             let safeAreaFraction = budgetAreaFraction.isFinite && budgetAreaFraction > 0
                 ? min(budgetAreaFraction, 1) : 1
             let frameBudgetScale = safeBudget / 16.7
-            let roiBudgetPixels = Self.interactivePixelsPerFrameBudget
-                * frameBudgetScale / safeAreaFraction
+            let visibleBudget = safeAreaFraction < 1
+                ? Self.interactiveVisiblePixelsBudget : Self.interactivePixelsPerFrameBudget
+            let roiBudgetPixels = visibleBudget * frameBudgetScale / safeAreaFraction
             let absoluteBudgetPixels = Self.interactiveAbsolutePixelCeiling * frameBudgetScale
             let budgetPixels = min(roiBudgetPixels, absoluteBudgetPixels)
             guard maxSize.width > 0, maxSize.height > 0,
