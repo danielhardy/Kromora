@@ -158,6 +158,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Stored in a per-photo session keyed by stable source identity. Navigation restores the active
     /// photo's Light, other edits, and history without carrying them onto a different frame.
     @Published private(set) var document = EditDocument()
+    /// Toolbar photo actions retain their last settled availability while another selected photo
+    /// loads. Their action methods still validate the active source before doing any work.
+    @Published private(set) var toolbarPhotoActionsAvailable = false
+    @Published private(set) var isToolbarPhotoTransitioning = false
     @Published private(set) var durableEditHistory: [PortablePackageEditRevision] = []
     @Published private(set) var durableCurrentEditRevision: UInt64 = 0
 
@@ -1110,8 +1114,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // useful status instead of leaving the user with a permanent black canvas.
         previewSurface.onPresentationFailure = { [weak self] in
             guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
-            self.isNavigationLoading = false
-            self.previewState = .failed
+            self.publishPreviewFailure()
             self.publishAutoAdjustmentState(
                 .unavailable("Auto is unavailable because the photo preview failed."))
             self.statusMessage =
@@ -1163,6 +1166,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self.isLoading = false
             self.isNavigationLoading = false
             self.previewState = .failed
+            self.toolbarPhotoActionsAvailable = self.sourceImage != nil
+            self.isToolbarPhotoTransitioning = false
             self.presentError(message)
             self.presentPendingImportOutcome()
         }
@@ -1218,7 +1223,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.onFailure = { [weak self] request in
             guard request.quality == .preview else { return }
             guard let self, request.source == self.imageSource else { return }
-            self.previewState = .failed
+            self.publishPreviewFailure()
             self.publishAutoAdjustmentState(
                 .unavailable("Auto is unavailable because the photo preview failed."))
             if let message = self.semanticMaskFailureMessage(for: request.document) {
@@ -1907,6 +1912,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Do not rewrite an unchanged document merely because navigation occurred.
         let persistenceBarrier = requestPersistenceFlush()
         let previousActiveAssetID = activeAssetID
+        // `sourceImage` is cleared below to fence edit operations while decoding. Keep the
+        // toolbar's settled enabled appearance until this selected photo publishes or fails.
+        isToolbarPhotoTransitioning = true
         activeAssetID = assetID
         let sourceReference = importPlan.sourceReference
         activeSourceReference = sourceReference
@@ -2732,6 +2740,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.cancel()
         cancelWhiteBalanceSampling()
         sourceImage = nil
+        toolbarPhotoActionsAvailable = false
+        isToolbarPhotoTransitioning = false
         imageSource = nil
         sourceURL = nil
         sourceName = ""
@@ -4480,11 +4490,15 @@ extension AppViewModel: PreviewPublicationDestination {
     func publishPreviewReady() {
         isNavigationLoading = false
         previewState = .ready
+        toolbarPhotoActionsAvailable = true
+        isToolbarPhotoTransitioning = false
         presentPendingImportOutcome()
     }
     func publishPreviewFailure() {
         isNavigationLoading = false
         previewState = .failed
+        toolbarPhotoActionsAvailable = sourceImage != nil
+        isToolbarPhotoTransitioning = false
         presentPendingImportOutcome()
     }
     func publishAutoAdjustmentReady() {

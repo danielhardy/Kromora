@@ -89,7 +89,7 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(contentView.components(separatedBy: "Label(\"Info\", systemImage: \"sidebar.right\"").count, 2)
         XCTAssertFalse(contentView.contains("systemImage: \"sidebar.leading\""))
         XCTAssertTrue(contentView.contains("viewModel.toggleInspector()"))
-        XCTAssertTrue(contentView.contains(".disabled(!viewModel.isComparisonPresentationAvailable)"))
+        XCTAssertTrue(contentView.contains(".disabled(!viewModel.toolbarPhotoActionsAvailable)"))
         XCTAssertFalse(contentView.contains("Label(\"Copy Edits…\", systemImage: \"doc.on.doc\")"))
         XCTAssertFalse(contentView.contains("Label(\"Paste Edits\", systemImage: \"doc.on.clipboard\")"))
         XCTAssertFalse(contentView.contains("Label(\"Export Selected\", systemImage: \"square.and.arrow.up.on.square\")"))
