@@ -143,7 +143,7 @@ final class CropROITests: TempDirectoryTestCase {
         )
         let decodedROIArea = roi.width * roi.height
             * pow(request.renderScale.factor(for: native), 2)
-        XCTAssertLessThanOrEqual(decodedROIArea, 1_500_000)
+        XCTAssertLessThanOrEqual(decodedROIArea, 4_000_000)
         XCTAssertEqual(
             request.presentationLayoutExtent,
             CGRect(x: 480, y: 640, width: 960, height: 640),
@@ -152,17 +152,33 @@ final class CropROITests: TempDirectoryTestCase {
     }
 
     func testInteractiveROIBudgetKeepsAbsoluteDecodeCeiling() {
+        let native = CGSize(width: 12_000, height: 8_000)
         let scale = RenderScale.interactive(
             maxSize: native,
             budgetAreaFraction: 0.01
         )
 
-        XCTAssertEqual(scale.factor(for: native), 0.5, accuracy: 0.0001)
         XCTAssertEqual(
             native.width * native.height * pow(scale.factor(for: native), 2),
-            6_000_000,
+            36_000_000,
             accuracy: 1
         )
+    }
+
+    func testZoomedInteractiveDecodeKeepsViewportScaleVisiblePixels() {
+        let native = CGSize(width: 6_000, height: 4_000)
+        // A zoomed retina canvas: the visible ROI is 1/8 of the source area.
+        let scale = RenderScale.interactive(maxSize: native, budgetAreaFraction: 1.0 / 8)
+        let visiblePixels = native.width * native.height / 8
+            * pow(scale.factor(for: native), 2)
+
+        XCTAssertGreaterThanOrEqual(
+            visiblePixels, 1_500_000 * 2,
+            "a zoomed drag frame must not be upscaled ~2x from the 1.5 MP fit budget")
+        XCTAssertEqual(
+            RenderScale.interactive(maxSize: native).factor(for: native),
+            sqrt(1_500_000 / (native.width * native.height)), accuracy: 0.0001,
+            "fit views keep the historical 1.5 MP budget")
     }
 
     func testPresentationLayoutPutsATopSourceStripAtTheTopOfTheCanvas() {
