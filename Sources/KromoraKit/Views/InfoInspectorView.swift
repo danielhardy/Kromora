@@ -274,28 +274,16 @@ struct InfoInspectorView: View {
             .padding(.horizontal, 12)
             .padding(.top, 8)
 
-            histogramPlot
-                .frame(height: 120)
-                .frame(maxWidth: .infinity)
-                // Full bleed to the photo and the window edge. The plot stays a local dark
-                // surface; it does not define the inspector background.
-                .background(KromoraTheme.analysisBackground)
-                .overlay(Rectangle().stroke(KromoraTheme.analysisBorder, lineWidth: 1))
+            VStack(spacing: 0) {
+                histogramPlot
+                    .frame(height: 120)
+                    .frame(maxWidth: .infinity)
 
-            Picker("Channel", selection: $channel) {
-                Text("RGB").tag(HistogramChart.Mode.rgb)
-                Text("Luma").tag(HistogramChart.Mode.luma)
-                Text("R").tag(HistogramChart.Mode.red)
-                Text("G").tag(HistogramChart.Mode.green)
-                Text("B").tag(HistogramChart.Mode.blue)
-                Text("Wave").tag(HistogramChart.Mode.waveform)
-                Text("Parade").tag(HistogramChart.Mode.parade)
-                Text("Vector").tag(HistogramChart.Mode.vectorscope)
+                histogramModeSelector
             }
-            .pickerStyle(.menu)
-            .labelsHidden()
-            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-            .padding(.horizontal, 12)
+            // Keep the plot and its mode tabs on one edge-to-edge chart surface.
+            .background(KromoraTheme.analysisBackground)
+            .overlay(Rectangle().stroke(KromoraTheme.analysisBorder, lineWidth: 1))
         }
     }
 
@@ -315,6 +303,49 @@ struct InfoInspectorView: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(12)
+        }
+    }
+
+    private var histogramModeSelector: some View {
+        HStack(spacing: 0) {
+            ForEach(HistogramChart.Mode.allCases, id: \.self) { mode in
+                let isSelected = channel == mode
+                Button {
+                    channel = mode
+                } label: {
+                    Text(mode.title)
+                        .font(.system(.caption2, design: .monospaced))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 32)
+                        .contentShape(Rectangle())
+                        .background {
+                            if isSelected {
+                                Color.accentColor.opacity(0.2)
+                            }
+                        }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Histogram \(mode.title)")
+                .accessibilityValue(isSelected ? "Selected" : "Not selected")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .help("Show \(mode.title) histogram")
+                .overlay(alignment: .trailing) {
+                    if mode != HistogramChart.Mode.allCases.last {
+                        Rectangle()
+                            .fill(KromoraTheme.analysisBorder)
+                            .frame(width: 1)
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Histogram mode")
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(KromoraTheme.analysisBorder)
+                .frame(height: 1)
         }
     }
 
@@ -416,8 +447,21 @@ struct InfoInspectorView: View {
 /// blending (overlaps brighten toward white, the classic look); single-channel
 /// and luma modes draw one filled curve.
 struct HistogramChart: View, @MainActor Animatable {
-    enum Mode: Hashable {
+    enum Mode: Hashable, CaseIterable {
         case rgb, luma, red, green, blue, waveform, parade, vectorscope
+
+        var title: String {
+            switch self {
+            case .rgb: "RGB"
+            case .luma: "Luma"
+            case .red: "R"
+            case .green: "G"
+            case .blue: "B"
+            case .waveform: "Wave"
+            case .parade: "Parade"
+            case .vectorscope: "Vector"
+            }
+        }
     }
 
     let data: HistogramData
