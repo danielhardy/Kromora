@@ -39,6 +39,7 @@ struct CropInspectorView: View {
                 Button("Reset", action: onReset)
                     .font(.callout)
                     .buttonStyle(.link)
+                    .tint(KromoraTheme.primaryAccent)
                     .accessibilityLabel("Reset crop")
                     .accessibilityHint("Return the crop frame to the full image")
             }
