@@ -57,6 +57,36 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testImportOutcomeWaitsForPreviewAndRetainsPartialFailures() async throws {
+        let importedURL = try Fixtures.writeGradientPNG(
+            width: 12, height: 8, named: "imported.png", in: tempDirectory
+        )
+        let missingURL = tempDirectory.appendingPathComponent("zz-missing.png")
+
+        let engine = FakeRenderEngine()
+        await engine.gateSourcePreparation()
+        let viewModel = makeAppViewModel(engine: engine)
+
+        let summary = try XCTUnwrap(viewModel.openImages(urls: [importedURL, missingURL]))
+
+        XCTAssertEqual(summary.imported, 1)
+        XCTAssertEqual(summary.failed, 1)
+        XCTAssertTrue(viewModel.statusMessage.hasPrefix("Loading "))
+        let preparationDeadline = Date().addingTimeInterval(5)
+        while await engine.sourcePreparationCount == 0 {
+            XCTAssertLessThan(Date(), preparationDeadline, "source preparation did not start")
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        await engine.releaseSourcePreparation()
+        try await waitUntil("settled imported preview") {
+            viewModel.previewState == .ready
+        }
+
+        XCTAssertEqual(viewModel.statusMessage, summary.status(prefix: "Photo import"))
+        XCTAssertTrue(viewModel.statusMessage.contains("1 failed"))
+    }
+
     func testOpeningSourceFolderWithoutLibraryReportsUnavailableErrorWithoutImportSummary() throws {
         let unavailablePackageURL = tempDirectory.appendingPathComponent("not-a-package")
         try Data("not a library package".utf8).write(to: unavailablePackageURL)

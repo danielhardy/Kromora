@@ -154,7 +154,10 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             viewModel.previewState == .ready
         }
 
-        XCTAssertEqual(viewModel.statusMessage, "standard.jpg  16\u{00D7}12")
+        XCTAssertEqual(
+            viewModel.statusMessage,
+            "Photo import complete — 1 imported, 0 duplicates, 0 skipped, 0 failed"
+        )
         let previewRequestCount = await fake.previewRequests.count
         XCTAssertEqual(previewRequestCount, 1)
     }
