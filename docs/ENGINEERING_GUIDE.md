@@ -63,6 +63,11 @@ by `ExportOptions` and applied after sizing, so it does not change the edit docu
 Sendable request values and rendered values cross `RenderEngining`. New work should use the existing
 request funnel and injected protocol seams rather than adding a second renderer or context.
 
+Interactive preview decode budgets 1.5 MP of work to the visible source ROI so zoomed previews retain
+detail. ROI scaling is capped at 6 MP across the full decoded source per 16.7 ms frame budget; longer
+or shorter frame budgets scale both limits proportionally. This allows zoom detail to exceed the
+historical 1.5 MP source-wide limit while keeping interactive RAW decode bounded during rapid edits.
+
 White balance stays in the same `EditDocument`: RAW presets and samples write decoder temperature
 and tint overrides before RAW rendering; standard-image edits write the existing temperature/tint
 adjustment node. The Color inspector's eyedropper samples the currently rendered preview, averages
