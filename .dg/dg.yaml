@@ -1,5 +1,5 @@
 name: Kromora
-format_version: 2
+format_version: 3
 id_prefix: KRMA
 description: Native macOS RAW photo editor
 default_board: product
@@ -7,7 +7,6 @@ statuses:
   - backlog
   - ready
   - claimed
-  - blocked
   - review
   - verification
   - done

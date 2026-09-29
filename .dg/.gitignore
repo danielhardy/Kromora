@@ -10,6 +10,7 @@
 .project/locks/
 .project/mutations/
 .project/mutations.json
+.project/mutations.json.corrupt-*
 PROJ-*-finish.sh
 # END DispatchGraph
 
