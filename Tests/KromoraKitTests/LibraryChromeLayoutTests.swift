@@ -30,7 +30,7 @@ final class LibraryChromeLayoutTests: TempDirectoryTestCase {
         XCTAssertNotNil(window.toolbar)
     }
 
-    func testInspectorReservesItsColumnAndKeepsItsToggleAtTheToolbarEdge() throws {
+    func testImportAndExportMoveIntoTheLeadingToolbarWhenInspectorIsOpen() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -47,22 +47,17 @@ final class LibraryChromeLayoutTests: TempDirectoryTestCase {
             "the preview must stay inside the width left by the inspector"
         )
         let toolbar = try XCTUnwrap(contentView.range(of: ".toolbar {"))
-        let toolbarContents = toolbar.upperBound..<contentView.endIndex
-        let transferButton = try XCTUnwrap(
-            contentView.range(of: "transferToolbarPill", range: toolbarContents)
-        )
-        let inspectorButton = try XCTUnwrap(
-            contentView.range(
-                of: "inspectorToolbarButton",
-                range: transferButton.upperBound..<contentView.endIndex
-            )
-        )
-        XCTAssertLessThan(transferButton.lowerBound, inspectorButton.lowerBound)
+        let toolbarContents = String(contentView[toolbar.upperBound..<contentView.endIndex])
         XCTAssertTrue(
-            contentView[transferButton.upperBound..<inspectorButton.lowerBound]
-                .contains("ToolbarSpacer(.fixed)"),
-            "the inspector toggle is separated from the other toolbar controls"
+            toolbarContents.contains("if inspectorState.isPresented {\n                        ToolbarSpacer(.fixed)\n                        ToolbarItem(placement: .navigation) {\n                            transferToolbarPill"),
+            "the import and export controls join the leading toolbar group while the inspector is open"
         )
+        XCTAssertTrue(
+            toolbarContents.contains("if !inspectorState.isPresented {\n                        ToolbarSpacer(.fixed)\n                        ToolbarItem(placement: .primaryAction) {\n                            transferToolbarPill"),
+            "the import and export controls return to the trailing group when the inspector is closed"
+        )
+        let transferReferences = toolbarContents.components(separatedBy: "transferToolbarPill").count - 1
+        XCTAssertEqual(transferReferences, 3, "one declaration and one placement per inspector state")
         XCTAssertTrue(
             contentView.contains(".inspectorColumnWidth(min: 240, ideal: 280, max: 360)")
         )
