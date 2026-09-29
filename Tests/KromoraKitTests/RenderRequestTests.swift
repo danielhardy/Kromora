@@ -57,7 +57,10 @@ final class RenderRequestTests: TempDirectoryTestCase {
 
             let expectedInteractiveFactor = min(
                 plan.scale,
-                sqrt(1_500_000 / (roi.width * roi.height))
+                sqrt(min(
+                    1_500_000 / (roi.width * roi.height),
+                    6_000_000 / (native.width * native.height)
+                ))
             )
             XCTAssertEqual(
                 interactive.renderScale.factor(for: native), expectedInteractiveFactor,

@@ -12,6 +12,11 @@ import CoreGraphics
 /// image rather than the full extent. That is what makes every `AdjustmentNode`'s
 /// resolution-independence a hard requirement rather than a nicety (§5).
 enum RenderScale: Sendable, Equatable {
+    private static let interactivePixelsPerFrameBudget = 1_500_000.0
+    /// ROI scaling can spend more decode work on the visible region, but rapid edits still need
+    /// a source-wide ceiling so a tiny ROI cannot turn an interactive render into a large decode.
+    private static let interactiveAbsolutePixelCeiling = 6_000_000.0
+
     /// Fit within `maxSize`, never upscaling.
     case preview(maxSize: CGSize)
     /// Interaction policy. The input is the canvas backing-pixel size, not a fixed export box.
@@ -37,12 +42,15 @@ enum RenderScale: Sendable, Equatable {
         case .preview(let maxSize): return maxSize
         case .interactive(let maxSize, let budget, let budgetAreaFraction):
             let safeBudget = budget.isFinite && budget > 0 ? budget : 16.7
-            // Bound the pixels processed for the visible ROI, rather than the complete source.
-            // At high zoom the ROI may be a small fraction of a large source: applying this budget
-            // to the full source needlessly discards the detail needed for the visible canvas.
+            // Spend the 1.5 MP budget on the visible ROI rather than the complete source, while
+            // retaining a 6 MP source-wide ceiling for predictable interactive decode cost.
             let safeAreaFraction = budgetAreaFraction.isFinite && budgetAreaFraction > 0
                 ? min(budgetAreaFraction, 1) : 1
-            let budgetPixels = 1_500_000.0 * safeBudget / 16.7 / safeAreaFraction
+            let frameBudgetScale = safeBudget / 16.7
+            let roiBudgetPixels = Self.interactivePixelsPerFrameBudget
+                * frameBudgetScale / safeAreaFraction
+            let absoluteBudgetPixels = Self.interactiveAbsolutePixelCeiling * frameBudgetScale
+            let budgetPixels = min(roiBudgetPixels, absoluteBudgetPixels)
             guard maxSize.width > 0, maxSize.height > 0,
                   maxSize.width.isFinite, maxSize.height.isFinite else { return maxSize }
             let pixels = maxSize.width * maxSize.height

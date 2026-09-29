@@ -124,7 +124,7 @@ final class CropROITests: TempDirectoryTestCase {
         )
     }
 
-    func testInteractiveZoomFragmentLayoutStaysInPlannerSpace() {
+    func testInteractiveZoomFragmentLayoutStaysInPlannerSpaceWithinROIShapedBudget() {
         let native = CGSize(width: 3_000, height: 2_000)
         let source = ImageSource(
             url: URL(fileURLWithPath: "/tmp/layout-roi.png"), nativeExtent: native)
@@ -137,13 +137,31 @@ final class CropROITests: TempDirectoryTestCase {
 
         XCTAssertFalse(request.coversPresentationExtent)
         XCTAssertEqual(
-            request.renderScale.factor(for: native) * native.width, 1_500, accuracy: 0.5,
-            "the 1.5 MP interactive budget must actually decode below the planner size"
+            request.renderScale.factor(for: native) * native.width, plannerSize.width,
+            accuracy: 0.5,
+            "the planner box fits under the absolute ceiling and the ROI-specific budget"
         )
+        let decodedROIArea = roi.width * roi.height
+            * pow(request.renderScale.factor(for: native), 2)
+        XCTAssertLessThanOrEqual(decodedROIArea, 1_500_000)
         XCTAssertEqual(
             request.presentationLayoutExtent,
             CGRect(x: 480, y: 640, width: 960, height: 640),
             "layout must use y-down planner pixels, not the reduced interactive decode origin"
+        )
+    }
+
+    func testInteractiveROIBudgetKeepsAbsoluteDecodeCeiling() {
+        let scale = RenderScale.interactive(
+            maxSize: native,
+            budgetAreaFraction: 0.01
+        )
+
+        XCTAssertEqual(scale.factor(for: native), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(
+            native.width * native.height * pow(scale.factor(for: native), 2),
+            6_000_000,
+            accuracy: 1
         )
     }
 
