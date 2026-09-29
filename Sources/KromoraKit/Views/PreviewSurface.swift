@@ -85,6 +85,8 @@ final class PreviewSurface: ObservableObject {
     private var submittedTelemetryRevisions: Set<UInt64> = []
     private var skippedTelemetryRevisions: Set<UInt64> = []
     private var presentationConfirmations: [UInt64: () -> Void] = [:]
+    private var submittedPresentationConfirmations: Set<UInt64> = []
+    private var skippedPresentationConfirmations: Set<UInt64> = []
     private var hasManagedPresentationLifecycle = false
     var onPresentationFailure: (() -> Void)?
 
@@ -181,32 +183,39 @@ final class PreviewSurface: ObservableObject {
         }
         self.revision &+= 1
         pendingDisplayID = self.revision
-        if let revision, let telemetry {
+        if let revision {
             // A skipped publication has been submitted but never reached a visible drawable.
             // A newer publication supersedes it, so release its callback and diagnostic state.
             if let previous = pendingGPURevision,
                 skippedTelemetryRevisions.contains(previous)
+                    || skippedPresentationConfirmations.contains(previous)
             {
                 telemetryByRevision.removeValue(forKey: previous)
                 submittedTelemetryRevisions.remove(previous)
                 skippedTelemetryRevisions.remove(previous)
                 presentationConfirmations.removeValue(forKey: previous)
+                submittedPresentationConfirmations.remove(previous)
+                skippedPresentationConfirmations.remove(previous)
             }
             // A pending value that has not reached a drawable is obsolete once a newer value is
             // presented. Submitted values remain until Metal reports their completion/display.
             if let previous = pendingGPURevision,
                 !submittedTelemetryRevisions.contains(previous)
+                    && !submittedPresentationConfirmations.contains(previous)
             {
                 telemetryByRevision.removeValue(forKey: previous)
+                presentationConfirmations.removeValue(forKey: previous)
             }
             pendingGPURevision = revision
-            telemetryByRevision[revision] = PendingTelemetry(
-                telemetry: telemetry, source: source,
-                quality: quality)
+            if let telemetry {
+                telemetryByRevision[revision] = PendingTelemetry(
+                    telemetry: telemetry, source: source,
+                    quality: quality)
+            }
             if let onPresented {
                 presentationConfirmations[revision] = onPresented
             }
-            trimTelemetry()
+            if telemetry != nil { trimTelemetry() }
         } else {
             pendingGPURevision = nil
         }
@@ -343,9 +352,17 @@ final class PreviewSurface: ObservableObject {
     }
 
     fileprivate func markPresentationSubmitted(revision: UInt64) {
-        guard telemetryByRevision[revision] != nil else { return }
-        submittedTelemetryRevisions.insert(revision)
-        if pendingGPURevision == revision { pendingGPURevision = nil }
+        if telemetryByRevision[revision] != nil {
+            submittedTelemetryRevisions.insert(revision)
+        }
+        if presentationConfirmations[revision] != nil {
+            submittedPresentationConfirmations.insert(revision)
+        }
+        if pendingGPURevision == revision,
+            telemetryByRevision[revision] != nil || presentationConfirmations[revision] != nil
+        {
+            pendingGPURevision = nil
+        }
     }
 
     fileprivate func setEffectiveDimensions(revision: UInt64, width: Int, height: Int) {
@@ -492,6 +509,8 @@ final class PreviewSurface: ObservableObject {
 
     fileprivate func markPresentationFailed(revision: UInt64) {
         presentationConfirmations.removeValue(forKey: revision)
+        submittedPresentationConfirmations.remove(revision)
+        skippedPresentationConfirmations.remove(revision)
         telemetryByRevision.removeValue(forKey: revision)
         submittedTelemetryRevisions.remove(revision)
         skippedTelemetryRevisions.remove(revision)
@@ -503,26 +522,31 @@ final class PreviewSurface: ObservableObject {
     /// visible pixels, so the producer's visible-frame confirmation must wait for a real retry.
     @discardableResult
     func markDrawablePresented(revision: UInt64, time: TimeInterval) -> Bool {
-        guard let pending = telemetryByRevision[revision] else { return false }
+        let pending = telemetryByRevision[revision]
+        guard pending != nil || presentationConfirmations[revision] != nil else { return false }
         if time > 0 {
-            pending.telemetry.mark(revision, drawablePresentation: time)
+            pending?.telemetry.mark(revision, drawablePresentation: time)
         } else if let fallback = zeroPresentedTimeFallback {
             // Capture host without drawable scan-out (screen sharing/headless session). A real
             // drawable still went through the presentation lifecycle and the capture needs a
             // timestamp; this is the same fallback clock the MetalPresentationBenchmark capture
             // procedure uses.
-            pending.telemetry.mark(revision, drawablePresentation: fallback())
+            pending?.telemetry.mark(revision, drawablePresentation: fallback())
         } else {
             // Metal reports zero when a drawable was skipped. Do not turn a skipped frame into a
             // false presentation sample. Keep the candidate and its confirmation pending so the
             // producer does not mistake an occluded frame for pixels the user received. Re-arm
             // the revision for the next drawable; the coordinator bounds how often that happens.
-            pending.telemetry.markSkippedDrawable(revision)
-            skippedTelemetryRevisions.insert(revision)
+            pending?.telemetry.markSkippedDrawable(revision)
+            if pending != nil { skippedTelemetryRevisions.insert(revision) }
+            if presentationConfirmations[revision] != nil {
+                skippedPresentationConfirmations.insert(revision)
+                submittedPresentationConfirmations.remove(revision)
+            }
             pendingGPURevision = revision
             return true
         }
-        if let source = pending.source {
+        if let pending, let source = pending.source {
             KromoraObservability.liveEdit(
                 .drawablePresented, source: source, quality: pending.quality,
                 revision: revision, detail: "displayed")
@@ -530,6 +554,8 @@ final class PreviewSurface: ObservableObject {
         telemetryByRevision.removeValue(forKey: revision)
         submittedTelemetryRevisions.remove(revision)
         skippedTelemetryRevisions.remove(revision)
+        submittedPresentationConfirmations.remove(revision)
+        skippedPresentationConfirmations.remove(revision)
         let confirmation = presentationConfirmations.removeValue(forKey: revision)
         confirmation?()
         return false
@@ -571,6 +597,8 @@ final class PreviewSurface: ObservableObject {
         submittedTelemetryRevisions.removeAll()
         skippedTelemetryRevisions.removeAll()
         presentationConfirmations.removeAll()
+        submittedPresentationConfirmations.removeAll()
+        skippedPresentationConfirmations.removeAll()
         pendingPresentationMaterializationRevision = nil
         pendingPresentationMaterialization = nil
         presentationMaterializations.removeAll()

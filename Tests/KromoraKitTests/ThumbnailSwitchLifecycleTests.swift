@@ -60,9 +60,11 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         viewModel.collection.beginThumbnailDemand()
 
         viewModel.selectCollectionImage(at: 0)
+        XCTAssertTrue(viewModel.isNavigationLoading)
         try await waitUntil("the first photo") {
             viewModel.sourceURL == first && viewModel.previewState == .ready
         }
+        XCTAssertFalse(viewModel.isNavigationLoading)
         let firstThumbnailRequestCount = await engine.thumbnailRequests.filter {
             $0.quality == .thumbnail && $0.assetID == viewModel.collection.items[0].id
         }.count
@@ -594,6 +596,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
         XCTAssertEqual(viewModel.previewState, .loading)
+        XCTAssertTrue(viewModel.isNavigationLoading)
         XCTAssertFalse(viewModel.isLoading, "source preparation is complete while B renders")
 
         await engine.releaseNextPreview()
@@ -606,6 +609,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "previews=\(await engine.previewRequests.count), revisions=\(await engine.renderRequests.map(\.requestRevision))"
         }
         XCTAssertFalse(viewModel.isLoading)
+        try await waitUntil("the second photo frame to present") {
+            !viewModel.isNavigationLoading
+        }
+        XCTAssertFalse(viewModel.isNavigationLoading)
     }
 
     func testRapidThumbnailChangesCannotPublishAnObsoleteSourceOrHistogram() async throws {
@@ -629,6 +636,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             "source preparations=\(await engine.sourcePreparationCount)"
         }
         viewModel.selectCollectionImage(at: 1)
+        XCTAssertTrue(viewModel.isNavigationLoading)
         await engine.releaseSourcePreparation()
 
         _ = try await TestSynchronization.nextEvent(from: reader, "the latest source preparation") {
@@ -657,6 +665,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[1].id)
         XCTAssertNotEqual(viewModel.sourceURL, first)
+        try await waitUntil("the latest photo frame to present") {
+            !viewModel.isNavigationLoading
+        }
+        XCTAssertFalse(viewModel.isNavigationLoading)
 
         await engine.gateHistogram()
         viewModel.isInspectorPresented = true
@@ -863,6 +875,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         try await waitUntil("the source failure") {
             sourceViewModel.previewState == .failed && !sourceViewModel.isLoading
         }
+        XCTAssertFalse(sourceViewModel.isNavigationLoading)
         XCTAssertNil(sourceViewModel.sourceImage)
         XCTAssertNotNil(sourceViewModel.errorMessage)
 

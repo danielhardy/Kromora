@@ -64,7 +64,7 @@ struct PreviewView: View {
             }
             .allowsHitTesting(!isPreviewLoading)
 
-            if previewSurface.image != nil && isPreviewLoading {
+            if previewSurface.image != nil && viewModel.isNavigationLoading {
                 ProgressView()
                     .controlSize(.large)
                     .scaleEffect(1.35)

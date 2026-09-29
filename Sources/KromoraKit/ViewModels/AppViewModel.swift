@@ -611,6 +611,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private let autoWorkflowCoordinator = AutoWorkflowCoordinator()
 
     @Published var isLoading: Bool = false
+    /// Navigation waits only until the selected source has a usable frame on the surface. Full
+    /// preview readiness remains separate because RAW development and other render work can
+    /// continue after its embedded camera preview has already been presented.
+    @Published private(set) var isNavigationLoading = false
     enum PreviewState: Equatable, Sendable {
         case empty
         case loading
@@ -1105,6 +1109,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // useful status instead of leaving the user with a permanent black canvas.
         previewSurface.onPresentationFailure = { [weak self] in
             guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
+            self.isNavigationLoading = false
             self.previewState = .failed
             self.publishAutoAdjustmentState(
                 .unavailable("Auto is unavailable because the photo preview failed."))
@@ -1154,6 +1159,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 request.assetID == self.activeAssetID
             else { return }
             self.isLoading = false
+            self.isNavigationLoading = false
             self.previewState = .failed
             self.presentError(message)
         }
@@ -1944,6 +1950,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // change an unrelated inspector preference merely because source preparation is async.
 
         isLoading = true
+        isNavigationLoading = true
         statusMessage = "Loading \(name)..."
 
         sourceSession.begin(
@@ -2012,12 +2019,21 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // replacing that settled frame, so no explicit clear is needed here.
             previewSurface.present(
                 provisional, space: .current,
-                revision: displayRevision,
+                // Presentation-only revision: the embedded JPEG is not renderer telemetry, but
+                // it still participates in the drawable confirmation lifecycle.
+                revision: UInt64.max - displayRevision,
                 source: publication.preparation.source,
                 quality: .preview,
                 presentationImageExtent: CGRect(origin: .zero, size: native),
                 coversPresentationExtent: true,
-                onPresented: nil
+                onPresented: { [weak self] in
+                    guard let self, !self.isShuttingDown,
+                        publication.request.sourceRevision == self.sourceRevision,
+                        publication.request.assetID == self.activeAssetID,
+                        self.previewState == .loading
+                    else { return }
+                    self.isNavigationLoading = false
+                }
             )
     }
 
@@ -2712,6 +2728,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         metadata = ImageMetadata()
         histogram = nil
         isLoading = false
+        isNavigationLoading = false
         previewState = .empty
         previewSurface.clear()
         originalPreviewSurface.clear()
@@ -4270,6 +4287,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     public func shutdown() async {
         guard !isShuttingDown else { return }
         isShuttingDown = true
+        isNavigationLoading = false
 
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
@@ -4443,8 +4461,14 @@ extension AppViewModel: PreviewPublicationDestination {
         storedEditsResolvedSourceRevision
     }
 
-    func publishPreviewReady() { previewState = .ready }
-    func publishPreviewFailure() { previewState = .failed }
+    func publishPreviewReady() {
+        isNavigationLoading = false
+        previewState = .ready
+    }
+    func publishPreviewFailure() {
+        isNavigationLoading = false
+        previewState = .failed
+    }
     func publishAutoAdjustmentReady() {
         publishAutoAdjustmentState(.ready)
     }

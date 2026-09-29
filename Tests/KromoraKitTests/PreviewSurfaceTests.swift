@@ -360,6 +360,23 @@ final class PreviewSurfaceTests: XCTestCase {
             "a skipped-then-retried frame must not enter presentation statistics")
     }
 
+    func testPresentationOnlyFrameConfirmsWithoutRenderTelemetry() {
+        let surface = PreviewSurface()
+        surface.attachPresentationLifecycle()
+        var confirmed = false
+
+        surface.present(
+            CIImage(color: .red), revision: UInt64.max,
+            onPresented: { confirmed = true }
+        )
+
+        XCTAssertFalse(confirmed, "the image must reach a drawable before confirmation")
+        XCTAssertTrue(surface.markDrawablePresented(revision: UInt64.max, time: 0))
+        XCTAssertFalse(confirmed, "a skipped drawable is not a visible presentation")
+        XCTAssertFalse(surface.markDrawablePresented(revision: UInt64.max, time: 1))
+        XCTAssertTrue(confirmed)
+    }
+
     func testSkippedDrawRetriesAreBoundedAndQuietAfterConsecutiveSkips() async throws {
         let coordinator = PreviewSurfaceView.Coordinator()
         let view = TrackingMTKView(frame: CGRect(x: 0, y: 0, width: 32, height: 24), device: nil)
