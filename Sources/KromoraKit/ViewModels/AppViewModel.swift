@@ -1632,6 +1632,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             pendingImportOutcome = (summary, prefix)
             return
         }
+        pendingImportOutcome = nil
         statusMessage = summary.status(prefix: prefix)
     }
 
