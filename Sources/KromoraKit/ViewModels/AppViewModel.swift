@@ -778,9 +778,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         editorDocument.revision(for: assetID)
     }
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
-    func invalidateEditedThumbnail(for assetID: PhotoAssetID) {
-        collection.invalidateEditedThumbnail(for: assetID)
-    }
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         collection.applyEditedThumbnail(image, for: assetID, revision: revision)
     }

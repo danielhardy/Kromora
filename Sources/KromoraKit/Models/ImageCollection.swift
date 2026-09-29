@@ -136,14 +136,7 @@ final class ImageCollectionPresentationModel {
             displayNameOverride = name
         }
 
-        func invalidateEditedThumbnail() {
-            editedThumbnailRevision = nil
-            editedThumbnailUsesFallback = false
-            thumbnail = originalThumbnail
-        }
-
         func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
-            guard editedThumbnailRevision != revision || editedThumbnailUsesFallback else { return }
             editedThumbnailRevision = revision
             editedThumbnailUsesFallback = thumbnail == nil
             self.thumbnail = thumbnail ?? originalThumbnail
@@ -547,7 +540,6 @@ final class ImageCollectionPresentationModel {
         isScanning = false
     }
 
-    func invalidateEditedThumbnail(for id: PhotoAssetID) { items.first { $0.id == id }?.invalidateEditedThumbnail() }
     func applyEditedThumbnail(_ thumbnail: NSImage?, for id: PhotoAssetID, revision: String) {
         items.first { $0.id == id }?.applyEditedThumbnail(thumbnail, revision: revision)
     }
