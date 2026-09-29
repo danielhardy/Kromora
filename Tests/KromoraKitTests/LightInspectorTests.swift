@@ -139,6 +139,26 @@ final class LightInspectorTests: TempDirectoryTestCase {
         ))
     }
 
+    func testToneCurveGraphPinsItsVerticalSizeInsideTheScrollingInspector() throws {
+        let source = try lightInspectorSource()
+        let sizingComment = try XCTUnwrap(source.range(of: "// Keep the graph square while"))
+        let notificationHandler = try XCTUnwrap(
+            source.range(
+                of: ".onReceive(NotificationCenter.default.publisher",
+                range: sizingComment.lowerBound..<source.endIndex
+            )
+        )
+        let sizing = source[sizingComment.lowerBound..<notificationHandler.lowerBound]
+
+        XCTAssertTrue(sizing.contains(".aspectRatio(1, contentMode: .fit)"))
+        XCTAssertTrue(sizing.contains(".frame(maxWidth: 220, alignment: .center)"))
+        XCTAssertTrue(sizing.contains(".fixedSize(horizontal: false, vertical: true)"))
+
+        // Visual check: with Light > Tone Curve expanded, move between photos with the arrow keys,
+        // then drag Exposure through several values. The square graph and controls below it should
+        // keep the same size and y-position while the preview loading indicator appears and clears.
+    }
+
     func testLightSliderGestureIsOneUndoOperation() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.beginPreviewInteraction()
