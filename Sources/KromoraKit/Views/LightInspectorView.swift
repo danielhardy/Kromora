@@ -253,7 +253,7 @@ private struct ToneCurveEditor: View {
             .position(position(for: point, in: size))
         .simultaneousGesture(
             SpatialTapGesture(count: 2)
-                .onEnded { _ in removePoint(point) }
+                .onEnded { _ in doubleClickPoint(point) }
         )
         .focusable()
         .accessibilityAddTraits(.isButton)
@@ -289,7 +289,7 @@ private struct ToneCurveEditor: View {
 
         if curveDrag == nil {
             let curve = viewModel.document.light.toneCurve(for: channel)
-            if let existing = curve.nearestPoint(toInput: coordinate.input) {
+            if let existing = curve.nearestHandle(to: location, in: size) {
                 viewModel.beginPreviewInteraction()
                 curveDrag = .point(input: existing.input, moved: false)
             } else {
@@ -345,6 +345,21 @@ private struct ToneCurveEditor: View {
         viewModel.beginPreviewInteraction()
         viewModel.removeToneCurvePoint(atInput: point.input, channel: channel)
         viewModel.endPreviewInteraction()
+    }
+
+    private func doubleClickPoint(_ point: LightCurvePoint) {
+        guard let index = editablePoints.firstIndex(of: point) else { return }
+        if index == editablePoints.startIndex {
+            viewModel.beginPreviewInteraction()
+            viewModel.setToneCurvePoint(point, input: 0, output: 0, channel: channel)
+            viewModel.endPreviewInteraction()
+        } else if index == editablePoints.index(before: editablePoints.endIndex) {
+            viewModel.beginPreviewInteraction()
+            viewModel.setToneCurvePoint(point, input: 1, output: 1, channel: channel)
+            viewModel.endPreviewInteraction()
+        } else {
+            removePoint(point)
+        }
     }
 }
 

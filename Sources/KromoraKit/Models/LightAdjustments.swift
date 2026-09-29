@@ -207,6 +207,40 @@ struct LightToneCurve: Codable, Equatable, Sendable {
         return points[index]
     }
 
+    /// Return the handle whose rendered center is nearest to a pointer location.
+    ///
+    /// The editor draws handles in two-dimensional graph coordinates, so hit testing in normalized
+    /// input alone can select a different point when curves have nearby inputs or handles are
+    /// vertically separated. `hitRadius` is measured in points and should cover the visible thumb
+    /// plus a small pointer target margin.
+    func nearestHandle(
+        to location: CGPoint, in size: CGSize, hitRadius: CGFloat = 12
+    ) -> LightCurvePoint? {
+        guard location.x.isFinite, location.y.isFinite,
+              size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0,
+              hitRadius >= 0, !points.isEmpty else { return nil }
+
+        let nearest = points.min { lhs, rhs in
+            distanceSquared(to: lhs, location: location, size: size)
+                < distanceSquared(to: rhs, location: location, size: size)
+        }
+        guard let nearest,
+              distanceSquared(to: nearest, location: location, size: size) <= hitRadius * hitRadius
+        else {
+            return nil
+        }
+        return nearest
+    }
+
+    private func distanceSquared(
+        to point: LightCurvePoint, location: CGPoint, size: CGSize
+    ) -> CGFloat {
+        let deltaX = CGFloat(point.input) * size.width - location.x
+        let deltaY = CGFloat(1 - point.output) * size.height - location.y
+        return deltaX * deltaX + deltaY * deltaY
+    }
+
     /// Return a curve with the interior point nearest to `input` removed.
     ///
     /// Endpoints are deliberately never candidates. A small hit tolerance makes this useful for

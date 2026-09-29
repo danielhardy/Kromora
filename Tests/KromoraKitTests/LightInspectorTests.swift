@@ -351,6 +351,67 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertNil(curve.nearestPoint(toInput: 0.2))
     }
 
+    func testToneCurveHandleHitTestingUsesRenderedPositionsAtInspectorSizes() {
+        let curve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.08, output: 0.18),
+            LightCurvePoint(input: 0.12, output: 0.72),
+            LightCurvePoint(input: 0.55, output: 0.5),
+            LightCurvePoint(input: 0.88, output: 0.82),
+            LightCurvePoint(input: 0.92, output: 0.25),
+        ], preserveEndpointPositions: true)
+
+        for edge in [CGFloat(120), 180, 260] {
+            let size = CGSize(width: edge, height: edge)
+            // A point 9 pt from the moved-in black handle remains within its 12 pt hit radius.
+            // At the largest size, its input is outside the old 0.03 endpoint tolerance, while
+            // its rendered position is still closest to the endpoint rather than its neighbor.
+            let blackHandleCenter = CGPoint(x: 0.08 * edge, y: (1 - 0.18) * edge)
+            let blackPress = CGPoint(x: blackHandleCenter.x + 9, y: blackHandleCenter.y)
+            XCTAssertEqual(curve.nearestHandle(to: blackPress, in: size), curve.points.first)
+
+            let whiteHandleCenter = CGPoint(x: 0.92 * edge, y: (1 - 0.25) * edge)
+            let whitePress = CGPoint(x: whiteHandleCenter.x - 9, y: whiteHandleCenter.y)
+            XCTAssertEqual(curve.nearestHandle(to: whitePress, in: size), curve.points.last)
+
+            XCTAssertNil(curve.nearestHandle(to: CGPoint(x: 0, y: edge / 2), in: size))
+        }
+    }
+
+    func testDoubleClickEndpointResetPreservesInteriorPointsAndGroupsUndo() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let redCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.08, output: 0.12),
+            LightCurvePoint(input: 0.3, output: 0.42),
+            LightCurvePoint(input: 0.7, output: 0.76),
+            LightCurvePoint(input: 0.91, output: 0.88),
+        ], preserveEndpointPositions: true)
+        viewModel.updateDocument { $0.light.setToneCurve(redCurve, for: .red) }
+
+        let black = try XCTUnwrap(redCurve.points.first)
+        viewModel.beginPreviewInteraction()
+        viewModel.setToneCurvePoint(black, input: 0, output: 0, channel: .red)
+        viewModel.endPreviewInteraction()
+        let afterBlackReset = viewModel.document.light.toneCurve(for: .red)
+        XCTAssertEqual(afterBlackReset.points.first, LightCurvePoint(input: 0, output: 0))
+        XCTAssertEqual(Array(afterBlackReset.points.dropFirst().dropLast()),
+                       Array(redCurve.points.dropFirst().dropLast()))
+        viewModel.undo()
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .red), redCurve)
+
+        let white = try XCTUnwrap(redCurve.points.last)
+        viewModel.beginPreviewInteraction()
+        viewModel.setToneCurvePoint(white, input: 1, output: 1, channel: .red)
+        viewModel.endPreviewInteraction()
+        let afterWhiteReset = viewModel.document.light.toneCurve(for: .red)
+        XCTAssertEqual(afterWhiteReset.points.last, LightCurvePoint(input: 1, output: 1))
+        XCTAssertEqual(Array(afterWhiteReset.points.dropFirst().dropLast()),
+                       Array(redCurve.points.dropFirst().dropLast()))
+
+        let source = try lightInspectorSource()
+        XCTAssertTrue(source.contains(".onEnded { _ in doubleClickPoint(point) }"))
+        XCTAssertTrue(source.contains("private func doubleClickPoint(_ point: LightCurvePoint)"))
+    }
+
     func testEmptyCurveDragCreatesOnePointAndUndoRedoKeepTheWholeGestureTogether() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let curve = viewModel.document.light.toneCurve
