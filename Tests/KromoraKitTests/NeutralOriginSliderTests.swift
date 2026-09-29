@@ -322,6 +322,40 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(slider.doubleValue, 37)
     }
 
+    func testRepeatedPresentationOfTheSameTargetDoesNotRestartAnimation() async throws {
+        let coordinator = makeCoordinator()
+        let slider = NSSlider()
+        slider.minValue = 0
+        slider.maxValue = 1
+        slider.doubleValue = 0
+
+        coordinator.present(1, on: slider, animated: true)
+        try await Task.sleep(for: .milliseconds(180))
+        let intermediateValue = slider.doubleValue
+        XCTAssertGreaterThan(intermediateValue, 0)
+        XCTAssertLessThan(intermediateValue, 1)
+
+        coordinator.present(1, on: slider, animated: true)
+        try await Task.sleep(for: .milliseconds(260))
+
+        XCTAssertEqual(slider.doubleValue, 1, accuracy: 0.0001)
+    }
+
+    func testSupersedingPresentationFinishesAtTheLatestTarget() async throws {
+        let coordinator = makeCoordinator()
+        let slider = NSSlider()
+        slider.minValue = -1
+        slider.maxValue = 1
+        slider.doubleValue = 0
+
+        coordinator.present(1, on: slider, animated: true)
+        try await Task.sleep(for: .milliseconds(100))
+        coordinator.present(-0.5, on: slider, animated: true)
+        try await Task.sleep(for: .milliseconds(430))
+
+        XCTAssertEqual(slider.doubleValue, -0.5, accuracy: 0.0001)
+    }
+
     // MARK: - Harness
 
     /// Rasterised geometry lands within a pixel or two of the arithmetic, and the fill's rounded
@@ -343,6 +377,15 @@ final class NeutralOriginSliderTests: XCTestCase {
         cell.neutral = neutral
         cell.trackStyle = trackStyle
         return slider
+    }
+
+    private func makeCoordinator() -> NeutralOriginSlider.Coordinator {
+        let binding = Binding<Double>(get: { 0 }, set: { _ in })
+        return NeutralOriginSlider.Coordinator(
+            value: binding,
+            step: nil,
+            onEditingChanged: { _ in }
+        )
     }
 
     private func trackColor(
