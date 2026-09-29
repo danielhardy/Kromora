@@ -49,7 +49,7 @@ final class PortableLibraryPackageTests: TempDirectoryTestCase {
         var package = try PortableLibraryPackage.open(at: packageURL)
         let savedManifest = package.manifest
         try package.rewriteManifest(savedManifest)
-        let rewrittenManifest = try String(contentsOf: packageURL.appendingPathComponent("manifest.json"))
+        let rewrittenManifest = try String(contentsOf: packageURL.appendingPathComponent("manifest.json"), encoding: .utf8)
         XCTAssertTrue(rewrittenManifest.contains("\"futureManifest\": { \"keep\": [1, 2, 3] }"))
 
         let summary = PortablePackageAssetSummary(
@@ -67,7 +67,7 @@ final class PortableLibraryPackageTests: TempDirectoryTestCase {
         let shard = try package.readMembershipShard("ab")
         XCTAssertEqual(shard.entries, [entry])
         try package.writeMembershipShard(shard)
-        let rewrittenShard = try String(contentsOf: packageURL.appendingPathComponent("Catalog/Membership/ab.json"))
+        let rewrittenShard = try String(contentsOf: packageURL.appendingPathComponent("Catalog/Membership/ab.json"), encoding: .utf8)
         XCTAssertTrue(rewrittenShard.contains("\"futureShard\": { \"state\": \"preserve-me\" }"))
 
         let record = PortablePackageAssetRecord(
@@ -85,7 +85,7 @@ final class PortableLibraryPackageTests: TempDirectoryTestCase {
         try JSONSerialization.data(withJSONObject: recordWithFuture, options: [.prettyPrinted, .sortedKeys]).write(to: recordURL)
         let readRecord = try package.readAssetRecord(for: assetID)
         try package.writeAssetRecord(readRecord)
-        let rewrittenRecord = try String(contentsOf: recordURL)
+        let rewrittenRecord = try String(contentsOf: recordURL, encoding: .utf8)
         XCTAssertTrue(rewrittenRecord.contains("\"futureRecord\""))
         XCTAssertTrue(rewrittenRecord.contains("\"unknown\" : true"))
     }

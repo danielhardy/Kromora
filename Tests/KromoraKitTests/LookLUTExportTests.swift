@@ -97,7 +97,7 @@ final class LookLUTExportTests: TempDirectoryTestCase {
             XCTAssertEqual((error as? LookSaveCoordinator.LookSaveError)?.errorDescription,
                            "A Look with that filename already exists. Choose a different name or destination.")
         }
-        XCTAssertEqual(try String(contentsOf: destination), "sentinel")
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "sentinel")
     }
 
     @MainActor
@@ -142,7 +142,7 @@ final class LookLUTExportTests: TempDirectoryTestCase {
         coordinator.allowsApproximateSave = true
         try coordinator.performSave(name: "Approximate Look", to: destination)
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
-        XCTAssertTrue(try String(contentsOf: destination).contains("Verification result: approximate"))
+        XCTAssertTrue(try String(contentsOf: destination, encoding: .utf8).contains("Verification result: approximate"))
     }
 }
 
