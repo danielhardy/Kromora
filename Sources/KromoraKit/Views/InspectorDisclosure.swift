@@ -146,6 +146,7 @@ struct FitsProposedWidth: Layout {
     /// ScrollViewHelper transactions — the update class at the center of KRMA-687.
     struct Cache {
         var proposal: ProposedViewSize = .unspecified
+        var lastProposedWidth: CGFloat?
     }
 
     func makeCache(subviews: Subviews) -> Cache {
@@ -158,7 +159,19 @@ struct FitsProposedWidth: Layout {
         cache: inout Cache
     ) -> CGSize {
         guard let child = subviews.first else { return .zero }
-        let width = proposal.width ?? child.sizeThatFits(.unspecified).width
+        // A vertical ScrollView can briefly measure its content with an unspecified width while
+        // child state is updating. Reusing the last viewport width keeps ideal child sizes from
+        // widening the scroll document during that pass. A concrete proposal still updates the
+        // cache immediately, so resizing the inspector remains responsive.
+        let width: CGFloat
+        if let proposedWidth = proposal.width {
+            width = proposedWidth
+            cache.lastProposedWidth = proposedWidth
+        } else if let lastProposedWidth = cache.lastProposedWidth {
+            width = lastProposedWidth
+        } else {
+            width = child.sizeThatFits(.unspecified).width
+        }
         let measure = ProposedViewSize(width: width, height: proposal.height)
         cache.proposal = measure
         let childSize = child.sizeThatFits(measure)

@@ -164,8 +164,18 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertTrue(picker.contains(".pickerStyle(.segmented)\n            .frame(maxWidth: .infinity)"))
 
         // Visual check: with Light > Tone Curve expanded, move between photos with the arrow keys,
-        // then drag Exposure through several values. The square graph and controls below it should
-        // keep the same size and y-position while the preview loading indicator appears and clears.
+        // then drag Exposure and Contrast through several values. The header, tabs, graph, and
+        // section chrome should stay inside the inspector rail as the preview updates. The graph
+        // should also keep the same size and y-position while the loading indicator appears/clears.
+    }
+
+    func testInspectorRetainsViewportWidthDuringUnspecifiedScrollMeasurements() throws {
+        let source = try inspectorDisclosureSource()
+
+        XCTAssertTrue(source.contains("var lastProposedWidth: CGFloat?"))
+        XCTAssertTrue(source.contains("cache.lastProposedWidth = proposedWidth"))
+        XCTAssertTrue(source.contains("} else if let lastProposedWidth = cache.lastProposedWidth {"))
+        XCTAssertTrue(source.contains("width = child.sizeThatFits(.unspecified).width"))
     }
 
     func testLightSliderGestureIsOneUndoOperation() {
