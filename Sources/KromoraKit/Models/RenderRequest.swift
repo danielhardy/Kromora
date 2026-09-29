@@ -121,9 +121,18 @@ struct RenderRequest: Sendable, Equatable {
         case .preview:
             return .preview(maxSize: targetSize ?? nativeExtent)
         case .interactive:
+            let roiAreaFraction: CGFloat = {
+                guard let sourceROI else { return 1 }
+                let sourceArea = nativeExtent.width * nativeExtent.height
+                let roiArea = sourceROI.width * sourceROI.height
+                guard sourceArea.isFinite, sourceArea > 0,
+                      roiArea.isFinite, roiArea > 0 else { return 1 }
+                return min(roiArea / sourceArea, 1)
+            }()
             return .interactive(
                 maxSize: targetSize ?? nativeExtent,
-                frameBudgetMilliseconds: frameBudgetMilliseconds
+                frameBudgetMilliseconds: frameBudgetMilliseconds,
+                budgetAreaFraction: roiAreaFraction
             )
         case .fullResolution:
             return .full

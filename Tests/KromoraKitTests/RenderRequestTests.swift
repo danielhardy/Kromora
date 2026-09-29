@@ -33,6 +33,43 @@ final class RenderRequestTests: TempDirectoryTestCase {
         )
     }
 
+    func testInteractivePixelBudgetTracksVisibleROIAcrossZoomLevels() throws {
+        let native = CGSize(width: 6_000, height: 4_000)
+        let source = ImageSource(data: Data("zoom-budget".utf8), nativeExtent: native)
+        let viewport = CGSize(width: 1_200, height: 900)
+
+        for zoom in [2.0, 4.0, 8.0] {
+            var navigation = CanvasNavigation()
+            navigation.setZoom(zoom)
+            var planner = ResolutionPlanner()
+            let plan = planner.plan(
+                nativeExtent: native, viewportSize: viewport, navigation: navigation
+            )
+            let roi = try XCTUnwrap(plan.previewSourceROI(nativeExtent: native))
+            let interactive = RenderRequest(
+                source: source, document: EditDocument(), targetSize: plan.sourceSize,
+                sourceROI: roi, quality: .interactive
+            )
+            let settled = RenderRequest(
+                source: source, document: EditDocument(), targetSize: plan.sourceSize,
+                sourceROI: roi, quality: .preview
+            )
+
+            let expectedInteractiveFactor = min(
+                plan.scale,
+                sqrt(1_500_000 / (roi.width * roi.height))
+            )
+            XCTAssertEqual(
+                interactive.renderScale.factor(for: native), expectedInteractiveFactor,
+                accuracy: 0.0001, "interactive detail at \(zoom)x"
+            )
+            XCTAssertEqual(
+                settled.renderScale.factor(for: native), plan.scale,
+                accuracy: 0.0001, "settled detail at \(zoom)x"
+            )
+        }
+    }
+
     func testQualityControlsExtentWithoutChangingTheEditModel() async throws {
         let source = try makeSource()
         let document = EditDocument(adjustments: [.exposure(ev: 0.35)])

@@ -17,7 +17,12 @@ enum RenderScale: Sendable, Equatable {
     /// Interaction policy. The input is the canvas backing-pixel size, not a fixed export box.
     /// Interactive rendering intentionally uses a bounded pixel budget so a large RAW cannot
     /// monopolize the GPU past the next display tick.
-    case interactive(maxSize: CGSize, frameBudgetMilliseconds: Double = 16.7)
+    /// `budgetAreaFraction` is the fraction of the source covered by the requested visible ROI.
+    case interactive(
+        maxSize: CGSize,
+        frameBudgetMilliseconds: Double = 16.7,
+        budgetAreaFraction: CGFloat = 1
+    )
     /// Native resolution.
     case full
 
@@ -30,12 +35,14 @@ enum RenderScale: Sendable, Equatable {
     var targetSize: CGSize? {
         switch self {
         case .preview(let maxSize): return maxSize
-        case .interactive(let maxSize, let budget):
+        case .interactive(let maxSize, let budget, let budgetAreaFraction):
             let safeBudget = budget.isFinite && budget > 0 ? budget : 16.7
-            // The 1.5 MP cap is the interaction budget calibrated against the existing preview
-            // benchmark. Scale it by the requested frame budget, while always respecting the
-            // actual drawable size and never upscaling.
-            let budgetPixels = 1_500_000.0 * safeBudget / 16.7
+            // Bound the pixels processed for the visible ROI, rather than the complete source.
+            // At high zoom the ROI may be a small fraction of a large source: applying this budget
+            // to the full source needlessly discards the detail needed for the visible canvas.
+            let safeAreaFraction = budgetAreaFraction.isFinite && budgetAreaFraction > 0
+                ? min(budgetAreaFraction, 1) : 1
+            let budgetPixels = 1_500_000.0 * safeBudget / 16.7 / safeAreaFraction
             guard maxSize.width > 0, maxSize.height > 0,
                   maxSize.width.isFinite, maxSize.height.isFinite else { return maxSize }
             let pixels = maxSize.width * maxSize.height
