@@ -259,6 +259,35 @@ final class RenderPipelineTests: TempDirectoryTestCase {
         )
     }
 
+    func testNoiseControlValuesSurviveDocumentReopenAndReachTheSharedRenderPath() throws {
+        for (control, chromaNoise) in [
+            (DetailControl.luminanceNoise, false),
+            (DetailControl.colorNoise, true),
+        ] {
+            let input = noisyDetailFixture(chromaNoise: chromaNoise)
+            let baseline = detailPixels(input)
+            let baselineEnergy = detailNoiseEnergy(baseline, chroma: chromaNoise)
+            var document = EditDocument()
+            control.setting(70, in: &document.effects.detail)
+            let reopenedDocument = try JSONDecoder().decode(
+                EditDocument.self, from: JSONEncoder().encode(document)
+            )
+
+            let rendered = RenderPipeline.buildPreLUTImage(
+                developed: input,
+                document: reopenedDocument,
+                spatialReferenceExtent: input.extent
+            )
+            let renderedEnergy = detailNoiseEnergy(detailPixels(rendered), chroma: chromaNoise)
+
+            XCTAssertLessThan(
+                renderedEnergy,
+                baselineEnergy * 0.8,
+                "\(control.title) should reduce deterministic noise through the shared render path after document reopen"
+            )
+        }
+    }
+
     func testSharpeningIncreasesFineDetailMonotonicallyAndNeutralPreservesPixels() throws {
         let input = noisyDetailFixture(chromaNoise: false)
         let baseline = detailPixels(input)

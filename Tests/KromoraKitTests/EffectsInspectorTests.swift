@@ -69,6 +69,21 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(decoded.detail, .neutral)
     }
 
+    func testNoiseInspectorBindingsWriteIndependentValuesToThePersistableDocument() throws {
+        let viewModel = makeAppViewModel()
+
+        viewModel.detailBinding(for: .luminanceNoise).wrappedValue = 70
+        viewModel.detailBinding(for: .colorNoise).wrappedValue = 35
+
+        XCTAssertEqual(viewModel.document.effects.detail.luminanceNoise, 70)
+        XCTAssertEqual(viewModel.document.effects.detail.colorNoise, 35)
+        let reopenedDocument = try JSONDecoder().decode(
+            EditDocument.self, from: JSONEncoder().encode(viewModel.document)
+        )
+        XCTAssertEqual(reopenedDocument.effects.detail.luminanceNoise, 70)
+        XCTAssertEqual(reopenedDocument.effects.detail.colorNoise, 35)
+    }
+
     func testEveryDetailControlNeutralValueFallsWithinItsOwnRange() {
         for control in DetailControl.allCases {
             XCTAssertTrue(
