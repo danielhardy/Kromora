@@ -573,6 +573,7 @@ private struct CanvasToolbarControls: View {
             Button("Reset View") { viewModel.resetCanvas() }
         } label: {
             Label("\(canvasState.navigation.zoomPercent)%", systemImage: "magnifyingglass")
+                .labelStyle(.titleAndIcon)
         }
         .help("Canvas zoom: fit, fill, or explicit zoom")
         .accessibilityLabel("Canvas zoom")
