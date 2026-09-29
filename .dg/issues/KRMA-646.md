@@ -11,10 +11,10 @@ creation_provenance:
 labels:
   - verification
 created: 2026-09-27T05:10:45.074Z
-updated: 2026-09-28T21:56:24.020Z
+updated: 2026-09-29T01:16:02.220Z
 parent: KRMA-595
 blockers: []
-order: k
+order: "8"
 board: product
 ---
 

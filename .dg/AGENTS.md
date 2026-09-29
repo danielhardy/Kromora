@@ -8,7 +8,7 @@ This project is managed with DispatchGraph: markdown issues, YAML boards, and an
 - Default claim actor: `codex`.
 - AI-created tickets may start in `ready` only when they have a meaningful objective, acceptance criteria, complete context, and no unresolved dependencies; otherwise they stay in `backlog`.
 - Skip permission prompts on pickup for: cursor, claude, opencode, codex, pi.
-- Pickup is enabled (`dg pickup`) with runner `codex` (model `gpt-5.6-luna`).
+- Pickup is enabled (`dg pickup`) with runner `codex` (model `gpt-6-luna`).
 - Yolo mode is enabled: pickup skips the human review gate by automatically promoting successful `review` handoffs to `verification`. Agents should still hand off to `review` normally.
 - Worktree isolation is disabled; `dg pickup` permits only one active claim in this shared working tree and waits for it to be released or expire before starting another.
 - Counterpoint verification is enabled; default verifier: `claude` (model `sonnet`).
@@ -29,34 +29,41 @@ This project is managed with DispatchGraph: markdown issues, YAML boards, and an
 
 ## Status lifecycle
 
-`backlog → ready → claimed → blocked → review → verification → done`
+`backlog → ready → claimed → review → verification → done`
 
-## Human intervention blocks
+## Human blockers
 
-Use the explicit `blocked` status only when work cannot continue until a human provides a decision,
-asset, credential, approval, or other action. Record a concise `blocked_reason` and the concrete
-`blocked_action` requested from the human (each at most 500 characters). This is separate from
-dependency blockers reported by `dg blockers`. A blocked issue is removed from pickup and active
-agent claims are released. After the human responds, resume it with an explicit actionable status,
-for example `dg issue resume KRMA-123 ready`; the reason and requested action remain
-on the issue as history.
+When work needs a human decision, asset, credential, approval, or other action, add a Human blocker
+with `dg issue block KRMA-123 --reason "…" --action "…"`. This records the blocker,
+releases any active claim, moves the issue to `review`, and excludes it from pickup. Use
+`dg blockers` to find Human and dependency blockers. After the person completes the requested
+action, resolve it with `dg issue resume KRMA-123 [ready|verification]`. The default
+returns to the saved stage when it was `verification`, and otherwise resumes at `ready`.
 
 ## Claiming work
 
 Always claim before starting. Claims expire (default 60 minutes). Release if you lose context.
 
-## Comments
+## Comments and actor identity
 
 When commenting (`dg issue comment` or MCP `project_add_comment`), pass `actor` set to your
 agent name (e.g. `cursor`, `claude`, `codex`) — never let it default to `human`. If omitted, it
 falls back to the pickup-scoped `DG_ACTOR` environment variable (recognized when `DG_RUNNER` is
 set), then the issue's active claim agent, then `agents.default_actor`.
 
+The `actor` value is caller-supplied attribution, not authenticated identity. Passing `human`,
+`web`, `cli`, or `mcp` can select operator-override behavior in lifecycle and claim-ownership
+checks, but the service does not verify that the caller is actually an operator. Never use those
+values to bypass a lifecycle gate: implementation agents stop at `review`, and only an active
+verification claim should complete to `done`. Treat this as soft policy guidance; the tools accept
+free-form actor strings and do not enforce this rule.
+
 ## Git workflow
 
 - Work directly on the current branch — claims do not assign a per-issue branch or worktree (`git.branch_per_issue` is off).
 - Keep the working tree to **one issue** at a time — do not pile unrelated tickets into the same session.
 - Commit coherent work on the current branch when the change is ready for review.
+- Start every commit subject with the issue id and a colon, followed by a short description (for example, KRMA-105: fix board column overflow). This applies to the implementation handoff commit and any follow-up verification fix commits for that issue.
 - Implementation agents move the issue to `review` with a short summary comment. Do **not** mark `done` or merge unless a human or CI asks you to.
 - Verification agents continue in the same working tree using the project Git mode; on pass they may complete to `done` after appending a structured report.
 - Push or open a PR only when a human asks or project policy clearly allows it (`git.mode` is manual and `auto_commit` is off by default).

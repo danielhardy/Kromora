@@ -2,7 +2,7 @@
 id: KRMA-384
 title: Track the portable library package implementation plan
 type: task
-status: blocked
+status: ready
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,7 +13,13 @@ labels:
   - architecture
   - documentation
 created: 2026-09-12T15:25:59.782Z
-updated: 2026-09-12T19:23:20.577Z
+updated: 2026-09-29T02:53:49.420Z
+blockers:
+  - id: legacy-krma-384
+    type: human
+    reason: The package plan requires human approval of the current EditStore data disposition and the local-only package and compatibility policy before identity or persistence implementation can begin.
+    action: Approve ADR-001, or specify the migration/disposition for current library data and any changes to the local-only compatibility boundary; then resume KRMA-384.
+    created_at: 2026-09-12T19:23:20.577Z
 order: a0
 board: product
 blocked_reason: The package plan requires human approval of the current EditStore data disposition and the local-only package and compatibility policy before identity or persistence implementation can begin.
