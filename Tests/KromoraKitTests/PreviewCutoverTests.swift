@@ -753,6 +753,10 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.histogram, firstHistogram,
                        "a pending photo switch keeps the last published chart visible")
         XCTAssertTrue(viewModel.isHistogramLoading)
+        XCTAssertFalse(
+            viewModel.isNavigationLoading,
+            "the selected frame is presented even while its histogram is still computing"
+        )
 
         await fake.releaseNextHistogram()
         try await waitUntil("the current second photo histogram result") {
