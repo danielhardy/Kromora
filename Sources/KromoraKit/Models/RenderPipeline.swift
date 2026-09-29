@@ -48,8 +48,9 @@ enum RenderPipeline {
     /// bounded vertical/horizontal perspective stage. v30 normalizes straighten output onto its
     /// geometry AABB so post-geometry ROI previews share the planner's frame. v31 aligns the
     /// standard-image Tint sign with the green-to-magenta UI track; previously positive values
-    /// rendered greener while RAW positive values rendered magenta.
-    static let cacheVersion = 33
+    /// rendered greener while RAW positive values rendered magenta. v34 gives luminance and colour
+    /// noise reduction independent filter passes; the previous max-based mapping made them aliases.
+    static let cacheVersion = 34
 
     /// Build the graph for `document` over `source`.
     ///
@@ -263,8 +264,9 @@ enum RenderPipeline {
             ), to: adjusted)
             adjusted = applyDetailControls(DetailAdjustments(
                 sharpeningAmount: layer.adjustments.sharpness,
-                luminanceNoise: layer.adjustments.noiseReduction,
-                colorNoise: layer.adjustments.noiseReduction
+                // A local layer has one Noise Reduction control. Route it through the luminance
+                // path once; setting both global controls would apply two full filter passes.
+                luminanceNoise: layer.adjustments.noiseReduction
             ), to: adjusted, referenceExtent: input.extent)
             if layer.adjustments.moireReduction > 0 {
                 let softened = adjusted.applyingFilter("CIMedianFilter").cropped(to: adjusted.extent)
@@ -1085,18 +1087,34 @@ enum RenderPipeline {
         guard !detail.isIdentity else { return image }
         let extent = image.extent
         var result = image
-        let noise = max(detail.luminanceNoise, detail.colorNoise) / 100
-        if noise > 0 {
-            let level = CGFloat(noise * 0.1)
-            let retention = CGFloat((detail.luminanceDetail + detail.colorDetail) / 200)
+        // Keep these controls independent. CINoiseReduction's noiseLevel is the actual threshold;
+        // scaling the same filter by max(luminance, colour) made the sliders aliases, and the old
+        // 0.1 ceiling plus a second blend attenuation left moderate settings barely visible.
+        // Apple's filter example uses 0.2, so map the full control range to that threshold and use
+        // each control's Contrast setting only to retain more of the unfiltered source.
+        if detail.luminanceNoise > 0 {
+            let amount = CGFloat(detail.luminanceNoise / 100)
             let denoised = result.applyingFilter("CINoiseReduction", parameters: [
-                "inputNoiseLevel": level,
-                "inputSharpness": retention,
+                "inputNoiseLevel": amount * 0.2,
+                "inputSharpness": CGFloat(detail.luminanceDetail / 100),
             ]).cropped(to: extent)
-            let contrastRetention = CGFloat((detail.luminanceContrast + detail.colorContrast) / 200)
-            result = blend(effect: denoised, over: result,
-                           amount: CGFloat(noise) * (1 - contrastRetention * 0.65),
-                           mask: nil, extent: extent)
+            result = blend(
+                effect: denoised, over: result,
+                amount: amount * (1 - CGFloat(detail.luminanceContrast / 100) * 0.65),
+                mask: nil, extent: extent
+            )
+        }
+        if detail.colorNoise > 0 {
+            let amount = CGFloat(detail.colorNoise / 100)
+            let denoised = result.applyingFilter("CINoiseReduction", parameters: [
+                "inputNoiseLevel": amount * 0.2,
+                "inputSharpness": CGFloat(detail.colorDetail / 100),
+            ]).cropped(to: extent)
+            result = blend(
+                effect: denoised, over: result,
+                amount: amount * (1 - CGFloat(detail.colorContrast / 100) * 0.65),
+                mask: nil, extent: extent
+            )
         }
         if detail.sharpeningAmount > 0 {
             let referenceShortSide = max(1, min(referenceExtent.width, referenceExtent.height))
