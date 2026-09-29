@@ -10,6 +10,15 @@ private func roundedClamped(
         .rounded(.toNearestOrAwayFromZero)
 }
 
+private func clamped(
+    _ value: Double,
+    to range: ClosedRange<Double>,
+    default fallback: Double
+) -> Double {
+    guard value.isFinite else { return fallback }
+    return min(max(value, range.lowerBound), range.upperBound)
+}
+
 /// Photographer-facing controls for the post-crop vignette.
 ///
 /// The renderer maps these normalized values to a mask over the image extent it receives. The
@@ -127,16 +136,36 @@ struct GrainAdjustments: Codable, Equatable, Sendable {
 /// Values are image-relative and therefore behave consistently at preview and export sizes.
 struct DetailAdjustments: Codable, Equatable, Sendable {
     static let neutral = DetailAdjustments()
-    var sharpeningRadius: Double
-    var sharpeningAmount: Double
-    var sharpeningDetail: Double
-    var sharpeningMasking: Double
-    var luminanceNoise: Double
-    var luminanceDetail: Double
-    var luminanceContrast: Double
-    var colorNoise: Double
-    var colorDetail: Double
-    var colorContrast: Double
+    var sharpeningRadius: Double {
+        didSet { sharpeningRadius = clamped(sharpeningRadius, to: 0.1...5, default: 1) }
+    }
+    var sharpeningAmount: Double {
+        didSet { sharpeningAmount = roundedClamped(sharpeningAmount, to: 0...100, default: 0) }
+    }
+    var sharpeningDetail: Double {
+        didSet { sharpeningDetail = roundedClamped(sharpeningDetail, to: 0...100, default: 50) }
+    }
+    var sharpeningMasking: Double {
+        didSet { sharpeningMasking = roundedClamped(sharpeningMasking, to: 0...100, default: 0) }
+    }
+    var luminanceNoise: Double {
+        didSet { luminanceNoise = roundedClamped(luminanceNoise, to: 0...100, default: 0) }
+    }
+    var luminanceDetail: Double {
+        didSet { luminanceDetail = roundedClamped(luminanceDetail, to: 0...100, default: 50) }
+    }
+    var luminanceContrast: Double {
+        didSet { luminanceContrast = roundedClamped(luminanceContrast, to: 0...100, default: 0) }
+    }
+    var colorNoise: Double {
+        didSet { colorNoise = roundedClamped(colorNoise, to: 0...100, default: 0) }
+    }
+    var colorDetail: Double {
+        didSet { colorDetail = roundedClamped(colorDetail, to: 0...100, default: 50) }
+    }
+    var colorContrast: Double {
+        didSet { colorContrast = roundedClamped(colorContrast, to: 0...100, default: 0) }
+    }
 
     init(
         sharpeningRadius: Double = 1, sharpeningAmount: Double = 0,
@@ -145,7 +174,7 @@ struct DetailAdjustments: Codable, Equatable, Sendable {
         luminanceContrast: Double = 0, colorNoise: Double = 0, colorDetail: Double = 50,
         colorContrast: Double = 0
     ) {
-        self.sharpeningRadius = roundedClamped(sharpeningRadius, to: 0.1...5, default: 1)
+        self.sharpeningRadius = clamped(sharpeningRadius, to: 0.1...5, default: 1)
         self.sharpeningAmount = roundedClamped(sharpeningAmount, to: 0...100, default: 0)
         self.sharpeningDetail = roundedClamped(sharpeningDetail, to: 0...100, default: 50)
         self.sharpeningMasking = roundedClamped(sharpeningMasking, to: 0...100, default: 0)

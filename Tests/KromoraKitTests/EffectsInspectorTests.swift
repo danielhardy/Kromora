@@ -54,6 +54,16 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
             control.setting(control == .sharpeningRadius ? 3.2 : 64, in: &detail)
             XCTAssertEqual(control.value(in: detail), control == .sharpeningRadius ? 3.2 : 64)
         }
+        detail.sharpeningRadius = 99
+        detail.sharpeningAmount = 101
+        XCTAssertEqual(detail.sharpeningRadius, 5)
+        XCTAssertEqual(detail.sharpeningAmount, 100)
+
+        let fractionalRadius = try JSONDecoder().decode(
+            DetailAdjustments.self,
+            from: Data(#"{"sharpeningRadius":3.2}"#.utf8)
+        )
+        XCTAssertEqual(fractionalRadius.sharpeningRadius, 3.2)
         let legacy = Data(#"{"texture":0,"clarity":0,"dehaze":0}"#.utf8)
         let decoded = try JSONDecoder().decode(EffectsAdjustments.self, from: legacy)
         XCTAssertEqual(decoded.detail, .neutral)
@@ -208,7 +218,11 @@ final class EffectsInspectorTests: TempDirectoryTestCase {
         let document = EditDocument(effects: EffectsAdjustments(
             texture: 30, clarity: -12, dehaze: 55,
             vignette: VignetteAdjustments(amount: 70, midpoint: 35, roundness: -20, feather: 80, highlights: 45),
-            grain: GrainAdjustments(amount: 65, size: 25, roughness: 85)
+            grain: GrainAdjustments(amount: 65, size: 25, roughness: 85),
+            detail: DetailAdjustments(
+                sharpeningRadius: 2.4, sharpeningAmount: 62,
+                sharpeningDetail: 73, sharpeningMasking: 18
+            )
         ))
         let data = try JSONEncoder().encode(document)
         let copy = try JSONDecoder().decode(EditDocument.self, from: data)
