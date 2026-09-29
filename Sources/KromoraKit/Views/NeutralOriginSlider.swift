@@ -137,6 +137,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
         var onEditingChanged: (Bool) -> Void
         private(set) var isTracking = false
         private var valueAnimation: Task<Void, Never>?
+        private var valueAnimationTarget: Double?
         private var animationAssetID: PhotoAssetID?
         private var sourceAnimationDeadline = 0.0
 
@@ -176,8 +177,14 @@ struct NeutralOriginSlider: NSViewRepresentable {
         }
 
         func present(_ target: Double, on slider: NSSlider, animated: Bool) {
+            // SwiftUI may update the representable several times while one presentation is in
+            // flight. Re-applying its bound target must not restart the easing curve from the
+            // slider's intermediate value; doing so repeatedly makes the knob appear to pause.
+            if animated, valueAnimation != nil, valueAnimationTarget == target { return }
+
             valueAnimation?.cancel()
             valueAnimation = nil
+            valueAnimationTarget = nil
 
             guard animated else {
                 slider.doubleValue = target
@@ -188,6 +195,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
             let start = slider.doubleValue
             let startTime = ProcessInfo.processInfo.systemUptime
             let duration = 0.38
+            valueAnimationTarget = target
             valueAnimation = Task { @MainActor [weak self, weak slider] in
                 while !Task.isCancelled {
                     guard let slider else { return }
@@ -208,6 +216,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
                 slider.doubleValue = target
                 slider.needsDisplay = true
                 self.valueAnimation = nil
+                self.valueAnimationTarget = nil
             }
         }
 
@@ -229,6 +238,7 @@ struct NeutralOriginSlider: NSViewRepresentable {
             if tracking {
                 valueAnimation?.cancel()
                 valueAnimation = nil
+                valueAnimationTarget = nil
             }
             onEditingChanged(tracking)
         }
