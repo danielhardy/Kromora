@@ -179,6 +179,65 @@ final class PresentationFrameClassifierTests: XCTestCase {
     }
 }
 
+final class ThumbnailFrameStoreTests: TempDirectoryTestCase {
+    func testStableKeysReplaceTheLiveEditedRecordAndSurviveRelaunch() async throws {
+        let identity = FrameFixtures.identity()
+        let directory = tempDirectory.appendingPathComponent("Thumbnails")
+        let store = ThumbnailFrameStore(directory: directory)
+        let first = try thumbnailFrame(identity: identity, kind: .editedThumbnail480, red: 0.2)
+        let second = try thumbnailFrame(identity: identity, kind: .editedThumbnail480, red: 0.8)
+        let original = try thumbnailFrame(identity: identity, kind: .originalThumbnail480, red: 0.4)
+
+        await store.enqueueWrite(first)
+        await store.enqueueWrite(second)
+        await store.enqueueWrite(original)
+        let pendingCount = await store.pendingWriteCount
+        XCTAssertEqual(pendingCount, 2)
+        await store.flush()
+        let liveCount = await store.liveEntryCount
+        XCTAssertEqual(liveCount, 2)
+
+        let relaunched = ThumbnailFrameStore(directory: directory)
+        let frames = await relaunched.readFrames(for: identity)
+        XCTAssertEqual(frames.original?.frame.kind, .originalThumbnail480)
+        XCTAssertEqual(frames.edited?.frame.kind, .editedThumbnail480)
+        XCTAssertEqual(frames.edited?.frame.rasterData, second.rasterData)
+        let relaunchedCount = await relaunched.liveEntryCount
+        XCTAssertEqual(relaunchedCount, 2)
+    }
+
+    func testReadWindowIsVisibleIDsPlusAtMostOnePrefetchPage() {
+        let visible = (0..<5).map { PhotoAssetID(rawValue: "visible-\($0)") }
+        let following = (0..<80).map { PhotoAssetID(rawValue: "following-\($0)") }
+        let window = ThumbnailFrameReadPolicy.window(visible: visible, following: following)
+
+        XCTAssertEqual(ThumbnailFrameReadPolicy.maxConcurrentReads, 4)
+        XCTAssertEqual(ThumbnailFrameReadPolicy.prefetchPageSize, 24)
+        XCTAssertEqual(window.count, ThumbnailFrameReadPolicy.windowCap(visibleCount: visible.count))
+        XCTAssertEqual(Array(window.prefix(visible.count)), visible)
+        XCTAssertEqual(Set(window).count, window.count)
+    }
+
+    private func thumbnailFrame(
+        identity: PortablePhotoIdentity, kind: PresentationFrameKind, red: CGFloat
+    ) throws -> PresentationFrame {
+        let base = try FrameFixtures.frame(identity: identity, red: red)
+        let baseMetadata = base.metadata
+        let metadata = PresentationFrameMetadata(
+            identity: baseMetadata.identity,
+            kind: kind,
+            signature: baseMetadata.signature,
+            geometry: baseMetadata.geometry,
+            rasterColorSpace: baseMetadata.rasterColorSpace,
+            perceptualDigest: baseMetadata.perceptualDigest,
+            presentedAt: baseMetadata.presentedAt,
+            pixelWidth: baseMetadata.pixelWidth,
+            pixelHeight: baseMetadata.pixelHeight
+        )
+        return PresentationFrame(metadata: metadata, rasterData: base.rasterData)
+    }
+}
+
 final class PresentationFrameEnvelopeTests: TempDirectoryTestCase {
     private func write(_ frame: PresentationFrame, named name: String = "frame.kframe") throws -> URL {
         let url = tempDirectory.appendingPathComponent(name)

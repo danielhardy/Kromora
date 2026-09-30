@@ -682,8 +682,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let workScheduler: ImageWorkScheduler
     /// Edit-aware collection thumbnail scheduling and cache publication.
     private lazy var editedThumbnailCoordinator = EditedThumbnailCoordinator(
-        workScheduler: workScheduler, engine: engine, editStore: editStore, destination: self
+        workScheduler: workScheduler, engine: engine, editStore: editStore,
+        frameStore: thumbnailFrameStore, destination: self
     )
+    /// Persisted original and latest-edited thumbnails in `Derived/Thumbnails`. Rebuildable cache:
+    /// losing it costs a decode or render, never an edit.
+    let thumbnailFrameStore: ThumbnailFrameStore
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
     let editStore: EditDocumentStore
@@ -795,6 +799,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         collection.applyEditedThumbnail(image, for: assetID, revision: revision)
+    }
+    func applyStoredEditedThumbnail(_ image: NSImage, for assetID: PhotoAssetID) {
+        collection.applyStoredEditedThumbnail(image, for: assetID)
     }
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
@@ -911,6 +918,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
         previewFrameStoreDirectory: URL? = nil,
         previewFrameStoreCapBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
+        thumbnailFrameStoreDirectory: URL? = nil,
         portablePackageURL: URL,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
@@ -1018,6 +1026,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
         self.previewPresentation = PreviewPresentationCoordinator(
             store: previewFrameStore, engine: engine)
+        self.thumbnailFrameStore = ThumbnailFrameStore(
+            directory: thumbnailFrameStoreDirectory
+                ?? ThumbnailFrameStore.packageDirectory(for: normalizedPortablePackageURL)
+        )
+        collection.thumbnailFrameStore = thumbnailFrameStore
         self.sourceSession = SourceSessionCoordinator(
             engine: engine, editStore: effectiveEditStore,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider
@@ -1059,6 +1072,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         collection.onThumbnailDemand = { [weak self] assetID, priority in
             self?.requestEditedThumbnail(for: assetID, priority: priority)
+        }
+        // An edit commits its presented geometry to the membership summary in the same package
+        // transaction; mirror that committed entry into the disposable index.
+        if let session = openedPortableLibrary {
+            Task { [weak session] in
+                await effectiveEditStore.setMembershipObserver { entry in
+                    Task { @MainActor in session?.applyCommittedMembership(entry) }
+                }
+            }
         }
 
         if let renderEngine = engine as? RenderEngine {
@@ -2790,6 +2812,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         let deletedSet = Set(result.deletedIDs)
         editedThumbnailCoordinator.removeAssets(deletedSet)
+        let deletedPortableIDs = Set(deletedSet.map { PortablePhotoAssetID.compatibility(from: $0) })
+        Task { [thumbnailFrameStore] in
+            await thumbnailFrameStore.remove(assetIDs: deletedPortableIDs)
+        }
         // Deletion is the lifecycle boundary for editor sessions. Keep the coordinator's bulk
         // operation wired here so removed photos cannot leave their undo snapshots retained.
         editorDocument.removeSessions(for: deletedSet)
@@ -4488,6 +4514,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await collection.shutdown()
 
         await editedThumbnailCoordinator.shutdown()
+        await thumbnailFrameStore.shutdown()
         previewAdmissionCoordinator.shutdown()
         cancelIdlePreviewBuild(resetCursor: true)
         let tasks: [Task<Void, Never>?] =

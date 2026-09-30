@@ -470,6 +470,10 @@ struct PhotoAsset: Identifiable, Codable, Hashable, Sendable, Equatable {
     let fileType: String
     private(set) var metadata: PhotoAssetMetadata
     var libraryState: PhotoAssetLibraryState
+    /// The aspect ratio of the pixels a library cell presents, published by the package summary.
+    /// Nil until the package has one (older packages), in which case a cell uses the source
+    /// aspect. Survives `updateMetadata(from:)`, which replaces only discovered metadata.
+    var presentedAspectRatio: Double?
 
     var id: PhotoAssetID { source.id }
     var url: URL? { source.url }
@@ -516,13 +520,15 @@ struct PhotoAsset: Identifiable, Codable, Hashable, Sendable, Equatable {
         filename: String,
         fileType: String,
         metadata: PhotoAssetMetadata = .empty,
-        libraryState: PhotoAssetLibraryState = PhotoAssetLibraryState()
+        libraryState: PhotoAssetLibraryState = PhotoAssetLibraryState(),
+        presentedAspectRatio: Double? = nil
     ) {
         self.source = source
         self.filename = filename
         self.fileType = fileType.lowercased()
         self.metadata = metadata
         self.libraryState = libraryState
+        self.presentedAspectRatio = presentedAspectRatio
     }
 
     init(

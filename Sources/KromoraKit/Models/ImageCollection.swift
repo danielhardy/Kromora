@@ -66,6 +66,10 @@ final class ImageCollectionPresentationModel {
         private(set) var editedThumbnailRevision: String?
         private var presentedCrop = CropAdjustments.neutral
         private var presentedRotation = ImageRotation.zero
+        /// True once a document's crop/rotation has been installed. From then on the live values,
+        /// not the package summary's published ratio, define the cell shape (a reset to identity
+        /// must return the cell to the source shape).
+        private var hasLivePresentedGeometry = false
 
         var id: PhotoAssetID { asset.id }
         var url: URL? { asset.url }
@@ -78,24 +82,45 @@ final class ImageCollectionPresentationModel {
             return CGSize(width: dimensions.width, height: dimensions.height)
         }
         var hasResolvedLibraryAspect: Bool {
-            guard let dimensions = asset.dimensions else { return false }
-            return dimensions.width > 0 && dimensions.height > 0
+            if let dimensions = asset.dimensions, dimensions.width > 0, dimensions.height > 0 {
+                return true
+            }
+            return Self.isUsableRatio(asset.presentedAspectRatio)
         }
-        /// A settled edited raster has the same crop/rotation geometry as the Library cell, so it
-        /// should fill that frame. Original and fallback thumbnails can still have source geometry
-        /// while an edit is loading (or when rendering failed), and must remain fitted in that gap.
+        /// Edited pixels are rendered with the cell's own crop and rotation, so they fill the
+        /// frame. The original — and any fallback — keeps its source geometry and stays fitted
+        /// inside it. A stale edited raster stays filled while its replacement renders; only the
+        /// absence of edited pixels (never edited, reset to identity, render failed) fits.
         var shouldFillLibraryThumbnail: Bool {
-            editedThumbnailRevision != nil && !editedThumbnailUsesFallback
+            editedThumbnailImage != nil && !editedThumbnailUsesFallback
         }
         var originalThumbnailForPresentation: NSImage? { originalThumbnail }
         var editedThumbnailForPresentation: NSImage? { editedThumbnailImage }
+        /// The final cell shape, independent of which pixels have arrived: live document geometry
+        /// when one is installed, else the package summary's published presented ratio, else the
+        /// source aspect. Publishing original or edited pixels never changes it.
         var libraryAspectRatio: Double {
-            guard hasResolvedLibraryAspect, let dimensions = asset.dimensions else { return 4.0 / 3.0 }
+            let sourceRatio: Double? = asset.dimensions.flatMap { dimensions in
+                dimensions.width > 0 && dimensions.height > 0
+                    ? Double(dimensions.width) / Double(dimensions.height) : nil
+            }
+            if hasLivePresentedGeometry, let sourceRatio {
+                return LibraryGridLayout.presentedAspectRatio(
+                    sourceAspectRatio: sourceRatio, crop: presentedCrop, rotation: presentedRotation
+                )
+            }
+            if Self.isUsableRatio(asset.presentedAspectRatio), let published = asset.presentedAspectRatio {
+                return LibraryGridLayout.normalizedAspectRatio(published)
+            }
+            guard let sourceRatio else { return 4.0 / 3.0 }
             return LibraryGridLayout.presentedAspectRatio(
-                sourceAspectRatio: Double(dimensions.width) / Double(dimensions.height),
-                crop: presentedCrop,
-                rotation: presentedRotation
+                sourceAspectRatio: sourceRatio, crop: presentedCrop, rotation: presentedRotation
             )
+        }
+
+        private static func isUsableRatio(_ ratio: Double?) -> Bool {
+            guard let ratio else { return false }
+            return ratio.isFinite && ratio > 0
         }
 
         init(
@@ -130,7 +155,8 @@ final class ImageCollectionPresentationModel {
 
         func setOriginalThumbnail(_ thumbnail: NSImage?) {
             originalThumbnail = thumbnail
-            if editedThumbnailRevision == nil || editedThumbnailUsesFallback { self.thumbnail = thumbnail }
+            // A displayed edited raster — current or stale — is never replaced by the original.
+            if editedThumbnailImage == nil || editedThumbnailUsesFallback { self.thumbnail = thumbnail }
         }
 
         /// Open Image… historically presents selected files without their extensions. Keep that
@@ -152,12 +178,41 @@ final class ImageCollectionPresentationModel {
             editedThumbnailRevision = nil
         }
 
+        /// Show a persisted edited frame while the current edit is being confirmed. It carries no
+        /// revision, so the edited-thumbnail coordinator still classifies it and refines it once if
+        /// it is stale. Ignored when edited pixels are already displayed.
+        @discardableResult
+        func applyStoredEditedThumbnail(_ thumbnail: NSImage) -> Bool {
+            guard editedThumbnailImage == nil else { return false }
+            editedThumbnailUsesFallback = false
+            editedThumbnailImage = thumbnail
+            self.thumbnail = thumbnail
+            return true
+        }
+
+        /// Adopt the geometry a persisted frame was presented with, for a package whose summary has
+        /// no published ratio. Never overrides live document geometry or a published ratio.
+        @discardableResult
+        func adoptStoredGeometry(_ geometry: PresentedGeometry) -> Bool {
+            guard !hasLivePresentedGeometry,
+                  !Self.isUsableRatio(asset.presentedAspectRatio),
+                  let dimensions = asset.dimensions, dimensions.width > 0, dimensions.height > 0
+            else { return false }
+            let before = libraryAspectRatio
+            presentedCrop = geometry.crop
+            presentedRotation = geometry.rotation
+            return abs(libraryAspectRatio - before) > 1e-9
+        }
+
+        /// Install the document's crop and rotation. Returns true only when the cell shape changes,
+        /// so a document that agrees with the published ratio causes no relayout.
         @discardableResult
         func setPresentedCrop(_ crop: CropAdjustments, rotation: ImageRotation) -> Bool {
-            guard presentedCrop != crop || presentedRotation != rotation else { return false }
+            let before = libraryAspectRatio
             presentedCrop = crop
             presentedRotation = rotation
-            return true
+            hasLivePresentedGeometry = true
+            return abs(libraryAspectRatio - before) > 1e-9
         }
     }
 
@@ -180,6 +235,14 @@ final class ImageCollectionPresentationModel {
     private(set) var cropGeneration = 0
 
     var onThumbnailDemand: (@MainActor @Sendable (PhotoAssetID, ImageWorkScheduler.Priority) -> Void)?
+
+    /// The package's persisted thumbnail frames. Nil for collections that are not package-backed
+    /// (and most unit tests); thumbnails then decode from source exactly as before.
+    var thumbnailFrameStore: ThumbnailFrameStore?
+    private var frameReadJobIDs: Set<ImageWorkScheduler.JobID> = []
+    private var pendingFrameReadIDs: Set<PhotoAssetID> = []
+    private var completedFrameReadIDs: Set<PhotoAssetID> = []
+    private var frameReadWaiters: [CheckedContinuation<Void, Never>] = []
 
     private var collectionRevision: UInt64 = 0
     private var filterRevision: UInt64 = 0
@@ -461,6 +524,7 @@ final class ImageCollectionPresentationModel {
         requestsEditedThumbnail: Bool = true
     ) {
         guard isThumbnailDemandDriven, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        admitFrameReads(visible: [id], indexByID: [id: index], prefetch: false)
         requestOriginalThumbnail(for: id, at: index, priority: priority)
         if requestsEditedThumbnail { onThumbnailDemand?(id, priority) }
     }
@@ -478,10 +542,13 @@ final class ImageCollectionPresentationModel {
         for (index, item) in items.enumerated() { indexByID[item.id] = index }
         var admitted: [PhotoAssetID] = []
         admitted.reserveCapacity(ids.count)
-        for id in ids {
+        for id in ids where indexByID[id] != nil { admitted.append(id) }
+        // Persisted frames are read for the whole window before any source decode or edited
+        // render is admitted; both of those then find most of the window already painted.
+        admitFrameReads(visible: admitted, indexByID: indexByID, prefetch: true)
+        for id in admitted {
             guard let index = indexByID[id] else { continue }
             requestOriginalThumbnail(for: id, at: index, priority: priority(for: index))
-            admitted.append(id)
         }
         visibleEditedThumbnailIDs = admitted
         scheduleVisibleEditedThumbnails()
@@ -558,6 +625,9 @@ final class ImageCollectionPresentationModel {
 
     func applyEditedThumbnail(_ thumbnail: NSImage?, for id: PhotoAssetID, revision: String) {
         items.first { $0.id == id }?.applyEditedThumbnail(thumbnail, revision: revision)
+    }
+    func applyStoredEditedThumbnail(_ thumbnail: NSImage, for id: PhotoAssetID) {
+        items.first { $0.id == id }?.applyStoredEditedThumbnail(thumbnail)
     }
     func setPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation = .zero, for id: PhotoAssetID
@@ -708,6 +778,122 @@ final class ImageCollectionPresentationModel {
         thumbnailGeneration &+= 1
         scheduler.cancel(ids: thumbnailJobIDs)
         thumbnailJobIDs.removeAll()
+        scheduler.cancel(ids: frameReadJobIDs)
+        frameReadJobIDs.removeAll()
+        pendingFrameReadIDs.removeAll()
+        completedFrameReadIDs.removeAll()
+        resumeFrameReadWaiters()
+    }
+
+    // MARK: Persisted frames
+
+    /// Admit bounded, priority-ordered reads of the packed frames for a window: every visible photo
+    /// plus one prefetch page of the photos that follow it. A photo is read once per collection
+    /// load; one that already shows edited pixels needs nothing.
+    private func admitFrameReads(
+        visible: [PhotoAssetID], indexByID: [PhotoAssetID: Int], prefetch: Bool
+    ) {
+        guard let store = thumbnailFrameStore, !visible.isEmpty else { return }
+        var following: [PhotoAssetID] = []
+        if prefetch, let last = visible.compactMap({ indexByID[$0] }).max() {
+            let end = min(items.count, last + 1 + ThumbnailFrameReadPolicy.prefetchPageSize)
+            if last + 1 < end { following = items[(last + 1)..<end].map(\.id) }
+        }
+        let window = ThumbnailFrameReadPolicy.window(visible: visible, following: following)
+        let visibleSet = Set(visible)
+        for id in window {
+            guard !pendingFrameReadIDs.contains(id), !completedFrameReadIDs.contains(id),
+                  let index = indexByID[id], items.indices.contains(index),
+                  items[index].editedThumbnailForPresentation == nil
+            else { continue }
+            let identity = items[index].asset.source.portableIdentity
+            let jobID = ImageWorkScheduler.JobID("frame-read:\(id.raw)")
+            let generation = thumbnailGeneration
+            let readPriority: ImageWorkScheduler.Priority =
+                visibleSet.contains(id) ? priority(for: index) : .background
+            pendingFrameReadIDs.insert(id)
+            frameReadJobIDs.insert(jobID)
+            let admitted = scheduler.enqueueFrameRead(
+                id: jobID, priority: readPriority,
+                onTerminal: { [weak self] outcome in
+                    self?.finishFrameRead(id, jobID: jobID, generation: generation, outcome: outcome)
+                },
+                operation: { [weak self] in
+                    let frames = await store.readFrames(for: identity)
+                    guard !Task.isCancelled else { return }
+                    await self?.applyStoredFrames(
+                        frames, itemID: id, identity: identity, generation: generation
+                    )
+                }
+            )
+            if !admitted {
+                pendingFrameReadIDs.remove(id)
+                frameReadJobIDs.remove(jobID)
+            }
+        }
+    }
+
+    private func finishFrameRead(
+        _ id: PhotoAssetID, jobID: ImageWorkScheduler.JobID, generation: UInt64,
+        outcome: ImageWorkScheduler.TerminalOutcome
+    ) {
+        guard generation == thumbnailGeneration else { return }
+        pendingFrameReadIDs.remove(id)
+        frameReadJobIDs.remove(jobID)
+        if outcome == .completed { completedFrameReadIDs.insert(id) }
+        resumeFrameReadWaiters()
+    }
+
+    private func resumeFrameReadWaiters() {
+        let waiters = frameReadWaiters
+        frameReadWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    /// Suspends until none of `ids` has a frame read queued or running. A read that is evicted,
+    /// cancelled, or rejected also releases its waiters, so this can only delay, never wedge.
+    private func waitForFrameReads(of ids: [PhotoAssetID]) async {
+        while ids.contains(where: { pendingFrameReadIDs.contains($0) }) {
+            await withCheckedContinuation { frameReadWaiters.append($0) }
+        }
+    }
+
+    private func applyStoredFrames(
+        _ frames: ThumbnailFrameStore.StoredFrames, itemID: PhotoAssetID,
+        identity: PortablePhotoIdentity, generation: UInt64
+    ) {
+        guard generation == thumbnailGeneration,
+              let item = items.first(where: { $0.id == itemID }),
+              item.asset.source.portableIdentity == identity else { return }
+        if let hit = frames.edited,
+           FrameClassifier.classify(hit.frame.metadata, against: FrameCurrentInputs(source: identity))
+               .isPresentable
+        {
+            let image = NSImage(
+                cgImage: hit.image,
+                size: NSSize(width: hit.image.width, height: hit.image.height)
+            )
+            if item.applyStoredEditedThumbnail(image) {
+                if item.adoptStoredGeometry(hit.frame.geometry) {
+                    cropGeneration += 1
+                    invalidateCollectionProjection(notify: true)
+                }
+            }
+        }
+        if let hit = frames.original, item.originalThumbnailForPresentation == nil,
+           FrameClassifier.classify(
+               hit.frame.metadata, against: OriginalThumbnailSignature.currentInputs(for: identity)
+           ) == .exact
+        {
+            PlatformThumbnailProvider.primeMemoryCache(
+                hit.image, identity: identity, maxPixelSize: PlatformThumbnailProvider.libraryMaxPixelSize
+            )
+            item.setOriginalThumbnail(NSImage(
+                cgImage: hit.image,
+                size: NSSize(width: hit.image.width, height: hit.image.height)
+            ))
+            item.asset.thumbnailState = .ready
+        }
     }
     private func enqueueThumbnails() {
         if isThumbnailDemandDriven { fillThumbnailQueue(); return }
@@ -722,26 +908,18 @@ final class ImageCollectionPresentationModel {
     ) {
         let id = thumbnailJobID(for: item)
         scheduler.enqueue(id: id, lane: .thumbnail, priority: requested ?? priority(for: index)) { [weak self] in
-            let thumbnail: NSImage?
-            if let url = item.url {
-                let identity = item.asset.source.portableIdentity
-                thumbnail = await Task.detached {
-                    PlatformThumbnailProvider.generate(
-                        from: url, maxPixelSize: PlatformThumbnailProvider.libraryMaxPixelSize,
-                        portableIdentity: identity
-                    )
-                }.value
-            } else if let data = item.imageData {
-                let identity = item.asset.source.portableIdentity
-                let fingerprint = item.dataFingerprint
-                thumbnail = await Task.detached {
-                    PlatformThumbnailProvider.generate(
-                        from: data, maxPixelSize: PlatformThumbnailProvider.libraryMaxPixelSize,
-                        dataFingerprint: fingerprint, portableIdentity: identity
-                    )
-                }.value
-            } else { thumbnail = nil }
+            // Memory, then the package's packed frame, then a decode of the source — the last
+            // only on a miss.
+            let image = await OriginalThumbnailLoader.load(
+                url: item.url, data: item.url == nil ? item.imageData : nil,
+                dataFingerprint: item.dataFingerprint,
+                identity: item.asset.source.portableIdentity,
+                store: self?.thumbnailFrameStore
+            )
             guard !Task.isCancelled else { return }
+            let thumbnail = image.map {
+                NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
+            }
             self?.applyThumbnail(thumbnail, itemID: item.id, generation: generation)
         }
         if scheduler.contains(id) { thumbnailJobIDs.insert(id); item.asset.thumbnailState = .loading }
@@ -779,6 +957,9 @@ final class ImageCollectionPresentationModel {
         visibleEditedDemandScheduled = true
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // Frame reads precede render admission: the coordinator classifies against a frame
+            // the read has already published rather than racing it to a render.
+            await self.waitForFrameReads(of: self.visibleEditedThumbnailIDs)
             self.visibleEditedDemandScheduled = false
             let ids = self.visibleEditedThumbnailIDs
             for id in ids {

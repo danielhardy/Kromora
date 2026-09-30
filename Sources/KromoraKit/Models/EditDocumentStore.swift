@@ -162,6 +162,9 @@ actor EditDocumentStore {
     private let packageRoot: URL?
     private let packageLease: PortablePackageLease?
     private var embeddedLookBytes: [String: Data] = [:]
+    /// Receives the membership entry a package transaction committed beside an edit, so the
+    /// disposable library index can carry the same `presentedAspectRatio` without a rebuild.
+    private var membershipObserver: (@Sendable (PortablePackageMembershipEntry) -> Void)?
     private var artificialWriteDelay: Duration
     private var failuresRemaining: Int
 
@@ -218,6 +221,10 @@ actor EditDocumentStore {
 
     func setEmbeddedLookBytes(_ values: [String: Data]) {
         embeddedLookBytes = values
+    }
+
+    func setMembershipObserver(_ observer: (@Sendable (PortablePackageMembershipEntry) -> Void)?) {
+        membershipObserver = observer
     }
 
     func load(for source: EditSourceReference) async -> EditDocumentLoadResult {
@@ -305,9 +312,11 @@ actor EditDocumentStore {
             throw StoreError.cannotWrite("the canonical edit package is unavailable")
         }
         let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
-        try package.selectEditRevision(
+        if let membership = try package.selectEditRevision(
             for: source.portableAssetID, revision: revision, lease: packageLease
-        )
+        ) {
+            membershipObserver?(membership)
+        }
     }
 
     func save(_ document: EditDocument, for source: EditSourceReference) async throws {
@@ -340,11 +349,13 @@ actor EditDocumentStore {
                 throw StoreError.cannotWrite("injected persistence failure")
             }
             let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
-            let sidecar = try package.appendEditRevision(
+            let commit = try package.commitEditRevision(
                 for: source.portableAssetID, document: document,
                 snapshotName: snapshotName,
                 lookBytes: sourceLookBytes(for: document), lease: packageLease
             )
+            let sidecar = commit.sidecar
+            if let membership = commit.membership { membershipObserver?(membership) }
             insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
             writeCount += 1
             status = .ready

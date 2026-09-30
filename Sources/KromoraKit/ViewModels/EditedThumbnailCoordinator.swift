@@ -27,6 +27,9 @@ protocol EditedThumbnailDestination: AnyObject {
     func resolvedEditedThumbnailLUT(_ id: LUTID?) -> CubeLUT?
     func markEditedThumbnailStale(for assetID: PhotoAssetID)
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String)
+    /// Show a persisted frame that has not been confirmed against the current edit. It carries no
+    /// revision, so demand still classifies and, if stale, refines it once.
+    func applyStoredEditedThumbnail(_ image: NSImage, for assetID: PhotoAssetID)
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
     )
@@ -53,17 +56,22 @@ final class EditedThumbnailCoordinator {
     private let workScheduler: ImageWorkScheduler
     private let engine: any EditedThumbnailRendering
     private let editStore: EditDocumentStore
+    /// Persisted thumbnail frames. With none, every demand renders, exactly as an unpersisted
+    /// collection always did.
+    var frameStore: ThumbnailFrameStore?
     weak var destination: (any EditedThumbnailDestination)?
 
     init(
         workScheduler: ImageWorkScheduler,
         engine: any EditedThumbnailRendering,
         editStore: EditDocumentStore,
+        frameStore: ThumbnailFrameStore? = nil,
         destination: (any EditedThumbnailDestination)? = nil
     ) {
         self.workScheduler = workScheduler
         self.engine = engine
         self.editStore = editStore
+        self.frameStore = frameStore
         self.destination = destination
     }
 
@@ -187,7 +195,9 @@ final class EditedThumbnailCoordinator {
         let inMemoryDocument = destination.editedThumbnailDocument(for: assetID)
         if let inMemoryDocument, inMemoryDocument.isIdentity {
             let revision = editedThumbnailRevision(document: inMemoryDocument, look: .none)
-            destination.applyEditedThumbnail(nil, for: assetID, revision: revision)
+            presentIdentity(
+                revision: revision, assetID: assetID, portableAssetID: source.cacheIdentity.assetID
+            )
             return
         }
         let sourceReference = EditSourceReference(
@@ -220,10 +230,16 @@ final class EditedThumbnailCoordinator {
             ) else { return }
 
             let document: EditDocument
+            // The Look a saved revision was written with, from its content-addressed package
+            // reference. It is known without the Look browser, so a persisted frame can be judged
+            // exact before a scan has resolved anything.
+            var savedLook: LookSignature?
             if let inMemoryDocument {
                 document = inMemoryDocument
             } else {
-                document = await editStore.load(for: sourceReference).document
+                let loaded = await editStore.load(for: sourceReference)
+                document = loaded.document
+                savedLook = loaded.found ? loaded.lookSignature : nil
             }
             guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
                 assetID: assetID, generation: generation,
@@ -238,24 +254,67 @@ final class EditedThumbnailCoordinator {
             )
             let lut = destination.resolvedEditedThumbnailLUT(document.lut.lutID)
             let look = LookSignature(settings: document.lut, resolved: lut)
+            // What to compare persisted pixels against: the live Look when it resolved, else the
+            // saved revision's own. Pixels rendered here are always labelled with `look`, so an
+            // ungraded provisional render can never claim the saved Look's identity.
+            let frameLook = look.permitsExactReuse ? look : (savedLook ?? look)
             let revision = self.editedThumbnailRevision(document: document, look: look)
+            let frameRevision = self.editedThumbnailRevision(document: document, look: frameLook)
             let materialized = MaterializedThumbnail(
-                sourceIdentity: thumbnailSourceIdentity, revision: revision, look: look
+                sourceIdentity: thumbnailSourceIdentity, revision: frameRevision, look: frameLook
             )
             // Appearance callbacks are repeated by both browsing surfaces. Reuse only a result
             // whose edit/Look revision and source identity still match; a non-nil revision alone
             // can describe an older saved edit or an earlier source at the same asset ID. Pixels
             // rendered while the Look was unresolved are provisional and never count as a match, so
             // they are replaced as soon as demand finds the Look resolvable.
-            if !force, look.permitsExactReuse, item.editedThumbnailRevision == revision,
+            if !force, frameLook.permitsExactReuse, item.editedThumbnailRevision == frameRevision,
                 self.materializedThumbnails[assetID] == materialized
             {
                 return
             }
             guard !document.isIdentity else {
-                destination.applyEditedThumbnail(nil, for: assetID, revision: revision)
-                self.materializedThumbnails[assetID] = materialized
+                self.presentIdentity(
+                    revision: revision, assetID: assetID,
+                    portableAssetID: thumbnailSourceIdentity.assetID
+                )
+                self.materializedThumbnails[assetID] = MaterializedThumbnail(
+                    sourceIdentity: thumbnailSourceIdentity, revision: revision, look: look
+                )
                 return
+            }
+
+            // A persisted frame is judged by the shared classifier. Exact pixels are published
+            // and nothing renders; stale pixels are shown, inert, while one render refines them.
+            if let frameStore = self.frameStore,
+               let hit = await frameStore.read(.edited, for: thumbnailSourceIdentity)
+            {
+                guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
+                    assetID: assetID, generation: generation,
+                    sourceRevision: thumbnailSourceRevision,
+                    documentRevision: thumbnailDocumentRevision,
+                    sourceIdentity: thumbnailSourceIdentity
+                ), let destination = self.destination
+                else { return }
+                let storedImage = NSImage(
+                    cgImage: hit.image,
+                    size: NSSize(width: hit.image.width, height: hit.image.height)
+                )
+                switch FrameClassifier.classify(
+                    hit.frame.metadata,
+                    against: FrameCurrentInputs(
+                        source: thumbnailSourceIdentity, editHash: document.editHash, look: frameLook
+                    )
+                ) {
+                case .exact:
+                    destination.applyEditedThumbnail(storedImage, for: assetID, revision: frameRevision)
+                    self.materializedThumbnails[assetID] = materialized
+                    return
+                case .staleCompatible, .provisionalOnly:
+                    destination.applyStoredEditedThumbnail(storedImage, for: assetID)
+                case .unusable:
+                    break
+                }
             }
 
             // Keep the last published raster visible while a replacement is prepared. It belongs
@@ -278,13 +337,7 @@ final class EditedThumbnailCoordinator {
                 quality: .thumbnail,
                 output: .raster, space: .current
             )
-            let image: NSImage?
-            if let cgImage = await engine.makeThumbnailCGImage(request) {
-                image = NSImage(
-                    cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height))
-            } else {
-                image = nil
-            }
+            let rendered: CGImage? = await engine.makeThumbnailCGImage(request)
             guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
                 assetID: assetID, generation: generation,
                 sourceRevision: thumbnailSourceRevision,
@@ -292,15 +345,59 @@ final class EditedThumbnailCoordinator {
                 sourceIdentity: thumbnailSourceIdentity
             ), let destination = self.destination
             else { return }
-            // A failed render leaves the last published image in place (or the original source if
-            // this item has never had a successful edit render). Its revision remains unchanged,
-            // so the next visible demand can retry this request.
-            if image != nil {
-                destination.applyEditedThumbnail(image, for: assetID, revision: revision)
-                self.materializedThumbnails[assetID] = materialized
-            } else {
+            // A failed render leaves the last published image in place — a stale persisted frame,
+            // else the original. Its revision remains unchanged, so the next visible demand can
+            // retry this request.
+            guard let rendered else {
                 self.materializedThumbnails.removeValue(forKey: assetID)
+                return
             }
+            let image = NSImage(
+                cgImage: rendered, size: NSSize(width: rendered.width, height: rendered.height))
+            destination.applyEditedThumbnail(image, for: assetID, revision: revision)
+            self.materializedThumbnails[assetID] = MaterializedThumbnail(
+                sourceIdentity: thumbnailSourceIdentity, revision: revision, look: look
+            )
+            // Only a render of the real Look is worth persisting: an ungraded provisional frame
+            // would replace a good stored one.
+            if let frameStore = self.frameStore, look.permitsExactReuse {
+                let signature = FrameSignature(
+                    source: thumbnailSourceIdentity, editHash: document.editHash, look: look,
+                    workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
+                )
+                let crop = document.crop
+                let rotation = document.rotation
+                let identity = thumbnailSourceIdentity
+                let frame = await Task.detached {
+                    ThumbnailFrameEncoder.editedFrame(
+                        image: rendered, identity: identity, signature: signature,
+                        crop: crop, rotation: rotation
+                    )
+                }.value
+                // Encoding can outlive a rapid edit or source switch. Recheck the same fences used
+                // for pixel publication before allowing obsolete work to replace the stable key.
+                guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
+                    assetID: assetID, generation: generation,
+                    sourceRevision: thumbnailSourceRevision,
+                    documentRevision: thumbnailDocumentRevision,
+                    sourceIdentity: thumbnailSourceIdentity
+                ) else { return }
+                if let frame { await frameStore.enqueueWrite(frame) }
+            }
+        }
+    }
+
+    /// Publish "no edited appearance": the original shows fitted in the source-shaped cell, and the
+    /// persisted edited record is removed so a relaunch cannot revive a crop or fill that no longer
+    /// applies.
+    private func presentIdentity(
+        revision: String, assetID: PhotoAssetID, portableAssetID: PortablePhotoAssetID
+    ) {
+        guard let destination else { return }
+        destination.setEditedThumbnailPresentedCrop(.neutral, rotation: .zero, for: assetID)
+        destination.applyEditedThumbnail(nil, for: assetID, revision: revision)
+        if let frameStore {
+            Task { await frameStore.remove(.edited, for: portableAssetID) }
         }
     }
 
