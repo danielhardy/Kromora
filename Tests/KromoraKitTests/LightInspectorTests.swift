@@ -113,7 +113,8 @@ final class LightInspectorTests: TempDirectoryTestCase {
         let curveEditor = try XCTUnwrap(source.range(of: "private struct ToneCurveEditor"))
         let parametricControls = try XCTUnwrap(source.range(of: "struct ParametricToneCurveControls"))
         let editorSource = source[curveEditor.lowerBound..<parametricControls.lowerBound]
-        XCTAssertTrue(editorSource.contains("Picker(\"Channel\""))
+        XCTAssertTrue(editorSource.contains("channelTabs"))
+        XCTAssertFalse(editorSource.contains("Picker(\"Channel\""))
         XCTAssertTrue(editorSource.contains("curveGraph(size: size)"))
         XCTAssertFalse(editorSource.contains("Parametric regions"))
         XCTAssertFalse(editorSource.contains("Region splits"))
@@ -155,13 +156,11 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertFalse(sizing.contains(".frame(maxWidth: 220"))
         XCTAssertTrue(sizing.contains(".frame(maxWidth: .infinity)"))
         XCTAssertTrue(sizing.contains(".fixedSize(horizontal: false, vertical: true)"))
-        XCTAssertTrue(sizing.contains(".padding(.top, 6)"))
 
-        // The channel tabs take the offered width so they cannot resize with parent proposals.
-        let pickerStart = try XCTUnwrap(source.range(of: "Picker(\"Channel\""))
-        let graphStart = try XCTUnwrap(source.range(of: "GeometryReader { proxy in"))
-        let picker = source[pickerStart.lowerBound..<graphStart.lowerBound]
-        XCTAssertTrue(picker.contains(".pickerStyle(.segmented)\n            .frame(maxWidth: .infinity)"))
+        // The channel tabs are plain SwiftUI (no AppKit segmented control with its own intrinsic
+        // width), so they always take exactly the width offered.
+        XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
+        XCTAssertTrue(source.contains("private var channelTabs: some View"))
 
         // Visual check: with Light > Tone Curve expanded, move between photos with the arrow keys,
         // then drag Exposure and Contrast through several values. The header, tabs, graph, and
@@ -176,6 +175,12 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertTrue(source.contains("cache.lastProposedWidth = proposedWidth"))
         XCTAssertTrue(source.contains("} else if let lastProposedWidth = cache.lastProposedWidth {"))
         XCTAssertTrue(source.contains("width = child.sizeThatFits(.unspecified).width"))
+        // Probe proposals (.infinity / 0) are never a viewport width, and placement uses the
+        // granted bounds rather than a cached proposal a later probe may have overwritten.
+        XCTAssertTrue(source.contains("proposedWidth.isFinite, proposedWidth > 0"))
+        // Each disclosure section is clamped too, so an over-wide child cannot overflow the rail.
+        XCTAssertTrue(source.contains("FitsProposedWidth(reportsProposedHeight: false)"))
+        XCTAssertTrue(source.contains("ProposedViewSize(width: bounds.width, height: cache.proposal.height)"))
     }
 
     func testLightSliderGestureIsOneUndoOperation() {
