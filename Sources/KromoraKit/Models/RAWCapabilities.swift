@@ -105,7 +105,10 @@ enum DevelopControl: String, Sendable, CaseIterable {
     /// unnoticed.
     var range: ClosedRange<Double> {
         switch self {
-        case .exposure, .baselineExposure: return -4...4
+        case .exposure: return -4...4
+        // Some camera DNGs (local IMG_0797.DNG: +5.42 EV) carry a larger baseline than the
+        // creative exposure throw; keep every decoder seed inside the track.
+        case .baselineExposure: return -8...8
         case .shadowBias: return -10...10
         case .boost: return 0...1
         case .boostShadow: return 0...2
