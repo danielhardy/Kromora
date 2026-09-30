@@ -2,8 +2,35 @@
 id: KRMA-710
 title: Dismiss navigation spinner when the image is already loaded
 type: bug
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Distinguish presentation from background work
+      result: pass
+    - criterion: Clear spinner when selected image has usable pixels
+      result: pass
+      notes: isNavigationLoading cleared by drawable presentation callback
+    - criterion: Stay visible until presented; stale completions ignored
+      result: pass
+      notes: sourceRevision and assetID guards
+    - criterion: Clear on failure/cancellation
+      result: pass
+    - criterion: Regression coverage
+      result: pass
+      notes: tests added in PreviewSurfaceTests, PreviewCutoverTests, ThumbnailSwitchLifecycleTests
+  checks_run:
+    - "swift test --filter PreviewSurfaceTests|PreviewCutoverTests|ThumbnailSwitchLifecycleTests: 75 tests, 2 assertion failures both in unrelated testDelayedThumbnailCompletionCannotPublishAnObsoleteDocument"
+  findings:
+    - Unrelated thumbnail-order test failure filed as KRMA-712
+  fixes: []
+  verification_commits:
+    - 1aef48e
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-29T04:28:40.431Z
+  session: 01MUM6DWTCQZYNQDS2
 creation_provenance:
   runner: codex
   model: gpt-6-luna
@@ -15,9 +42,12 @@ labels:
   - preview
   - ui
 created: 2026-09-29T03:31:38.317Z
-updated: 2026-09-29T03:31:53.260Z
-order: zy
+updated: 2026-09-29T04:28:40.433Z
+blockers: []
+order: a0
 board: product
+commits:
+  - 1aef48e
 ---
 
 ## Objective
@@ -48,6 +78,31 @@ stuck.
 Trace the spinner's ownership and the readiness signal used by the navigation/preview handoff.
 Avoid tying dismissal to work that continues after the destination image is already visible.
 
+### Comment — codex @ 2026-09-29T04:27:34.003Z
+
+Separated navigation spinner state from full preview readiness. The spinner now clears after the selected edited frame or embedded RAW frame is confirmed by drawable presentation; generation checks preserve rapid-navigation ordering, and failure/cancellation paths clear the indicator. Added coverage for presentation without render telemetry, histogram work continuing after presentation, rapid navigation, and terminal failure. Verification: 42 PreviewSurfaceTests and 5 focused navigation/lifecycle tests passed. The unrelated testDelayedThumbnailCompletionCannotPublishAnObsoleteDocument test fails its thumbnail-order assertions.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-29T04:28:40.431Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Distinguish presentation from background work (pass)
+- [x] Clear spinner when selected image has usable pixels (pass) — isNavigationLoading cleared by drawable presentation callback
+- [x] Stay visible until presented; stale completions ignored (pass) — sourceRevision and assetID guards
+- [x] Clear on failure/cancellation (pass)
+- [x] Regression coverage (pass) — tests added in PreviewSurfaceTests, PreviewCutoverTests, ThumbnailSwitchLifecycleTests
+Checks run:
+- swift test --filter PreviewSurfaceTests|PreviewCutoverTests|ThumbnailSwitchLifecycleTests: 75 tests, 2 assertion failures both in unrelated testDelayedThumbnailCompletionCannotPublishAnObsoleteDocument
+Findings:
+- Unrelated thumbnail-order test failure filed as KRMA-712
+Fixes:
+- None
+Verification commits:
+- 1aef48e
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUM6DWTCQZYNQDS2
+Summary: Verified: spinner decoupled from full preview readiness; stale/failure/cancel paths clear it.

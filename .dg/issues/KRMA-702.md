@@ -2,7 +2,7 @@
 id: KRMA-702
 title: Remove unintended white stroke from library grid thumbnails
 type: bug
-status: ready
+status: review
 priority: medium
 creation_provenance:
   runner: codex
@@ -13,9 +13,18 @@ labels:
   - rendering
   - ui
 created: 2026-09-29T03:11:04.112Z
-updated: 2026-09-29T03:11:32.044Z
+updated: 2026-09-29T03:41:43.647Z
+blockers:
+  - id: evt_mum4qrtq_yqruda
+    type: human
+    reason: The referenced Library screenshot and mountain photo are not present in the issue context or checkout, and a Retina SwiftUI/AppKit snapshot of a solid thumbnail does not reproduce a white edge or implicate the selection overlay. Without the affected pixels I cannot safely identify or fix the source.
+    action: Attach a readable crop of the affected Library grid tile and, if available, the original mountain photo; include whether the tile shows original or edited pixels and the display scale.
+    created_at: 2026-09-29T03:41:43.647Z
 order: t
 board: product
+blocked_reason: The referenced Library screenshot and mountain photo are not present in the issue context or checkout, and a Retina SwiftUI/AppKit snapshot of a solid thumbnail does not reproduce a white edge or implicate the selection overlay. Without the affected pixels I cannot safely identify or fix the source.
+blocked_action: Attach a readable crop of the affected Library grid tile and, if available, the original mountain photo; include whether the tile shows original or edited pixels and the display scale.
+blocked_from_status: ready
 ---
 
 ## Objective
