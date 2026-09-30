@@ -777,6 +777,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var isEditedThumbnailInteractionActive: Bool { isPreviewInteractionActive }
     var isEditedThumbnailPreviewDebouncing: Bool { previewAdmissionCoordinator.isPreviewDebouncing }
     var editedThumbnailItems: [ImageCollection.Item] { collection.items }
+    var visibleEditedThumbnailAssetIDs: Set<PhotoAssetID> {
+        collection.visibleEditedThumbnailAssetIDs
+    }
     func editedThumbnailItem(for assetID: PhotoAssetID) -> ImageCollection.Item? {
         collection.items.first { $0.id == assetID }
     }

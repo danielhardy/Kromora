@@ -200,6 +200,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
             adjustments: [.exposure(ev: 0.25)], lut: LUTSettings(lutID: lut.lutID)
         )
         let fixture = makeFixture(document: document, lut: lut)
+        fixture.destination.visibleEditedThumbnailAssetIDs = [fixture.assetID]
         fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
         try await waitUntil("the first thumbnail") { !fixture.destination.appliedRevisions.isEmpty }
         XCTAssertEqual(fixture.coordinator.referencedLookIDs, [lut.lutID])
@@ -222,6 +223,26 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         try await waitUntil("the affected re-render") {
             await fixture.engine.thumbnailRequestCount == 2
         }
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
+    func testLookRefreshSkipsMaterializedThumbnailsOutsideTheVisibleWindow() async throws {
+        let lut = makeLUT("Offscreen", table: 1)
+        let document = EditDocument(
+            adjustments: [.exposure(ev: 0.25)], lut: LUTSettings(lutID: lut.lutID)
+        )
+        let fixture = makeFixture(document: document, lut: lut, active: false)
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the initial materialized thumbnail") {
+            !fixture.destination.appliedRevisions.isEmpty
+        }
+
+        fixture.destination.visibleEditedThumbnailAssetIDs = []
+        fixture.coordinator.refreshMaterializedThumbnails(affecting: [lut.lutID])
+        try await Task.sleep(for: .milliseconds(150))
+
+        let renders = await fixture.engine.thumbnailRequestCount
+        XCTAssertEqual(renders, 1, "a thumbnail outside the active/visible set is not re-rendered")
         await fixture.scheduler.cancelAllAndWait()
     }
 
@@ -554,6 +575,7 @@ private final class FakeDestination: EditedThumbnailDestination {
     var isEditedThumbnailShuttingDown = false
     var isEditedThumbnailInteractionActive = false
     var isEditedThumbnailPreviewDebouncing = false
+    var visibleEditedThumbnailAssetIDs: Set<PhotoAssetID> = []
     let item: ImageCollection.Item
     let document: EditDocument
     /// What the Look browser currently resolves the document's ID to. Tests change it to model a
