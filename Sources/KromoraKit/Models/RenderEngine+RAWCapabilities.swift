@@ -8,8 +8,10 @@ import Foundation
 extension RenderEngine {
     /// Admit a source using decoder-owned geometry. Standard-image dimensions come from ImageIO;
     /// RAW dimensions come from the renderer-owned session, which also rejects a filter whose
-    /// output cannot be rasterized before publishing a prepared source.
-    func prepareSource(_ source: ImageSource) -> ImageSourcePreparation? {
+    /// output cannot be rasterized before publishing a prepared source. Keep this explicitly async
+    /// to match `RenderEngining`'s requirement and select this RAW-aware implementation instead of
+    /// the protocol extension's standard-only default.
+    func prepareSource(_ source: ImageSource) async -> ImageSourcePreparation? {
         switch source.kind {
         case .standard:
             guard let prepared = try? standardPreparation(for: source) else { return nil }

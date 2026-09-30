@@ -124,11 +124,14 @@ extension AppViewModel {
         case .boost: develop.boostAmount = value
         case .boostShadow: develop.boostShadowAmount = value
         case .whiteBalance: develop.neutralTemperature = value
-        case .sharpness: develop.sharpnessAmount = value
+        // The slider has a small UI-only margin above 1 so a decoder seed of 1.0 is not
+        // displayed at the very end of its track. CIRAWFilter documents this amount as 0...1.
+        case .sharpness: develop.sharpnessAmount = min(max(value, 0), 1)
         case .contrast: develop.contrastAmount = value
         case .detail: develop.detailAmount = value
         case .moireReduction: develop.moireReductionAmount = value
-        case .localToneMap: develop.localToneMapAmount = value
+        // See `DevelopControl.range`: keep the extra slider headroom out of the decoder setting.
+        case .localToneMap: develop.localToneMapAmount = min(max(value, 0), 1)
         case .luminanceNoiseReduction: develop.luminanceNoiseReductionAmount = value
         case .colorNoiseReduction: develop.colorNoiseReductionAmount = value
         case .lensCorrection: develop.lensCorrectionEnabled = value != 0

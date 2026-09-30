@@ -72,8 +72,10 @@ enum DevelopControl: String, Sendable, CaseIterable {
     /// **Which of these are documented, and which are ours.** Documented — by `CIRAWFilter`, recorded
     /// in `RAWDevelopSettings`' per-property comments and `PHASE2_SPEC.md` §9: `boost` 0…1,
     /// `boostShadow` 0…2, `whiteBalance` 2000…50000 K, tint −150…150, `detail` 0…3,
-    /// `extendedDynamicRange` 0…2, and the 0…1 detail amounts (sharpness, contrast, moiré, local tone
-    /// map, both noise reductions). **Chosen by us**, with no documented bound anywhere in the repo or
+    /// `extendedDynamicRange` 0…2, and 0…1 for sharpness, contrast, moiré, local tone map, and both
+    /// noise reductions. Sharpness and local tone map have a small UI-only upper margin so decoder
+    /// defaults of 1.0 do not place their thumbs at the end of the track; their writes remain capped
+    /// at the documented maximum. **Chosen by us**, with no documented bound anywhere in the repo or
     /// the header: `exposure` and `baselineExposure` at −4…4, and `shadowBias` at −10…10. Those three
     /// are UI conveniences — a usable throw for a slider — not framework limits, and `CIRAWFilter`
     /// will accept values outside them. Widen them freely; the other rows are not ours to move.
@@ -110,7 +112,11 @@ enum DevelopControl: String, Sendable, CaseIterable {
         case .whiteBalance: return 2000...50000
         case .detail: return 0...3
         case .extendedDynamicRange: return 0...2
-        case .sharpness, .contrast, .moireReduction, .localToneMap,
+        // These two RAW decoder defaults can be exactly 1.0 for camera files. Keep the
+        // documented 0...1 decoder domain, with a small UI-only upper margin so that seed is
+        // visible inside the track rather than pinned to its end.
+        case .sharpness, .localToneMap: return 0...1.1
+        case .contrast, .moireReduction,
              .luminanceNoiseReduction, .colorNoiseReduction: return 0...1
         case .lensCorrection, .gamutMapping, .highlightRecovery: return 0...1
         }
