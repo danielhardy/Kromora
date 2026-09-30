@@ -759,7 +759,7 @@ final class PreviewSurface: ObservableObject {
             alpha: crossfadeProgress() ?? 1
         )
         let transitionFrame: PresentationFrame? = {
-            guard let progress = crossfadeProgress(),
+            guard crossfadeProgress() != nil,
                   let texture = transitionTexture, let textureExtent = transitionTextureExtent
             else { return nil }
             return PresentationFrame(
@@ -769,7 +769,7 @@ final class PreviewSurface: ObservableObject {
                 layoutImageExtent: transitionLayoutImageExtent ?? transitionImageExtent,
                 space: transitionSpace, navigation: current,
                 generation: presentationTextureGeneration &- 1,
-                usesRetainedCompleteFrame: false, alpha: 1 - progress
+                usesRetainedCompleteFrame: false, alpha: 1
             )
         }()
         guard hasCompleteUnderlay, let retainedCompleteImage else {
