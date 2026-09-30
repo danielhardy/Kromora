@@ -42,10 +42,10 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             KromoraStorage.cacheDirectory(named: "Masks").path.contains("Caches/Kromora/Masks")
         )
         XCTAssertTrue(
-            PreviewDiskCache.packageDirectory(for: packageURL).path.hasPrefix(packageURL.path)
+            LatestPreviewFrameStore.packageDirectory(for: packageURL).path.hasPrefix(packageURL.path)
         )
         XCTAssertEqual(
-            PreviewDiskCache.packageDirectory(for: packageURL).deletingLastPathComponent(),
+            LatestPreviewFrameStore.packageDirectory(for: packageURL).deletingLastPathComponent(),
             packageURL.appendingPathComponent("Derived", isDirectory: true)
         )
     }

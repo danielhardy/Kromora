@@ -60,8 +60,10 @@ adjacent prefetch, idle cache fill, and comparison-preview admission, including 
 retried revision state and retry task. `PreviewPublicationCoordinator` owns the settled and
 interactive publication funnel, presented-frame state, and latest-wins publication fences;
 `PreviewPresentationCoordinator` owns display/comparison generations, per-surface
-resolution-planner hysteresis, preview cache keys/access, and canonical complete-frame cache
-writes. `PreviewCoordinator` remains the only render-submission owner. The root supplies
+resolution-planner hysteresis, the selection-time stored-frame lookup and its classification, and
+canonical complete-frame writes to `LatestPreviewFrameStore` (an actor in `Derived/Previews`).
+`PreviewAdmissionCoordinator` holds a settled submission back while a stored frame can still make it
+unnecessary, and presents an exact hit instead of rendering. `PreviewCoordinator` remains the only render-submission owner. The root supplies
 value-only document/source/navigation inputs and retains the `PreviewSurface` instances, so there
 is no second document store or surface reference in these collaborators.
 

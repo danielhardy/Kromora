@@ -252,7 +252,7 @@ final class ResolutionPlannerTests: TempDirectoryTestCase {
             presentationROI: request.presentationROI,
             quality: request.quality,
             space: request.space,
-            pipelineVersion: RenderPipeline.cacheVersion
+            pipelineVersion: RenderPipeline.pixelEpoch
         )
     }
 

@@ -180,56 +180,55 @@ final class LookSignatureTests: TempDirectoryTestCase {
         XCTAssertEqual(none.lookSignature, .none)
     }
 
-    // MARK: - Durable preview cache
+    // MARK: - Durable preview frame
 
-    @MainActor
-    func testAnUnresolvedRequestHasNoCacheKeyAndAnUnresolvedKeyNeverHits() throws {
-        let cache = PreviewDiskCache(
-            directory: tempDirectory.appendingPathComponent("previews"), capBytes: 10_000_000)
-        let coordinator = PreviewPresentationCoordinator(cache: cache)
-        let source = ImageSource(
-            backing: .data(Data("cache-source".utf8)), kind: .standard,
-            nativeExtent: CGSize(width: 32, height: 24))
-        let document = EditDocument(lut: LUTSettings(lutID: id, intensity: 1))
+    func testAnUnresolvedLookNeverSuppressesARenderInEitherDirection() {
+        let identity = FrameFixtures.identity()
+        let unresolved = LookSignature.unresolved(id: id)
+        let resolved = LookSignature.resolved(id: id, contentHash: "h1")
 
-        let unresolvedRequest = RenderRequest(source: source, document: document, quality: .preview)
-        XCTAssertNil(coordinator.cacheKey(for: unresolvedRequest))
-
-        let forced = PreviewDiskCache.Key(
-            identity: source.cacheIdentity, documentHash: document.editHash,
-            look: .unresolved(id: id))
-        let image = try Fixtures.makeCGImage(width: 32, height: 24)
-        cache.write(image, for: forced)
-        XCTAssertFalse(cache.contains(forced))
-        XCTAssertNil(cache.read(for: forced))
-    }
-
-    func testNoneAndUnresolvedDoNotShareACacheEntry() throws {
-        let cache = PreviewDiskCache(
-            directory: tempDirectory.appendingPathComponent("previews"), capBytes: 10_000_000)
-        let source = ImageSource(
-            backing: .data(Data("cache-source-2".utf8)), kind: .standard,
-            nativeExtent: CGSize(width: 32, height: 24))
-        func key(_ look: LookSignature) -> PreviewDiskCache.Key {
-            PreviewDiskCache.Key(identity: source.cacheIdentity, documentHash: "d", look: look)
-        }
-        cache.write(try Fixtures.makeCGImage(width: 32, height: 24), for: key(.none))
-        XCTAssertTrue(cache.contains(key(.none)))
-        XCTAssertFalse(cache.contains(key(.unresolved(id: id))))
+        // A frame stored while the Look was unresolved is never exact, even against the same
+        // unresolved signature: two missing Looks say nothing about each other's bytes.
+        let ungraded = FrameFixtures.metadata(identity: identity, look: unresolved)
         XCTAssertNotEqual(
-            key(.none).canonicalKeyString, key(.unresolved(id: id)).canonicalKeyString)
+            FrameClassifier.classify(
+                ungraded, against: FrameCurrentInputs(
+                    source: identity, editHash: "edit", look: unresolved, workingSpace: .sRGB)),
+            .exact)
+        XCTAssertEqual(
+            FrameClassifier.classify(
+                ungraded, against: FrameCurrentInputs(
+                    source: identity, editHash: "edit", look: resolved, workingSpace: .sRGB)),
+            .staleCompatible)
+
+        // A graded frame is not exact while the current Look is merely unresolved.
+        let graded = FrameFixtures.metadata(identity: identity, look: resolved)
+        XCTAssertEqual(
+            FrameClassifier.classify(
+                graded, against: FrameCurrentInputs(
+                    source: identity, editHash: "edit", look: unresolved, workingSpace: .sRGB)),
+            .provisionalOnly)
     }
 
-    func testAResolvedKeyChangesWhenTheLookBytesChange() {
-        let source = ImageSource(
-            backing: .data(Data("cache-source-3".utf8)), kind: .standard,
-            nativeExtent: CGSize(width: 32, height: 24))
-        func key(_ hash: String) -> PreviewDiskCache.Key {
-            PreviewDiskCache.Key(
-                identity: source.cacheIdentity, documentHash: "d",
-                look: .resolved(id: id, contentHash: hash))
+    func testNoneAndUnresolvedAreDistinctSignaturesForFrames() {
+        let identity = FrameFixtures.identity()
+        let none = FrameFixtures.metadata(identity: identity, look: LookSignature.none)
+        let inputs = FrameCurrentInputs(
+            source: identity, editHash: "edit", look: .unresolved(id: id), workingSpace: .sRGB)
+        XCTAssertNotEqual(FrameClassifier.classify(none, against: inputs), .exact)
+    }
+
+    func testAResolvedFrameStopsBeingExactWhenTheLookBytesChange() {
+        let identity = FrameFixtures.identity()
+        let frame = FrameFixtures.metadata(
+            identity: identity, look: .resolved(id: id, contentHash: "h1"))
+        func classify(_ hash: String) -> FrameClassification {
+            FrameClassifier.classify(
+                frame, against: FrameCurrentInputs(
+                    source: identity, editHash: "edit",
+                    look: .resolved(id: id, contentHash: hash), workingSpace: .sRGB))
         }
-        XCTAssertEqual(key("h1").canonicalKeyString, key("h1").canonicalKeyString)
-        XCTAssertNotEqual(key("h1").canonicalKeyString, key("h2").canonicalKeyString)
+        XCTAssertEqual(classify("h1"), .exact)
+        XCTAssertEqual(classify("h2"), .staleCompatible)
     }
 }

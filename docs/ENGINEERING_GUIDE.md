@@ -164,8 +164,52 @@ carries no digest; `EditDocumentLoadResult.lookSignature` exposes the current re
 from its stored reference.
 
 - `none` never equals `unresolved`. An `unresolved` signature labels provisional (ungraded) pixels
-  only: it has no durable preview key, is never written to or served from `PreviewDiskCache`, and is
+  only: it is never written to `LatestPreviewFrameStore`, never classifies as exact, and is
   never an exact edited-thumbnail match, so those pixels are replaced when the Look resolves.
+## Presentation frames and freshness
+
+`LatestPreviewFrameStore` keeps the latest presented 2048 px preview of each asset. Three value types
+define what a stored frame means:
+
+- `FrameSignature` — source `PortablePhotoIdentity` (including fingerprint), edit hash,
+  `LookSignature`, `WorkingSpace`, and `RenderPipeline.pixelEpoch`. Container layout is not part of
+  it.
+- `PresentedGeometry` — crop, rotation, and oriented aspect ratio.
+- `PerceptualDigest` — an 8×8×RGB fingerprint computed beside the engine's `CIContext` from the
+  completed image, never from a full-size readback.
+
+`FrameClassifier.classify(_:against:)` is the **only** freshness implementation. Callers never
+compare keys themselves:
+
+| Result | Condition | Effect |
+| --- | --- | --- |
+| `unusable` | different asset, source fingerprint mismatch, or raster color space not losslessly presentable | never shown |
+| `provisionalOnly` | same photo, but edit hash or Look is not resolved yet | may paint; never skips a render |
+| `exact` | every `FrameSignature` field equals the current inputs, Look resolved | present through the confirmed tail and skip the settled render |
+| `staleCompatible` | same photo, presentable, any input differs (including `pixelEpoch`) | paint inert pixels, render once, replace |
+
+Rules that keep this safe:
+
+- Lookup starts at selection, from the collection's identity, in parallel with source preparation.
+  The hit enters `PreviewPresentationCoordinator` as the provisional `.storedFrame` candidate. It is
+  inert: it cannot drive tools, histogram, scopes, comparison, `lastPublishedVisibleRequest`, or a
+  write.
+- Until stored edits have been adopted the current inputs are unresolved, so the classification is
+  `provisionalOnly` and the first settled submission is *deferred* rather than rendered against the
+  speculative identity document. `adoptStoredEdits` and the end of the lookup release it.
+- Exact hits go through `presentSettledRaster(persistsFrame: false)`, so histogram and supporting
+  work are admitted once and the frame is not re-encoded. The first confirmed frame of a session
+  consumes the candidate; later edits always render.
+- Only a complete, canonical (`quality == .preview`, no ROI) frame of the photo's own resolved edit
+  writes. Interactive, ROI, comparison/original, crop-tool, embedded, provisional, and failed output
+  never does, nor does a speculative frame rendered before stored edits were adopted.
+- Bump `pixelEpoch` only when identical inputs render different pixels; bump
+  `storageFormatVersion` only when the envelope cannot be decoded.
+- `FrameRefinementPolicy` decides how a stale frame is replaced: one 120 ms crossfade when the digest
+  distance exceeds `crossfadeDigestThreshold` (pinned by `FrameRefinementPolicyTests`), otherwise an
+  immediate swap; Reduce Motion always swaps. The policy and digest are in place; the presentation
+  surface does not yet animate the swap.
+
 - `LUTFilterCache` and engine preview keys include the content hash, so a `.cube` replaced in place
   under the same `LUTID` can never be served stale; invalidation is memory hygiene, not correctness.
 - `LUTLibrary` publishes a `[LUTID: contentHash]` snapshot with each scan or import and reports a

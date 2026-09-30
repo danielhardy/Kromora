@@ -8,16 +8,34 @@ import os.log
 ///
 /// `PreviewCoordinator` remains the renderer-admission owner. This layer owns the state shared by
 /// settled, interactive, comparison, and cache-only requests: display/baseline generations,
-/// hysteretic resolution planners, and the durable preview cache. It deliberately has no
-/// presentation surface or `AppViewModel` reference, so request planning, cache-hit behavior, and
-/// revision fencing can be tested with a fake renderer and a temporary cache directory.
+/// hysteretic resolution planners, and the latest-frame store lookup/write policy. It deliberately
+/// has no presentation surface or `AppViewModel` reference, so request planning, stored-frame
+/// behavior, and revision fencing can be tested with a fake renderer and a temporary directory.
 @MainActor
 final class PreviewPresentationCoordinator {
     enum CandidateSource: String, Sendable, Equatable {
+        case storedFrame
         case editedThumbnail
         case originalThumbnail
         case embeddedJPEG
         case rendered
+    }
+
+    /// A persisted preview read at selection time, before the source has been prepared. It is
+    /// inert: it may fill the canvas and, once every current input is known and matches, stand in
+    /// for the settled render. It never drives editing tools, histograms, or writes.
+    struct StoredFrameCandidate {
+        let metadata: PresentationFrameMetadata
+        let image: CGImage
+    }
+
+    enum StoredFrameLookup {
+        /// No lookup was started for this selection.
+        case idle
+        case loading
+        case candidate(StoredFrameCandidate)
+        /// Missed, unusable for this photo, or already consumed by a confirmed frame.
+        case unavailable
     }
 
     enum SessionState: Sendable, Equatable {
@@ -48,13 +66,15 @@ final class PreviewPresentationCoordinator {
     private var mainPlanner = ResolutionPlanner()
     private var comparisonPlanner = ResolutionPlanner()
     private var histogramPlanner = ResolutionPlanner()
-    private var cacheLookupTask: Task<Void, Never>?
-    private var canonicalWriteTasks: [PreviewDiskCache.Key: Task<Void, Never>] = [:]
-    let cache: PreviewDiskCache
+    private var storedFrameTask: Task<Void, Never>?
+    private var storedFrameSessionGeneration: UInt64?
+    private(set) var storedFrameLookup: StoredFrameLookup = .idle
+    private var canonicalWriteTasks: [PortablePhotoAssetID: Task<Void, Never>] = [:]
+    let store: LatestPreviewFrameStore
     private let engine: any RenderEngining
 
-    init(cache: PreviewDiskCache, engine: any RenderEngining = RenderEngine.shared) {
-        self.cache = cache
+    init(store: LatestPreviewFrameStore, engine: any RenderEngining = RenderEngine.shared) {
+        self.store = store
         self.engine = engine
     }
 
@@ -64,6 +84,7 @@ final class PreviewPresentationCoordinator {
     func beginPresentationSession(
         assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64
     ) {
+        cancelStoredFrameLookup()
         presentationSession = PresentationSession(
             assetID: assetID, identity: identity, generation: generation,
             selectionUptime: DispatchTime.now().uptimeNanoseconds,
@@ -94,6 +115,8 @@ final class PreviewPresentationCoordinator {
         switch (session.candidateSource, source) {
         case (nil, _): mayReplaceCurrent = true
         case (.originalThumbnail, .editedThumbnail): mayReplaceCurrent = true
+        case (.editedThumbnail, .storedFrame), (.originalThumbnail, .storedFrame),
+            (.embeddedJPEG, .storedFrame): mayReplaceCurrent = true
         default: mayReplaceCurrent = false
         }
         guard mayReplaceCurrent else { return false }
@@ -149,6 +172,7 @@ final class PreviewPresentationCoordinator {
             }
         session.state = .confirmed
         session.candidateSource = .rendered
+        consumeStoredFrame()
         session.distinctFrameCount += 1
         if session.firstPixelLatencyMilliseconds == nil {
             session.firstPixelLatencyMilliseconds = Self.elapsedMilliseconds(
@@ -237,42 +261,106 @@ final class PreviewPresentationCoordinator {
         }
     }
 
-    /// The exact-pixel key for a canonical request, or `nil` when its Look is unresolved. An
-    /// unresolved request renders provisional (ungraded) pixels: they may be shown, but must be
-    /// neither served from nor written to the durable cache, whichever side of a Look scan the
-    /// request falls on.
-    func cacheKey(for request: RenderRequest) -> PreviewDiskCache.Key? {
-        let look = request.lookSignature
-        guard look.permitsExactReuse else { return nil }
-        return PreviewDiskCache.Key(
-            identity: request.source.cacheIdentity,
-            documentHash: request.document.editHash,
-            look: look,
-            targetSizeBucket: String(PreviewDiskCache.canonicalLongEdge),
-            space: request.space,
-            pipelineVersion: RenderPipeline.cacheVersion
-        )
-    }
+    // MARK: Stored frame
 
-    func cancelCacheLookup() {
-        cacheLookupTask?.cancel()
-        cacheLookupTask = nil
-    }
-
-    /// Performs cache I/O outside the main actor and returns only an exact-key raster. The caller
-    /// still owns the source/display fence because it also owns the visible document and surfaces.
-    func lookupCache(
-        for key: PreviewDiskCache.Key,
-        completion: @escaping @MainActor (CGImage?) -> Void
+    /// Begin reading this photo's latest persisted preview. Runs in parallel with source
+    /// preparation; `completion` runs on the main actor with the candidate, or `nil`, only if the
+    /// selection is still the session that asked. A candidate that is unusable for this photo
+    /// (different source, unpresentable color space) is reported as a miss.
+    func beginStoredFrameLookup(
+        assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64,
+        completion: @escaping @MainActor (StoredFrameCandidate?) -> Void
     ) {
-        cancelCacheLookup()
-        let cache = self.cache
-        cacheLookupTask = Task { [weak self] in
-            let image = await cache.readAsync(for: key)
+        cancelStoredFrameLookup()
+        storedFrameSessionGeneration = generation
+        storedFrameLookup = .loading
+        let store = self.store
+        storedFrameTask = Task { [weak self] in
+            async let pin: Void = store.setPinned([identity.assetID])
+            let hit = await store.read(for: identity)
+            await pin
             guard !Task.isCancelled, let self else { return }
-            self.cacheLookupTask = nil
-            completion(image)
+            self.storedFrameTask = nil
+            guard let session = self.presentationSession,
+                session.assetID == assetID, session.generation == generation,
+                self.storedFrameSessionGeneration == generation
+            else { return }
+            let provisionalInputs = FrameCurrentInputs(source: identity)
+            if let hit,
+                FrameClassifier.classify(hit.frame.metadata, against: provisionalInputs).isPresentable
+            {
+                let candidate = StoredFrameCandidate(metadata: hit.frame.metadata, image: hit.image)
+                self.storedFrameLookup = .candidate(candidate)
+                completion(candidate)
+            } else {
+                self.storedFrameLookup = .unavailable
+                completion(nil)
+            }
         }
+    }
+
+    func cancelStoredFrameLookup() {
+        storedFrameTask?.cancel()
+        storedFrameTask = nil
+        storedFrameSessionGeneration = nil
+        storedFrameLookup = .idle
+    }
+
+    /// The candidate has served its purpose once a confirmed frame exists; later requests in the
+    /// session (edits, undo) must render, never reuse a frame from before they happened.
+    func consumeStoredFrame() {
+        if case .idle = storedFrameLookup { return }
+        storedFrameTask?.cancel()
+        storedFrameTask = nil
+        storedFrameLookup = .unavailable
+    }
+
+    /// The freshness of the session's candidate against what the request would render, or `nil`
+    /// when there is no usable candidate for this source revision. `editsResolved` is false until
+    /// the stored edit document has been adopted, which keeps the candidate from ever suppressing
+    /// a render it cannot yet justify.
+    ///
+    /// `storedLook` is the current edit revision's content-addressed Look identity. It stands in
+    /// for a Look the browser has not resolved yet, so a warm open is exact regardless of whether
+    /// the Look scan has finished.
+    func classifyStoredFrame(
+        for request: RenderRequest, sourceRevision: UInt64, editsResolved: Bool,
+        storedLook: LookSignature? = nil
+    ) -> (classification: FrameClassification, candidate: StoredFrameCandidate)? {
+        guard case .candidate(let candidate) = storedFrameLookup,
+            storedFrameSessionGeneration == sourceRevision,
+            let session = presentationSession, session.generation == sourceRevision
+        else { return nil }
+        var look = request.lookSignature
+        if !look.permitsExactReuse, let storedLook, storedLook.permitsExactReuse,
+            storedLook.lutID == look.lutID
+        {
+            look = storedLook
+        }
+        let inputs = FrameCurrentInputs(
+            source: request.source.portableIdentity,
+            editHash: editsResolved ? request.document.editHash : nil,
+            look: editsResolved ? look : nil,
+            workingSpace: request.space
+        )
+        return (FrameClassifier.classify(candidate.metadata, against: inputs), candidate)
+    }
+
+    var isStoredFrameLookupLoading: Bool {
+        if case .loading = storedFrameLookup { return true }
+        return false
+    }
+
+    /// Whether the persisted frame for this request's photo already matches it exactly. Used by
+    /// idle building so it does not re-render what a relaunch would already show.
+    func storedFrameIsExact(for request: RenderRequest) async -> Bool {
+        let identity = request.source.portableIdentity
+        guard let metadata = await store.metadata(for: identity) else { return false }
+        let inputs = FrameCurrentInputs(
+            source: identity, editHash: request.document.editHash,
+            look: request.lookSignature, workingSpace: request.space
+        )
+        return FrameClassifier.classify(metadata, against: inputs) == .exact
     }
 
     func resetForSource() {
@@ -281,28 +369,49 @@ final class PreviewPresentationCoordinator {
         resetPlanners()
     }
 
-    /// Canonical cache writes are kept here so every settled presentation and every idle build
-    /// applies the same complete-frame/ROI rule. A key has one cancellable task, so rapid settled
+    /// Canonical writes are kept here so every settled presentation and every idle build applies
+    /// the same complete-frame/ROI rule. An asset has one cancellable task, so rapid settled
     /// frames cannot leave a detached rasterization task per document tick.
     func writeCanonical(_ image: CIImage, for request: RenderRequest) {
-        guard request.quality == .preview, request.sourceROI == nil,
-              let key = cacheKey(for: request) else { return }
-        canonicalWriteTasks[key]?.cancel()
-        let cache = self.cache
+        let look = request.lookSignature
+        guard request.quality == .preview, request.sourceROI == nil, look.permitsExactReuse
+        else { return }
+        let identity = request.source.portableIdentity
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return }
+        let signature = FrameSignature(
+            source: identity, editHash: request.document.editHash, look: look,
+            workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
+        )
+        let geometry = PresentedGeometry(
+            crop: request.document.crop, rotation: request.document.rotation,
+            orientedAspectRatio: Double(extent.width / extent.height)
+        )
+        canonicalWriteTasks[identity.assetID]?.cancel()
+        let store = self.store
         let engine = self.engine
-        canonicalWriteTasks[key] = Task { [weak self] in
+        canonicalWriteTasks[identity.assetID] = Task { [weak self] in
             guard !Task.isCancelled,
                   let raster = await engine.makeCanonicalPreviewRaster(
-                      image, space: request.space, longEdge: PreviewDiskCache.canonicalLongEdge
+                      image, space: request.space, longEdge: LatestPreviewFrameStore.canonicalLongEdge
                   ), !Task.isCancelled else { return }
-            await cache.enqueueWrite(raster, for: key)
+            let frame = PresentationFrame(
+                metadata: PresentationFrameMetadata(
+                    identity: identity, kind: .preview2048, signature: signature,
+                    geometry: geometry, rasterColorSpace: raster.rasterColorSpace,
+                    perceptualDigest: raster.perceptualDigest, presentedAt: Date(),
+                    pixelWidth: raster.pixelWidth, pixelHeight: raster.pixelHeight
+                ),
+                rasterData: raster.jpegData
+            )
+            await store.enqueueWrite(frame)
             guard let self else { return }
-            self.canonicalWriteTasks.removeValue(forKey: key)
+            self.canonicalWriteTasks.removeValue(forKey: identity.assetID)
         }
     }
 
     func shutdown() {
-        cancelCacheLookup()
+        cancelStoredFrameLookup()
         for task in canonicalWriteTasks.values { task.cancel() }
         canonicalWriteTasks.removeAll()
     }

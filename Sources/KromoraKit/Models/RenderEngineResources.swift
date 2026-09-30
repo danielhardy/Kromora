@@ -1,6 +1,19 @@
 import CoreImage
 import Metal
 import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
+
+/// A finished canonical preview as plain values: the encoded JPEG, its pixel size and color space,
+/// and its perceptual digest. Produced beside the engine's `CIContext` so nothing Core Image
+/// reaches the frame store.
+struct CanonicalPreviewRaster: Sendable {
+    let jpegData: Data
+    let pixelWidth: Int
+    let pixelHeight: Int
+    let rasterColorSpace: RasterColorSpace
+    let perceptualDigest: PerceptualDigest
+}
 
 /// Actor-confined GPU and cache resources used by `RenderEngine`.
 ///
@@ -88,6 +101,107 @@ final class RenderEngineResources {
         return canonicalPreviewRaster(
             from: image, space: space, longEdge: longEdge, context: context
         )
+    }
+
+    /// Rasterize, encode, and fingerprint a completed preview in one pass. Everything a
+    /// `LatestPreviewFrameStore` needs crosses the boundary as values; no Core Image object does.
+    func canonicalPreviewFrame(
+        from image: CIImage, space: WorkingSpace, longEdge: Int
+    ) -> CanonicalPreviewRaster? {
+        Self.canonicalPreviewFrame(
+            from: image, space: space, longEdge: longEdge, context: context
+        )
+    }
+
+    static func canonicalPreviewFrame(
+        from image: CIImage, space: WorkingSpace, longEdge: Int
+    ) -> CanonicalPreviewRaster? {
+        canonicalPreviewFrame(
+            from: image, space: space, longEdge: longEdge,
+            context: makeOneShotContext(workingColorSpace: space.cgColorSpace)
+        )
+    }
+
+    static func canonicalPreviewFrame(
+        from image: CIImage, space: WorkingSpace, longEdge: Int, context: CIContext
+    ) -> CanonicalPreviewRaster? {
+        guard let raster = canonicalPreviewRaster(
+                  from: image, space: space, longEdge: longEdge, context: context
+              ),
+              let digest = perceptualDigest(of: image, space: space, context: context),
+              let jpeg = jpegData(for: raster, quality: canonicalJPEGQuality)
+        else { return nil }
+        return CanonicalPreviewRaster(
+            jpegData: jpeg, pixelWidth: raster.width, pixelHeight: raster.height,
+            rasterColorSpace: RasterColorSpace(space), perceptualDigest: digest
+        )
+    }
+
+    static let canonicalJPEGQuality = 0.9
+
+    static func jpegData(for image: CGImage, quality: Double) -> Data? {
+        let data = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            data, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return nil }
+        CGImageDestinationAddImage(destination, image, [
+            kCGImageDestinationLossyCompressionQuality: quality
+        ] as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return data as Data
+    }
+
+    /// The fingerprint of `image` as it would be displayed in `space`: one 64×64 render, then an
+    /// 8×8 grid of block means. Deterministic for equal inputs, bounded, and independent of the
+    /// image's size, so a 2048 px frame and a viewport-sized refinement of it are comparable.
+    func perceptualDigest(of image: CIImage, space: WorkingSpace) -> PerceptualDigest? {
+        Self.perceptualDigest(of: image, space: space, context: context)
+    }
+
+    static func perceptualDigest(
+        of image: CIImage, space: WorkingSpace, context: CIContext
+    ) -> PerceptualDigest? {
+        let extent = image.extent.integral
+        guard extent.width > 0, extent.height > 0,
+              extent.width.isFinite, extent.height.isFinite else { return nil }
+        let side = PerceptualDigest.gridSide
+        let block = 8
+        let pixels = side * block
+        let scaled = image
+            .transformed(by: CGAffineTransform(translationX: -extent.minX, y: -extent.minY))
+            .applyingFilter("CILanczosScaleTransform", parameters: [
+                kCIInputScaleKey: CGFloat(pixels) / extent.height,
+                kCIInputAspectRatioKey: (CGFloat(pixels) / extent.width)
+                    / (CGFloat(pixels) / extent.height),
+            ])
+        let rowBytes = pixels * 4
+        var buffer = [UInt8](repeating: 0, count: rowBytes * pixels)
+        context.render(
+            scaled, toBitmap: &buffer, rowBytes: rowBytes,
+            bounds: CGRect(x: 0, y: 0, width: pixels, height: pixels),
+            format: .RGBA8, colorSpace: space.cgColorSpace
+        )
+        var cells = Data(count: PerceptualDigest.byteCount)
+        let area = block * block
+        for cellY in 0..<side {
+            for cellX in 0..<side {
+                var sums = (r: 0, g: 0, b: 0)
+                for y in 0..<block {
+                    let rowStart = (cellY * block + y) * rowBytes + cellX * block * 4
+                    for x in 0..<block {
+                        let offset = rowStart + x * 4
+                        sums.r += Int(buffer[offset])
+                        sums.g += Int(buffer[offset + 1])
+                        sums.b += Int(buffer[offset + 2])
+                    }
+                }
+                let out = (cellY * side + cellX) * 3
+                cells[out] = UInt8((sums.r + area / 2) / area)
+                cells[out + 1] = UInt8((sums.g + area / 2) / area)
+                cells[out + 2] = UInt8((sums.b + area / 2) / area)
+            }
+        }
+        return PerceptualDigest(bytes: cells)
     }
 
     init(configuration: RenderCacheConfiguration) {

@@ -43,14 +43,20 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
     /// preview frames do not pay for an encoded PNG that is immediately decoded again.
     func makeCGImage(_ request: RenderRequest) async -> sending CGImage?
 
-    /// Rasterize a completed preview frame into the durable cache's canonical long-edge size.
-    /// Core Image work stays beside the engine-owned context; callers receive only the finished
-    /// value that the disk cache can encode.
+    /// Rasterize a completed preview frame into the frame store's canonical long-edge size,
+    /// encode it, and fingerprint it. Core Image work stays beside the engine-owned context;
+    /// callers receive only finished values.
     func makeCanonicalPreviewRaster(
         _ image: sending CIImage,
         space: WorkingSpace,
         longEdge: Int
-    ) async -> sending CGImage?
+    ) async -> CanonicalPreviewRaster?
+
+    /// Fingerprint a completed frame for the refinement policy without a full-size readback.
+    func makePerceptualDigest(
+        _ image: sending CIImage,
+        space: WorkingSpace
+    ) async -> PerceptualDigest?
 
     /// Produce a thumbnail CGImage. The default preserves older conformers' thumbnail recording
     /// seam; `RenderEngine` overrides it to rasterize directly without encoded bytes.
@@ -343,13 +349,26 @@ extension RenderEngining {
         _ image: sending CIImage,
         space: WorkingSpace,
         longEdge: Int
-    ) async -> sending CGImage? {
+    ) async -> CanonicalPreviewRaster? {
         // Compatibility seam for fake/lightweight renderers. Production RenderEngine overrides
         // this with its retained context; the fallback still keeps context construction inside
         // RenderEngineResources and lets existing renderer doubles exercise preview caching.
         guard !Task.isCancelled else { return nil }
-        return RenderEngineResources.canonicalPreviewRaster(
+        return RenderEngineResources.canonicalPreviewFrame(
             from: image, space: space, longEdge: longEdge
+        )
+    }
+
+    func makePerceptualDigest(
+        _ image: sending CIImage,
+        space: WorkingSpace
+    ) async -> PerceptualDigest? {
+        guard !Task.isCancelled else { return nil }
+        return RenderEngineResources.perceptualDigest(
+            of: image, space: space,
+            context: RenderEngineResources.makeOneShotContext(
+                workingColorSpace: space.cgColorSpace
+            )
         )
     }
 
@@ -816,9 +835,17 @@ actor RenderEngine: RenderEngining {
         _ image: sending CIImage,
         space: WorkingSpace,
         longEdge: Int
-    ) async -> sending CGImage? {
+    ) async -> CanonicalPreviewRaster? {
         guard !Task.isCancelled else { return nil }
-        return resources.canonicalPreviewRaster(from: image, space: space, longEdge: longEdge)
+        return resources.canonicalPreviewFrame(from: image, space: space, longEdge: longEdge)
+    }
+
+    func makePerceptualDigest(
+        _ image: sending CIImage,
+        space: WorkingSpace
+    ) async -> PerceptualDigest? {
+        guard !Task.isCancelled else { return nil }
+        return resources.perceptualDigest(of: image, space: space)
     }
 
     /// The edited-thumbnail path uses the actor-local rasterizer directly. Keeping this separate
@@ -1545,7 +1572,7 @@ actor RenderEngine: RenderEngining {
             scale: RenderScaleKey(
                 scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
             ),
-            pipelineVersion: RenderPipeline.cacheVersion
+            pipelineVersion: RenderPipeline.pixelEpoch
         )
         if let key {
             let flights = thumbnail ? thumbnailDevelopedSourceFlights : developedSourceFlights
@@ -2133,7 +2160,7 @@ actor RenderEngine: RenderEngining {
             sourceROI: sourceROI,
             space: space,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
-            pipelineVersion: RenderPipeline.cacheVersion
+            pipelineVersion: RenderPipeline.pixelEpoch
         )
         if let flight = processingPrefixFlights[key] {
             return await flight.task.value?.image
@@ -2203,7 +2230,7 @@ actor RenderEngine: RenderEngining {
             sourceROI: sourceROI,
             space: space,
             includePostRenderWhiteBalance: includePostRenderWhiteBalance,
-            pipelineVersion: RenderPipeline.cacheVersion
+            pipelineVersion: RenderPipeline.pixelEpoch
         )
         if let flight = processingPrefixFlights[key] {
             return await flight.task.value?.image ?? localAdjusted
@@ -2328,7 +2355,7 @@ actor RenderEngine: RenderEngining {
             scale: RenderScaleKey(
                 scale, nativeExtent: rotation.orientedExtent(source.nativeExtent)
             ),
-            pipelineVersion: RenderPipeline.cacheVersion
+            pipelineVersion: RenderPipeline.pixelEpoch
         )
         let cache = thumbnail ? thumbnailDevelopedSourceCache : developedSourceCache
         var cacheInterval = KromoraObservability.begin(.cache, source: source, quality: .preview)
@@ -2694,7 +2721,7 @@ actor RenderEngine: RenderEngining {
             presentationROI: request.presentationROI,
             quality: request.quality,
             space: request.space,
-            pipelineVersion: RenderPipeline.cacheVersion
+            pipelineVersion: RenderPipeline.pixelEpoch
         )
     }
 

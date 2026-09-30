@@ -115,6 +115,49 @@ final class PreviewPublicationCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.idleCount, 1)
     }
 
+    func testSpeculativeFrameBeforeStoredEditsResolveDoesNotWrite() throws {
+        let destination = FakeDestination()
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+
+        coordinator.publish(try makePublication(destination: destination))
+
+        XCTAssertEqual(destination.presentCount, 1)
+        XCTAssertEqual(destination.canonicalWriteCount, 0,
+                       "a frame rendered before the stored edit is known is not that photo's edit")
+    }
+
+    func testComparisonAndCropFramesDoNotWrite() throws {
+        let destination = FakeDestination()
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        destination.mayPersistFrame = false
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+
+        coordinator.publish(try makePublication(destination: destination))
+
+        XCTAssertEqual(destination.presentCount, 1)
+        XCTAssertEqual(destination.histogramCount, 1)
+        XCTAssertEqual(destination.canonicalWriteCount, 0)
+    }
+
+    func testFrameStoreRastersAreConfirmedWithoutBeingRewritten() throws {
+        let destination = FakeDestination()
+        destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        let coordinator = PreviewPublicationCoordinator(destination: destination)
+        let publication = try makePublication(destination: destination)
+
+        coordinator.presentSettledRaster(
+            CIImage(cgImage: try XCTUnwrap(publication.image)), request: publication.request,
+            assetID: publication.assetID, sourceRevision: publication.sourceRevision,
+            displayRevision: publication.displayRevision, persistsFrame: false
+        )
+
+        XCTAssertEqual(destination.presentCount, 1)
+        XCTAssertEqual(destination.histogramCount, 1, "supporting work is admitted exactly once")
+        XCTAssertEqual(destination.idleCount, 1)
+        XCTAssertEqual(destination.canonicalWriteCount, 0)
+        XCTAssertEqual(destination.previewState, .ready)
+    }
+
     func testDevelopChangeSchedulesOneComparisonRefreshAndThenClears() throws {
         let destination = FakeDestination()
         let coordinator = PreviewPublicationCoordinator(destination: destination)
@@ -183,7 +226,9 @@ private final class FakeDestination: PreviewPublicationDestination {
     var originalScheduleCount = 0
     var lastOriginalScheduleAllowedHiddenPreparation = false
     var comparisonCancelCount = 0
+    var mayPersistFrame = true
 
+    var publicationMayPersistFrame: Bool { mayPersistFrame }
     var publicationIsShuttingDown: Bool { isShuttingDown }
     var publicationActiveAssetID: PhotoAssetID? { activeAssetID }
     var publicationImageSource: ImageSource? { imageSource }

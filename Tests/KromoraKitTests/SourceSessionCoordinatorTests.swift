@@ -112,11 +112,11 @@ final class SourceSessionCoordinatorTests: XCTestCase {
         await coordinator.shutdown()
     }
 
-    func testPreviewPresentationOwnsGenerationsAndCacheIdentity() throws {
+    func testPreviewPresentationOwnsGenerations() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("KromoraPreviewPresentation-\(UUID().uuidString)")
-        let cache = PreviewDiskCache(directory: directory, capBytes: 1_000_000)
-        let coordinator = PreviewPresentationCoordinator(cache: cache)
+        let store = LatestPreviewFrameStore(directory: directory, capBytes: 1_000_000)
+        let coordinator = PreviewPresentationCoordinator(store: store)
         XCTAssertEqual(coordinator.displayRevision, 0)
         XCTAssertEqual(coordinator.comparisonRevision, 0)
 
@@ -128,18 +128,6 @@ final class SourceSessionCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.displayRevision, 2)
         XCTAssertEqual(coordinator.comparisonRevision, 2)
 
-        let source = ImageSource(
-            backing: .data(Data("preview".utf8)), kind: .standard,
-            nativeExtent: CGSize(width: 100, height: 80)
-        )
-        let request = RenderRequest(
-            source: source, document: EditDocument(), targetSize: CGSize(width: 100, height: 80),
-            quality: .preview
-        )
-        XCTAssertEqual(
-            coordinator.cacheKey(for: request)?.identity,
-            source.cacheIdentity
-        )
         try? FileManager.default.removeItem(at: directory)
     }
 }

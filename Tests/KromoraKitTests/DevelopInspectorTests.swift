@@ -630,7 +630,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     func testHistogramFollowsTheDisplayedComparisonRequest() async throws {
         let fake = FakeRenderEngine()
         let reader = FakeRenderEventReader(await fake.eventStream())
-        let viewModel = makeAppViewModel(engine: fake, previewDiskCacheCapBytes: 0)
+        let viewModel = makeAppViewModel(engine: fake, previewFrameStoreCapBytes: 0)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         viewModel.isInspectorPresented = true

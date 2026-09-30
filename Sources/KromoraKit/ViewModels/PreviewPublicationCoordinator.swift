@@ -40,6 +40,9 @@ protocol PreviewPublicationDestination: AnyObject {
     func publicationUpdateHistogram(for request: RenderRequest, presentedImage: CIImage?)
     func publicationScheduleIdlePreviewBuild()
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest)
+    /// False while the canvas shows something other than the photo's own edit — the original
+    /// comparison baseline or the crop tool's transient geometry. Those frames never persist.
+    var publicationMayPersistFrame: Bool { get }
     /// The adjusted frame the surface is actually showing. A newer settled request can be turned
     /// away when this frame is already sharper; the histogram still has to describe it.
     var publicationVisiblePreview: CIImage? { get }
@@ -119,10 +122,13 @@ final class PreviewPublicationCoordinator {
         }
     }
 
+    /// - Parameter persistsFrame: false for pixels that came from the frame store itself, which
+    ///   must not be re-encoded and rewritten by the tail that confirms them.
     @discardableResult
     func presentSettledRaster(
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
-        sourceRevision: UInt64, displayRevision: UInt64, surfaceRevision: UInt64? = nil
+        sourceRevision: UInt64, displayRevision: UInt64, surfaceRevision: UInt64? = nil,
+        persistsFrame: Bool = true
     ) -> Bool {
         guard let destination else { return false }
         let presented = destination.presentAdjustedFrame(
@@ -130,7 +136,8 @@ final class PreviewPublicationCoordinator {
             onPresented: { [weak self] in
                 self?.didPresentVisibleFrame(
                     request, assetID: assetID, sourceRevision: sourceRevision,
-                    displayRevision: displayRevision, presentedImage: image
+                    displayRevision: displayRevision, presentedImage: image,
+                    persistsFrame: persistsFrame
                 )
             }
         )
@@ -173,7 +180,7 @@ final class PreviewPublicationCoordinator {
 
     private func didPresentVisibleFrame(
         _ request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
-        displayRevision: UInt64, presentedImage: CIImage?
+        displayRevision: UInt64, presentedImage: CIImage?, persistsFrame: Bool
     ) {
         guard let destination,
             assetID == destination.publicationActiveAssetID,
@@ -221,9 +228,14 @@ final class PreviewPublicationCoordinator {
         }
         destination.publicationScheduleIdlePreviewBuild()
 
-        guard request.quality == .preview, request.sourceROI == nil, let presentedImage else {
-            return
-        }
+        // Only a complete, canonical, settled frame of the photo's own resolved edit persists. A
+        // speculative frame rendered before the stored edit was adopted is written later, by the
+        // adoption, if it turns out to be the edit on screen.
+        guard persistsFrame, request.quality == .preview, request.sourceROI == nil,
+            destination.publicationMayPersistFrame,
+            destination.publicationStoredEditsResolvedSourceRevision == sourceRevision,
+            let presentedImage
+        else { return }
         destination.writeCanonicalPreview(presentedImage, request: request)
     }
 }
