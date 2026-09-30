@@ -20,6 +20,7 @@ protocol EditedThumbnailDestination: AnyObject {
     var isEditedThumbnailInteractionActive: Bool { get }
     var isEditedThumbnailPreviewDebouncing: Bool { get }
     var editedThumbnailItems: [ImageCollection.Item] { get }
+    var visibleEditedThumbnailAssetIDs: Set<PhotoAssetID> { get }
     func editedThumbnailItem(for assetID: PhotoAssetID) -> ImageCollection.Item?
     func editedThumbnailDocument(for assetID: PhotoAssetID) -> EditDocument?
     func editedThumbnailDocumentRevision(for assetID: PhotoAssetID) -> UInt64
@@ -397,8 +398,10 @@ final class EditedThumbnailCoordinator {
     /// admission still bounds the re-renders.
     func refreshMaterializedThumbnails(affecting ids: Set<LUTID>) {
         guard let destination, !ids.isEmpty else { return }
+        var demanded = destination.visibleEditedThumbnailAssetIDs
+        if let active = destination.activeEditedThumbnailAssetID { demanded.insert(active) }
         let affected = materializedThumbnails.filter { $0.value.look.references(anyOf: ids) }.keys
-        for assetID in affected {
+        for assetID in affected where demanded.contains(assetID) {
             let priority: ImageWorkScheduler.Priority =
                 assetID == destination.activeEditedThumbnailAssetID
                 ? .activeEditor : .visibleGrid

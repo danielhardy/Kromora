@@ -199,6 +199,12 @@ final class ImageCollectionPresentationModel {
     /// thumbnail slot before the fast previews.
     private var visibleEditedThumbnailIDs: [PhotoAssetID] = []
     private var visibleEditedDemandScheduled = false
+
+    /// IDs whose edited thumbnails are currently requested by the visible grid or filmstrip.
+    /// Scan-driven Look refreshes use this to avoid rebuilding thumbnails that have scrolled away.
+    var visibleEditedThumbnailAssetIDs: Set<PhotoAssetID> {
+        Set(visibleEditedThumbnailIDs)
+    }
     private var metadataTask: Task<Void, Never>?
     private var metadataContinuation: AsyncStream<MetadataRequest>.Continuation?
     private var nextMetadataRequestID: UInt64 = 0
