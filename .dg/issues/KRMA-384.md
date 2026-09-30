@@ -2,8 +2,35 @@
 id: KRMA-384
 title: Track the portable library package implementation plan
 type: task
-status: claimed
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Review and approve the package format, identity, migration, and performance assumptions
+      result: pass
+      notes: ADR-001 status approved; EDIT_STORE_IDENTITY_DISPOSITION.md exists
+    - criterion: Break the plan into implementation issues with dependencies and verification lanes
+      result: pass
+      notes: KRMA-389..393 archived with status done
+    - criterion: Implement the approved phases without changing deletion behavior or discarding data
+      result: pass
+      notes: Phases archived done; no source changes in this issue
+    - criterion: Update or retire the plan as each phase lands
+      result: pass
+      notes: LIBRARY_PACKAGE_PLAN.md carries historical notice and links to APP_ARCHITECTURE/STORAGE_POLICY; linked docs and ADR exist
+  checks_run:
+    - "dg validate (warnings only: unknown model names on unrelated issues)"
+    - git diff --check (clean)
+    - verified ADR-001 approved and KRMA-389..393 archived done
+    - verified linked docs exist
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-29T13:00:48.603Z
+  session: 01MUMOP2UMFQ3NID1G
 creation_provenance:
   runner: codex
   model: gpt-5.6-luna
@@ -13,7 +40,7 @@ labels:
   - architecture
   - documentation
 created: 2026-09-12T15:25:59.782Z
-updated: 2026-09-29T12:58:30.290Z
+updated: 2026-09-29T13:00:48.605Z
 blockers:
   - id: legacy-krma-384
     type: human
@@ -24,13 +51,6 @@ blockers:
     resolved_by: web
 order: a0
 board: product
-claim:
-  actor: codex
-  session: 01MUMOMRMCM8IV2ZLV
-  claimed_at: 2026-09-29T12:58:29.076Z
-  expires_at: 2026-09-29T13:58:29.076Z
-  model: gpt-6-luna
-  stage: implementation
 blocked_reason: The package plan requires human approval of the current EditStore data disposition and the local-only package and compatibility policy before identity or persistence implementation can begin.
 blocked_action: Approve ADR-001, or specify the migration/disposition for current library data and any changes to the local-only compatibility boundary; then resume KRMA-384.
 blocked_from_status: claimed
@@ -71,6 +91,10 @@ disposition is recorded in `docs/EDIT_STORE_IDENTITY_DISPOSITION.md` and ADR-001
 
 Reviewed docs/LIBRARY_PACKAGE_PLAN.md and recorded ADR-001. Created the phased implementation issues KRMA-389 through KRMA-393 with explicit dependencies, acceptance criteria, and verification lanes. Updated the plan tracking line. No source, deletion behavior, or current library data was changed.
 
+### Comment — codex @ 2026-09-29T13:00:09.464Z
+
+Completed the package plan tracking: ADR-001 and the legacy-data disposition are approved, KRMA-389–393 are archived complete, and docs/LIBRARY_PACKAGE_PLAN.md now identifies the shipped plan as historical and links current architecture guidance. No further product changes were needed. Checks: dg validate and git diff --check passed.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
@@ -85,3 +109,26 @@ Closed the tracking loop: ADR-001 and the legacy-data disposition are approved a
 KRMA-389 through KRMA-393 are archived complete; the package phases and integration are shipped;
 and the plan now marks itself historical with links to current architecture and storage docs.
 No additional product changes were needed for KRMA-384.
+
+- 2026-09-29T13:00:48.603Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Review and approve the package format, identity, migration, and performance assumptions (pass) — ADR-001 status approved; EDIT_STORE_IDENTITY_DISPOSITION.md exists
+- [x] Break the plan into implementation issues with dependencies and verification lanes (pass) — KRMA-389..393 archived with status done
+- [x] Implement the approved phases without changing deletion behavior or discarding data (pass) — Phases archived done; no source changes in this issue
+- [x] Update or retire the plan as each phase lands (pass) — LIBRARY_PACKAGE_PLAN.md carries historical notice and links to APP_ARCHITECTURE/STORAGE_POLICY; linked docs and ADR exist
+Checks run:
+- dg validate (warnings only: unknown model names on unrelated issues)
+- git diff --check (clean)
+- verified ADR-001 approved and KRMA-389..393 archived done
+- verified linked docs exist
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUMOP2UMFQ3NID1G
+Summary: Verified docs-only tracking closure: ADR-001 approved, phases archived done, plan marked historical with valid links.
