@@ -321,6 +321,18 @@ final class PortableLibrarySession {
     }
 
     var assetCount: Int { queryController.totalCount }
+    var libraryID: UUID { package.manifest.libraryID }
+
+    /// Resolve hinted IDs only against the already-published membership projection. This reads
+    /// neither asset records nor originals and naturally drops IDs removed from the package.
+    func launchHintAssets(for ids: [PortablePhotoAssetID]) -> [PhotoAsset] {
+        ids.compactMap { id in
+            guard let entry = queryController.index.entry(for: id), entry.deletedRevision == nil else {
+                return nil
+            }
+            return try? browsingAssetForLaunchHint(entry)
+        }
+    }
 
     func totalCount(query: LibraryQuery = .all) -> Int {
         page(at: 0, query: query).totalCount
@@ -870,6 +882,30 @@ final class PortableLibrarySession {
             metadata: metadata,
             libraryState: state,
             presentedAspectRatio: summary.presentedAspectRatio
+        )
+    }
+
+    /// Hint reads require only identity, geometry, and the package-derived locator. In particular,
+    /// do not fall back to opening an asset record when a display name has no extension.
+    private func browsingAssetForLaunchHint(_ entry: LibraryIndexEntry) throws -> PhotoAsset {
+        let summary = entry.summary
+        let embeddedURL = try package.browsingOriginalURL(
+            for: entry.assetID, displayName: summary.displayName
+        )
+        let source = PhotoAssetSource(
+            browsingPortableAsset: entry.assetID, embeddedURL: embeddedURL, summary: summary
+        )
+        let metadata = PhotoAssetMetadata(
+            dimensions: summary.dimensions, captureDate: summary.captureDate,
+            cameraMake: summary.cameraMake, cameraModel: summary.cameraModel, lens: summary.lens
+        )
+        return PhotoAsset(
+            source: source, filename: summary.displayName,
+            fileType: embeddedURL.pathExtension, metadata: metadata,
+            libraryState: PhotoAssetLibraryState(
+                rating: summary.rating ?? 0,
+                flag: PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
+            ), presentedAspectRatio: summary.presentedAspectRatio
         )
     }
 

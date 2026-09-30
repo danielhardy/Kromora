@@ -61,6 +61,10 @@ The standing identity regression gate is IdentityRegressionGateTests. It generat
 thumbnail mask supersession, preview publication supersession, and direct edit-store recovery. It
 is included in serial and can also be run directly with scripts/ci-tests.sh identity.
 
+`LaunchHintsTests` covers schema and ID bounds, atomic persistence, library scoping, unsupported
+versions, and corrupt records. `LibraryBrowsingCoordinatorTests` verifies that actual viewport IDs
+are persisted without restoring selection from the hint.
+
 The pre-package folder-backed library baseline is documented in
 [`LIBRARY_PACKAGE_BASELINE.md`](LIBRARY_PACKAGE_BASELINE.md). Its opt-in harness runs in the
 optional lane with `KROMORA_LIBRARY_BASELINE_BENCHMARK=1` and emits the stable JSON report shape

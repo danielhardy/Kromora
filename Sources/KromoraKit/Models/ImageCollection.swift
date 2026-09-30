@@ -239,6 +239,7 @@ final class ImageCollectionPresentationModel {
     /// The package's persisted thumbnail frames. Nil for collections that are not package-backed
     /// (and most unit tests); thumbnails then decode from source exactly as before.
     var thumbnailFrameStore: ThumbnailFrameStore?
+    var onVisibleIDsPublished: (@MainActor @Sendable ([PhotoAssetID]) -> Void)?
     private var frameReadJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var pendingFrameReadIDs: Set<PhotoAssetID> = []
     private var completedFrameReadIDs: Set<PhotoAssetID> = []
@@ -543,6 +544,7 @@ final class ImageCollectionPresentationModel {
         var admitted: [PhotoAssetID] = []
         admitted.reserveCapacity(ids.count)
         for id in ids where indexByID[id] != nil { admitted.append(id) }
+        onVisibleIDsPublished?(admitted)
         // Persisted frames are read for the whole window before any source decode or edited
         // render is admitted; both of those then find most of the window already painted.
         admitFrameReads(visible: admitted, indexByID: indexByID, prefetch: true)
@@ -860,11 +862,14 @@ final class ImageCollectionPresentationModel {
 
     private func applyStoredFrames(
         _ frames: ThumbnailFrameStore.StoredFrames, itemID: PhotoAssetID,
-        identity: PortablePhotoIdentity, generation: UInt64
+        identity: PortablePhotoIdentity, generation: UInt64,
+        allowHintIdentity: Bool = false
     ) {
         guard generation == thumbnailGeneration,
               let item = items.first(where: { $0.id == itemID }),
-              item.asset.source.portableIdentity == identity else { return }
+              allowHintIdentity
+                ? item.asset.source.portableIdentity.assetID == identity.assetID
+                : item.asset.source.portableIdentity == identity else { return }
         if let hit = frames.edited,
            FrameClassifier.classify(hit.frame.metadata, against: FrameCurrentInputs(source: identity))
                .isPresentable
@@ -893,6 +898,19 @@ final class ImageCollectionPresentationModel {
                 size: NSSize(width: hit.image.width, height: hit.image.height)
             ))
             item.asset.thumbnailState = .ready
+        }
+    }
+
+    /// Apply completed launch reads only after the real grid viewport names the same asset.
+    /// Current collection identity and generation checks fence page reuse and scrolling.
+    func applyLaunchFrames(
+        _ frames: [PhotoAssetID: (PortablePhotoIdentity, ThumbnailFrameStore.StoredFrames)]
+    ) {
+        for (id, candidate) in frames {
+            applyStoredFrames(
+                candidate.1, itemID: id, identity: candidate.0,
+                generation: thumbnailGeneration, allowHintIdentity: true
+            )
         }
     }
     private func enqueueThumbnails() {
