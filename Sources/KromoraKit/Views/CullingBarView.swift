@@ -8,6 +8,9 @@ struct CullingBarView: View {
     @ObservedObject var viewModel: AppViewModel
     @Bindable var collection: ImageCollection
     var isCompact: Bool = false
+    /// Edit sits this bar on the photo canvas so the preview and filmstrip share one plane.
+    /// Library keeps the secondary chrome of the grid.
+    var surface: Color = KromoraTheme.secondaryChrome
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -37,7 +40,7 @@ struct CullingBarView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, isCompact ? 4 : 7)
         }
-        .background(KromoraTheme.secondaryChrome)
+        .background(surface)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Photo culling controls")
     }

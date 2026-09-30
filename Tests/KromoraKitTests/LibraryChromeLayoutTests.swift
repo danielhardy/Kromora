@@ -30,7 +30,7 @@ final class LibraryChromeLayoutTests: TempDirectoryTestCase {
         XCTAssertNotNil(window.toolbar)
     }
 
-    func testImportAndExportMoveIntoTheLeadingToolbarWhenInspectorIsOpen() throws {
+    func testImportAndExportStayTrailingBesideTheSidebar() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -48,16 +48,24 @@ final class LibraryChromeLayoutTests: TempDirectoryTestCase {
         )
         let toolbar = try XCTUnwrap(contentView.range(of: ".toolbar {"))
         let toolbarContents = String(contentView[toolbar.upperBound..<contentView.endIndex])
-        XCTAssertTrue(
-            toolbarContents.contains("if inspectorState.isPresented {\n                        ToolbarSpacer(.fixed)\n                        ToolbarItem(placement: .navigation) {\n                            transferToolbarPill"),
-            "the import and export controls join the leading toolbar group while the inspector is open"
+        XCTAssertFalse(
+            toolbarContents.contains("ToolbarItem(placement: .navigation) {\n                            transferToolbarPill"),
+            "import and export stay on the trailing side of the toolbar"
+        )
+        XCTAssertFalse(
+            toolbarContents.contains("if !inspectorState.isPresented"),
+            "the content toolbar must not add a second sidebar toggle when the inspector is closed"
+        )
+        let inspectorView = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/InfoInspectorView.swift"),
+            encoding: .utf8
         )
         XCTAssertTrue(
-            toolbarContents.contains("if !inspectorState.isPresented {\n                        ToolbarSpacer(.fixed)\n                        ToolbarItem(placement: .primaryAction) {\n                            transferToolbarPill"),
-            "the import and export controls return to the trailing group when the inspector is closed"
+            inspectorView.contains("if sidebarAnchoredToTrailingEdge {\n                    ToolbarSpacer(.flexible)"),
+            "the sidebar toggle stays at the trailing edge while the inspector column closes"
         )
         let transferReferences = toolbarContents.components(separatedBy: "transferToolbarPill").count - 1
-        XCTAssertEqual(transferReferences, 3, "one declaration and one placement per inspector state")
+        XCTAssertEqual(transferReferences, 2, "one declaration and one trailing placement")
         XCTAssertTrue(
             contentView.contains(".inspectorColumnWidth(min: 240, ideal: 280, max: 360)")
         )

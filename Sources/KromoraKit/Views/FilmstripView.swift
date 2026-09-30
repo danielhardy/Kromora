@@ -87,7 +87,7 @@ struct FilmstripView: View {
                 // content inset is the complete end gutter at the rightmost scroll position.
                 .padding(.vertical, FilmstripLayout.stripVerticalPadding)
             }
-            .background(KromoraTheme.secondaryChrome)
+            .background(KromoraTheme.canvasBackground)
             .onAppear { collection.beginThumbnailDemand() }
             .onChange(of: collection.selectedIndex) { _, newIndex in
                 guard collection.items.indices.contains(newIndex) else { return }

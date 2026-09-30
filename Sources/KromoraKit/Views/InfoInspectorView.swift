@@ -96,8 +96,30 @@ struct InfoInspectorView: View {
             }
         }
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 360, alignment: .topLeading)
-        // Leave the pane transparent so the native inspector material shows around the chart.
+        // Light matches the toolbar. Dark stays the sidebar step. Follows the window
+        // appearance, including Always dark mode.
+        .background(KromoraTheme.inspectorChrome)
         .animation(inspectorAnimation, value: canvasState.isCropToolActive)
+        .toolbar {
+            // The toggle stays at the trailing edge while the column moves. The pin is not
+            // cleared when closing starts: that jump would move the button. The photo
+            // toolbar slides to it, and the pin drops only after that motion finishes.
+            if !canvasState.isCropToolActive {
+                if sidebarAnchoredToTrailingEdge {
+                    ToolbarSpacer(.flexible)
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    EditorSidebarToolbarButton(
+                        isPresented: inspectorState.isPresented,
+                        isEnabled: viewModel.sourceImage != nil,
+                        action: { viewModel.toggleInspector() }
+                    )
+                }
+            }
+        }
+        .onChange(of: inspectorState.isPresented, initial: true) { _, presented in
+            syncSidebarAnchor(presented: presented)
+        }
     }
 
     private var inspectorAnimation: Animation? {
@@ -173,6 +195,27 @@ struct InfoInspectorView: View {
     @State private var editHistoryExpanded = false
     @State private var snapshotName = ""
     @State private var expandedMetadataSections: Set<String> = ["Camera & Lens", "Exposure"]
+    /// True while the sidebar toggle should stay pinned to the window's trailing edge.
+    /// Closing keeps this set until the column animation finishes.
+    @State private var sidebarAnchoredToTrailingEdge = false
+    @State private var sidebarAnchorGeneration = 0
+
+    /// The system inspector column animates a bit longer than the pane's own content.
+    private static let sidebarAnchorReleaseDelay: Duration = .milliseconds(450)
+
+    private func syncSidebarAnchor(presented: Bool) {
+        sidebarAnchorGeneration += 1
+        let generation = sidebarAnchorGeneration
+        if presented || accessibilityReduceMotion {
+            sidebarAnchoredToTrailingEdge = presented
+            return
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: Self.sidebarAnchorReleaseDelay)
+            guard generation == sidebarAnchorGeneration else { return }
+            sidebarAnchoredToTrailingEdge = false
+        }
+    }
 
     private var editHistorySection: some View {
         InspectorDisclosure("Edit History", isExpanded: $editHistoryExpanded) {
@@ -326,10 +369,10 @@ struct InfoInspectorView: View {
                         }
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Histogram \(mode.title)")
+                .accessibilityLabel("Histogram \(mode.accessibilityName)")
                 .accessibilityValue(isSelected ? "Selected" : "Not selected")
                 .accessibilityAddTraits(isSelected ? .isSelected : [])
-                .help("Show \(mode.title) histogram")
+                .help("Show \(mode.accessibilityName) histogram")
                 .overlay(alignment: .trailing) {
                     if mode != HistogramChart.Mode.allCases.last {
                         Rectangle()
@@ -456,9 +499,22 @@ struct HistogramChart: View, @MainActor Animatable {
             case .red: "R"
             case .green: "G"
             case .blue: "B"
-            case .waveform: "Wave"
+            case .waveform: "W"
+            case .parade: "P"
+            case .vectorscope: "V"
+            }
+        }
+
+        var accessibilityName: String {
+            switch self {
+            case .rgb: "RGB"
+            case .luma: "Luma"
+            case .red: "Red"
+            case .green: "Green"
+            case .blue: "Blue"
+            case .waveform: "Waveform"
             case .parade: "Parade"
-            case .vectorscope: "Vector"
+            case .vectorscope: "Vectorscope"
             }
         }
     }
