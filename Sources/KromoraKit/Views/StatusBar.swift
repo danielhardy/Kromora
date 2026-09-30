@@ -9,6 +9,9 @@ struct StatusBar: View {
     @Bindable var export: ExportCoordinator
     @Bindable var collection: ImageCollection
     var showsKeyHints: Bool = true
+    /// Edit uses the photo canvas so this row continues the preview plane. Library keeps
+    /// the secondary chrome of the grid.
+    var surface: Color = KromoraTheme.secondaryChrome
     var onCancelImport: () -> Void = {}
     var onCancelExport: () -> Void = {}
     var onCancelAuto: () -> Void = {}
@@ -99,7 +102,7 @@ struct StatusBar: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
-        .background(KromoraTheme.secondaryChrome)
+        .background(surface)
     }
 }
 

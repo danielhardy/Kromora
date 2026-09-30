@@ -111,11 +111,19 @@ final class MenuCommandTests: XCTestCase {
                 .dropFirst().first?
                 .components(separatedBy: "private var cropToolbarPill: some View {").first
         )
-        XCTAssertTrue(transferPill.contains("GlassEffectContainer"))
-        XCTAssertTrue(transferPill.contains("glassEffectUnion(id: \"transfer\""))
-        XCTAssertFalse(transferPill.components(separatedBy: "Label(\"Import\"").dropFirst().first?
-            .components(separatedBy: "Label(\"Export\"").first?.contains("Divider()") ?? true,
-            "Import and Export remain adjacent members of one glass pill")
+        XCTAssertTrue(transferPill.contains("ControlGroup {"))
+        XCTAssertTrue(transferPill.contains(".controlGroupStyle(.navigation)"))
+        XCTAssertFalse(
+            contentView.contains(".glassEffect(.regular.interactive(), in: Capsule())"),
+            "toolbar groups use the system control, not a painted capsule"
+        )
+        XCTAssertFalse(transferPill.contains("glassEffectUnion(id: \"transfer\""))
+        let betweenImportAndExport = transferPill.components(separatedBy: "Label(\"Import\"").dropFirst().first?
+            .components(separatedBy: "Label(\"Export\"").first ?? ""
+        XCTAssertFalse(
+            betweenImportAndExport.contains("Divider()"),
+            "Import and Export stay adjacent inside one system control group"
+        )
         XCTAssertTrue(contentView.contains("viewModel.importFromPhotos()"))
         XCTAssertTrue(contentView.contains("viewModel.shareDialog()"))
         XCTAssertTrue(contentView.contains("Label(\"Import\", systemImage: \"photo.on.rectangle\")"))
@@ -148,7 +156,7 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(contentView.contains("ToolbarSpacer(.fixed)"))
         XCTAssertTrue(contentView.contains("ToolbarSpacer(.flexible)"))
         XCTAssertTrue(contentView.contains(".toolbarBackgroundVisibility(.visible, for: .windowToolbar)"))
-        XCTAssertTrue(contentView.contains(".toolbarBackground(.regularMaterial, for: .windowToolbar)"))
+        XCTAssertTrue(contentView.contains(".toolbarBackground(KromoraTheme.toolbarChrome, for: .windowToolbar)"))
         XCTAssertTrue(contentView.contains("GlassEffectContainer(spacing: 10)"))
         XCTAssertTrue(contentView.contains(".buttonStyle(.glass)"))
         XCTAssertTrue(contentView.contains(".buttonStyle(.glassProminent)"))

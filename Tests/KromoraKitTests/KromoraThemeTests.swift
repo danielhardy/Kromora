@@ -34,29 +34,46 @@ final class KromoraThemeTests: XCTestCase {
         XCTAssertGreaterThan(contrastRatio(accent, canvas), 4.5)
     }
 
-    func testSecondaryChromeUsesWarmLightSurfaceAndRetainsSystemDarkSurface() throws {
-        let light = try XCTUnwrap(
+    func testShellSurfacesSeparateCanvasSidebarAndToolbarInBothAppearances() throws {
+        let lightChrome = try XCTUnwrap(
             KromoraTheme.resolvedSecondaryChromeColor(for: NSAppearance(named: .aqua))
                 .usingColorSpace(.deviceRGB)
         )
-        XCTAssertEqual(light.redComponent, 236 / 255, accuracy: 0.002)
-        XCTAssertEqual(light.greenComponent, 232 / 255, accuracy: 0.002)
-        XCTAssertEqual(light.blueComponent, 225 / 255, accuracy: 0.002)
+        XCTAssertEqual(lightChrome.redComponent, 236 / 255, accuracy: 0.002)
+        XCTAssertEqual(lightChrome.greenComponent, 232 / 255, accuracy: 0.002)
+        XCTAssertEqual(lightChrome.blueComponent, 225 / 255, accuracy: 0.002)
 
         let darkAppearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
-        let dark = try XCTUnwrap(
-            KromoraTheme.resolvedSecondaryChromeColor(for: darkAppearance)
-                .usingColorSpace(.deviceRGB)
+        let lightAppearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let darkCanvas = try XCTUnwrap(
+            KromoraTheme.resolvedCanvasBackgroundColor(for: darkAppearance).usingColorSpace(.deviceRGB)
         )
-        var systemDarkSurface: NSColor?
-        darkAppearance.performAsCurrentDrawingAppearance {
-            systemDarkSurface = NSColor.underPageBackgroundColor.usingColorSpace(.deviceRGB)
-        }
-        let expectedDark = try XCTUnwrap(systemDarkSurface)
+        let darkSidebar = try XCTUnwrap(
+            KromoraTheme.resolvedSecondaryChromeColor(for: darkAppearance).usingColorSpace(.deviceRGB)
+        )
+        let lightCanvas = try XCTUnwrap(
+            KromoraTheme.resolvedCanvasBackgroundColor(for: lightAppearance).usingColorSpace(.deviceRGB)
+        )
 
-        XCTAssertEqual(dark.redComponent, expectedDark.redComponent, accuracy: 0.002)
-        XCTAssertEqual(dark.greenComponent, expectedDark.greenComponent, accuracy: 0.002)
-        XCTAssertEqual(dark.blueComponent, expectedDark.blueComponent, accuracy: 0.002)
+        XCTAssertEqual(darkCanvas.redComponent, 38.0 / 255.0, accuracy: 0.01)
+        XCTAssertEqual(darkSidebar.redComponent, 52.0 / 255.0, accuracy: 0.01)
+        XCTAssertGreaterThan(darkSidebar.redComponent, darkCanvas.redComponent)
+        XCTAssertGreaterThan(lightChrome.redComponent, lightCanvas.redComponent)
+
+        let lightInspector = try XCTUnwrap(
+            KromoraTheme.resolvedInspectorChromeColor(for: lightAppearance).usingColorSpace(.deviceRGB)
+        )
+        let lightToolbar = try XCTUnwrap(
+            KromoraTheme.resolvedToolbarChromeColor(for: lightAppearance).usingColorSpace(.deviceRGB)
+        )
+        let darkInspector = try XCTUnwrap(
+            KromoraTheme.resolvedInspectorChromeColor(for: darkAppearance).usingColorSpace(.deviceRGB)
+        )
+        XCTAssertEqual(lightInspector.redComponent, lightToolbar.redComponent, accuracy: 0.002)
+        XCTAssertEqual(lightInspector.greenComponent, lightToolbar.greenComponent, accuracy: 0.002)
+        XCTAssertEqual(lightInspector.blueComponent, lightToolbar.blueComponent, accuracy: 0.002)
+        XCTAssertEqual(darkInspector.redComponent, 52.0 / 255.0, accuracy: 0.01)
+        XCTAssertGreaterThan(lightInspector.redComponent, lightChrome.redComponent)
     }
 
     private func contrastRatio(_ lhs: NSColor, _ rhs: NSColor) -> CGFloat {

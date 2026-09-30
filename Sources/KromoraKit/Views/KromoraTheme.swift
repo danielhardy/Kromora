@@ -8,20 +8,26 @@ import SwiftUI
 /// dark mode while the window is open. Keep fixed dark colors out of these shell
 /// surfaces; image-analysis canvases have their own explicitly scoped colors.
 enum KromoraTheme {
-    // Surface roles for the editor shell:
+    // Surface roles for the editor shell. Each one is a dynamic AppKit color, so it follows the
+    // window appearance: system light, system dark, or the Settings "Always dark mode" override.
     //
-    // - Toolbar: visible unified glass behind the native full-width toolbar, with regular
-    //   glass-effect groups in the controls. Keep the material solid enough to protect labels
-    //   from busy canvas imagery while allowing `.tint(primaryAccent)` to carry through the glass.
-    // - Inspector: system material below the toolbar, including the histogram.
-    // - Canvas: the dedicated recessed stage below, kept distinct from chrome.
-    // - Secondary chrome: source browser, filmstrip, culling, and status surfaces share a
-    //   quieter semantic surface (warm neutral in light appearance, the system under-page
-    //   color in dark appearance) rather than the elevated `.bar` material.
+    // - Toolbar: the lightest chrome band.
+    // - Secondary chrome: source browser and library. A step lighter than the canvas in
+    //   dark appearance, and the warm neutral in light appearance.
+    //   In Edit, the filmstrip, culling bar, and status row use the canvas so they share
+    //   the photo's plane. Library status stays on this secondary surface.
+    // - Inspector: matches the toolbar in light appearance, and the sidebar step in dark.
+    // - Canvas: the recessed editor stage, the darkest large surface in dark appearance.
     // - Analysis plots: locally scoped dark plot surfaces only.
 
     static var windowBackground: Color {
         Color(nsColor: .windowBackgroundColor)
+    }
+
+    /// The toolbar band. Dark appearance lifts it well above the sidebar and canvas, the way
+    /// Xcode's toolbar sits above the editor. Light appearance stays a near-white chrome.
+    static var toolbarChrome: Color {
+        Color(nsColor: toolbarChromeNSColor)
     }
 
     /// Kromora's primary interactive accent. The dark variant is a muted copper chosen
@@ -44,10 +50,34 @@ enum KromoraTheme {
     }
 
     /// Quiet semantic surface for chrome that supports the canvas without competing with it.
-    /// Light mode uses a warm neutral close to the canvas tone; dark mode retains the system
-    /// under-page surface that already works well across the editor chrome family.
+    /// Light mode uses a warm neutral. Dark mode is a sidebar tone, lighter than the canvas
+    /// and darker than the toolbar.
     static var secondaryChrome: Color {
         Color(nsColor: secondaryChromeNSColor)
+    }
+
+    /// The inspector column. Light appearance matches the toolbar so the sidebar reads as
+    /// bright chrome. Dark appearance stays the sidebar step, below the toolbar.
+    static var inspectorChrome: Color {
+        Color(nsColor: inspectorChromeNSColor)
+    }
+
+    static func resolvedInspectorChromeColor(for appearance: NSAppearance? = nil) -> NSColor {
+        let effectiveAppearance = appearance ?? NSAppearance(named: .aqua)!
+        var color: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = inspectorChromeNSColor.usingColorSpace(.deviceRGB)
+        }
+        return color ?? NSColor(calibratedWhite: 0.96, alpha: 1)
+    }
+
+    static func resolvedToolbarChromeColor(for appearance: NSAppearance? = nil) -> NSColor {
+        let effectiveAppearance = appearance ?? NSAppearance(named: .aqua)!
+        var color: NSColor?
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            color = toolbarChromeNSColor.usingColorSpace(.deviceRGB)
+        }
+        return color ?? NSColor(calibratedWhite: 0.96, alpha: 1)
     }
 
     static func resolvedSecondaryChromeColor(for appearance: NSAppearance? = nil) -> NSColor {
@@ -59,9 +89,9 @@ enum KromoraTheme {
         return color ?? NSColor(srgbRed: 0.925, green: 0.910, blue: 0.882, alpha: 1)
     }
 
-    /// Dedicated editor surface color. Secondary chrome can converge with
-    /// `windowBackgroundColor` on newer macOS releases, so the image canvas needs an explicit
-    /// neutral that remains visibly recessed in either appearance.
+    /// Dedicated editor surface color. On this macOS release the system window, control, and
+    /// under-page colors collapse to nearly the same dark value, so the canvas and the chrome
+    /// around it use explicit neutrals that still switch with the window appearance.
     static var canvasBackground: Color {
         Color(nsColor: canvasBackgroundNSColor)
     }
@@ -78,21 +108,44 @@ enum KromoraTheme {
         return color ?? NSColor(calibratedWhite: 0.90, alpha: 1)
     }
 
+    private static let toolbarChromeNSColor = NSColor(
+        name: NSColor.Name("KromoraToolbarChrome")
+    ) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        // Dark matches the lighter Xcode toolbar band. Light stays near the system window.
+        return isDark
+            ? NSColor(srgbRed: 74.0 / 255.0, green: 74.0 / 255.0, blue: 74.0 / 255.0, alpha: 1)
+            : NSColor(calibratedWhite: 0.96, alpha: 1)
+    }
+
     private static let canvasBackgroundNSColor = NSColor(
         name: NSColor.Name("KromoraCanvasBackground")
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return NSColor(calibratedWhite: isDark ? 0.12 : 0.90, alpha: 1)
+        // Dark is the recessed editor, darker than the sidebar. Light stays the existing stage.
+        return isDark
+            ? NSColor(srgbRed: 38.0 / 255.0, green: 38.0 / 255.0, blue: 38.0 / 255.0, alpha: 1)
+            : NSColor(calibratedWhite: 0.90, alpha: 1)
+    }
+
+    private static let inspectorChromeNSColor = NSColor(
+        name: NSColor.Name("KromoraInspectorChrome")
+    ) { appearance in
+        let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        // Light matches the toolbar. Dark stays the sidebar step, not the toolbar band.
+        return isDark
+            ? NSColor(srgbRed: 52.0 / 255.0, green: 52.0 / 255.0, blue: 52.0 / 255.0, alpha: 1)
+            : NSColor(calibratedWhite: 0.96, alpha: 1)
     }
 
     private static let secondaryChromeNSColor = NSColor(
         name: NSColor.Name("KromoraSecondaryChrome")
     ) { appearance in
         let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        // Light: #ECE8E1, a quiet warm neutral near the canvas' #E6E6E6.
-        // Dark continues to use the system surface already established for this role.
+        // Light: #ECE8E1, a quiet warm neutral above the canvas.
+        // Dark: a sidebar step between the canvas and the toolbar.
         return isDark
-            ? .underPageBackgroundColor
+            ? NSColor(srgbRed: 52.0 / 255.0, green: 52.0 / 255.0, blue: 52.0 / 255.0, alpha: 1)
             : NSColor(srgbRed: 236 / 255, green: 232 / 255, blue: 225 / 255, alpha: 1)
     }
 
