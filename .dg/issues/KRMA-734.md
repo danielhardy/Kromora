@@ -4,6 +4,28 @@ title: Qualify last-known frames under faults, load, and release benchmarks
 type: task
 status: review
 priority: urgent
+verification_report:
+  verdict: blocker
+  acceptance_criteria:
+    - criterion: Release benchmark evidence records every required field and reports p50/p95, frame counts
+      result: fail
+      notes: No release capture; docs/TESTING.md records only a failed link attempt.
+    - criterion: All architecture budgets pass
+      result: fail
+      notes: Unmeasured. Blocker KRMA-738 filed.
+    - criterion: Confirmed/provisional frame counts are actual drawable presentations
+      result: fail
+      notes: No drawable capture produced.
+  checks_run:
+    - "xcode-select -p; xcodebuild -version: Xcode-beta 27A5252f, stable not installed"
+  findings:
+    - Human blocker marked resolved but stable Xcode 27.0 is not installed; budgets unmeasured. Tracked in KRMA-738.
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-09-30T23:39:15.222Z
+  session: 01MUOQY1ODO4AQ3O7F
 creation_provenance:
   runner: codex
   model: gpt-6-luna
@@ -14,7 +36,7 @@ labels:
   - verification
   - caching
 created: 2026-09-30T13:19:21.193Z
-updated: 2026-09-30T22:33:32.250Z
+updated: 2026-09-30T23:39:15.340Z
 depends_on:
   - KRMA-729
   - KRMA-730
@@ -28,8 +50,10 @@ blockers:
     reason: The only local toolchain is /Applications/Xcode-beta.app (Xcode 27.0 build 27A5252f); its beta SDK failed to link the Release XCTest bundle. Xcode 27.0 stable (build 27A266a) has since been released but is not installed here, so the release drawable and last-known-frame budgets remain unmeasured on stable.
     action: Install/select Xcode 27.0 stable (build 27A266a) on this Apple Silicon host, rerun the Release XCTest drawable capture and budgets, then resume KRMA-734 at verification.
     created_at: 2026-09-30T21:57:59.149Z
+    resolved_at: 2026-09-30T22:43:18.728Z
+    resolved_by: web
 estimate: 8
-order: z
+order: zq
 board: product
 blocked_reason: The only local toolchain is /Applications/Xcode-beta.app (Xcode 27.0 build 27A5252f); its beta SDK failed to link the Release XCTest bundle. Xcode 27.0 stable (build 27A266a) has since been released but is not installed here, so the release drawable and last-known-frame budgets remain unmeasured on stable.
 blocked_action: Install/select Xcode 27.0 stable (build 27A266a) on this Apple Silicon host, rerun the Release XCTest drawable capture and budgets, then resume KRMA-734 at verification.
@@ -145,3 +169,22 @@ Toolchain guidance is now Xcode 27+ with the macOS 27 SDK; the app deployment fl
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-09-30T23:39:15.339Z: Verification report
+Verdict: BLOCKER
+Acceptance criteria:
+- [ ] Release benchmark evidence records every required field and reports p50/p95, frame counts (fail) — No release capture; docs/TESTING.md records only a failed link attempt.
+- [ ] All architecture budgets pass (fail) — Unmeasured. Blocker KRMA-738 filed.
+- [ ] Confirmed/provisional frame counts are actual drawable presentations (fail) — No drawable capture produced.
+Checks run:
+- xcode-select -p; xcodebuild -version: Xcode-beta 27A5252f, stable not installed
+Findings:
+- Human blocker marked resolved but stable Xcode 27.0 is not installed; budgets unmeasured. Tracked in KRMA-738.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUOQY1ODO4AQ3O7F
+Summary: Release drawable budgets remain unmeasured: host still has only Xcode 27.0 beta (27A5252f); stable not installed. Child KRMA-738 filed.
