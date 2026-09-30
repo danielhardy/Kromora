@@ -161,6 +161,13 @@ final class RenderEngineResources {
         previewCache.removeAll()
     }
 
+    /// Release cube filters built for `ids`. Engine preview entries are keyed by Look content, so an
+    /// old render of a replaced Look is already unreachable and simply ages out; nothing else here
+    /// depends on a `LUTID` alone.
+    func invalidateLUTDependentCaches(for ids: Set<LUTID>) {
+        lutCache.remove(lutIDs: ids)
+    }
+
     func evictAll() {
         previewCache.removeAll(countAsEvictions: true)
         developedSourceCache.removeAll(countAsEvictions: true)

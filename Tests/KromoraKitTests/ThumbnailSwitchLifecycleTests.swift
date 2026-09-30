@@ -965,8 +965,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         XCTAssertNil(histogramViewModel.histogram)
     }
 
-    /// KRMA-308's `refreshMaterializedEditedThumbnails()` re-requests every item that already has a
-    /// materialized edited thumbnail after a Look-folder scan, independent of the edit debounce path
+    /// KRMA-308's Look-scan refresh re-requests every item whose materialized edited thumbnail
+    /// references a Look the scan changed, independent of the edit debounce path
     /// above. `applyEditedThumbnail` early-returns when the revision is unchanged (`ImageCollection.swift`),
     /// so a real refresh must be observed as both a revision change and a new published `NSImage`
     /// instance — a no-op would leave both untouched.
@@ -1003,7 +1003,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         let firstRevision = try XCTUnwrap(viewModel.collection.items[0].editedThumbnailRevision)
         XCTAssertTrue(
-            firstRevision.hasSuffix(":unresolved"),
+            firstRevision.hasSuffix(
+                ":" + LookSignature.unresolved(id: LUTID(raw: missingLUTURL.path)).cacheComponent
+            ),
             "an unresolved Look reference must not be mistaken for a resolved fingerprint"
         )
         let firstThumbnail = viewModel.collection.items[0].thumbnail
@@ -1023,8 +1025,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             return false
         }
         let secondRevision = try XCTUnwrap(viewModel.collection.items[0].editedThumbnailRevision)
-        XCTAssertFalse(
-            secondRevision.hasSuffix(":unresolved"),
+        XCTAssertTrue(
+            secondRevision.contains(":look-resolved:"),
             "resolving the Look via a folder scan must bump the materialized revision"
         )
         XCTAssertTrue(

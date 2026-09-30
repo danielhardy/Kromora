@@ -37,7 +37,7 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         destination.admissionLastPresentedRequest = makeRequest(source: destination.source)
         destination.admissionLastPresentedImage = CIImage(color: .black)
         let request = makeRequest(source: destination.source)
-        let key = destination.admissionPresentation.cacheKey(for: request)
+        let key = try XCTUnwrap(destination.admissionPresentation.cacheKey(for: request))
         destination.admissionPresentation.cache.write(
             try Fixtures.makeCGImage(width: 32, height: 24), for: key
         )
@@ -118,7 +118,7 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         destination.admissionCanvasNavigation.setZoom(8)
         let coordinator = makeCoordinator(destination: destination, engine: engine)
         let canonical = makeRequest(source: destination.source)
-        let key = destination.admissionPresentation.cacheKey(for: canonical)
+        let key = try XCTUnwrap(destination.admissionPresentation.cacheKey(for: canonical))
         destination.admissionPresentation.cache.write(
             try Fixtures.makeCGImage(width: 32, height: 24), for: key
         )

@@ -71,11 +71,11 @@ final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
             space: .displayP3
         )
 
-        let key = coordinator.cacheKey(for: request)
+        let key = try XCTUnwrap(coordinator.cacheKey(for: request))
 
         XCTAssertEqual(key.identity, source.cacheIdentity)
         XCTAssertEqual(key.documentHash, document.editHash)
-        XCTAssertEqual(key.lookFingerprint, "unresolved")
+        XCTAssertEqual(key.look, .none)
         XCTAssertEqual(key.targetSizeBucket, String(PreviewDiskCache.canonicalLongEdge))
         XCTAssertEqual(key.space, WorkingSpace.displayP3.rawValue)
         XCTAssertEqual(key.pipelineVersion, RenderPipeline.cacheVersion)
@@ -92,7 +92,7 @@ final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
         let completeRequest = RenderRequest(
             source: source, document: EditDocument(), quality: .preview
         )
-        let key = coordinator.cacheKey(for: completeRequest)
+        let key = try XCTUnwrap(coordinator.cacheKey(for: completeRequest))
         coordinator.writeCanonical(image, for: completeRequest)
         try await waitUntil("canonical cache write") { coordinator.cache.contains(key) }
 

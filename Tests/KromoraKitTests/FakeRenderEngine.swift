@@ -394,6 +394,12 @@ actor FakeRenderEngine: RenderEngining {
 
     func invalidateLUTCache() { invalidateCount += 1 }
 
+    /// Targeted invalidations, one entry per request. Kept apart from `invalidateCount` so a test
+    /// can tell "the app flushed everything" from "the app released only the Looks that changed".
+    private(set) var invalidatedLUTIDs: [Set<LUTID>] = []
+
+    func invalidateLUTCache(ids: Set<LUTID>) { invalidatedLUTIDs.append(ids) }
+
     /// How many times the app asked for capabilities. The probe costs ~25 ms, so "once per image
     /// open" is a requirement, not a detail — a count is the only way to see it.
     private(set) var capabilityProbeCount = 0

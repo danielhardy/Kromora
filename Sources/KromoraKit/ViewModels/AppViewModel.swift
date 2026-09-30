@@ -1303,30 +1303,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         export.lutResolver = { [weak self] id in self?.resolvedLUT(id) }
 
         // A rescan can mean the bytes behind an unchanged `LUTID` have changed — a path is the
-        // identity, so a `.cube` replaced in place keeps it. Drop the engine's cube filters rather
-        // than go on serving the old cube. Wired here, before `restoreFolder()` runs below, so the
-        // launch scan is covered too.
-        library.onScanned = { [weak self] in
+        // identity, so a `.cube` replaced in place keeps it. The library reports which IDs now
+        // resolve differently, and only work that referenced one of them is redone. Wired here,
+        // before `restoreFolder()` runs below, so the launch scan is covered too.
+        library.onScanned = { [weak self] delta in
             guard let self, !self.isShuttingDown else { return }
             self.refreshLUTResolutionStatus()
-            self.lutCacheInvalidationTask?.cancel()
-            let engine = self.engine
-            guard self.sourceImage != nil else {
-                self.lutCacheInvalidationTask = Task { [weak self, engine] in
-                    await engine.invalidateLUTCache()
-                    guard let self, !self.isShuttingDown else { return }
-                    self.refreshMaterializedEditedThumbnails()
-                }
-                return
-            }
-            // A render submitted before the asynchronous scan may have been safely ungraded. Flush
-            // first, then submit again, so an old cached cube cannot win the race with publication.
-            lutCacheInvalidationTask = Task { [weak self] in
-                await engine.invalidateLUTCache()
-                guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
-                self.schedulePreview()
-                self.refreshMaterializedEditedThumbnails()
-            }
+            self.applyLookLibraryDelta(delta)
         }
 
         library.onImported = { [weak self] lut in
@@ -2810,10 +2793,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         editedThumbnailCoordinator.scheduleAfterSettle(for: assetID, priority: priority)
     }
 
-    private func refreshMaterializedEditedThumbnails() {
-        editedThumbnailCoordinator.refreshMaterializedThumbnails()
-    }
-
     private func cancelEditedThumbnailDebounce(for assetID: PhotoAssetID?) {
         editedThumbnailCoordinator.cancelDebounce(for: assetID)
     }
@@ -3284,6 +3263,32 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         if let activeAssetID {
             scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
+        }
+    }
+
+    /// Redo only the work whose Look resolution a scan changed.
+    ///
+    /// Preview and thumbnail identities carry the Look's content (`LookSignature`), so a stale
+    /// result can never be served for changed bytes. What a scan owes is *replacement*: the pixels
+    /// already on screen were made with a Look that is now different, missing, or newly resolvable.
+    /// That is limited to the active document's Look and Looks a published edited thumbnail
+    /// references. A byte-identical rescan, or a change to a Look nothing references, updates the
+    /// browser (already done by the library) and does no engine or image work.
+    private func applyLookLibraryDelta(_ delta: LookLibraryDelta) {
+        guard !delta.isEmpty else { return }
+        let activeLookID = sourceImage != nil ? document.lut.lutID : nil
+        var referenced = editedThumbnailCoordinator.referencedLookIDs
+        if let activeLookID { referenced.insert(activeLookID) }
+        let affected = delta.affected.intersection(referenced)
+        guard !affected.isEmpty else { return }
+
+        let refreshesCanvas = activeLookID.map(affected.contains) ?? false
+        let engine = self.engine
+        lutCacheInvalidationTask = Task { [weak self, engine] in
+            await engine.invalidateLUTCache(ids: affected)
+            guard let self, !self.isShuttingDown else { return }
+            if refreshesCanvas, self.sourceImage != nil { self.schedulePreview() }
+            self.editedThumbnailCoordinator.refreshMaterializedThumbnails(affecting: affected)
         }
     }
 

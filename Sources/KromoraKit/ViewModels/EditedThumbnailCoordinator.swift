@@ -38,6 +38,8 @@ final class EditedThumbnailCoordinator {
     private struct MaterializedThumbnail: Equatable {
         let sourceIdentity: PortablePhotoIdentity
         let revision: String
+        /// The Look the published pixels were rendered with; scopes a scan delta to this asset.
+        let look: LookSignature
     }
 
     private var editedThumbnailGenerations: [PhotoAssetID: UInt64] = [:]
@@ -183,7 +185,7 @@ final class EditedThumbnailCoordinator {
 
         let inMemoryDocument = destination.editedThumbnailDocument(for: assetID)
         if let inMemoryDocument, inMemoryDocument.isIdentity {
-            let revision = editedThumbnailRevision(document: inMemoryDocument, lut: nil)
+            let revision = editedThumbnailRevision(document: inMemoryDocument, look: .none)
             destination.applyEditedThumbnail(nil, for: assetID, revision: revision)
             return
         }
@@ -234,14 +236,17 @@ final class EditedThumbnailCoordinator {
                 document.crop, rotation: document.rotation, for: assetID
             )
             let lut = destination.resolvedEditedThumbnailLUT(document.lut.lutID)
-            let revision = self.editedThumbnailRevision(document: document, lut: lut)
+            let look = LookSignature(settings: document.lut, resolved: lut)
+            let revision = self.editedThumbnailRevision(document: document, look: look)
             let materialized = MaterializedThumbnail(
-                sourceIdentity: thumbnailSourceIdentity, revision: revision
+                sourceIdentity: thumbnailSourceIdentity, revision: revision, look: look
             )
             // Appearance callbacks are repeated by both browsing surfaces. Reuse only a result
-            // whose edit/LUT revision and source identity still match; a non-nil revision alone
-            // can describe an older saved edit or an earlier source at the same asset ID.
-            if !force, item.editedThumbnailRevision == revision,
+            // whose edit/Look revision and source identity still match; a non-nil revision alone
+            // can describe an older saved edit or an earlier source at the same asset ID. Pixels
+            // rendered while the Look was unresolved are provisional and never count as a match, so
+            // they are replaced as soon as demand finds the Look resolvable.
+            if !force, look.permitsExactReuse, item.editedThumbnailRevision == revision,
                 self.materializedThumbnails[assetID] == materialized
             {
                 return
@@ -341,8 +346,8 @@ final class EditedThumbnailCoordinator {
         return true
     }
 
-    private func editedThumbnailRevision(document: EditDocument, lut: CubeLUT?) -> String {
-        document.editHash + ":" + (lut?.cacheFingerprint ?? "unresolved")
+    private func editedThumbnailRevision(document: EditDocument, look: LookSignature) -> String {
+        document.editHash + ":" + look.cacheComponent
     }
 
     /// Keep the active photo's badge out of the shared renderer while a preview burst is active.
@@ -381,16 +386,23 @@ final class EditedThumbnailCoordinator {
         editedThumbnailDebounceTasks[assetID] = nil
     }
 
-    /// A LUT scan can resolve or replace a file-backed Look without changing the edit document.
-    /// Only items that already produced an edited thumbnail are revisited; demand admission still
-    /// keeps the work bounded and avoids a full-library render after every Look-folder scan.
-    func refreshMaterializedThumbnails() {
-        guard let destination else { return }
-        for item in destination.editedThumbnailItems where item.editedThumbnailRevision != nil {
+    /// Every Look ID a published edited thumbnail was rendered against, resolved or not.
+    var referencedLookIDs: Set<LUTID> {
+        Set(materializedThumbnails.values.compactMap(\.look.lutID))
+    }
+
+    /// A LUT scan can resolve, replace, or remove a file-backed Look without changing any edit
+    /// document. Only thumbnails already published against one of `ids` are revisited; a scan that
+    /// touched none of them — including any byte-identical rescan — does no image work. Demand
+    /// admission still bounds the re-renders.
+    func refreshMaterializedThumbnails(affecting ids: Set<LUTID>) {
+        guard let destination, !ids.isEmpty else { return }
+        let affected = materializedThumbnails.filter { $0.value.look.references(anyOf: ids) }.keys
+        for assetID in affected {
             let priority: ImageWorkScheduler.Priority =
-                item.id == destination.activeEditedThumbnailAssetID
+                assetID == destination.activeEditedThumbnailAssetID
                 ? .activeEditor : .visibleGrid
-            request(for: item.id, priority: priority, force: true)
+            request(for: assetID, priority: priority, force: true)
         }
     }
 

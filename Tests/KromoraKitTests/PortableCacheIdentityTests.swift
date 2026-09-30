@@ -80,11 +80,11 @@ final class PortableCacheIdentityTests: TempDirectoryTestCase {
         )
 
         let previewA = PreviewDiskCache.Key(
-            identity: firstIdentity, documentHash: "document", lookFingerprint: "look",
+            identity: firstIdentity, documentHash: "document", look: .resolved(id: LUTID(raw: "look"), contentHash: "look"),
             space: .sRGB
         )
         let previewB = PreviewDiskCache.Key(
-            identity: sameIdentity, documentHash: "document", lookFingerprint: "look",
+            identity: sameIdentity, documentHash: "document", look: .resolved(id: LUTID(raw: "look"), contentHash: "look"),
             space: .sRGB
         )
         XCTAssertEqual(previewA.canonicalKeyString, previewB.canonicalKeyString)

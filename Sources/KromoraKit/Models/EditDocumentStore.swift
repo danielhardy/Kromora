@@ -56,6 +56,21 @@ struct EditDocumentLoadResult: Sendable, Equatable {
     let document: EditDocument
     let found: Bool
     let status: EditDocumentStore.Status
+    /// The Look identity of the current package revision, taken from its content-addressed
+    /// `PortablePackageLookReference` rather than from the Look browser. It is durable and does not
+    /// depend on scan timing; `.none` for a neutral fallback or a revision with no Look. The blob
+    /// is not read or copied — the hash was recorded when the revision was written.
+    let lookSignature: LookSignature
+
+    init(
+        document: EditDocument, found: Bool, status: EditDocumentStore.Status,
+        lookSignature: LookSignature = .none
+    ) {
+        self.document = document
+        self.found = found
+        self.status = status
+        self.lookSignature = lookSignature
+    }
 
     /// A speculative preview may use a healthy missing record as identity, but must not use the
     /// neutral fallback returned when persistence could not establish what the stored state was.
@@ -228,11 +243,22 @@ actor EditDocumentStore {
                 // Validate the immutable native/XMP pair even on a cache hit. The package remains
                 // authoritative if a sidecar is damaged or replaced outside this actor.
                 touch(source.portableAssetID)
-                return finishLoad(document: entry.document, found: true, status: .ready)
+                return finishLoad(
+                    document: entry.document, found: true, status: .ready,
+                    lookSignature: LookSignature(
+                        settings: entry.document.lut,
+                        reference: sidecar.native.lookReferences.first
+                    )
+                )
             }
             let document = sidecar.native.document
             insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
-            return finishLoad(document: document, found: true, status: .ready)
+            return finishLoad(
+                document: document, found: true, status: .ready,
+                lookSignature: LookSignature(
+                    settings: document.lut, reference: sidecar.native.lookReferences.first
+                )
+            )
         } catch {
             let failure = Self.status(for: error)
             return finishLoad(document: EditDocument(), found: false, status: failure)
@@ -386,13 +412,16 @@ actor EditDocumentStore {
     }
 
     private func finishLoad(
-        document: EditDocument, found: Bool, status loadStatus: Status
+        document: EditDocument, found: Bool, status loadStatus: Status,
+        lookSignature: LookSignature = .none
     ) -> EditDocumentLoadResult {
         status = loadStatus
         if loadStatus.isActionable {
             retainWorstActionableStatus(loadStatus)
         }
-        return EditDocumentLoadResult(document: document, found: found, status: loadStatus)
+        return EditDocumentLoadResult(
+            document: document, found: found, status: loadStatus, lookSignature: lookSignature
+        )
     }
 
     private func retainWorstActionableStatus(_ candidate: Status) {

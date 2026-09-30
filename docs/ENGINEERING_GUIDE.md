@@ -154,6 +154,26 @@ artifacts and explicitly supplied local index, mask, and analysis-cache location
 `rebuildableGaps`; a missing or stale cache can never make a package invalid. Validation never
 deletes, quarantines, rebuilds, or writes any package or cache file.
 
+## Look identity and scans
+
+`LookSignature` (`none`, `resolved(id, contentHash)`, `unresolved(id)`) is the one value preview and
+edited-thumbnail pixel identity use for a document's Look. The hash is SHA-256 of the `.cube` file
+bytes: `CubeLUT.contentHash` computes it while parsing, and `PortablePackageLookReference.contentHash`
+is the same value for an embedded blob, so a live Look and a saved revision agree. `EditDocument`
+carries no digest; `EditDocumentLoadResult.lookSignature` exposes the current revision's signature
+from its stored reference.
+
+- `none` never equals `unresolved`. An `unresolved` signature labels provisional (ungraded) pixels
+  only: it has no durable preview key, is never written to or served from `PreviewDiskCache`, and is
+  never an exact edited-thumbnail match, so those pixels are replaced when the Look resolves.
+- `LUTFilterCache` and engine preview keys include the content hash, so a `.cube` replaced in place
+  under the same `LUTID` can never be served stale; invalidation is memory hygiene, not correctness.
+- `LUTLibrary` publishes a `[LUTID: contentHash]` snapshot with each scan or import and reports a
+  `LookLibraryDelta` (changed, appeared, disappeared). `AppViewModel` intersects it with the Looks the
+  active document and published edited thumbnails reference. A byte-identical rescan, or a change to
+  an unreferenced Look, does no engine or image work; a referenced change releases only those
+  `LUTID`s (`invalidateLUTCache(ids:)`) and re-admits only the affected canvas and thumbnails.
+
 ## Inspector controls
 
 Every inspector slider is `NeutralOriginSlider`, not `SwiftUI.Slider`. It wraps `NSSlider` and

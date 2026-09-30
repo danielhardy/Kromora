@@ -117,6 +117,11 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
     /// cache keeps serving the first cube and the second save silently does nothing on screen.
     func invalidateLUTCache() async
 
+    /// Release render resources built for these Looks only. Used when a library scan changed the
+    /// bytes behind, added, or removed specific `LUTID`s. The default is the broad flush, so an
+    /// engine that cannot target an ID stays correct.
+    func invalidateLUTCache(ids: Set<LUTID>) async
+
     /// Drop in-memory render resources after a source is deleted from the library.
     func invalidateRenderCaches() async
 
@@ -140,6 +145,8 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
 extension RenderEngining {
     /// Compatibility default for lightweight render test doubles and integrations.
     func invalidateRenderCaches() async {}
+
+    func invalidateLUTCache(ids: Set<LUTID>) async { await invalidateLUTCache() }
 
     func pickRetouchSource(source: ImageSource, settings: RetouchSettings, spotID: UUID, rank: Int) async -> RetouchSource? { nil }
 
@@ -1190,6 +1197,10 @@ actor RenderEngine: RenderEngining {
 
     /// Drop every cached LUT-dependent render resource. For a library rescan: a `LUTID` is a file
     /// path, so a `.cube` edited in place keeps its ID and would otherwise keep serving the old cube.
+    func invalidateLUTCache(ids: Set<LUTID>) {
+        resources.invalidateLUTDependentCaches(for: ids)
+    }
+
     func invalidateLUTCache() {
         // A preview submitted while a scan was unresolved has no LUT fingerprint. Clear it too so
         // the scan completion can safely publish a newly resolved render.

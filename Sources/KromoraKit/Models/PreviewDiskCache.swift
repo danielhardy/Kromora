@@ -16,7 +16,7 @@ struct PreviewDiskCache: Sendable {
     struct Key: Hashable, Sendable {
         let identity: PortablePhotoIdentity
         let documentHash: String
-        let lookFingerprint: String
+        let look: LookSignature
         let targetSizeBucket: String
         let space: String
         let pipelineVersion: Int
@@ -24,7 +24,7 @@ struct PreviewDiskCache: Sendable {
         init(
             sourceFingerprint: String,
             documentHash: String,
-            lookFingerprint: String,
+            look: LookSignature,
             targetSizeBucket: String = String(PreviewDiskCache.canonicalLongEdge),
             space: WorkingSpace = .current,
             pipelineVersion: Int = RenderPipeline.cacheVersion
@@ -34,7 +34,7 @@ struct PreviewDiskCache: Sendable {
                 sourceFingerprint: PhotoSourceFingerprint.data(Data(sourceFingerprint.utf8))
             )
             self.documentHash = documentHash
-            self.lookFingerprint = lookFingerprint
+            self.look = look
             self.targetSizeBucket = targetSizeBucket
             self.space = space.rawValue
             self.pipelineVersion = pipelineVersion
@@ -43,21 +43,25 @@ struct PreviewDiskCache: Sendable {
         init(
             identity: PortablePhotoIdentity,
             documentHash: String,
-            lookFingerprint: String,
+            look: LookSignature,
             targetSizeBucket: String = String(PreviewDiskCache.canonicalLongEdge),
             space: WorkingSpace = .current,
             pipelineVersion: Int = RenderPipeline.cacheVersion
         ) {
             self.identity = identity
             self.documentHash = documentHash
-            self.lookFingerprint = lookFingerprint
+            self.look = look
             self.targetSizeBucket = targetSizeBucket
             self.space = space.rawValue
             self.pipelineVersion = pipelineVersion
         }
 
+        /// An unresolved Look never names exact pixels, so the cache neither stores nor serves it.
+        /// The coordinator does not build such keys; this keeps a hand-built one from hitting.
+        var isCacheable: Bool { look.permitsExactReuse }
+
         var canonicalKeyString: String {
-            [identity.cacheKey, documentHash, lookFingerprint, targetSizeBucket, space,
+            [identity.cacheKey, documentHash, look.cacheComponent, targetSizeBucket, space,
              String(pipelineVersion)].joined(separator: "|")
         }
     }
@@ -100,7 +104,7 @@ struct PreviewDiskCache: Sendable {
     /// Synchronous compatibility seam for existing model tests and non-production callers. The
     /// presentation path uses `enqueueWrite`, which never scans the directory per write.
     func write(_ image: CGImage, for key: Key) {
-        guard let data = Self.jpegData(for: image) else { return }
+        guard key.isCacheable, let data = Self.jpegData(for: image) else { return }
         do {
             try Self.prepareDirectorySynchronously(at: directory, pipelineVersion: pipelineVersion)
             let url = Self.fileURL(for: key, in: directory)
@@ -116,7 +120,7 @@ struct PreviewDiskCache: Sendable {
 
     /// Synchronous read retained for existing callers. Preview presentation uses `readAsync`.
     func read(for key: Key) -> CGImage? {
-        guard prepareForSynchronousAccess() else { return nil }
+        guard key.isCacheable, prepareForSynchronousAccess() else { return nil }
         let url = Self.fileURL(for: key, in: directory)
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
               let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
@@ -127,7 +131,7 @@ struct PreviewDiskCache: Sendable {
     }
 
     func contains(_ key: Key) -> Bool {
-        guard prepareForSynchronousAccess() else { return false }
+        guard key.isCacheable, prepareForSynchronousAccess() else { return false }
         return FileManager.default.fileExists(atPath: Self.fileURL(for: key, in: directory).path)
     }
 
@@ -261,6 +265,7 @@ private actor PreviewDiskCacheWriter {
     }
 
     func enqueue(_ image: sending CGImage, for key: PreviewDiskCache.Key) {
+        guard key.isCacheable else { return }
         let identifier = key.canonicalKeyString
         pending[identifier]?.cancel()
         pendingAssetPrefixes[identifier] = PreviewDiskCache.assetPrefix(for: key.identity)
@@ -273,7 +278,7 @@ private actor PreviewDiskCacheWriter {
     }
 
     func read(for key: PreviewDiskCache.Key) -> CGImage? {
-        guard loadIndex() else { return nil }
+        guard key.isCacheable, loadIndex() else { return nil }
         let name = PreviewDiskCache.fileURL(for: key, in: directory).lastPathComponent
         guard let entry = entries[name],
               let source = CGImageSourceCreateWithURL(entry.url as CFURL, nil),
@@ -283,7 +288,7 @@ private actor PreviewDiskCacheWriter {
     }
 
     func contains(_ key: PreviewDiskCache.Key) -> Bool {
-        guard loadIndex() else { return false }
+        guard key.isCacheable, loadIndex() else { return false }
         return entries[PreviewDiskCache.fileURL(for: key, in: directory).lastPathComponent] != nil
     }
 
