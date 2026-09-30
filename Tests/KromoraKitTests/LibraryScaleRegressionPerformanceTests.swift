@@ -580,7 +580,7 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
             editStore: makeInMemoryEditStore(),
             preferences: makeTestUserDefaults(),
             userLookFolderURL: tempDirectory.appendingPathComponent("looks"),
-            previewDiskCacheDirectory: tempDirectory.appendingPathComponent("preview-cache"),
+            previewFrameStoreDirectory: tempDirectory.appendingPathComponent("preview-cache"),
             portablePackageURL: tempDirectory.appendingPathComponent("Scale.kromoralibrary")
         )
         do {

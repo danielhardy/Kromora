@@ -134,7 +134,7 @@ enum PlatformThumbnailProvider {
     private static func cacheKey(
         identity: PortablePhotoIdentity, maxPixelSize: Int
     ) -> String {
-        "thumbnail-v\(RenderPipeline.cacheVersion):\(identity.cacheKey):\(maxPixelSize)"
+        "thumbnail-v\(RenderPipeline.pixelEpoch):\(identity.cacheKey):\(maxPixelSize)"
     }
 
     private static func nsImage(from image: CGImage) -> NSImage {
