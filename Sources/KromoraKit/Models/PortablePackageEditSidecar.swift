@@ -193,6 +193,24 @@ enum PortablePackageXMPCodec {
     }
 }
 
+/// What one edit-revision transaction published: the immutable sidecar and, when the asset has a
+/// live membership entry, the membership entry carrying the geometry committed beside it.
+struct PortablePackageEditCommit: Sendable {
+    let sidecar: PortablePackageEditSidecar
+    let membership: PortablePackageMembershipEntry?
+}
+
+extension PortablePackageAssetSummary {
+    /// The presented ratio for `document` over this summary's source geometry. Nil when the source
+    /// aspect is unknown, which leaves cells on the fallback shape until dimensions are read.
+    func presentedAspectRatio(for document: EditDocument) -> Double? {
+        guard let source = sourceAspectRatio else { return nil }
+        return LibraryGridLayout.presentedAspectRatio(
+            sourceAspectRatio: source, crop: document.crop, rotation: document.rotation
+        )
+    }
+}
+
 extension PortableLibraryPackage {
     /// Appends one immutable edit revision and its XMP companion through the package transaction
     /// protocol. A new revision is always chosen; an existing revision path is never overwritten.
@@ -207,6 +225,25 @@ extension PortableLibraryPackage {
         isCancelled: @Sendable () -> Bool = { false },
         faultInjector: PortablePackageFaultInjector? = nil
     ) throws -> PortablePackageEditSidecar {
+        try commitEditRevision(
+            for: assetID, document: document, snapshotName: snapshotName, lookBytes: lookBytes,
+            lease: lease, now: now, isCancelled: isCancelled, faultInjector: faultInjector
+        ).sidecar
+    }
+
+    /// The edit-revision transaction. The membership summary's `presentedAspectRatio` is staged in
+    /// the same transaction as the asset record that advances the current revision, so a reader
+    /// can never observe a new edit beside old geometry, or the reverse.
+    func commitEditRevision(
+        for assetID: PortablePhotoAssetID,
+        document: EditDocument,
+        snapshotName: String? = nil,
+        lookBytes: [Data] = [],
+        lease: PortablePackageLease,
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false },
+        faultInjector: PortablePackageFaultInjector? = nil
+    ) throws -> PortablePackageEditCommit {
         var record = try readAssetRecord(for: assetID)
         let recordedRevision = max(
             record.currentRevision,
@@ -218,8 +255,8 @@ extension PortableLibraryPackage {
         // those files and every later save, including quit, fails forever.
         let occupiedRevision = try highestOccupiedEditRevision(for: assetID)
         var nextRevision = max(recordedRevision, occupiedRevision) + 1
-        let shard = PortableLibraryPackage.shard(for: assetID)
-        let base = "Assets/\(shard)/\(assetID.raw)"
+        let shardName = PortableLibraryPackage.shard(for: assetID)
+        let base = "Assets/\(shardName)/\(assetID.raw)"
         var nativePath = "\(base)/Edits/\(nextRevision).json"
         var xmpPath = "\(base)/Metadata/\(nextRevision).xmp"
         var collisions = 0
@@ -313,12 +350,91 @@ extension PortableLibraryPackage {
                 )
             )
             try transaction.stage(data: try encodedAssetRecord(record), at: assetRecordPath(for: assetID))
+            let membership = try stagePresentedAspectRatio(
+                for: document, assetID: assetID, in: &transaction
+            )
             try transaction.commit(now: now, isCancelled: isCancelled)
+            return PortablePackageEditCommit(
+                sidecar: PortablePackageEditSidecar(native: persistedRevision, xmp: xmp),
+                membership: membership
+            )
         } catch {
             try? transaction.abort()
             throw error
         }
-        return PortablePackageEditSidecar(native: persistedRevision, xmp: xmp)
+    }
+
+    /// Stages the membership shard with `document`'s presented geometry into `transaction`.
+    /// Returns the asset's membership entry as it will read after commit, or nil when the asset
+    /// has no live membership entry (nothing to denormalize into).
+    private func stagePresentedAspectRatio(
+        for document: EditDocument,
+        assetID: PortablePhotoAssetID,
+        in transaction: inout PortablePackageTransaction
+    ) throws -> PortablePackageMembershipEntry? {
+        let shardName = PortableLibraryPackage.shard(for: assetID)
+        guard var shard = try? readMembershipShard(shardName),
+              let index = shard.entries.firstIndex(where: {
+                  $0.assetID == assetID && !$0.isTombstone
+              })
+        else { return nil }
+        let presented = shard.entries[index].summary.presentedAspectRatio(for: document)
+        if shard.entries[index].summary.presentedAspectRatio != presented {
+            shard.entries[index].summary.presentedAspectRatio = presented
+            try transaction.stage(
+                data: try encodedMembershipShard(shard),
+                at: "Catalog/Membership/\(shardName).json"
+            )
+        }
+        return shard.entries[index]
+    }
+
+    /// Recompute `presentedAspectRatio` for every live asset whose summary lacks the current
+    /// edit's geometry, reading each asset's current edit sidecar. This is the explicit repair for
+    /// packages written before the field existed; the sidecar remains the truth and the summary is
+    /// rebuilt from it. Returns the assets whose summary changed.
+    @discardableResult
+    func repairPresentedAspectRatios(
+        lease: PortablePackageLease,
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false }
+    ) throws -> [PortablePhotoAssetID] {
+        var repaired: [PortablePhotoAssetID] = []
+        for shardName in Self.allShards {
+            if isCancelled() { throw CancellationError() }
+            var shard = try readMembershipShard(shardName)
+            var changed = false
+            for index in shard.entries.indices where !shard.entries[index].isTombstone {
+                let assetID = shard.entries[index].assetID
+                let document: EditDocument
+                if let record = try? readAssetRecord(for: assetID), record.currentRevision > 0,
+                   let revision = try? readEditRevision(for: assetID) {
+                    document = revision.document
+                } else {
+                    document = EditDocument()
+                }
+                let presented = shard.entries[index].summary.presentedAspectRatio(for: document)
+                guard shard.entries[index].summary.presentedAspectRatio != presented else {
+                    continue
+                }
+                shard.entries[index].summary.presentedAspectRatio = presented
+                repaired.append(assetID)
+                changed = true
+            }
+            guard changed else { continue }
+            var transaction = try beginTransaction(lease: lease, now: now)
+            do {
+                try transaction.stage(
+                    data: try encodedMembershipShard(shard),
+                    at: "Catalog/Membership/\(shardName).json"
+                )
+                try transaction.commit(now: now, isCancelled: isCancelled)
+            } catch {
+                try? transaction.abort()
+                throw error
+            }
+        }
+        return repaired
     }
 
     /// The highest revision number already stored as an edit JSON or XMP sidecar.
@@ -364,25 +480,34 @@ extension PortableLibraryPackage {
             .map { try readEditRevision(for: assetID, revision: $0.revision) }
     }
 
-    /// Moves the package's current edit position without creating a new revision.
+    /// Moves the package's current edit position without creating a new revision. Returns the
+    /// membership entry carrying the geometry committed with the move, when the asset has one.
+    @discardableResult
     func selectEditRevision(
         for assetID: PortablePhotoAssetID,
         revision: UInt64,
         lease: PortablePackageLease,
         now: Date = Date()
-    ) throws {
+    ) throws -> PortablePackageMembershipEntry? {
         var record = try readAssetRecord(for: assetID)
         guard record.editHistory.edits.contains(where: { $0.revision == revision }) else {
             throw PortablePackageError.invalidEditRevision("revision \(revision) is not present")
         }
         record.currentRevision = revision
         record.editHistory.currentRevision = revision
+        // The selected revision's crop and rotation become the presented geometry in the same
+        // transaction that moves the current-revision pointer.
+        let selected = try readEditRevision(for: assetID, revision: revision)
         var transaction = try beginTransaction(lease: lease, now: now)
         do {
             try transaction.stage(
                 data: try encodedAssetRecord(record), at: assetRecordPath(for: assetID)
             )
+            let membership = try stagePresentedAspectRatio(
+                for: selected.document, assetID: assetID, in: &transaction
+            )
             try transaction.commit(now: now)
+            return membership
         } catch {
             try? transaction.abort()
             throw error

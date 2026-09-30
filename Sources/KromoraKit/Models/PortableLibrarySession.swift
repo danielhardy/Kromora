@@ -868,7 +868,8 @@ final class PortableLibrarySession {
             filename: summary.displayName,
             fileType: embeddedURL.pathExtension,
             metadata: metadata,
-            libraryState: state
+            libraryState: state,
+            presentedAspectRatio: summary.presentedAspectRatio
         )
     }
 
@@ -901,7 +902,8 @@ final class PortableLibrarySession {
                 filename: summary.displayName,
                 fileType: sourceURL.pathExtension,
                 metadata: metadata,
-                libraryState: state
+                libraryState: state,
+                presentedAspectRatio: summary.presentedAspectRatio
             )
         }
     }
@@ -917,6 +919,14 @@ final class PortableLibrarySession {
         }
         _ = try applyIndexDelta(.init(removals: [assetID]))
         return result
+    }
+
+    /// Mirror a membership entry a package transaction already committed (an edit's presented
+    /// geometry) into the disposable projection. The package stays canonical; this only keeps the
+    /// query index from serving the previous value until the next rebuild.
+    func applyCommittedMembership(_ entry: PortablePackageMembershipEntry) {
+        guard !entry.isTombstone else { return }
+        _ = try? applyIndexDelta(.init(upserts: [.init(from: entry)]))
     }
 
     /// Persist the package-owned catalog summary used by filtering and sorting. The presentation

@@ -325,16 +325,7 @@ enum PresentationFrameEnvelope {
         }
 
         let metadata = header.metadata
-        guard metadata.identity.assetID == metadata.signature.source.assetID,
-              expectedAssetID.map({ $0 == metadata.identity.assetID }) ?? true
-        else { throw .identityMismatch }
-        guard (1...maxPixelDimension).contains(metadata.pixelWidth),
-              (1...maxPixelDimension).contains(metadata.pixelHeight),
-              metadata.geometry.orientedAspectRatio.isFinite,
-              metadata.geometry.orientedAspectRatio > 0
-        else { throw .invalidDimensions }
-        guard header.rasterByteCount > 0, header.rasterByteCount <= maxRasterBytes
-        else { throw .badHeaderLength }
+        try validate(metadata, rasterByteCount: header.rasterByteCount, expectedAssetID: expectedAssetID)
         let expectedSize = prefixLength + headerLength + header.rasterByteCount
         guard fileSize >= expectedSize else { throw .truncated }
         guard fileSize == expectedSize else { throw .trailingBytes }
@@ -348,6 +339,60 @@ enum PresentationFrameEnvelope {
         }
         guard raster.count == header.rasterByteCount else { throw .truncated }
         return PresentationFrame(metadata: metadata, rasterData: raster)
+    }
+
+    /// Decode a frame held in memory, such as a packed-thumbnail record. The same validation as
+    /// `read(from:)` applies, and the record must be exactly one envelope: a shifted or partial
+    /// read can never pass as a frame.
+    static func decode(
+        _ data: Data, expectedAssetID: PortablePhotoAssetID?, includeRaster: Bool = true
+    ) throws(DecodeError) -> PresentationFrame {
+        guard data.count >= prefixLength else {
+            throw data.starts(with: magic.prefix(data.count)) ? .truncated : .badMagic
+        }
+        guard data.prefix(4) == magic else { throw .badMagic }
+        let version = data.readBigEndianUInt32(at: 4)
+        guard version == storageFormatVersion else { throw .unsupportedVersion(version) }
+        let headerLength = Int(data.readBigEndianUInt32(at: 8))
+        guard headerLength > 0, headerLength <= maxHeaderBytes else { throw .badHeaderLength }
+        guard prefixLength + headerLength <= data.count else { throw .truncated }
+        let headerStart = data.startIndex + prefixLength
+        let header: Header
+        do {
+            header = try PackageJSONCoder.decode(
+                Header.self, from: data[headerStart..<(headerStart + headerLength)]
+            )
+        } catch { throw .malformedHeader }
+
+        let metadata = header.metadata
+        try validate(metadata, rasterByteCount: header.rasterByteCount, expectedAssetID: expectedAssetID)
+        let expectedSize = prefixLength + headerLength + header.rasterByteCount
+        guard data.count >= expectedSize else { throw .truncated }
+        guard data.count == expectedSize else { throw .trailingBytes }
+        guard includeRaster else {
+            return PresentationFrame(metadata: metadata, rasterData: Data())
+        }
+        let rasterStart = headerStart + headerLength
+        return PresentationFrame(
+            metadata: metadata,
+            rasterData: Data(data[rasterStart..<(rasterStart + header.rasterByteCount)])
+        )
+    }
+
+    private static func validate(
+        _ metadata: PresentationFrameMetadata, rasterByteCount: Int,
+        expectedAssetID: PortablePhotoAssetID?
+    ) throws(DecodeError) {
+        guard metadata.identity.assetID == metadata.signature.source.assetID,
+              expectedAssetID.map({ $0 == metadata.identity.assetID }) ?? true
+        else { throw .identityMismatch }
+        guard (1...maxPixelDimension).contains(metadata.pixelWidth),
+              (1...maxPixelDimension).contains(metadata.pixelHeight),
+              metadata.geometry.orientedAspectRatio.isFinite,
+              metadata.geometry.orientedAspectRatio > 0
+        else { throw .invalidDimensions }
+        guard rasterByteCount > 0, rasterByteCount <= maxRasterBytes
+        else { throw .badHeaderLength }
     }
 
     /// Decode the JPEG payload, checking its own dimensions against the metadata before any pixel

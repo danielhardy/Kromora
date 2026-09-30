@@ -160,7 +160,7 @@ struct FilmstripThumbnail: View {
                 if let thumbnail = item.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
+                        .aspectRatio(contentMode: item.shouldFillLibraryThumbnail ? .fill : .fit)
                         .frame(
                             width: FilmstripLayout.thumbnailSize,
                             height: FilmstripLayout.thumbnailSize
