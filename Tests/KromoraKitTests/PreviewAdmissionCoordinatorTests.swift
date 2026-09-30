@@ -31,21 +31,20 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await scheduler.cancelAllAndWait()
     }
 
-    func testStaleDisplayRevisionAndAssetDropCacheHit() async throws {
+    func testStaleDisplayRevisionAndAssetDropStoredFrameHit() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
         destination.admissionLastPresentedRequest = makeRequest(source: destination.source)
         destination.admissionLastPresentedImage = CIImage(color: .black)
         let request = makeRequest(source: destination.source)
-        let key = destination.admissionPresentation.cacheKey(for: request)
-        destination.admissionPresentation.cache.write(
-            try Fixtures.makeCGImage(width: 32, height: 24), for: key
-        )
         let coordinator = makeCoordinator(destination: destination, engine: engine)
+        try await seedStoredFrame(destination, edit: request.document.editHash)
 
-        coordinator.schedulePreview()
+        // The selection moved on before the submission: the session no longer owns this
+        // revision, so the stored frame must neither present nor suppress the render.
         destination.assetID = PhotoAssetID.imported(UUID())
-        destination.admissionPresentation.advanceDisplayRevision()
+        destination.admissionSourceRevision += 1
+        coordinator.schedulePreview()
         try await Task.sleep(for: .milliseconds(100))
 
         XCTAssertEqual(destination.cachePublicationCount, 0)
@@ -111,17 +110,13 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
-    func testROIRequestDoesNotAdoptCanonicalCacheHit() async throws {
+    func testROIRequestDoesNotAdoptCanonicalStoredFrame() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
         destination.admissionPreviewBackingSize = CGSize(width: 12, height: 12)
         destination.admissionCanvasNavigation.setZoom(8)
         let coordinator = makeCoordinator(destination: destination, engine: engine)
-        let canonical = makeRequest(source: destination.source)
-        let key = destination.admissionPresentation.cacheKey(for: canonical)
-        destination.admissionPresentation.cache.write(
-            try Fixtures.makeCGImage(width: 32, height: 24), for: key
-        )
+        try await seedStoredFrame(destination, edit: EditDocument().editHash)
 
         coordinator.schedulePreview()
         try await waitUntil("ROI render admission") {
@@ -132,6 +127,155 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         let requests = await engine.renderRequests
         XCTAssertNotNil(requests.first?.sourceROI)
         await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testExactStoredFrameSkipsTheRendererAndPresentsThroughTheConfirmedTail() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        try await seedStoredFrame(destination, edit: EditDocument().editHash)
+        destination.admissionStoredEditsResolved = true
+
+        coordinator.schedulePreview()
+
+        XCTAssertEqual(destination.cachePublicationCount, 1)
+        try await Task.sleep(for: .milliseconds(80))
+        let renders = await engine.renderRequests.count + engine.previewRequests.count
+        XCTAssertEqual(renders, 0, "an exact stored frame must not submit a preview render")
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testStaleStoredFrameWaitsForStoredEditsThenRendersOnce() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        try await seedStoredFrame(destination, edit: "an-older-edit")
+        destination.admissionStoredEditsResolved = false
+
+        coordinator.schedulePreview()
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertTrue(coordinator.hasDeferredSettledPreview)
+        let deferredRenders = await engine.previewRequests.count
+        XCTAssertEqual(deferredRenders, 0, "no speculative render while the stored frame can cover")
+        XCTAssertEqual(destination.cachePublicationCount, 0)
+
+        destination.admissionStoredEditsResolved = true
+        coordinator.resumeDeferredSettledPreview()
+        try await waitUntil("the single settled render") {
+            await engine.previewRequests.count == 1
+        }
+        XCTAssertFalse(coordinator.hasDeferredSettledPreview)
+        XCTAssertEqual(destination.cachePublicationCount, 0, "a stale frame never stands in")
+        XCTAssertEqual(destination.staleRefinementPreparationCount, 1)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testPendingStoredFrameLookupDefersTheRenderUntilItFinishes() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionStoredEditsResolved = true
+        let session = destination.beginSession()
+        var finished = false
+        destination.admissionPresentation.beginStoredFrameLookup(
+            assetID: session.assetID, identity: session.identity, generation: session.generation
+        ) { _ in finished = true }
+
+        coordinator.schedulePreview()
+        XCTAssertTrue(coordinator.hasDeferredSettledPreview)
+        try await waitUntil("lookup completion") { finished }
+        coordinator.resumeDeferredSettledPreview()
+        try await waitUntil("render after a miss") { await engine.previewRequests.count == 1 }
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testStoredLookIdentityMakesAWarmOpenExactBeforeTheLookScanFinishes() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        let lutID = LUTID(raw: "warm-look")
+        destination.admissionDocument = EditDocument(lut: LUTSettings(lutID: lutID, intensity: 1))
+        let look = LookSignature.resolved(id: lutID, contentHash: "bytes-1")
+        try await seedStoredFrame(
+            destination, edit: destination.admissionDocument.editHash, look: look
+        )
+        destination.admissionStoredEditsResolved = true
+        // The Look browser has not resolved the table: the request itself is unresolved.
+        XCTAssertNil(destination.admissionSelectedLook)
+
+        destination.storedLookSignature = nil
+        coordinator.schedulePreview()
+        XCTAssertEqual(destination.cachePublicationCount, 0, "without the stored identity it renders")
+        try await waitUntil("provisional render") { await engine.previewRequests.count == 1 }
+
+        destination.storedLookSignature = look
+        coordinator.schedulePreview()
+        XCTAssertEqual(destination.cachePublicationCount, 1)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testStoredFrameOfAReplacedSourceIsNeverACandidate() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        let replaced = FrameFixtures.identity(
+            asset: destination.source.portableIdentity.assetID, content: "the-old-source"
+        )
+        try await seedStoredFrame(
+            destination, edit: EditDocument().editHash, identity: replaced, expectCandidate: false
+        )
+        destination.admissionStoredEditsResolved = true
+
+        coordinator.schedulePreview()
+
+        XCTAssertEqual(destination.cachePublicationCount, 0)
+        try await waitUntil("render of the current source") {
+            await engine.previewRequests.count == 1
+        }
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testComparisonAndCropFramesNeverConsultTheStoredFrame() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        try await seedStoredFrame(destination, edit: EditDocument().editHash)
+        destination.admissionStoredEditsResolved = true
+        destination.admissionIsShowingOriginal = true
+
+        coordinator.schedulePreview()
+
+        XCTAssertEqual(destination.cachePublicationCount, 0)
+        try await waitUntil("original render") { await engine.previewRequests.count == 1 }
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    /// Stores a preview for the destination's photo and runs the selection-time lookup, so the
+    /// presentation coordinator holds it as the session's candidate.
+    private func seedStoredFrame(
+        _ destination: FakePreviewAdmissionDestination, edit: String,
+        look: LookSignature = .none,
+        identity: PortablePhotoIdentity? = nil, expectCandidate: Bool = true
+    ) async throws {
+        let frameIdentity = identity ?? destination.source.portableIdentity
+        let store = destination.admissionPresentation.store
+        await store.enqueueWrite(
+            try FrameFixtures.frame(identity: frameIdentity, edit: edit, look: look)
+        )
+        await store.waitForPendingWrites()
+        let session = destination.beginSession()
+        var finished: Bool?
+        destination.admissionPresentation.beginStoredFrameLookup(
+            assetID: session.assetID, identity: session.identity, generation: session.generation
+        ) { candidate in finished = candidate != nil }
+        try await waitUntil("stored frame lookup") { finished != nil }
+        XCTAssertEqual(finished, expectCandidate)
     }
 
     private func makeCoordinator(
@@ -147,11 +291,11 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
 
     private func makeDestination(engine: FakeRenderEngine) -> FakePreviewAdmissionDestination {
         let scheduler = ImageWorkScheduler()
-        let cache = PreviewDiskCache(
-            directory: tempDirectory.appendingPathComponent("admission-cache-\(UUID().uuidString)"),
+        let store = LatestPreviewFrameStore(
+            directory: tempDirectory.appendingPathComponent("admission-frames-\(UUID().uuidString)"),
             capBytes: 10_000_000
         )
-        let presentation = PreviewPresentationCoordinator(cache: cache, engine: engine)
+        let presentation = PreviewPresentationCoordinator(store: store, engine: engine)
         let renderCoordinator = PreviewCoordinator(engine: engine, scheduler: scheduler)
         return FakePreviewAdmissionDestination(
             scheduler: scheduler,
@@ -208,6 +352,11 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var admissionPreviewDebouncing = false
     var admissionPreviewInteractionActive = false
     var admissionPreviewBackingSize = CGSize(width: 1600, height: 1200)
+    var admissionStoredEditsResolved = false
+    var storedLookSignature: LookSignature?
+    func admissionStoredLookSignature(for lutID: LUTID?) -> LookSignature? {
+        storedLookSignature?.lutID == lutID ? storedLookSignature : nil
+    }
     var admissionDocument = EditDocument()
     var admissionComparisonBaselineDocument = EditDocument()
     var admissionComparisonRevision: UInt64 { admissionPresentation.comparisonRevision }
@@ -229,6 +378,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var pendingEditedThumbnailAssetID: PhotoAssetID?
     var admissionIsShuttingDown = false
     var cachePublicationCount = 0
+    var staleRefinementPreparationCount = 0
     var histogramPublicationCount = 0
     var statusMessage: String?
 
@@ -249,6 +399,15 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     }
 
     var source: ImageSource { admissionImageSource! }
+
+    /// Start the presentation session a real selection would have begun for this photo.
+    func beginSession() -> (assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64) {
+        let identity = source.portableIdentity
+        admissionPresentation.beginPresentationSession(
+            assetID: assetID, identity: identity, generation: admissionSourceRevision
+        )
+        return (assetID, identity, admissionSourceRevision)
+    }
     func admitSettledEditedThumbnail(_ assetID: PhotoAssetID) {}
     func admitDeferredEditedThumbnails() {}
     func admissionClearPreview() {}
@@ -257,6 +416,9 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64
     ) { cachePublicationCount += 1 }
+    func admissionPrepareStaleRefinement(using digest: PerceptualDigest) {
+        staleRefinementPreparationCount += 1
+    }
     func admissionDocument(for assetID: PhotoAssetID) -> EditDocument? { nil }
     func admissionSourceReference(for item: ImageCollection.Item) -> EditSourceReference {
         EditSourceReference(assetID: item.id, url: item.url)

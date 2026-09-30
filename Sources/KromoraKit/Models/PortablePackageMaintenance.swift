@@ -130,19 +130,44 @@ final class PortablePackagePackedThumbnailStore {
     private let indexURL: URL
     private var entries: [String: Entry]
 
+    private struct IndexStamp: Equatable {
+        let modified: Date?
+        let size: Int?
+    }
+
+    private var indexStamp: IndexStamp?
+
     init(at rootURL: URL) throws {
         self.rootURL = rootURL.standardizedFileURL
         self.indexURL = self.rootURL.appendingPathComponent("index.json")
         try fileManager.createDirectory(at: self.rootURL, withIntermediateDirectories: true)
-        if fileManager.fileExists(atPath: indexURL.path) {
-            let index = try PackageJSONCoder.decode(IndexFile.self, from: Data(contentsOf: indexURL))
-            guard index.schemaVersion == Self.schemaVersion else {
-                throw PortablePackageError.invalidRelativePath("unsupported thumbnail index schema")
-            }
-            entries = Dictionary(uniqueKeysWithValues: index.entries.map { ($0.key, $0) })
-        } else {
+        entries = [:]
+        try reloadIndex()
+    }
+
+    /// Re-read the on-disk index. A process that compacts the packs (package maintenance) replaces
+    /// both packs and index, so a long-lived runtime instance must drop offsets it cached before.
+    func reloadIndex() throws {
+        guard fileManager.fileExists(atPath: indexURL.path) else {
             entries = [:]
+            indexStamp = currentIndexStamp()
+            return
         }
+        let index = try PackageJSONCoder.decode(IndexFile.self, from: Data(contentsOf: indexURL))
+        guard index.schemaVersion == Self.schemaVersion else {
+            throw PortablePackageError.invalidRelativePath("unsupported thumbnail index schema")
+        }
+        entries = Dictionary(index.entries.map { ($0.key, $0) }, uniquingKeysWith: { _, last in last })
+        indexStamp = currentIndexStamp()
+    }
+
+    /// True when another writer (maintenance compaction) replaced the index since this instance
+    /// last read or wrote it.
+    var indexChangedOnDisk: Bool { currentIndexStamp() != indexStamp }
+
+    private func currentIndexStamp() -> IndexStamp {
+        let values = try? indexURL.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+        return IndexStamp(modified: values?.contentModificationDate, size: values?.fileSize)
     }
 
     var liveEntryCount: Int { entries.count }
@@ -265,6 +290,7 @@ final class PortablePackagePackedThumbnailStore {
             }
         }
         entries = plan.entries
+        indexStamp = currentIndexStamp()
         return CompactionResult(
             bytesBefore: plan.bytesBefore,
             bytesAfter: physicalByteCount,
@@ -307,6 +333,7 @@ final class PortablePackagePackedThumbnailStore {
             entries: entries.values.sorted { $0.key < $1.key }
         )
         try PackageJSONCoder.encode(index).write(to: indexURL, options: .atomic)
+        indexStamp = currentIndexStamp()
     }
 
     private func encodedIndex(_ values: [String: Entry]) throws -> Data {

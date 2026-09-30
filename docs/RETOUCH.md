@@ -147,5 +147,5 @@ The gate measures Heal and Clone quality against the unchanged KRMA-658 limits. 
 offsets passed 3/36 Heal rows and 7/36 Clone rows; the automatic picker passed 5/36 Heal rows in
 the last recorded full corpus run. These are generated-fixture results, not claims about
 camera-image performance. The evaluation limits are a quality gate, not a timing benchmark. For
-real-camera coverage, place licensed RAW fixtures outside the checkout and opt in with
-`KROMORA_RAW_FIXTURE_DIR`; the normal quality suite does not read or commit that directory.
+real-camera coverage, use local RAW fixtures in `realworldtest/` or another fixture directory with
+`KROMORA_RAW_FIXTURE_DIR`; the normal quality suite does not use those images.

@@ -19,6 +19,11 @@ enum RenderPipeline {
 
     /// Increment whenever the pixels produced by the graph can change without a cache-key input
     /// changing. This makes cache invalidation explicit when the pipeline evolves.
+    ///
+    /// This is the *pixel* epoch only. Persisted presentation frames keep it in their
+    /// `FrameSignature`, so a bump demotes them to stale-compatible (shown, then refined once)
+    /// instead of wiping them. The frame container's own layout is versioned independently by
+    /// `PresentationFrameEnvelope.storageFormatVersion`.
     /// v2 added the Light stage to the graph. v3 refines its non-neutral mapping to the native EV
     /// plus tonal-curve implementation. v4 clamps the tone curve's interior points to stay
     /// monotonic; some Contrast/Highlights/Shadows combinations previously produced a curve that
@@ -50,7 +55,7 @@ enum RenderPipeline {
     /// standard-image Tint sign with the green-to-magenta UI track; previously positive values
     /// rendered greener while RAW positive values rendered magenta. v34 gives luminance and colour
     /// noise reduction independent filter passes; the previous max-based mapping made them aliases.
-    static let cacheVersion = 34
+    static let pixelEpoch = 34
 
     /// Build the graph for `document` over `source`.
     ///

@@ -34,8 +34,7 @@ build/
 # pi-glla local session state
 .pi-glla/
 
-# Real-world camera files stay outside the repository. Set KROMORA_RAW_FIXTURE_DIR to a local,
-# license-cleared directory when running the slow RAW lane.
+# Local-only real-world image fixtures; only the usage and license README is tracked.
 realworldtest/*
 !realworldtest/README.md
 

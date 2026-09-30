@@ -122,18 +122,23 @@ final class LUTLibrary: ObservableObject {
     private var cachedMyLooks: (revision: UInt64, value: [CubeLUT])?
     private var cachedLookCollections: (revision: UInt64, value: [LookCollection])?
 
-    /// Fired after every scan publishes its results, whatever started it.
+    /// Content hashes of every Look the browser holds, refreshed by each publish. A value snapshot
+    /// rather than a live query, so an owner can diff two of them without racing a scan.
+    private(set) var snapshot: LookLibrarySnapshot = .empty
+
+    /// Fired after every scan or import publishes its results, whatever started it, with what that
+    /// publish changed relative to the previous one.
     ///
-    /// Exists so `AppViewModel` can drop the engine's cube-filter cache. A `LUTID` is a file path, so
-    /// a `.cube` replaced in place keeps its identity and a cached filter would go on serving the old
-    /// contents — reachable as of Step 9, when saving a second derive over the same path became a
-    /// thing the UI can do.
+    /// A `LUTID` is a file path, so a `.cube` replaced in place keeps its identity. The delta says
+    /// which IDs now resolve to different bytes (or to none), so the owner can re-render exactly the
+    /// work that referenced them. A byte-identical rescan arrives as `isEmpty`, and the owner is
+    /// expected to do no image work for it.
     ///
     /// A closure rather than a call at each scan site because it covers *every* scan — `setFolder`,
     /// `restoreFolder`, and the rescan after a save — instead of relying on the next person to
     /// remember. The library stays ignorant of the renderer, which is why this is a closure the owner
     /// wires rather than an engine reference held here.
-    var onScanned: (() -> Void)?
+    var onScanned: ((LookLibraryDelta) -> Void)?
     /// Fired after a valid external file has joined the canonical Look browser.
     var onImported: ((CubeLUT) -> Void)?
     /// Fired when an explicit import cannot be read or parsed.
@@ -293,10 +298,10 @@ final class LUTLibrary: ObservableObject {
                 self.scanError = nil
                 self.scannedCategories = cats
             }
-            self.publishCategories()
-            // After publishing, and on the failure path too: a scan that found nothing still means
-            // the folder changed under whatever the engine has cached.
-            self.onScanned?()
+            // On the failure path too: a scan that found nothing still means the folder changed, and
+            // every Look it used to hold is now in `disappeared`.
+            let delta = self.publishCategories()
+            self.onScanned?(delta)
         }
     }
 
@@ -332,10 +337,10 @@ final class LUTLibrary: ObservableObject {
 
             self.isImporting = false
             self.importedLUTs = imported
-            self.publishCategories()
+            let delta = self.publishCategories()
 
-            // The callback is intentionally before cache invalidation: AppViewModel selects the new
-            // value, then the normal library-change path flushes any filter for the same stable path.
+            // The callback is intentionally before `onScanned`: AppViewModel selects the new value,
+            // then the delta path re-renders anything an in-place replacement at that path changed.
             if let added = imported.first(where: { Self.canonicalPath($0.url) == Self.canonicalPath(url) }) {
                 if audition { self.onImported?(added) }
             } else {
@@ -348,7 +353,7 @@ final class LUTLibrary: ObservableObject {
                 }
                 self.reportImportError("Could not import “\(url.lastPathComponent)”: \(detail)")
             }
-            self.onScanned?()
+            self.onScanned?(delta)
         }
     }
 
@@ -372,8 +377,8 @@ final class LUTLibrary: ObservableObject {
             guard !Task.isCancelled else { return }
             self.isImporting = false
             self.importedLUTs = imported
-            self.publishCategories()
-            self.onScanned?()
+            let delta = self.publishCategories()
+            self.onScanned?(delta)
         }
     }
 
@@ -382,7 +387,9 @@ final class LUTLibrary: ObservableObject {
         onImportError?(message)
     }
 
-    private func publishCategories() {
+    /// Rebuild the canonical browser and return how its content changed since the last publish.
+    @discardableResult
+    private func publishCategories() -> LookLibraryDelta {
         var byCategory: [String: (name: String, source: LUTSource, luts: [CubeLUT])] = [:]
         for category in bundledCategories + scannedCategories {
             let key = "\(category.source.rawValue):\(category.name)"
@@ -416,6 +423,11 @@ final class LUTLibrary: ObservableObject {
         }
         allLUTs = categories.flatMap(\.luts)
         libraryRevision &+= 1
+
+        let published = LookLibrarySnapshot(looks: allLUTs)
+        let delta = published.delta(from: snapshot)
+        snapshot = published
+        return delta
     }
 
     private func sortedLooks(source: LUTSource? = nil, excluding: LUTSource? = nil) -> [CubeLUT] {

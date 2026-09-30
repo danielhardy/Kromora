@@ -347,7 +347,8 @@ struct PreviewView: View {
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
                 viewSpaceRotationAngle: canvasState.isCropToolActive
                     ? canvasState.cropStraightenAngle : 0,
-                ignoresHits: canvasState.isCropToolActive
+                ignoresHits: canvasState.isCropToolActive,
+                reduceMotion: accessibilityReduceMotion
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 

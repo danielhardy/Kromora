@@ -271,7 +271,7 @@ final class LibraryFolderBaselinePerformanceTests: TempDirectoryTestCase {
             editStore: makeInMemoryEditStore(),
             preferences: makeTestUserDefaults(),
             userLookFolderURL: tempDirectory.appendingPathComponent("looks"),
-            previewDiskCacheDirectory: tempDirectory.appendingPathComponent("preview-cache"),
+            previewFrameStoreDirectory: tempDirectory.appendingPathComponent("preview-cache"),
             portablePackageURL: tempDirectory.appendingPathComponent("Baseline.kromoralibrary")
         )
         do {

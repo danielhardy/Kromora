@@ -61,17 +61,43 @@ enum PlatformThumbnailProvider {
         maxPixelSize: Int = defaultMaxPixelSize,
         portableIdentity: PortablePhotoIdentity? = nil
     ) -> NSImage? {
+        generateCGImage(from: url, maxPixelSize: maxPixelSize, portableIdentity: portableIdentity)
+            .map(nsImage(from:))
+    }
+
+    /// `generate(from:)` for callers that need the bitmap itself (the packed frame store), which is
+    /// also what crosses task boundaries: `CGImage` is `Sendable`, `NSImage` is not.
+    static func generateCGImage(
+        from url: URL,
+        maxPixelSize: Int = defaultMaxPixelSize,
+        portableIdentity: PortablePhotoIdentity? = nil
+    ) -> CGImage? {
         guard maxPixelSize > 0 else { return nil }
         let identity = portableIdentity
             ?? ImageSource(url: url, nativeExtent: .zero).cacheIdentity
         let key = cacheKey(identity: identity, maxPixelSize: maxPixelSize)
         if let image = cache.value(for: key) {
             KromoraObservability.event(.cacheHit, quality: .thumbnail, detail: "layer=thumbnail")
-            return nsImage(from: image)
+            return image
         }
         KromoraObservability.event(.cacheMiss, quality: .thumbnail, detail: "layer=thumbnail")
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return nil }
         return thumbnail(from: source, maxPixelSize: maxPixelSize, cacheKey: key)
+    }
+
+    /// The bounded in-memory front tier, without falling through to a decode. Packed frames and
+    /// source decodes both feed it, so a revisit within a session never touches disk.
+    static func memoryCachedImage(
+        identity: PortablePhotoIdentity, maxPixelSize: Int
+    ) -> CGImage? {
+        cache.value(for: cacheKey(identity: identity, maxPixelSize: maxPixelSize))
+    }
+
+    /// Admit a bitmap obtained elsewhere (a packed frame) to the in-memory front tier.
+    static func primeMemoryCache(
+        _ image: CGImage, identity: PortablePhotoIdentity, maxPixelSize: Int
+    ) {
+        cache.insert(image, for: cacheKey(identity: identity, maxPixelSize: maxPixelSize))
     }
 
     /// Generate a thumbnail from in-memory data (Photos imports).
@@ -85,6 +111,18 @@ enum PlatformThumbnailProvider {
         dataFingerprint: String? = nil,
         portableIdentity: PortablePhotoIdentity? = nil
     ) -> NSImage? {
+        generateCGImage(
+            from: data, maxPixelSize: maxPixelSize, dataFingerprint: dataFingerprint,
+            portableIdentity: portableIdentity
+        ).map(nsImage(from:))
+    }
+
+    static func generateCGImage(
+        from data: Data,
+        maxPixelSize: Int = defaultMaxPixelSize,
+        dataFingerprint: String? = nil,
+        portableIdentity: PortablePhotoIdentity? = nil
+    ) -> CGImage? {
         var interval = KromoraSignpostInterval(
             .photoThumbnail,
             context: KromoraTraceContext(sourceFingerprint: "data:" + String(data.count), quality: "thumbnail")
@@ -104,7 +142,7 @@ enum PlatformThumbnailProvider {
         )
         if let image = cache.value(for: key) {
             KromoraObservability.event(.cacheHit, quality: .thumbnail, detail: "layer=thumbnail")
-            return nsImage(from: image)
+            return image
         }
         KromoraObservability.event(.cacheMiss, quality: .thumbnail, detail: "layer=thumbnail")
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
@@ -113,7 +151,7 @@ enum PlatformThumbnailProvider {
 
     private static func thumbnail(
         from source: CGImageSource, maxPixelSize: Int, cacheKey: String?
-    ) -> NSImage? {
+    ) -> CGImage? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceThumbnailMaxPixelSize: maxPixelSize,
@@ -128,13 +166,13 @@ enum PlatformThumbnailProvider {
         if let cacheKey {
             cache.insert(cgImage, for: cacheKey)
         }
-        return nsImage(from: cgImage)
+        return cgImage
     }
 
     private static func cacheKey(
         identity: PortablePhotoIdentity, maxPixelSize: Int
     ) -> String {
-        "thumbnail-v\(RenderPipeline.cacheVersion):\(identity.cacheKey):\(maxPixelSize)"
+        "thumbnail-v\(RenderPipeline.pixelEpoch):\(identity.cacheKey):\(maxPixelSize)"
     }
 
     private static func nsImage(from image: CGImage) -> NSImage {

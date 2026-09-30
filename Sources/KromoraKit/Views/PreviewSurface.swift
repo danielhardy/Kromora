@@ -39,6 +39,16 @@ final class PreviewSurface: ObservableObject {
     private(set) var presentationTexture: MTLTexture?
     private(set) var presentationTextureExtent: CGRect?
     private(set) var presentationTextureGeneration: UInt64 = 0
+    private var presentedDigest: PerceptualDigest?
+    private var staleRefinementPending = false
+    private var transitionTexture: MTLTexture?
+    private var transitionTextureExtent: CGRect?
+    private var transitionImageExtent: CGRect?
+    private var transitionLayoutImageExtent: CGRect?
+    private var transitionSpace: WorkingSpace = .current
+    private var transitionStartedAt: ContinuousClock.Instant?
+    private var transitionTask: Task<Void, Never>?
+    private(set) var reduceMotion = false
     private var lastValidPresentationTexture: MTLTexture?
     private var lastValidPresentationTextureExtent: CGRect?
     private var lastValidPresentationImageExtent: CGRect?
@@ -90,6 +100,14 @@ final class PreviewSurface: ObservableObject {
     private var hasManagedPresentationLifecycle = false
     var onPresentationFailure: (() -> Void)?
 
+    var hasPresentedDigest: Bool { staleRefinementPending && presentedDigest != nil }
+    var retainsTransitionTexture: Bool { transitionTexture != nil }
+
+    func prepareStaleRefinement(using digest: PerceptualDigest) {
+        presentedDigest = digest
+        staleRefinementPending = true
+    }
+
     /// Capture-host seam for hardware benchmarks: when the WindowServer reports no scan-out
     /// (`presentedTime == 0`, e.g. screen sharing or a headless capture session), a real drawable
     /// still went through the presentation lifecycle and the capture needs a timestamp. When set,
@@ -110,6 +128,11 @@ final class PreviewSurface: ObservableObject {
     func attachDisplayView(_ view: MTKView) {
         displayView = view
         view.setNeedsDisplay(view.bounds)
+    }
+
+    func setReduceMotion(_ enabled: Bool) {
+        reduceMotion = enabled
+        if enabled { finishCrossfade() }
     }
 
     func detachDisplayView(_ view: MTKView) {
@@ -133,6 +156,7 @@ final class PreviewSurface: ObservableObject {
         coversPresentationExtent: Bool = false,
         layoutImageExtent: CGRect? = nil,
         presentationNavigation: CanvasNavigation? = nil,
+        perceptualDigest: PerceptualDigest? = nil,
         onPresented: (() -> Void)? = nil
     ) -> Bool {
         guard let image,
@@ -158,7 +182,27 @@ final class PreviewSurface: ObservableObject {
             // request will still be accepted when it reaches the coordinator.
             return false
         }
+        let transition: FrameTransition = staleRefinementPending
+            && quality == .preview && coversPresentationExtent
+            ? FrameRefinementPolicy.transition(
+                from: presentedDigest, to: perceptualDigest, reduceMotion: reduceMotion
+            )
+            : .immediate
+        if case .crossfade = transition,
+            let oldTexture = presentationTexture ?? lastValidPresentationTexture
+        {
+            transitionTexture = oldTexture
+            transitionTextureExtent = presentationTextureExtent ?? lastValidPresentationTextureExtent
+            transitionImageExtent = presentationImageExtent ?? lastValidPresentationImageExtent
+            transitionLayoutImageExtent = layoutImageExtent ?? lastValidLayoutImageExtent
+            transitionSpace = space
+            transitionStartedAt = nil
+        } else {
+            finishCrossfade()
+        }
         self.image = image
+        presentedDigest = perceptualDigest
+        staleRefinementPending = false
         self.presentationImageExtent = Self.presentationExtentMatchingPixelAxes(
             planned: presentationImageExtent, pixels: image.extent,
             covers: coversPresentationExtent
@@ -332,6 +376,47 @@ final class PreviewSurface: ObservableObject {
         pendingDisplayID = nil
     }
 
+    private func beginCrossfade() {
+        transitionStartedAt = ContinuousClock.now
+        transitionTask?.cancel()
+        transitionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled, let startedAt = self.transitionStartedAt {
+                let elapsed = startedAt.duration(to: .now).components
+                let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+                guard seconds < FrameRefinementPolicy.crossfadeDuration else {
+                    self.finishCrossfade()
+                    return
+                }
+                self.requestDisplay()
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+        }
+    }
+
+    private func finishCrossfade() {
+        transitionTask?.cancel()
+        transitionTask = nil
+        transitionStartedAt = nil
+        transitionTexture = nil
+        transitionTextureExtent = nil
+        transitionImageExtent = nil
+        transitionLayoutImageExtent = nil
+        transitionSpace = .current
+    }
+
+    func crossfadeProgress(at instant: ContinuousClock.Instant = .now) -> Float? {
+        guard transitionTexture != nil else { return nil }
+        guard let transitionStartedAt else { return 0 }
+        let elapsed = transitionStartedAt.duration(to: instant).components
+        let seconds = Double(elapsed.seconds) + Double(elapsed.attoseconds) / 1e18
+        guard seconds < FrameRefinementPolicy.crossfadeDuration else {
+            finishCrossfade()
+            return nil
+        }
+        return Float(min(1, max(0, seconds / FrameRefinementPolicy.crossfadeDuration)))
+    }
+
     func rejectPresentation(displayRevision: UInt64) {
         guard pendingDisplayID == displayRevision else { return }
         pendingDisplayID = nil
@@ -460,6 +545,7 @@ final class PreviewSurface: ObservableObject {
             presentationTexture = materialization.texture
             presentationTextureExtent = materialization.extent
             presentationTextureGeneration &+= 1
+            if transitionTexture != nil { beginCrossfade() }
             if coversPresentationExtent, pendingDisplayID == nil {
                 retainedCompleteTexture = materialization.texture
                 retainedCompleteTextureExtent = materialization.extent
@@ -475,6 +561,7 @@ final class PreviewSurface: ObservableObject {
         } else if isCurrentMaterialization, let pendingDisplayID {
             // The Core Image fallback may have skipped rollback because this texture was still
             // outstanding. Once materialization itself fails, the previous frame has to return.
+            finishCrossfade()
             rejectPresentation(displayRevision: pendingDisplayID)
         }
     }
@@ -561,6 +648,9 @@ final class PreviewSurface: ObservableObject {
         return false
     }
     func clear() {
+        finishCrossfade()
+        presentedDigest = nil
+        staleRefinementPending = false
         image = nil
         presentationImageExtent = nil
         coversPresentationExtent = false
@@ -626,11 +716,13 @@ final class PreviewSurface: ObservableObject {
         let navigation: CanvasNavigation
         let generation: UInt64
         let usesRetainedCompleteFrame: Bool
+        let alpha: Float
     }
 
     fileprivate struct PresentationStack {
         let detail: PresentationFrame
         let underlay: PresentationFrame?
+        let transition: PresentationFrame?
     }
 
     /// Select the pixels that may be moved under the pointer. A partial ROI is detail: it follows
@@ -663,10 +755,25 @@ final class PreviewSurface: ObservableObject {
             space: space,
             navigation: detailNavigation,
             generation: presentationTextureGeneration,
-            usesRetainedCompleteFrame: false
+            usesRetainedCompleteFrame: false,
+            alpha: crossfadeProgress() ?? 1
         )
+        let transitionFrame: PresentationFrame? = {
+            guard crossfadeProgress() != nil,
+                  let texture = transitionTexture, let textureExtent = transitionTextureExtent
+            else { return nil }
+            return PresentationFrame(
+                image: retainedCompleteImage ?? image, texture: texture,
+                textureExtent: textureExtent,
+                presentationImageExtent: transitionImageExtent,
+                layoutImageExtent: transitionLayoutImageExtent ?? transitionImageExtent,
+                space: transitionSpace, navigation: current,
+                generation: presentationTextureGeneration &- 1,
+                usesRetainedCompleteFrame: false, alpha: 1
+            )
+        }()
         guard hasCompleteUnderlay, let retainedCompleteImage else {
-            return PresentationStack(detail: detail, underlay: nil)
+            return PresentationStack(detail: detail, underlay: nil, transition: transitionFrame)
         }
 
         let underlay = PresentationFrame(
@@ -679,9 +786,10 @@ final class PreviewSurface: ObservableObject {
             space: retainedCompleteSpace,
             navigation: current,
             generation: retainedCompleteGeneration,
-            usesRetainedCompleteFrame: true
+            usesRetainedCompleteFrame: true,
+            alpha: 1
         )
-        return PresentationStack(detail: detail, underlay: underlay)
+        return PresentationStack(detail: detail, underlay: underlay, transition: transitionFrame)
     }
 
     private struct MaterializationSubmission {
@@ -756,6 +864,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
     /// input. SwiftUI `allowsHitTesting(false)` is not enough on its own because the representable
     /// still participates in the NSView hit-test walk.
     var ignoresHits: Bool = false
+    var reduceMotion: Bool = false
 
     /// The canvas is sized by its surrounding SwiftUI frames. Supplying that proposal directly
     /// avoids asking AppKit to infer an intrinsic size for MTKView during layout.
@@ -776,6 +885,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         let view = PreviewMTKView(frame: .zero, device: context.coordinator.device)
         surface.attachPresentationLifecycle()
         surface.attachDisplayView(view)
+        surface.setReduceMotion(reduceMotion)
         context.coordinator.surface = surface
         context.coordinator.navigation = navigation
         context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
@@ -808,6 +918,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             surface.attachDisplayView(view)
         }
         context.coordinator.surface = surface
+        surface.setReduceMotion(reduceMotion)
         context.coordinator.navigation = navigation
         context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
@@ -887,6 +998,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             var viewportSize: SIMD2<Float>
             var rotationCenter: SIMD2<Float>
             var rotationRadians: Float
+            var alpha: Float
         }
 
         override init() {
@@ -981,6 +1093,9 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         private static func metalFrames(in stack: PreviewSurface.PresentationStack) -> [PreviewSurface.PresentationFrame] {
             var frames: [PreviewSurface.PresentationFrame] = []
+            if let transition = stack.transition {
+                frames.append(transition)
+            }
             if let underlay = stack.underlay, underlay.texture != nil, underlay.textureExtent != nil {
                 frames.append(underlay)
             }
@@ -1009,7 +1124,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                         navigation: frame.navigation,
                         destination: destination,
                         virtualExtent: frame.presentationImageExtent,
-                        viewSpaceRotationAngle: rotation
+                        viewSpaceRotationAngle: rotation, alpha: frame.alpha
                     ),
                     let vertexBuffer = geometry.vertices.withUnsafeBytes({ rawBuffer in
                         device.makeBuffer(
@@ -1023,6 +1138,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 else { continue }
                 encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
                 encoder.setVertexBuffer(uniformBuffer, offset: 0, index: 1)
+                encoder.setFragmentBuffer(uniformBuffer, offset: 0, index: 1)
                 encoder.setFragmentTexture(texture, index: 0)
                 encoder.drawPrimitives(
                     type: .triangleStrip, vertexStart: 0,
@@ -1107,8 +1223,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             // A retained complete-frame texture must not be the only thing drawn while the new
             // publication is still a Core Image image. Otherwise an edit stays on the previous
             // photo until that detail texture materializes — and never appears if it does not.
-            let detailIsTextured = stack.detail.texture != nil && stack.detail.textureExtent != nil
-            if detailIsTextured, !metalFrames.isEmpty, pipeline != nil, samplerState != nil,
+            if !metalFrames.isEmpty, pipeline != nil, samplerState != nil,
                 let encoder = renderPass.flatMap({
                     commandBuffer.makeRenderCommandEncoder(descriptor: $0)
                 })
@@ -1289,7 +1404,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         private static func quadGeometry(
             imageExtent: CGRect, navigation: CanvasNavigation, destination: CGRect,
-            virtualExtent: CGRect?, viewSpaceRotationAngle: Double = 0
+            virtualExtent: CGRect?, viewSpaceRotationAngle: Double = 0, alpha: Float = 1
         ) -> (vertices: [Vertex], uniforms: Uniforms)? {
             let transformExtent = viewSpaceExtent(
                 for: virtualExtent ?? imageExtent, angle: viewSpaceRotationAngle)
@@ -1343,7 +1458,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     rotationCenter: SIMD2(Float(center.x), Float(center.y)),
                     // CIImage uses a y-up coordinate system while the presenter uses y-down
                     // screen pixels, so the visual transform is the inverse mathematical angle.
-                    rotationRadians: Float(-viewSpaceRotationAngle * .pi / 180)
+                    rotationRadians: Float(-viewSpaceRotationAngle * .pi / 180),
+                    alpha: alpha
                 )
             )
         }

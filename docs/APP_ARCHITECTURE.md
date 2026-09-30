@@ -60,8 +60,10 @@ adjacent prefetch, idle cache fill, and comparison-preview admission, including 
 retried revision state and retry task. `PreviewPublicationCoordinator` owns the settled and
 interactive publication funnel, presented-frame state, and latest-wins publication fences;
 `PreviewPresentationCoordinator` owns display/comparison generations, per-surface
-resolution-planner hysteresis, preview cache keys/access, and canonical complete-frame cache
-writes. `PreviewCoordinator` remains the only render-submission owner. The root supplies
+resolution-planner hysteresis, the selection-time stored-frame lookup and its classification, and
+canonical complete-frame writes to `LatestPreviewFrameStore` (an actor in `Derived/Previews`).
+`PreviewAdmissionCoordinator` holds a settled submission back while a stored frame can still make it
+unnecessary, and presents an exact hit instead of rendering. `PreviewCoordinator` remains the only render-submission owner. The root supplies
 value-only document/source/navigation inputs and retains the `PreviewSurface` instances, so there
 is no second document store or surface reference in these collaborators.
 
@@ -188,6 +190,7 @@ after the ownership stages; the main file is 4,293 lines, recorded here only as 
 | Auto adjustment | `AutoWorkflowCoordinator` owns invocation state and cancellation. `runAutoAdjustment` snapshots source/document identity, fences completion, presents status, and commits a successful value through `updateDocument`. |
 | Image loading and source changes | `load` is the root sequencer: it closes undo, flushes the previous edit, activates the session, invalidates old source/display work, clears surfaces, then starts `SourceSessionCoordinator`. Root installation and stored-edit adoption publish the active document and schedule the corrective render. `SourceSessionCoordinator` owns replaceable source preparation and its worker tasks. |
 | Import and library commands | `LibraryImportCoordinator`, `PhotosImportCoordinator`, `PhotosImportBatchCoordinator`, `LibraryMediaWorkflowCoordinator`, and `LibraryBrowsingCoordinator` own their worker, provider, batch bridge, validation, query-window, and selection state. The root keeps view-compatible entry points, final package/import publication, source-to-edit handoff, and cross-feature deletion cleanup. |
+| Launch hints | `LibraryBrowsingCoordinator` coalesces device-local viewport/active-ID hints, reads at most two hinted packed-frame windows below current viewport priority, and cancels remaining speculative reads when the grid publishes its real viewport. Hints never alter selection, scroll position, or package truth. |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns request state. Root demand, refresh, debounce, and invalidation hooks are forwards; collection/document publication remains at the root boundary. |
 | Copy/paste and Looks | `EditorDocumentCoordinator` owns per-photo sessions, history, and clipboard. Root commands translate UI actions into document mutations, preserve multi-photo persistence semantics, and resolve Looks against `LUTLibrary`/`DerivedLUTRegistry`. |
 | Document commit and history | `updateDocument` is the sole ordinary edit commit path: it records history, updates the published document and crop, queues persistence, advances revisions, and admits preview/thumbnail work. `applyHistoryDocument` is the restore sequencer for undo/redo and reset, using the same published document, persistence, revision, and render boundaries. |
