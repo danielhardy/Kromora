@@ -370,7 +370,7 @@ Acceptance: new collaborators have genuine fake-only tests; new suites require a
 architecture docs link to existing symbols at the landing commit. Record exact SHA, commands,
 counts, skips, warnings, and environment limitations in handoffs. Establish a diagnostic baseline,
 then prevent new warnings; resolve actor-isolation warnings rather than silencing concurrency checks.
-Preserve macOS 26 (Tahoe) on Apple Silicon, Xcode 26+ SDK support, Swift 6 mode, and Apple-only dependencies. Do not add fallbacks for earlier macOS releases or Intel hardware.
+Preserve macOS 26 (Tahoe) as the Apple Silicon deployment floor, Xcode 27+ SDK support, Swift 6 mode, and Apple-only dependencies. Do not add fallbacks for earlier macOS releases or Intel hardware.
 
 ### R8 — Add interaction coverage for crop and custom slider changes
 
