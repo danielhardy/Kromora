@@ -27,6 +27,10 @@ final class ImageWorkScheduler {
         case thumbnail
         /// All package reads and writes share this scheduler with rendering work.
         case packageIO
+        /// Read-only hydration of persisted presentation frames for a visible window. Bounded
+        /// independently of the single-writer package lane, and held while editor work is
+        /// contended so a cache read never delays a visible edit.
+        case frameRead
     }
 
     enum PackageIOLane: Sendable, Equatable {
@@ -77,6 +81,9 @@ final class ImageWorkScheduler {
         /// a larger value after measuring their volume, while maintenance defaults to one worker.
         var maxConcurrentPackageIO: Int = 1
         var maxQueuedPackageIO: Int = 32
+        /// Persisted-frame reads are small and read-only; see `ThumbnailFrameReadPolicy`.
+        var maxConcurrentFrameReads: Int = ThumbnailFrameReadPolicy.maxConcurrentReads
+        var maxQueuedFrameReads: Int = 96
 
         static let `default` = Configuration()
     }
@@ -138,7 +145,9 @@ final class ImageWorkScheduler {
             maxQueuedThumbnails: max(0, configuration.maxQueuedThumbnails),
             maxQueuedEditorJobs: max(0, configuration.maxQueuedEditorJobs),
             maxConcurrentPackageIO: max(0, configuration.maxConcurrentPackageIO),
-            maxQueuedPackageIO: max(0, configuration.maxQueuedPackageIO)
+            maxQueuedPackageIO: max(0, configuration.maxQueuedPackageIO),
+            maxConcurrentFrameReads: max(0, configuration.maxConcurrentFrameReads),
+            maxQueuedFrameReads: max(0, configuration.maxQueuedFrameReads)
         )
     }
 
@@ -155,6 +164,18 @@ final class ImageWorkScheduler {
     var pendingPackageIOCount: Int {
         queued.values.filter { $0.lane == .packageIO }.count
     }
+
+    var pendingFrameReadCount: Int {
+        queued.values.filter { $0.lane == .frameRead }.count
+    }
+
+    var runningFrameReadCount: Int {
+        running.values.filter { $0.lane == .frameRead }.count
+    }
+
+    /// Jobs a frame read was ready for but held behind editor contention.
+    private(set) var yieldedFrameReadCount = 0
+    private(set) var peakRunningFrameReadCount = 0
 
     var runningCount: Int { running.count }
 
@@ -276,6 +297,44 @@ final class ImageWorkScheduler {
         updatePeakQueue()
         pump()
         return admitted || running[job.id] != nil
+    }
+
+    /// Admit one persisted-frame read. The operation runs off the main actor; its terminal callback
+    /// is delivered on it. Reads never block the editor lane: they wait while editor work is queued
+    /// or running, and otherwise run up to `maxConcurrentFrameReads` at a time in priority order.
+    @discardableResult
+    func enqueueFrameRead(
+        id: JobID,
+        priority: Priority = .visibleGrid,
+        onTerminal: @escaping TerminalHandler = { _ in },
+        operation: @escaping PackageIOOperation
+    ) -> Bool {
+        cancel(id: id, countAsCancellation: false)
+
+        nextSequence &+= 1
+        let job = Job(
+            id: id, lane: .frameRead, priority: priority, sequence: nextSequence,
+            operation: .packageIO(operation), onTerminal: onTerminal
+        )
+        guard configuration.maxConcurrentFrameReads > 0 else {
+            onTerminal(.rejected)
+            return false
+        }
+        let pending = queued.values.filter { $0.lane == .frameRead }
+        if pending.count >= configuration.maxQueuedFrameReads,
+            let worst = pending.max(by: { precedes($0, $1) })
+        {
+            guard precedes(job, worst) else {
+                onTerminal(.rejected)
+                return false
+            }
+            queued.removeValue(forKey: worst.id)
+            worst.onTerminal(.evicted)
+        }
+        queued[job.id] = job
+        admissionLog.append(Admission(id: job.id, lane: .frameRead, priority: priority))
+        pump()
+        return queued[job.id] != nil || running[job.id] != nil
     }
 
     /// Change a queued job's priority without restarting it. Running work is left alone when it is
@@ -478,6 +537,7 @@ final class ImageWorkScheduler {
                 lane: next.lane, priority: next.priority, token: token, task: task,
                 onTerminal: next.onTerminal
             )
+            peakRunningFrameReadCount = max(peakRunningFrameReadCount, runningFrameReadCount)
         }
     }
 
@@ -489,6 +549,9 @@ final class ImageWorkScheduler {
                     return !running.values.contains(where: { $0.lane == .editor })
                 case .thumbnail:
                     return runningThumbnailCount < configuration.maxConcurrentThumbnails
+                case .frameRead:
+                    return runningFrameReadCount < configuration.maxConcurrentFrameReads
+                        && !isEditorContended
                 case .packageIO:
                     return runningPackageIOCount < configuration.maxConcurrentPackageIO
                         // A user-requested import must be able to finish while a render is
@@ -502,6 +565,12 @@ final class ImageWorkScheduler {
             isEditorContended
         {
             yieldedPackageIOCount += 1
+        }
+        if isEditorContended,
+            queued.values.contains(where: { $0.lane == .frameRead }),
+            runningFrameReadCount < configuration.maxConcurrentFrameReads
+        {
+            yieldedFrameReadCount += 1
         }
         return candidates.min(by: precedes)
     }

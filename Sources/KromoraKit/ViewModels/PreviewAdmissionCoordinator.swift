@@ -15,6 +15,11 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionActiveAssetID: PhotoAssetID? { get }
     var admissionLastPresentedRequest: RenderRequest? { get }
     var admissionLastPresentedImage: CIImage? { get }
+    /// True once the active photo's stored edit document has been adopted (or declined), which is
+    /// when a settled request names the edit that will actually be shown.
+    var admissionStoredEditsResolved: Bool { get }
+    /// The current revision's own Look identity when `lutID` is the Look that revision names.
+    func admissionStoredLookSignature(for lutID: LUTID?) -> LookSignature?
     var admissionInspectorPresented: Bool { get }
     var admissionHistogramLoading: Bool { get }
     var admissionHistogram: HistogramData? { get }
@@ -54,6 +59,7 @@ protocol PreviewAdmissionDestination: AnyObject {
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64
     )
+    func admissionPrepareStaleRefinement(using digest: PerceptualDigest)
     func admissionDocument(for assetID: PhotoAssetID) -> EditDocument?
     func admissionSourceReference(for item: ImageCollection.Item) -> EditSourceReference
     func admissionResolvedLUT(_ id: LUTID?) -> CubeLUT?
@@ -105,8 +111,10 @@ final class PreviewAdmissionCoordinator {
     private var idleBuildCursor: Int?
     private static let maxItemsPerIdleSession = 20
     private var prefetchDelayTask: Task<Void, Never>?
-    private var pendingPreviewCacheLookup:
-        (request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64, displayRevision: UInt64)?
+    /// A settled submission held back while a stored frame might make the render unnecessary. The
+    /// value is the submission's `preemptsPredecessor`. It is released by the lookup finishing or
+    /// the stored edits resolving, whichever leaves the request able to be judged.
+    private var deferredSettledPreview: Bool?
     private var previewScheduledSourceRevision: UInt64?
     private let comparisonPreviewJobID = ImageWorkScheduler.JobID("comparison-preview")
     private var comparisonPreviewScheduledRevision: UInt64?
@@ -257,7 +265,7 @@ final class PreviewAdmissionCoordinator {
         previewDebounceGeneration &+= 1
         previewDebounceTask?.cancel()
         previewDebounceTask = nil
-        pendingPreviewCacheLookup = nil
+        deferredSettledPreview = nil
         comparisonPreviewRetryTask?.cancel()
         comparisonPreviewRetryTask = nil
         destination = nil
@@ -442,8 +450,7 @@ final class PreviewAdmissionCoordinator {
 
     func cancelPendingPreviewWork() {
         cancelPreviewDebounce()
-        destination?.admissionPresentation.cancelCacheLookup()
-        pendingPreviewCacheLookup = nil
+        deferredSettledPreview = nil
         destination?.admissionPreviewCoordinator.cancel()
     }
 
@@ -482,13 +489,23 @@ final class PreviewAdmissionCoordinator {
         submitSettledPreview(preemptsPredecessor: false)
     }
 
+    /// Re-run a submission that was held for the stored frame. Safe to call at any time: it does
+    /// nothing unless something is deferred, and a still-undecidable request defers again.
+    func resumeDeferredSettledPreview() {
+        guard let preemptsPredecessor = deferredSettledPreview else { return }
+        submitSettledPreview(preemptsPredecessor: preemptsPredecessor)
+    }
+
+    func resetDeferredSettledPreview() { deferredSettledPreview = nil }
+    var hasDeferredSettledPreview: Bool { deferredSettledPreview != nil }
+
     private func submitSettledPreview(preemptsPredecessor: Bool) {
         guard let destination else { return }
         cancelIdlePreviewBuild()
+        deferredSettledPreview = nil
         guard !destination.admissionIsShuttingDown,
             let source = destination.admissionImageSource
         else { destination.admissionClearPreview(); return }
-        let supersededLookup = pendingPreviewCacheLookup
         destination.admissionPresentation.advanceDisplayRevision()
         cancelHistogram(clear: false, pump: false)
         let (requested, look) = displayRequest
@@ -506,51 +523,47 @@ final class PreviewAdmissionCoordinator {
         let assetID = destination.admissionActiveAssetID
         let sourceRevision = destination.admissionSourceRevision
         let displayRevision = destination.admissionDisplayRevision
-        if !preemptsPredecessor, let supersededLookup,
-            supersededLookup.sourceRevision == sourceRevision, supersededLookup.assetID == assetID
-        {
-            destination.admissionPresentation.cancelCacheLookup()
-            destination.admissionPreviewCoordinator.submit(
-                supersededLookup.request, phase: .settled, assetID: assetID,
-                sourceRevision: sourceRevision, displayRevision: supersededLookup.displayRevision
-            )
-        }
-        if request.sourceROI != nil {
-            destination.admissionPresentation.cancelCacheLookup()
-            pendingPreviewCacheLookup = nil
-            submit(request, preemptsPredecessor: preemptsPredecessor,
-                assetID: assetID, sourceRevision: sourceRevision, displayRevision: displayRevision)
-            return
-        }
-        let key = destination.admissionPresentation.cacheKey(for: request)
-        destination.admissionPresentation.lookupCache(for: key) { [weak self, weak destination] cached in
-            guard let self, let destination, !destination.admissionIsShuttingDown,
-                destination.admissionSourceRevision == sourceRevision,
-                destination.admissionActiveAssetID == assetID,
-                destination.admissionImageSource == request.source
-            else { return }
-            self.pendingPreviewCacheLookup = nil
-            guard destination.admissionDisplayRevision == displayRevision,
-                self.displayRequest.document == request.document
-            else {
-                // The lookup's revision was already consumed. Leaving here dropped the only
-                // canvas render while the edited thumbnail, admitted above, still ran.
-                guard !self.isPreviewInteractionActive else { return }
-                self.submitSettledPreview(preemptsPredecessor: true)
+
+        // The stored frame describes the photo's own edit at canvas size. A region of interest,
+        // the original/comparison baseline, and the crop tool's transient geometry are all
+        // different pixels and always render.
+        let mayUseStoredFrame = request.sourceROI == nil
+            && !destination.admissionIsShowingOriginal && !destination.admissionCropToolActive
+        if mayUseStoredFrame {
+            let presentation = destination.admissionPresentation
+            let editsResolved = destination.admissionStoredEditsResolved
+            if let stored = presentation.classifyStoredFrame(
+                for: request, sourceRevision: sourceRevision, editsResolved: editsResolved,
+                storedLook: destination.admissionStoredLookSignature(for: request.document.lut.lutID)
+            ) {
+                switch stored.classification {
+                case .exact:
+                    destination.admissionPreviewCoordinator.cancel()
+                    destination.admissionPresentCacheRaster(
+                        CIImage(cgImage: stored.candidate.image), request: request,
+                        assetID: assetID, sourceRevision: sourceRevision,
+                        displayRevision: displayRevision
+                    )
+                    return
+                case .provisionalOnly where !editsResolved:
+                    // Rendering now would use the speculative identity document and then
+                    // render again once the stored edit arrives.
+                    deferredSettledPreview = preemptsPredecessor
+                    return
+                case .staleCompatible:
+                    destination.admissionPrepareStaleRefinement(
+                        using: stored.candidate.metadata.perceptualDigest
+                    )
+                default:
+                    break
+                }
+            } else if presentation.isStoredFrameLookupLoading {
+                deferredSettledPreview = preemptsPredecessor
                 return
             }
-            if let cached {
-                destination.admissionPreviewCoordinator.cancel()
-                destination.admissionPresentCacheRaster(
-                    CIImage(cgImage: cached), request: request, assetID: assetID,
-                    sourceRevision: sourceRevision, displayRevision: displayRevision
-                )
-            } else {
-                self.submit(request, preemptsPredecessor: preemptsPredecessor,
-                    assetID: assetID, sourceRevision: sourceRevision, displayRevision: displayRevision)
-            }
         }
-        pendingPreviewCacheLookup = (request, assetID, sourceRevision, displayRevision)
+        submit(request, preemptsPredecessor: preemptsPredecessor,
+            assetID: assetID, sourceRevision: sourceRevision, displayRevision: displayRevision)
     }
 
     private func submit(
@@ -662,8 +675,7 @@ final class PreviewAdmissionCoordinator {
         // settled debounce is already queued. If it fires mid-drag it advances the display
         // revision and the engine discards every interactive frame for the gesture.
         cancelPreviewDebounce()
-        destination?.admissionPresentation.cancelCacheLookup()
-        pendingPreviewCacheLookup = nil
+        deferredSettledPreview = nil
         destination?.admissionPresentation.advanceDisplayRevision()
         isPreviewInteractionActive = true
         destination?.admissionPreviewCoordinator.beginInteraction()
@@ -883,22 +895,24 @@ final class PreviewAdmissionCoordinator {
                 source: candidate.source, assetID: candidate.reference.assetID, document: document,
                 lut: destination.admissionResolvedLUT(document.lut.lutID), plan: plan, canonical: true
             )
-            let key = destination.admissionPresentation.cacheKey(for: request)
+            // An unresolved Look cannot be persisted, so idle building it would render for
+            // nothing; a frame that already matches exactly needs no rebuild either.
+            let needsFrame = request.lookSignature.permitsExactReuse
+                ? await !destination.admissionPresentation.storedFrameIsExact(for: request)
+                : false
             workItems.append(IdlePreviewWorkItem(
-                cursor: cursor,
-                request: destination.admissionPresentation.cache.contains(key) ? nil : request
+                cursor: cursor, request: needsFrame ? request : nil
             ))
         }
         guard !workItems.isEmpty, !Task.isCancelled else { return }
         let engine = self.engine
-        let cache = destination.admissionPresentation.cache
         let presentation = destination.admissionPresentation
         let scheduler = workScheduler
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             scheduler.enqueue(
                 id: idlePreviewBuildJobID, lane: .editor, priority: .background,
                 onTerminal: { _ in continuation.resume() }
-            ) { [weak self, weak destination, engine, cache, presentation, workItems,
+            ) { [weak self, weak destination, engine, presentation, workItems,
                 generation, sourceRevision, selectedAssetID] in
                 guard let self, let destination else { return }
                 for item in workItems {
@@ -912,8 +926,9 @@ final class PreviewAdmissionCoordinator {
                     guard let request = item.request else {
                         self.idleBuildCursor = item.cursor + 1; continue
                     }
-                    let key = presentation.cacheKey(for: request)
-                    guard !cache.contains(key) else {
+                    guard request.lookSignature.permitsExactReuse,
+                        await !presentation.storedFrameIsExact(for: request)
+                    else {
                         self.idleBuildCursor = item.cursor + 1; continue
                     }
                     let image = await engine.makeCIImage(request)

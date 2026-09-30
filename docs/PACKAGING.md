@@ -89,8 +89,8 @@ The GitHub updater is compiled only for direct-download releases. `release-dmg.s
 that flag and therefore omit the updater, its menu/settings UI, and its DMG installer entirely.
 App Store archives should continue to use Xcode's App Store Connect distribution workflow.
 
-For a distributable build, use Xcode 26 or newer with the macOS 26 SDK. The package and app deploy
-to macOS 26 (Tahoe), matching the SDK and allowing Tahoe APIs to be used unconditionally.
+For a distributable build, use Xcode 27 or newer with the macOS 27 SDK. The package and app deploy
+to macOS 26 (Tahoe); keep API usage compatible with that deployment floor.
 
 ## Signed DMG releases
 

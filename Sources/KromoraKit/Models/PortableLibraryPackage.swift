@@ -94,6 +94,13 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
     var lens: String?
     var dimensions: PhotoPixelDimensions?
     var aspectRatio: Double?
+    /// The aspect ratio of the pixels a library cell presents: the source aspect with the current
+    /// edit's crop and rotation applied. Denormalized from the current edit sidecar and published
+    /// in the same package transaction that advances the edit revision, so a cell can reserve its
+    /// final geometry before any raster arrives. Nil means "same as `aspectRatio`" — packages
+    /// written before this field decode unchanged and are repaired on the next edit commit or an
+    /// explicit `repairPresentedAspectRatios`.
+    var presentedAspectRatio: Double?
     var displayName: String
     var assetRevision: UInt64
 
@@ -107,6 +114,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         lens: String? = nil,
         dimensions: PhotoPixelDimensions? = nil,
         aspectRatio: Double? = nil,
+        presentedAspectRatio: Double? = nil,
         displayName: String,
         assetRevision: UInt64 = 0
     ) {
@@ -119,9 +127,23 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         self.lens = lens
         self.dimensions = dimensions
         self.aspectRatio = aspectRatio
+        self.presentedAspectRatio = presentedAspectRatio
         self.displayName = displayName
         self.assetRevision = assetRevision
     }
+
+    /// The source aspect ratio the summary knows about. Pixel dimensions win because the library
+    /// cell derives its own source ratio from them; the explicit ratio is the fallback.
+    var sourceAspectRatio: Double? {
+        if let dimensions, dimensions.width > 0, dimensions.height > 0 {
+            return Double(dimensions.width) / Double(dimensions.height)
+        }
+        if let aspectRatio, aspectRatio.isFinite, aspectRatio > 0 { return aspectRatio }
+        return nil
+    }
+
+    /// The ratio a cell should reserve: the published presented ratio, else the source ratio.
+    var libraryCellAspectRatio: Double? { presentedAspectRatio ?? sourceAspectRatio }
 }
 
 /// One entry in a membership shard. Tombstones remain in the shard so deletion history can be

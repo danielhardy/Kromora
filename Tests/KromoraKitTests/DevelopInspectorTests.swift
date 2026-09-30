@@ -630,7 +630,7 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
     func testHistogramFollowsTheDisplayedComparisonRequest() async throws {
         let fake = FakeRenderEngine()
         let reader = FakeRenderEventReader(await fake.eventStream())
-        let viewModel = makeAppViewModel(engine: fake, previewDiskCacheCapBytes: 0)
+        let viewModel = makeAppViewModel(engine: fake, previewFrameStoreCapBytes: 0)
         try await openStandardImage(viewModel)
         try await waitUntil("the opening render") { await !fake.previewRequests.isEmpty }
         viewModel.isInspectorPresented = true
@@ -793,6 +793,26 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
 
         // Reading all of that still wrote nothing.
         XCTAssertTrue(viewModel.document.rawDevelop.isNeutral)
+    }
+
+    /// Sharpness and local-tone-map sliders have UI headroom above their documented decoder max,
+    /// so even a maximum per-image seed is not parked at the track endpoint. That extra UI space
+    /// must never be written through to `CIRAWFilter`, whose documented input range remains 0...1.
+    func testRawAmountSliderHeadroomDoesNotExceedDecoderRange() async throws {
+        let fake = FakeRenderEngine()
+        await fake.setStubbedCapabilities(RAWCapabilities.distinctivelySeeded)
+        let viewModel = makeAppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+
+        for control in [DevelopControl.sharpness, .localToneMap] {
+            XCTAssertEqual(control.range.upperBound, 1.1)
+            viewModel.developBinding(for: control).wrappedValue = 1.05
+            let storedValue = control == .sharpness
+                ? viewModel.document.rawDevelop.sharpnessAmount
+                : viewModel.document.rawDevelop.localToneMapAmount
+            XCTAssertEqual(storedValue, 1)
+        }
     }
 
     /// **`lensCorrectionEnabled` is a `Bool`**, so `RAWCapabilities.distinctivelySeeded`'s single

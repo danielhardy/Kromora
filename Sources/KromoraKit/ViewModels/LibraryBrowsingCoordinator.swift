@@ -5,8 +5,11 @@ import Foundation
 @MainActor
 protocol LibraryBrowsingProviding: AnyObject {
     var queryPageSize: Int { get }
+    var assetCount: Int { get }
     var portableSelectedIDs: Set<PortablePhotoAssetID> { get }
     var portableActiveID: PortablePhotoAssetID? { get }
+    var libraryID: UUID { get }
+    func launchHintAssets(for ids: [PortablePhotoAssetID]) -> [PhotoAsset]
     func browsingWindow(pageIndex: Int, query: LibraryQuery) throws
         -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int)
     func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage
@@ -20,6 +23,12 @@ protocol LibraryBrowsingProviding: AnyObject {
 extension PortableLibrarySession: LibraryBrowsingProviding {
     var queryPageSize: Int { queryController.pageSize }
 }
+
+protocol LaunchHintFrameReading: Sendable {
+    func readFrames(for identity: PortablePhotoIdentity) async -> ThumbnailFrameStore.StoredFrames
+}
+
+extension ThumbnailFrameStore: LaunchHintFrameReading {}
 
 @MainActor
 protocol LibraryBrowsingDestination: AnyObject {
@@ -41,16 +50,42 @@ protocol LibraryBrowsingDestination: AnyObject {
 final class LibraryBrowsingCoordinator {
     private let collection: ImageCollection
     private let library: (any LibraryBrowsingProviding)?
+    private let scheduler: ImageWorkScheduler?
+    private let frameStore: (any LaunchHintFrameReading)?
+    private let hintsStore: LaunchHintsStore?
     weak var destination: (any LibraryBrowsingDestination)?
+    private var launchHints: LaunchHints?
+    private var hintsLoadStarted = false
+    private var hintIDsAdmitted = false
+    private var hintedAssets: [PortablePhotoAssetID: PhotoAsset] = [:]
+    private var hintQueue: [PortablePhotoAssetID] = []
+    private var hintJobs: [PortablePhotoAssetID: ImageWorkScheduler.JobID] = [:]
+    private var completedHintFrames: [PhotoAssetID: (PortablePhotoIdentity, ThumbnailFrameStore.StoredFrames)] = [:]
+    private var latestVisibleIDs: [PhotoAssetID] = []
+    private var pendingLaunchHintsWrite: LaunchHints?
+    private var launchHintsWriteTask: Task<Void, Never>?
+    private var launchStartedAt = ContinuousClock.now
+    private var metrics = LaunchHydrationMetrics()
+    private var launchReadSuperseded = false
+    private var hasPublishedVisibleIDs = false
+
+    var launchHydrationMetrics: LaunchHydrationMetrics { metrics }
 
     init(
         collection: ImageCollection,
         library: (any LibraryBrowsingProviding)?,
-        destination: (any LibraryBrowsingDestination)? = nil
+        destination: (any LibraryBrowsingDestination)? = nil,
+        scheduler: ImageWorkScheduler? = nil,
+        frameStore: (any LaunchHintFrameReading)? = nil,
+        hintsStore: LaunchHintsStore? = nil
     ) {
         self.collection = collection
         self.library = library
         self.destination = destination
+        self.scheduler = scheduler
+        self.frameStore = frameStore
+        self.hintsStore = hintsStore
+        collection.onVisibleIDsPublished = { [weak self] ids in self?.visibleIDsPublished(ids) }
     }
 
     func reloadPortableCollection() throws { try reloadPortableWindow(pageIndex: 0) }
@@ -59,6 +94,11 @@ final class LibraryBrowsingCoordinator {
         guard let library, let destination else { return }
         let query = destination.portableQuery
         let window = try library.browsingWindow(pageIndex: pageIndex, query: query)
+        if pageIndex == 0, metrics.timeToFirstIndexPageMilliseconds == nil {
+            metrics.timeToFirstIndexPageMilliseconds = elapsedMilliseconds
+            KromoraObservability.event(.launchFirstIndexPage,
+                detail: "first_index_ms=\(metrics.timeToFirstIndexPageMilliseconds ?? 0)")
+        }
         collection.loadPortableWindow(
             assets: window.assets, totalCount: window.totalCount,
             pageIndex: pageIndex, pageSize: window.pageSize, query: query
@@ -66,7 +106,144 @@ final class LibraryBrowsingCoordinator {
         syncPortableSelection()
         destination.showLibraryGridIfActive()
         collection.beginThumbnailDemand()
+        if pageIndex == 0 { admitHintsAgainstPublishedIndex() }
     }
+
+    func prepareLaunchHints() { loadLaunchHints() }
+
+    private func loadLaunchHints() {
+        guard let library, let hintsStore, !hintsLoadStarted, !launchReadSuperseded else { return }
+        hintsLoadStarted = true
+        let libraryID = library.libraryID
+        Task { [weak self] in
+            let result = await hintsStore.load(for: libraryID)
+            guard let self, !self.launchReadSuperseded else { return }
+            switch result {
+            case .missing:
+                self.metrics.validation = "missing"
+                KromoraObservability.event(.launchHintsValidation, detail: "missing")
+            case .invalid:
+                self.metrics.validation = "invalid-or-wrong-library"
+                KromoraObservability.event(.launchHintsValidation, detail: "invalid")
+            case .valid(let hints):
+                self.metrics.validation = "valid"
+                self.launchHints = hints
+                KromoraObservability.event(.launchHintsValidation, detail: "valid count=\(hints.visibleAssetIDs.count)")
+                self.admitHintsAgainstPublishedIndex()
+            }
+        }
+    }
+
+    private func admitHintsAgainstPublishedIndex() {
+        guard !hintIDsAdmitted, !launchReadSuperseded, let library, let hints = launchHints,
+              library.assetCount > 0 else { return }
+        hintIDsAdmitted = true
+        let assets = library.launchHintAssets(
+            for: Array(hints.visibleAssetIDs.prefix(LaunchHintReadPolicy.maximumHintedIDs))
+        )
+        hintedAssets = Dictionary(uniqueKeysWithValues: assets.map { asset in
+            (PortablePhotoAssetID.compatibility(from: asset.id), asset)
+        })
+        hintQueue = assets.map { PortablePhotoAssetID.compatibility(from: $0.id) }
+        admitNextHintReads()
+    }
+
+    private func admitNextHintReads() {
+        guard !launchReadSuperseded, let scheduler, let frameStore else { return }
+        while hintJobs.count < LaunchHintReadPolicy.maxConcurrentReads, !hintQueue.isEmpty {
+            let id = hintQueue.removeFirst()
+            guard let asset = hintedAssets[id] else { continue }
+            let jobID = ImageWorkScheduler.JobID("launch-frame-read:\(id.raw)")
+            let identity = asset.source.portableIdentity
+            hintJobs[id] = jobID
+            _ = scheduler.enqueueFrameRead(
+                id: jobID, priority: .background,
+                onTerminal: { [weak self] outcome in
+                    guard let self else { return }
+                    self.hintJobs.removeValue(forKey: id)
+                    if outcome == .completed, !self.launchReadSuperseded { self.admitNextHintReads() }
+                },
+                operation: { [weak self] in
+                    let frames = await frameStore.readFrames(for: identity)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard let self, !self.launchReadSuperseded else { return }
+                        self.metrics.readCount += 1
+                        let frameBytes = UInt64((frames.edited?.frame.rasterData.count ?? 0)
+                            + (frames.original?.frame.rasterData.count ?? 0))
+                        self.metrics.bytesRead += frameBytes
+                        if frames.edited != nil || frames.original != nil { self.metrics.usefulHits += 1 }
+                        self.completedHintFrames[PhotoAssetID(rawValue: "portable:\(id.raw)")] = (identity, frames)
+                    }
+                }
+            )
+        }
+    }
+
+    private func visibleIDsPublished(_ ids: [PhotoAssetID]) {
+        guard library != nil else { return }
+        latestVisibleIDs = ids
+        guard !hasPublishedVisibleIDs else {
+            scheduleLaunchHintsIfVisible()
+            return
+        }
+        hasPublishedVisibleIDs = true
+        // The viewport is canonical. Flush only already completed matching hints into the
+        // collection, then cancel queued/running speculative reads before admitting normal work.
+        launchReadSuperseded = true
+        for jobID in hintJobs.values { scheduler?.cancel(id: jobID) }
+        metrics.superseded += hintQueue.count + hintJobs.count
+        hintJobs.removeAll()
+        hintQueue.removeAll()
+        let visible = Set(ids)
+        let useful = completedHintFrames.filter { visible.contains($0.key) }
+        collection.applyLaunchFrames(useful)
+        completedHintFrames.removeAll()
+        metrics.timeToVisibleWindowMilliseconds = elapsedMilliseconds
+        KromoraObservability.event(.launchHintsSuperseded,
+            detail: "superseded=\(metrics.superseded) useful=\(useful.count) bytes=\(metrics.bytesRead) reads=\(metrics.readCount)")
+        KromoraObservability.event(.launchHydrationComplete,
+            detail: "validation=\(metrics.validation) useful=\(metrics.usefulHits) superseded=\(metrics.superseded) bytes=\(metrics.bytesRead) reads=\(metrics.readCount) visible_ms=\(metrics.timeToVisibleWindowMilliseconds ?? 0) first_index_ms=\(metrics.timeToFirstIndexPageMilliseconds ?? 0)")
+        scheduleLaunchHintsIfVisible()
+    }
+
+    private func scheduleLaunchHintsIfVisible() {
+        guard !latestVisibleIDs.isEmpty, let library else { return }
+        let hints = LaunchHints(
+            libraryID: library.libraryID, activeAssetID: library.portableActiveID,
+            visibleAssetIDs: latestVisibleIDs.compactMap(Self.portableID(for:))
+        )
+        pendingLaunchHintsWrite = hints
+        guard launchHintsWriteTask == nil else { return }
+        launchHintsWriteTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled, let self else { return }
+            let latest = self.pendingLaunchHintsWrite
+            self.pendingLaunchHintsWrite = nil
+            if let latest { await self.hintsStoreWrite(latest) }
+            self.launchHintsWriteTask = nil
+        }
+    }
+
+    private var elapsedMilliseconds: Double {
+        let elapsed = launchStartedAt.duration(to: .now).components
+        return Double(elapsed.seconds) * 1_000
+            + Double(elapsed.attoseconds) / 1_000_000_000_000_000
+    }
+
+    private func hintsStoreWrite(_ hints: LaunchHints) async {
+        await hintsStore?.scheduleWrite(hints)
+    }
+
+    func shutdown() async {
+        launchHintsWriteTask?.cancel()
+        if let launchHintsWriteTask { await launchHintsWriteTask.value }
+        launchHintsWriteTask = nil
+        if let pendingLaunchHintsWrite { await hintsStoreWrite(pendingLaunchHintsWrite) }
+        pendingLaunchHintsWrite = nil
+        await hintsStore?.shutdown()
+    }
+
 
     func loadMorePortableIfNeeded(currentIndex: Int) {
         guard let library, let destination, collection.isPortableWindowed,
@@ -214,6 +391,7 @@ final class LibraryBrowsingCoordinator {
         collection.syncPortableSelection(
             selectedIDs: library.portableSelectedIDs, activeID: library.portableActiveID
         )
+        scheduleLaunchHintsIfVisible()
     }
 
     @discardableResult

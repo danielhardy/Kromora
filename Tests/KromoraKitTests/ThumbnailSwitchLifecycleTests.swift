@@ -104,6 +104,38 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
     }
 
+    func testSelectionPresentsItsEditedThumbnailBeforeItsOriginal() async throws {
+        let source = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "presentation-candidate.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        await engine.gatePreviews()
+        let viewModel = makeAppViewModel(engine: engine)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let item = try XCTUnwrap(viewModel.collection.items.first { $0.url == source })
+        item.setOriginalThumbnail(NSImage(
+            cgImage: try Fixtures.makeCGImage(width: 3, height: 2, red: 0.8, green: 0.1, blue: 0.1),
+            size: NSSize(width: 3, height: 2)
+        ))
+        item.applyEditedThumbnail(NSImage(
+            cgImage: try Fixtures.makeCGImage(width: 5, height: 3, red: 0.1, green: 0.8, blue: 0.1),
+            size: NSSize(width: 5, height: 3)
+        ), revision: "materialized-edited")
+
+        let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == item.id })
+        viewModel.selectCollectionImage(at: index)
+
+        XCTAssertEqual(
+            viewModel.previewSurface.image?.extent.size, CGSize(width: 5, height: 3),
+            "the edited thumbnail is the first visible candidate for its own asset"
+        )
+        await engine.releasePreviews()
+        try await waitUntil("the confirmed preview after the edited candidate") {
+            viewModel.previewState == .ready
+        }
+    }
+
     /// The filmstrip and library grid both render `ThumbnailEntry`'s resolved Item. Exercise that
     /// shared projection with the real renderer so a committed crop is checked at the publication
     /// boundary, not only in RenderRequest/RenderEngine unit tests. The long edge is the displayed
@@ -965,8 +997,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         XCTAssertNil(histogramViewModel.histogram)
     }
 
-    /// KRMA-308's `refreshMaterializedEditedThumbnails()` re-requests every item that already has a
-    /// materialized edited thumbnail after a Look-folder scan, independent of the edit debounce path
+    /// KRMA-308's Look-scan refresh re-requests every item whose materialized edited thumbnail
+    /// references a Look the scan changed, independent of the edit debounce path
     /// above. `applyEditedThumbnail` early-returns when the revision is unchanged (`ImageCollection.swift`),
     /// so a real refresh must be observed as both a revision change and a new published `NSImage`
     /// instance — a no-op would leave both untouched.
@@ -1003,7 +1035,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
         let firstRevision = try XCTUnwrap(viewModel.collection.items[0].editedThumbnailRevision)
         XCTAssertTrue(
-            firstRevision.hasSuffix(":unresolved"),
+            firstRevision.hasSuffix(
+                ":" + LookSignature.unresolved(id: LUTID(raw: missingLUTURL.path)).cacheComponent
+            ),
             "an unresolved Look reference must not be mistaken for a resolved fingerprint"
         )
         let firstThumbnail = viewModel.collection.items[0].thumbnail
@@ -1023,8 +1057,8 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             return false
         }
         let secondRevision = try XCTUnwrap(viewModel.collection.items[0].editedThumbnailRevision)
-        XCTAssertFalse(
-            secondRevision.hasSuffix(":unresolved"),
+        XCTAssertTrue(
+            secondRevision.contains(":look-resolved:"),
             "resolving the Look via a folder scan must bump the materialized revision"
         )
         XCTAssertTrue(

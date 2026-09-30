@@ -56,6 +56,21 @@ struct EditDocumentLoadResult: Sendable, Equatable {
     let document: EditDocument
     let found: Bool
     let status: EditDocumentStore.Status
+    /// The Look identity of the current package revision, taken from its content-addressed
+    /// `PortablePackageLookReference` rather than from the Look browser. It is durable and does not
+    /// depend on scan timing; `.none` for a neutral fallback or a revision with no Look. The blob
+    /// is not read or copied — the hash was recorded when the revision was written.
+    let lookSignature: LookSignature
+
+    init(
+        document: EditDocument, found: Bool, status: EditDocumentStore.Status,
+        lookSignature: LookSignature = .none
+    ) {
+        self.document = document
+        self.found = found
+        self.status = status
+        self.lookSignature = lookSignature
+    }
 
     /// A speculative preview may use a healthy missing record as identity, but must not use the
     /// neutral fallback returned when persistence could not establish what the stored state was.
@@ -147,6 +162,9 @@ actor EditDocumentStore {
     private let packageRoot: URL?
     private let packageLease: PortablePackageLease?
     private var embeddedLookBytes: [String: Data] = [:]
+    /// Receives the membership entry a package transaction committed beside an edit, so the
+    /// disposable library index can carry the same `presentedAspectRatio` without a rebuild.
+    private var membershipObserver: (@Sendable (PortablePackageMembershipEntry) -> Void)?
     private var artificialWriteDelay: Duration
     private var failuresRemaining: Int
 
@@ -205,6 +223,10 @@ actor EditDocumentStore {
         embeddedLookBytes = values
     }
 
+    func setMembershipObserver(_ observer: (@Sendable (PortablePackageMembershipEntry) -> Void)?) {
+        membershipObserver = observer
+    }
+
     func load(for source: EditSourceReference) async -> EditDocumentLoadResult {
         markIO()
         guard let packageRoot else {
@@ -228,11 +250,22 @@ actor EditDocumentStore {
                 // Validate the immutable native/XMP pair even on a cache hit. The package remains
                 // authoritative if a sidecar is damaged or replaced outside this actor.
                 touch(source.portableAssetID)
-                return finishLoad(document: entry.document, found: true, status: .ready)
+                return finishLoad(
+                    document: entry.document, found: true, status: .ready,
+                    lookSignature: LookSignature(
+                        settings: entry.document.lut,
+                        reference: sidecar.native.lookReferences.first
+                    )
+                )
             }
             let document = sidecar.native.document
             insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
-            return finishLoad(document: document, found: true, status: .ready)
+            return finishLoad(
+                document: document, found: true, status: .ready,
+                lookSignature: LookSignature(
+                    settings: document.lut, reference: sidecar.native.lookReferences.first
+                )
+            )
         } catch {
             let failure = Self.status(for: error)
             return finishLoad(document: EditDocument(), found: false, status: failure)
@@ -279,9 +312,11 @@ actor EditDocumentStore {
             throw StoreError.cannotWrite("the canonical edit package is unavailable")
         }
         let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
-        try package.selectEditRevision(
+        if let membership = try package.selectEditRevision(
             for: source.portableAssetID, revision: revision, lease: packageLease
-        )
+        ) {
+            membershipObserver?(membership)
+        }
     }
 
     func save(_ document: EditDocument, for source: EditSourceReference) async throws {
@@ -314,11 +349,13 @@ actor EditDocumentStore {
                 throw StoreError.cannotWrite("injected persistence failure")
             }
             let package = try PortableLibraryPackage.openForQuery(at: packageRoot)
-            let sidecar = try package.appendEditRevision(
+            let commit = try package.commitEditRevision(
                 for: source.portableAssetID, document: document,
                 snapshotName: snapshotName,
                 lookBytes: sourceLookBytes(for: document), lease: packageLease
             )
+            let sidecar = commit.sidecar
+            if let membership = commit.membership { membershipObserver?(membership) }
             insert(document, revision: sidecar.native.revision, for: source.portableAssetID)
             writeCount += 1
             status = .ready
@@ -386,13 +423,16 @@ actor EditDocumentStore {
     }
 
     private func finishLoad(
-        document: EditDocument, found: Bool, status loadStatus: Status
+        document: EditDocument, found: Bool, status loadStatus: Status,
+        lookSignature: LookSignature = .none
     ) -> EditDocumentLoadResult {
         status = loadStatus
         if loadStatus.isActionable {
             retainWorstActionableStatus(loadStatus)
         }
-        return EditDocumentLoadResult(document: document, found: found, status: loadStatus)
+        return EditDocumentLoadResult(
+            document: document, found: found, status: loadStatus, lookSignature: lookSignature
+        )
     }
 
     private func retainWorstActionableStatus(_ candidate: Status) {

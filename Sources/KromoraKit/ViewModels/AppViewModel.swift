@@ -682,8 +682,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let workScheduler: ImageWorkScheduler
     /// Edit-aware collection thumbnail scheduling and cache publication.
     private lazy var editedThumbnailCoordinator = EditedThumbnailCoordinator(
-        workScheduler: workScheduler, engine: engine, editStore: editStore, destination: self
+        workScheduler: workScheduler, engine: engine, editStore: editStore,
+        frameStore: thumbnailFrameStore, destination: self
     )
+    /// Persisted original and latest-edited thumbnails in `Derived/Thumbnails`. Rebuildable cache:
+    /// losing it costs a decode or render, never an edit.
+    let thumbnailFrameStore: ThumbnailFrameStore
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
     let editStore: EditDocumentStore
@@ -722,7 +726,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let libraryMediaWorkflow: LibraryMediaWorkflowCoordinator
     private let libraryDeletionCoordinator: LibraryDeletionCoordinator
     private lazy var libraryBrowsingCoordinator = LibraryBrowsingCoordinator(
-        collection: collection, library: portableLibrary, destination: self
+        collection: collection, library: portableLibrary, destination: self,
+        scheduler: workScheduler, frameStore: thumbnailFrameStore,
+        hintsStore: LaunchHintsStore(url: KromoraStorage.launchHintsURL())
     )
     private let applicationShell: ApplicationShellCoordinator
     /// Compatibility façade for diagnostics and package-maintenance tests. Lifecycle ownership
@@ -777,6 +783,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var isEditedThumbnailInteractionActive: Bool { isPreviewInteractionActive }
     var isEditedThumbnailPreviewDebouncing: Bool { previewAdmissionCoordinator.isPreviewDebouncing }
     var editedThumbnailItems: [ImageCollection.Item] { collection.items }
+    var visibleEditedThumbnailAssetIDs: Set<PhotoAssetID> {
+        collection.visibleEditedThumbnailAssetIDs
+    }
     func editedThumbnailItem(for assetID: PhotoAssetID) -> ImageCollection.Item? {
         collection.items.first { $0.id == assetID }
     }
@@ -792,6 +801,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         collection.applyEditedThumbnail(image, for: assetID, revision: revision)
+    }
+    func applyStoredEditedThumbnail(_ image: NSImage, for assetID: PhotoAssetID) {
+        collection.applyStoredEditedThumbnail(image, for: assetID)
     }
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
@@ -835,6 +847,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// such as histogram and edited-thumbnail generation is admitted only after this source's
     /// stored document has been reconciled.
     private var storedEditsResolvedSourceRevision: UInt64?
+    /// The adopted revision's own Look identity, from its content-addressed reference. It lets a
+    /// stored frame be judged exact before the Look browser has scanned the Look.
+    private var storedEditLook: LookSignature?
     /// The embedded camera JPEG is a presentation-only first frame. It never enters the render
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
@@ -903,8 +918,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         includeBundledLooks: Bool = false,
         userLookFolderURL: URL? = nil,
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
-        previewDiskCacheDirectory: URL? = nil,
-        previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
+        previewFrameStoreDirectory: URL? = nil,
+        previewFrameStoreCapBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
+        thumbnailFrameStoreDirectory: URL? = nil,
         portablePackageURL: URL,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
@@ -1005,13 +1021,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             editStore: effectiveEditStore
         )
         self.previewCoordinator = PreviewCoordinator(engine: engine, scheduler: workScheduler)
-        let previewCache = PreviewDiskCache(
-            directory: previewDiskCacheDirectory
-                ?? PreviewDiskCache.packageDirectory(for: normalizedPortablePackageURL),
-            capBytes: previewDiskCacheCapBytes
+        let previewFrameStore = LatestPreviewFrameStore(
+            directory: previewFrameStoreDirectory
+                ?? LatestPreviewFrameStore.packageDirectory(for: normalizedPortablePackageURL),
+            capBytes: previewFrameStoreCapBytes
         )
         self.previewPresentation = PreviewPresentationCoordinator(
-            cache: previewCache, engine: engine)
+            store: previewFrameStore, engine: engine)
+        self.thumbnailFrameStore = ThumbnailFrameStore(
+            directory: thumbnailFrameStoreDirectory
+                ?? ThumbnailFrameStore.packageDirectory(for: normalizedPortablePackageURL)
+        )
+        collection.thumbnailFrameStore = thumbnailFrameStore
         self.sourceSession = SourceSessionCoordinator(
             engine: engine, editStore: effectiveEditStore,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider
@@ -1053,6 +1074,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         collection.onThumbnailDemand = { [weak self] assetID, priority in
             self?.requestEditedThumbnail(for: assetID, priority: priority)
+        }
+        // An edit commits its presented geometry to the membership summary in the same package
+        // transaction; mirror that committed entry into the disposable index.
+        if let session = openedPortableLibrary {
+            Task { [weak session] in
+                await effectiveEditStore.setMembershipObserver { entry in
+                    Task { @MainActor in session?.applyCommittedMembership(entry) }
+                }
+            }
         }
 
         if let renderEngine = engine as? RenderEngine {
@@ -1239,6 +1269,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
+        libraryBrowsingCoordinator.prepareLaunchHints()
         if let portableLibrary, portableLibrary.isLoadingIndex {
             statusMessage = "Opening library index…"
         }
@@ -1303,30 +1334,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         export.lutResolver = { [weak self] id in self?.resolvedLUT(id) }
 
         // A rescan can mean the bytes behind an unchanged `LUTID` have changed — a path is the
-        // identity, so a `.cube` replaced in place keeps it. Drop the engine's cube filters rather
-        // than go on serving the old cube. Wired here, before `restoreFolder()` runs below, so the
-        // launch scan is covered too.
-        library.onScanned = { [weak self] in
+        // identity, so a `.cube` replaced in place keeps it. The library reports which IDs now
+        // resolve differently, and only work that referenced one of them is redone. Wired here,
+        // before `restoreFolder()` runs below, so the launch scan is covered too.
+        library.onScanned = { [weak self] delta in
             guard let self, !self.isShuttingDown else { return }
             self.refreshLUTResolutionStatus()
-            self.lutCacheInvalidationTask?.cancel()
-            let engine = self.engine
-            guard self.sourceImage != nil else {
-                self.lutCacheInvalidationTask = Task { [weak self, engine] in
-                    await engine.invalidateLUTCache()
-                    guard let self, !self.isShuttingDown else { return }
-                    self.refreshMaterializedEditedThumbnails()
-                }
-                return
-            }
-            // A render submitted before the asynchronous scan may have been safely ungraded. Flush
-            // first, then submit again, so an old cached cube cannot win the race with publication.
-            lutCacheInvalidationTask = Task { [weak self] in
-                await engine.invalidateLUTCache()
-                guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
-                self.schedulePreview()
-                self.refreshMaterializedEditedThumbnails()
-            }
+            self.applyLookLibraryDelta(delta)
         }
 
         library.onImported = { [weak self] lut in
@@ -1932,7 +1946,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         refreshLUTResolutionStatus()
 
         previewPresentation.resetForSource()
+        let presentationGeneration = sourceSession.sourceRevision &+ 1
+        let presentationIdentity = importPlan.source.portableIdentity
+        previewPresentation.beginPresentationSession(
+            assetID: assetID, identity: presentationIdentity,
+            generation: presentationGeneration
+        )
         storedEditsResolvedSourceRevision = nil
+        storedEditLook = nil
         // Keep the last published chart visible while the newly selected source prepares and
         // renders. Histogram admission still checks the active asset and source revision before
         // publishing, so only the current photo can replace it.
@@ -1940,9 +1961,53 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.cancel()
         invalidateEditedThumbnailWork(for: previousActiveAssetID)
         editedThumbnailCoordinator.clearPendingRequest()
-        // Keep the last presented frame beneath the loading indicator until this source publishes
-        // its replacement. The render publication gate prevents an obsolete in-flight request
-        // from taking its place.
+        // Fence the old asset synchronously. Only already-materialized pixels owned by the new
+        // selection may fill the canvas while preparation and rendering suspend.
+        previewSurface.clear()
+        if let item = collection.items.first(where: { $0.id == assetID }),
+            item.asset.source.portableIdentity == presentationIdentity
+        {
+            if let edited = item.editedThumbnailForPresentation,
+                let cgImage = Self.cgImage(from: edited)
+            {
+                presentProvisionalCandidate(
+                    CIImage(cgImage: cgImage), source: .editedThumbnail,
+                    assetID: assetID, identity: presentationIdentity,
+                    generation: presentationGeneration,
+                    nativeExtent: item.thumbnailNativeExtent
+                )
+            } else if let original = item.originalThumbnailForPresentation,
+                let cgImage = Self.cgImage(from: original)
+            {
+                presentProvisionalCandidate(
+                    CIImage(cgImage: cgImage), source: .originalThumbnail,
+                    assetID: assetID, identity: presentationIdentity,
+                    generation: presentationGeneration,
+                    nativeExtent: item.thumbnailNativeExtent
+                )
+            }
+        }
+        previewAdmissionCoordinator.resetDeferredSettledPreview()
+        // The latest persisted frame is read while the source prepares. It needs only the
+        // identity the collection already holds, so it can paint before any decode.
+        previewPresentation.beginStoredFrameLookup(
+            assetID: assetID, identity: presentationIdentity, generation: presentationGeneration
+        ) { [weak self] candidate in
+            guard let self, !self.isShuttingDown else { return }
+            if let candidate {
+                self.presentProvisionalCandidate(
+                    CIImage(cgImage: candidate.image), source: .storedFrame,
+                    assetID: assetID, identity: presentationIdentity,
+                    generation: presentationGeneration,
+                    perceptualDigest: candidate.metadata.perceptualDigest,
+                    nativeExtent: CGSize(
+                        width: candidate.metadata.pixelWidth,
+                        height: candidate.metadata.pixelHeight
+                    )
+                )
+            }
+            self.previewAdmissionCoordinator.resumeDeferredSettledPreview()
+        }
         if canvasState.isCropToolActive {
             canvasWorkflow.discardCropForSourceChange()
         }
@@ -1988,6 +2053,40 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
     }
 
+    private func presentProvisionalCandidate(
+        _ image: CIImage, source: PreviewPresentationCoordinator.CandidateSource,
+        assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64,
+        perceptualDigest: PerceptualDigest? = nil,
+        nativeExtent: CGSize
+    ) {
+        guard previewPresentation.presentProvisional(
+            source, assetID: assetID, identity: identity, generation: generation
+        ) else { return }
+        let extent = nativeExtent.width > 0 && nativeExtent.height > 0
+            ? CGRect(origin: .zero, size: nativeExtent) : image.extent
+        _ = previewSurface.present(
+            image, space: .current,
+            revision: UInt64.max - generation,
+            quality: .preview,
+            presentationImageExtent: extent,
+            coversPresentationExtent: true,
+            perceptualDigest: perceptualDigest,
+            onPresented: { [weak self] in
+                guard let self,
+                    self.previewPresentation.presentationSession?.generation == generation,
+                    self.previewPresentation.presentationSession?.assetID == assetID else { return }
+                self.previewPresentation.confirmProvisionalPresentation(
+                    source, assetID: assetID, identity: identity, generation: generation
+                )
+                self.isNavigationLoading = false
+            }
+        )
+    }
+
+    private static func cgImage(from image: NSImage) -> CGImage? {
+        image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+
     private func install(
         preparation: ImageSourcePreparation, request: SourceSessionCoordinator.Request
     ) {
@@ -2025,6 +2124,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             publication.request.assetID == activeAssetID,
             previewState == .loading,
             !previewPublicationCoordinator.hasPublishedFrame,
+            previewPresentation.presentationSession?.candidateSource == nil,
+            previewPresentation.admitsPublication(
+                assetID: publication.request.assetID,
+                identity: publication.preparation.source.portableIdentity,
+                generation: publication.request.sourceRevision
+            ),
             let cgImage = publication.image.cgImage(
                 forProposedRect: nil, context: nil, hints: nil
             )
@@ -2041,9 +2146,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 CIImage(cgImage: cgImage), to: native
             )
 
-            // The settled preview is submitted through the coordinator and always publishes at a
-            // newer surface revision. The guards above keep a late provisional JPEG from ever
-            // replacing that settled frame, so no explicit clear is needed here.
+            guard previewPresentation.presentProvisional(
+                .embeddedJPEG, assetID: publication.request.assetID,
+                identity: publication.preparation.source.portableIdentity,
+                generation: publication.request.sourceRevision
+            ) else { return }
             previewSurface.present(
                 provisional, space: .current,
                 // Presentation-only revision: the embedded JPEG is not renderer telemetry, but
@@ -2059,6 +2166,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         publication.request.assetID == self.activeAssetID,
                         self.previewState == .loading
                     else { return }
+                    self.previewPresentation.confirmProvisionalPresentation(
+                        .embeddedJPEG, assetID: publication.request.assetID,
+                        identity: publication.preparation.source.portableIdentity,
+                        generation: publication.request.sourceRevision
+                    )
                     self.isNavigationLoading = false
                 }
             )
@@ -2114,6 +2226,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
         }
         storedEditsResolvedSourceRevision = sourceRevision
+        storedEditLook = stored.lookSignature
         // A cold open already rendered the identity document speculatively. Only an adopted disk
         // document that differs from that first request needs a corrective render. In-memory
         // sessions and edits made while loading remain authoritative and must not be replaced.
@@ -2121,6 +2234,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // request still reaches the engine (LUMO-317).
         if shouldAdopt, documentChanged {
             scheduleCorrectivePreview()
+        } else if previewAdmissionCoordinator.hasDeferredSettledPreview {
+            // A stored frame held the first render back until this edit was known.
+            previewAdmissionCoordinator.resumeDeferredSettledPreview()
         } else if let lastPresentedVisibleRequest =
             previewPublicationCoordinator.lastPresentedVisibleRequest,
             lastPresentedVisibleRequest.source == imageSource,
@@ -2132,6 +2248,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             updateHistogram(
                 for: lastPresentedVisibleRequest,
                 presentedImage: previewPublicationCoordinator.lastPresentedVisibleImage)
+            if publicationMayPersistFrame,
+                let image = previewPublicationCoordinator.lastPresentedVisibleImage
+            {
+                writeCanonicalPreview(image, request: lastPresentedVisibleRequest)
+            }
         }
         scheduleEditedThumbnailAfterSettle(for: request.assetID, priority: .activeEditor)
         applyStoredLoadStatus(stored.status)
@@ -2694,6 +2815,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         let deletedSet = Set(result.deletedIDs)
         editedThumbnailCoordinator.removeAssets(deletedSet)
+        let deletedPortableIDs = Set(deletedSet.map { PortablePhotoAssetID.compatibility(from: $0) })
+        Task { [thumbnailFrameStore] in
+            await thumbnailFrameStore.remove(assetIDs: deletedPortableIDs)
+        }
         // Deletion is the lifecycle boundary for editor sessions. Keep the coordinator's bulk
         // operation wired here so removed photos cannot leave their undo snapshots retained.
         editorDocument.removeSessions(for: deletedSet)
@@ -2706,7 +2831,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let deletedIdentities = Set(
             result.deletedIDs.compactMap { identitiesByID[$0] }
         )
-        await previewPresentation.cache.invalidate(identities: deletedIdentities)
+        await previewPresentation.store.invalidate(identities: deletedIdentities)
         Thumbnails.invalidateCache()
         await engine.invalidateRenderCaches()
 
@@ -2808,10 +2933,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         for assetID: PhotoAssetID, priority: ImageWorkScheduler.Priority
     ) {
         editedThumbnailCoordinator.scheduleAfterSettle(for: assetID, priority: priority)
-    }
-
-    private func refreshMaterializedEditedThumbnails() {
-        editedThumbnailCoordinator.refreshMaterializedThumbnails()
     }
 
     private func cancelEditedThumbnailDebounce(for assetID: PhotoAssetID?) {
@@ -3284,6 +3405,32 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         if let activeAssetID {
             scheduleEditedThumbnailAfterSettle(for: activeAssetID, priority: .activeEditor)
+        }
+    }
+
+    /// Redo only the work whose Look resolution a scan changed.
+    ///
+    /// Preview and thumbnail identities carry the Look's content (`LookSignature`), so a stale
+    /// result can never be served for changed bytes. What a scan owes is *replacement*: the pixels
+    /// already on screen were made with a Look that is now different, missing, or newly resolvable.
+    /// That is limited to the active document's Look and Looks a published edited thumbnail
+    /// references. A byte-identical rescan, or a change to a Look nothing references, updates the
+    /// browser (already done by the library) and does no engine or image work.
+    private func applyLookLibraryDelta(_ delta: LookLibraryDelta) {
+        guard !delta.isEmpty else { return }
+        let activeLookID = sourceImage != nil ? document.lut.lutID : nil
+        var referenced = editedThumbnailCoordinator.referencedLookIDs
+        if let activeLookID { referenced.insert(activeLookID) }
+        let affected = delta.affected.intersection(referenced)
+        guard !affected.isEmpty else { return }
+
+        let refreshesCanvas = activeLookID.map(affected.contains) ?? false
+        let engine = self.engine
+        lutCacheInvalidationTask = Task { [weak self, engine] in
+            await engine.invalidateLUTCache(ids: affected)
+            guard let self, !self.isShuttingDown else { return }
+            if refreshesCanvas, self.sourceImage != nil { self.schedulePreview() }
+            self.editedThumbnailCoordinator.refreshMaterializedThumbnails(affecting: affected)
         }
     }
 
@@ -4365,11 +4512,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         cancellables.removeAll()
         await applicationShell.shutdown()
 
+        await libraryBrowsingCoordinator.shutdown()
+
         // Collection shutdown ends its discovery stream before awaiting the consumer. This also
         // prevents a late scan batch from admitting another thumbnail job.
         await collection.shutdown()
 
         await editedThumbnailCoordinator.shutdown()
+        await thumbnailFrameStore.shutdown()
         previewAdmissionCoordinator.shutdown()
         cancelIdlePreviewBuild(resetCursor: true)
         let tasks: [Task<Void, Never>?] =
@@ -4492,6 +4642,20 @@ extension AppViewModel: PreviewPublicationDestination {
     var publicationStoredEditsResolvedSourceRevision: UInt64? {
         storedEditsResolvedSourceRevision
     }
+    func publicationAcceptsFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) -> Bool {
+        generation == sourceRevision && previewPresentation.admitsPublication(
+            assetID: assetID, identity: identity, generation: generation
+        )
+    }
+    func confirmPresentationFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) {
+        previewPresentation.confirmRenderedFrame(
+            assetID: assetID, identity: identity, generation: generation
+        )
+    }
 
     func publishPreviewReady() {
         isNavigationLoading = false
@@ -4528,10 +4692,11 @@ extension AppViewModel: PreviewPublicationDestination {
             documentHash: request.document.editHash,
             space: request.space
         )
-        return previewSurface.present(
+        let publish: (PerceptualDigest?) -> Bool = { digest in
+            self.previewSurface.present(
             image, space: request.space,
             revision: revision,
-            telemetry: previewCoordinator.telemetry,
+            telemetry: self.previewCoordinator.telemetry,
             source: request.source,
             quality: request.quality,
             detailIdentity: detailIdentity,
@@ -4540,8 +4705,23 @@ extension AppViewModel: PreviewPublicationDestination {
             coversPresentationExtent: request.coversPresentationExtent,
             layoutImageExtent: request.presentationLayoutExtent,
             presentationNavigation: request.presentationNavigation,
+            perceptualDigest: digest,
             onPresented: onPresented
-        )
+            )
+        }
+        guard previewSurface.hasPresentedDigest,
+            request.quality == .preview, request.sourceROI == nil,
+            request.coversPresentationExtent
+        else { return publish(nil) }
+
+        let expectedSurfaceRevision = previewSurface.revision
+        let engine = self.engine
+        Task { @MainActor [weak self] in
+            let digest = await engine.makePerceptualDigest(image, space: request.space)
+            guard let self, self.previewSurface.revision == expectedSurfaceRevision else { return }
+            _ = publish(digest)
+        }
+        return true
     }
     func publicationScheduleOriginalPreview(
         allowHiddenPreparation: Bool, allowBeforePresentationConfirmation: Bool
@@ -4559,6 +4739,7 @@ extension AppViewModel: PreviewPublicationDestination {
     func writeCanonicalPreview(_ image: CIImage, request: RenderRequest) {
         previewPresentation.writeCanonical(image, for: request)
     }
+    var publicationMayPersistFrame: Bool { !isShowingOriginal && !canvasState.isCropToolActive }
     var publicationVisiblePreview: CIImage? { previewSurface.image }
 }
 
@@ -4621,14 +4802,23 @@ extension AppViewModel: PreviewAdmissionDestination {
     func admitDeferredEditedThumbnails() {
         editedThumbnailCoordinator.admitDeferredDemands()
     }
+    var admissionStoredEditsResolved: Bool { storedEditsResolvedSourceRevision == sourceRevision }
+    func admissionStoredLookSignature(for lutID: LUTID?) -> LookSignature? {
+        guard let lutID, let stored = storedEditLook, stored.lutID == lutID else { return nil }
+        return stored
+    }
     func admissionClearPreview() { previewSurface.clear() }
+    func admissionPrepareStaleRefinement(using digest: PerceptualDigest) {
+        previewSurface.prepareStaleRefinement(using: digest)
+    }
     func admissionPresentCacheRaster(
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64
     ) {
         _ = previewPublicationCoordinator.presentSettledRaster(
             image, request: request, assetID: assetID,
-            sourceRevision: sourceRevision, displayRevision: displayRevision
+            sourceRevision: sourceRevision, displayRevision: displayRevision,
+            persistsFrame: false
         )
     }
 
@@ -4654,8 +4844,8 @@ extension AppViewModel: PreviewAdmissionDestination {
         return planner.plan(
             nativeExtent: document.rotation.orientedExtent(nativeExtent), crop: document.crop,
             viewportSize: CGSize(
-                width: CGFloat(PreviewDiskCache.canonicalLongEdge),
-                height: CGFloat(PreviewDiskCache.canonicalLongEdge)
+                width: CGFloat(LatestPreviewFrameStore.canonicalLongEdge),
+                height: CGFloat(LatestPreviewFrameStore.canonicalLongEdge)
             ), navigation: CanvasNavigation()
         )
     }

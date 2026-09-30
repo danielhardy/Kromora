@@ -14,6 +14,7 @@ struct PreviewQuadUniforms {
     float2 viewportSize;
     float2 rotationCenter;
     float rotationRadians;
+    float alpha;
 };
 
 struct PreviewQuadOutput {
@@ -55,7 +56,10 @@ vertex PreviewQuadOutput preview_quad_vertex(
 fragment float4 preview_quad_fragment(
     PreviewQuadOutput input [[stage_in]],
     texture2d<float> image [[texture(0)]],
+    constant PreviewQuadUniforms &uniforms [[buffer(1)]],
     sampler imageSampler [[sampler(0)]]
 ) {
-    return image.sample(imageSampler, input.texcoord);
+    float4 color = image.sample(imageSampler, input.texcoord);
+    color.a *= uniforms.alpha;
+    return color;
 }

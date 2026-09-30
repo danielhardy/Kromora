@@ -56,6 +56,11 @@ enum KromoraStorage {
             .appendingPathComponent("LibraryIndex.store")
     }
 
+    static func launchHintsURL(fileManager: FileManager = .default) -> URL {
+        projectionRoot(fileManager: fileManager)
+            .appendingPathComponent("LaunchHints.json", isDirectory: false)
+    }
+
     static func picturesDirectory(fileManager: FileManager = .default) -> URL {
         fileManager.urls(for: .picturesDirectory, in: .userDomainMask).first
             ?? fileManager.homeDirectoryForCurrentUser.appendingPathComponent(

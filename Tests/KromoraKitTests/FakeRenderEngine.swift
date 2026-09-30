@@ -178,6 +178,7 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var activeEncodes = 0
     private(set) var maxConcurrentEncodes = 0
     var previewResult: CGImage?
+    var shouldFailPreview = false
 
     init(previewResult: CGImage? = FakeRenderEngine.solidImage()) {
         self.previewResult = previewResult
@@ -213,6 +214,7 @@ actor FakeRenderEngine: RenderEngining {
             if previewIsGated {
                 await withCheckedContinuation { parkedPreviews.append($0) }
             }
+            if shouldFailPreview { throw ImageError.processingFailed }
             guard let image = previewResult ?? Self.solidImage(),
                   let data = Self.pngData(for: image)
             else { throw ImageError.processingFailed }
@@ -362,6 +364,8 @@ actor FakeRenderEngine: RenderEngining {
     /// source switch and prove its generation guard rejects the late result.
     func gatePreviews() { previewIsGated = true }
 
+    func failPreviews() { shouldFailPreview = true }
+
     func releaseNextPreview() {
         guard !parkedPreviews.isEmpty else { return }
         parkedPreviews.removeFirst().resume()
@@ -393,6 +397,12 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var invalidateCount = 0
 
     func invalidateLUTCache() { invalidateCount += 1 }
+
+    /// Targeted invalidations, one entry per request. Kept apart from `invalidateCount` so a test
+    /// can tell "the app flushed everything" from "the app released only the Looks that changed".
+    private(set) var invalidatedLUTIDs: [Set<LUTID>] = []
+
+    func invalidateLUTCache(ids: Set<LUTID>) { invalidatedLUTIDs.append(ids) }
 
     /// How many times the app asked for capabilities. The probe costs ~25 ms, so "once per image
     /// open" is a requirement, not a detail — a count is the only way to see it.

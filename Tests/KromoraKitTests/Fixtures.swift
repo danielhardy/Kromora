@@ -481,12 +481,11 @@ enum Fixtures {
 
     // MARK: - Local-only RAW
 
-    /// A real RAW file, if a caller supplied a local fixture directory.
+    /// Real RAW files from the local fixture folder or a caller-supplied fixture directory.
     ///
-    /// Everything else here is generated, but a RAW cannot be: a synthetic DNG that `CIRAWFilter`
-    /// will actually decode is a project of its own. Real-world fixtures are optional, so CI and
-    /// checkouts without a licensed local fixture directory skip RAW-dependent tests rather than
-    /// fail. See `realworldtest/README.md`.
+    /// Most fixtures are generated, but a synthetic DNG that `CIRAWFilter` will actually decode is
+    /// a project of its own. Real-world fixtures are optional, so CI and checkouts without local
+    /// fixtures skip RAW-dependent tests rather than fail. See `realworldtest/README.md`.
     static var localRAWURLs: [URL] {
         let repoRoot = URL(fileURLWithPath: #filePath)  // Tests/KromoraKitTests/Fixtures.swift
             .deletingLastPathComponent()  // Tests/KromoraKitTests
@@ -777,8 +776,8 @@ class TempDirectoryTestCase: XCTestCase {
         libraryFolderURL: URL? = nil,
         userLookFolderURL: URL? = nil,
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
-        previewDiskCacheDirectory: URL? = nil,
-        previewDiskCacheCapBytes: Int64 = PreviewDiskCache.defaultCapBytes,
+        previewFrameStoreDirectory: URL? = nil,
+        previewFrameStoreCapBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
         portablePackageURL: URL? = nil,
         portableLibrarySession: PortableLibrarySession? = nil,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
@@ -807,9 +806,9 @@ class TempDirectoryTestCase: XCTestCase {
             userLookFolderURL: userLookFolderURL
                 ?? tempDirectory.appendingPathComponent("looks", isDirectory: true),
             photoAnalysisCoordinator: photoAnalysisCoordinator,
-            previewDiskCacheDirectory: previewDiskCacheDirectory
+            previewFrameStoreDirectory: previewFrameStoreDirectory
                 ?? tempDirectory.appendingPathComponent("developed-previews", isDirectory: true),
-            previewDiskCacheCapBytes: previewDiskCacheCapBytes,
+            previewFrameStoreCapBytes: previewFrameStoreCapBytes,
             portablePackageURL: portablePackageURL
                 ?? tempDirectory.appendingPathComponent("Test Library.kromoralibrary", isDirectory: true),
             portableMaintenanceIdleDelay: portableMaintenanceIdleDelay,

@@ -79,16 +79,10 @@ final class PortableCacheIdentityTests: TempDirectoryTestCase {
             MaskStoreTestSupport.filename(for: movedMaskKey)
         )
 
-        let previewA = PreviewDiskCache.Key(
-            identity: firstIdentity, documentHash: "document", lookFingerprint: "look",
-            space: .sRGB
-        )
-        let previewB = PreviewDiskCache.Key(
-            identity: sameIdentity, documentHash: "document", lookFingerprint: "look",
-            space: .sRGB
-        )
-        XCTAssertEqual(previewA.canonicalKeyString, previewB.canonicalKeyString)
-        XCTAssertFalse(previewA.canonicalKeyString.contains("/"))
+        let previewA = try XCTUnwrap(LatestPreviewFrameStore.assetHash(firstIdentity.assetID))
+        let previewB = try XCTUnwrap(LatestPreviewFrameStore.assetHash(sameIdentity.assetID))
+        XCTAssertEqual(previewA, previewB)
+        XCTAssertFalse(previewA.contains("/"))
     }
 
     func testChangingContentChangesRenderIdentityEvenWhenAssetUUIDIsRetained() throws {

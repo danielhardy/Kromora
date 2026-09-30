@@ -24,6 +24,20 @@ final class AppViewModelTests: TempDirectoryTestCase {
         }
     }
 
+    /// Same wait, for conditions that must ask an actor (the fake engine) a question.
+    private func waitUntilAsync(
+        _ description: String, _ condition: @MainActor () async -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while await !condition() {
+            if Date() >= deadline {
+                throw TestSynchronizationError.timedOut(
+                    description, "published state did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     func testLegacySourceBookmarkIsIgnoredByThePackageLibrary() throws {
         let libraryFolder = tempDirectory.appendingPathComponent(
             "managed-library", isDirectory: true)
@@ -653,30 +667,42 @@ final class AppViewModelTests: TempDirectoryTestCase {
         }
     }
 
-    /// A scan that finds nothing still changed the folder under the engine's cache.
+    /// A scan that finds nothing means every Look the folder held is gone. If the open document
+    /// references one, that is a real change and must reach the renderer — as a targeted release of
+    /// that Look, not a blanket flush.
     ///
-    /// Found by mutation: gating `onScanned` on `scanError == nil` left everything green. Deleting
-    /// the `.cube` a cached filter was built from is a failed scan *and* a reason to drop the cache,
-    /// so the failure path is exactly the one that must not be skipped.
-    func testAFailedScanStillInvalidatesTheLUTCache() async throws {
+    /// Found by mutation: gating `onScanned` on `scanError == nil` left everything green. The
+    /// failure path is exactly the one that must not be skipped.
+    func testAFailedScanReleasesTheLookTheOpenDocumentLostWithoutABlanketFlush() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
-        let empty = tempDirectory.appendingPathComponent("empty")
-        try FileManager.default.createDirectory(at: empty, withIntermediateDirectories: true)
+        let lookFolder = tempDirectory.appendingPathComponent("looks")
+        try FileManager.default.createDirectory(at: lookFolder, withIntermediateDirectories: true)
+        let cube = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "A.cube", in: lookFolder)
+        viewModel.library.setFolder(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+        let lutID = try CubeLUT(url: cube).lutID
 
-        let before = await fake.invalidateCount
-        viewModel.library.setFolder(empty)
+        viewModel.openImage(url: try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "shot.png", in: tempDirectory))
+        try await waitUntil("the source photo") { viewModel.sourceName == "shot.png" }
+        viewModel.updateDocument { $0.lut = LUTSettings(lutID: lutID, intensity: 1) }
+        try await waitUntilAsync("the first graded preview") {
+            await fake.previewRequests.contains { $0.lutID == lutID }
+        }
+
+        try FileManager.default.removeItem(at: cube)
+        viewModel.library.scan(lookFolder)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertNotNil(
             viewModel.library.scanError, "precondition: an empty folder is a scan failure")
 
-        let deadline = Date().addingTimeInterval(2)
-        while await fake.invalidateCount == before {
-            if Date() > deadline {
-                return XCTFail("a failed scan did not invalidate the LUT cache")
-            }
-            try await Task.sleep(for: .milliseconds(10))
+        try await waitUntilAsync("the vanished Look's targeted release") {
+            await fake.invalidatedLUTIDs == [[lutID]]
         }
+        let flushes = await fake.invalidateCount
+        XCTAssertEqual(flushes, 0)
     }
 
     func testACompletedScanReResolvesTheOpenDocumentAndReportsMissingLUTsOnce() async throws {
@@ -742,33 +768,122 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
     // MARK: - LUT filter cache
 
-    /// A `LUTID` is a file path, so a `.cube` replaced in place keeps its identity and the engine
-    /// keeps serving the filter it built from the old contents.
-    ///
-    /// Step 9 makes that reachable: save a derive to `X.cube`, derive again, save over `X.cube`. Same
-    /// path, same ID, stale cube on screen. So every library scan now drops the cache.
-    ///
-    /// Asserted through the fake because the real engine's cache is behind an actor and the question
-    /// here is not whether the cache works — `RenderEngineTests` covers that — but whether the app
-    /// ever asks. Before Step 9 the only caller of `invalidateLUTCache` was a test.
-    func testALibraryScanInvalidatesTheEngineLUTCache() async throws {
+    /// A `LUTID` is a file path, so a `.cube` replaced in place keeps its identity. A scan that finds
+    /// new bytes behind an ID the open document references must release that Look's engine
+    /// resources and re-render — and must not do so with a blanket flush.
+    func testAScanThatReplacesAReferencedLookReleasesOnlyThatLook() async throws {
         let fake = FakeRenderEngine()
         let viewModel = makeAppViewModel(engine: fake)
+        let lookFolder = tempDirectory.appendingPathComponent("looks")
+        try FileManager.default.createDirectory(at: lookFolder, withIntermediateDirectories: true)
+        let cube = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "A.cube", in: lookFolder)
         try Fixtures.writeCube(
-            Fixtures.identityCubeText(size: 2), named: "A.cube", in: tempDirectory)
-
-        let before = await fake.invalidateCount
-        viewModel.library.setFolder(tempDirectory)
+            Fixtures.identityCubeText(size: 2), named: "Other.cube", in: lookFolder)
+        viewModel.library.setFolder(lookFolder)
         while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
 
-        // The invalidation is dispatched from the scan's completion, so let it land.
-        let deadline = Date().addingTimeInterval(2)
-        while await fake.invalidateCount == before {
-            if Date() > deadline {
-                return XCTFail("a library scan never invalidated the LUT cache")
-            }
-            try await Task.sleep(for: .milliseconds(10))
+        viewModel.openImage(url: try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "shot.png", in: tempDirectory))
+        try await waitUntil("the source photo") { viewModel.sourceName == "shot.png" }
+        let lutID = try CubeLUT(url: cube).lutID
+        viewModel.updateDocument { $0.lut = LUTSettings(lutID: lutID, intensity: 1) }
+        try await waitUntilAsync("the first graded preview") {
+            await fake.previewRequests.contains { $0.lutID == lutID }
         }
+        let rendersBefore = await fake.previewRequests.count
+
+        // Same path, different bytes: same LUTID, new content.
+        try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 3), named: "A.cube", in: lookFolder)
+        viewModel.library.scan(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        try await waitUntilAsync("the replaced Look's targeted invalidation") {
+            await fake.invalidatedLUTIDs == [[lutID]]
+        }
+        try await waitUntilAsync("a re-render with the new bytes") {
+            await fake.previewRequests.count > rendersBefore
+        }
+        let flushes = await fake.invalidateCount
+        XCTAssertEqual(flushes, 0, "a scan must never fall back to a blanket cache flush")
+    }
+
+    /// The launch scan of an unchanged folder — the common case — is a rescan that finds every byte
+    /// where it was. It must not reach the renderer at all.
+    func testAByteIdenticalScanDoesNoRenderWork() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        let lookFolder = tempDirectory.appendingPathComponent("looks")
+        try FileManager.default.createDirectory(at: lookFolder, withIntermediateDirectories: true)
+        let cube = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "A.cube", in: lookFolder)
+        viewModel.library.setFolder(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        viewModel.openImage(url: try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "shot.png", in: tempDirectory))
+        try await waitUntil("the source photo") { viewModel.sourceName == "shot.png" }
+        let lutID = try CubeLUT(url: cube).lutID
+        viewModel.updateDocument { $0.lut = LUTSettings(lutID: lutID, intensity: 1) }
+        try await waitUntilAsync("the first graded preview") {
+            await fake.previewRequests.contains { $0.lutID == lutID }
+        }
+        try await waitUntil("the edited thumbnail") {
+            viewModel.collection.items[0].editedThumbnailRevision != nil
+        }
+        // Let in-flight work drain so the counters below are stable.
+        try await Task.sleep(for: .milliseconds(300))
+        let previews = await fake.previewRequests.count
+        let thumbnails = await fake.thumbnailRequests.count
+
+        viewModel.library.scan(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(300))
+
+        let previewsAfter = await fake.previewRequests.count
+        let thumbnailsAfter = await fake.thumbnailRequests.count
+        let flushes = await fake.invalidateCount
+        let targeted = await fake.invalidatedLUTIDs
+        XCTAssertEqual(previewsAfter, previews, "an unchanged scan must not admit a preview render")
+        XCTAssertEqual(thumbnailsAfter, thumbnails, "an unchanged scan must not admit a thumbnail render")
+        XCTAssertEqual(flushes, 0)
+        XCTAssertTrue(targeted.isEmpty, "an unchanged scan must not touch engine caches")
+    }
+
+    /// A change to a Look nothing references updates the browser and nothing else.
+    func testAScanChangingAnUnreferencedLookDoesNoRenderWork() async throws {
+        let fake = FakeRenderEngine()
+        let viewModel = makeAppViewModel(engine: fake)
+        let lookFolder = tempDirectory.appendingPathComponent("looks")
+        try FileManager.default.createDirectory(at: lookFolder, withIntermediateDirectories: true)
+        try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "Unused.cube", in: lookFolder)
+        viewModel.library.setFolder(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+
+        viewModel.openImage(url: try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "shot.png", in: tempDirectory))
+        try await waitUntil("the source photo") { viewModel.sourceName == "shot.png" }
+        try await waitUntilAsync("the first preview") { await !fake.previewRequests.isEmpty }
+        try await Task.sleep(for: .milliseconds(300))
+        let previews = await fake.previewRequests.count
+
+        try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 3), named: "Unused.cube", in: lookFolder)
+        try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "New.cube", in: lookFolder)
+        viewModel.library.scan(lookFolder)
+        while viewModel.library.isScanning { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(300))
+
+        let previewsAfter = await fake.previewRequests.count
+        let flushes = await fake.invalidateCount
+        let targeted = await fake.invalidatedLUTIDs
+        XCTAssertEqual(previewsAfter, previews)
+        XCTAssertEqual(flushes, 0)
+        XCTAssertTrue(targeted.isEmpty)
+        XCTAssertEqual(viewModel.library.allLUTs.count, 2, "the browser still reflects the scan")
     }
 
     /// ...but not on every render, which would make the cache pointless. The cache exists because a

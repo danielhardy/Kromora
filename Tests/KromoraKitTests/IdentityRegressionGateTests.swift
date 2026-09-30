@@ -65,16 +65,30 @@ final class IdentityRegressionGateTests: TempDirectoryTestCase {
         let originalRender = try await engine.render(renderRequest)
 
         let previewDirectory = tempDirectory.appendingPathComponent("preview-cache")
-        let previewCache = PreviewDiskCache(directory: previewDirectory)
-        let previewKey = PreviewDiskCache.Key(
-            identity: representative.identity,
-            documentHash: representative.document.editHash,
-            lookFingerprint: "none",
-            targetSizeBucket: "32",
-            space: .sRGB
-        )
+        let previewStore = LatestPreviewFrameStore(directory: previewDirectory)
         let originalRaster = try image(at: representative.asset.url)
-        previewCache.write(originalRaster, for: previewKey)
+        let originalRaster2048 = try XCTUnwrap(RenderEngineResources.canonicalPreviewFrame(
+            from: CIImage(cgImage: originalRaster), space: .sRGB, longEdge: 2048
+        ))
+        await previewStore.enqueueWrite(PresentationFrame(
+            metadata: PresentationFrameMetadata(
+                identity: representative.identity, kind: .preview2048,
+                signature: FrameSignature(
+                    source: representative.identity,
+                    editHash: representative.document.editHash, look: .none,
+                    workingSpace: .sRGB, pixelEpoch: RenderPipeline.pixelEpoch
+                ),
+                geometry: PresentedGeometry(
+                    crop: CropAdjustments(), rotation: ImageRotation(rawValue: 0)!,
+                    orientedAspectRatio: Double(originalRaster.width) / Double(originalRaster.height)
+                ),
+                rasterColorSpace: .sRGB, perceptualDigest: originalRaster2048.perceptualDigest,
+                presentedAt: Date(), pixelWidth: originalRaster2048.pixelWidth,
+                pixelHeight: originalRaster2048.pixelHeight
+            ),
+            rasterData: originalRaster2048.jpegData
+        ))
+        await previewStore.waitForPendingWrites()
 
         let maskStore = MaskStore(
             directory: tempDirectory.appendingPathComponent("mask-cache")
@@ -133,17 +147,21 @@ final class IdentityRegressionGateTests: TempDirectoryTestCase {
         XCTAssertEqual(renderStats.preview.misses, 1)
         XCTAssertEqual(renderStats.preview.hits, 1, "a moved source must reuse its render entry")
 
-        let movedPreviewKey = PreviewDiskCache.Key(
-            identity: movedRepresentative.identity,
-            documentHash: movedRepresentative.document.editHash,
-            lookFingerprint: "none",
-            targetSizeBucket: "32",
-            space: .sRGB
-        )
-        let movedPreview = previewCache.read(for: movedPreviewKey)
-        XCTAssertNotNil(movedPreview, "the moved source must hit its preview-disk entry")
-        XCTAssertEqual(movedPreview?.width, originalRaster.width)
-        XCTAssertEqual(movedPreview?.height, originalRaster.height)
+        let movedPreview = await previewStore.read(for: movedRepresentative.identity)
+        XCTAssertNotNil(movedPreview, "the moved source must hit its stored preview frame")
+        if let movedPreview {
+            XCTAssertEqual(
+                FrameClassifier.classify(
+                    movedPreview.frame.metadata,
+                    against: FrameCurrentInputs(
+                        source: movedRepresentative.identity,
+                        editHash: movedRepresentative.document.editHash,
+                        look: LookSignature.none, workingSpace: .sRGB
+                    )
+                ),
+                .exact
+            )
+        }
 
         let movedMaskKey = maskKey.with(quality: .preview)
         let movedMaskPixels = await maskStore.pixels(for: RegionMaskReference(

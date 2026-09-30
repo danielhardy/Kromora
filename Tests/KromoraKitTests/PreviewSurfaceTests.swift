@@ -25,6 +25,92 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertNotNil(KromoraKitResourceBundle.metalSource(named: "PreviewSurface"))
     }
 
+    func testStaleSettledReplacementCrossfadesFor120MillisecondsThenReleasesOldTexture() async throws {
+        let surface = PreviewSurface()
+        let oldDigest = PerceptualDigest(
+            bytes: Data(repeating: 0, count: PerceptualDigest.byteCount))!
+        let newDigest = PerceptualDigest(
+            bytes: Data(repeating: 255, count: PerceptualDigest.byteCount))!
+        let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
+        XCTAssertTrue(surface.present(
+            CIImage(color: .black).cropped(to: extent), quality: .preview,
+            coversPresentationExtent: true, perceptualDigest: oldDigest
+        ))
+        let oldTexture = try await waitForPresentationTexture(surface)
+        surface.prepareStaleRefinement(using: oldDigest)
+
+        XCTAssertTrue(surface.present(
+            CIImage(color: .white).cropped(to: extent), quality: .preview,
+            coversPresentationExtent: true, perceptualDigest: newDigest
+        ))
+        _ = try await waitForPresentationTexture(surface)
+        XCTAssertTrue(surface.retainsTransitionTexture)
+        XCTAssertFalse(surface.presentationTexture === oldTexture)
+        let progress = try XCTUnwrap(surface.crossfadeProgress())
+        XCTAssertGreaterThanOrEqual(progress, 0)
+        XCTAssertLessThan(progress, 1)
+        let rendered = try XCTUnwrap(
+            PreviewSurfaceView.Coordinator().renderRetainedTexture(
+                surface: surface, navigation: CanvasNavigation(),
+                destinationSize: CGSize(width: 32, height: 24)
+            ))
+        var center = [UInt8](repeating: 0, count: 32 * 24 * 4)
+        center.withUnsafeMutableBytes { raw in
+            rendered.getBytes(
+                raw.baseAddress!, bytesPerRow: 32 * 4,
+                from: MTLRegionMake2D(0, 0, 32, 24), mipmapLevel: 0
+            )
+        }
+        let centerPixel = bgraPixel(in: center, width: 32, at: (16, 12))
+        XCTAssertGreaterThan(centerPixel.0, 0, "the old black frame must fade out")
+        XCTAssertLessThan(centerPixel.0, 255, "the new white frame must fade in")
+
+        try await Task.sleep(for: .milliseconds(145))
+        XCTAssertFalse(surface.retainsTransitionTexture)
+        XCTAssertNil(surface.crossfadeProgress())
+    }
+
+    func testMissingDigestReplacementDoesNotRetainATransitionTexture() async throws {
+        let surface = PreviewSurface()
+        let digest = PerceptualDigest(
+            bytes: Data(repeating: 0, count: PerceptualDigest.byteCount))!
+        let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
+        XCTAssertTrue(surface.present(
+            CIImage(color: .black).cropped(to: extent), quality: .preview,
+            coversPresentationExtent: true, perceptualDigest: digest
+        ))
+        _ = try await waitForPresentationTexture(surface)
+        surface.prepareStaleRefinement(using: digest)
+        XCTAssertTrue(surface.present(
+            CIImage(color: .white).cropped(to: extent), quality: .preview,
+            coversPresentationExtent: true
+        ))
+        _ = try await waitForPresentationTexture(surface)
+        XCTAssertFalse(surface.retainsTransitionTexture)
+    }
+
+    func testReduceMotionReplacementDoesNotRetainATransitionTexture() async throws {
+        let surface = PreviewSurface()
+        let black = PerceptualDigest(
+            bytes: Data(repeating: 0, count: PerceptualDigest.byteCount))!
+        let white = PerceptualDigest(
+            bytes: Data(repeating: 255, count: PerceptualDigest.byteCount))!
+        let extent = CGRect(x: 0, y: 0, width: 32, height: 24)
+        XCTAssertTrue(surface.present(
+            CIImage(color: .black).cropped(to: extent), quality: .preview,
+            coversPresentationExtent: true, perceptualDigest: black
+        ))
+        _ = try await waitForPresentationTexture(surface)
+        surface.prepareStaleRefinement(using: black)
+        surface.setReduceMotion(true)
+        XCTAssertTrue(surface.present(
+            CIImage(color: .white).cropped(to: extent), quality: .preview,
+            coversPresentationExtent: true, perceptualDigest: white
+        ))
+        _ = try await waitForPresentationTexture(surface)
+        XCTAssertFalse(surface.retainsTransitionTexture)
+    }
+
     func testPreviewSurfaceLayoutUsesProposedSizeWithoutIntrinsicMeasurement() throws {
         XCTAssertEqual(
             PreviewSurfaceView.layoutSize(for: ProposedViewSize(width: 320, height: 240)),

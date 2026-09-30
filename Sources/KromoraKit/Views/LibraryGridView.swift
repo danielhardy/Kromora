@@ -343,9 +343,9 @@ private struct LibraryGridCell: View {
         if let thumbnail = item.thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
-                // Provisional source pixels can still have the original aspect while crop
-                // geometry is loading. Once the edited raster is published, its crop and the
-                // cell frame agree, so fill removes the letterboxing without trimming the edit.
+                // The cell reserves the package's final presented geometry before pixels arrive.
+                // Original fallback pixels fit inside that frame; edited pixels already carry the
+                // crop and rotation and therefore fill it without changing row geometry.
                 .aspectRatio(contentMode: item.shouldFillLibraryThumbnail ? .fill : .fit)
         } else if item.asset.thumbnailState == .failed {
             Rectangle()

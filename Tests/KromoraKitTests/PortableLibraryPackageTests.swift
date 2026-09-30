@@ -236,6 +236,68 @@ final class PortableLibraryPackageTests: TempDirectoryTestCase {
         XCTAssertEqual(try package.readEditRevision(for: assetID).document.light.exposure, 0.75)
     }
 
+    func testEditCommitAbortsWhenMembershipGeometryCannotBeRead() throws {
+        let packageURL = tempDirectory.appendingPathComponent("UnreadableMembership.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = tempDirectory.appendingPathComponent("source.jpg")
+        try Data("source".utf8).write(to: sourceURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+        let shard = PortableLibraryPackage.shard(for: assetID)
+        let membershipURL = packageURL.appendingPathComponent("Catalog/Membership/\(shard).json")
+        try Data("corrupt membership".utf8).write(to: membershipURL)
+
+        XCTAssertThrowsError(try package.appendEditRevision(
+            for: assetID,
+            document: EditDocument(light: .init(exposure: 0.5)),
+            lease: lease
+        ))
+
+        XCTAssertEqual(try package.readAssetRecord(for: assetID).currentRevision, 0)
+        let editsURL = packageURL.appendingPathComponent(
+            "Assets/\(shard)/\(assetID.raw)/Edits/1.json"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: editsURL.path))
+    }
+
+    func testEditRevisionAndPresentedGeometryPublishOrRollbackTogether() throws {
+        let packageURL = tempDirectory.appendingPathComponent("TransactionalGeometry.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 4, height: 2, orientation: 1, named: "source.jpg", in: tempDirectory
+        )
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+        let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+        let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+        let shardName = PortableLibraryPackage.shard(for: assetID)
+        var initialShard = try package.readMembershipShard(shardName)
+        let membershipIndex = try XCTUnwrap(initialShard.entries.firstIndex { $0.assetID == assetID })
+        initialShard.entries[membershipIndex].summary.dimensions = PhotoPixelDimensions(width: 4, height: 2)
+        try package.writeMembershipShard(initialShard)
+        let crop = CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
+        let document = EditDocument(crop: crop)
+        let faultInjector = PortablePackageFaultInjector(failingAt: .publish)
+
+        XCTAssertThrowsError(try package.commitEditRevision(
+            for: assetID, document: document, lease: lease, faultInjector: faultInjector
+        ))
+        XCTAssertEqual(try package.readAssetRecord(for: assetID).currentRevision, 0)
+        let afterFailure = try package.readMembershipShard(shardName)
+        XCTAssertNil(afterFailure.entries.first(where: { $0.assetID == assetID })?.summary.presentedAspectRatio)
+
+        _ = try package.commitEditRevision(for: assetID, document: document, lease: lease)
+        XCTAssertEqual(try package.readAssetRecord(for: assetID).currentRevision, 1)
+        let afterCommit = try package.readMembershipShard(shardName)
+        XCTAssertEqual(
+            try XCTUnwrap(afterCommit.entries.first(where: { $0.assetID == assetID })?.summary.presentedAspectRatio),
+            1,
+            accuracy: 1e-9
+        )
+    }
+
     func testMalformedXMPIsReportedAndCanBeQuarantined() throws {
         let packageURL = tempDirectory.appendingPathComponent("MalformedXMP.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)
