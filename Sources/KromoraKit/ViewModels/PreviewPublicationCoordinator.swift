@@ -16,6 +16,12 @@ protocol PreviewPublicationDestination: AnyObject {
     var publicationIsAutoAdjustmentInProgress: Bool { get }
     var publicationIsSideBySideVisible: Bool { get }
     var publicationStoredEditsResolvedSourceRevision: UInt64? { get }
+    func publicationAcceptsFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) -> Bool
+    func confirmPresentationFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    )
 
     func publishPreviewReady()
     func publishPreviewFailure()
@@ -70,7 +76,12 @@ final class PreviewPublicationCoordinator {
             publication.assetID == destination.publicationActiveAssetID,
             publication.sourceRevision == destination.publicationSourceRevision,
             publication.displayRevision == destination.publicationDisplayRevision,
-            publication.request.source == destination.publicationImageSource
+            publication.request.source == destination.publicationImageSource,
+            destination.publicationAcceptsFrame(
+                assetID: publication.assetID,
+                identity: publication.request.source.portableIdentity,
+                generation: publication.sourceRevision
+            )
         else { return }
 
         let request = publication.request
@@ -146,7 +157,11 @@ final class PreviewPublicationCoordinator {
             sourceRevision == destination.publicationSourceRevision,
             displayRevision == destination.publicationDisplayRevision,
             request.source == destination.publicationImageSource,
-            request.document == destination.publicationDisplayDocument
+            request.document == destination.publicationDisplayDocument,
+            destination.publicationAcceptsFrame(
+                assetID: assetID, identity: request.source.portableIdentity,
+                generation: sourceRevision
+            )
         else { return }
         let image = lastPresentedVisibleImage ?? destination.publicationVisiblePreview
         guard let image else { return }
@@ -165,8 +180,17 @@ final class PreviewPublicationCoordinator {
             sourceRevision == destination.publicationSourceRevision,
             displayRevision == destination.publicationDisplayRevision,
             request.source == destination.publicationImageSource,
-            request.document == destination.publicationDisplayDocument
+            request.document == destination.publicationDisplayDocument,
+            destination.publicationAcceptsFrame(
+                assetID: assetID, identity: request.source.portableIdentity,
+                generation: sourceRevision
+            )
         else { return }
+
+        destination.confirmPresentationFrame(
+            assetID: assetID, identity: request.source.portableIdentity,
+            generation: sourceRevision
+        )
 
         destination.publishPreviewReady()
         if request.source.kind == .raw {

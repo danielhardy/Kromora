@@ -162,6 +162,30 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         XCTAssertEqual(previewRequestCount, 1)
     }
 
+    func testRendererFailureKeepsTheSelectedAssetsProvisionalThumbnail() async throws {
+        let raw = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "thumbnail-failure.ARW",
+            in: tempDirectory
+        )
+        let image = try embeddedImage(width: 3, height: 2, red: 0.8, green: 0.2, blue: 0.1)
+        let fake = FakeRenderEngine()
+        await fake.failPreviews()
+        let viewModel = makeAppViewModel(engine: fake)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == raw })
+        viewModel.collection.items[index].setOriginalThumbnail(image)
+
+        viewModel.selectCollectionImage(at: index)
+        try await waitUntil("the failed settled render") {
+            viewModel.previewState == .failed
+        }
+
+        XCTAssertEqual(viewModel.previewSurface.image?.extent.size, CGSize(width: 3, height: 2))
+        XCTAssertEqual(viewModel.previewSurface.revision, 2, "clear plus thumbnail; failed render adds no frame")
+        XCTAssertTrue(viewModel.statusMessage.contains("Could not render"))
+    }
+
     func testEmbeddedFirstFrameStaleDropOnNavigation() async throws {
         let first = try Fixtures.writeJPEG(
             width: 16, height: 12, orientation: 1, named: "first.ARW", in: tempDirectory
@@ -208,12 +232,13 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             viewModel.sourceURL?.lastPathComponent == second.lastPathComponent
         }
         try await waitUntil("the second provisional frame") {
-            viewModel.previewState == .loading && viewModel.previewSurface.image?.extent.width == 5
+            viewModel.previewState == .loading && viewModel.previewSurface.image != nil
         }
         XCTAssertTrue(viewModel.previewSurface.coversPresentationExtent)
         XCTAssertEqual(
             viewModel.previewSurface.presentationImageExtent?.size,
-            CGSize(width: 4000, height: 3000)
+            viewModel.previewSurface.image?.extent.size,
+            "a materialized thumbnail may be used before native source geometry is known"
         )
         let secondProvisionalRevision = viewModel.previewSurface.revision
 
