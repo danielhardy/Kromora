@@ -795,6 +795,26 @@ final class DevelopInspectorTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.document.rawDevelop.isNeutral)
     }
 
+    /// Sharpness and local-tone-map sliders have UI headroom above their documented decoder max,
+    /// so even a maximum per-image seed is not parked at the track endpoint. That extra UI space
+    /// must never be written through to `CIRAWFilter`, whose documented input range remains 0...1.
+    func testRawAmountSliderHeadroomDoesNotExceedDecoderRange() async throws {
+        let fake = FakeRenderEngine()
+        await fake.setStubbedCapabilities(RAWCapabilities.distinctivelySeeded)
+        let viewModel = makeAppViewModel(engine: fake)
+        try await openStandardImage(viewModel)
+        try await waitUntil("capabilities") { viewModel.rawCapabilities != nil }
+
+        for control in [DevelopControl.sharpness, .localToneMap] {
+            XCTAssertEqual(control.range.upperBound, 1.1)
+            viewModel.developBinding(for: control).wrappedValue = 1.05
+            let storedValue = control == .sharpness
+                ? viewModel.document.rawDevelop.sharpnessAmount
+                : viewModel.document.rawDevelop.localToneMapAmount
+            XCTAssertEqual(storedValue, 1)
+        }
+    }
+
     /// **`lensCorrectionEnabled` is a `Bool`**, so `RAWCapabilities.distinctivelySeeded`'s single
     /// `false` above cannot by itself distinguish "reads the seed" from "returns a constant" — a
     /// getter hardcoded to `false` (the field's own default, and the getter's own tail fallback) would

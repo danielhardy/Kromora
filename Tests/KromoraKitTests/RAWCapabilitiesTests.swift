@@ -153,11 +153,11 @@ final class RAWCapabilitiesTests: XCTestCase {
             .boost: 0...1,                        // documented: "Global tone curve, 0…1"
             .boostShadow: 0...2,                  // documented: "0…2 (<1 darkens, >1 lightens)"
             .whiteBalance: 2000...50000,          // documented: "2000…50000 K"
-            .sharpness: 0...1,                    // documented
+            .sharpness: 0...1.1,                  // UI headroom; writes remain documented 0...1
             .contrast: 0...1,                     // documented: "Local contrast, 0…1"
             .detail: 0...3,                       // documented: "Detail enhancement, 0…3"
             .moireReduction: 0...1,               // documented
-            .localToneMap: 0...1,                 // documented: "Local tone curve, 0…1"
+            .localToneMap: 0...1.1,               // UI headroom; writes remain documented 0...1
             .luminanceNoiseReduction: 0...1,      // documented
             .colorNoiseReduction: 0...1,          // documented
             .lensCorrection: 0...1,               // toggle, expressed as 0/1
