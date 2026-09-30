@@ -61,6 +61,7 @@ final class ImageCollectionPresentationModel {
         var subfolder: String
         private var displayNameOverride: String?
         private var originalThumbnail: NSImage?
+        private var editedThumbnailImage: NSImage?
         private var editedThumbnailUsesFallback = false
         private(set) var editedThumbnailRevision: String?
         private var presentedCrop = CropAdjustments.neutral
@@ -86,6 +87,8 @@ final class ImageCollectionPresentationModel {
         var shouldFillLibraryThumbnail: Bool {
             editedThumbnailRevision != nil && !editedThumbnailUsesFallback
         }
+        var originalThumbnailForPresentation: NSImage? { originalThumbnail }
+        var editedThumbnailForPresentation: NSImage? { editedThumbnailImage }
         var libraryAspectRatio: Double {
             guard hasResolvedLibraryAspect, let dimensions = asset.dimensions else { return 4.0 / 3.0 }
             return LibraryGridLayout.presentedAspectRatio(
@@ -139,6 +142,7 @@ final class ImageCollectionPresentationModel {
         func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
             editedThumbnailRevision = revision
             editedThumbnailUsesFallback = thumbnail == nil
+            editedThumbnailImage = thumbnail
             self.thumbnail = thumbnail ?? originalThumbnail
         }
 

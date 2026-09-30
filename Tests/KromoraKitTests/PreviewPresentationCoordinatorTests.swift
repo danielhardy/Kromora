@@ -21,6 +21,54 @@ final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(coordinator.comparisonRevision, 2)
     }
 
+    func testPresentationSessionFencesCandidatesAndTracksFirstAndConfirmedFrames() throws {
+        let coordinator = makeCoordinator()
+        let source = ImageSource(
+            backing: .data(Data("presentation-session".utf8)),
+            kind: .standard, nativeExtent: CGSize(width: 32, height: 24)
+        )
+        let assetID = PhotoAssetID(rawValue: "presentation-session-asset")
+        let generation: UInt64 = 9
+        coordinator.beginPresentationSession(
+            assetID: assetID, identity: source.portableIdentity, generation: generation
+        )
+
+        XCTAssertTrue(coordinator.presentProvisional(
+            .editedThumbnail, assetID: assetID, identity: source.portableIdentity,
+            generation: generation
+        ))
+        coordinator.confirmProvisionalPresentation(
+            .editedThumbnail, assetID: assetID, identity: source.portableIdentity,
+            generation: generation
+        )
+        XCTAssertFalse(coordinator.presentProvisional(
+            .embeddedJPEG, assetID: assetID, identity: source.portableIdentity,
+            generation: generation
+        ), "an embedded JPEG must not add a hop after a same-asset thumbnail")
+        XCTAssertFalse(coordinator.presentProvisional(
+            .originalThumbnail, assetID: assetID, identity: source.portableIdentity,
+            generation: generation
+        ), "an original thumbnail must not replace an already visible edited thumbnail")
+        XCTAssertFalse(coordinator.presentProvisional(
+            .originalThumbnail, assetID: assetID, identity: source.portableIdentity,
+            generation: generation - 1
+        ), "late candidates from an older generation must be rejected")
+        XCTAssertTrue(coordinator.admitsPublication(
+            assetID: assetID, identity: source.portableIdentity, generation: generation
+        ))
+        coordinator.confirmRenderedFrame(
+            assetID: assetID, identity: source.portableIdentity, generation: generation
+        )
+
+        let session = try XCTUnwrap(coordinator.presentationSession)
+        XCTAssertEqual(session.state, .confirmed)
+        XCTAssertEqual(session.candidateSource, .rendered)
+        XCTAssertEqual(session.distinctFrameCount, 2)
+        XCTAssertNotNil(session.firstPixelLatencyMilliseconds)
+        XCTAssertNotNil(session.confirmedLatencyMilliseconds)
+        XCTAssertEqual(session.staleGenerationDrops, 1)
+    }
+
     func testResolutionPlannerStateIsIndependentAndResettable() throws {
         let coordinator = makeCoordinator()
         let document = EditDocument()

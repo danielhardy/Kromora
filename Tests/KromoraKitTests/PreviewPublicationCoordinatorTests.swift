@@ -196,6 +196,15 @@ private final class FakeDestination: PreviewPublicationDestination {
     var publicationStoredEditsResolvedSourceRevision: UInt64? {
         storedEditsResolvedSourceRevision
     }
+    func publicationAcceptsFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) -> Bool {
+        assetID == activeAssetID && identity == imageSource.portableIdentity
+            && generation == sourceRevision
+    }
+    func confirmPresentationFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) {}
 
     func publishPreviewReady() { previewState = .ready }
     func publishPreviewFailure() { previewState = .failed }

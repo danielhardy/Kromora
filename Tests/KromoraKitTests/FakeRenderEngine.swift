@@ -178,6 +178,7 @@ actor FakeRenderEngine: RenderEngining {
     private(set) var activeEncodes = 0
     private(set) var maxConcurrentEncodes = 0
     var previewResult: CGImage?
+    var shouldFailPreview = false
 
     init(previewResult: CGImage? = FakeRenderEngine.solidImage()) {
         self.previewResult = previewResult
@@ -213,6 +214,7 @@ actor FakeRenderEngine: RenderEngining {
             if previewIsGated {
                 await withCheckedContinuation { parkedPreviews.append($0) }
             }
+            if shouldFailPreview { throw ImageError.processingFailed }
             guard let image = previewResult ?? Self.solidImage(),
                   let data = Self.pngData(for: image)
             else { throw ImageError.processingFailed }
@@ -361,6 +363,8 @@ actor FakeRenderEngine: RenderEngining {
     /// Hold raster preview requests so comparison tests can release an obsolete baseline after a
     /// source switch and prove its generation guard rejects the late result.
     func gatePreviews() { previewIsGated = true }
+
+    func failPreviews() { shouldFailPreview = true }
 
     func releaseNextPreview() {
         guard !parkedPreviews.isEmpty else { return }

@@ -1,6 +1,8 @@
+import CryptoKit
 import CoreGraphics
 import CoreImage
 import Foundation
+import os.log
 
 /// Value-state owner for preview presentation policy.
 ///
@@ -11,6 +13,35 @@ import Foundation
 /// revision fencing can be tested with a fake renderer and a temporary cache directory.
 @MainActor
 final class PreviewPresentationCoordinator {
+    enum CandidateSource: String, Sendable, Equatable {
+        case editedThumbnail
+        case originalThumbnail
+        case embeddedJPEG
+        case rendered
+    }
+
+    enum SessionState: Sendable, Equatable {
+        case provisional
+        case confirmed
+    }
+
+    struct PresentationSession: Sendable, Equatable {
+        let assetID: PhotoAssetID
+        let identity: PortablePhotoIdentity
+        let generation: UInt64
+        let selectionUptime: UInt64
+        fileprivate(set) var state: SessionState
+        fileprivate(set) var candidateSource: CandidateSource?
+        fileprivate(set) var firstPixelLatencyMilliseconds: Double?
+        fileprivate(set) var confirmedLatencyMilliseconds: Double?
+        fileprivate(set) var distinctFrameCount: Int
+        fileprivate(set) var staleGenerationDrops: Int
+    }
+
+    private static let presentationSignposter = OSSignposter(
+        subsystem: "com.kromora.app", category: "presentation-session"
+    )
+    private(set) var presentationSession: PresentationSession?
     private(set) var displayRevision: UInt64 = 0
     private(set) var comparisonRevision: UInt64 = 0
 
@@ -29,6 +60,150 @@ final class PreviewPresentationCoordinator {
 
     func advanceDisplayRevision() { displayRevision &+= 1 }
     func advanceComparisonRevision() { comparisonRevision &+= 1 }
+
+    func beginPresentationSession(
+        assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64
+    ) {
+        presentationSession = PresentationSession(
+            assetID: assetID, identity: identity, generation: generation,
+            selectionUptime: DispatchTime.now().uptimeNanoseconds,
+            state: .provisional, candidateSource: nil,
+            firstPixelLatencyMilliseconds: nil, confirmedLatencyMilliseconds: nil,
+            distinctFrameCount: 0, staleGenerationDrops: 0
+        )
+        let token = Self.opaqueToken(identity)
+        Self.presentationSignposter.emitEvent(
+            "PresentationSelection", "asset=\(token, privacy: .public) generation=\(generation)"
+        )
+    }
+
+    /// The single admission point for inert same-asset frames. Candidate admission immediately
+    /// suppresses an embedded JPEG, even if the thumbnail's drawable callback has not arrived.
+    func presentProvisional(
+        _ source: CandidateSource, assetID: PhotoAssetID,
+        identity: PortablePhotoIdentity, generation: UInt64
+    ) -> Bool {
+        guard var session = presentationSession,
+            session.assetID == assetID, Self.identitiesMatch(session.identity, identity),
+            session.generation == generation, session.state == .provisional
+        else {
+            recordStaleGenerationDrop(identity: identity)
+            return false
+        }
+        let mayReplaceCurrent: Bool
+        switch (session.candidateSource, source) {
+        case (nil, _): mayReplaceCurrent = true
+        case (.originalThumbnail, .editedThumbnail): mayReplaceCurrent = true
+        default: mayReplaceCurrent = false
+        }
+        guard mayReplaceCurrent else { return false }
+        session.candidateSource = source
+        presentationSession = session
+        Self.emitPresentationMetric(
+            "PresentationCandidate", session: session, source: source.rawValue
+        )
+        return true
+    }
+
+    func confirmProvisionalPresentation(
+        _ source: CandidateSource, assetID: PhotoAssetID?,
+        identity: PortablePhotoIdentity, generation: UInt64
+    ) {
+        guard var session = presentationSession,
+            session.assetID == assetID, Self.identitiesMatch(session.identity, identity),
+            session.generation == generation, session.state == .provisional,
+            session.candidateSource == source else {
+                recordStaleGenerationDrop(identity: identity)
+                return
+            }
+        session.distinctFrameCount += 1
+        if session.firstPixelLatencyMilliseconds == nil {
+            session.firstPixelLatencyMilliseconds = Self.elapsedMilliseconds(
+                since: session.selectionUptime
+            )
+        }
+        presentationSession = session
+        Self.emitPresentationMetric("PresentationFirstPixel", session: session, source: source.rawValue)
+    }
+
+    func admitsPublication(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) -> Bool {
+        guard let session = presentationSession,
+            session.assetID == assetID, Self.identitiesMatch(session.identity, identity),
+            session.generation == generation else {
+                recordStaleGenerationDrop(identity: identity)
+                return false
+            }
+        return true
+    }
+
+    func confirmRenderedFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) {
+        guard var session = presentationSession,
+            session.assetID == assetID, Self.identitiesMatch(session.identity, identity),
+            session.generation == generation else {
+                recordStaleGenerationDrop(identity: identity)
+                return
+            }
+        session.state = .confirmed
+        session.candidateSource = .rendered
+        session.distinctFrameCount += 1
+        if session.firstPixelLatencyMilliseconds == nil {
+            session.firstPixelLatencyMilliseconds = Self.elapsedMilliseconds(
+                since: session.selectionUptime
+            )
+        }
+        if session.confirmedLatencyMilliseconds == nil {
+            session.confirmedLatencyMilliseconds = Self.elapsedMilliseconds(
+                since: session.selectionUptime
+            )
+        }
+        presentationSession = session
+        Self.emitPresentationMetric(
+            "PresentationConfirmed", session: session, source: CandidateSource.rendered.rawValue
+        )
+    }
+
+    private func recordStaleGenerationDrop(identity: PortablePhotoIdentity) {
+        guard var session = presentationSession else { return }
+        session.staleGenerationDrops += 1
+        presentationSession = session
+        let token = Self.opaqueToken(identity)
+        Self.presentationSignposter.emitEvent(
+            "PresentationStaleDrop",
+            "asset=\(token, privacy: .public) activeGeneration=\(session.generation) drops=\(session.staleGenerationDrops)"
+        )
+    }
+
+    private static func elapsedMilliseconds(since uptime: UInt64) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds &- uptime) / 1_000_000
+    }
+
+    private static func opaqueToken(_ identity: PortablePhotoIdentity) -> String {
+        let digest = SHA256.hash(data: identity.canonicalData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return String(digest.prefix(16))
+    }
+
+    private static func identitiesMatch(
+        _ expected: PortablePhotoIdentity, _ actual: PortablePhotoIdentity
+    ) -> Bool {
+        expected.assetID == actual.assetID
+            && expected.sourceFingerprint.matches(actual.sourceFingerprint)
+    }
+
+    private static func emitPresentationMetric(
+        _ name: StaticString, session: PresentationSession, source: String
+    ) {
+        let token = opaqueToken(session.identity)
+        presentationSignposter.emitEvent(
+            name,
+            "asset=\(token, privacy: .public) generation=\(session.generation) source=\(source, privacy: .public) frames=\(session.distinctFrameCount) firstMS=\(session.firstPixelLatencyMilliseconds ?? -1) confirmedMS=\(session.confirmedLatencyMilliseconds ?? -1) staleDrops=\(session.staleGenerationDrops)"
+        )
+    }
 
     func resetPlanners() {
         mainPlanner.reset()

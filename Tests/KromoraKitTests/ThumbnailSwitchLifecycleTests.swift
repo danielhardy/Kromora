@@ -104,6 +104,38 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
     }
 
+    func testSelectionPresentsItsEditedThumbnailBeforeItsOriginal() async throws {
+        let source = try Fixtures.writeGradientPNG(
+            width: 32, height: 24, named: "presentation-candidate.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        await engine.gatePreviews()
+        let viewModel = makeAppViewModel(engine: engine)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let item = try XCTUnwrap(viewModel.collection.items.first { $0.url == source })
+        item.setOriginalThumbnail(NSImage(
+            cgImage: try Fixtures.makeCGImage(width: 3, height: 2, red: 0.8, green: 0.1, blue: 0.1),
+            size: NSSize(width: 3, height: 2)
+        ))
+        item.applyEditedThumbnail(NSImage(
+            cgImage: try Fixtures.makeCGImage(width: 5, height: 3, red: 0.1, green: 0.8, blue: 0.1),
+            size: NSSize(width: 5, height: 3)
+        ), revision: "materialized-edited")
+
+        let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == item.id })
+        viewModel.selectCollectionImage(at: index)
+
+        XCTAssertEqual(
+            viewModel.previewSurface.image?.extent.size, CGSize(width: 5, height: 3),
+            "the edited thumbnail is the first visible candidate for its own asset"
+        )
+        await engine.releasePreviews()
+        try await waitUntil("the confirmed preview after the edited candidate") {
+            viewModel.previewState == .ready
+        }
+    }
+
     /// The filmstrip and library grid both render `ThumbnailEntry`'s resolved Item. Exercise that
     /// shared projection with the real renderer so a committed crop is checked at the publication
     /// boundary, not only in RenderRequest/RenderEngine unit tests. The long edge is the displayed

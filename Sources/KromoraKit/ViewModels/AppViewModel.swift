@@ -1918,6 +1918,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         refreshLUTResolutionStatus()
 
         previewPresentation.resetForSource()
+        let presentationGeneration = sourceSession.sourceRevision &+ 1
+        let presentationIdentity = importPlan.source.portableIdentity
+        previewPresentation.beginPresentationSession(
+            assetID: assetID, identity: presentationIdentity,
+            generation: presentationGeneration
+        )
         storedEditsResolvedSourceRevision = nil
         // Keep the last published chart visible while the newly selected source prepares and
         // renders. Histogram admission still checks the active asset and source revision before
@@ -1926,9 +1932,32 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewCoordinator.cancel()
         invalidateEditedThumbnailWork(for: previousActiveAssetID)
         editedThumbnailCoordinator.clearPendingRequest()
-        // Keep the last presented frame beneath the loading indicator until this source publishes
-        // its replacement. The render publication gate prevents an obsolete in-flight request
-        // from taking its place.
+        // Fence the old asset synchronously. Only already-materialized pixels owned by the new
+        // selection may fill the canvas while preparation and rendering suspend.
+        previewSurface.clear()
+        if let item = collection.items.first(where: { $0.id == assetID }),
+            item.asset.source.portableIdentity == presentationIdentity
+        {
+            if let edited = item.editedThumbnailForPresentation,
+                let cgImage = Self.cgImage(from: edited)
+            {
+                presentProvisionalCandidate(
+                    CIImage(cgImage: cgImage), source: .editedThumbnail,
+                    assetID: assetID, identity: presentationIdentity,
+                    generation: presentationGeneration,
+                    nativeExtent: item.thumbnailNativeExtent
+                )
+            } else if let original = item.originalThumbnailForPresentation,
+                let cgImage = Self.cgImage(from: original)
+            {
+                presentProvisionalCandidate(
+                    CIImage(cgImage: cgImage), source: .originalThumbnail,
+                    assetID: assetID, identity: presentationIdentity,
+                    generation: presentationGeneration,
+                    nativeExtent: item.thumbnailNativeExtent
+                )
+            }
+        }
         if canvasState.isCropToolActive {
             canvasWorkflow.discardCropForSourceChange()
         }
@@ -1974,6 +2003,38 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
     }
 
+    private func presentProvisionalCandidate(
+        _ image: CIImage, source: PreviewPresentationCoordinator.CandidateSource,
+        assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64,
+        nativeExtent: CGSize
+    ) {
+        guard previewPresentation.presentProvisional(
+            source, assetID: assetID, identity: identity, generation: generation
+        ) else { return }
+        let extent = nativeExtent.width > 0 && nativeExtent.height > 0
+            ? CGRect(origin: .zero, size: nativeExtent) : image.extent
+        _ = previewSurface.present(
+            image, space: .current,
+            revision: UInt64.max - generation,
+            quality: .preview,
+            presentationImageExtent: extent,
+            coversPresentationExtent: true,
+            onPresented: { [weak self] in
+                guard let self,
+                    self.previewPresentation.presentationSession?.generation == generation,
+                    self.previewPresentation.presentationSession?.assetID == assetID else { return }
+                self.previewPresentation.confirmProvisionalPresentation(
+                    source, assetID: assetID, identity: identity, generation: generation
+                )
+                self.isNavigationLoading = false
+            }
+        )
+    }
+
+    private static func cgImage(from image: NSImage) -> CGImage? {
+        image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+    }
+
     private func install(
         preparation: ImageSourcePreparation, request: SourceSessionCoordinator.Request
     ) {
@@ -2011,6 +2072,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             publication.request.assetID == activeAssetID,
             previewState == .loading,
             !previewPublicationCoordinator.hasPublishedFrame,
+            previewPresentation.presentationSession?.candidateSource == nil,
+            previewPresentation.admitsPublication(
+                assetID: publication.request.assetID,
+                identity: publication.preparation.source.portableIdentity,
+                generation: publication.request.sourceRevision
+            ),
             let cgImage = publication.image.cgImage(
                 forProposedRect: nil, context: nil, hints: nil
             )
@@ -2027,9 +2094,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 CIImage(cgImage: cgImage), to: native
             )
 
-            // The settled preview is submitted through the coordinator and always publishes at a
-            // newer surface revision. The guards above keep a late provisional JPEG from ever
-            // replacing that settled frame, so no explicit clear is needed here.
+            guard previewPresentation.presentProvisional(
+                .embeddedJPEG, assetID: publication.request.assetID,
+                identity: publication.preparation.source.portableIdentity,
+                generation: publication.request.sourceRevision
+            ) else { return }
             previewSurface.present(
                 provisional, space: .current,
                 // Presentation-only revision: the embedded JPEG is not renderer telemetry, but
@@ -2045,6 +2114,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         publication.request.assetID == self.activeAssetID,
                         self.previewState == .loading
                     else { return }
+                    self.previewPresentation.confirmProvisionalPresentation(
+                        .embeddedJPEG, assetID: publication.request.assetID,
+                        identity: publication.preparation.source.portableIdentity,
+                        generation: publication.request.sourceRevision
+                    )
                     self.isNavigationLoading = false
                 }
             )
@@ -4499,6 +4573,20 @@ extension AppViewModel: PreviewPublicationDestination {
     var publicationIsSideBySideVisible: Bool { isSideBySideVisible }
     var publicationStoredEditsResolvedSourceRevision: UInt64? {
         storedEditsResolvedSourceRevision
+    }
+    func publicationAcceptsFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) -> Bool {
+        generation == sourceRevision && previewPresentation.admitsPublication(
+            assetID: assetID, identity: identity, generation: generation
+        )
+    }
+    func confirmPresentationFrame(
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+    ) {
+        previewPresentation.confirmRenderedFrame(
+            assetID: assetID, identity: identity, generation: generation
+        )
     }
 
     func publishPreviewReady() {
