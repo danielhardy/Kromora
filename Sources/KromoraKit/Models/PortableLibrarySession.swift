@@ -912,6 +912,11 @@ final class PortableLibrarySession {
         let result: PortablePackageRemovalResult
         do {
             result = try package.removeFromLibrary(assetID, lease: lease)
+        } catch PortablePackageTrashError.alreadyRemoved(let removedID) {
+            // A prior removal committed its tombstone but did not finish updating the projection.
+            // Reconcile the index so the item leaves the grid, then let the caller finish cleanup.
+            _ = try applyIndexDelta(.init(removals: [assetID]))
+            throw PortablePackageTrashError.alreadyRemoved(removedID)
         } catch {
             throw ensureLeaseError(error)
         }
