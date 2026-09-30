@@ -3,6 +3,10 @@ import CoreGraphics
 import XCTest
 @testable import KromoraKit
 
+/// Revision suffix of a document that applies no Look. Before `LookSignature` this was spelled
+/// "unresolved", which conflated "no Look" with "a Look nothing has resolved".
+private let noLookRevisionSuffix = ":" + LookSignature.none.cacheComponent
+
 @MainActor
 final class EditedThumbnailCoordinatorTests: XCTestCase {
     func testDebounceCoalescesBurstToOneTrailingRequest() async throws {
@@ -48,7 +52,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         let fixture = makeFixture(document: document, rendererWaits: true)
         let previouslyPublished = NSImage(size: NSSize(width: 3, height: 2))
         fixture.item.applyEditedThumbnail(
-            previouslyPublished, revision: document.editHash + ":unresolved"
+            previouslyPublished, revision: document.editHash + noLookRevisionSuffix
         )
 
         fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
@@ -58,13 +62,13 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(fixture.item.thumbnail === previouslyPublished)
         XCTAssertEqual(
-            fixture.item.editedThumbnailRevision, document.editHash + ":unresolved"
+            fixture.item.editedThumbnailRevision, document.editHash + noLookRevisionSuffix
         )
 
         await fixture.engine.releaseThumbnail()
         try await waitUntil("the completed matching render") {
             fixture.item.editedThumbnailRevision
-                == fixture.destination.document.editHash + ":unresolved"
+                == fixture.destination.document.editHash + noLookRevisionSuffix
         }
 
         XCTAssertTrue(fixture.item.thumbnail === previouslyPublished)
@@ -89,7 +93,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
 
         await fixture.engine.releaseThumbnail()
         try await waitUntil("the replacement thumbnail publication") {
-            fixture.item.editedThumbnailRevision == document.editHash + ":unresolved"
+            fixture.item.editedThumbnailRevision == document.editHash + noLookRevisionSuffix
         }
 
         XCTAssertFalse(fixture.item.thumbnail === sourceThumbnail)
@@ -127,8 +131,118 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(
             fixture.destination.appliedRevisions.last,
-            document.editHash + ":" + lut.cacheFingerprint
+            document.editHash + ":" + LookSignature(
+                settings: document.lut, resolved: lut
+            ).cacheComponent
         )
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
+    // MARK: - Look signatures
+
+    private func makeLUT(_ name: String, table: Float) -> CubeLUT {
+        CubeLUT(
+            cube: (0..<8).map { index in
+                let value = table * Float(index) / 7
+                return SIMD3(value, value, value)
+            }, size: 2, name: name
+        )
+    }
+
+    func testUnresolvedLookPixelsAreProvisionalAndNeverAnExactHit() async throws {
+        let id = LUTID(raw: "/Looks/Missing.cube")
+        let document = EditDocument(
+            adjustments: [.exposure(ev: 0.25)], lut: LUTSettings(lutID: id)
+        )
+        let fixture = makeFixture(document: document, lut: nil)
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the provisional thumbnail") {
+            !fixture.destination.appliedRevisions.isEmpty
+        }
+        XCTAssertEqual(
+            fixture.destination.appliedRevisions.last,
+            document.editHash + ":" + LookSignature.unresolved(id: id).cacheComponent
+        )
+        XCTAssertNotEqual(
+            fixture.destination.appliedRevisions.last, document.editHash + noLookRevisionSuffix,
+            "an unresolved Look must not share a revision with no Look"
+        )
+
+        // Repeated appearance demand: a resolved or Look-less result would be reused here.
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the repeated render") {
+            await fixture.engine.thumbnailRequestCount == 2
+        }
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
+    func testResolvedLookThumbnailIsReusedOnRepeatedDemand() async throws {
+        let lut = makeLUT("Reuse", table: 1)
+        let document = EditDocument(
+            adjustments: [.exposure(ev: 0.25)], lut: LUTSettings(lutID: lut.lutID)
+        )
+        let fixture = makeFixture(document: document, lut: lut)
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the first thumbnail") { !fixture.destination.appliedRevisions.isEmpty }
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await Task.sleep(for: .milliseconds(150))
+
+        let renders = await fixture.engine.thumbnailRequestCount
+        XCTAssertEqual(renders, 1, "an exact resolved match needs no second render")
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
+    func testAffectedRefreshRerendersOnlyThumbnailsThatReferenceAChangedLook() async throws {
+        let lut = makeLUT("Refresh", table: 1)
+        let document = EditDocument(
+            adjustments: [.exposure(ev: 0.25)], lut: LUTSettings(lutID: lut.lutID)
+        )
+        let fixture = makeFixture(document: document, lut: lut)
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the first thumbnail") { !fixture.destination.appliedRevisions.isEmpty }
+        XCTAssertEqual(fixture.coordinator.referencedLookIDs, [lut.lutID])
+
+        // Unrelated Look, and an empty set: the renderer is not entered.
+        fixture.coordinator.refreshMaterializedThumbnails(affecting: [LUTID(raw: "/Looks/Other.cube")])
+        fixture.coordinator.refreshMaterializedThumbnails(affecting: [])
+        try await Task.sleep(for: .milliseconds(150))
+        let afterUnrelated = await fixture.engine.thumbnailRequestCount
+        XCTAssertEqual(afterUnrelated, 1)
+
+        // The referenced Look now resolves to different bytes.
+        let replaced = makeLUT("Refresh", table: 0.5)
+        fixture.destination.lut = CubeLUT(
+            cube: (0..<8).map { SIMD3(repeating: 0.5 * Float($0) / 7) }, size: 2, name: "Refresh",
+            sourceURL: URL(fileURLWithPath: lut.id)
+        )
+        XCTAssertNotEqual(replaced.contentHash, lut.contentHash)
+        fixture.coordinator.refreshMaterializedThumbnails(affecting: [lut.lutID])
+        try await waitUntil("the affected re-render") {
+            await fixture.engine.thumbnailRequestCount == 2
+        }
+        await fixture.scheduler.cancelAllAndWait()
+    }
+
+    func testALookAppearingMovesThePublishedRevisionFromUnresolvedToResolved() async throws {
+        let lut = makeLUT("Appears", table: 1)
+        let document = EditDocument(
+            adjustments: [.exposure(ev: 0.25)], lut: LUTSettings(lutID: lut.lutID)
+        )
+        let fixture = makeFixture(document: document, lut: nil)
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitUntil("the provisional thumbnail") { !fixture.destination.appliedRevisions.isEmpty }
+        let provisional = try XCTUnwrap(fixture.destination.appliedRevisions.last)
+
+        fixture.destination.lut = lut
+        fixture.coordinator.refreshMaterializedThumbnails(affecting: [lut.lutID])
+        try await waitUntil("the resolved thumbnail") { fixture.destination.appliedRevisions.count == 2 }
+
+        let resolved = try XCTUnwrap(fixture.destination.appliedRevisions.last)
+        XCTAssertNotEqual(provisional, resolved)
+        XCTAssertEqual(
+            resolved, document.editHash + ":" + lut.lookSignature.cacheComponent)
         await fixture.scheduler.cancelAllAndWait()
     }
 
@@ -140,7 +254,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
         try await waitUntil("the current saved edit thumbnail") {
             fixture.item.editedThumbnailRevision
-                == currentDocument.editHash + ":unresolved"
+                == currentDocument.editHash + noLookRevisionSuffix
         }
 
         let renderedEditHashes = await fixture.engine.renderedEditHashes
@@ -155,7 +269,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
         try await waitUntil("the current edited thumbnail") {
             fixture.item.editedThumbnailRevision
-                == fixture.destination.document.editHash + ":unresolved"
+                == fixture.destination.document.editHash + noLookRevisionSuffix
         }
 
         XCTAssertTrue(fixture.item.shouldFillLibraryThumbnail)
@@ -205,7 +319,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         let fixture = makeFixture(document: EditDocument())
         fixture.coordinator.request(for: fixture.assetID, priority: .activeEditor)
 
-        XCTAssertEqual(fixture.destination.appliedRevisions, [EditDocument().editHash + ":unresolved"])
+        XCTAssertEqual(fixture.destination.appliedRevisions, [EditDocument().editHash + noLookRevisionSuffix])
         XCTAssertTrue(fixture.destination.appliedWasNil)
         let requestCount = await fixture.engine.thumbnailRequestCount
         XCTAssertEqual(requestCount, 0)
@@ -246,7 +360,7 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         fixture.coordinator.admitDeferredDemands()
         try await waitUntil("the refreshed visible thumbnail") {
             fixture.item.editedThumbnailRevision
-                == fixture.destination.document.editHash + ":unresolved"
+                == fixture.destination.document.editHash + noLookRevisionSuffix
         }
 
         let renderedEditHashes = await fixture.engine.renderedEditHashes
@@ -442,7 +556,9 @@ private final class FakeDestination: EditedThumbnailDestination {
     var isEditedThumbnailPreviewDebouncing = false
     let item: ImageCollection.Item
     let document: EditDocument
-    private let lut: CubeLUT?
+    /// What the Look browser currently resolves the document's ID to. Tests change it to model a
+    /// scan resolving, replacing, or dropping the Look.
+    var lut: CubeLUT?
     private(set) var appliedRevisions: [String] = []
     private(set) var appliedWasNil = false
     private(set) var presentedCrop = CropAdjustments.neutral

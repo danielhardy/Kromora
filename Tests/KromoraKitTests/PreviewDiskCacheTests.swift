@@ -35,7 +35,8 @@ final class PreviewDiskCacheTests: TempDirectoryTestCase {
         version: Int = RenderPipeline.cacheVersion
     ) -> PreviewDiskCache.Key {
         PreviewDiskCache.Key(
-            sourceFingerprint: source, documentHash: document, lookFingerprint: look,
+            sourceFingerprint: source, documentHash: document,
+            look: .resolved(id: LUTID(raw: "look"), contentHash: look),
             targetSizeBucket: bucket, space: space, pipelineVersion: version
         )
     }
@@ -108,14 +109,14 @@ final class PreviewDiskCacheTests: TempDirectoryTestCase {
             sourceFingerprint: .data(Data("replacement".utf8), decoderVersion: "test")
         )
         let firstKey = PreviewDiskCache.Key(
-            identity: firstIdentity, documentHash: "document", lookFingerprint: "look", space: .sRGB
+            identity: firstIdentity, documentHash: "document", look: .resolved(id: LUTID(raw: "look"), contentHash: "look"), space: .sRGB
         )
         let replacementKey = PreviewDiskCache.Key(
-            identity: replacementIdentity, documentHash: "replacement", lookFingerprint: "look",
+            identity: replacementIdentity, documentHash: "replacement", look: .resolved(id: LUTID(raw: "look"), contentHash: "look"),
             space: .sRGB
         )
         let secondKey = PreviewDiskCache.Key(
-            identity: secondIdentity, documentHash: "document", lookFingerprint: "look", space: .sRGB
+            identity: secondIdentity, documentHash: "document", look: .resolved(id: LUTID(raw: "look"), contentHash: "look"), space: .sRGB
         )
         let cache = PreviewDiskCache(directory: directory)
         let raster = try image(width: 32, height: 24)

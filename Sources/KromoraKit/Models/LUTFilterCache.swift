@@ -1,7 +1,7 @@
 import Foundation
 import CoreImage
 
-/// Reusable `CIColorCubeWithColorSpace` filters, keyed by LUT **and** colour space.
+/// Reusable `CIColorCubeWithColorSpace` filters, keyed by LUT, its content, **and** colour space.
 ///
 /// Building one of these is not free: `CubeLUT.makeFilter` hands Core Image the whole flattened cube,
 /// which for a 65³ LUT is 65³ × 4 floats ≈ **4.4 MB**. Rebuilding it per render — and a slider drag is
@@ -30,8 +30,11 @@ final class LUTFilterCache {
     /// Eight covers A/B-ing a handful of looks, which is the access pattern that actually repeats.
     static let defaultCapacity = 8
 
+    /// The content hash makes a `.cube` replaced in place under the same `LUTID` a different entry,
+    /// so a stale cube is unreachable rather than merely flushed by a scan.
     private struct Key: Hashable {
         let lut: LUTID
+        let contentHash: String
         let space: WorkingSpace
     }
 
@@ -54,7 +57,7 @@ final class LUTFilterCache {
         var interval = KromoraObservability.begin(.cache, quality: .preview)
         defer { interval.end() }
 
-        let key = Key(lut: lut.lutID, space: space)
+        let key = Key(lut: lut.lutID, contentHash: lut.contentHash, space: space)
 
         if let cached = filters[key] {
             hitCount += 1
@@ -77,6 +80,13 @@ final class LUTFilterCache {
     func removeAll() {
         filters.removeAll()
         usage.removeAll()
+    }
+
+    /// Drop every filter built for one of `ids`, whatever its content or space. Hygiene for a Look
+    /// whose bytes changed: the old entry is already unreachable, this just releases its memory.
+    func remove(lutIDs ids: Set<LUTID>) {
+        filters = filters.filter { !ids.contains($0.key.lut) }
+        usage.removeAll { ids.contains($0.lut) }
     }
 
     /// How many filters are currently held. Exists for the tests that pin the eviction policy.

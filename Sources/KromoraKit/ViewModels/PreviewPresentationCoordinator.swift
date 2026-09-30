@@ -62,11 +62,17 @@ final class PreviewPresentationCoordinator {
         }
     }
 
-    func cacheKey(for request: RenderRequest) -> PreviewDiskCache.Key {
-        PreviewDiskCache.Key(
+    /// The exact-pixel key for a canonical request, or `nil` when its Look is unresolved. An
+    /// unresolved request renders provisional (ungraded) pixels: they may be shown, but must be
+    /// neither served from nor written to the durable cache, whichever side of a Look scan the
+    /// request falls on.
+    func cacheKey(for request: RenderRequest) -> PreviewDiskCache.Key? {
+        let look = request.lookSignature
+        guard look.permitsExactReuse else { return nil }
+        return PreviewDiskCache.Key(
             identity: request.source.cacheIdentity,
             documentHash: request.document.editHash,
-            lookFingerprint: request.lut?.cacheFingerprint ?? "unresolved",
+            look: look,
             targetSizeBucket: String(PreviewDiskCache.canonicalLongEdge),
             space: request.space,
             pipelineVersion: RenderPipeline.cacheVersion
@@ -104,8 +110,8 @@ final class PreviewPresentationCoordinator {
     /// applies the same complete-frame/ROI rule. A key has one cancellable task, so rapid settled
     /// frames cannot leave a detached rasterization task per document tick.
     func writeCanonical(_ image: CIImage, for request: RenderRequest) {
-        guard request.quality == .preview, request.sourceROI == nil else { return }
-        let key = cacheKey(for: request)
+        guard request.quality == .preview, request.sourceROI == nil,
+              let key = cacheKey(for: request) else { return }
         canonicalWriteTasks[key]?.cancel()
         let cache = self.cache
         let engine = self.engine

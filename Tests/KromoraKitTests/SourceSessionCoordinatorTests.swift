@@ -137,7 +137,7 @@ final class SourceSessionCoordinatorTests: XCTestCase {
             quality: .preview
         )
         XCTAssertEqual(
-            coordinator.cacheKey(for: request).identity,
+            coordinator.cacheKey(for: request)?.identity,
             source.cacheIdentity
         )
         try? FileManager.default.removeItem(at: directory)

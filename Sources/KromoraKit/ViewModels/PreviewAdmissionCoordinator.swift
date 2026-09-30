@@ -522,7 +522,14 @@ final class PreviewAdmissionCoordinator {
                 assetID: assetID, sourceRevision: sourceRevision, displayRevision: displayRevision)
             return
         }
-        let key = destination.admissionPresentation.cacheKey(for: request)
+        // An unresolved Look has no exact key: skip the lookup and render provisional pixels.
+        guard let key = destination.admissionPresentation.cacheKey(for: request) else {
+            destination.admissionPresentation.cancelCacheLookup()
+            pendingPreviewCacheLookup = nil
+            submit(request, preemptsPredecessor: preemptsPredecessor,
+                assetID: assetID, sourceRevision: sourceRevision, displayRevision: displayRevision)
+            return
+        }
         destination.admissionPresentation.lookupCache(for: key) { [weak self, weak destination] cached in
             guard let self, let destination, !destination.admissionIsShuttingDown,
                 destination.admissionSourceRevision == sourceRevision,
@@ -883,10 +890,12 @@ final class PreviewAdmissionCoordinator {
                 source: candidate.source, assetID: candidate.reference.assetID, document: document,
                 lut: destination.admissionResolvedLUT(document.lut.lutID), plan: plan, canonical: true
             )
+            // An unresolved Look cannot be cached, so idle building it would render for nothing.
             let key = destination.admissionPresentation.cacheKey(for: request)
             workItems.append(IdlePreviewWorkItem(
                 cursor: cursor,
-                request: destination.admissionPresentation.cache.contains(key) ? nil : request
+                request: key.map { destination.admissionPresentation.cache.contains($0) } == false
+                    ? request : nil
             ))
         }
         guard !workItems.isEmpty, !Task.isCancelled else { return }
@@ -912,8 +921,7 @@ final class PreviewAdmissionCoordinator {
                     guard let request = item.request else {
                         self.idleBuildCursor = item.cursor + 1; continue
                     }
-                    let key = presentation.cacheKey(for: request)
-                    guard !cache.contains(key) else {
+                    guard let key = presentation.cacheKey(for: request), !cache.contains(key) else {
                         self.idleBuildCursor = item.cursor + 1; continue
                     }
                     let image = await engine.makeCIImage(request)

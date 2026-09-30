@@ -53,10 +53,16 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
     let source: LUTSource
     private let tableData: Data  // flattened RGBARGBA... float32 for Core Image
 
+    /// SHA-256 of the `.cube` file bytes this table was parsed from (of the table itself for an
+    /// in-memory LUT). File bytes are the domain of `PortablePackageLookReference.contentHash`, so
+    /// a live Look and a saved revision that embeds the same file report the same hash. Computed
+    /// once while parsing, off the main actor; reading it is free.
+    let contentHash: String
+
     /// Includes table contents as well as the stable LUT ID, so replacing a file in place cannot
     /// reuse a final preview merely because the path stayed the same.
     var cacheFingerprint: String {
-        RenderCacheHash.digest(tableData) + ":" + id
+        contentHash + ":" + id
     }
 
     // MARK: - Hashable
@@ -94,6 +100,7 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         }
         let table = floats.withUnsafeBufferPointer { Data(buffer: $0) }
         self.tableData = table
+        self.contentHash = RenderCacheHash.digest(table)
         // The table has to be built before the ID, because the ID is made from it.
         self.id = sourceURL.map(Self.canonicalPath) ?? Self.derivedID(name: name, table: table)
     }
@@ -359,6 +366,9 @@ struct CubeLUT: Identifiable, Hashable, Sendable {
         self.tableData = floats.withUnsafeBufferPointer { buffer in
             Data(buffer: buffer)
         }
+        // The reader has now consumed the whole file, so this is the hash of exactly the bytes
+        // that were parsed — a file replaced mid-parse cannot pair old bytes with a new hash.
+        self.contentHash = reader.contentHash()
     }
 
     private static func canonicalPath(_ url: URL) -> String {
@@ -523,6 +533,7 @@ private final class LUTLineReader {
     private var chunk: [UInt8] = []
     private var chunkIndex = 0
     private var reachedEOF = false
+    private var hasher = SHA256()
 
     init(url: URL, maximumFileBytes: Int, maximumLineBytes: Int) throws {
         do {
@@ -588,9 +599,17 @@ private final class LUTLineReader {
         return line
     }
 
+    /// SHA-256 (lowercase hex) of every byte read so far. Meaningful once `readLine` has returned
+    /// `nil`, i.e. after end of file.
+    func contentHash() -> String {
+        hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
     private func read(upToCount count: Int) throws -> Data {
         do {
-            return try handle.read(upToCount: count) ?? Data()
+            let data = try handle.read(upToCount: count) ?? Data()
+            hasher.update(data: data)
+            return data
         } catch {
             throw LUTError.unreadable(error.localizedDescription)
         }

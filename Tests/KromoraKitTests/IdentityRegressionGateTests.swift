@@ -69,7 +69,7 @@ final class IdentityRegressionGateTests: TempDirectoryTestCase {
         let previewKey = PreviewDiskCache.Key(
             identity: representative.identity,
             documentHash: representative.document.editHash,
-            lookFingerprint: "none",
+            look: .none,
             targetSizeBucket: "32",
             space: .sRGB
         )
@@ -136,7 +136,7 @@ final class IdentityRegressionGateTests: TempDirectoryTestCase {
         let movedPreviewKey = PreviewDiskCache.Key(
             identity: movedRepresentative.identity,
             documentHash: movedRepresentative.document.editHash,
-            lookFingerprint: "none",
+            look: .none,
             targetSizeBucket: "32",
             space: .sRGB
         )
