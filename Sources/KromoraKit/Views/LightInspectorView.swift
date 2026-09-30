@@ -140,52 +140,53 @@ private struct ToneCurveEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The segmented control takes exactly the width the inspector offers instead of its
-            // intrinsic segment width, so it cannot resize when a parent re-proposes sizes.
-            Picker("Channel", selection: $channel) {
-                ForEach(ToneCurveChannel.allCases) { item in Text(item.rawValue).tag(item) }
-            }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(maxWidth: .infinity)
-
-            GeometryReader { proxy in
-                let size = proxy.size
-                ZStack {
-                    curveGraph(size: size)
-                        .contentShape(Rectangle())
-                    // Keep the handle view's identity tied to its slot, not its changing input.
-                    // Re-keying by input while a drag is in flight can tear down the gesture as
-                    // soon as the handle follows the pointer.
-                    ForEach(Array(editablePoints.enumerated()), id: \.offset) { _, point in
-                        pointHandle(point, size: size)
+            // The tabs sit flush under the graph so the two read as one attached control.
+            VStack(spacing: 0) {
+                GeometryReader { proxy in
+                    let size = proxy.size
+                    ZStack {
+                        curveGraph(size: size)
+                            .contentShape(Rectangle())
+                        // Keep the handle view's identity tied to its slot, not its changing input.
+                        // Re-keying by input while a drag is in flight can tear down the gesture as
+                        // soon as the handle follows the pointer.
+                        ForEach(Array(editablePoints.enumerated()), id: \.offset) { _, point in
+                            pointHandle(point, size: size)
+                        }
                     }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                    // A zero-distance graph gesture turns a press on the curve into both the add and
+                    // drag operation. Handle views only provide their double-click removal gesture;
+                    // selecting and moving every point therefore uses one graph coordinate space.
+                    .gesture(curveDragGesture(size: size))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel("\(channel.rawValue) tone curve")
                 }
+                // Keep the graph square and exactly as wide as the channel tabs below it, so both
+                // edges share the same gutters. The scrolling inspector recomputes its content size
+                // while a source loads and while previews publish. Pin the graph's vertical ideal
+                // size to its width so those parent height proposals cannot stretch the chart or
+                // move the controls below it. The inspector column is width-capped, so no extra
+                // graph width cap is needed.
+                .aspectRatio(1, contentMode: .fit)
                 .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
-                // A zero-distance graph gesture turns a press on the curve into both the add and
-                // drag operation. Handle views only provide their double-click removal gesture;
-                // selecting and moving every point therefore uses one graph coordinate space.
-                .gesture(curveDragGesture(size: size))
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("\(channel.rawValue) tone curve")
-            }
-            // Keep the graph square and exactly as wide as the channel tabs above it, so both
-            // edges share the same gutters. The scrolling inspector recomputes its content size
-            // while a source loads and while previews publish. Pin the graph's vertical ideal
-            // size to its width so those parent height proposals cannot stretch the chart or
-            // move the controls below it. The inspector column is width-capped, so no extra
-            // graph width cap is needed.
-            .aspectRatio(1, contentMode: .fit)
-            .frame(maxWidth: .infinity)
-            .fixedSize(horizontal: false, vertical: true)
-            // Extra air between the channel tabs and the map, on top of the stack spacing.
-            .padding(.top, 6)
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
-                finishCurveDrag()
-            }
-            .onDisappear {
-                finishCurveDrag()
+                .fixedSize(horizontal: false, vertical: true)
+                // Corner handles overhang the graph by half their size. Keep the graph above the
+                // tabs so the bottom-left handle's lower half still wins the hit test.
+                .zIndex(1)
+                .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
+                    finishCurveDrag()
+                }
+                .onDisappear {
+                    finishCurveDrag()
+                }
+
+                // Plain SwiftUI tabs, not an AppKit segmented control: `NSSegmentedControl` carries its
+                // own intrinsic width and re-measures on selection, which pushed the whole section
+                // past the inspector rail while previews published. Equal-width tabs always take
+                // exactly the width offered.
+                channelTabs
             }
 
             HStack {
@@ -199,6 +200,59 @@ private struct ToneCurveEditor: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Square top edge where the tabs meet the graph, rounded bottom corners.
+    private static let tabShape = UnevenRoundedRectangle(
+        bottomLeadingRadius: 5, bottomTrailingRadius: 5, style: .continuous
+    )
+    private static let graphShape = UnevenRoundedRectangle(
+        topLeadingRadius: 5, topTrailingRadius: 5, style: .continuous
+    )
+
+    /// Master keeps the app accent; the color channels draw in their own hue.
+    private func curveColor(for channel: ToneCurveChannel) -> Color {
+        switch channel {
+        case .master: KromoraTheme.primaryAccent
+        case .red: .red
+        case .green: .green
+        case .blue: .blue
+        }
+    }
+
+    private var channelTabs: some View {
+        HStack(spacing: 0) {
+            ForEach(ToneCurveChannel.allCases) { item in
+                let isSelected = channel == item
+                Button {
+                    channel = item
+                } label: {
+                    Text(item.rawValue)
+                        .font(.system(.caption2, design: .monospaced))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                        .frame(maxWidth: .infinity, minHeight: 26)
+                        .background {
+                            if isSelected { curveColor(for: item).opacity(0.22) }
+                        }
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(item.rawValue) channel")
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+                .overlay(alignment: .trailing) {
+                    if item != ToneCurveChannel.allCases.last {
+                        Rectangle().fill(KromoraTheme.analysisBorder).frame(width: 1)
+                    }
+                }
+            }
+        }
+        .background(KromoraTheme.analysisBackground)
+        .clipShape(Self.tabShape)
+        .overlay(Self.tabShape.stroke(KromoraTheme.analysisBorder, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Tone curve channel")
+    }
+
     private var editablePoints: [LightCurvePoint] {
         viewModel.document.light.toneCurve(for: channel).points
     }
@@ -208,7 +262,7 @@ private struct ToneCurveEditor: View {
             let rect = CGRect(origin: .zero, size: canvasSize)
             // Tone-curve analysis is intentionally dark for consistent grid/curve contrast;
             // this fill is limited to the graph and is not an inspector-wide appearance choice.
-            context.fill(Path(roundedRect: rect, cornerRadius: 5), with: .color(KromoraTheme.analysisBackground))
+            context.fill(Path(rect), with: .color(KromoraTheme.analysisBackground))
 
             var grid = Path()
             for fraction in stride(from: 0.25, through: 0.75, by: 0.25) {
@@ -235,9 +289,9 @@ private struct ToneCurveEditor: View {
                 if index == 0 { path.move(to: point) }
                 else { path.addLine(to: point) }
             }
-            context.stroke(path, with: .color(KromoraTheme.primaryAccent), style: StrokeStyle(lineWidth: 2))
+            context.stroke(path, with: .color(curveColor(for: channel)), style: StrokeStyle(lineWidth: 2))
         }
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .clipShape(Self.graphShape)
     }
 
     private func pointHandle(_ point: LightCurvePoint, size: CGSize) -> some View {
@@ -245,7 +299,7 @@ private struct ToneCurveEditor: View {
         // until its primary action resolves on mouse-up. That can leave a handle drag dependent
         // on the release path instead of publishing its changing location immediately.
         Circle()
-            .fill(KromoraTheme.primaryAccent)
+            .fill(curveColor(for: channel))
             .overlay(Circle().stroke(.white, lineWidth: 1))
             .frame(width: 12, height: 12)
             .shadow(radius: 1)

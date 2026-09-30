@@ -96,8 +96,13 @@ struct InspectorDisclosure<Content: View>: View {
             }
 
             if isExpanded {
-                content()
-                    .transition(.opacity)
+                // Section content that reports more than the rail offered (a segmented picker's
+                // intrinsic width, say) is placed at that wider size and overflows the right
+                // edge while previews publish. Clamp every section to the width it is given.
+                FitsProposedWidth(reportsProposedHeight: false) {
+                    content()
+                }
+                .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -139,6 +144,10 @@ struct InspectorScrollingContent<Content: View>: View {
 
 /// Reports the width the parent offered, even when a child would rather be wider.
 struct FitsProposedWidth: Layout {
+    /// The scroll root claims a finite proposed height; nested section clamps must report
+    /// their content's height so a parent stack's height proposal cannot inflate them.
+    var reportsProposedHeight = true
+
     /// The proposal the child was last measured with. `placeSubviews` reuses it verbatim
     /// so the child is never measured with one proposal and placed with another: a
     /// measure/place mismatch reports a new size after placement, which keeps the
@@ -164,7 +173,10 @@ struct FitsProposedWidth: Layout {
         // widening the scroll document during that pass. A concrete proposal still updates the
         // cache immediately, so resizing the inspector remains responsive.
         let width: CGFloat
-        if let proposedWidth = proposal.width {
+        // Only a finite width is a real viewport width. A scroll view also probes with
+        // `.infinity` (max-size) and `0` (min-size); caching those would make later unspecified
+        // passes, and the placement proposal, resolve to an unbounded width.
+        if let proposedWidth = proposal.width, proposedWidth.isFinite, proposedWidth > 0 {
             width = proposedWidth
             cache.lastProposedWidth = proposedWidth
         } else if let lastProposedWidth = cache.lastProposedWidth {
@@ -175,7 +187,10 @@ struct FitsProposedWidth: Layout {
         let measure = ProposedViewSize(width: width, height: proposal.height)
         cache.proposal = measure
         let childSize = child.sizeThatFits(measure)
-        return CGSize(width: width, height: proposal.height ?? childSize.height)
+        return CGSize(
+            width: width,
+            height: reportsProposedHeight ? (proposal.height ?? childSize.height) : childSize.height
+        )
     }
 
     func placeSubviews(
@@ -187,7 +202,9 @@ struct FitsProposedWidth: Layout {
         subviews.first?.place(
             at: CGPoint(x: bounds.minX, y: bounds.minY),
             anchor: .topLeading,
-            proposal: cache.proposal
+            // Place at the width actually granted, so a probe pass that overwrote the cached
+            // proposal cannot widen the child beyond the inspector rail.
+            proposal: ProposedViewSize(width: bounds.width, height: cache.proposal.height)
         )
     }
 }
