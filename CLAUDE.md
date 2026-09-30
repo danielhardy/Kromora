@@ -14,12 +14,13 @@ Kromora is a native RAW photo editor (**Swift 6 language mode**, SwiftUI + Core 
   RAW-fixture and benchmark methods are opt-in through `scripts/ci-tests.sh optional`, then CI
   builds and verifies the packaged app.
 
-CI runs on `macos-26` with Xcode 26 and the macOS 26 SDK. The package, app bundle, and distributable
-build all target **macOS 26 (Tahoe) on Apple Silicon**, so the SDK and deployment floor match and Tahoe
-APIs are used directly. Do not add `#available` branches, alternate code paths, or universal-binary
-support to keep an older OS or Intel Mac working.
+CI runs on GitHub Actions' arm64 `xcode-27` image with Xcode 27 and the macOS 27 SDK. That hosted
+image is currently in preview. The package, app bundle, and distributable still target **macOS 26
+(Tahoe) on Apple Silicon**; keep product API usage compatible with that deployment floor. Do not add
+`#available` branches, alternate code paths, or universal-binary support to keep an older OS or Intel
+Mac working.
 
-**Requires Xcode 26 or newer to build.** Symbols that exist only in the macOS 26 SDK, such as
+**Requires Xcode 27 or newer to build.** Symbols available in the macOS 26 SDK, such as
 `CIRAWFilter.isHighlightRecoveryEnabled`, are part of the product baseline. An availability check cannot
 supply a symbol the SDK never declared, and this project does not keep a fallback for that case.
 
