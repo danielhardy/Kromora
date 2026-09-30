@@ -726,7 +726,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     let libraryMediaWorkflow: LibraryMediaWorkflowCoordinator
     private let libraryDeletionCoordinator: LibraryDeletionCoordinator
     private lazy var libraryBrowsingCoordinator = LibraryBrowsingCoordinator(
-        collection: collection, library: portableLibrary, destination: self
+        collection: collection, library: portableLibrary, destination: self,
+        scheduler: workScheduler, frameStore: thumbnailFrameStore,
+        hintsStore: LaunchHintsStore(url: KromoraStorage.launchHintsURL())
     )
     private let applicationShell: ApplicationShellCoordinator
     /// Compatibility façade for diagnostics and package-maintenance tests. Lifecycle ownership
@@ -1267,6 +1269,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
+        libraryBrowsingCoordinator.prepareLaunchHints()
         if let portableLibrary, portableLibrary.isLoadingIndex {
             statusMessage = "Opening library index…"
         }
@@ -4508,6 +4511,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         applicationShell.onApplicationActivated = nil
         cancellables.removeAll()
         await applicationShell.shutdown()
+
+        await libraryBrowsingCoordinator.shutdown()
 
         // Collection shutdown ends its discovery stream before awaiting the consumer. This also
         // prevents a late scan batch from admitting another thumbnail job.

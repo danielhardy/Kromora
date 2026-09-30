@@ -44,8 +44,13 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         }
 
         var queryPageSize: Int { pageSize }
+        var assetCount: Int { assets.count }
         var portableSelectedIDs: Set<PortablePhotoAssetID> { selectedIDs }
         var portableActiveID: PortablePhotoAssetID? { activeID }
+        var libraryID = UUID()
+        func launchHintAssets(for ids: [PortablePhotoAssetID]) -> [PhotoAsset] {
+            assets.filter { ids.contains($0.source.portableIdentity.assetID) }
+        }
 
         func browsingWindow(pageIndex: Int, query: LibraryQuery) throws
             -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
@@ -172,6 +177,33 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         coordinator.openPortableAsset(PortablePhotoAssetID())
         XCTAssertEqual(destination.opened.count, 1)
         XCTAssertEqual(destination.status.last, "The imported photo is not available in the package index.")
+    }
+
+    func testVisibleViewportWritesHintsWithoutRestoringSelection() async throws {
+        let collection = ImageCollection(scheduler: ImageWorkScheduler())
+        collections.append(collection)
+        let library = FakeLibrary(count: 3, pageSize: 3)
+        let destination = FakeDestination()
+        let root = try Fixtures.makeTempDirectory("LibraryBrowsingLaunchHints")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LaunchHintsStore(url: root.appendingPathComponent("hints.json"))
+        let coordinator = LibraryBrowsingCoordinator(
+            collection: collection, library: library, destination: destination,
+            hintsStore: store
+        )
+        try coordinator.reloadPortableWindow()
+        let visibleID = collection.items[1].id
+        collection.requestVisibleThumbnails(for: [visibleID])
+        try await Task.sleep(for: .milliseconds(20))
+        await coordinator.shutdown()
+
+        let persisted = await store.load(for: library.libraryID)
+        guard case .valid(let hints) = persisted else {
+            return XCTFail("the actual viewport should persist launch hints")
+        }
+        XCTAssertEqual(hints.visibleAssetIDs, [library.assets[1].source.portableIdentity.assetID])
+        XCTAssertNil(hints.activeAssetID)
+        XCTAssertTrue(library.selectedIDs.isEmpty, "launch hints do not become selection truth")
     }
 
     func testCullingPersistsOnlyWhenStateChanges() throws {
