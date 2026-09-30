@@ -152,6 +152,34 @@ final class LibraryDeletionCoordinatorTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
+    func testRetryAfterPartialPortableRemovalFinishesInsteadOfFailing() async throws {
+        let source = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "partial.png", in: tempDirectory
+        )
+        let packageURL = tempDirectory.appendingPathComponent("partial.kromora")
+        let session = try PortableLibrarySession(at: packageURL)
+        try session.importURLs([source])
+        let asset = try XCTUnwrap(try session.materializedAssets().first)
+        let collection = makeTestCollection(libraryFolderURL: packageURL)
+        collection.loadPortableAssets([asset])
+        let item = try XCTUnwrap(collection.items.first)
+        let store = makeInMemoryEditStore()
+        let analysis = makeAnalysisCoordinator()
+        let coordinator = makeCoordinator(
+            collection: collection, persistence: EditPersistenceCoordinator(store: store),
+            store: store, analysis: analysis, portableLibrary: session
+        )
+        // An earlier attempt committed the package tombstone but the item is still presented.
+        try session.removeFromLibrary(item.asset.source.portableIdentity.assetID)
+
+        let result = await coordinator.delete([candidate(for: item, in: collection)])
+
+        XCTAssertEqual(result.deletedIDs, [item.id])
+        XCTAssertTrue(result.failures.isEmpty)
+        await analysis.shutdown()
+        await collection.shutdown()
+    }
+
     func testTrashIsRestoredWhenEditDeletionFails() async throws {
         let source = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "rollback.png", in: tempDirectory

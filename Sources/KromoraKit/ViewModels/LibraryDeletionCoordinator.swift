@@ -75,6 +75,10 @@ final class LibraryDeletionCoordinator {
             do {
                 do {
                     try portableLibrary.removeFromLibrary(item.asset.source.portableIdentity.assetID)
+                } catch PortablePackageTrashError.alreadyRemoved {
+                    // Membership is already tombstoned by an earlier, partially completed removal.
+                    // Removal is idempotent: fall through to finish the edit-record cleanup so the
+                    // item leaves the grid instead of failing on every retry.
                 } catch let error as PortablePackageTrashError
                     where allowsUnregisteredSourceDeletion && isAssetNotFound(error)
                 {

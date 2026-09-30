@@ -3,7 +3,7 @@ import Foundation
 /// Package-native removal is deliberately separate from the current folder-backed Library
 /// deletion workflow (KRMA-371). It changes only a portable package and never calls the current
 /// library's deletion or Trash code.
-enum PortablePackageTrashError: Error, Equatable, CustomStringConvertible {
+enum PortablePackageTrashError: LocalizedError, Equatable, CustomStringConvertible {
     case assetNotFound(PortablePhotoAssetID)
     case alreadyRemoved(PortablePhotoAssetID)
     case missingQuarantine(PortablePhotoAssetID)
@@ -22,6 +22,8 @@ enum PortablePackageTrashError: Error, Equatable, CustomStringConvertible {
             return "Referenced asset is not owned by the package: \(assetID.raw)"
         }
     }
+
+    var errorDescription: String? { description }
 }
 
 struct PortablePackageRemovalResult: Equatable, Sendable {
