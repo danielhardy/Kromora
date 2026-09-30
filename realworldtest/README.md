@@ -1,20 +1,23 @@
-# Real-world test photos
+# Local real-world image fixtures
 
-Camera RAW files are intentionally not stored in this repository. They are large, carry embedded
-metadata, and may include people, locations, or other material whose redistribution rights are not
-covered by the source photographer's license. This directory is only the documentation anchor for
-local opt-in fixtures.
-
-To run the optional RAW regression lane, point it at a directory containing a license-cleared RAW and,
-for derive tests, a same-stem in-camera JPG pair:
+This is a local-only fixture folder. Put RAW images here to make them available to RAW-dependent
+tests. `Fixtures.localRAWURLs` discovers supported RAW files in this directory automatically; no
+environment variable is needed. Tests that inspect every image visit all discovered RAWs; tests
+that need one image use the first filename-sorted RAW. To isolate one input, point
+`KROMORA_RAW_FIXTURE_DIR` at a directory containing only that RAW. The optional lane can be run with:
 
 ```bash
-KROMORA_RAW_FIXTURE_DIR=/absolute/path/to/fixtures \
 scripts/ci-tests.sh optional
 ```
 
-Do not commit those files or add them to Git LFS without an approved remote storage, retention, and
-access policy. The normal required lanes use generated fixtures and remain fully runnable without them.
+The RAW extensions currently recognized are DNG, CR2, CR3, NEF, ARW, ORF, RAF, RW2, PEF, SRW, X3F,
+and RAW. Standard formats such as HEIC are not selected by the RAW fixture helpers. For KRMA-737,
+place `IMG_0371.DNG` here to make it part of the per-image decoder-seed check. Tests that require a
+matching in-camera JPEG still need a same-stem pair in the fixture directory.
+
+Files in this folder are ignored by Git; only this README is tracked. Keep any local fixtures you add
+here out of commits unless the project explicitly changes that policy. Required test lanes use
+generated fixtures and continue to run without local images.
 
 The following terms apply to files Daniel Hardy has separately released for local project use:
 

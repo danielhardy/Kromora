@@ -28,7 +28,7 @@ the active MVP or roadmap.
 | [`LIBRARY_PACKAGE_FORMAT.md`](LIBRARY_PACKAGE_FORMAT.md) | Format reference | Portable package record and compatibility format; runtime behavior is governed by storage and architecture guides. |
 | [`BRANDING.md`](../BRANDING.md) | Current identity policy | Branding, attribution, and redistribution. |
 | [`scripts/README.md`](../scripts/README.md) | Current operations | Script entry points and prerequisites. |
-| [`realworldtest/README.md`](../realworldtest/README.md) | Current fixture policy | Licensed local camera-file policy and real-world checks. |
+| [`realworldtest/README.md`](../realworldtest/README.md) | Current fixture policy | Local-only camera-file policy and real-world checks. |
 | [`CLAUDE.md`](../CLAUDE.md), [`AGENTS.md`](../AGENTS.md) | Current contributor guidance | Build, code, repository, and agent workflow rules. |
 | [`.dg/AGENTS.md`](../.dg/AGENTS.md), [`.dg/README.md`](../.dg/README.md) | Current workflow guidance | DispatchGraph lifecycle and issue operations. |
 

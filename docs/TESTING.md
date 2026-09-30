@@ -48,8 +48,8 @@ The report is gitignored and contains real original/Auto-rendered pixels, a comp
 difference, and the returned subject mask when Vision provides one. AI-generated photo-intelligence
 fixtures (KRMA-459 Part C) may be committed under the tests target resources within a ≤ 5 MB budget,
 with a provenance manifest recording generator, model, date, and prompt. Procedural tone fixtures
-remain generated at test time. Licensed RAW / non-redistributable camera files still stay outside
-the checkout via `KROMORA_RAW_FIXTURE_DIR`.
+remain generated at test time. Local camera RAWs in the gitignored `realworldtest/` folder are used
+only by the opt-in RAW lane.
 
 The Auto pixel evaluator, report value, artifact writer, and Vision-aesthetics probe are test-target
 support code under `Tests/KromoraKitTests/Support`. `KromoraKit` keeps only the small
@@ -72,8 +72,8 @@ described there.
 
 ## Optional RAW and performance work
 
-Use a licensed RAW outside the checkout and set `KROMORA_RAW_FIXTURE_DIR` as required by the
-specific test. The real drawable benchmark requires a logged-in display:
+Use local RAW fixtures in `realworldtest/` by default, or set `KROMORA_RAW_FIXTURE_DIR` to another
+fixture directory. The real drawable benchmark requires a logged-in display:
 
 ```sh
 KROMORA_METAL_BENCHMARK=1 \

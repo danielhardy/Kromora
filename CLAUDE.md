@@ -59,8 +59,9 @@ The package is split so the app's code is testable (`@testable` can't import an 
 - `Tests/KromoraKitTests/` — XCTest. **Most fixtures are generated, never committed** (`Fixtures.swift`
   builds `.cube` files and orientation-tagged JPEGs into a temp dir). Exception (KRMA-459): a small
   set of AI-generated photo-intelligence JPEGs (≤ 5 MB total, each ≤ 500 KB) may be committed under
-  the tests target resources with a provenance manifest. Licensed camera files for the opt-in RAW
-  lane still live outside the checkout and are selected with `KROMORA_RAW_FIXTURE_DIR`.
+  the tests target resources with a provenance manifest. Local camera files for the opt-in RAW lane
+  belong in the gitignored `realworldtest/` folder and are selected with `KROMORA_RAW_FIXTURE_DIR`
+  when stored elsewhere. Keep them out of commits and document the workflow in its README.
 
 When a test needs to exercise private behavior, first consider testing through the existing boundary.
 Widen an implementation detail only when that makes the production boundary clearer and the test
