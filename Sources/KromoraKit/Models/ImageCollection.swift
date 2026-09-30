@@ -862,14 +862,11 @@ final class ImageCollectionPresentationModel {
 
     private func applyStoredFrames(
         _ frames: ThumbnailFrameStore.StoredFrames, itemID: PhotoAssetID,
-        identity: PortablePhotoIdentity, generation: UInt64,
-        allowHintIdentity: Bool = false
+        identity: PortablePhotoIdentity, generation: UInt64
     ) {
         guard generation == thumbnailGeneration,
               let item = items.first(where: { $0.id == itemID }),
-              allowHintIdentity
-                ? item.asset.source.portableIdentity.assetID == identity.assetID
-                : item.asset.source.portableIdentity == identity else { return }
+              item.asset.source.portableIdentity == identity else { return }
         if let hit = frames.edited,
            FrameClassifier.classify(hit.frame.metadata, against: FrameCurrentInputs(source: identity))
                .isPresentable
@@ -909,7 +906,7 @@ final class ImageCollectionPresentationModel {
         for (id, candidate) in frames {
             applyStoredFrames(
                 candidate.1, itemID: id, identity: candidate.0,
-                generation: thumbnailGeneration, allowHintIdentity: true
+                generation: thumbnailGeneration
             )
         }
     }

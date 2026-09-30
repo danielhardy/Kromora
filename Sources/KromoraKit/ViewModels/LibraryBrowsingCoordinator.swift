@@ -24,6 +24,12 @@ extension PortableLibrarySession: LibraryBrowsingProviding {
     var queryPageSize: Int { queryController.pageSize }
 }
 
+protocol LaunchHintFrameReading: Sendable {
+    func readFrames(for identity: PortablePhotoIdentity) async -> ThumbnailFrameStore.StoredFrames
+}
+
+extension ThumbnailFrameStore: LaunchHintFrameReading {}
+
 @MainActor
 protocol LibraryBrowsingDestination: AnyObject {
     var portableQuery: LibraryQuery { get set }
@@ -45,7 +51,7 @@ final class LibraryBrowsingCoordinator {
     private let collection: ImageCollection
     private let library: (any LibraryBrowsingProviding)?
     private let scheduler: ImageWorkScheduler?
-    private let frameStore: ThumbnailFrameStore?
+    private let frameStore: (any LaunchHintFrameReading)?
     private let hintsStore: LaunchHintsStore?
     weak var destination: (any LibraryBrowsingDestination)?
     private var launchHints: LaunchHints?
@@ -61,13 +67,16 @@ final class LibraryBrowsingCoordinator {
     private var launchStartedAt = ContinuousClock.now
     private var metrics = LaunchHydrationMetrics()
     private var launchReadSuperseded = false
+    private var hasPublishedVisibleIDs = false
+
+    var launchHydrationMetrics: LaunchHydrationMetrics { metrics }
 
     init(
         collection: ImageCollection,
         library: (any LibraryBrowsingProviding)?,
         destination: (any LibraryBrowsingDestination)? = nil,
         scheduler: ImageWorkScheduler? = nil,
-        frameStore: ThumbnailFrameStore? = nil,
+        frameStore: (any LaunchHintFrameReading)? = nil,
         hintsStore: LaunchHintsStore? = nil
     ) {
         self.collection = collection
@@ -174,6 +183,11 @@ final class LibraryBrowsingCoordinator {
     private func visibleIDsPublished(_ ids: [PhotoAssetID]) {
         guard library != nil else { return }
         latestVisibleIDs = ids
+        guard !hasPublishedVisibleIDs else {
+            scheduleLaunchHintsIfVisible()
+            return
+        }
+        hasPublishedVisibleIDs = true
         // The viewport is canonical. Flush only already completed matching hints into the
         // collection, then cancel queued/running speculative reads before admitting normal work.
         launchReadSuperseded = true
@@ -189,7 +203,7 @@ final class LibraryBrowsingCoordinator {
         KromoraObservability.event(.launchHintsSuperseded,
             detail: "superseded=\(metrics.superseded) useful=\(useful.count) bytes=\(metrics.bytesRead) reads=\(metrics.readCount)")
         KromoraObservability.event(.launchHydrationComplete,
-            detail: "validation=\(metrics.validation) visible_ms=\(metrics.timeToVisibleWindowMilliseconds ?? 0) first_index_ms=\(metrics.timeToFirstIndexPageMilliseconds ?? 0)")
+            detail: "validation=\(metrics.validation) useful=\(metrics.usefulHits) superseded=\(metrics.superseded) bytes=\(metrics.bytesRead) reads=\(metrics.readCount) visible_ms=\(metrics.timeToVisibleWindowMilliseconds ?? 0) first_index_ms=\(metrics.timeToFirstIndexPageMilliseconds ?? 0)")
         scheduleLaunchHintsIfVisible()
     }
 
