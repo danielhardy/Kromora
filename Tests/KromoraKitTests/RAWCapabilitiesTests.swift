@@ -148,7 +148,7 @@ final class RAWCapabilitiesTests: XCTestCase {
     func testEveryControlsSliderRangeIsPinned() {
         let expected: [DevelopControl: ClosedRange<Double>] = [
             .exposure: -4...4,                    // ours
-            .baselineExposure: -4...4,            // ours
+            .baselineExposure: -8...8,            // ours; local DNG seeds reach +5.42 EV
             .shadowBias: -10...10,                // ours
             .boost: 0...1,                        // documented: "Global tone curve, 0…1"
             .boostShadow: 0...2,                  // documented: "0…2 (<1 darkens, >1 lightens)"
