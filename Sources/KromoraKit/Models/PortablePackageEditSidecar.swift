@@ -373,8 +373,12 @@ extension PortableLibraryPackage {
         in transaction: inout PortablePackageTransaction
     ) throws -> PortablePackageMembershipEntry? {
         let shardName = PortableLibraryPackage.shard(for: assetID)
-        guard var shard = try? readMembershipShard(shardName),
-              let index = shard.entries.firstIndex(where: {
+        // A failure to read a shard is different from an asset with no live membership entry.
+        // Swallowing it here would let the asset record publish a new edit revision while the
+        // library keeps exposing its old geometry. Propagate the error so the whole transaction
+        // aborts; only the absence of a live entry is a legitimate no-op.
+        var shard = try readMembershipShard(shardName)
+        guard let index = shard.entries.firstIndex(where: {
                   $0.assetID == assetID && !$0.isTombstone
               })
         else { return nil }
