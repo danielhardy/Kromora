@@ -110,3 +110,42 @@ macOS UI session. Check light/dark appearance, Settings transitions, keyboard/fo
 behavior, inspector disclosure state, mask overlay and export parity, and icon/signature outputs.
 The app-level smoke test and the verification scripts under `scripts/` are the executable checks;
 the source and test names are the authoritative coverage map.
+
+## Last-known-frame qualification matrix
+
+The deterministic frame qualification is split across model, store, coordinator, package, and UI
+boundary suites so injected failures stay reproducible and do not depend on a screenshot:
+
+| Scenario | Deterministic coverage |
+| --- | --- |
+| Freshness rows, unresolved Looks, source replacement, color-space mismatch, and pixel-epoch changes | `PresentationFrameClassifierTests`, `LookSignatureTests` |
+| Truncated/overflow/corrupt preview envelopes, unsupported storage format, per-entry isolation, LRU cap and pinning | `PresentationFrameEnvelopeTests`, `LatestPreviewFrameStoreTests` |
+| Exact/stale/missing stored frames, candidate ordering, renderer failure, and obsolete generations | `WarmReopenPresentationTests`, `PreviewPresentationCoordinatorTests`, `EmbeddedFirstFrameTests`, `PreviewCutoverTests` |
+| Same-ID Look replacement and unchanged Look scans | `LUTLibraryTests`, `AppViewModelTests`, `EditedThumbnailCoordinatorTests` |
+| Transactional edit plus presented geometry and rollback | `PortableLibraryPackageTests.testEditRevisionAndPresentedGeometryPublishOrRollbackTogether` |
+| Packed-frame stable keys, read-window bounds, compaction, and interruptions | `ThumbnailFrameStoreTests`, `PortablePackageMaintenanceTests` |
+| Launch-hint schema faults, wrong library, removed IDs, viewport supersession, and stale completion | `LaunchHintsTests`, `LibraryBrowsingCoordinatorTests` |
+| Rapid selection, newest-pending work, stale render/thumbnail publication, and actual drawable callbacks | `FilmstripNavigationTests`, `ThumbnailSwitchLifecycleTests`, `IdentityRegressionGateTests`, `PreviewSurfaceTests` |
+
+Run this matrix with `swift test`, then `scripts/ci-tests.sh fast`, `serial`, and `identity`. These
+assertions establish correctness and bounded work; fake renderer timings remain orchestration data
+and do not count toward the release latency budgets.
+
+### KRMA-734 release qualification attempt (2026-09-30)
+
+The required warning gate, debug and Release app builds, full test suite, fast lane, serial lane, and
+identity lane passed. `scripts/ci-tests.sh optional` was also run with the local `IMG_0371.DNG`
+(8064×6048). It reported two failing test methods with three failed assertions: `ImageLoadingTests.testLoadingARAWGoesThroughCIRAWFilter`
+could not prepare that DNG through `RenderEngine`; `RAWCapabilitiesTests.testEveryPerImageSeedLandsStrictlyInsideItsSliderRange`
+found the decoder's Sharpness and Local Tone Map seeds at the slider maximum. The remaining 32
+optional methods skipped because their separate benchmark switches or matching RAW/JPEG pair were
+not available.
+
+The Release drawable capture was attempted on an Apple M4 Pro Mac mini (12 CPU cores, 48 GB RAM),
+macOS 27.2 build 26B5091g, source commit `986e73b41e0be9e87a31522c91ef715183c3dcf6`, with the same
+DNG and a 1280×800 drawable target, 30 requested samples. The Release app build passed, but the
+Release XCTest bundle did not link with the installed Xcode 27.0 beta (build 27A5252f): its SDK
+reported unresolved SwiftUI opaque descriptors and an unavailable `CoreAudioTypes` framework.
+The capture process never launched, so it produced no latency samples or drawable/frame counts.
+This attempt is not release-budget evidence. The warm Edit, 30-cell hydration, crossfade/swap, and
+layout budgets remain unmeasured until the Release capture can run with a supported test toolchain.
