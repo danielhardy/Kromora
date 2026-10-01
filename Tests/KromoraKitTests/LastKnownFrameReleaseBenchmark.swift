@@ -99,7 +99,12 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         }
         // Start in Edit and wait for the actual confirmed drawable, then sample repeated warm
         // Library → Edit handoffs. The synchronous call is the work done before its tasks yield.
+        let initialSelectionStart = CACurrentMediaTime()
         model.selectCollectionImage(at: rawIndex)
+        print(
+            "LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(milliseconds(since: initialSelectionStart))"
+        )
+        try await flushWindowPresentation(window)
         try await waitForDrawableFrame(model)
         try await Task.sleep(for: .milliseconds(300))
         let frameStore = LatestPreviewFrameStore(
@@ -147,11 +152,14 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
 
         let iterations = boundedIterations()
         _ = model.navigate(to: .grid)
+        try await settleGridNavigation(window)
         let exactActorStart = CACurrentMediaTime()
         let exactRendersBefore = model.previewRenderAdmissionCountForDiagnostics
         let exactCrossfadesBefore = model.previewSurface.crossfadeAdmissionCount
         model.selectCollectionImage(at: rawIndex)
         let exactMainActor = milliseconds(since: exactActorStart)
+        print("LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(exactMainActor)")
+        try await flushWindowPresentation(window)
         try await waitForDrawableFrame(model)
         let exactSession = try XCTUnwrap(model.presentationSessionForDiagnostics)
         try emit(
@@ -190,11 +198,14 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             ))
         await frameStore.waitForPendingWrites()
         _ = model.navigate(to: .grid)
+        try await settleGridNavigation(window)
         let staleActorStart = CACurrentMediaTime()
         let staleRendersBefore = model.previewRenderAdmissionCountForDiagnostics
         let staleCrossfadesBefore = model.previewSurface.crossfadeAdmissionCount
         model.selectCollectionImage(at: rawIndex)
         let staleMainActor = milliseconds(since: staleActorStart)
+        print("LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(staleMainActor)")
+        try await flushWindowPresentation(window)
         try await waitForDrawableFrame(model)
         let staleSession = try XCTUnwrap(model.presentationSessionForDiagnostics)
         try emit(
@@ -226,6 +237,7 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             let modeBeforeGrid = model.navigation.mode
             _ = model.navigate(to: .grid)
             if model.navigation.mode != modeBeforeGrid { editLayoutChanges += 1 }
+            try await settleGridNavigation(window)
             try await waitForVisibleGrid(model)
             editThumbnailSwaps += changedThumbnails(
                 from: thumbnailsBeforeGrid, to: thumbnailSnapshot(model)
@@ -236,7 +248,10 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             let modeBeforeEdit = model.navigation.mode
             model.selectCollectionImage(at: rawIndex)
             if model.navigation.mode != modeBeforeEdit { editLayoutChanges += 1 }
-            mainActorTimes.append(milliseconds(since: admissionStart))
+            let mainActorMilliseconds = milliseconds(since: admissionStart)
+            mainActorTimes.append(mainActorMilliseconds)
+            print("LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(mainActorMilliseconds)")
+            try await flushWindowPresentation(window)
             try await waitForDrawableFrame(model)
             guard let session = model.presentationSessionForDiagnostics else {
                 XCTFail("A drawable confirmation must leave a presentation session")
@@ -346,7 +361,25 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             }
             try await Task.sleep(for: .milliseconds(5))
         }
-        throw BenchmarkError.presentationTimedOut("drawable confirmation timed out")
+        throw BenchmarkError.presentationTimedOut(
+            "drawable confirmation timed out; mode=\(model.navigation.mode), "
+                + "state=\(model.previewState), status=\(model.statusMessage), "
+                + "session=\(String(describing: model.presentationSessionForDiagnostics))"
+        )
+    }
+
+    private func flushWindowPresentation(_ window: NSWindow) async throws {
+        window.displayIfNeeded()
+        try await Task.sleep(for: .milliseconds(20))
+        window.displayIfNeeded()
+    }
+
+    private func settleGridNavigation(_ window: NSWindow) async throws {
+        // Let SwiftUI commit the Library surface and AppKit remount its drawable before the next
+        // Edit selection. Without a run-loop turn, consecutive selections can reuse the old canvas.
+        try await Task.sleep(for: .milliseconds(20))
+        window.displayIfNeeded()
+        await Task.yield()
     }
 
     private func boundedIterations() -> Int {
