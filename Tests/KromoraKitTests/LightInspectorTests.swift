@@ -60,6 +60,10 @@ final class LightInspectorTests: TempDirectoryTestCase {
 
     func testToneCurveResetClearsOnlySelectedChannelAndIsUndoable() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let masterCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.25, output: 0.3),
+            LightCurvePoint(input: 0.75, output: 0.7),
+        ])
         let redCurve = LightToneCurve(points: [
             LightCurvePoint(input: 0.25, output: 0.35),
             LightCurvePoint(input: 0.75, output: 0.8),
@@ -69,15 +73,68 @@ final class LightInspectorTests: TempDirectoryTestCase {
             LightCurvePoint(input: 0.75, output: 0.65),
         ])
         viewModel.updateDocument {
+            $0.light.setToneCurve(masterCurve, for: .master)
             $0.light.setToneCurve(redCurve, for: .red)
             $0.light.setToneCurve(blueCurve, for: .blue)
         }
 
         viewModel.resetToneCurve(.red)
 
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .master), masterCurve)
         XCTAssertTrue(viewModel.document.light.toneCurve(for: .red).isIdentity)
         XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
         viewModel.undo()
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .master), masterCurve)
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .red), redCurve)
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
+    }
+
+    func testToneCurveEditingRoutesEveryOperationToSelectedChannel() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let masterCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.3, output: 0.4),
+        ])
+        let redCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.3, output: 0.25),
+        ])
+        let blueCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.7, output: 0.8),
+        ])
+        let greenCurve = LightToneCurve(points: [
+            LightCurvePoint(input: 0.25, output: 0.25),
+            LightCurvePoint(input: 0.75, output: 0.75),
+        ])
+        viewModel.updateDocument {
+            $0.light.setToneCurve(masterCurve, for: .master)
+            $0.light.setToneCurve(redCurve, for: .red)
+            $0.light.setToneCurve(greenCurve, for: .green)
+            $0.light.setToneCurve(blueCurve, for: .blue)
+        }
+
+        viewModel.addToneCurvePoint(input: 0.5, output: 0.55, channel: .green)
+        let addedPoint = try XCTUnwrap(
+            viewModel.document.light.toneCurve(for: .green).points.first { $0.input == 0.5 }
+        )
+        XCTAssertEqual(addedPoint.output, 0.55, accuracy: 0.000_001)
+
+        viewModel.setToneCurvePoint(addedPoint, input: 0.52, output: 0.58, channel: .green)
+        let movedPoint = try XCTUnwrap(
+            viewModel.document.light.toneCurve(for: .green).points.first { $0.input == 0.52 }
+        )
+        XCTAssertEqual(movedPoint.output, 0.58, accuracy: 0.000_001)
+
+        let actualInput = viewModel.moveToneCurvePoint(
+            fromInput: 0.52, input: 0.6, output: 0.62, channel: .green
+        )
+        XCTAssertEqual(actualInput ?? -1, 0.6, accuracy: 0.000_001)
+        viewModel.removeToneCurvePoint(atInput: 0.25, channel: .green)
+
+        let editedGreenCurve = viewModel.document.light.toneCurve(for: .green)
+        XCTAssertEqual(editedGreenCurve.points.dropFirst().dropLast().count, 2)
+        XCTAssertEqual(editedGreenCurve.points[1].input, 0.6, accuracy: 0.000_001)
+        XCTAssertEqual(editedGreenCurve.points[1].output, 0.62, accuracy: 0.000_001)
+        XCTAssertEqual(editedGreenCurve.points[2], LightCurvePoint(input: 0.75, output: 0.75))
+        XCTAssertEqual(viewModel.document.light.toneCurve(for: .master), masterCurve)
         XCTAssertEqual(viewModel.document.light.toneCurve(for: .red), redCurve)
         XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
     }
