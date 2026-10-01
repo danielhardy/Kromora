@@ -44,6 +44,7 @@ depends_on:
   - KRMA-732
   - KRMA-733
   - KRMA-737
+  - KRMA-743
 blockers:
   - id: evt_muoncf71_uxhj3k
     type: human
