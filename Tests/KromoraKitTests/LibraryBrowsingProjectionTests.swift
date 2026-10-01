@@ -161,4 +161,49 @@ final class LibraryBrowsingProjectionTests: TempDirectoryTestCase {
                        openedIdentity.sourceFingerprint.contentHash)
         XCTAssertEqual(source.portableIdentity.assetID, openedIdentity.assetID)
     }
+
+    /// Opening a browsing asset first resolves its durable record off the main actor. The canvas
+    /// must be fenced before that suspension, or the previously selected photo stays visible
+    /// until the record read finishes.
+    func testSelectingAnotherPackagePhotoClearsThePreviousPixelsBeforeResolvingItsRecord() async throws {
+        let session = try makeSession(assetCount: 2)
+        let viewModel = makeAppViewModel(
+            engine: FakeRenderEngine(),
+            portablePackageURL: tempDirectory.appendingPathComponent("Browsing.kromoralibrary"),
+            portableLibrarySession: session
+        )
+        viewModel.collection.loadPortableAssets(try session.browsingAssets())
+        await viewModel.collection.scanCompletion()
+        XCTAssertEqual(viewModel.collection.items.count, 2)
+
+        viewModel.selectCollectionImage(at: 0)
+        try await waitUntil("the first photo to present") {
+            viewModel.previewState == .ready && viewModel.previewSurface.image != nil
+        }
+
+        viewModel.selectCollectionImage(at: 1)
+        XCTAssertNil(
+            viewModel.previewSurface.image,
+            "the previous photo's pixels must be gone synchronously on selection"
+        )
+        XCTAssertEqual(viewModel.previewState, .loading)
+
+        try await waitUntil("the second photo to present") {
+            viewModel.previewState == .ready && viewModel.previewSurface.image != nil
+        }
+    }
+
+    private func waitUntil(
+        _ description: String,
+        timeout: Duration = .seconds(5),
+        _ condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            if ContinuousClock.now >= deadline {
+                throw TestSynchronizationError.timedOut(description, "condition did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
 }

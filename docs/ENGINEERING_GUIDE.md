@@ -188,6 +188,24 @@ compare keys themselves:
 | `exact` | every `FrameSignature` field equals the current inputs, Look resolved | present through the confirmed tail and skip the settled render |
 | `staleCompatible` | same photo, presentable, any input differs (including `pixelEpoch`) | paint inert pixels, render once, replace |
 
+`ThumbnailFrameStore` applies the same signature and classifier to Library and filmstrip cells. It is
+an actor facade over the packed thumbnail store and keeps at most two records per asset, `original`
+and latest `edited`, under stable keys derived from the asset UUID and kind (never from an edit or
+Look). Reads for the visible window are admitted before any source decode or render, through the
+scheduler's frame-read lane (`ThumbnailFrameReadPolicy`: at most 4 concurrent reads, the visible set
+plus one 24-photo prefetch page). An exact edited frame is published without rendering; a
+stale-compatible frame stays on screen while the cell renders and refines once; a missing or
+unusable one falls back to the original inside the cell's final geometry. Cell aspect comes from the
+package membership summary's `presentedAspectRatio`, written in the same transaction as the edit
+revision, so raster arrival never changes a cell's size.
+
+`LaunchHints` is a device-local, disposable accelerator in Application Support (`LaunchHints.json`):
+library ID, last active asset, and at most 64 de-duplicated visible asset IDs, validated by schema
+version and bounds. It is never navigation or library truth: Kromora still launches into Library, a
+missing, corrupt, or stale hint is ignored, and the real viewport supersedes it. Hinted frame reads
+run concurrently with index and Look startup under the same read limit and perform no decode or
+render.
+
 Rules that keep this safe:
 
 - Lookup starts at selection, from the collection's identity, in parallel with source preparation.

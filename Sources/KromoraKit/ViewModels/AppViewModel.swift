@@ -1883,6 +1883,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             isLoading = true
             isNavigationLoading = true
             previewState = .loading
+            // Fence the canvas before suspending, exactly as `load` does: the previous photo's
+            // pixels must never remain on screen while the selected photo's record resolves.
+            imageSource = nil
+            sourceImage = nil
+            previewPresentation.resetForSource()
+            previewSurface.clear()
             statusMessage = "Loading \(item.displayName)..."
             Task { @MainActor [weak self] in
                 guard let self else { return }
