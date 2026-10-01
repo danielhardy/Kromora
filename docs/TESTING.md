@@ -240,3 +240,31 @@ These KRMA-734 budgets therefore remain unmeasured: warm Edit navigation p95 <= 
 main-actor work before first suspension, exact warm Edit zero renders and one confirmed frame, stale
 warm Edit one provisional plus at most one confirmed frame, and warm 30-cell hydration p95 <= 100 ms.
 No target was redefined.
+
+### KRMA-742 last-known-frame Release capture (2026-09-30)
+
+Ran `scripts/run-kromora-capture.sh --benchmark last-known-frame --source
+realworldtest/DSC01019.ARW --iterations 5` on stable Xcode 27.0 (27A266a), macOS 27.0 build
+26A428, Apple M1 Pro MacBook Pro (10 cores, 16 GB), Release configuration, commit
+`29496b3df7cea4bc9e1d6b24074f15b5551ccb9d`. The source is ARW, metadata dimensions 9504×6336,
+decoded with `CIRAWFilter`; viewport 1440×897 points and 2880×1794 backing pixels. Exact and stale
+warm scenarios each ran once; the 30-cell grid and warm Edit selection ran five samples each.
+The first grid hydration was 1095.0 ms; the reported grid p95 covers warm samples.
+
+| Scenario | p50 / p95 first-pixel or hydration | Frames (provisional / confirmed) | Render admissions | Other counts |
+| --- | ---: | ---: | ---: | --- |
+| Exact warm Edit | 211.7 / 211.7 ms (1 sample) | 1 / 1 | 0 | 0 crossfades; 0 thumbnail swaps; 2 layout changes |
+| Stale warm Edit | 182.3 / 182.3 ms (1 sample) | 1 / 1 | 1 | 0 crossfades; 0 thumbnail swaps; 2 layout changes |
+| Warm 30-cell grid | 0.135 / 0.135 ms (5 samples) | 0 / 0 | 0 | 0 crossfades; 0 thumbnail swaps; 5 layout changes |
+| Warm Edit selection | 196.3 / 197.2 ms (5 samples) | 5 / 5 | 0 | 0 crossfades; 0 thumbnail swaps; 10 layout changes |
+
+The warm Edit main-actor selection call p95 was 289.0 ms. The grid p95 meets the <= 100 ms budget.
+Exact warm Edit used zero preview renders and had one confirmed drawable; stale warm Edit showed one
+provisional drawable followed by one confirmed replacement with one renderer admission. Warm Edit
+selection misses both limits: 197.2 ms versus <= 50 ms first provisional pixels, and 289.0 ms versus
+<= 2 ms main-actor work before the first asynchronous task. This is recorded in urgent follow-up
+KRMA-743. No budget was changed.
+
+Trace and full capture summary:
+`/tmp/kromora-capture-krma742/KROMORA-last-known-frame-DSC01019-20260930-213520.trace` and
+`/tmp/kromora-capture-krma742/KROMORA-last-known-frame-DSC01019-20260930-213520-summary.txt`.
