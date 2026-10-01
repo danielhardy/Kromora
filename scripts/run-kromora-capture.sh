@@ -193,10 +193,13 @@ case "$benchmark" in
         fi
         ;;
     last-known-frame)
+        report_path="$output_dir/${capture_id}-${source_stem}-${stamp}-report.jsonl"
+        : > "$report_path"
         benchmark_env=(
             --env KROMORA_LAST_KNOWN_FRAME_BENCHMARK=1
             --env "KROMORA_LAST_KNOWN_FRAME_RAW=$source_path"
             --env "KROMORA_LAST_KNOWN_FRAME_ITERATIONS=$last_known_iteration_count"
+            --env "KROMORA_LAST_KNOWN_FRAME_REPORT=$report_path"
         )
         ;;
 esac
@@ -271,3 +274,6 @@ fi
 
 print "trace=$trace_path"
 print "summary=$summary_path"
+if [[ "$benchmark" == "last-known-frame" ]]; then
+    print "report=$report_path"
+fi
