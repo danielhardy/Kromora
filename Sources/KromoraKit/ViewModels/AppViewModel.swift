@@ -932,6 +932,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         thumbnailFrameStoreDirectory: URL? = nil,
         portablePackageURL: URL,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
+        originalThumbnailProvider: @escaping ImageCollection.OriginalThumbnailProvider = { url, data, fingerprint, identity, store in
+            await OriginalThumbnailLoader.load(
+                url: url, data: data, dataFingerprint: fingerprint,
+                identity: identity, store: store
+            )
+        },
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
@@ -1017,7 +1023,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             engine: engine, scheduler: ImageWorkScheduler()
         )
         self.collection = ImageCollection(
-            scheduler: workScheduler
+            scheduler: workScheduler,
+            originalThumbnailProvider: originalThumbnailProvider
         )
         self.library = LUTLibrary(
             preferences: preferences,
