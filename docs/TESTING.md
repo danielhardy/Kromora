@@ -420,3 +420,30 @@ confirmed, main-actor time before first suspension p95 1.86 ms (≤ 2 ms; 1.99 m
 capture). Per ADR-LKF-001 the wall-clock budgets are release evidence, not a KRMA-734 gate, and
 remain **unmet** and unchanged under KRMA-750: warm Edit first pixel p50/p95 265 / 278 ms (target
 p95 ≤ 50 ms) and warm 30-cell grid p50/p95 219 / 230 ms (target p95 ≤ 100 ms).
+
+### Last-known-frame measured state after KRMA-746/747/751 (2026-10-01)
+
+Three consecutive `scripts/run-kromora-capture.sh --benchmark last-known-frame --source
+realworldtest/DSC01019.ARW --iterations 30` runs on commit `4bbc5c5f`, Release, Apple M1 Pro,
+macOS 27.0 (26A428), `DSC01019.ARW` (126 MB, 9504×6336), viewport 1440×897 points, 30 warm samples
+each. Values are the median across the three runs, with the three individual p95 values in
+parentheses. Reports: `/tmp/kromora-capture/KROMORA-final-{1,2,3}-DSC01019-20261001-*-report.jsonl`.
+
+| Scenario | p50 | p95 | Budget | Result |
+| --- | ---: | ---: | --- | --- |
+| Exact warm Edit | 293 ms | 293 ms (286/293/313) | zero renders, one confirmed frame | **pass** |
+| Stale warm Edit | 275 ms | 275 ms (274/275/276) | one provisional, at most one confirmed | **pass** |
+| Warm Edit first pixel | 279 ms | 293 ms (287/293/294) | p95 <= 50 ms | miss (was 664 ms before KRMA-746/747) |
+| Main-actor before first suspension | — | 2.03 ms (2.03/2.19/2.00) | <= 2 ms | **at the limit**, over by 0.03 ms at the median (was 72 ms) |
+| Warm 30-cell grid re-entry | 227 ms | 235 ms (235/238/235) | p95 <= 100 ms | miss (unchanged across attempts) |
+
+The whole-file SHA-256 on the main actor is gone (KRMA-746, KRMA-747). The first-pixel and grid
+misses are tracked, unchanged and non-gating, by KRMA-748 and KRMA-749 under KRMA-750 (see
+ADR-LKF-001). Exact warm Edit paints at about 290 ms with zero renders, so the remaining first-pixel
+time is Edit-surface mount and SwiftUI work, not rendering or hashing.
+
+Also fixed in this pass: a package-library photo selected from the filmstrip left the previous
+photo's pixels on the canvas while its record resolved. `AppViewModel.openImage` now clears the
+surface and resets the presentation session before that suspension, covered by
+`LibraryBrowsingProjectionTests`. Full gate on `4bbc5c5f`: warning gate, `fast`, `serial` (455
+tests), and `identity` (4 tests) all pass.
