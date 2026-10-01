@@ -390,3 +390,9 @@ scripts/run-kromora-capture.sh --benchmark last-known-frame \
 
 then read `…-report.jsonl` (or the `LAST_KNOWN_FRAME_BUDGET_SUMMARY` line), and set
 `KROMORA_LAST_KNOWN_FRAME_ENFORCE_BUDGETS=1` when the budgets are expected to pass.
+
+KRMA-738 verification re-run (commit `8bb287a7`, same host, 30 iterations, 88 s, 0 failures) reproduced
+the capture: exact and stale warm Edit pass; warm 30-cell grid p50/p95 197 / 202 ms (miss, KRMA-745);
+warm Edit navigation p50/p95 676 / 694 ms with main-actor p95 74 ms before first suspension (miss,
+KRMA-743). Records: `/tmp/kromora-capture-738v/KRMA738v-DSC01019-20261001-104724-report.jsonl`.
+Targets are unchanged.
