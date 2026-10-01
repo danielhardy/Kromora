@@ -214,7 +214,7 @@ esac
 print "Preparing Release XCTest bundle..." >> "$summary_path"
 "$swift_path" test -c release --filter "$test_filter" >> "$summary_path" 2>&1
 bin_path="$($swift_path build -c release --show-bin-path)"
-test_bundle="$bin_path/KromoraPackageTests.xctest"
+test_bundle="$bin_path/KromoraKitTests.xctest"
 if [[ ! -d "$test_bundle" ]]; then
     print -u2 "Release test bundle does not exist: $test_bundle"
     exit 2
