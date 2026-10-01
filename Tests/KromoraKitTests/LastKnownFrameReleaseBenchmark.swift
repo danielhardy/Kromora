@@ -71,23 +71,39 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             )
         }
 
+        // xctest is a background process by default. Make it a regular GUI app before creating
+        // the capture window so WindowServer composites it and drawable callbacks get real times.
+        let app = NSApplication.shared
+        guard app.setActivationPolicy(.regular) else {
+            throw XCTSkip("Release drawable capture requires a regular GUI application")
+        }
+        app.activate()
         let window = NSWindow(
             contentRect: NSRect(x: 100, y: 100, width: 1440, height: 1000),
             styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false
         )
         window.contentView = NSHostingView(rootView: ContentView(viewModel: model))
         window.isReleasedWhenClosed = false
-        NSApplication.shared.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        // xctest may remain inactive even after requesting activation. The capture explicitly
+        // needs its window composited, so place it in front of other apps before sampling.
+        window.orderFrontRegardless()
+        app.activate()
         window.displayIfNeeded()
         defer {
             window.orderOut(nil)
             window.close()
         }
+        // Let AppKit and WindowServer commit the newly activated window before checking its
+        // occlusion state. The drawable capture harness needs the same settling turn.
+        try await Task.sleep(for: .milliseconds(300))
+        window.displayIfNeeded()
         guard window.occlusionState.contains(.visible) else {
             throw XCTSkip(
                 "Release drawable capture requires an onscreen window; "
-                    + "occlusionState=\(window.occlusionState.rawValue)"
+                    + "occlusionState=\(window.occlusionState.rawValue), "
+                    + "isVisible=\(window.isVisible), keyWindow=\(window.isKeyWindow), "
+                    + "appActive=\(app.isActive), activationPolicy=\(app.activationPolicy().rawValue)"
             )
         }
 
