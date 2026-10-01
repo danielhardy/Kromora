@@ -158,7 +158,13 @@ gate, debug and Release builds, fast lane, identity lane, `git diff --check`, an
 The serial lane failed in `MetalKernelParityTests.testGrainKeepsGoldenStatistics` and
 `testMigratedKernelsRenderOnTheSoftwareRenderer`: the `grain-seed` golden's worst byte delta was 34
 against the 32 tolerance (mean and standard deviation checks passed), so the golden is sensitive to
-the OS build.
+the OS build. Across the two observed systems, both Metal and software rendering produced a worst
+byte delta of 34 on macOS 27.0 build 26A428 and 29 on macOS 27.2 build 26B5091g. These are alternate
+valid noise patterns from implementation-defined single-precision `sin` range reduction, not a
+change in grain character. The grain golden therefore checks mean and standard deviation within 3
+levels, along with repeatability for the same seed and a changed result for a different seed; it
+does not compare individual grain bytes across OS builds. The other migrated kernels retain their
+pixel comparisons.
 
 `scripts/run-kromora-capture.sh --benchmark metal-presentation --source realworldtest/DSC01019.ARW
 --iterations 30` still failed before launching: the Release `KromoraKitTests.xctest` bundle fails to
