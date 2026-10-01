@@ -308,5 +308,12 @@ seconds because `window.occlusionState` was `8192` (the window had no visible bi
 frame measurements were produced. Capture summary:
 `/tmp/kromora-capture-krma744/KRMA744-DSC01019-20261001-041641-summary.txt`.
 
+An additional capture attempt on 2026-10-01 used the same command from the agent shell and rebuilt
+the Release test bundle successfully. The XCTest process still could not activate its window:
+`occlusionState=8192`, `isVisible=true`, `keyWindow=false`, `appActive=false`, and
+`activationPolicy=0`. It skipped before producing measurements, so this run is not budget evidence.
+Summary and trace: `/tmp/kromora-capture/KROMORA-last-known-frame-DSC01019-20261001-081124-summary.txt`
+and `.trace`.
+
 To complete qualification, run the same 30-sample capture from an interactive macOS session where
 the XCTest-created Kromora window is onscreen, then append the output and budget results here.
