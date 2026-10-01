@@ -182,6 +182,15 @@ final class LibraryDeletionTests: TempDirectoryTestCase {
         viewModel.collection.loadFromFolder(sourceFolder)
         await viewModel.collection.scanCompletion()
         viewModel.openImage(url: source)
+        // Opening yields once before the new source session begins; edit only after it installs.
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.sourceURL != source {
+            guard Date() < deadline else {
+                throw TestSynchronizationError.timedOut(
+                    "the opened source", "published state did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(5))
+        }
         viewModel.updateDocument { $0.adjustments = [.exposure(ev: 0.8)] }
 
         let result = await viewModel.deleteSelectedLibraryItems()

@@ -126,6 +126,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == item.id })
         viewModel.selectCollectionImage(at: index)
 
+        // The canvas is cleared synchronously; the candidate follows the selection's single yield.
+        try await waitUntil("the edited thumbnail candidate") {
+            viewModel.previewSurface.image != nil
+        }
         XCTAssertEqual(
             viewModel.previewSurface.image?.extent.size, CGSize(width: 5, height: 3),
             "the edited thumbnail is the first visible candidate for its own asset"

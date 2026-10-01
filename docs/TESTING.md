@@ -410,3 +410,13 @@ the capture: exact and stale warm Edit pass; warm 30-cell grid p50/p95 197 / 202
 warm Edit navigation p50/p95 676 / 694 ms with main-actor p95 74 ms before first suspension (miss,
 KRMA-743). Records: `/tmp/kromora-capture-738v/KRMA738v-DSC01019-20261001-104724-report.jsonl`.
 Targets are unchanged.
+
+KRMA-734 verification capture (commit `1145f266` plus the verification fixes below, same host, Apple
+M1 Pro, macOS 27.0 (26A428), Xcode 27.0 (27A266a), 30 iterations, 2880×1794 backing, source
+`DSC01019.ARW` 9504×6336; records `/tmp/kromora-capture-734v1/KRMA734v1-DSC01019-20261001-150054-report.jsonl`).
+Structural budgets pass: exact warm Edit 0 renders / 1 provisional / 1 confirmed; stale warm Edit
+1 render / 1 provisional / 1 confirmed; warm Edit navigation 0 renders, 30 provisional / 30
+confirmed, main-actor time before first suspension p95 1.86 ms (≤ 2 ms; 1.99 ms in the prior
+capture). Per ADR-LKF-001 the wall-clock budgets are release evidence, not a KRMA-734 gate, and
+remain **unmet** and unchanged under KRMA-750: warm Edit first pixel p50/p95 265 / 278 ms (target
+p95 ≤ 50 ms) and warm 30-cell grid p50/p95 219 / 230 ms (target p95 ≤ 100 ms).
