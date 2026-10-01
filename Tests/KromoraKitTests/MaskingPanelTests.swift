@@ -129,7 +129,7 @@ final class MaskingPanelTests: XCTestCase {
         XCTAssertFalse(model.canApplyMask)
     }
 
-    func testMaskingPanelConstructsWithoutAnImage() {
+    func testMaskingPanelInitializesWithoutAPreviewSurface() {
         let coordinator = PhotoAnalysisCoordinator(stages: [:])
         let source = ImageSource(
             backing: .data(Data([4, 5, 6])), kind: .standard,
@@ -141,7 +141,7 @@ final class MaskingPanelTests: XCTestCase {
             source: source
         )
 
-        XCTAssertNotNil(panel.body)
+        XCTAssertNil(panel.surface)
     }
 }
 
