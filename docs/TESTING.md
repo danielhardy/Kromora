@@ -171,3 +171,15 @@ pixel comparisons.
 link on stable Xcode 27.0 with the same unresolved SwiftUI opaque type descriptors (`View.tag(_:includeOptional:)`,
 `View.task(name:priority:file:line:_:)`) and missing `CoreAudioTypes` framework. The failure is
 therefore not specific to the beta SDK. No latency samples, drawable counts, or budget results exist.
+
+### KRMA-738 stable Release capture retry (2026-09-30)
+
+Retried on the selected stable Xcode 27.0 (build 27A266a, macOS 27.0 SDK), Apple M1 Pro MacBook Pro
+(10 cores, 16 GB), macOS 27.0 build 26A428, commit `2bb86786e08925ac7506016a6ec6900aeb9ca7f5`,
+using `DSC01019.ARW` and 30 requested iterations. The Release test sources compiled, but linking
+`KromoraKitTests.xctest` failed with unresolved SwiftUI opaque type descriptors for
+`View.tag(_:includeOptional:)` and `View.task(name:priority:file:line:_:)`, unavailable `CoreAudioTypes`,
+and an SDK diagnostic that `SwiftUICore.tbd` cannot be linked by this client. The benchmark process
+did not launch. The harness's configured drawable is 1280×800, but it was not created or measured;
+latencies, frame counts, render admissions, transitions, and KRMA-734 budgets remain unmeasured.
+Capture summary: `/tmp/kromora-capture/KRMA-738-stable-xcode-27-DSC01019-20260930-185223-summary.txt`.
