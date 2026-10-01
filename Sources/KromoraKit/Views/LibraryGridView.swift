@@ -11,7 +11,7 @@ import SwiftUI
 /// immediately after.
 struct LibraryGridView: View {
     @Bindable var collection: ImageCollection
-    @ObservedObject var viewModel: AppViewModel
+    let viewModel: AppViewModel
     let onOpen: () -> Void
 
     private let layout = LibraryGridLayout()

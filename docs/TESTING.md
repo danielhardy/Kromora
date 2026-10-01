@@ -391,6 +391,20 @@ scripts/run-kromora-capture.sh --benchmark last-known-frame \
 then read `…-report.jsonl` (or the `LAST_KNOWN_FRAME_BUDGET_SUMMARY` line), and set
 `KROMORA_LAST_KNOWN_FRAME_ENFORCE_BUDGETS=1` when the budgets are expected to pass.
 
+KRMA-745 profiling attempt (2026-10-01): a five-sample Release Time Profiler run reported warm-grid
+p50/p95 of 205.7 / 206.7 ms, with zero thumbnail swaps and zero render admissions
+(`/tmp/kromora-grid-time-profile.jsonl`; trace `/tmp/kromora-grid-time-profile.trace`). Its full
+XCTest main-thread sample set contains SwiftUI graph/layout work (`AG::Graph::UpdateStack::update`,
+`ForEachState.item(at:offset:)`, `ContentView.body.getter`, and
+`LibraryMosaicRow.body.getter`). This profile spans setup, Edit handoffs, and grid re-entry, so those
+samples do not isolate the grid interval or quantify a specific view's contribution. A separate
+SwiftUI-template recording produced no SwiftUI update rows. The profiling request therefore remains
+open. A subsequent 30-sample capture after changing the grid's `AppViewModel` property from
+`@ObservedObject` to a plain reference was skipped before measurement because the capture window was
+not onscreen (`occlusionState=8192`, `isVisible=false`, `keyWindow=false`, `appActive=false`); it
+provides no performance evidence. Keep the KRMA-734 target unchanged and complete the capture from an
+unlocked, awake display before claiming a pass.
+
 KRMA-738 verification re-run (commit `8bb287a7`, same host, 30 iterations, 88 s, 0 failures) reproduced
 the capture: exact and stale warm Edit pass; warm 30-cell grid p50/p95 197 / 202 ms (miss, KRMA-745);
 warm Edit navigation p50/p95 676 / 694 ms with main-actor p95 74 ms before first suspension (miss,
