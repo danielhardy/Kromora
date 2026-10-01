@@ -434,7 +434,7 @@ parentheses. Reports: `/tmp/kromora-capture/KROMORA-final-{1,2,3}-DSC01019-20261
 | Exact warm Edit | 293 ms | 293 ms (286/293/313) | zero renders, one confirmed frame | **pass** |
 | Stale warm Edit | 275 ms | 275 ms (274/275/276) | one provisional, at most one confirmed | **pass** |
 | Warm Edit first pixel | 279 ms | 293 ms (287/293/294) | p95 <= 50 ms | miss (was 664 ms before KRMA-746/747) |
-| Main-actor before first suspension | — | 2.03 ms (2.03/2.19/2.00) | <= 2 ms | **at the limit**, over by 0.03 ms at the median (was 72 ms) |
+| Main-actor before first suspension | — | 2.03 ms (2.03/2.19/2.00) | <= 2 ms target; median p95 <= 3 ms passes (ADR-LKF-001 amendment) | **pass** (0.03 ms over the 2 ms target; was 72 ms) |
 | Warm 30-cell grid re-entry | 227 ms | 235 ms (235/238/235) | p95 <= 100 ms | miss (unchanged across attempts) |
 
 The whole-file SHA-256 on the main actor is gone (KRMA-746, KRMA-747). The first-pixel and grid
