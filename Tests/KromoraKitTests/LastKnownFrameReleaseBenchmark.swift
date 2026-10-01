@@ -32,9 +32,10 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         let renderAdmissions: Int
         let crossfades: Int
         let thumbnailSwaps: Int
-        let layoutChanges: Int
+        let layoutPasses: Int
         let mainActorBeforeSuspensionP95Milliseconds: Double
         let budget: String
+        let criteriaPassed: Bool
     }
 
     func testReleaseLastKnownFrameBudgets() async throws {
@@ -83,11 +84,19 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             window.orderOut(nil)
             window.close()
         }
+        guard window.occlusionState.contains(.visible) else {
+            throw XCTSkip(
+                "Release drawable capture requires an onscreen window; "
+                    + "occlusionState=\(window.occlusionState.rawValue)"
+            )
+        }
 
         // First visit hydrates the actual visible mosaic and warms its in-memory thumbnails.
         let coldGridStart = CACurrentMediaTime()
+        let firstGridMount = RenderDiagnostics.snapshot.gridMounts
+            - (model.navigation.isGrid ? 1 : 0)
         XCTAssertTrue(model.navigate(to: .grid))
-        try await waitForVisibleGrid(model)
+        try await waitForVisibleGrid(model, window: window, mountedAfter: firstGridMount)
         let coldGridMS = milliseconds(since: coldGridStart)
 
         guard
@@ -100,12 +109,15 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         // Start in Edit and wait for the actual confirmed drawable, then sample repeated warm
         // Library → Edit handoffs. The synchronous call is the work done before its tasks yield.
         let initialSelectionStart = CACurrentMediaTime()
+        let initialGridUnmount = RenderDiagnostics.snapshot.gridUnmounts
         model.selectCollectionImage(at: rawIndex)
         print(
             "LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(milliseconds(since: initialSelectionStart))"
         )
         try await flushWindowPresentation(window)
-        try await waitForDrawableFrame(model)
+        try await waitForFirstPixel(model, window: window)
+        try await waitForDrawableFrame(model, window: window)
+        try await waitForGridUnmount(after: initialGridUnmount)
         try await Task.sleep(for: .milliseconds(300))
         let frameStore = LatestPreviewFrameStore(
             directory: tempDirectory.appendingPathComponent("last-known-frames")
@@ -151,32 +163,41 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         }
 
         let iterations = boundedIterations()
+        let exactGridMount = RenderDiagnostics.snapshot.gridMounts
         _ = model.navigate(to: .grid)
-        try await settleGridNavigation(window)
-        let exactActorStart = CACurrentMediaTime()
+        try await waitForVisibleGrid(model, window: window, mountedAfter: exactGridMount)
+        let exactSelectionStart = CACurrentMediaTime()
+        let exactGridUnmount = RenderDiagnostics.snapshot.gridUnmounts
         let exactRendersBefore = model.previewRenderAdmissionCountForDiagnostics
         let exactCrossfadesBefore = model.previewSurface.crossfadeAdmissionCount
         model.selectCollectionImage(at: rawIndex)
-        let exactMainActor = milliseconds(since: exactActorStart)
+        let exactMainActor = milliseconds(since: exactSelectionStart)
         print("LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(exactMainActor)")
         try await flushWindowPresentation(window)
-        try await waitForDrawableFrame(model)
+        try await waitForFirstPixel(model, window: window)
+        let exactFirstPixel = milliseconds(since: exactSelectionStart)
+        try await waitForDrawableFrame(model, window: window)
         let exactSession = try XCTUnwrap(model.presentationSessionForDiagnostics)
+        let exactPassed = model.previewRenderAdmissionCountForDiagnostics - exactRendersBefore == 0
+            && exactSession.confirmedFrameCount == 1
         try emit(
             makeReport(
                 "exact-warm-edit", rawURL: rawURL, dimensions: dimensions, window: window,
                 coldWarm: "warm", cacheState: "exact stored preview", sampleCount: 1,
-                p50: exactSession.firstPixelLatencyMilliseconds ?? .infinity,
-                p95: exactSession.firstPixelLatencyMilliseconds ?? .infinity,
+                p50: exactFirstPixel,
+                p95: exactFirstPixel,
                 provisionalFrames: exactSession.provisionalFrameCount,
                 confirmedFrames: exactSession.confirmedFrameCount,
                 renderAdmissions: model.previewRenderAdmissionCountForDiagnostics
                     - exactRendersBefore,
                 crossfades: model.previewSurface.crossfadeAdmissionCount - exactCrossfadesBefore,
-                thumbnailSwaps: 0, layoutChanges: 2,
+                thumbnailSwaps: 0, layoutPasses: 0,
                 mainActorMilliseconds: exactMainActor,
-                budget: "zero preview renders; one confirmed frame per sample"
+                budget: "zero preview renders; one confirmed frame per sample",
+                criteriaPassed: exactPassed
             ))
+        try await waitForGridUnmount(after: exactGridUnmount)
+        XCTAssertTrue(exactPassed, "Exact warm Edit must use zero renders and one confirmed frame")
 
         let oldMetadata = storedFrame.frame.metadata
         let oldSignature = oldMetadata.signature
@@ -197,67 +218,85 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
                 rasterData: storedFrame.frame.rasterData
             ))
         await frameStore.waitForPendingWrites()
+        let staleGridMount = RenderDiagnostics.snapshot.gridMounts
         _ = model.navigate(to: .grid)
-        try await settleGridNavigation(window)
-        let staleActorStart = CACurrentMediaTime()
+        try await waitForVisibleGrid(model, window: window, mountedAfter: staleGridMount)
+        let staleSelectionStart = CACurrentMediaTime()
+        let staleGridUnmount = RenderDiagnostics.snapshot.gridUnmounts
         let staleRendersBefore = model.previewRenderAdmissionCountForDiagnostics
         let staleCrossfadesBefore = model.previewSurface.crossfadeAdmissionCount
         model.selectCollectionImage(at: rawIndex)
-        let staleMainActor = milliseconds(since: staleActorStart)
+        let staleMainActor = milliseconds(since: staleSelectionStart)
         print("LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(staleMainActor)")
         try await flushWindowPresentation(window)
-        try await waitForDrawableFrame(model)
+        try await waitForFirstPixel(model, window: window)
+        let staleFirstPixel = milliseconds(since: staleSelectionStart)
+        try await waitForDrawableFrame(model, window: window)
         let staleSession = try XCTUnwrap(model.presentationSessionForDiagnostics)
+        let stalePassed = staleSession.provisionalFrameCount == 1
+            && staleSession.confirmedFrameCount <= 1
         try emit(
             makeReport(
                 "stale-warm-edit", rawURL: rawURL, dimensions: dimensions, window: window,
                 coldWarm: "warm", cacheState: "stale saved edit signature", sampleCount: 1,
-                p50: staleSession.firstPixelLatencyMilliseconds ?? .infinity,
-                p95: staleSession.firstPixelLatencyMilliseconds ?? .infinity,
+                p50: staleFirstPixel,
+                p95: staleFirstPixel,
                 provisionalFrames: staleSession.provisionalFrameCount,
                 confirmedFrames: staleSession.confirmedFrameCount,
                 renderAdmissions: model.previewRenderAdmissionCountForDiagnostics
                     - staleRendersBefore,
                 crossfades: model.previewSurface.crossfadeAdmissionCount - staleCrossfadesBefore,
-                thumbnailSwaps: 0, layoutChanges: 2,
+                thumbnailSwaps: 0, layoutPasses: 0,
                 mainActorMilliseconds: staleMainActor,
-                budget: "one provisional; at most one confirmed replacement per sample"
+                budget: "one provisional; at most one confirmed replacement per sample",
+                criteriaPassed: stalePassed
             ))
+        try await waitForGridUnmount(after: staleGridUnmount)
+        XCTAssertTrue(
+            stalePassed,
+            "Stale warm Edit must show one provisional and at most one confirmed frame"
+        )
 
         var navigationTimes: [Double] = []
         var mainActorTimes: [Double] = []
         var provisionalFrameCounts: [Int] = []
         var confirmedFrameCounts: [Int] = []
+        var editFirstPixelTimes: [Double] = []
         var renderAdmissions = 0
         var crossfades = 0
         var editThumbnailSwaps = 0
-        var editLayoutChanges = 0
+        var editLayoutPasses = 0
         for _ in 0..<iterations {
             let thumbnailsBeforeGrid = thumbnailSnapshot(model)
-            let modeBeforeGrid = model.navigation.mode
+            let mountsBeforeGrid = RenderDiagnostics.snapshot.gridMounts
             _ = model.navigate(to: .grid)
-            if model.navigation.mode != modeBeforeGrid { editLayoutChanges += 1 }
-            try await settleGridNavigation(window)
-            try await waitForVisibleGrid(model)
+            try await waitForVisibleGrid(
+                model, window: window, mountedAfter: mountsBeforeGrid
+            )
             editThumbnailSwaps += changedThumbnails(
                 from: thumbnailsBeforeGrid, to: thumbnailSnapshot(model)
             )
+            try XCTUnwrap(window.contentView).layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            editLayoutPasses += 1
             let admissionStart = CACurrentMediaTime()
+            let gridUnmountsBeforeEdit = RenderDiagnostics.snapshot.gridUnmounts
             let beforeRenders = model.previewRenderAdmissionCountForDiagnostics
             let beforeCrossfades = model.previewSurface.crossfadeAdmissionCount
-            let modeBeforeEdit = model.navigation.mode
             model.selectCollectionImage(at: rawIndex)
-            if model.navigation.mode != modeBeforeEdit { editLayoutChanges += 1 }
             let mainActorMilliseconds = milliseconds(since: admissionStart)
             mainActorTimes.append(mainActorMilliseconds)
             print("LAST_KNOWN_FRAME_SELECTION_SYNC_MS \(mainActorMilliseconds)")
             try await flushWindowPresentation(window)
-            try await waitForDrawableFrame(model)
+            try await waitForFirstPixel(model, window: window)
+            editFirstPixelTimes.append(milliseconds(since: admissionStart))
+            try await waitForDrawableFrame(model, window: window)
+            try await waitForGridUnmount(after: gridUnmountsBeforeEdit)
             guard let session = model.presentationSessionForDiagnostics else {
                 XCTFail("A drawable confirmation must leave a presentation session")
                 return
             }
-            navigationTimes.append(session.firstPixelLatencyMilliseconds ?? .infinity)
+            navigationTimes.append(editFirstPixelTimes.last ?? .infinity)
             provisionalFrameCounts.append(session.provisionalFrameCount)
             confirmedFrameCounts.append(session.confirmedFrameCount)
             renderAdmissions += model.previewRenderAdmissionCountForDiagnostics - beforeRenders
@@ -268,21 +307,29 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         // hydrated. Reopening the workspace still performs real SwiftUI layout and display.
         var gridTimes: [Double] = []
         var gridThumbnailSwaps = 0
-        var gridLayoutChanges = 0
+        var gridLayoutPasses = 0
         for _ in 0..<iterations {
             let start = CACurrentMediaTime()
             let thumbnailsBefore = thumbnailSnapshot(model)
-            let modeBefore = model.navigation.mode
+            let mountsBeforeGrid = RenderDiagnostics.snapshot.gridMounts
             _ = model.navigate(to: .grid)
-            if model.navigation.mode != modeBefore { gridLayoutChanges += 1 }
-            try await waitForVisibleGrid(model)
+            try await waitForVisibleGrid(
+                model, window: window, mountedAfter: mountsBeforeGrid
+            )
             gridThumbnailSwaps += changedThumbnails(
                 from: thumbnailsBefore, to: thumbnailSnapshot(model)
             )
+            try await Task.sleep(for: .milliseconds(20))
+            try XCTUnwrap(window.contentView).layoutSubtreeIfNeeded()
             window.displayIfNeeded()
+            gridLayoutPasses += 1
             gridTimes.append(milliseconds(since: start))
+            let gridUnmountsBeforeEdit = RenderDiagnostics.snapshot.gridUnmounts
             model.selectCollectionImage(at: rawIndex)
-            try await waitForDrawableFrame(model)
+            try await flushWindowPresentation(window)
+            try await waitForFirstPixel(model, window: window)
+            try await waitForDrawableFrame(model, window: window)
+            try await waitForGridUnmount(after: gridUnmountsBeforeEdit)
         }
 
         let backing = window.convertToBacking(window.contentView?.bounds ?? .zero).size
@@ -298,8 +345,11 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             sampleCount: gridTimes.count, p50Milliseconds: percentile(gridTimes, 0.50),
             p95Milliseconds: percentile(gridTimes, 0.95), provisionalFrames: 0,
             confirmedFrames: 0, renderAdmissions: 0, crossfades: 0,
-            thumbnailSwaps: gridThumbnailSwaps, layoutChanges: gridLayoutChanges,
-            mainActorBeforeSuspensionP95Milliseconds: 0, budget: "p95 <= 100 ms"
+            thumbnailSwaps: gridThumbnailSwaps, layoutPasses: gridLayoutPasses,
+            mainActorBeforeSuspensionP95Milliseconds: 0, budget: "p95 <= 100 ms",
+            criteriaPassed: gridTimes.count == iterations
+                && gridLayoutPasses == iterations
+                && percentile(gridTimes, 0.95) <= 100
         )
         let editReport = Report(
             benchmark: "warm-edit-navigation", source: rawURL.lastPathComponent,
@@ -315,9 +365,11 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             provisionalFrames: provisionalFrameCounts.reduce(0, +),
             confirmedFrames: confirmedFrameCounts.reduce(0, +),
             renderAdmissions: renderAdmissions, crossfades: crossfades,
-            thumbnailSwaps: editThumbnailSwaps, layoutChanges: editLayoutChanges,
+            thumbnailSwaps: editThumbnailSwaps, layoutPasses: editLayoutPasses,
             mainActorBeforeSuspensionP95Milliseconds: percentile(mainActorTimes, 0.95),
-            budget: "correct-photo provisional p95 <= 50 ms; main-actor <= 2 ms"
+            budget: "correct-photo provisional p95 <= 50 ms; main-actor <= 2 ms",
+            criteriaPassed: percentile(navigationTimes, 0.95) <= 50
+                && percentile(mainActorTimes, 0.95) <= 2
         )
         try emit(gridReport)
         try emit(editReport)
@@ -333,27 +385,55 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         }
     }
 
-    private func waitForVisibleGrid(_ model: AppViewModel) async throws {
+    private func waitForVisibleGrid(
+        _ model: AppViewModel, window: NSWindow, mountedAfter previousMounts: Int
+    ) async throws {
         let deadline = Date().addingTimeInterval(30)
         while Date() < deadline {
+            try requireVisible(window)
             let visibleIDs = model.collection.visibleEditedThumbnailAssetIDs
-            if !visibleIDs.isEmpty
+            if RenderDiagnostics.snapshot.gridMounts > previousMounts
+                && !visibleIDs.isEmpty
                 && visibleIDs.allSatisfy({ id in
                     model.collection.items.first(where: { $0.id == id })?.thumbnail != nil
                 })
             {
                 return
             }
-            // The visible-ID set is an admission hint; wait for visible rows to finish layout.
-            if model.collection.items.filter({ $0.thumbnail != nil }).count >= 30 { return }
             try await Task.sleep(for: .milliseconds(5))
         }
-        XCTFail("The visible 30-cell grid did not hydrate before the deadline")
+        XCTFail(
+            "A newly mounted grid with hydrated visible cells did not appear before the deadline"
+        )
     }
 
-    private func waitForDrawableFrame(_ model: AppViewModel) async throws {
+    private func waitForGridUnmount(after previousUnmounts: Int) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while Date() < deadline {
+            if RenderDiagnostics.snapshot.gridUnmounts > previousUnmounts { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("LibraryGridView did not unmount after navigating to Edit")
+    }
+
+    private func waitForFirstPixel(_ model: AppViewModel, window: NSWindow) async throws {
         let deadline = Date().addingTimeInterval(60)
         while Date() < deadline {
+            try requireVisible(window)
+            if (model.presentationSessionForDiagnostics?.distinctFrameCount ?? 0) > 0 { return }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        throw BenchmarkError.presentationTimedOut(
+            "no drawable frame arrived; mode=\(model.navigation.mode), "
+                + "state=\(model.previewState), status=\(model.statusMessage), "
+                + "session=\(String(describing: model.presentationSessionForDiagnostics))"
+        )
+    }
+
+    private func waitForDrawableFrame(_ model: AppViewModel, window: NSWindow) async throws {
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
+            try requireVisible(window)
             if model.presentationSessionForDiagnostics?.state == .confirmed,
                 model.previewState == .ready
             {
@@ -374,18 +454,19 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         window.displayIfNeeded()
     }
 
-    private func settleGridNavigation(_ window: NSWindow) async throws {
-        // Let SwiftUI commit the Library surface and AppKit remount its drawable before the next
-        // Edit selection. Without a run-loop turn, consecutive selections can reuse the old canvas.
-        try await Task.sleep(for: .milliseconds(20))
-        window.displayIfNeeded()
-        await Task.yield()
+    private func requireVisible(_ window: NSWindow) throws {
+        guard window.occlusionState.contains(.visible) else {
+            throw XCTSkip(
+                "Drawable capture stopped because its window is no longer onscreen; "
+                    + "occlusionState=\(window.occlusionState.rawValue)"
+            )
+        }
     }
 
     private func boundedIterations() -> Int {
         let requested =
-            Int(ProcessInfo.processInfo.environment["KROMORA_LAST_KNOWN_FRAME_ITERATIONS"] ?? "20")
-            ?? 20
+            Int(ProcessInfo.processInfo.environment["KROMORA_LAST_KNOWN_FRAME_ITERATIONS"] ?? "30")
+            ?? 30
         return min(100, max(5, requested))
     }
 
@@ -400,8 +481,8 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
         p50: Double, p95: Double,
         provisionalFrames: Int, confirmedFrames: Int,
         renderAdmissions: Int, crossfades: Int = 0, thumbnailSwaps: Int = 0,
-        layoutChanges: Int,
-        mainActorMilliseconds: Double, budget: String
+        layoutPasses: Int,
+        mainActorMilliseconds: Double, budget: String, criteriaPassed: Bool
     ) -> Report {
         let backing = window.convertToBacking(window.contentView?.bounds ?? .zero).size
         return Report(
@@ -415,9 +496,9 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
             p50Milliseconds: p50, p95Milliseconds: p95,
             provisionalFrames: provisionalFrames, confirmedFrames: confirmedFrames,
             renderAdmissions: renderAdmissions, crossfades: crossfades,
-            thumbnailSwaps: thumbnailSwaps, layoutChanges: layoutChanges,
+            thumbnailSwaps: thumbnailSwaps, layoutPasses: layoutPasses,
             mainActorBeforeSuspensionP95Milliseconds: mainActorMilliseconds,
-            budget: budget
+            budget: budget, criteriaPassed: criteriaPassed
         )
     }
 

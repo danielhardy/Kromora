@@ -228,6 +228,8 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
             contentViewBodyEvaluations: 0,
             inspectorBodyEvaluations: 0,
             gridBodyEvaluations: 0,
+            gridMounts: 0,
+            gridUnmounts: 0,
             toolbarBodyEvaluations: 0,
             presentationCoreImageEvaluations: 0
         ))
@@ -235,6 +237,8 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
         RenderDiagnostics.noteContentViewBody()
         RenderDiagnostics.noteInspectorBody()
         RenderDiagnostics.noteGridBody()
+        RenderDiagnostics.noteGridMount()
+        RenderDiagnostics.noteGridUnmount()
         RenderDiagnostics.noteToolbarBody()
         RenderDiagnostics.notePresentationCoreImageEvaluation()
 
@@ -242,6 +246,8 @@ final class ObservationInvalidationTests: TempDirectoryTestCase {
             contentViewBodyEvaluations: 1,
             inspectorBodyEvaluations: 1,
             gridBodyEvaluations: 1,
+            gridMounts: 1,
+            gridUnmounts: 1,
             toolbarBodyEvaluations: 1,
             presentationCoreImageEvaluations: 1
         ))

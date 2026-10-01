@@ -119,8 +119,10 @@ struct LibraryGridView: View {
         }
         .background(KromoraTheme.windowBackground)
         .onAppear {
+            RenderDiagnostics.noteGridMount()
             collection.beginThumbnailDemand()
         }
+        .onDisappear { RenderDiagnostics.noteGridUnmount() }
         .overlay(alignment: .bottomLeading) {
             if collection.isScanning {
                 Label("Scanning…", systemImage: "arrow.triangle.2.circlepath")
