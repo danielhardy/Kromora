@@ -723,7 +723,8 @@ final class PreviewAdmissionCoordinator {
                 let source: ImageSource
                 if let url = item.url {
                     source = ImageSource(url: url, nativeExtent: extent,
-                        portableIdentity: item.asset.source.portableIdentity)
+                        portableIdentity: item.asset.source.portableIdentity,
+                        existingFileChangeSignature: item.asset.source.fingerprint)
                 } else if let data = item.imageData {
                     source = ImageSource(data: data, nativeExtent: extent,
                         dataFingerprint: item.dataFingerprint,
@@ -815,7 +816,8 @@ final class PreviewAdmissionCoordinator {
                 let source: ImageSource
                 if let url = item.url {
                     source = ImageSource(url: url, nativeExtent: extent,
-                        portableIdentity: item.asset.source.portableIdentity)
+                        portableIdentity: item.asset.source.portableIdentity,
+                        existingFileChangeSignature: item.asset.source.fingerprint)
                 } else if let data = item.imageData {
                     source = ImageSource(data: data, nativeExtent: extent,
                         dataFingerprint: item.dataFingerprint,
