@@ -15,6 +15,9 @@ import Observation
 @MainActor
 @Observable
 final class ImageCollectionPresentationModel {
+    typealias OriginalThumbnailProvider = @Sendable (
+        URL?, Data?, String?, PortablePhotoIdentity, ThumbnailFrameStore?
+    ) async -> CGImage?
     enum LibrarySourceKind: String, Sendable, Equatable { case managed }
 
     struct DeletionCandidate: Identifiable, Sendable, Equatable {
@@ -256,6 +259,7 @@ final class ImageCollectionPresentationModel {
     private var cullingUndoStack: [CullingChange] = []
     private(set) var lastCullingAssetID: PhotoAssetID?
     private let scheduler: ImageWorkScheduler
+    private let originalThumbnailProvider: OriginalThumbnailProvider
     private var thumbnailJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var thumbnailGeneration: UInt64 = 0
     private var isThumbnailDemandDriven = false
@@ -295,7 +299,18 @@ final class ImageCollectionPresentationModel {
         case failure(String)
     }
 
-    init(scheduler: ImageWorkScheduler = ImageWorkScheduler()) { self.scheduler = scheduler }
+    init(
+        scheduler: ImageWorkScheduler = ImageWorkScheduler(),
+        originalThumbnailProvider: @escaping OriginalThumbnailProvider = { url, data, fingerprint, identity, store in
+            await OriginalThumbnailLoader.load(
+                url: url, data: data, dataFingerprint: fingerprint,
+                identity: identity, store: store
+            )
+        }
+    ) {
+        self.scheduler = scheduler
+        self.originalThumbnailProvider = originalThumbnailProvider
+    }
 
     // Teardown that needs the main actor belongs in `shutdown()`. `deinit` is nonisolated
     // and must not touch MainActor-isolated state (Swift 6 zero-opt-out policy).
@@ -925,11 +940,10 @@ final class ImageCollectionPresentationModel {
         scheduler.enqueue(id: id, lane: .thumbnail, priority: requested ?? priority(for: index)) { [weak self] in
             // Memory, then the package's packed frame, then a decode of the source — the last
             // only on a miss.
-            let image = await OriginalThumbnailLoader.load(
-                url: item.url, data: item.url == nil ? item.imageData : nil,
-                dataFingerprint: item.dataFingerprint,
-                identity: item.asset.source.portableIdentity,
-                store: self?.thumbnailFrameStore
+            let image = await self?.originalThumbnailProvider(
+                item.url, item.url == nil ? item.imageData : nil,
+                item.dataFingerprint, item.asset.source.portableIdentity,
+                self?.thumbnailFrameStore
             )
             guard !Task.isCancelled else { return }
             let thumbnail = image.map {

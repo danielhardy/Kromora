@@ -98,7 +98,10 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             width: 2, height: 2, red: 0.1, green: 0.8, blue: 0.2
         ))
         await fake.gatePreviews()
-        let viewModel = makeAppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(
+            engine: fake,
+            originalThumbnailProvider: { _, _, _, _, _ in nil }
+        )
 
         viewModel.openImage(url: raw)
         try await waitUntil("the embedded first frame") {
@@ -170,7 +173,10 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         let image = try embeddedImage(width: 3, height: 2, red: 0.8, green: 0.2, blue: 0.1)
         let fake = FakeRenderEngine()
         await fake.failPreviews()
-        let viewModel = makeAppViewModel(engine: fake)
+        let viewModel = makeAppViewModel(
+            engine: fake,
+            originalThumbnailProvider: { _, _, _, _, _ in nil }
+        )
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
         let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == raw })
@@ -206,6 +212,7 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         await fake.gatePreviews()
         let viewModel = makeAppViewModel(
             engine: fake,
+            originalThumbnailProvider: { _, _, _, _, _ in nil },
             embeddedFirstFrameProvider: { url in await gate.extract(url) }
         )
         viewModel.collection.loadFromFolder(tempDirectory)
@@ -235,10 +242,11 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             viewModel.previewState == .loading && viewModel.previewSurface.image != nil
         }
         XCTAssertTrue(viewModel.previewSurface.coversPresentationExtent)
+        // The embedded JPEG keeps its own pixels and is stretched across the native frame, so its
+        // presentation extent is the source's native size, not the JPEG's.
         XCTAssertEqual(
-            viewModel.previewSurface.presentationImageExtent?.size,
-            viewModel.previewSurface.image?.extent.size,
-            "a materialized thumbnail may be used before native source geometry is known"
+            viewModel.previewSurface.presentationImageExtent?.size, viewModel.sourceSize,
+            "the embedded first frame must cover the native source geometry"
         )
         let secondProvisionalRevision = viewModel.previewSurface.revision
 

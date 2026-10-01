@@ -781,6 +781,12 @@ class TempDirectoryTestCase: XCTestCase {
         portablePackageURL: URL? = nil,
         portableLibrarySession: PortableLibrarySession? = nil,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
+        originalThumbnailProvider: @escaping ImageCollection.OriginalThumbnailProvider = { url, data, fingerprint, identity, store in
+            await OriginalThumbnailLoader.load(
+                url: url, data: data, dataFingerprint: fingerprint,
+                identity: identity, store: store
+            )
+        },
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
             Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
         },
@@ -812,6 +818,7 @@ class TempDirectoryTestCase: XCTestCase {
             portablePackageURL: portablePackageURL
                 ?? tempDirectory.appendingPathComponent("Test Library.kromoralibrary", isDirectory: true),
             portableMaintenanceIdleDelay: portableMaintenanceIdleDelay,
+            originalThumbnailProvider: originalThumbnailProvider,
             embeddedFirstFrameProvider: embeddedFirstFrameProvider,
             fileDialog: fileDialog,
             fileDropActionPolicy: fileDropActionPolicy,
