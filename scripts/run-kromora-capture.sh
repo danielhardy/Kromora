@@ -11,6 +11,7 @@ KROMORA_RAW_FIXTURE_DIR/DSC07826.ARW (or realworldtest/DSC07826.ARW).
 Benchmarks:
   metal-presentation          Real CAMetalLayer presentation latency
   concurrent-export-editing  Batch export while editing with real drawables
+  last-known-frame           Warm Edit and 30-cell grid Release qualification
 
 Options:
   --benchmark NAME   Required benchmark configuration
@@ -34,6 +35,7 @@ capture_id=""
 output_dir=""
 time_limit=""
 iteration_count="${KROMORA_METAL_BENCHMARK_ITERATIONS:-20}"
+last_known_iteration_count="${KROMORA_LAST_KNOWN_FRAME_ITERATIONS:-5}"
 item_count="${KROMORA_CONCURRENT_CAPTURE_ITEMS:-6}"
 gesture_count="${KROMORA_CONCURRENT_CAPTURE_GESTURES:-10}"
 
@@ -67,6 +69,7 @@ while (( $# > 0 )); do
         --iterations)
             (( $# >= 2 )) || { print -u2 -- "--iterations requires a count"; exit 2; }
             iteration_count="$2"
+            last_known_iteration_count="$2"
             shift 2
             ;;
         --items)
@@ -109,6 +112,12 @@ case "$benchmark" in
     concurrent-export-editing)
         test_filter="ConcurrentExportEditingBenchmark/testRealConcurrentBatchExportAndEditing"
         default_capture_id="KROMORA-concurrent-export-editing"
+        default_time_limit="600s"
+        default_output_dir="/tmp/kromora-capture"
+        ;;
+    last-known-frame)
+        test_filter="LastKnownFrameReleaseBenchmark/testReleaseLastKnownFrameBudgets"
+        default_capture_id="KROMORA-last-known-frame"
         default_time_limit="600s"
         default_output_dir="/tmp/kromora-capture"
         ;;
@@ -183,6 +192,13 @@ case "$benchmark" in
             secondary_env=(--env "KROMORA_CONCURRENT_CAPTURE_RAW_SECONDARY=$secondary")
         fi
         ;;
+    last-known-frame)
+        benchmark_env=(
+            --env KROMORA_LAST_KNOWN_FRAME_BENCHMARK=1
+            --env "KROMORA_LAST_KNOWN_FRAME_RAW=$source_path"
+            --env "KROMORA_LAST_KNOWN_FRAME_ITERATIONS=$last_known_iteration_count"
+        )
+        ;;
 esac
 
 {
@@ -199,11 +215,16 @@ esac
         print "iterations=$iteration_count"
         print "supporting_work=not enabled by this representative capture"
         print "cache_state=single automated Release run; cold/warm comparison is optional follow-up"
-    else
+    elif [[ "$benchmark" == "concurrent-export-editing" ]]; then
         print "batch_items=$item_count"
         print "editing_gestures=$gesture_count"
         print "supporting_work=histogram enabled per confirmed settled frame; comparison and prefetch disabled"
         print "cache_state=warm (settled preview develop completed before the measured phase)"
+    fi
+    if [[ "$benchmark" == "last-known-frame" ]]; then
+        print "iterations=$last_known_iteration_count"
+        print "supporting_work=shipping ContentView, PreviewSurface drawable callbacks, and visible LibraryGridView"
+        print "cache_state=first grid visit warms thumbnail cache; Edit re-entry uses package preview store"
     fi
     print "trace=$trace_path"
     print ""

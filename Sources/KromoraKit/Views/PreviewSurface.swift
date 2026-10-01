@@ -102,6 +102,8 @@ final class PreviewSurface: ObservableObject {
 
     var hasPresentedDigest: Bool { staleRefinementPending && presentedDigest != nil }
     var retainsTransitionTexture: Bool { transitionTexture != nil }
+    /// Number of refinements that entered the real drawable crossfade path.
+    private(set) var crossfadeAdmissionCount = 0
 
     func prepareStaleRefinement(using digest: PerceptualDigest) {
         presentedDigest = digest
@@ -191,6 +193,7 @@ final class PreviewSurface: ObservableObject {
         if case .crossfade = transition,
             let oldTexture = presentationTexture ?? lastValidPresentationTexture
         {
+            crossfadeAdmissionCount &+= 1
             transitionTexture = oldTexture
             transitionTextureExtent = presentationTextureExtent ?? lastValidPresentationTextureExtent
             transitionImageExtent = presentationImageExtent ?? lastValidPresentationImageExtent
