@@ -268,3 +268,24 @@ KRMA-743. No budget was changed.
 Trace and full capture summary:
 `/tmp/kromora-capture-krma742/KROMORA-last-known-frame-DSC01019-20260930-213520.trace` and
 `/tmp/kromora-capture-krma742/KROMORA-last-known-frame-DSC01019-20260930-213520-summary.txt`.
+
+### KRMA-743 diagnostic Release capture (2026-10-01)
+
+The selection path previously performed a portable-library page query and requested an active
+edited thumbnail before starting the source load. Those supporting operations are now deferred or
+owned by the visible-grid demand path. Selection begins the source transition promptly, while the
+stored-frame lookup cancels an older read after yielding; its generation check prevents an old read
+from clearing or publishing over a newer selection. Presentation signpost tokens hash the opaque
+portable asset UUID directly instead of JSON-encoding the full source fingerprint.
+
+On the same M1 Pro / Xcode 27.0 / macOS 27.0 setup, a 20-iteration Release capture was attempted
+with the display awake. The pre-suspension selection call measured 1.23 ms in the single warm-up
+sample that ran. The harness then timed out waiting for the RAW preview to settle: it observed one
+embedded-JPEG drawable callback at 1,132.7 ms from selection, but no confirmed RAW drawable, so it
+did not reach the warm samples or produce a valid p50/p95. This is not a pass for either KRMA-734
+latency budget. Follow-up capture depends on repairing the warm-up/window behavior tracked in
+KRMA-744. Targets remain unchanged.
+
+Capture summary and trace:
+`/tmp/kromora-capture-krma743/KRMA743-retry-DSC01019-20260930-235547-summary.txt` and
+`/tmp/kromora-capture-krma743/KRMA743-retry-DSC01019-20260930-235547.trace`.

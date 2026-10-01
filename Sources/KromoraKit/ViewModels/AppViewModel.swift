@@ -837,6 +837,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private let usesInjectedEditStore: Bool
     private let previewCoordinator: PreviewCoordinator
     private let previewPresentation: PreviewPresentationCoordinator
+    private var loadRequestGeneration: UInt64 = 0
 
     /// Value-only counters used by the opt-in Release presentation qualification harness.
     var presentationSessionForDiagnostics: PreviewPresentationCoordinator.PresentationSession? {
@@ -1169,7 +1170,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         sourceSession.onPreparation = { [weak self] publication in
-            guard let self, !self.isShuttingDown else { return }
+            guard let self, !self.isShuttingDown,
+                publication.request.sourceRevision == self.sourceRevision,
+                publication.request.assetID == self.activeAssetID else { return }
             self.install(preparation: publication.preparation, request: publication.request)
             if self.previewAdmissionCoordinator.scheduledSourceRevision != self.sourceRevision {
                 self.schedulePreview()
@@ -1849,10 +1852,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
     }
 
-    private func openImage(url: URL, assetID: PhotoAssetID) {
+    private func openImage(
+        url: URL, assetID: PhotoAssetID, selectionUptime: UInt64? = nil,
+        collectionAlreadySelected: Bool = false
+    ) {
         cancelPendingPreviewDebounce()
         navigation.move(to: .edit)
-        focusCollectionItem(id: assetID)
+        if !collectionAlreadySelected { focusCollectionItem(id: assetID) }
         let item = collection.items.first(where: { $0.id == assetID })
         let itemName = item?.displayName
         let name =
@@ -1868,7 +1874,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             } ?? url.lastPathComponent
         load(
             name: name, url: url, data: nil, assetID: assetID,
-            portableIdentity: item.flatMap { persistencePortableIdentity(for: $0) }
+            portableIdentity: item.flatMap { persistencePortableIdentity(for: $0) },
+            presentationSelectionUptime: selectionUptime
         )
     }
 
@@ -1918,17 +1925,53 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func load(
         name: String, url: URL?, data: Data?, assetID: PhotoAssetID? = nil,
         traceQuality: String = "open", dataFingerprint: String? = nil,
-        portableIdentity: PortablePhotoIdentity? = nil
+        portableIdentity: PortablePhotoIdentity? = nil,
+        presentationSelectionUptime: UInt64? = nil
     ) {
         guard !isShuttingDown else { return }
-        // A real open always wins over cache-only work. Keep this adjacent to the existing
-        // prefetch cancellation: the two jobs have separate identities and separate lifecycles.
-        cancelIdlePreviewBuild(resetCursor: true)
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
             portableIdentity: portableIdentity, dataFingerprint: dataFingerprint,
             traceQuality: traceQuality
         )
+        loadRequestGeneration &+= 1
+        let requestGeneration = loadRequestGeneration
+        let previousActiveAssetID = activeAssetID
+
+        // Make the source switch observable and invalidate old pixels immediately. Package state,
+        // editor cleanup, and candidate materialization continue after the selection event yields.
+        activeAssetID = importPlan.assetID
+        isToolbarPhotoTransitioning = true
+        isLoading = true
+        isNavigationLoading = true
+        previewState = .loading
+        imageSource = nil
+        sourceImage = nil
+        statusMessage = "Loading \(importPlan.name)..."
+        previewPresentation.resetForSource()
+        previewSurface.clear()
+
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !self.isShuttingDown,
+                self.loadRequestGeneration == requestGeneration else { return }
+            self.beginLoad(
+                importPlan, previousActiveAssetID: previousActiveAssetID,
+                presentationSelectionUptime: presentationSelectionUptime
+            )
+        }
+    }
+
+    private func beginLoad(
+        _ importPlan: SourceImportPlan, previousActiveAssetID: PhotoAssetID?,
+        presentationSelectionUptime: UInt64?
+    ) {
+        guard !isShuttingDown else { return }
+        // A real open always wins over cache-only work. Keep this adjacent to the existing
+        // prefetch cancellation: the two jobs have separate identities and separate lifecycles.
+        cancelIdlePreviewBuild(resetCursor: true)
+        previewCoordinator.cancel()
+        cancelPendingPreviewDebounce()
         let assetID = importPlan.assetID
         endUndoGrouping()
         resetAutoAdjustmentForLifecycle()
@@ -1936,7 +1979,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Discrete edits are queued normally; switching sources is a durability boundary for them.
         // Do not rewrite an unchanged document merely because navigation occurred.
         let persistenceBarrier = requestPersistenceFlush()
-        let previousActiveAssetID = activeAssetID
         // `sourceImage` is cleared below to fence edit operations while decoding. Keep the
         // toolbar's settled enabled appearance until this selected photo publishes or fails.
         isToolbarPhotoTransitioning = true
@@ -1958,7 +2000,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let presentationIdentity = importPlan.source.portableIdentity
         previewPresentation.beginPresentationSession(
             assetID: assetID, identity: presentationIdentity,
-            generation: presentationGeneration
+            generation: presentationGeneration,
+            selectionUptime: presentationSelectionUptime ?? DispatchTime.now().uptimeNanoseconds
         )
         storedEditsResolvedSourceRevision = nil
         storedEditLook = nil
@@ -1966,12 +2009,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // renders. Histogram admission still checks the active asset and source revision before
         // publishing, so only the current photo can replace it.
         cancelHistogram(clear: false, pump: false)
-        previewCoordinator.cancel()
         invalidateEditedThumbnailWork(for: previousActiveAssetID)
         editedThumbnailCoordinator.clearPendingRequest()
         // Fence the old asset synchronously. Only already-materialized pixels owned by the new
         // selection may fill the canvas while preparation and rendering suspend.
-        previewSurface.clear()
         if let item = collection.items.first(where: { $0.id == assetID }),
             item.asset.source.portableIdentity == presentationIdentity
         {
@@ -2051,7 +2092,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         isLoading = true
         isNavigationLoading = true
-        statusMessage = "Loading \(name)..."
+        statusMessage = "Loading \(importPlan.name)..."
 
         sourceSession.begin(
             plan: importPlan,
@@ -2866,6 +2907,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func clearActiveSourceAfterLibraryDeletion() {
+        loadRequestGeneration &+= 1
         sourceSession.cancel()
         autoWorkflowCoordinator.invalidate { [weak self] state, progress in
             self?.publishAutoAdjustmentState(state, progress: progress)
@@ -2904,21 +2946,31 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         modifiers: LibrarySelectionModel.Modifiers = []
     ) {
         guard collection.items.indices.contains(index) else { return }
+        let selectionUptime = DispatchTime.now().uptimeNanoseconds
         if isCropToolActive { cancelCrop() }
-        cancelIdlePreviewBuild(resetCursor: true)
         selectPortableItem(at: index, modifiers: modifiers)
-        loadMorePortableIfNeeded(currentIndex: index)
         let item = collection.items[index]
-        requestEditedThumbnail(for: item.id, priority: .activeEditor)
 
         if let url = item.url {
-            openImage(url: url, assetID: item.id)
+            openImage(
+                url: url, assetID: item.id, selectionUptime: selectionUptime,
+                collectionAlreadySelected: true
+            )
         } else if let data = item.imageData {
             load(
                 name: item.displayName, url: nil, data: data, assetID: item.id,
                 dataFingerprint: item.dataFingerprint,
-                portableIdentity: item.asset.source.portableIdentity
+                portableIdentity: item.asset.source.portableIdentity,
+                presentationSelectionUptime: selectionUptime
             )
+        }
+        // The active editor should receive this request, but constructing its persistence and
+        // Look snapshot can be expensive. It is supporting work, so let the photo switch enqueue
+        // source preparation first and admit the thumbnail after the selection event returns.
+        Task { @MainActor [weak self] in
+            await Task.yield()
+            guard let self, !self.isShuttingDown, self.activeAssetID == item.id else { return }
+            self.requestEditedThumbnail(for: item.id, priority: .activeEditor)
         }
     }
 

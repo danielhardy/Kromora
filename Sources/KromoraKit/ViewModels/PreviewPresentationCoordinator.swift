@@ -84,12 +84,13 @@ final class PreviewPresentationCoordinator {
     func advanceComparisonRevision() { comparisonRevision &+= 1 }
 
     func beginPresentationSession(
-        assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64
+        assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64,
+        selectionUptime: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) {
         cancelStoredFrameLookup()
         presentationSession = PresentationSession(
             assetID: assetID, identity: identity, generation: generation,
-            selectionUptime: DispatchTime.now().uptimeNanoseconds,
+            selectionUptime: selectionUptime,
             state: .provisional, candidateSource: nil,
             firstPixelLatencyMilliseconds: nil, confirmedLatencyMilliseconds: nil,
             distinctFrameCount: 0, provisionalFrameCount: 0, confirmedFrameCount: 0,
@@ -211,7 +212,9 @@ final class PreviewPresentationCoordinator {
     }
 
     private static func opaqueToken(_ identity: PortablePhotoIdentity) -> String {
-        let digest = SHA256.hash(data: identity.canonicalData)
+        // The portable UUID already has no path/content data. Hashing it directly avoids
+        // JSON-encoding the full fingerprint on every selection just to emit a private-safe token.
+        let digest = SHA256.hash(data: Data(identity.assetID.raw.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
         return String(digest.prefix(16))
@@ -285,6 +288,7 @@ final class PreviewPresentationCoordinator {
             let hit = await store.read(for: identity)
             await pin
             guard !Task.isCancelled, let self else { return }
+            guard self.storedFrameSessionGeneration == generation else { return }
             self.storedFrameTask = nil
             guard let session = self.presentationSession,
                 session.assetID == assetID, session.generation == generation,
@@ -305,10 +309,18 @@ final class PreviewPresentationCoordinator {
     }
 
     func cancelStoredFrameLookup() {
-        storedFrameTask?.cancel()
+        let task = storedFrameTask
         storedFrameTask = nil
         storedFrameSessionGeneration = nil
         storedFrameLookup = .idle
+        guard let task else { return }
+        // The store task may be suspended behind package I/O. Cancellation handlers run on the
+        // caller, so yield before invoking them on the selection path. Generation fencing above
+        // prevents its late result from replacing a newer lookup.
+        Task { @MainActor in
+            await Task.yield()
+            task.cancel()
+        }
     }
 
     /// The candidate has served its purpose once a confirmed frame exists; later requests in the
