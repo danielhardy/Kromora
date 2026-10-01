@@ -98,6 +98,12 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             URL(fileURLWithPath: "/virtual/\(assetID.raw).jpg")
         }
 
+        func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset {
+            try XCTUnwrap(assets.first {
+                $0.source.portableIdentity.assetID == assetID
+            })
+        }
+
         func updateLibraryState(for assetID: PortablePhotoAssetID, rating: Int, flag: PhotoFlag) throws {
             persistedStates.append((assetID, rating, flag))
         }

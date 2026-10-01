@@ -847,6 +847,46 @@ final class PortableLibrarySession {
         return try package.embeddedSourceURL(for: package.readAssetRecord(for: assetID))
     }
 
+    /// Resolve the selected browsing projection against its durable record. Browsing windows keep
+    /// only summaries and deliberately carry placeholder identities; opening one asset is the point
+    /// where its persisted content hash becomes available to render and edit consumers.
+    func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset {
+        guard let entry = queryController.index.entry(for: assetID) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        assetRecordReadObserver?(assetID)
+        let summary = entry.summary
+        let package = self.package
+        return try await Task.detached {
+            let record = try package.readAssetRecord(for: assetID)
+            let sourceURL = try package.embeddedSourceURL(for: record)
+            let source = PhotoAssetSource(
+                url: sourceURL,
+                id: PhotoAssetID(rawValue: "portable:\(assetID.raw)"),
+                data: nil,
+                bookmarkData: nil,
+                portableIdentity: record.identity
+            )
+            return PhotoAsset(
+                source: source,
+                filename: summary.displayName,
+                fileType: sourceURL.pathExtension,
+                metadata: PhotoAssetMetadata(
+                    dimensions: summary.dimensions,
+                    captureDate: summary.captureDate,
+                    cameraMake: summary.cameraMake,
+                    cameraModel: summary.cameraModel,
+                    lens: summary.lens
+                ),
+                libraryState: PhotoAssetLibraryState(
+                    rating: summary.rating ?? 0,
+                    flag: PhotoFlag(rawValue: summary.flag ?? "none") ?? .none
+                ),
+                presentedAspectRatio: summary.presentedAspectRatio
+            )
+        }.value
+    }
+
     private func browsingAsset(for item: LibraryQueryItem) throws -> PhotoAsset {
         let summary = item.summary
         // Names such as "IMG_1370.DNG — Copy" have no path extension. The derived
