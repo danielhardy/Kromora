@@ -183,3 +183,36 @@ and an SDK diagnostic that `SwiftUICore.tbd` cannot be linked by this client. Th
 did not launch. The harness's configured drawable is 1280×800, but it was not created or measured;
 latencies, frame counts, render admissions, transitions, and KRMA-734 budgets remain unmeasured.
 Capture summary: `/tmp/kromora-capture/KRMA-738-stable-xcode-27-DSC01019-20260930-185223-summary.txt`.
+
+### KRMA-738 stable Release capture (2026-09-30)
+
+After KRMA-741 removed the eager `MaskingPanel.body` evaluation from the test bundle, the Release
+`KromoraKitTests.xctest` links on stable Xcode 27.0 (build 27A266a). `scripts/run-kromora-capture.sh`
+looked for a stale `KromoraPackageTests.xctest` name and aborted before tracing; it now uses
+`KromoraKitTests.xctest`.
+
+`scripts/run-kromora-capture.sh --benchmark metal-presentation --source realworldtest/DSC01019.ARW
+--iterations 30` ran on an Apple M1 Pro MacBook Pro (10 cores, 16 GB), macOS 27.0 build 26A428,
+commit `dd70dfb9d9fcacc90caf611078978ddd724e6d33`, Release configuration, `DSC01019.ARW` (ARW,
+6336×9504 source extent) decoded through `CIRAWFilter`, 1280×800 drawable. Single automated run:
+a 30-iteration warm transform phase after a 529 ms completed-texture warm-up, plus 5 settled
+adjustment iterations; the Core Image/preview caches were warm for the measured phase.
+
+| Metric | Value |
+| --- | --- |
+| Input to present p50 / p95 / p99 | 24.4 / 24.5 / 25.2 ms |
+| Release to settled p50 / p95 / p99 | 41.0 / 49.5 / 49.5 ms |
+| Warm presentation encoding p50 / p95 | 0.79 / 6.96 ms |
+| Warm drawable acquisition p50 / p95 | 0.08 / 0.16 ms |
+| Warm GPU p95 | 0.30 ms |
+| Peak memory delta | 65.0 MB |
+
+Trace: `/tmp/kromora-capture/KRMA-738-verify-DSC01019-20260930-201225.trace`.
+
+This harness measures single-photo drawable presentation only. It does not emit confirmed and
+provisional frame counts, render admissions, crossfades, thumbnail swaps, layout changes, main-actor
+time before first suspension, or 30-cell grid hydration, and nothing else in the test target does.
+These KRMA-734 budgets therefore remain unmeasured: warm Edit navigation p95 <= 50 ms with <= 2 ms
+main-actor work before first suspension, exact warm Edit zero renders and one confirmed frame, stale
+warm Edit one provisional plus at most one confirmed frame, and warm 30-cell hydration p95 <= 100 ms.
+No target was redefined.
