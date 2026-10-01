@@ -101,27 +101,54 @@ scripts/run-kromora-capture.sh --benchmark last-known-frame \
   --source /absolute/path/to/fixtures/DSC01019.ARW --iterations 30
 ```
 
-`last-known-frame` mounts the shipping `ContentView` in an onscreen window, imports 30 generated grid
-sources plus the selected licensed RAW into a temporary test package, and warms the actual visible
-thumbnail rows before its warm grid samples. Every warm grid sample leaves Edit, waits for
-`LibraryGridView` to unmount, re-enters Library, waits for a new grid mount and populated visible
-cells, then forces an AppKit layout and display pass. Edit selections run through `AppViewModel`;
-the first-pixel clock starts immediately before the selection call and ends at the first drawable
-callback from `PreviewSurface`. Exact and stale cases emit `criteriaPassed` and assert their frame
-and render-count requirements. Renderer admissions and crossfade counts are captured from the
-corresponding production owners. Each output line is JSON prefixed with
-`LAST_KNOWN_FRAME_BENCHMARK`; the capture summary supplies machine, OS, commit, and Release
-configuration. The synchronous selection call is the measured main-actor work before its first
-asynchronous task can run. The harness does not infer a presentation from a published CIImage.
+`last-known-frame` mounts the shipping `ContentView` in an onscreen window, imports 29 generated grid
+sources plus the selected licensed RAW (a 30-cell grid) into a temporary test package, and warms the
+actual visible thumbnail rows before its warm grid samples. Every warm grid sample leaves Edit,
+waits for `LibraryGridView` to unmount, re-enters Library, waits for a new grid mount and populated
+visible cells, then forces one AppKit layout and display pass; the sample is the time from the
+navigation request to that pass. Every warm Edit sample does the reverse and selects the RAW again
+through `AppViewModel`, so the Edit surface remounts. First-pixel and confirmed latencies come from
+the presentation session's own drawable-callback clock (which starts at the top of
+`selectCollectionImage`), re-based to a timestamp taken before the call; no sleep or polling
+interval is inside a reported number. Each wait requires a session created after that timestamp,
+so a confirmation left over from the previous selection cannot satisfy it. The synchronous
+selection call is the measured main-actor work before its first asynchronous task can run. Exact
+and stale cases assert their frame and render-count requirements. Renderer admissions and
+crossfade counts come from the production owners, and the harness never infers a presentation from
+a published `CIImage`.
 
-The output includes separate warm grid hydration and warm Edit selection records, with source
-dimensions, viewport points, backing pixels, cache state, sample count, p50/p95, drawable frame
-counts, render admissions, crossfades, thumbnail swaps, layout passes, and an explicit
-`criteriaPassed` result. Grid layout-pass counts represent explicit layout/display work after a
-newly mounted grid has populated visible cells. The harness requires a logged-in display and skips
-immediately with the window occlusion state when it is not onscreen. Its default is 30 warm samples
-so p95 does not collapse to the maximum of a five-sample run. Keep the benchmark opt-in; KRMA-734
-targets are unchanged.
+Each output line is JSON prefixed with `LAST_KNOWN_FRAME_BENCHMARK`, and the wrapper also writes
+the same records to `<capture>-report.jsonl` so a consumer need not parse them out of interleaved
+xctest output. Records carry machine, OS, commit, source format/dimensions, viewport points,
+backing pixels, cold/warm and cache state, sample count, p50/p95 (nearest-rank), confirmed-frame
+p95, provisional/confirmed frame counts, render admissions, crossfades, thumbnail swaps, grid
+mounts, SwiftUI body evaluations, p95 main-actor time before first suspension, and
+`criteriaPassed`. A final `LAST_KNOWN_FRAME_BUDGET_SUMMARY exact=… stale=… grid=… edit=…` line gives
+the four verdicts. The default is 30 warm samples (5...100) so p95 does not collapse to the
+maximum. `KROMORA_LAST_KNOWN_FRAME_ENFORCE_BUDGETS=1` turns a wall-clock miss into a test failure;
+without it the test fails only for harness errors and the structural exact/stale criteria, so a
+green run is **not** evidence that the budgets pass. Check the summary line. Keep the benchmark
+opt-in; KRMA-734 targets are unchanged.
+
+Requirements and behavior of the capture host:
+
+- The display must be unlocked and awake (`caffeinate -d` for a long session). xctest is a
+  background process that only spins the run loop, and AppKit delivers activation and window-state
+  events through its own event queue, so the harness calls `finishLaunching()` and drains that
+  queue (`settle`) at every wait. Without both, the app never activates and its window stays
+  occluded (`occlusionState=8192`, `appActive=false`) however often `activate` or `orderFront` is
+  called. If the window is still not onscreen after five seconds the test skips with the occlusion
+  state; it also skips, rather than failing, if the window is occluded mid-run (locked or asleep
+  display, another window covering it).
+- Metal reports `presentedTime == 0` for a drawable the compositor skipped, and `PreviewSurface`
+  then withholds confirmation and stops retrying after a bounded number of skips. That is correct
+  for an occluded product window but strands the session at `provisional` in a capture. The harness
+  sets `zeroPresentedTimeFallback` (as `ConcurrentExportEditingBenchmark` does) and reports how
+  often it was used as `zeroPresentedTimeFallbacks`; one or two per run is normal. Latencies are
+  therefore handler time, not scan-out time, and are diagnostic in the same sense as
+  `metal-presentation`.
+- Run one capture at a time. Concurrent runs share `.build`, the capture directory, and window
+  activation, and one will be occluded or rebuilt under the other.
 
 Record hardware, OS, commit, source format/dimensions, viewport/backing pixels, decoder, and
 cold/warm state. Points of Interest under `com.kromora.app` / `workflow` distinguish input, render,
@@ -240,7 +267,7 @@ time before first suspension, or 30-cell grid hydration, and nothing else in the
 These KRMA-734 budgets therefore remain unmeasured: warm Edit navigation p95 <= 50 ms with <= 2 ms
 main-actor work before first suspension, exact warm Edit zero renders and one confirmed frame, stale
 warm Edit one provisional plus at most one confirmed frame, and warm 30-cell hydration p95 <= 100 ms.
-No target was redefined.
+No target was redefined. (Superseded: the KRMA-744 capture below measures all four.)
 
 ### KRMA-742 last-known-frame Release capture (2026-09-30)
 
@@ -292,28 +319,74 @@ Capture summary and trace:
 `/tmp/kromora-capture-krma743/KRMA743-retry-DSC01019-20260930-235547-summary.txt` and
 `/tmp/kromora-capture-krma743/KRMA743-retry-DSC01019-20260930-235547.trace`.
 
-### KRMA-744 harness repair and capture attempt (2026-10-01)
+### KRMA-744 harness repair and first valid capture (2026-10-01)
 
-The harness now waits for a new `LibraryGridView` mount after leaving Edit, waits for populated
-visible thumbnails, forces layout/display work, and records a layout pass for each warm grid sample.
-Edit timing starts immediately before `selectCollectionImage` and ends at the first drawable
-callback. Exact and stale frame/render requirements are emitted as pass/fail and asserted. The
-default is 30 samples. The initial 2026-09-30 grid p95 and Edit first-pixel timings above remain
-invalid evidence; the new harness did not change any KRMA-734 budget.
+The harness now measures what the budgets describe (see the method above). Before this, every
+attempt either timed out waiting for a drawable or skipped with `occlusionState=8192`; none
+produced a record. The cause was the capture host, not the product: xctest never finished
+launching or drained AppKit's event queue, so the window was never composited. A scratch probe
+showed an `NSApplication.run()` loop (or manually draining events) reaches `occlusionState=8194`,
+`active=true` within a second, while a bare `RunLoop` never does. A second, intermittent failure
+(about one run in three hung at `provisional`, in a different step each time) was the
+`presentedTime == 0` skip described above; with `zeroPresentedTimeFallback` set it did not recur in
+8 short runs, a full 30-sample run, and both runs of the rewritten harness (a 5-sample run and the capture below). A deferred perceptual-digest publish in
+`AppViewModel.presentAdjustedFrame` was investigated and ruled out for this hang (it never fired in
+a failing run).
 
-The requested Release capture was attempted with the 30-sample command above on the logged-in
-Apple M1 Pro MacBook Pro, macOS 27.0 build 26A428, stable Xcode 27.0, using `DSC01019.ARW`. Both the
-capture wrapper and direct Release test reached the visibility guard and skipped in about eight
-seconds because `window.occlusionState` was `8192` (the window had no visible bit). No latency or
-frame measurements were produced. Capture summary:
-`/tmp/kromora-capture-krma744/KRMA744-DSC01019-20261001-041641-summary.txt`.
+First valid capture: `scripts/run-kromora-capture.sh --benchmark last-known-frame --source
+realworldtest/DSC01019.ARW --iterations 30`, Release, Apple M1 Pro, macOS 27.0 (26A428), stable
+Xcode 27.0, commit `a130e6b27c0a7c66a50c7d6772c46549e57e298a` plus the KRMA-744 harness changes,
+`DSC01019.ARW` (126 MB, 9504×6336), viewport 1440×897 points / 2880×1794 backing pixels, 86 s,
+0 failures. Records:
+`/tmp/kromora-capture/KROMORA-last-known-frame-DSC01019-20261001-101504-report.jsonl` (trace and
+summary beside it).
 
-An additional capture attempt on 2026-10-01 used the same command from the agent shell and rebuilt
-the Release test bundle successfully. The XCTest process still could not activate its window:
-`occlusionState=8192`, `isVisible=true`, `keyWindow=false`, `appActive=false`, and
-`activationPolicy=0`. It skipped before producing measurements, so this run is not budget evidence.
-Summary and trace: `/tmp/kromora-capture/KROMORA-last-known-frame-DSC01019-20261001-081124-summary.txt`
-and `.trace`.
+| Scenario | p50 / p95 first pixel or hydration | Confirmed p95 | Frames (prov / conf) | Renders | Budget |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Exact warm Edit (1 sample) | 627 / 627 ms | 933 ms | 1 / 1 | 0 | zero renders, one confirmed: **pass** |
+| Stale warm Edit (1 sample) | 651 / 651 ms | 1282 ms | 1 / 1 | 1 | one provisional, ≤ 1 confirmed: **pass** |
+| Warm 30-cell grid (30) | 193 / 214 ms | — | — | 0 | p95 ≤ 100 ms: **miss** |
+| Warm Edit navigation (30) | 652 / 664 ms | 1009 ms | 30 / 30 | 0 | p95 ≤ 50 ms: **miss** |
+| Main-actor before first suspension | p95 72 ms | — | — | — | ≤ 2 ms: **miss** |
 
-To complete qualification, run the same 30-sample capture from an interactive macOS session where
-the XCTest-created Kromora window is onscreen, then append the output and budget results here.
+Cold grid hydration was 723 ms (one visit, not a budget). Warm grid: 30 mounts, 330 body
+evaluations, 0 thumbnail swaps. Warm Edit: 0 crossfades, 0 thumbnail swaps, 870 body evaluations
+over 30 samples. These supersede the invalid 2026-09-30 grid and Edit-latency figures above; the
+earlier exact/stale one-sample counts agree with the asserted results here.
+
+**Diagnosis of the warm Edit miss.** A 1 ms `sample` of the xctest main thread during a 100-sample
+run attributes **37% of all main-thread time to `AccelerateCrypto_SHA256_compress`, every sample of
+it under `ImageSource.makePortableIdentity`**. For a URL-backed source that calls
+`PortablePhotoSourceFingerprint.file(at:)`, which does `Data(contentsOf:)` and a full SHA-256 of the
+126 MB RAW, and `SourceImportPlan.source` is a computed property, so each access builds a new
+`ImageSource` and hashes again. The hashing lands at four points of one selection, all on the main
+actor: inside `selectCollectionImage` itself (9% of main-thread time; the ~70 ms pre-suspension
+miss), `AppViewModel.load` (5%), `SourceSessionCoordinator.prepare` (14%), and
+`EditedThumbnailCoordinator.request` after the yield (9%). Roughly half a second of every ~1.4 s
+handoff cycle is this hash, which accounts for most of the ~650 ms first pixel even when the stored
+frame is exact (627 ms with zero renders). Not attributed: the remainder of the first-pixel time
+(SwiftUI Edit-surface mount and inspector construction) should be re-measured after the hash is
+removed from the path. The remedy is the portable-identity design question, not a harness defect:
+`existing` identity is passed in but the content hash is still recomputed, so reuse it while the
+file-change signature (size, modification date, resource identifier) is unchanged, and construct
+the plan's `ImageSource` once. Any such change must keep the in-place-replacement identity tests
+(KRMA-734) passing.
+
+**Diagnosis of the warm grid miss (partial).** None of the SHA-256 time sits under grid
+mount or thumbnail demand. The main-thread profile is dominated by SwiftUI graph updates and layout
+(`ViewLayoutEngine.sizeThatFits`, `AG::Graph::update_attribute`, `NSHostingView` transactions): about
+11 body evaluations and one full layout per grid entry. The grid re-enters at ~190 ms against a
+100 ms budget with nothing else competing, so this needs its own focused profile of grid mount
+(cell body cost, whether the 30 cells are laid out eagerly, and the `.onAppear` thumbnail demand);
+it is separate from the Edit hashing finding.
+
+Re-run from the repository root with the display unlocked:
+
+```sh
+caffeinate -d -t 1800 &
+scripts/run-kromora-capture.sh --benchmark last-known-frame \
+  --source realworldtest/DSC01019.ARW --iterations 30
+```
+
+then read `…-report.jsonl` (or the `LAST_KNOWN_FRAME_BUDGET_SUMMARY` line), and set
+`KROMORA_LAST_KNOWN_FRAME_ENFORCE_BUDGETS=1` when the budgets are expected to pass.
