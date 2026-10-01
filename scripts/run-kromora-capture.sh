@@ -35,7 +35,7 @@ capture_id=""
 output_dir=""
 time_limit=""
 iteration_count="${KROMORA_METAL_BENCHMARK_ITERATIONS:-20}"
-last_known_iteration_count="${KROMORA_LAST_KNOWN_FRAME_ITERATIONS:-5}"
+last_known_iteration_count="${KROMORA_LAST_KNOWN_FRAME_ITERATIONS:-30}"
 item_count="${KROMORA_CONCURRENT_CAPTURE_ITEMS:-6}"
 gesture_count="${KROMORA_CONCURRENT_CAPTURE_GESTURES:-10}"
 

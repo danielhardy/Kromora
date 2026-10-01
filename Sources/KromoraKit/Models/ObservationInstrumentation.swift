@@ -9,6 +9,8 @@ struct RenderDiagnosticsSnapshot: Sendable, Equatable {
     let contentViewBodyEvaluations: Int
     let inspectorBodyEvaluations: Int
     let gridBodyEvaluations: Int
+    let gridMounts: Int
+    let gridUnmounts: Int
     let toolbarBodyEvaluations: Int
     let presentationCoreImageEvaluations: Int
 }
@@ -44,6 +46,8 @@ enum RenderDiagnostics {
     private static var contentViewBodyEvaluations = 0
     private static var inspectorBodyEvaluations = 0
     private static var gridBodyEvaluations = 0
+    private static var gridMounts = 0
+    private static var gridUnmounts = 0
     private static var toolbarBodyEvaluations = 0
     private static var presentationCoreImageEvaluations = 0
 
@@ -52,6 +56,8 @@ enum RenderDiagnostics {
             contentViewBodyEvaluations: contentViewBodyEvaluations,
             inspectorBodyEvaluations: inspectorBodyEvaluations,
             gridBodyEvaluations: gridBodyEvaluations,
+            gridMounts: gridMounts,
+            gridUnmounts: gridUnmounts,
             toolbarBodyEvaluations: toolbarBodyEvaluations,
             presentationCoreImageEvaluations: presentationCoreImageEvaluations
         )
@@ -61,6 +67,8 @@ enum RenderDiagnostics {
         contentViewBodyEvaluations = 0
         inspectorBodyEvaluations = 0
         gridBodyEvaluations = 0
+        gridMounts = 0
+        gridUnmounts = 0
         toolbarBodyEvaluations = 0
         presentationCoreImageEvaluations = 0
     }
@@ -82,6 +90,9 @@ enum RenderDiagnostics {
         gridBodyEvaluations &+= 1
         return true
     }
+
+    static func noteGridMount() { gridMounts &+= 1 }
+    static func noteGridUnmount() { gridUnmounts &+= 1 }
 
     @discardableResult
     static func noteToolbarBody() -> Bool {

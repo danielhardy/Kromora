@@ -98,29 +98,30 @@ scripts/run-kromora-capture.sh --benchmark concurrent-export-editing \
   --source /absolute/path/to/fixtures/DSC07826.ARW
 
 scripts/run-kromora-capture.sh --benchmark last-known-frame \
-  --source /absolute/path/to/fixtures/DSC01019.ARW --iterations 5
+  --source /absolute/path/to/fixtures/DSC01019.ARW --iterations 30
 ```
 
-`last-known-frame` mounts the shipping `ContentView` in a visible window, imports 30 generated grid
+`last-known-frame` mounts the shipping `ContentView` in an onscreen window, imports 30 generated grid
 sources plus the selected licensed RAW into a temporary test package, and warms the actual visible
-thumbnail rows before its warm grid samples. Edit selections run through `AppViewModel`; first-
-pixel/confirmed counts are recorded only after the `PreviewSurface` drawable callback. Renderer
-admission and crossfade counts are captured from the corresponding production owners. Each output line is JSON prefixed with
+thumbnail rows before its warm grid samples. Every warm grid sample leaves Edit, waits for
+`LibraryGridView` to unmount, re-enters Library, waits for a new grid mount and populated visible
+cells, then forces an AppKit layout and display pass. Edit selections run through `AppViewModel`;
+the first-pixel clock starts immediately before the selection call and ends at the first drawable
+callback from `PreviewSurface`. Exact and stale cases emit `criteriaPassed` and assert their frame
+and render-count requirements. Renderer admissions and crossfade counts are captured from the
+corresponding production owners. Each output line is JSON prefixed with
 `LAST_KNOWN_FRAME_BENCHMARK`; the capture summary supplies machine, OS, commit, and Release
 configuration. The synchronous selection call is the measured main-actor work before its first
 asynchronous task can run. The harness does not infer a presentation from a published CIImage.
 
 The output includes separate warm grid hydration and warm Edit selection records, with source
 dimensions, viewport points, backing pixels, cache state, sample count, p50/p95, drawable frame
-counts, render admissions, crossfades, thumbnail swaps, and layout changes. Frame counters are
-drawable callbacks; grid hydration waits for visible thumbnail publication and an AppKit display
-pass. Keep the benchmark opt-in and run on a logged-in display. This harness does not change the
-KRMA-734 targets.
-
-This pass measures the warm Edit selection and grid wall-clock budgets. Exact warm reopen and stale
-warm replacement counts still require a benchmark setup backed by a persisted package preview
-record; this harness currently reports actual frame and render counts for the measured selection
-flow and does not infer those two cases from the deterministic fake-renderer tests.
+counts, render admissions, crossfades, thumbnail swaps, layout passes, and an explicit
+`criteriaPassed` result. Grid layout-pass counts represent explicit layout/display work after a
+newly mounted grid has populated visible cells. The harness requires a logged-in display and skips
+immediately with the window occlusion state when it is not onscreen. Its default is 30 warm samples
+so p95 does not collapse to the maximum of a five-sample run. Keep the benchmark opt-in; KRMA-734
+targets are unchanged.
 
 Record hardware, OS, commit, source format/dimensions, viewport/backing pixels, decoder, and
 cold/warm state. Points of Interest under `com.kromora.app` / `workflow` distinguish input, render,
@@ -249,21 +250,22 @@ realworldtest/DSC01019.ARW --iterations 5` on stable Xcode 27.0 (27A266a), macOS
 `29496b3df7cea4bc9e1d6b24074f15b5551ccb9d`. The source is ARW, metadata dimensions 9504×6336,
 decoded with `CIRAWFilter`; viewport 1440×897 points and 2880×1794 backing pixels. Exact and stale
 warm scenarios each ran once; the 30-cell grid and warm Edit selection ran five samples each.
-The first grid hydration was 1095.0 ms; the reported grid p95 covers warm samples.
+The first grid hydration was 1095.0 ms. KRMA-744 later found that the warm grid loop did not wait
+for the Library view to mount or yield to SwiftUI, and that Edit latency used a timestamp stamped
+inside selection. Therefore the warm grid p95 and all Edit first-pixel timings below are invalid
+measurements and must not be used as budget evidence. The recorded drawable and render counts remain
+historical observations from that run, but the harness did not assert its exact/stale criteria.
 
 | Scenario | p50 / p95 first-pixel or hydration | Frames (provisional / confirmed) | Render admissions | Other counts |
 | --- | ---: | ---: | ---: | --- |
 | Exact warm Edit | 211.7 / 211.7 ms (1 sample) | 1 / 1 | 0 | 0 crossfades; 0 thumbnail swaps; 2 layout changes |
 | Stale warm Edit | 182.3 / 182.3 ms (1 sample) | 1 / 1 | 1 | 0 crossfades; 0 thumbnail swaps; 2 layout changes |
-| Warm 30-cell grid | 0.135 / 0.135 ms (5 samples) | 0 / 0 | 0 | 0 crossfades; 0 thumbnail swaps; 5 layout changes |
-| Warm Edit selection | 196.3 / 197.2 ms (5 samples) | 5 / 5 | 0 | 0 crossfades; 0 thumbnail swaps; 10 layout changes |
+| Warm 30-cell grid | 0.135 / 0.135 ms (5 samples, invalid) | 0 / 0 | 0 | 0 crossfades; 0 thumbnail swaps; 5 navigation flips |
+| Warm Edit selection | 196.3 / 197.2 ms (5 samples, invalid timing) | 5 / 5 | 0 | 0 crossfades; 0 thumbnail swaps; 10 navigation flips |
 
-The warm Edit main-actor selection call p95 was 289.0 ms. The grid p95 meets the <= 100 ms budget.
-Exact warm Edit used zero preview renders and had one confirmed drawable; stale warm Edit showed one
-provisional drawable followed by one confirmed replacement with one renderer admission. Warm Edit
-selection misses both limits: 197.2 ms versus <= 50 ms first provisional pixels, and 289.0 ms versus
-<= 2 ms main-actor work before the first asynchronous task. This is recorded in urgent follow-up
-KRMA-743. No budget was changed.
+The warm Edit main-actor selection call p95 was reported as 289.0 ms. The corrected harness measures
+the first drawable from before the selection call and separately rechecks both budgets. KRMA-743
+tracks the main-actor work improvement; no KRMA-734 target was changed.
 
 Trace and full capture summary:
 `/tmp/kromora-capture-krma742/KROMORA-last-known-frame-DSC01019-20260930-213520.trace` and
@@ -283,9 +285,28 @@ with the display awake. The pre-suspension selection call measured 1.23 ms in th
 sample that ran. The harness then timed out waiting for the RAW preview to settle: it observed one
 embedded-JPEG drawable callback at 1,132.7 ms from selection, but no confirmed RAW drawable, so it
 did not reach the warm samples or produce a valid p50/p95. This is not a pass for either KRMA-734
-latency budget. Follow-up capture depends on repairing the warm-up/window behavior tracked in
+latency budget. The warm-up/window harness repair and follow-up capture status are tracked in
 KRMA-744. Targets remain unchanged.
 
 Capture summary and trace:
 `/tmp/kromora-capture-krma743/KRMA743-retry-DSC01019-20260930-235547-summary.txt` and
 `/tmp/kromora-capture-krma743/KRMA743-retry-DSC01019-20260930-235547.trace`.
+
+### KRMA-744 harness repair and capture attempt (2026-10-01)
+
+The harness now waits for a new `LibraryGridView` mount after leaving Edit, waits for populated
+visible thumbnails, forces layout/display work, and records a layout pass for each warm grid sample.
+Edit timing starts immediately before `selectCollectionImage` and ends at the first drawable
+callback. Exact and stale frame/render requirements are emitted as pass/fail and asserted. The
+default is 30 samples. The initial 2026-09-30 grid p95 and Edit first-pixel timings above remain
+invalid evidence; the new harness did not change any KRMA-734 budget.
+
+The requested Release capture was attempted with the 30-sample command above on the logged-in
+Apple M1 Pro MacBook Pro, macOS 27.0 build 26A428, stable Xcode 27.0, using `DSC01019.ARW`. Both the
+capture wrapper and direct Release test reached the visibility guard and skipped in about eight
+seconds because `window.occlusionState` was `8192` (the window had no visible bit). No latency or
+frame measurements were produced. Capture summary:
+`/tmp/kromora-capture-krma744/KRMA744-DSC01019-20261001-041641-summary.txt`.
+
+To complete qualification, run the same 30-sample capture from an interactive macOS session where
+the XCTest-created Kromora window is onscreen, then append the output and budget results here.
