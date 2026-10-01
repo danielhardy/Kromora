@@ -837,6 +837,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private let usesInjectedEditStore: Bool
     private let previewCoordinator: PreviewCoordinator
     private let previewPresentation: PreviewPresentationCoordinator
+
+    /// Value-only counters used by the opt-in Release presentation qualification harness.
+    var presentationSessionForDiagnostics: PreviewPresentationCoordinator.PresentationSession? {
+        previewPresentation.presentationSession
+    }
+    var previewRenderAdmissionCountForDiagnostics: Int {
+        previewCoordinator.renderAdmissionCount
+    }
     private lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
         workScheduler: workScheduler, engine: engine, destination: self
     )

@@ -85,6 +85,10 @@ final class PreviewCoordinator {
     private var isShutdown = false
     private var warmSemanticMasks: SemanticWarmth?
 
+    /// Cumulative calls into the renderer, including refinements. Release qualification reads a
+    /// delta around one navigation so a cache hit can be distinguished from a fast render.
+    private(set) var renderAdmissionCount = 0
+
     var onPublication: PublicationHandler?
     var onFailure: FailureHandler?
     let telemetry = LiveEditTelemetry()
@@ -439,6 +443,7 @@ final class PreviewCoordinator {
         tracksLatency: Bool = true
     ) async -> Bool {
         let maskDetail = request.maskResolution == .deferSemantic ? "masks=deferred" : ""
+        renderAdmissionCount &+= 1
         if tracksLatency { telemetry.mark(token.revision, renderStart: LiveEditTelemetryClock.now) }
         KromoraObservability.liveEdit(.renderStart, source: request.source, quality: request.quality,
                                    revision: token.revision, detail: maskDetail)

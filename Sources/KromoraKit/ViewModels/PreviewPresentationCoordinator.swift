@@ -53,6 +53,8 @@ final class PreviewPresentationCoordinator {
         fileprivate(set) var firstPixelLatencyMilliseconds: Double?
         fileprivate(set) var confirmedLatencyMilliseconds: Double?
         fileprivate(set) var distinctFrameCount: Int
+        fileprivate(set) var provisionalFrameCount: Int
+        fileprivate(set) var confirmedFrameCount: Int
         fileprivate(set) var staleGenerationDrops: Int
     }
 
@@ -90,7 +92,8 @@ final class PreviewPresentationCoordinator {
             selectionUptime: DispatchTime.now().uptimeNanoseconds,
             state: .provisional, candidateSource: nil,
             firstPixelLatencyMilliseconds: nil, confirmedLatencyMilliseconds: nil,
-            distinctFrameCount: 0, staleGenerationDrops: 0
+            distinctFrameCount: 0, provisionalFrameCount: 0, confirmedFrameCount: 0,
+            staleGenerationDrops: 0
         )
         let token = Self.opaqueToken(identity)
         Self.presentationSignposter.emitEvent(
@@ -140,6 +143,7 @@ final class PreviewPresentationCoordinator {
                 return
             }
         session.distinctFrameCount += 1
+        session.provisionalFrameCount += 1
         if session.firstPixelLatencyMilliseconds == nil {
             session.firstPixelLatencyMilliseconds = Self.elapsedMilliseconds(
                 since: session.selectionUptime
@@ -174,6 +178,7 @@ final class PreviewPresentationCoordinator {
         session.candidateSource = .rendered
         consumeStoredFrame()
         session.distinctFrameCount += 1
+        session.confirmedFrameCount += 1
         if session.firstPixelLatencyMilliseconds == nil {
             session.firstPixelLatencyMilliseconds = Self.elapsedMilliseconds(
                 since: session.selectionUptime

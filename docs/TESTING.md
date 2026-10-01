@@ -96,7 +96,31 @@ scripts/run-kromora-capture.sh --benchmark metal-presentation \
 
 scripts/run-kromora-capture.sh --benchmark concurrent-export-editing \
   --source /absolute/path/to/fixtures/DSC07826.ARW
+
+scripts/run-kromora-capture.sh --benchmark last-known-frame \
+  --source /absolute/path/to/fixtures/DSC01019.ARW --iterations 5
 ```
+
+`last-known-frame` mounts the shipping `ContentView` in a visible window, imports 30 generated grid
+sources plus the selected licensed RAW into a temporary test package, and warms the actual visible
+thumbnail rows before its warm grid samples. Edit selections run through `AppViewModel`; first-
+pixel/confirmed counts are recorded only after the `PreviewSurface` drawable callback. Renderer
+admission and crossfade counts are captured from the corresponding production owners. Each output line is JSON prefixed with
+`LAST_KNOWN_FRAME_BENCHMARK`; the capture summary supplies machine, OS, commit, and Release
+configuration. The synchronous selection call is the measured main-actor work before its first
+asynchronous task can run. The harness does not infer a presentation from a published CIImage.
+
+The output includes separate warm grid hydration and warm Edit selection records, with source
+dimensions, viewport points, backing pixels, cache state, sample count, p50/p95, drawable frame
+counts, render admissions, crossfades, thumbnail swaps, and layout changes. Frame counters are
+drawable callbacks; grid hydration waits for visible thumbnail publication and an AppKit display
+pass. Keep the benchmark opt-in and run on a logged-in display. This harness does not change the
+KRMA-734 targets.
+
+This pass measures the warm Edit selection and grid wall-clock budgets. Exact warm reopen and stale
+warm replacement counts still require a benchmark setup backed by a persisted package preview
+record; this harness currently reports actual frame and render counts for the measured selection
+flow and does not infer those two cases from the deterministic fake-renderer tests.
 
 Record hardware, OS, commit, source format/dimensions, viewport/backing pixels, decoder, and
 cold/warm state. Points of Interest under `com.kromora.app` / `workflow` distinguish input, render,

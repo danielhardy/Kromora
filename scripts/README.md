@@ -12,7 +12,7 @@ measurements. Current requirements and verification limits are summarized in
 | Active | `check-swift-format.sh` | Check changed Swift files against `.swift-format` | macOS Swift toolchain; optional `SWIFT_FORMAT_BASE` |
 | Active | `ci-tests.sh` | Enforce the zero-warning build and run the deterministic, serial render/UI, or optional test lane | Xcode 27+ / macOS 27 SDK; optional lane needs the documented `KROMORA_*` fixtures/settings |
 | Opt-in | `photo-intelligence-report.sh` | Generate the photo-intelligence corpus report | Photo-intelligence test fixtures; optional `KROMORA_PHOTO_INTELLIGENCE_REPORT_PATH` |
-| Opt-in | `run-kromora-capture.sh` | Run a Release `xctrace` capture for `metal-presentation` or `concurrent-export-editing` | macOS, logged-in display, `xctrace`/`xctest`, and a licensed RAW fixture; use `--benchmark` and optionally `--source` |
+| Opt-in | `run-kromora-capture.sh` | Run a Release `xctrace` capture for `metal-presentation`, `concurrent-export-editing`, or `last-known-frame` | macOS, logged-in display, `xctrace`/`xctest`, and a licensed RAW fixture; use `--benchmark` and optionally `--source` |
 | Active | `smoke-macos-app.sh` | Exercise launch, Open, Settings, and Export through the packaged app | Built `.build/Kromora.app`, macOS UI session, accessible WindowServer; exits 2 when hosted UI is unavailable |
 | Active | `verify-app-icon.sh` | Verify Icon Composer inputs and packaged icon/resource outputs | Built `.build/Kromora.app`, Icon Composer asset, Python 3 |
 | Active | `verify-app-signature.sh` | Verify the app signature and expected entitlements | Built `.build/Kromora.app`, `codesign`, Python 3 |
@@ -28,4 +28,7 @@ scripts/run-kromora-capture.sh --benchmark metal-presentation \
 scripts/run-kromora-capture.sh --benchmark concurrent-export-editing \
   --source /absolute/path/to/fixtures/DSC07826.ARW \
   --items 6 --gestures 10
+
+scripts/run-kromora-capture.sh --benchmark last-known-frame \
+  --source /absolute/path/to/fixtures/DSC01019.ARW --iterations 5
 ```
