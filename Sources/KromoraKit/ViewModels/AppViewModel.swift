@@ -3007,9 +3007,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let item = collection.items[index]
 
         if let url = item.url {
+            // `selectPortableItem` is a no-op without an open package or a portable ID, so only
+            // skip the focus step when it actually made this item the active selection.
             openImage(
                 url: url, assetID: item.id, selectionUptime: selectionUptime,
-                collectionAlreadySelected: true
+                collectionAlreadySelected: collection.selection.activeID == item.id
             )
         } else if let data = item.imageData {
             load(
