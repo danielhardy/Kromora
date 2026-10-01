@@ -134,4 +134,31 @@ final class LibraryBrowsingProjectionTests: TempDirectoryTestCase {
             }
         }
     }
+
+    func testOpeningBrowsingAssetPublishesItsPersistedContentIdentity() async throws {
+        let session = try makeSession(assetCount: 1)
+        let browsingAsset = try XCTUnwrap(session.browsingAssets().first)
+        XCTAssertEqual(browsingAsset.source.portableIdentity.sourceFingerprint.decoderVersion,
+                       "browsing-v1")
+
+        let assetID = browsingAsset.source.portableIdentity.assetID
+        let openedAsset = try await session.materializedAsset(for: assetID)
+        let openedIdentity = openedAsset.source.portableIdentity
+        XCTAssertNotEqual(openedIdentity.sourceFingerprint.decoderVersion, "browsing-v1")
+        XCTAssertEqual(
+            openedIdentity.sourceFingerprint.contentHash,
+            try PortablePhotoSourceFingerprint.file(
+                at: try XCTUnwrap(openedAsset.url), decoderVersion: "imageio-standard-v1"
+            ).contentHash
+        )
+
+        let source = ImageSource(
+            url: try XCTUnwrap(openedAsset.url), nativeExtent: .zero,
+            portableIdentity: openedIdentity,
+            existingFileChangeSignature: openedAsset.source.fingerprint
+        )
+        XCTAssertEqual(source.portableIdentity.sourceFingerprint.contentHash,
+                       openedIdentity.sourceFingerprint.contentHash)
+        XCTAssertEqual(source.portableIdentity.assetID, openedIdentity.assetID)
+    }
 }

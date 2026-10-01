@@ -17,6 +17,7 @@ protocol LibraryBrowsingProviding: AnyObject {
     func setPortableSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?)
     func togglePortableSelection(_ assetID: PortablePhotoAssetID)
     func resolveEmbeddedSourceURL(for assetID: PortablePhotoAssetID) throws -> URL
+    func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset
     func updateLibraryState(for assetID: PortablePhotoAssetID, rating: Int, flag: PhotoFlag) throws
 }
 

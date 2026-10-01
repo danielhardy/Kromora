@@ -1857,9 +1857,61 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         collectionAlreadySelected: Bool = false
     ) {
         cancelPendingPreviewDebounce()
-        navigation.move(to: .edit)
+        // Assign the value so @Published sends immediately. This open path can now suspend while
+        // resolving a browsing record, before `load` publishes its normal loading-state changes.
+        navigation = NavigationState(mode: .edit)
         if !collectionAlreadySelected { focusCollectionItem(id: assetID) }
         let item = collection.items.first(where: { $0.id == assetID })
+        if let item,
+            item.asset.source.portableIdentity.sourceFingerprint.decoderVersion == "browsing-v1",
+            let portableLibrary
+        {
+            // Record I/O and the bounded file signature lookup belong off the main actor. Fence
+            // late opens against a newer selection before publishing the durable source identity.
+            loadRequestGeneration &+= 1
+            let resolutionGeneration = loadRequestGeneration
+            let portableAssetID = item.asset.source.portableIdentity.assetID
+            let previousStatusMessage = statusMessage
+            isToolbarPhotoTransitioning = true
+            isLoading = true
+            isNavigationLoading = true
+            previewState = .loading
+            statusMessage = "Loading \(item.displayName)..."
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await Task.yield()
+                do {
+                    let resolved = try await portableLibrary.materializedAsset(for: portableAssetID)
+                    guard self.loadRequestGeneration == resolutionGeneration,
+                        let current = self.collection.items.first(where: { $0.id == assetID })
+                    else { return }
+                    // Keep the actual identity on the collection item so later ImageSource values
+                    // (thumbnails, previews, and persistence) reuse its hash for an unchanged file.
+                    current.asset = resolved
+                    guard self.navigation.isEdit else {
+                        self.isToolbarPhotoTransitioning = false
+                        self.isLoading = false
+                        self.isNavigationLoading = false
+                        self.previewState = self.sourceImage == nil ? .empty : .ready
+                        self.statusMessage = self.sourceImage == nil
+                            ? "Open an image to get started" : previousStatusMessage
+                        self.presentPendingImportOutcome()
+                        return
+                    }
+                    self.openImage(
+                        url: url, assetID: assetID, selectionUptime: selectionUptime,
+                        collectionAlreadySelected: true
+                    )
+                } catch {
+                    guard self.loadRequestGeneration == resolutionGeneration else { return }
+                    self.isToolbarPhotoTransitioning = false
+                    self.isLoading = false
+                    self.isNavigationLoading = false
+                    self.failOpenImage(url, reason: error.localizedDescription)
+                }
+            }
+            return
+        }
         let itemName = item?.displayName
         let name =
             itemName.map { displayName in
