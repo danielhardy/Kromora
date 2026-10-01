@@ -78,6 +78,52 @@ final class PortablePhotoIdentityTests: TempDirectoryTestCase {
         XCTAssertNotEqual(before.cacheKey, after.cacheKey)
     }
 
+    func testImageSourceReusesKnownContentHashWhenFileSignatureIsUnchanged() throws {
+        let url = tempDirectory.appendingPathComponent("unchanged.ARW")
+        try Data("same source".utf8).write(to: url)
+        let signature = PhotoSourceFingerprint.file(at: url)
+        let fingerprint = try PortablePhotoSourceFingerprint.file(
+            at: url, decoderVersion: "imageio-raw-v1"
+        )
+        let identity = PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID(uuid: UUID()), sourceFingerprint: fingerprint
+        )
+
+        let source = ImageSource(
+            url: url, nativeExtent: CGSize(width: 40, height: 30),
+            portableIdentity: identity, existingFileChangeSignature: signature
+        )
+
+        XCTAssertEqual(source.portableIdentity.assetID, identity.assetID)
+        XCTAssertEqual(source.portableIdentity.sourceFingerprint.contentHash, fingerprint.contentHash)
+        XCTAssertEqual(source.portableIdentity.sourceFingerprint.geometry,
+                       PhotoPixelDimensions(width: 40, height: 30))
+    }
+
+    func testImageSourceRehashesWhenFileChangeSignatureChanges() throws {
+        let url = tempDirectory.appendingPathComponent("replaced.ARW")
+        try Data("before".utf8).write(to: url)
+        let oldSignature = PhotoSourceFingerprint.file(at: url)
+        let oldFingerprint = try PortablePhotoSourceFingerprint.file(
+            at: url, decoderVersion: "imageio-raw-v1"
+        )
+        let identity = PortablePhotoIdentity(
+            assetID: PortablePhotoAssetID(uuid: UUID()), sourceFingerprint: oldFingerprint
+        )
+        try Data("replacement content".utf8).write(to: url)
+
+        let source = ImageSource(
+            url: url, nativeExtent: CGSize(width: 40, height: 30),
+            portableIdentity: identity, existingFileChangeSignature: oldSignature
+        )
+
+        XCTAssertEqual(source.portableIdentity.assetID, identity.assetID)
+        XCTAssertEqual(source.portableIdentity.sourceFingerprint.contentHash,
+                       PortablePhotoSourceFingerprint.contentHash(of: Data("replacement content".utf8)))
+        XCTAssertNotEqual(source.portableIdentity.sourceFingerprint.contentHash,
+                          oldFingerprint.contentHash)
+    }
+
     func testRelativePathResolutionIsExplicitlyAtRenderBoundary() throws {
         let root = tempDirectory.appendingPathComponent("Library", isDirectory: true)
         let resolved = try RenderBoundarySourceResolver.resolve(

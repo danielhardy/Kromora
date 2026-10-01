@@ -69,7 +69,8 @@ struct ImageSource: Sendable, Equatable {
         kind: Kind,
         nativeExtent: CGSize,
         dataFingerprint: String? = nil,
-        portableIdentity: PortablePhotoIdentity? = nil
+        portableIdentity: PortablePhotoIdentity? = nil,
+        existingFileChangeSignature: PhotoSourceFingerprint? = nil
     ) {
         self.backing = backing
         self.kind = kind
@@ -86,7 +87,9 @@ struct ImageSource: Sendable, Equatable {
         }
         self.portableIdentity = Self.makePortableIdentity(
             backing: backing, kind: kind, nativeExtent: nativeExtent,
-            dataFingerprint: self.dataFingerprint, existing: portableIdentity
+            dataFingerprint: self.dataFingerprint, existing: portableIdentity,
+            existingFileChangeSignature: existingFileChangeSignature,
+            currentFileChangeSignature: self.fileChangeSignature
         )
         self.traceToken = Self.makeTraceToken(from: Self.fingerprintForTrace(backing: backing,
                                                                               kind: kind,
@@ -97,11 +100,13 @@ struct ImageSource: Sendable, Equatable {
     /// A file-backed source, classified by extension — the same rule `ImageDecoder.load` uses,
     /// so a file cannot be RAW for one and standard for the other.
     init(
-        url: URL, nativeExtent: CGSize, portableIdentity: PortablePhotoIdentity? = nil
+        url: URL, nativeExtent: CGSize, portableIdentity: PortablePhotoIdentity? = nil,
+        existingFileChangeSignature: PhotoSourceFingerprint? = nil
     ) {
         self.init(
             backing: .url(url), kind: Self.kind(forExtension: url.pathExtension),
-            nativeExtent: nativeExtent, portableIdentity: portableIdentity
+            nativeExtent: nativeExtent, portableIdentity: portableIdentity,
+            existingFileChangeSignature: existingFileChangeSignature
         )
     }
 
@@ -184,7 +189,9 @@ struct ImageSource: Sendable, Equatable {
 
     private static func makePortableIdentity(
         backing: Backing, kind: Kind, nativeExtent: CGSize, dataFingerprint: String?,
-        existing: PortablePhotoIdentity?
+        existing: PortablePhotoIdentity?,
+        existingFileChangeSignature: PhotoSourceFingerprint?,
+        currentFileChangeSignature: PhotoSourceFingerprint?
     ) -> PortablePhotoIdentity {
         let geometry = nativeExtent.width > 0 && nativeExtent.height > 0
             ? PhotoPixelDimensions(width: Int(nativeExtent.width), height: Int(nativeExtent.height))
@@ -201,17 +208,23 @@ struct ImageSource: Sendable, Equatable {
         case .url(let url):
             let decoderVersion = existing?.sourceFingerprint.decoderVersion
                 ?? "imageio-\(kind)-v1"
-            fingerprint = (try? PortablePhotoSourceFingerprint.file(
-                at: url,
-                sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
-                decoderVersion: decoderVersion, geometry: geometry
-            )) ?? existing?.sourceFingerprint.with(geometry: geometry)
-                ?? PortablePhotoSourceFingerprint(
-                    contentHash: PortablePhotoSourceFingerprint.contentHash(
-                        of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
-                    ),
-                    decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
-                )
+            if let existing, let existingFileChangeSignature,
+               let currentFileChangeSignature,
+               existingFileChangeSignature == currentFileChangeSignature {
+                fingerprint = existing.sourceFingerprint.with(geometry: geometry)
+            } else {
+                fingerprint = (try? PortablePhotoSourceFingerprint.file(
+                    at: url,
+                    sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
+                    decoderVersion: decoderVersion, geometry: geometry
+                )) ?? existing?.sourceFingerprint.with(geometry: geometry)
+                    ?? PortablePhotoSourceFingerprint(
+                        contentHash: PortablePhotoSourceFingerprint.contentHash(
+                            of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
+                        ),
+                        decoderVersion: "unavailable-\(kind)-v1", geometry: geometry
+                    )
+            }
         }
         let fallbackAssetID: PortablePhotoAssetID
         if let existing {

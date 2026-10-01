@@ -11,8 +11,10 @@ struct SourceImportPlan: Sendable, Equatable {
     let data: Data?
     let assetID: PhotoAssetID
     let portableIdentity: PortablePhotoIdentity?
+    let fileChangeSignature: PhotoSourceFingerprint?
     let dataFingerprint: String?
     let traceQuality: String
+    let source: ImageSource
 
     init(
         name: String,
@@ -20,6 +22,7 @@ struct SourceImportPlan: Sendable, Equatable {
         data: Data?,
         assetID: PhotoAssetID? = nil,
         portableIdentity: PortablePhotoIdentity? = nil,
+        fileChangeSignature: PhotoSourceFingerprint? = nil,
         dataFingerprint: String? = nil,
         traceQuality: String = "open"
     ) {
@@ -31,8 +34,25 @@ struct SourceImportPlan: Sendable, Equatable {
             ?? data.map(PhotoAssetID.data)
             ?? .data(Data())
         self.portableIdentity = portableIdentity
+        self.fileChangeSignature = fileChangeSignature
         self.dataFingerprint = dataFingerprint
         self.traceQuality = traceQuality
+        if let url {
+            self.source = ImageSource(
+                url: url, nativeExtent: .zero, portableIdentity: portableIdentity,
+                existingFileChangeSignature: fileChangeSignature
+            )
+        } else if let data {
+            self.source = ImageSource(
+                data: data, nativeExtent: .zero, dataFingerprint: dataFingerprint,
+                portableIdentity: portableIdentity
+            )
+        } else {
+            self.source = ImageSource(
+                backing: .data(Data()), kind: .standard, nativeExtent: .zero,
+                portableIdentity: portableIdentity
+            )
+        }
     }
 
     var sourceReference: EditSourceReference {
@@ -41,19 +61,4 @@ struct SourceImportPlan: Sendable, Equatable {
         )
     }
 
-    var source: ImageSource {
-        if let url {
-            return ImageSource(url: url, nativeExtent: .zero, portableIdentity: portableIdentity)
-        }
-        if let data {
-            return ImageSource(
-                data: data, nativeExtent: .zero, dataFingerprint: dataFingerprint,
-                portableIdentity: portableIdentity
-            )
-        }
-        return ImageSource(
-            backing: .data(Data()), kind: .standard, nativeExtent: .zero,
-            portableIdentity: portableIdentity
-        )
-    }
 }
