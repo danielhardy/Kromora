@@ -149,3 +149,19 @@ reported unresolved SwiftUI opaque descriptors and an unavailable `CoreAudioType
 The capture process never launched, so it produced no latency samples or drawable/frame counts.
 This attempt is not release-budget evidence. The warm Edit, 30-cell hydration, crossfade/swap, and
 layout budgets remain unmeasured until the Release capture can run with a supported test toolchain.
+
+### KRMA-734 stable-toolchain re-verification (2026-09-30)
+
+Re-run on an Apple M1 Pro MacBook Pro (10 cores, 16 GB), macOS 27.0 build 26A428, stable Xcode 27.0
+(build 27A266a, macOS 27.0 SDK), commit `0c567dfec94c61d457d3f91e3999a6c7c13dd08f`. The warning
+gate, debug and Release builds, fast lane, identity lane, `git diff --check`, and `dg validate` passed.
+The serial lane failed in `MetalKernelParityTests.testGrainKeepsGoldenStatistics` and
+`testMigratedKernelsRenderOnTheSoftwareRenderer`: the `grain-seed` golden's worst byte delta was 34
+against the 32 tolerance (mean and standard deviation checks passed), so the golden is sensitive to
+the OS build.
+
+`scripts/run-kromora-capture.sh --benchmark metal-presentation --source realworldtest/DSC01019.ARW
+--iterations 30` still failed before launching: the Release `KromoraKitTests.xctest` bundle fails to
+link on stable Xcode 27.0 with the same unresolved SwiftUI opaque type descriptors (`View.tag(_:includeOptional:)`,
+`View.task(name:priority:file:line:_:)`) and missing `CoreAudioTypes` framework. The failure is
+therefore not specific to the beta SDK. No latency samples, drawable counts, or budget results exist.
