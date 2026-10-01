@@ -1875,6 +1875,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         load(
             name: name, url: url, data: nil, assetID: assetID,
             portableIdentity: item.flatMap { persistencePortableIdentity(for: $0) },
+            fileChangeSignature: item?.asset.source.fingerprint,
             presentationSelectionUptime: selectionUptime
         )
     }
@@ -1926,12 +1927,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         name: String, url: URL?, data: Data?, assetID: PhotoAssetID? = nil,
         traceQuality: String = "open", dataFingerprint: String? = nil,
         portableIdentity: PortablePhotoIdentity? = nil,
+        fileChangeSignature: PhotoSourceFingerprint? = nil,
         presentationSelectionUptime: UInt64? = nil
     ) {
         guard !isShuttingDown else { return }
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
-            portableIdentity: portableIdentity, dataFingerprint: dataFingerprint,
+            portableIdentity: portableIdentity, fileChangeSignature: fileChangeSignature,
+            dataFingerprint: dataFingerprint,
             traceQuality: traceQuality
         )
         loadRequestGeneration &+= 1
