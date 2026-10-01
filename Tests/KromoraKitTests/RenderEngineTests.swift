@@ -170,10 +170,16 @@ final class RenderEngineTests: TempDirectoryTestCase {
             output: .raster
         )
 
+        guard case let .preview(maxSize) = request.renderScale else {
+            return XCTFail("RAW thumbnails must use a preview scale")
+        }
         XCTAssertEqual(
-            request.renderScale,
-            .preview(maxSize: CGSize(width: 300, height: 800)),
-            "RAW thumbnails must reserve source pixels for both crop dimensions"
+            maxSize.width, 300, accuracy: 0.000_001,
+            "RAW thumbnails must reserve source pixels for the crop width"
+        )
+        XCTAssertEqual(
+            maxSize.height, 800, accuracy: 0.000_001,
+            "RAW thumbnails must reserve source pixels for the crop height"
         )
         let expectedFactor = min(
             300 / nativeExtent.width, 800 / nativeExtent.height, 1
