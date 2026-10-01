@@ -179,7 +179,8 @@ final class EditedThumbnailCoordinator {
         if let url = item.url {
             source = ImageSource(
                 url: url, nativeExtent: item.thumbnailNativeExtent,
-                portableIdentity: item.asset.source.portableIdentity
+                portableIdentity: item.asset.source.portableIdentity,
+                existingFileChangeSignature: item.asset.source.fingerprint
             )
         } else if let data = item.imageData {
             source = ImageSource(
@@ -419,7 +420,8 @@ final class EditedThumbnailCoordinator {
         if let url = item.url {
             currentSource = ImageSource(
                 url: url, nativeExtent: item.thumbnailNativeExtent,
-                portableIdentity: item.asset.source.portableIdentity
+                portableIdentity: item.asset.source.portableIdentity,
+                existingFileChangeSignature: item.asset.source.fingerprint
             )
         } else if let data = item.imageData {
             currentSource = ImageSource(
