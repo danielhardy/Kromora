@@ -369,20 +369,31 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         sourceChangeSignature: PhotoSourceFingerprint?,
         currentSignature: PhotoSourceFingerprint
     ) -> PortablePhotoIdentity {
-        let fallbackFingerprint = PortablePhotoSourceFingerprint(
-            contentHash: PortablePhotoSourceFingerprint.contentHash(
-                of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
-            ),
-            decoderVersion: existing?.sourceFingerprint.decoderVersion ?? "legacy-fallback-v1",
-            geometry: existing?.sourceFingerprint.geometry
-        )
-        let initialFingerprint = existing?.sourceFingerprint ?? fallbackFingerprint
-        let fingerprint = (try? PortablePhotoSourceFingerprint.refreshing(
-            initialFingerprint,
-            sourceChangeSignature: sourceChangeSignature,
-            currentSignature: currentSignature,
-            at: url
-        )) ?? initialFingerprint
+        let fingerprint: PortablePhotoSourceFingerprint
+        if let persisted = existing?.sourceFingerprint {
+            fingerprint = (try? PortablePhotoSourceFingerprint.refreshing(
+                persisted,
+                sourceChangeSignature: sourceChangeSignature,
+                currentSignature: currentSignature,
+                at: url
+            )) ?? PortablePhotoSourceFingerprint(
+                contentHash: PortablePhotoSourceFingerprint.contentHash(
+                    of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
+                ),
+                sourceRevision: persisted.sourceRevision,
+                decoderVersion: persisted.decoderVersion,
+                geometry: persisted.geometry
+            )
+        } else {
+            fingerprint = (try? PortablePhotoSourceFingerprint.file(
+                at: url, decoderVersion: "imageio-\(url.pathExtension.lowercased())-v1"
+            )) ?? PortablePhotoSourceFingerprint(
+                contentHash: PortablePhotoSourceFingerprint.contentHash(
+                    of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
+                ),
+                decoderVersion: "legacy-fallback-v1"
+            )
+        }
         // A file URL is a referenced source, not a data-only import. Two different files can have
         // identical bytes and still require independent edit documents, so their compatibility
         // identity must follow the file asset identity rather than the content fingerprint. The
