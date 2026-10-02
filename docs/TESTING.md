@@ -461,3 +461,42 @@ photo's pixels on the canvas while its record resolved. `AppViewModel.openImage`
 surface and resets the presentation session before that suspension, covered by
 `LibraryBrowsingProjectionTests`. Full gate on `4bbc5c5f`: warning gate, `fast`, `serial` (455
 tests), and `identity` (4 tests) all pass.
+
+### Edit-panel stored-edit adoption (KRMA-755)
+
+The Edit panel binds to `AppViewModel.document`. The stored edit document is a small read that now
+starts in `SourceSessionCoordinator.begin` at selection and is published through
+`onStoredDocumentLoaded` as soon as it is read; `AppViewModel.adoptStoredDocumentValues` puts it on
+the panel. Before this change it was published only after `engine.prepareSource` returned, and
+preparation is serialized behind the previous source, so the panel waited for the RAW to prepare
+while the pixels (from the stored frame) did not. The source-dependent reconciliation
+(`adoptStoredEdits`: source size, mask selection, corrective render, histogram, deferred preview)
+is unchanged and still runs after preparation. If the stored document reached the panel before the
+first render was scheduled, that render already uses it and no corrective render is queued.
+
+`StoredEditAdoptionBenchmark` measures it without a window, so it needs no unlocked display:
+
+```sh
+KROMORA_STORED_EDIT_ADOPTION_BENCHMARK=1 KROMORA_STORED_EDIT_ADOPTION_ITERATIONS=10 \
+swift test -c release --filter StoredEditAdoptionBenchmark
+```
+
+It reopens a package with a stored exposure edit for each sample (real `RenderEngine`, real RAW,
+empty frame store, production browsing items) and prints one `STORED_EDIT_ADOPTION` line. Release,
+Apple M1 Pro, macOS 27.0, `DSC01019.ARW` (126 MB), 10 samples each, milliseconds from selection:
+
+| | Panel has stored values (p50 / p95) | Source prepared (p50) | Photo ready (p50 / p95) |
+| --- | ---: | ---: | ---: |
+| Before | 295 / 308 | 295 | 915 / 1354 |
+| After | **154 / 197** | 292 | **703 / 740** |
+
+Before the change the panel received its values at exactly the instant preparation finished (lead
+0.0 ms). After it the panel leads preparation by about 138 ms at the median, and the photo settles
+about 210 ms sooner because the redundant corrective render is gone. The panel now has its values
+before first pixel (about 290 ms in the last-known-frame capture). What remains in the 154 ms is the
+package-record resolution hop in `openImage` plus the edit read; it has not been profiled.
+
+Deterministic coverage (`StoredEditAdoptionTests`, fake engine with source preparation held open):
+the panel gets the stored values while preparation is pending; the first render uses the stored
+document so no canvas render uses the identity document; and a superseded selection never publishes
+the old photo's values. All three fail on the previous code.

@@ -324,6 +324,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var sourceRevision: UInt64 { sourceSession.sourceRevision }
     /// Document generation guards the primary visible render and histogram publications.
     private var documentRevision: UInt64 = 0
+    /// Set when the stored document reached the panel before source preparation finished (KRMA-755).
+    /// `documentChanged` records whether a speculative render with a different document had already
+    /// been scheduled, i.e. whether the late reconciliation still owes a corrective render.
+    private var earlyStoredAdoption: (sourceRevision: UInt64, documentChanged: Bool)?
     /// Display generation guards histogram work against a newer request, including comparison
     /// mode and render-scale changes that do not change the edit document.
     var displayRevision: UInt64 { previewPresentation.displayRevision }
@@ -1184,6 +1188,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             if self.previewAdmissionCoordinator.scheduledSourceRevision != self.sourceRevision {
                 self.schedulePreview()
             }
+        }
+        sourceSession.onStoredDocumentLoaded = { [weak self] publication in
+            guard let self, !self.isShuttingDown,
+                publication.request.sourceRevision == self.sourceRevision,
+                publication.request.assetID == self.activeAssetID else { return }
+            self.adoptStoredDocumentValues(publication.result, for: publication.request)
         }
         sourceSession.onStoredDocument = { [weak self] publication in
             guard let self, !self.isShuttingDown else { return }
@@ -2318,22 +2328,59 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         return aspectMismatch(right) <= aspectMismatch(left) ? right : left
     }
 
+    /// Stage one of stored-edit adoption: everything the Edit panel binds to, which needs no
+    /// prepared source. It runs as soon as the small edit read completes, so the panel and the
+    /// stored frame agree long before the (serialized, much slower) source preparation finishes.
+    /// The source-dependent reconciliation stays in `adoptStoredEdits`.
+    private func adoptStoredDocumentValues(
+        _ stored: EditDocumentLoadResult, for request: SourceSessionCoordinator.Request
+    ) {
+        // Reconciliation already ran for this source (it won the race to the main actor).
+        guard storedEditsResolvedSourceRevision != sourceRevision else { return }
+        // Same ownership rule as `adoptStoredEdits`: only a still-pristine, never-seen session
+        // may adopt disk state; a mutation made while loading owns the document.
+        let changedInMemory =
+            editorDocument.revision(for: request.assetID) != request.editSessionRevision
+        guard !request.hadInMemorySession, !changedInMemory else { return }
+        let documentChanged = document != stored.document
+        document = stored.document
+        comparisonBaselineDocument = document.comparisonBaseline
+        editorDocument.adoptStoredDocument(document, for: request.assetID)
+        collection.setPresentedCrop(document.crop, rotation: document.rotation, for: request.assetID)
+        // A first render scheduled before this point used the identity document and needs the
+        // corrective render; one scheduled after it already uses the stored document.
+        earlyStoredAdoption = (
+            request.sourceRevision,
+            documentChanged && previewAdmissionCoordinator.scheduledSourceRevision == sourceRevision
+        )
+    }
+
     private func adoptStoredEdits(
         _ stored: EditDocumentLoadResult, for request: SourceSessionCoordinator.Request
     ) {
+        let adoptedEarly = earlyStoredAdoption?.sourceRevision == request.sourceRevision
+        let earlyDocumentChanged = adoptedEarly ? (earlyStoredAdoption?.documentChanged ?? false) : false
+        earlyStoredAdoption = nil
         // A pre-existing session or a mutation made while preparation was in flight owns the
         // current document. Only a still-pristine, never-seen session may adopt disk state.
         let changedInMemory =
             editorDocument.revision(for: request.assetID) != request.editSessionRevision
-        let shouldAdopt = !request.hadInMemorySession && !changedInMemory
+        let shouldAdopt = adoptedEarly || (!request.hadInMemorySession && !changedInMemory)
         var documentChanged = false
         if shouldAdopt {
-            documentChanged = document != stored.document
-            document = stored.document
+            if adoptedEarly {
+                // The panel already has the stored document. An edit made since then owns the
+                // document and has scheduled its own render.
+                documentChanged = earlyDocumentChanged && !changedInMemory
+            } else {
+                documentChanged = document != stored.document
+                document = stored.document
+                comparisonBaselineDocument = document.comparisonBaseline
+                editorDocument.adoptStoredDocument(document, for: request.assetID)
+                collection.setPresentedCrop(
+                    document.crop, rotation: document.rotation, for: request.assetID)
+            }
             sourceSize = document.rotation.orientedExtent(imageSource?.nativeExtent ?? sourceSize)
-            comparisonBaselineDocument = document.comparisonBaseline
-            editorDocument.adoptStoredDocument(document, for: request.assetID)
-            collection.setPresentedCrop(document.crop, rotation: document.rotation, for: request.assetID)
             restoreMaskSelection()
             refreshLUTResolutionStatus()
             if documentChanged {
