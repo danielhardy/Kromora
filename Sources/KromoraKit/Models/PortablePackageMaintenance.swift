@@ -172,6 +172,8 @@ final class PortablePackagePackedThumbnailStore {
 
     var liveEntryCount: Int { entries.count }
 
+    var keys: [String] { Array(entries.keys) }
+
     var physicalByteCount: UInt64 {
         guard let urls = try? fileManager.contentsOfDirectory(
             at: rootURL, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],

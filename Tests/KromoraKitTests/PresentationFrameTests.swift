@@ -241,6 +241,70 @@ final class ThumbnailFrameStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(Set(window).count, window.count)
     }
 
+    func testPlaceholderWritesAreSkippedForBothKindsAndLegacyRecordsAreSwept() async throws {
+        let directory = tempDirectory.appendingPathComponent("PlaceholderThumbnails")
+        let store = ThumbnailFrameStore(directory: directory)
+        let assetID = PortablePhotoAssetID()
+        let placeholder = PortablePhotoIdentity(
+            assetID: assetID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(
+                contentHash: "browsing:\(assetID.raw)", decoderVersion: "browsing-v1"
+            )
+        )
+        let placeholderOriginal = try thumbnailFrame(
+            identity: placeholder, kind: .originalThumbnail480, red: 0.2
+        )
+        let placeholderEdited = try thumbnailFrame(
+            identity: placeholder, kind: .editedThumbnail480, red: 0.8
+        )
+        await store.enqueueWrite(placeholderOriginal)
+        await store.enqueueWrite(placeholderEdited)
+        await store.flush()
+        let skipped = await store.placeholderWritesSkipped
+        let countAfterPlaceholderWrites = await store.liveEntryCount
+        XCTAssertEqual(skipped, 2)
+        XCTAssertEqual(countAfterPlaceholderWrites, 0)
+
+        let real = FrameFixtures.identity()
+        await store.enqueueWrite(try thumbnailFrame(
+            identity: real, kind: .originalThumbnail480, red: 0.4
+        ))
+        await store.enqueueWrite(try thumbnailFrame(
+            identity: real, kind: .editedThumbnail480, red: 0.6
+        ))
+        await store.flush()
+        let realCount = await store.liveEntryCount
+        XCTAssertEqual(realCount, 2)
+
+        let legacyID = PortablePhotoAssetID()
+        let legacy = PortablePhotoIdentity(
+            assetID: legacyID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(
+                contentHash: "browsing:\(legacyID.raw)", decoderVersion: "browsing-v1"
+            )
+        )
+        let packed = try PortablePackagePackedThumbnailStore(at: directory)
+        let legacyFrame = try thumbnailFrame(
+            identity: legacy, kind: .originalThumbnail480, red: 0.3
+        )
+        let legacyKey = try XCTUnwrap(ThumbnailFrameStore.key(.original, for: legacyID))
+        let realKey = try XCTUnwrap(ThumbnailFrameStore.key(.original, for: real.assetID))
+        let realBefore: Data
+        if case .found(let data) = try packed.lookup(realKey) { realBefore = data }
+        else { throw XCTSkip("real thumbnail setup did not persist") }
+        try packed.append(.init(
+            key: legacyKey, data: try PresentationFrameEnvelope.encode(legacyFrame)
+        ))
+
+        let reopened = ThumbnailFrameStore(directory: directory)
+        let result = await reopened.readWithOutcome(.original, for: legacy)
+        XCTAssertNil(result.hit)
+        XCTAssertFalse(result.corrupt)
+        let verify = try PortablePackagePackedThumbnailStore(at: directory)
+        XCTAssertEqual(try verify.lookup(legacyKey), .missing)
+        XCTAssertEqual(try verify.lookup(realKey), .found(realBefore))
+    }
+
     private func thumbnailFrame(
         identity: PortablePhotoIdentity, kind: PresentationFrameKind, red: CGFloat
     ) throws -> PresentationFrame {

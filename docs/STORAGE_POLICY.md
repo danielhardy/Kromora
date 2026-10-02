@@ -22,6 +22,12 @@ are not opened as a fallback or alternate authority; see
 | Edit revisions and embedded Look bytes | `PortableLibraryPackage` | Package `Assets/<shard>/<asset>/Edits/` and content-addressed `Looks/` blobs | Durable and immutable by revision | Required and checksum-verified; an edit never depends on the external Look browser |
 | Latest presentation frame (one 2048 px preview per asset) | `LatestPreviewFrameStore` | Package `Derived/Previews/<asset-hash>.kframe` | Optional package-derived cache; one atomically replaced envelope per asset, 1 GB LRU cap, safe to delete and regenerate | Optional; omitted from verified backup and reported only as a rebuildable gap |
 | Packed thumbnails | `ThumbnailFrameStore` (actor facade over `PortablePackagePackedThumbnailStore`) | Package `Derived/Thumbnails/` | Optional package-derived cache; at most two live records per asset (`original` and latest `edited`) under stable asset-UUID keys; a replacement appends bytes and moves the index pointer; compacted during maintenance | Optional; missing, stale, or corrupt records regenerate from originals and never block open |
+
+Both frame stores accept and retain frames only when the frame identity and its signature refer to
+resolved source identities. A browsing placeholder contains no source-byte fingerprint, so writes
+with one are skipped; legacy placeholder records become misses and are removed when read or during
+bounded, background-priority idle sweeps. Sweeps inspect at most eight records per tick and yield
+to visible frame work. These records are optional presentation caches and are never package truth.
 | Recovery journals, transaction staging, quarantine and audit | `PortableLibraryPackage` | Package `Recovery/` | Package-local recovery boundary; journals/staging are removed after commit, while quarantine remains until reclaim/restore | Recovery is resolved before open; the built-in backup omits transient `Recovery/` internals and restore starts with a clean recovery boundary |
 | Library query/index projection | `LibraryIndexProjection` | `~/Library/Application Support/Kromora/Indexes/<library-id>/LibraryIndex.store` | Rebuildable projection; never package truth | Optional; restore rebuilds it from membership shards |
 | Launch hints | `LaunchHintsStore` | `~/Library/Application Support/Kromora/LaunchHints.json` | Device-local, bounded, atomically replaced operational hint; safe to delete and regenerate | Excluded from backup; never required to open or navigate the package |

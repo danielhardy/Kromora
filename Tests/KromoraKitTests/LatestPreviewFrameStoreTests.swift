@@ -79,6 +79,79 @@ final class LatestPreviewFrameStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(awaited1, "other")
     }
 
+    func testPlaceholderFramesAreSkippedAndRemovedByBoundedSweep() async throws {
+        let directory = cacheDirectory("placeholder-sweep")
+        let store = LatestPreviewFrameStore(directory: directory)
+        let assetID = PortablePhotoAssetID()
+        let placeholder = PortablePhotoIdentity(
+            assetID: assetID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(
+                contentHash: "browsing:\(assetID.raw)", decoderVersion: "browsing-v1"
+            )
+        )
+        await store.enqueueWrite(try FrameFixtures.frame(identity: placeholder))
+        await store.waitForPendingWrites()
+        let skippedWrites = await store.placeholderWritesSkipped
+        XCTAssertEqual(skippedWrites, 1)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        XCTAssertTrue(try frameFiles(in: directory).isEmpty)
+
+        let identities = (0..<10).map { _ in FrameFixtures.identity() }
+        for identity in identities {
+            let frame = try FrameFixtures.frame(identity: identity)
+            let data = try PresentationFrameEnvelope.encode(frame)
+            let url = try fileURL(for: identity, in: directory)
+            try data.write(to: url)
+        }
+        let legacyFrame = try FrameFixtures.frame(identity: placeholder)
+        let legacyData = try PresentationFrameEnvelope.encode(legacyFrame)
+        let legacyURL = try fileURL(for: placeholder, in: directory)
+        try legacyData.write(to: legacyURL)
+
+        for _ in 0..<3 { await store.sweepPlaceholderFrames(maxFiles: 8) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
+        XCTAssertEqual(try frameFiles(in: directory).count, identities.count)
+        for identity in identities {
+            let expected = try PresentationFrameEnvelope.encode(FrameFixtures.frame(identity: identity))
+            XCTAssertEqual(try Data(contentsOf: fileURL(for: identity, in: directory)), expected)
+        }
+
+        let realIdentity = identities[0]
+        await store.enqueueWrite(try FrameFixtures.frame(identity: realIdentity, edit: "real"))
+        await store.waitForPendingWrites()
+        let persisted = await store.read(for: realIdentity)?.frame.signature.editHash
+        XCTAssertEqual(persisted, "real")
+    }
+
+    func testReadingLegacyPlaceholderRemovesOnlyItsFileAndCorrectsSizeIndex() async throws {
+        let directory = cacheDirectory("placeholder-read")
+        let assetID = PortablePhotoAssetID()
+        let placeholder = PortablePhotoIdentity(
+            assetID: assetID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(
+                contentHash: "browsing:\(assetID.raw)", decoderVersion: "browsing-v1"
+            )
+        )
+        let real = FrameFixtures.identity()
+        let placeholderData = try PresentationFrameEnvelope.encode(
+            FrameFixtures.frame(identity: placeholder)
+        )
+        let realData = try PresentationFrameEnvelope.encode(FrameFixtures.frame(identity: real))
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try placeholderData.write(to: fileURL(for: placeholder, in: directory))
+        try realData.write(to: fileURL(for: real, in: directory))
+
+        let store = LatestPreviewFrameStore(directory: directory)
+        let outcome = await store.readWithOutcome(for: placeholder)
+        XCTAssertNil(outcome.hit)
+        XCTAssertFalse(outcome.corrupt)
+        let placeholderURL = try fileURL(for: placeholder, in: directory)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: placeholderURL.path))
+        XCTAssertEqual(try Data(contentsOf: fileURL(for: real, in: directory)), realData)
+        let indexedSize = await store.currentSizeBytes
+        XCTAssertEqual(indexedSize, Int64(realData.count))
+    }
+
     func testFileNamesNeverDerivePathsOrFingerprints() async throws {
         let directory = cacheDirectory()
         let store = LatestPreviewFrameStore(directory: directory)
