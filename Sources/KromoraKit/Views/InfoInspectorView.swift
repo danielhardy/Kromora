@@ -46,7 +46,11 @@ struct InfoInspectorView: View {
                         onDone: viewModel.commitCrop
                     )
                     .transition(inspectorTransition(edge: .trailing))
-                } else if viewModel.sourceImage == nil && viewModel.histogram == nil {
+                } else if Self.shouldShowEmptyState(
+                    sourceImageAvailable: viewModel.sourceImage != nil,
+                    histogramAvailable: viewModel.histogram != nil,
+                    isNavigationLoading: viewModel.isNavigationLoading
+                ) {
                     // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
                     // offers a trip to Develop to be told "this image is already rendered" about an image
                     // that does not exist. The empty state alone is the honest answer.
@@ -81,9 +85,9 @@ struct InfoInspectorView: View {
                     }
                     .frame(maxHeight: .infinity, alignment: .top)
                     .transition(inspectorTransition(edge: .leading))
-                    // A source switch briefly clears sourceImage while the replacement decodes.
-                    // The retained histogram tells us this is a cutover, so keep the editor
-                    // controls mounted and let their values settle onto the new document.
+                    // A source switch can briefly leave neither pixels nor a histogram to show.
+                    // Keep the editor controls mounted until the replacement frame is presented,
+                    // and let their values settle onto the new document.
                     .environment(
                         \.sliderSourceAnimation,
                         SliderSourceAnimation(
@@ -121,6 +125,14 @@ struct InfoInspectorView: View {
         .onChange(of: inspectorState.isPresented, initial: true) { _, presented in
             syncSidebarAnchor(presented: presented)
         }
+    }
+
+    nonisolated static func shouldShowEmptyState(
+        sourceImageAvailable: Bool,
+        histogramAvailable: Bool,
+        isNavigationLoading: Bool
+    ) -> Bool {
+        !sourceImageAvailable && !histogramAvailable && !isNavigationLoading
     }
 
     private var inspectorAnimation: Animation? {
