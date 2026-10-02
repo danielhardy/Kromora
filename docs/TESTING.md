@@ -500,3 +500,23 @@ Deterministic coverage (`StoredEditAdoptionTests`, fake engine with source prepa
 the panel gets the stored values while preparation is pending; the first render uses the stored
 document so no canvas render uses the identity document; and a superseded selection never publishes
 the old photo's values. All three fail on the previous code.
+
+#### Warm switch and histogram timing (KRMA-757)
+
+The opt-in benchmark now reports both `relaunch` and `switch`. Relaunch retains the one-photo,
+fresh-view-model setup above. Switch imports three copies of the RAW with distinct stored exposure
+values, opens A and waits for its histogram, then measures B→C→B while the same view model remains
+open; it returns to A between rounds. A histogram sample counts only when its `HistogramData` differs
+from the previous photo's value, since the prior chart intentionally remains visible during a switch.
+
+Release, Apple M4 Pro Mac mini, macOS 27.2, `DSC01019.ARW` (126 MB): 10 relaunch samples and 30 warm
+switch samples (10 A→B→C→B rounds), milliseconds from selection. Histogram-after-ready is
+`histogram - ready` at p50.
+
+| Scenario | Panel stored values (p50 / p95) | Source prepared (p50 / p95) | Photo ready (p50 / p95) | Histogram (p50 / p95) | Panel lead p50 | Histogram after ready p50 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Relaunch (10) | 451 / 514 | 618 / 778 | 901 / 1111 | 916 / 1129 | 170 | 16 |
+| Warm switch (30) | 95 / 296 | 188 / 424 | 188 / 684 | 244 / 697 | 93 | 56 |
+
+On this run, the histogram followed ready by 15.8 ms at the relaunch median and 55.6 ms after a warm
+switch. Warm-switch panel adoption was 95.1 ms at p50, below the cold relaunch's 450.9 ms.
