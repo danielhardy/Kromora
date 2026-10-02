@@ -40,7 +40,7 @@ The whole-file SHA-256 on the main actor is fixed (KRMA-746/747; down to 64 samp
 ## Acceptance criteria
 
 - [ ] The structural decision (keep Library and Edit mounted vs. remount, with the memory and lifecycle trade-offs) is made from a grid-only and an Edit-only profile and recorded here and in docs/TESTING.md; 748 and 749 implement it for their own paths.
-- [ ] KRMA-748 and KRMA-749 are both done: warm Edit first pixel p95 <= 50 ms and warm 30-cell grid p95 <= 100 ms with 0 thumbnail swaps and no extra render admissions. `scripts/run-kromora-capture.sh --benchmark last-known-frame --source realworldtest/DSC01019.ARW --iterations 30` reports `edit=PASS grid=PASS`; set `KROMORA_LAST_KNOWN_FRAME_ENFORCE_BUDGETS=1` to make a miss fail.
+- [ ] **Supervised, owner-started only (CLAUDE.md, display-bound benchmarks):** do not start this capture unattended or to verify an ordinary change. KRMA-748 and KRMA-749 are both done: warm Edit first pixel p95 <= 50 ms and warm 30-cell grid p95 <= 100 ms with 0 thumbnail swaps and no extra render admissions. `scripts/run-kromora-capture.sh --benchmark last-known-frame --source realworldtest/DSC01019.ARW --iterations 30` reports `edit=PASS grid=PASS`; set `KROMORA_LAST_KNOWN_FRAME_ENFORCE_BUDGETS=1` to make a miss fail.
 - [ ] Focused tests, Release build, git diff --check, dg validate. Keep the KRMA-734 identity tests green.
 
 ## Run notes

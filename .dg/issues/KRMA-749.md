@@ -35,7 +35,7 @@ KRMA-745 change 312fb63 (AppViewModel stored as a plain reference in LibraryGrid
 
 - [ ] Grid-only attribution (os_signpost around mount/layout/display, or a profile restricted to the grid interval) naming the dominant views/work; record in docs/TESTING.md.
 - [ ] Fix without changing the KRMA-734 targets.
-- [ ] `scripts/run-kromora-capture.sh --benchmark last-known-frame --source realworldtest/DSC01019.ARW --iterations 30` reports `grid=PASS` on an awake display.
+- [ ] **Supervised, owner-started only (CLAUDE.md, display-bound benchmarks):** do not start this capture unattended or to verify an ordinary change. `scripts/run-kromora-capture.sh --benchmark last-known-frame --source realworldtest/DSC01019.ARW --iterations 30` reports `grid=PASS` on an awake display.
 - [ ] Focused tests, Release build, git diff --check, dg validate.
 
 
