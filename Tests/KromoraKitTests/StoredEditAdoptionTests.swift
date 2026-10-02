@@ -55,11 +55,12 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
 
     /// Reopens the package with source preparation held open.
     private func reopen(
-        _ packageURL: URL, freshFrameStore: Bool = false
+        _ packageURL: URL, freshFrameStore: Bool = false, browsingAssets: Bool = false,
+        holdPreparation: Bool = true
     ) async throws -> (AppViewModel, FakeRenderEngine, PortableLibrarySession) {
         let session = try PortableLibrarySession(at: packageURL)
         let fake = FakeRenderEngine()
-        await fake.gateSourcePreparation()
+        if holdPreparation { await fake.gateSourcePreparation() }
         let viewModel = makeAppViewModel(
             engine: fake,
             previewFrameStoreDirectory: freshFrameStore
@@ -71,7 +72,9 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
             await fake.releaseSourcePreparation()
             await viewModel.shutdown()
         }
-        viewModel.collection.loadPortableAssets(try session.materializedAssets())
+        viewModel.collection.loadPortableAssets(
+            try browsingAssets ? session.browsingAssets() : session.materializedAssets()
+        )
         await viewModel.collection.scanCompletion()
         return (viewModel, fake, session)
     }
@@ -155,6 +158,76 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         try await waitUntil("the second photo to settle") { viewModel.previewState == .ready }
         XCTAssertEqual(viewModel.sourceName, "two.png")
         XCTAssertEqual(viewModel.document.light.exposure, -0.5)
+    }
+
+    func testSettledPhotoWarmsItsBrowsingNeighboursWithoutCreatingTheirSessions() async throws {
+        let packageURL = try await makePackage(
+            storedExposures: ["one.png": 1.5, "two.png": -0.5, "three.png": 0.75])
+        let (viewModel, fake, session) = try await reopen(
+            packageURL, browsingAssets: true, holdPreparation: false)
+        var recordReads: [PortablePhotoAssetID] = []
+        session.assetRecordReadObserver = { recordReads.append($0) }
+
+        try select("one.png", in: viewModel)
+        try await waitUntil("the active photo to settle") {
+            viewModel.sourceName == "one.png" && viewModel.previewState == .ready
+                && viewModel.document.light.exposure == 1.5
+                && !viewModel.durableEditHistory.isEmpty
+        }
+        let activeDocument = viewModel.document
+        let activeHistory = viewModel.durableEditHistory
+        let neighbourIDs = try ["two.png", "three.png"].map { name -> PhotoAssetID in
+            let index = try XCTUnwrap(
+                viewModel.collection.items.firstIndex { $0.displayName == name })
+            return viewModel.collection.items[index].id
+        }
+
+        try await waitUntil("both nearest stored edit documents to warm") {
+            neighbourIDs.allSatisfy { id in
+                guard let item = viewModel.collection.items.first(where: { $0.id == id }) else {
+                    return false
+                }
+                return item.asset.source.portableIdentity.sourceFingerprint.decoderVersion
+                    != "browsing-v1"
+            }
+        }
+        XCTAssertEqual(viewModel.document, activeDocument)
+        XCTAssertEqual(viewModel.durableEditHistory, activeHistory)
+        for neighbourID in neighbourIDs {
+            XCTAssertNil(viewModel.admissionDocument(for: neighbourID))
+        }
+        let cacheDeadline = ContinuousClock.now + .seconds(5)
+        while await viewModel.editStore.cacheCount < 3 {
+            if ContinuousClock.now >= cacheDeadline {
+                throw TestSynchronizationError.timedOut(
+                    "the neighbour edit documents to enter the cache",
+                    "cache count stayed below three"
+                )
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let cacheCount = await viewModel.editStore.cacheCount
+        XCTAssertEqual(cacheCount, 3, "the active document and two neighbours should be cached")
+
+        let twoID = try XCTUnwrap(
+            viewModel.collection.items.first { $0.displayName == "two.png" }?.id)
+        let twoPortableID = try XCTUnwrap(
+            viewModel.collection.items.first { $0.id == twoID }?.asset.source.portableIdentity
+                .assetID)
+        await fake.gateSourcePreparation()
+        try select("two.png", in: viewModel)
+        try await waitForPreparationToStart(fake)
+        try await waitUntil("the warmed neighbour's stored value to reach the panel") {
+            viewModel.document.light.exposure == -0.5
+        }
+        XCTAssertEqual(
+            recordReads.filter { $0 == twoPortableID }.count, 1,
+            "opening an already resolved neighbour must not resolve its record again"
+        )
+        XCTAssertEqual(viewModel.previewState, .loading)
+
+        await fake.releaseSourcePreparation()
+        try await waitUntil("the warmed neighbour to settle") { viewModel.previewState == .ready }
     }
 
     func testPhotoSwitchMarksSliderPresentationPendingUntilIncomingDocumentArrives() async throws {
