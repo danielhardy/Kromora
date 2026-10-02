@@ -79,3 +79,20 @@ preview, thumbnail, mask, analysis, and current-edit caches are regenerated as n
 No production package operation reads or writes the legacy Application Support library folder,
 standalone edit store, or hidden standalone Look folder as an authoritative copy. Those paths remain
 untouched for support/disposition purposes.
+
+## Membership summary source identity
+
+Each live membership summary stores the complete `PortablePhotoSourceFingerprint` from its asset
+record: content hash, source revision, decoder version, and optional decoded geometry. This field is
+denormalized package truth for browsing, not a second authority. It lets the launch index and grid
+construct the exact same `PortablePhotoIdentity` as Edit without opening every asset record. The
+membership shard and asset record are updated in one package transaction when import or source
+replacement changes identity.
+
+Older packages decode a missing fingerprint as `nil`; the package format version does not change.
+After the library index is published, a background, resumable repair reads missing records with at
+most two concurrent reads and commits fingerprints in small transactions. Each committed batch is
+valid on its own, and a later launch resumes the remaining summaries. The disposable local index
+round-trips this optional field and can always be rebuilt from the membership shards. The summary
+field is rebuildable from `asset.json`, so a missing or stale summary remains safe and is repaired
+without making the package unavailable.

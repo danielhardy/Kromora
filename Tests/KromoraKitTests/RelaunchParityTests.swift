@@ -189,8 +189,8 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         line: UInt = #line
     ) {
         let sources = session?.provisionalCandidateSources ?? []
-        // KRMA-763 owns provisional-frame admission; keep these assertions live while that fix lands.
-        XCTExpectFailure("KRMA-763: suppress fallback candidates before confirmation", options: .nonStrict()) {
+        // KRMA-764 owns provisional-frame admission; keep these assertions live while that fix lands.
+        XCTExpectFailure("KRMA-764: suppress fallback candidates before confirmation", options: .nonStrict()) {
             XCTAssertFalse(sources.contains(.embeddedJPEG), "embedded JPEG was published before confirmation", file: file, line: line)
             XCTAssertFalse(sources.contains(.originalThumbnail), "original thumbnail was published before confirmation", file: file, line: line)
         }
@@ -302,8 +302,8 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             reopened.collection.items.first?.asset.source.portableIdentity.sourceFingerprint
                 .matches(replacementIdentity.sourceFingerprint) == true
         )
-        // KRMA-763 owns suppressing the provisional embedded frame during source re-admission.
-        XCTExpectFailure("KRMA-763: source replacement admission", options: .nonStrict()) {
+        // Source replacement re-admission still depends on KRMA-764's provisional-frame policy.
+        XCTExpectFailure("KRMA-764: source replacement admission", options: .nonStrict()) {
             XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
         }
         let matchingPreviewDescriptions = previewRequests.filter {
@@ -498,24 +498,23 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             settledGridRatios[name] = item.libraryAspectRatio
         }
 
-        // KRMA-763, KRMA-764, KRMA-765 and KRMA-766 fix the persisted identity/geometry path.
+        // KRMA-764 provisional/persisted-frame admission and KRMA-765/KRMA-766 geometry/crop work
+        // remain expected failures. Fingerprint-only edited-thumbnail reuse below is unwrapped.
         // On this tree the expected failures include the observed messages:
         // "edited thumbnails must be reused without rendering for exposure.png" (1 request),
         // "Edit must publish one confirmed frame for exposure.png" (2 distinct frames),
         // "unchanged Edit source must use its confirmed frame without a render for exposure.png" (1 request),
         // and "library aspect ratio must not change after first layout for exposure.png"
         // (1.5625 became 1.3333333333333333). Color, crop, and Look previews also render once.
-        // Keep each positive contract intact while those implementation tickets land.
+        // Identity-dependent relaunch assertions below are now ordinary passing assertions.
         for (name, _) in edits {
             let requests = await secondEngine.thumbnailRequests.filter {
                 $0.assetID == second.collection.items.first { $0.displayName == name }?.id
             }
-            XCTExpectFailure("KRMA-763: browsing identity mismatch", options: .nonStrict()) {
-                XCTAssertEqual(
-                    requests.count, 0,
-                    "edited thumbnails must be reused without rendering for \(name)"
-                )
-            }
+            XCTAssertEqual(
+                requests.count, 0,
+                "edited thumbnails must be reused without rendering for \(name)"
+            )
         }
 
         for name in names {
@@ -533,17 +532,17 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             let session = try XCTUnwrap(second.presentationSessionForDiagnostics)
             assertNoPrematureFallback(session)
             if !edits.contains(where: { $0.0 == name }) {
-                XCTExpectFailure("KRMA-763: relaunch cache identity", options: .nonStrict()) {
+                XCTExpectFailure("KRMA-764: relaunch frame admission", options: .nonStrict()) {
                     XCTAssertEqual(session.distinctFrameCount, 1,
                                    "unchanged plain photo should reuse its frame: \(name)")
                 }
                 let afterPlain = await secondEngine.previewRequests.count
-                XCTExpectFailure("KRMA-763: relaunch cache identity", options: .nonStrict()) {
+                XCTExpectFailure("KRMA-764: relaunch frame admission", options: .nonStrict()) {
                     XCTAssertEqual(afterPlain, before, "unchanged plain photo must not render: \(name)")
                 }
                 continue
             }
-            XCTExpectFailure("KRMA-763: browsing identity mismatch", options: .nonStrict()) {
+            XCTExpectFailure("KRMA-764: relaunch frame admission", options: .nonStrict()) {
                 XCTAssertEqual(
                     session.distinctFrameCount, 1,
                     "Edit must publish one confirmed frame for \(name)"
@@ -552,7 +551,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             XCTAssertNotEqual(session.candidateSource, .embeddedJPEG, "Edit must not begin with embedded JPEG for \(name)")
             XCTAssertNotEqual(session.candidateSource, .originalThumbnail, "Edit must not begin with original thumbnail for \(name)")
             let after = await secondEngine.previewRequests.count
-            XCTExpectFailure("KRMA-763: browsing identity mismatch", options: .nonStrict()) {
+            XCTExpectFailure("KRMA-764: relaunch frame admission", options: .nonStrict()) {
                 XCTAssertEqual(
                     after - before, 0,
                     "unchanged Edit source must use its confirmed frame without a render for \(name)"

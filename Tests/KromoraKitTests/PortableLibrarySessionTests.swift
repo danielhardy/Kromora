@@ -50,6 +50,148 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         )
     }
 
+    func testBrowsingProjectionUsesPersistedSourceFingerprintWithoutOpeningRecords() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("Fingerprint.kromoralibrary")
+        let sourceURLs = try (0..<3).map { index in
+            try Fixtures.writeJPEG(
+                width: 16 + index, height: 12, orientation: 1,
+                named: "fingerprint-\(index).jpg", in: tempDirectory
+            )
+        }
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs(sourceURLs, duplicatePolicy: .importAnyway)
+        var reads: [PortablePhotoAssetID] = []
+        session.assetRecordReadObserver = { reads.append($0) }
+
+        let assets = try session.browsingAssets()
+        XCTAssertTrue(reads.isEmpty, "fingerprinted browsing projections must not open records")
+        XCTAssertEqual(assets.count, 3)
+        for asset in assets {
+            let record = try session.package.readAssetRecord(
+                for: asset.source.portableIdentity.assetID
+            )
+            XCTAssertEqual(asset.source.portableIdentity, record.identity)
+            XCTAssertFalse(asset.source.portableIdentity.sourceFingerprint.isBrowsingPlaceholder)
+            let editAsset = try await session.materializedAsset(for: record.identity.assetID)
+            XCTAssertEqual(editAsset.source.portableIdentity, asset.source.portableIdentity)
+        }
+
+        let storedIndex = try LibraryIndexProjection.load(from: session.indexURL)
+        for entry in storedIndex.entries {
+            XCTAssertEqual(
+                entry.summary.sourceFingerprint,
+                try session.package.readAssetRecord(for: entry.assetID).identity.sourceFingerprint
+            )
+        }
+        try session.lease.release()
+    }
+
+    func testSourceFingerprintBackfillResumesAfterCommittedBatch() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LegacyFingerprints.kromoralibrary")
+        let sources = try (0..<3).map { index in
+            try Fixtures.writeJPEG(
+                width: 16 + index, height: 12, orientation: 1,
+                named: "legacy-\(index).jpg", in: tempDirectory
+            )
+        }
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs(sources)
+        let ids = session.queryController.index.entries.map(\.assetID)
+        await session.shutdown()
+
+        let package = try PortableLibraryPackage.open(at: packageURL)
+        for shardName in PortableLibraryPackage.allShards {
+            var shard = try package.readMembershipShard(shardName)
+            for index in shard.entries.indices where ids.contains(shard.entries[index].assetID) {
+                shard.entries[index].summary.sourceFingerprint = nil
+            }
+            try package.writeMembershipShard(shard)
+        }
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        let committedBatches = OSAllocatedUnfairLock(initialState: 0)
+        let legacyEntry = try XCTUnwrap(
+            package.readMembershipShard(PortableLibraryPackage.shard(for: ids[0])).entries
+                .first { $0.assetID == ids[0] }
+        )
+        let browsingSource = PhotoAssetSource(
+            browsingPortableAsset: ids[0],
+            embeddedURL: try package.browsingOriginalURL(
+                for: ids[0], displayName: legacyEntry.summary.displayName
+            ),
+            summary: legacyEntry.summary
+        )
+        XCTAssertTrue(browsingSource.portableIdentity.sourceFingerprint.isBrowsingPlaceholder)
+        let legacySummaryJSON = try PackageJSONCoder.encode(legacyEntry.summary)
+        XCTAssertNil(
+            (try JSONSerialization.jsonObject(with: legacySummaryJSON) as? [String: Any])?[
+                "sourceFingerprint"
+            ],
+            "nil optional summary fields remain omitted in old package encodings"
+        )
+
+        do {
+            _ = try await package.repairSourceFingerprints(
+                lease: lease,
+                batchSize: 1,
+                isCancelled: { committedBatches.withLock { $0 > 0 } },
+                onBatch: { _ in committedBatches.withLock { $0 += 1 } }
+            )
+            XCTFail("the controlled cancellation should stop after one durable batch")
+        } catch is CancellationError {
+            XCTAssertEqual(committedBatches.withLock { $0 }, 1)
+        }
+        try lease.release()
+        _ = try PortableLibraryPackage.open(at: packageURL)
+
+        let resumedLease = try PortablePackageLease.acquire(at: packageURL)
+        _ = try await package.repairSourceFingerprints(lease: resumedLease, batchSize: 1)
+        for id in ids {
+            let entry = try XCTUnwrap(
+                package.readMembershipShard(PortableLibraryPackage.shard(for: id)).entries
+                    .first { $0.assetID == id }
+            )
+            let record = try package.readAssetRecord(for: id)
+            XCTAssertEqual(entry.summary.sourceFingerprint, record.identity.sourceFingerprint)
+        }
+        try resumedLease.release()
+    }
+
+    func testSourceReplacementUpdatesRecordAndMembershipInOneTransaction() throws {
+        let packageURL = tempDirectory.appendingPathComponent("ReplaceFingerprint.kromoralibrary")
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1, named: "replace.jpg", in: tempDirectory
+        )
+        let session = try PortableLibrarySession(at: packageURL)
+        _ = try session.importURLs([sourceURL])
+        let id = try XCTUnwrap(session.queryController.index.entries.first?.assetID)
+        let prior = try session.package.readAssetRecord(for: id).identity
+        let replacement = PortablePhotoSourceFingerprint.data(
+            Data("replacement bytes".utf8), sourceRevision: prior.sourceFingerprint.sourceRevision + 1,
+            decoderVersion: prior.sourceFingerprint.decoderVersion,
+            geometry: prior.sourceFingerprint.geometry
+        )
+
+        let updated = try XCTUnwrap(
+            session.replaceSourceFingerprint(for: id, with: replacement)
+        )
+        let record = try session.package.readAssetRecord(for: id)
+        XCTAssertEqual(record.identity.sourceFingerprint, replacement)
+        XCTAssertEqual(updated.summary.sourceFingerprint, replacement)
+        XCTAssertNotEqual(updated.summary.sourceFingerprint, prior.sourceFingerprint)
+        let repairedIndex = try session.queryController.index
+            .reconcilingSourceFingerprints(with: session.package)
+        XCTAssertEqual(
+            repairedIndex.entry(for: id)?.summary.sourceFingerprint,
+            replacement,
+            "a stale disposable index recovers the committed fingerprint from membership"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(session.browsingAssets().first).source.portableIdentity,
+            PortablePhotoIdentity(assetID: id, sourceFingerprint: replacement)
+        )
+        try session.lease.release()
+    }
+
     func testPackageReopensAfterDisposableProjectionAndDerivedDataAreRemoved() async throws {
         let packageURL = tempDirectory.appendingPathComponent("Disposable.kromoralibrary")
         let indexURL = tempDirectory.appendingPathComponent("Index/LibraryIndex.store")

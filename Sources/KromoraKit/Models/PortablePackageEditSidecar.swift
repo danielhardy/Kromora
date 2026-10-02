@@ -212,6 +212,138 @@ extension PortablePackageAssetSummary {
 }
 
 extension PortableLibraryPackage {
+    /// Publish a source re-hash atomically with its denormalized membership summary. Callers
+    /// compute the fingerprint at the source boundary; this transaction makes that value the
+    /// record and grid identity together.
+    @discardableResult
+    func replaceSourceFingerprint(
+        for assetID: PortablePhotoAssetID,
+        with fingerprint: PortablePhotoSourceFingerprint,
+        lease: PortablePackageLease,
+        now: Date = Date()
+    ) throws -> LibraryIndexEntry? {
+        var record = try readAssetRecord(for: assetID)
+        var shard = try readMembershipShard(Self.shard(for: assetID))
+        guard let index = shard.entries.firstIndex(where: { $0.assetID == assetID }) else {
+            return nil
+        }
+        if record.identity.sourceFingerprint == fingerprint,
+           shard.entries[index].summary.sourceFingerprint == fingerprint {
+            return LibraryIndexEntry(from: shard.entries[index])
+        }
+        if record.identity.sourceFingerprint != fingerprint {
+            var updatedRecord = PortablePackageAssetRecord(
+                identity: PortablePhotoIdentity(assetID: assetID, sourceFingerprint: fingerprint),
+                source: record.source,
+                sourceChangeSignature: record.sourceChangeSignature,
+                isRemoved: record.isRemoved,
+                currentRevision: record.currentRevision,
+                editHistory: record.editHistory,
+                copyOfAssetID: record.copyOfAssetID
+            )
+            updatedRecord.unknownJSONFields = record.unknownJSONFields
+            record = updatedRecord
+        }
+        shard.entries[index].summary.sourceFingerprint = fingerprint
+
+        var transaction = try beginTransaction(lease: lease, now: now)
+        do {
+            try transaction.stage(
+                data: try encodedAssetRecord(record),
+                at: "Assets/\(Self.shard(for: assetID))/\(assetID.raw)/asset.json"
+            )
+            try transaction.stage(
+                data: try encodedMembershipShard(shard),
+                at: "Catalog/Membership/\(Self.shard(for: assetID)).json"
+            )
+            try transaction.commit(now: now)
+            return LibraryIndexEntry(from: shard.entries[index])
+        } catch {
+            try? transaction.abort()
+            throw error
+        }
+    }
+
+    /// Fill missing membership fingerprints from their canonical asset records. Each small batch
+    /// is an independent journalled transaction, so cancellation or process death leaves a valid
+    /// package and the next invocation naturally resumes at the remaining nil summaries.
+    @discardableResult
+    func repairSourceFingerprints(
+        lease: PortablePackageLease,
+        batchSize: Int = 32,
+        isCancelled: @Sendable () -> Bool = { false },
+        onBatch: (@Sendable ([LibraryIndexEntry]) async -> Void)? = nil
+    ) async throws -> [LibraryIndexEntry] {
+        let batchLimit = max(1, batchSize)
+        var repaired: [LibraryIndexEntry] = []
+
+        for shardName in Self.allShards {
+            try Task.checkCancellation()
+            if isCancelled() { throw CancellationError() }
+            var shard = try readMembershipShard(shardName)
+            let missingIDs = shard.entries
+                .filter { !$0.isTombstone && $0.summary.sourceFingerprint == nil }
+                .map(\.assetID)
+
+            for start in stride(from: 0, to: missingIDs.count, by: batchLimit) {
+                try Task.checkCancellation()
+                if isCancelled() { throw CancellationError() }
+                let ids = Array(missingIDs[start..<min(start + batchLimit, missingIDs.count)])
+                let fingerprints = try await withThrowingTaskGroup(
+                    of: (PortablePhotoAssetID, PortablePhotoSourceFingerprint).self
+                ) { group in
+                    var values: [(PortablePhotoAssetID, PortablePhotoSourceFingerprint)] = []
+                    var next = ids.makeIterator()
+                    for _ in 0..<min(2, ids.count) {
+                        if let id = next.next() {
+                            group.addTask {
+                                try Task.checkCancellation()
+                                return (id, try readAssetRecord(for: id).identity.sourceFingerprint)
+                            }
+                        }
+                    }
+                    while let value = try await group.next() {
+                        values.append(value)
+                        if let id = next.next() {
+                            group.addTask {
+                                try Task.checkCancellation()
+                                return (id, try readAssetRecord(for: id).identity.sourceFingerprint)
+                            }
+                        }
+                    }
+                    return values
+                }
+
+                for (assetID, fingerprint) in fingerprints {
+                    guard let index = shard.entries.firstIndex(where: { $0.assetID == assetID }),
+                          !shard.entries[index].isTombstone,
+                          shard.entries[index].summary.sourceFingerprint == nil else { continue }
+                    shard.entries[index].summary.sourceFingerprint = fingerprint
+                }
+                let entries = fingerprints.compactMap { assetID, _ in
+                    shard.entries.first { $0.assetID == assetID && !$0.isTombstone }
+                        .map(LibraryIndexEntry.init(from:))
+                }
+                guard !entries.isEmpty else { continue }
+
+                var transaction = try beginTransaction(lease: lease)
+                do {
+                    try transaction.stage(
+                        data: try encodedMembershipShard(shard),
+                        at: "Catalog/Membership/\(shardName).json"
+                    )
+                    try transaction.commit(isCancelled: isCancelled)
+                } catch {
+                    try? transaction.abort()
+                    throw error
+                }
+                repaired.append(contentsOf: entries)
+                await onBatch?(entries)
+            }
+        }
+        return repaired
+    }
+
     /// Appends one immutable edit revision and its XMP companion through the package transaction
     /// protocol. A new revision is always chosen; an existing revision path is never overwritten.
     @discardableResult

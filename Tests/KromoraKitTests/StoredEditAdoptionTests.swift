@@ -187,8 +187,7 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
                 guard let item = viewModel.collection.items.first(where: { $0.id == id }) else {
                     return false
                 }
-                return item.asset.source.portableIdentity.sourceFingerprint.decoderVersion
-                    != "browsing-v1"
+                return !item.asset.source.portableIdentity.sourceFingerprint.isBrowsingPlaceholder
             }
         }
         XCTAssertEqual(viewModel.document, activeDocument)
@@ -221,8 +220,8 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
             viewModel.document.light.exposure == -0.5
         }
         XCTAssertEqual(
-            recordReads.filter { $0 == twoPortableID }.count, 1,
-            "opening an already resolved neighbour must not resolve its record again"
+            recordReads.filter { $0 == twoPortableID }.count, 0,
+            "opening a neighbour with an indexed fingerprint must not resolve its record"
         )
         XCTAssertEqual(viewModel.previewState, .loading)
 

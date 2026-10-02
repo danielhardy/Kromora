@@ -46,6 +46,7 @@ final class PortableLibrarySession {
     private let heartbeatJobID: ImageWorkScheduler.JobID
     private let indexWriteJobID: ImageWorkScheduler.JobID
     private let indexLoadJobID: ImageWorkScheduler.JobID
+    private let sourceFingerprintBackfillJobID: ImageWorkScheduler.JobID
     private(set) var indexLoadingState: LibraryIndexLoadingState?
     private(set) var isLoadingIndex = false
     var onIndexLoadingStateChange: (@MainActor (LibraryIndexLoadingState) -> Void)?
@@ -54,6 +55,9 @@ final class PortableLibrarySession {
     private var pendingImportIndexDelta = LibraryIndexDelta.empty
     private var heartbeatTask: Task<Void, Never>?
     private var detachedIndexLoadTask: Task<Void, Never>?
+    private var detachedSourceFingerprintBackfillTask: Task<Void, Never>?
+    private var didStartSourceFingerprintBackfill = false
+    private var hasUserVisibleLibraryWork = false
     private var isShuttingDown = false
     private var lostDuringSession = false
 
@@ -104,7 +108,9 @@ final class PortableLibrarySession {
                     libraryID: package.manifest.libraryID, entries: [])
             } else if let loaded = try? LibraryIndexProjection.load(from: self.indexURL),
                       let valid = try? loaded.validated(for: package) {
-                projection = valid
+                let reconciled = try valid.reconcilingSourceFingerprints(with: package)
+                if reconciled != valid { try reconciled.write(to: self.indexURL) }
+                projection = reconciled
             } else {
                 projection = try LibraryIndexProjection(package: package)
                 try projection.write(to: self.indexURL)
@@ -122,10 +128,15 @@ final class PortableLibrarySession {
             self.indexLoadJobID = ImageWorkScheduler.JobID(
                 "portable-package-index-load-\(lease.ownerID.uuidString)"
             )
+            self.sourceFingerprintBackfillJobID = ImageWorkScheduler.JobID(
+                "portable-package-source-fingerprint-backfill-\(lease.ownerID.uuidString)"
+            )
             if scheduler != nil { startLeaseHeartbeat() }
             if asynchronousIndexLoading {
                 self.isLoadingIndex = true
                 startIndexLoading(package: package)
+            } else {
+                startSourceFingerprintBackfill()
             }
         } catch {
             try? lease.release()
@@ -174,6 +185,9 @@ final class PortableLibrarySession {
                 self.indexLoadingState = state
                 if state.isComplete { self.isLoadingIndex = false }
                 self.onIndexLoadingStateChange?(state)
+                if state.isComplete, error == nil {
+                    self.startSourceFingerprintBackfill()
+                }
             }
         }
         let operation: @Sendable () async -> Void = {
@@ -185,9 +199,11 @@ final class PortableLibrarySession {
             do {
                 if let loaded = try? LibraryIndexProjection.load(from: indexURL),
                    let valid = try? loaded.validated(for: package) {
+                    let reconciled = try valid.reconcilingSourceFingerprints(with: package)
                     KromoraObservability.event(.libraryIndexWarm)
-                    let controller = LibraryQueryController(index: valid, pageSize: pageSize)
-                    await publish(valid, controller.page(at: 0), 0, 0, true, nil)
+                    let controller = LibraryQueryController(index: reconciled, pageSize: pageSize)
+                    if reconciled != valid { try reconciled.write(to: indexURL) }
+                    await publish(reconciled, controller.page(at: 0), 0, 0, true, nil)
                     return
                 }
                 KromoraObservability.event(.libraryIndexRebuild)
@@ -220,6 +236,55 @@ final class PortableLibrarySession {
         } else {
             detachedIndexLoadTask = Task.detached(operation: operation)
         }
+    }
+
+    /// Starts legacy summary repair only after a usable index has been published. The package
+    /// scheduler keeps this at background priority; committed batches publish index deltas while
+    /// the first grid page remains immediately available.
+    private func startSourceFingerprintBackfill() {
+        guard !didStartSourceFingerprintBackfill, !hasUserVisibleLibraryWork, !isShuttingDown,
+              queryController.index.entries.contains(where: { $0.summary.sourceFingerprint == nil })
+        else { return }
+        didStartSourceFingerprintBackfill = true
+        let package = self.package
+        let lease = self.lease
+        let operation: @Sendable () async -> Void = { [weak self] in
+            do {
+                _ = try await package.repairSourceFingerprints(
+                    lease: lease,
+                    isCancelled: { Task.isCancelled },
+                    onBatch: { [weak self] entries in
+                        await MainActor.run {
+                            guard let self, !self.isShuttingDown else { return }
+                            _ = try? self.applyIndexDelta(.init(upserts: entries))
+                        }
+                    }
+                )
+            } catch is CancellationError {
+                // Committed batches remain valid and the next library open resumes the scan.
+            } catch {
+                // A repair failure is non-fatal; missing identities remain safe placeholders.
+            }
+        }
+        if let scheduler {
+            _ = scheduler.enqueuePackageIO(
+                id: sourceFingerprintBackfillJobID,
+                lane: .maintenance,
+                priority: .background,
+                operation: operation
+            )
+        } else {
+            detachedSourceFingerprintBackfillTask = Task.detached(operation: operation)
+        }
+    }
+
+    /// Any user-driven library/editor demand wins over this resumable idle repair. A committed
+    /// package batch remains valid; the next launch will continue from the summaries still nil.
+    private func cancelSourceFingerprintBackfillForUserWork() {
+        hasUserVisibleLibraryWork = true
+        guard didStartSourceFingerprintBackfill else { return }
+        scheduler?.cancel(id: sourceFingerprintBackfillJobID)
+        detachedSourceFingerprintBackfillTask?.cancel()
     }
 
     /// Begins the session-owned renewal loop on the shared package-I/O lane. The loop is started
@@ -286,9 +351,13 @@ final class PortableLibrarySession {
         activeImportJobIDs.removeAll()
         await scheduler?.cancelAndWait(id: indexWriteJobID)
         await scheduler?.cancelAndWait(id: indexLoadJobID)
+        await scheduler?.cancelAndWait(id: sourceFingerprintBackfillJobID)
         detachedIndexLoadTask?.cancel()
         await detachedIndexLoadTask?.value
         detachedIndexLoadTask = nil
+        detachedSourceFingerprintBackfillTask?.cancel()
+        await detachedSourceFingerprintBackfillTask?.value
+        detachedSourceFingerprintBackfillTask = nil
         try? lease.release()
     }
 
@@ -382,6 +451,7 @@ final class PortableLibrarySession {
     func browsingWindow(
         pageIndex: Int, query: LibraryQuery = .all
     ) throws -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
+        cancelSourceFingerprintBackfillForUserWork()
         let page = self.page(at: pageIndex, query: query)
         let assets = try page.items.map { try browsingAsset(for: $0) }
         return (assets, page.totalCount, page.pageSize)
@@ -809,6 +879,7 @@ final class PortableLibrarySession {
     /// scope item 2). The per-item cost is pure value construction, so launch and reload stay
     /// bounded by the index rather than by record or original I/O.
     func browsingAssets(query: LibraryQuery = .all) throws -> [PhotoAsset] {
+        cancelSourceFingerprintBackfillForUserWork()
         var assets: [PhotoAsset] = []
         var pageIndex = 0
         while true {
@@ -823,7 +894,8 @@ final class PortableLibrarySession {
     /// page; stable `PhotoAssetID` identity (`portable:<uuid>`) keeps selection coherent as
     /// further pages fault in.
     func browsingAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
-        try page(at: pageIndex, query: query).items.map { try browsingAsset(for: $0) }
+        cancelSourceFingerprintBackfillForUserWork()
+        return try page(at: pageIndex, query: query).items.map { try browsingAsset(for: $0) }
     }
 
     /// Canonical source URL for opening, exporting, or editing one asset. The derived browsing
@@ -847,17 +919,18 @@ final class PortableLibrarySession {
         return try package.embeddedSourceURL(for: package.readAssetRecord(for: assetID))
     }
 
-    /// Resolve the selected browsing projection against its durable record. Browsing windows keep
-    /// only summaries and deliberately carry placeholder identities; opening one asset is the point
-    /// where its persisted content hash becomes available to render and edit consumers.
+    /// Resolve the selected browsing projection against its durable record. New summaries already
+    /// carry the persisted identity; legacy summaries use a placeholder until this record read
+    /// resolves the fingerprint and repairs the summary if needed.
     func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset {
+        cancelSourceFingerprintBackfillForUserWork()
         guard let entry = queryController.index.entry(for: assetID) else {
             throw CocoaError(.fileNoSuchFile)
         }
         assetRecordReadObserver?(assetID)
         let summary = entry.summary
         let package = self.package
-        return try await Task.detached {
+        let resolved = try await Task.detached {
             let record = try package.readAssetRecord(for: assetID)
             let sourceURL = try package.embeddedSourceURL(for: record)
             let source = PhotoAssetSource(
@@ -867,6 +940,10 @@ final class PortableLibrarySession {
                 bookmarkData: nil,
                 portableIdentity: record.identity,
                 sourceChangeSignature: record.sourceChangeSignature
+            )
+            assert(
+                source.portableIdentity.sourceFingerprint == record.identity.sourceFingerprint,
+                "A materialized asset must retain the fingerprint persisted in its record."
             )
             return PhotoAsset(
                 source: source,
@@ -886,6 +963,21 @@ final class PortableLibrarySession {
                 presentedAspectRatio: summary.presentedAspectRatio
             )
         }.value
+        if summary.sourceFingerprint != resolved.source.portableIdentity.sourceFingerprint,
+           let updated = try package.replaceSourceFingerprint(
+               for: assetID,
+               with: resolved.source.portableIdentity.sourceFingerprint,
+               lease: lease,
+               now: clock.now()
+        ) {
+            try applyIndexDelta(.init(upserts: [updated]))
+        }
+        assert(
+            queryController.index.entry(for: assetID)?.summary.sourceFingerprint
+                == resolved.source.portableIdentity.sourceFingerprint,
+            "The resolved asset fingerprint must repair and agree with its published grid summary."
+        )
+        return resolved
     }
 
     private func browsingAsset(for item: LibraryQueryItem) throws -> PhotoAsset {
@@ -983,6 +1075,22 @@ final class PortableLibrarySession {
                 presentedAspectRatio: summary.presentedAspectRatio
             )
         }
+    }
+
+    /// Replace a source fingerprint and publish the returned membership value to browsing. The
+    /// package operation commits the record and summary together; this completes the projection
+    /// side of that source replacement.
+    @discardableResult
+    func replaceSourceFingerprint(
+        for assetID: PortablePhotoAssetID,
+        with fingerprint: PortablePhotoSourceFingerprint
+    ) throws -> LibraryIndexEntry? {
+        try ensureWritableLease()
+        let entry = try package.replaceSourceFingerprint(
+            for: assetID, with: fingerprint, lease: lease, now: clock.now()
+        )
+        if let entry { _ = try applyIndexDelta(.init(upserts: [entry])) }
+        return entry
     }
 
     @discardableResult

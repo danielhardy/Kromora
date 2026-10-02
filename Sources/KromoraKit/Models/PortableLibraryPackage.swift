@@ -101,6 +101,10 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
     /// written before this field decode unchanged and are repaired on the next edit commit or an
     /// explicit `repairPresentedAspectRatios`.
     var presentedAspectRatio: Double?
+    /// The complete source identity copied from `asset.json` so browsing can build the same
+    /// cache identity without opening the asset record. Rebuildable from that record; legacy
+    /// packages leave it nil until the resumable source fingerprint repair runs.
+    var sourceFingerprint: PortablePhotoSourceFingerprint?
     var displayName: String
     var assetRevision: UInt64
 
@@ -115,6 +119,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         dimensions: PhotoPixelDimensions? = nil,
         aspectRatio: Double? = nil,
         presentedAspectRatio: Double? = nil,
+        sourceFingerprint: PortablePhotoSourceFingerprint? = nil,
         displayName: String,
         assetRevision: UInt64 = 0
     ) {
@@ -128,6 +133,7 @@ struct PortablePackageAssetSummary: Codable, Equatable, Hashable, Sendable {
         self.dimensions = dimensions
         self.aspectRatio = aspectRatio
         self.presentedAspectRatio = presentedAspectRatio
+        self.sourceFingerprint = sourceFingerprint
         self.displayName = displayName
         self.assetRevision = assetRevision
     }

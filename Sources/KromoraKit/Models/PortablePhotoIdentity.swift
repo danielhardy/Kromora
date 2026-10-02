@@ -214,6 +214,10 @@ extension PortablePhotoAssetID {
 }
 
 extension PortablePhotoSourceFingerprint {
+    /// True only for the synthetic source identity used while a legacy package summary has no
+    /// persisted fingerprint. Callers use this to defer source-dependent work until resolution.
+    var isBrowsingPlaceholder: Bool { decoderVersion == "browsing-v1" }
+
     static func compatibility(from legacy: PhotoSourceFingerprint) -> Self {
         let legacyKey = legacy.cacheKey
         return Self(

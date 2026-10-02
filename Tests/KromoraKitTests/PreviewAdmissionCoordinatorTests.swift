@@ -31,7 +31,7 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await scheduler.cancelAllAndWait()
     }
 
-    func testLateNeighbourResolutionAfterNavigationCannotPublish() async throws {
+    func testNeighbourWithIndexedFingerprintDoesNotResolveItsRecord() async throws {
         let urls = try ["a.png", "b.png", "c.png"].map {
             try Fixtures.writeGradientPNG(width: 16, height: 12, named: $0, in: tempDirectory)
         }
@@ -49,28 +49,16 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         destination.admissionNavigationIsEdit = true
         destination.admissionCanWarmAdjacentDocuments = true
         let neighbor = destination.admissionCollection.items[1]
-        let resolvedNeighbor = try await session.materializedAsset(
-            for: neighbor.asset.source.portableIdentity.assetID)
 
         let coordinator = makeCoordinator(destination: destination, engine: engine)
         coordinator.scheduleAdjacentPreviewPrefetch()
-        try await waitUntil("the neighbour resolution to suspend") {
-            destination.resolutionStarted
-        }
-
-        // Simulate a newer selection while the package record read is still in flight.
-        destination.assetID = PhotoAssetID.imported(UUID())
-        destination.admissionSourceRevision += 1
-        coordinator.cancelAdjacentPreviewPrefetch()
-        destination.pendingResolution?.resume(returning: resolvedNeighbor)
-        destination.pendingResolution = nil
-        try await Task.sleep(for: .milliseconds(50))
+        try await Task.sleep(for: .milliseconds(450))
 
         let currentNeighbor = try XCTUnwrap(
             destination.admissionCollection.items.first { $0.id == neighbor.id })
-        XCTAssertEqual(
-            currentNeighbor.asset.source.portableIdentity.sourceFingerprint.decoderVersion,
-            "browsing-v1"
+        XCTAssertFalse(destination.resolutionStarted)
+        XCTAssertFalse(
+            currentNeighbor.asset.source.portableIdentity.sourceFingerprint.isBrowsingPlaceholder
         )
         coordinator.shutdown()
         await destination.scheduler.cancelAllAndWait()
