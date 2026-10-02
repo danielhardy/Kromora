@@ -777,6 +777,7 @@ class TempDirectoryTestCase: XCTestCase {
         userLookFolderURL: URL? = nil,
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
         previewFrameStoreDirectory: URL? = nil,
+        thumbnailFrameStoreDirectory: URL? = nil,
         previewFrameStoreCapBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
         portablePackageURL: URL? = nil,
         portableLibrarySession: PortableLibrarySession? = nil,
@@ -815,6 +816,7 @@ class TempDirectoryTestCase: XCTestCase {
             previewFrameStoreDirectory: previewFrameStoreDirectory
                 ?? tempDirectory.appendingPathComponent("developed-previews", isDirectory: true),
             previewFrameStoreCapBytes: previewFrameStoreCapBytes,
+            thumbnailFrameStoreDirectory: thumbnailFrameStoreDirectory,
             portablePackageURL: portablePackageURL
                 ?? tempDirectory.appendingPathComponent("Test Library.kromoralibrary", isDirectory: true),
             portableMaintenanceIdleDelay: portableMaintenanceIdleDelay,
