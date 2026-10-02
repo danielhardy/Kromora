@@ -3210,6 +3210,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         var pastedCount = 0
         for item in selected {
             let assetID = item.id
+            let sourceReference = EditSourceReference(
+                assetID: assetID, portableIdentity: persistencePortableIdentity(for: item),
+                url: item.url
+            )
             let destinationIsRAW: Bool
             if let url = item.url {
                 destinationIsRAW = ImageSource.kind(forExtension: url.pathExtension) == .raw
@@ -3219,7 +3223,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 destinationIsRAW = false
             }
 
-            if assetID == activeAssetID {
+            if activeSourceReference == sourceReference {
+                // The selected filmstrip item can change activeAssetID before its source load
+                // finishes, while activeSourceReference still describes the document on screen.
+                // Use that reference as the ownership boundary and restore the matching editor
+                // session before applying a paste to the active document.
+                activeAssetID = assetID
+                editorDocument.activate(session: editorDocument.session(for: assetID))
                 let updated = clipboard.applying(
                     to: document, destinationIsRAW: destinationIsRAW,
                     categories: editClipboardCategories
@@ -3235,10 +3245,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 requestEditedThumbnail(for: assetID, priority: .visibleGrid, force: true)
                 queuePersistence(
                     updated,
-                    for: EditSourceReference(
-                        assetID: assetID, portableIdentity: persistencePortableIdentity(for: item),
-                        url: item.url
-                    ),
+                    for: sourceReference,
                     reportsStatus: false,
                     force: true
                 )
