@@ -53,6 +53,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let sourceURL: URL
         let reference: EditSourceReference
         let identity: PortablePhotoIdentity
+        let seedSignature: FrameSignature
     }
 
     /// Seed one durable frame, then close every package session so the next model is a real
@@ -78,10 +79,11 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             .save(document, for: reference)
         await package.shutdown()
 
+        let firstEngine = FakeRenderEngine()
         let (first, firstSession) = try model(
             packageURL: packageURL, previewDirectory: previewDirectory,
             thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
-            engine: FakeRenderEngine()
+            engine: firstEngine
         )
         first.collection.loadPortableAssets(try firstSession.browsingAssets())
         await first.collection.scanCompletion()
@@ -92,34 +94,77 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         }
         first.collection.setSelection(at: 0)
         first.openActiveCollectionImage()
-        try await waitUntil("seed confirmed preview") {
-            first.presentationSessionForDiagnostics?.state == .confirmed
+        try await waitUntil("seed stored edit confirmed preview") {
+            let requests = await firstEngine.previewRequests
+            return first.admissionDocument.editHash == document.editHash
+                && requests.last?.document.editHash == document.editHash
+                && first.presentationSessionForDiagnostics?.state == .confirmed
         }
-        let identity = try XCTUnwrap(first.admissionImageSource?.portableIdentity)
+        let previewRequests = await firstEngine.previewRequests
+        let seedRequest = try XCTUnwrap(previewRequests.last)
+        // Use the package record's resolved identity as the baseline. The first UI request can
+        // still carry the browsing placeholder; that separate relaunch mismatch belongs to the
+        // multi-photo parity test, while these tests isolate one invalidation input at a time.
+        let identity = asset.source.portableIdentity
+        let seedSignature = FrameSignature(
+            source: identity, editHash: document.editHash, look: .none,
+            workingSpace: seedRequest.space, pixelEpoch: RenderPipeline.pixelEpoch
+        )
         let flushResult = await first.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
         await first.shutdown()
         let previewStore = LatestPreviewFrameStore(directory: previewDirectory)
-        await previewStore.enqueueWrite(try FrameFixtures.frame(
-            identity: identity, edit: "prior-session", epoch: RenderPipeline.pixelEpoch
-        ))
+        // The renderer fake does not produce canonical store rasters. Seed the same complete
+        // signature the first session requested, so each relaunch variant below changes only its
+        // named input. A deliberately mismatched seed would make every case a cache miss.
+        let seedFrame = try FrameFixtures.frame(
+            identity: identity, edit: seedSignature.editHash, look: seedSignature.look,
+            space: seedSignature.workingSpace, epoch: seedSignature.pixelEpoch
+        )
+        XCTAssertEqual(
+            FrameClassifier.classify(
+                seedFrame.metadata,
+                against: FrameCurrentInputs(
+                    source: seedSignature.source, editHash: seedSignature.editHash,
+                    look: seedSignature.look, workingSpace: seedSignature.workingSpace,
+                    pixelEpoch: seedSignature.pixelEpoch
+                )
+            ),
+            .exact,
+            "the unchanged-input control must classify the persisted seed as exact"
+        )
+        await previewStore.enqueueWrite(seedFrame)
         await previewStore.waitForPendingWrites()
+        let thumbnailStore = ThumbnailFrameStore(directory: thumbnailDirectory)
+        await thumbnailStore.enqueueWrite(PresentationFrame(
+            metadata: FrameFixtures.metadata(
+                identity: identity, edit: seedSignature.editHash, look: seedSignature.look,
+                space: seedSignature.workingSpace, epoch: seedSignature.pixelEpoch,
+                kind: .editedThumbnail480
+            ),
+            rasterData: try FrameFixtures.jpeg()
+        ))
+        await thumbnailStore.flush()
         return SinglePhotoRelaunch(
             packageURL: packageURL, previewDirectory: previewDirectory,
             thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
-            sourceURL: try XCTUnwrap(asset.url), reference: reference, identity: identity
+            sourceURL: try XCTUnwrap(asset.url), reference: reference, identity: identity,
+            seedSignature: seedSignature
         )
     }
 
     private func reopenedSinglePhoto(
-        _ fixture: SinglePhotoRelaunch, engine: FakeRenderEngine
+        _ fixture: SinglePhotoRelaunch, engine: FakeRenderEngine,
+        expectedEditHash: String? = nil
     ) async throws -> (AppViewModel, PortableLibrarySession) {
         let (viewModel, session) = try model(
             packageURL: fixture.packageURL, previewDirectory: fixture.previewDirectory,
             thumbnailDirectory: fixture.thumbnailDirectory, looksDirectory: fixture.looksDirectory,
             engine: engine
         )
-        viewModel.collection.loadPortableAssets(try session.browsingAssets())
+        // This helper isolates signature invalidation from the separate browsing-placeholder
+        // regression covered by the main two-session test below.
+        viewModel.collection.loadPortableAssets(try session.materializedAssets())
         await viewModel.collection.scanCompletion()
         viewModel.collection.beginThumbnailDemand()
         viewModel.collection.requestVisibleThumbnails(for: viewModel.collection.items.map(\.id))
@@ -128,8 +173,12 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         }
         viewModel.collection.setSelection(at: 0)
         viewModel.openActiveCollectionImage()
-        try await waitUntil("relaunch confirmed preview") {
-            viewModel.presentationSessionForDiagnostics?.state == .confirmed
+        let expectedEditHash = expectedEditHash ?? fixture.seedSignature.editHash
+        try await waitUntil("relaunch stored edit confirmed preview") {
+            let requests = await engine.previewRequests
+            return viewModel.admissionDocument.editHash == expectedEditHash
+                && (requests.last?.document.editHash == expectedEditHash || requests.isEmpty)
+                && viewModel.presentationSessionForDiagnostics?.state == .confirmed
         }
         try await Task.sleep(for: .milliseconds(100))
         return (viewModel, session)
@@ -152,18 +201,36 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let package = try PortableLibrarySession(at: fixture.packageURL)
         var changed = EditDocument()
         changed.adjustments = [.exposure(ev: 1.1)]
+        let maybeStoredFrame = await LatestPreviewFrameStore(directory: fixture.previewDirectory)
+            .read(for: fixture.identity)
+        let storedFrame = try XCTUnwrap(maybeStoredFrame)
+        XCTAssertEqual(
+            FrameClassifier.classify(
+                storedFrame.frame.metadata,
+                against: FrameCurrentInputs(
+                    source: fixture.seedSignature.source, editHash: changed.editHash,
+                    look: fixture.seedSignature.look,
+                    workingSpace: fixture.seedSignature.workingSpace,
+                    pixelEpoch: fixture.seedSignature.pixelEpoch
+                )
+            ),
+            .staleCompatible,
+            "only the edit hash should differ from the exact seed"
+        )
         try await EditDocumentStore(package: package.package, lease: package.lease)
             .save(changed, for: fixture.reference)
         await package.shutdown()
 
         let engine = FakeRenderEngine()
-        let (reopened, _) = try await reopenedSinglePhoto(fixture, engine: engine)
+        let (reopened, _) = try await reopenedSinglePhoto(
+            fixture, engine: engine, expectedEditHash: changed.editHash
+        )
         let diagnostics = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
         let previewCount = await engine.previewRequests.count
         let thumbnailCount = await engine.thumbnailRequests.count
         XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
         XCTAssertEqual(previewCount, 1, "a changed edit must render once")
-        XCTAssertGreaterThan(thumbnailCount, 0)
+        XCTAssertEqual(thumbnailCount, 1, "a changed edit must render its edited thumbnail once")
         assertNoPrematureFallback(diagnostics)
         await reopened.shutdown()
     }
@@ -174,20 +241,82 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             width: 80, height: 48, named: "replacement.png", in: tempDirectory
         )
         try Data(contentsOf: replacement).write(to: fixture.sourceURL, options: .atomic)
+        let package = try PortableLibraryPackage.open(at: fixture.packageURL)
+        let oldRecord = try package.readAssetRecord(for: fixture.identity.assetID)
+        let replacementFingerprint = try PortablePhotoSourceFingerprint.file(
+            at: fixture.sourceURL,
+            sourceRevision: fixture.identity.sourceFingerprint.sourceRevision + 1,
+            decoderVersion: fixture.identity.sourceFingerprint.decoderVersion,
+            geometry: fixture.identity.sourceFingerprint.geometry
+        )
+        let replacementIdentity = PortablePhotoIdentity(
+            assetID: fixture.identity.assetID, sourceFingerprint: replacementFingerprint
+        )
+        let maybeReplacedFrame = await LatestPreviewFrameStore(directory: fixture.previewDirectory)
+            .read(for: fixture.identity)
+        let replacedFrame = try XCTUnwrap(maybeReplacedFrame)
+        XCTAssertEqual(
+            FrameClassifier.classify(
+                replacedFrame.frame.metadata,
+                against: FrameCurrentInputs(
+                    source: replacementIdentity, editHash: fixture.seedSignature.editHash,
+                    look: fixture.seedSignature.look,
+                    workingSpace: fixture.seedSignature.workingSpace,
+                    pixelEpoch: fixture.seedSignature.pixelEpoch
+                )
+            ),
+            .unusable,
+            "only the source fingerprint should differ from the exact seed"
+        )
+        try package.writeAssetRecord(PortablePackageAssetRecord(
+            identity: replacementIdentity,
+            source: oldRecord.source,
+            sourceChangeSignature: PhotoSourceFingerprint.file(at: fixture.sourceURL),
+            isRemoved: oldRecord.isRemoved, currentRevision: oldRecord.currentRevision,
+            editHistory: oldRecord.editHistory, copyOfAssetID: oldRecord.copyOfAssetID
+        ))
 
         let engine = FakeRenderEngine()
         let (reopened, _) = try await reopenedSinglePhoto(fixture, engine: engine)
         let diagnostics = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
-        let previewCount = await engine.previewRequests.count
-        let thumbnailCount = await engine.thumbnailRequests.count
-        XCTAssertNotEqual(diagnostics.identity, fixture.identity, "replaced bytes must change the source identity")
-        // KRMA-763 owns relaunch source identity admission; these assertions expose its remaining
-        // double-confirmation path while retaining the regression contract for its fix.
-        XCTExpectFailure("KRMA-763: source replacement relaunch admission", options: .nonStrict()) {
+        let previewRequests = await engine.previewRequests
+        let thumbnailRequests = await engine.thumbnailRequests
+        let previewCount = previewRequests.filter {
+            $0.document.editHash == fixture.seedSignature.editHash
+                && $0.source?.portableIdentity.sourceFingerprint.matches(
+                    replacementIdentity.sourceFingerprint
+                ) == true
+        }.count
+        let thumbnailCount = thumbnailRequests.filter {
+            $0.document.editHash == fixture.seedSignature.editHash
+                && $0.source.portableIdentity.sourceFingerprint.matches(
+                    replacementIdentity.sourceFingerprint
+                ) == true
+        }.count
+        XCTAssertNotEqual(
+            diagnostics.identity.sourceFingerprint.contentHash,
+            fixture.identity.sourceFingerprint.contentHash,
+            "replaced bytes must change the source identity"
+        )
+        XCTAssertTrue(
+            reopened.collection.items.first?.asset.source.portableIdentity.sourceFingerprint
+                .matches(replacementIdentity.sourceFingerprint) == true
+        )
+        // KRMA-763 owns suppressing the provisional embedded frame during source re-admission.
+        XCTExpectFailure("KRMA-763: source replacement admission", options: .nonStrict()) {
             XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
-            XCTAssertEqual(previewCount, 1, "replaced source bytes must render once")
         }
-        XCTAssertGreaterThan(thumbnailCount, 0)
+        let matchingPreviewDescriptions = previewRequests.filter {
+            $0.document.editHash == fixture.seedSignature.editHash
+                && $0.source?.portableIdentity.sourceFingerprint.matches(
+                    replacementIdentity.sourceFingerprint
+                ) == true
+        }.map { "scale=\($0.scale), revision=\($0.requestRevision)" }
+        XCTAssertEqual(
+            previewCount, 1,
+            "replaced source bytes must render once; requests=\(matchingPreviewDescriptions)"
+        )
+        XCTAssertEqual(thumbnailCount, 1, "replaced source bytes must render its edited thumbnail once")
         assertNoPrematureFallback(diagnostics)
         await reopened.shutdown()
     }
@@ -197,6 +326,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let store = LatestPreviewFrameStore(directory: fixture.previewDirectory)
         let maybeHit = await store.read(for: fixture.identity)
         let hit = try XCTUnwrap(maybeHit)
+        XCTAssertEqual(hit.frame.signature, fixture.seedSignature)
         let old = hit.frame.metadata
         let stale = PresentationFrameMetadata(
             identity: old.identity, kind: old.kind,
@@ -209,6 +339,20 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             perceptualDigest: old.perceptualDigest, presentedAt: old.presentedAt,
             pixelWidth: old.pixelWidth, pixelHeight: old.pixelHeight
         )
+        XCTAssertEqual(
+            FrameClassifier.classify(
+                stale,
+                against: FrameCurrentInputs(
+                    source: fixture.seedSignature.source,
+                    editHash: fixture.seedSignature.editHash,
+                    look: fixture.seedSignature.look,
+                    workingSpace: fixture.seedSignature.workingSpace,
+                    pixelEpoch: RenderPipeline.pixelEpoch
+                )
+            ),
+            .staleCompatible,
+            "only the pixel epoch should differ from the exact seed"
+        )
         await store.enqueueWrite(PresentationFrame(metadata: stale, rasterData: hit.frame.rasterData))
         await store.waitForPendingWrites()
 
@@ -216,9 +360,36 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let (reopened, _) = try await reopenedSinglePhoto(fixture, engine: engine)
         let diagnostics = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
         let previewCount = await engine.previewRequests.count
+        let thumbnailCount = await engine.thumbnailRequests.count
         XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
         XCTAssertEqual(previewCount, 1, "an old pixel epoch must refine once")
+        XCTAssertEqual(thumbnailCount, 0, "the unchanged edited thumbnail should still be reused")
         assertNoPrematureFallback(diagnostics)
+        await reopened.shutdown()
+    }
+
+    func testUnchangedSinglePhotoSeedIsReusedAfterRelaunch() async throws {
+        let fixture = try await seedSinglePhotoRelaunch()
+        let engine = FakeRenderEngine()
+        let (reopened, _) = try await reopenedSinglePhoto(fixture, engine: engine)
+        let diagnostics = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
+        let requests = await engine.previewRequests
+        if let currentRequest = requests.last {
+            XCTAssertTrue(
+                currentRequest.source?.portableIdentity.sourceFingerprint.matches(
+                    fixture.seedSignature.source.sourceFingerprint
+                ) == true
+            )
+            XCTAssertEqual(currentRequest.document.editHash, fixture.seedSignature.editHash)
+            XCTAssertEqual(currentRequest.space, fixture.seedSignature.workingSpace)
+            XCTAssertEqual(currentRequest.document.lut, LUTSettings())
+        }
+        let previewCount = await engine.previewRequests.count
+        let thumbnailCount = await engine.thumbnailRequests.count
+
+        XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
+        XCTAssertEqual(previewCount, 0, "an exact seed frame must skip preview rendering")
+        XCTAssertEqual(thumbnailCount, 0, "an exact seed thumbnail must skip rendering")
         await reopened.shutdown()
     }
 
