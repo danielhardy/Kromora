@@ -45,6 +45,7 @@ actor LatestPreviewFrameStore {
     private var legacyCleanupTask: Task<Void, Never>?
     private var placeholderSweepScheduled = false
     private var placeholderSweepHasMore = false
+    private var placeholderSweepCompletedPass = false
     private var placeholderSweepKeys: [String] = []
     private var placeholderSweepCursor = 0
     private(set) var placeholderSweepFilesExamined = 0
@@ -209,6 +210,7 @@ actor LatestPreviewFrameStore {
         placeholderSweepCursor = min(start + batch.count, placeholderSweepKeys.count)
         let hasMore = placeholderSweepCursor < placeholderSweepKeys.count
         if !hasMore {
+            placeholderSweepCompletedPass = true
             placeholderSweepKeys = []
             placeholderSweepCursor = 0
         }
@@ -382,7 +384,8 @@ actor LatestPreviewFrameStore {
     }
 
     private func schedulePlaceholderSweep() async {
-        guard !placeholderSweepScheduled, let workScheduler else { return }
+        guard !placeholderSweepScheduled, !placeholderSweepCompletedPass, let workScheduler
+        else { return }
         placeholderSweepScheduled = true
         let admitted = await workScheduler.enqueuePackageIO(
             id: placeholderSweepJobID, lane: .maintenance, priority: .background,
