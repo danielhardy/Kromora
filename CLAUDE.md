@@ -24,6 +24,25 @@ Mac working.
 `CIRAWFilter.isHighlightRecoveryEnabled`, are part of the product baseline. An availability check cannot
 supply a symbol the SDK never declared, and this project does not keep a fallback for that case.
 
+## Display-bound benchmarks are rare and release-time
+
+`scripts/run-kromora-capture.sh` (`last-known-frame`, `metal-presentation`, `concurrent-export-editing`)
+mounts a real window and needs an unlocked, awake display, so it cannot run unattended and it takes
+minutes. It is **release-qualification evidence, not a per-ticket check**:
+
+- Do not run it to verify an ordinary change, a refactor, a fix, or a test. Use the deterministic
+  lanes (`scripts/ci-tests.sh fast|serial|identity`) and structural assertions, and prefer a
+  window-independent test (real engine and RAW, no `NSWindow`) when a number is needed.
+- Cite the numbers already in `docs/TESTING.md` (the measured-state section) instead of re-measuring.
+  The harness fails fast on a locked or asleep display; that is not a defect to chase.
+- Run it only when the ticket is an explicitly supervised performance task that must produce new
+  numbers, at most one series of three runs per ticket, with `caffeinate -dimu`, one capture at a
+  time. If a ticket's acceptance criteria ask for a capture on a change that cannot move those
+  numbers, say so in the ticket and skip it rather than starting a capture.
+- The script refuses a repeat run on an unchanged tree unless you pass `--force`; do not pass it to get
+  around the guard. A wall-clock miss is a handoff with a profile, not a reason to open a ticket on
+  every re-run (see `.dg/decisions/ADR-LKF-001`).
+
 ## Swift 6 language mode is on, for every target
 
 `Package.swift` is a 6.2 tools version and declares `.swiftLanguageMode(.v6)` on `KromoraKit`, `Kromora`
