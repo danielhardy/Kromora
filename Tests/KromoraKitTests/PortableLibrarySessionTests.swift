@@ -156,6 +156,52 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         try resumedLease.release()
     }
 
+    func testAsynchronousLaunchBrowsingDoesNotSuppressSessionFingerprintBackfill() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LaunchFingerprint.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("LaunchFingerprint.index")
+        let source = try Fixtures.writeJPEG(
+            width: 16, height: 12, orientation: 1,
+            named: "launch-fingerprint.jpg", in: tempDirectory
+        )
+        let initial = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        _ = try initial.importURLs([source])
+        let assetID = try XCTUnwrap(initial.queryController.index.entries.first?.assetID)
+        await initial.shutdown()
+
+        let package = try PortableLibraryPackage.open(at: packageURL)
+        let shardName = PortableLibraryPackage.shard(for: assetID)
+        var shard = try package.readMembershipShard(shardName)
+        let entryIndex = try XCTUnwrap(shard.entries.firstIndex { $0.assetID == assetID })
+        shard.entries[entryIndex].summary.sourceFingerprint = nil
+        try package.writeMembershipShard(shard)
+        try? FileManager.default.removeItem(at: indexURL)
+
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, asynchronousIndexLoading: true
+        )
+        var launchPublishedBrowsingWindow = false
+        session.onIndexLoadingStateChange = { state in
+            guard state.isComplete else { return }
+            _ = try? session.browsingWindow(pageIndex: 0)
+            launchPublishedBrowsingWindow = true
+        }
+
+        for _ in 0..<20_000 {
+            let current = (try? package.readMembershipShard(shardName))?
+                .entries.first { $0.assetID == assetID }?.summary.sourceFingerprint
+            if current != nil { break }
+            await Task.yield()
+        }
+
+        XCTAssertTrue(launchPublishedBrowsingWindow)
+        let repaired = try XCTUnwrap(
+            package.readMembershipShard(shardName).entries
+                .first { $0.assetID == assetID }?.summary.sourceFingerprint
+        )
+        XCTAssertEqual(repaired, try package.readAssetRecord(for: assetID).identity.sourceFingerprint)
+        await session.shutdown()
+    }
+
     func testSourceReplacementUpdatesRecordAndMembershipInOneTransaction() throws {
         let packageURL = tempDirectory.appendingPathComponent("ReplaceFingerprint.kromoralibrary")
         let sourceURL = try Fixtures.writeJPEG(

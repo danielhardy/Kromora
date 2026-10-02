@@ -57,7 +57,6 @@ final class PortableLibrarySession {
     private var detachedIndexLoadTask: Task<Void, Never>?
     private var detachedSourceFingerprintBackfillTask: Task<Void, Never>?
     private var didStartSourceFingerprintBackfill = false
-    private var hasUserVisibleLibraryWork = false
     private var isShuttingDown = false
     private var lostDuringSession = false
 
@@ -238,17 +237,22 @@ final class PortableLibrarySession {
         }
     }
 
-    /// Starts legacy summary repair only after a usable index has been published. The package
-    /// scheduler keeps this at background priority; committed batches publish index deltas while
-    /// the first grid page remains immediately available.
+    /// Starts legacy summary repair only after a usable index has been published. Browsing and
+    /// selection are read-only projection work and do not cancel maintenance; the package
+    /// scheduler keeps repair at background priority. Shutdown is the cancellation boundary.
     private func startSourceFingerprintBackfill() {
-        guard !didStartSourceFingerprintBackfill, !hasUserVisibleLibraryWork, !isShuttingDown,
+        guard !didStartSourceFingerprintBackfill, !isShuttingDown,
               queryController.index.entries.contains(where: { $0.summary.sourceFingerprint == nil })
         else { return }
         didStartSourceFingerprintBackfill = true
         let package = self.package
         let lease = self.lease
         let operation: @Sendable () async -> Void = { [weak self] in
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.didStartSourceFingerprintBackfill = false
+                }
+            }
             do {
                 _ = try await package.repairSourceFingerprints(
                     lease: lease,
@@ -276,15 +280,6 @@ final class PortableLibrarySession {
         } else {
             detachedSourceFingerprintBackfillTask = Task.detached(operation: operation)
         }
-    }
-
-    /// Any user-driven library/editor demand wins over this resumable idle repair. A committed
-    /// package batch remains valid; the next launch will continue from the summaries still nil.
-    private func cancelSourceFingerprintBackfillForUserWork() {
-        hasUserVisibleLibraryWork = true
-        guard didStartSourceFingerprintBackfill else { return }
-        scheduler?.cancel(id: sourceFingerprintBackfillJobID)
-        detachedSourceFingerprintBackfillTask?.cancel()
     }
 
     /// Begins the session-owned renewal loop on the shared package-I/O lane. The loop is started
@@ -451,7 +446,6 @@ final class PortableLibrarySession {
     func browsingWindow(
         pageIndex: Int, query: LibraryQuery = .all
     ) throws -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
-        cancelSourceFingerprintBackfillForUserWork()
         let page = self.page(at: pageIndex, query: query)
         let assets = try page.items.map { try browsingAsset(for: $0) }
         return (assets, page.totalCount, page.pageSize)
@@ -879,7 +873,6 @@ final class PortableLibrarySession {
     /// scope item 2). The per-item cost is pure value construction, so launch and reload stay
     /// bounded by the index rather than by record or original I/O.
     func browsingAssets(query: LibraryQuery = .all) throws -> [PhotoAsset] {
-        cancelSourceFingerprintBackfillForUserWork()
         var assets: [PhotoAsset] = []
         var pageIndex = 0
         while true {
@@ -894,7 +887,6 @@ final class PortableLibrarySession {
     /// page; stable `PhotoAssetID` identity (`portable:<uuid>`) keeps selection coherent as
     /// further pages fault in.
     func browsingAssets(pageIndex: Int, query: LibraryQuery = .all) throws -> [PhotoAsset] {
-        cancelSourceFingerprintBackfillForUserWork()
         return try page(at: pageIndex, query: query).items.map { try browsingAsset(for: $0) }
     }
 
@@ -923,7 +915,6 @@ final class PortableLibrarySession {
     /// carry the persisted identity; legacy summaries use a placeholder until this record read
     /// resolves the fingerprint and repairs the summary if needed.
     func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset {
-        cancelSourceFingerprintBackfillForUserWork()
         guard let entry = queryController.index.entry(for: assetID) else {
             throw CocoaError(.fileNoSuchFile)
         }

@@ -280,7 +280,7 @@ extension PortableLibraryPackage {
         for shardName in Self.allShards {
             try Task.checkCancellation()
             if isCancelled() { throw CancellationError() }
-            var shard = try readMembershipShard(shardName)
+            let shard = try readMembershipShard(shardName)
             let missingIDs = shard.entries
                 .filter { !$0.isTombstone && $0.summary.sourceFingerprint == nil }
                 .map(\.assetID)
@@ -314,14 +314,21 @@ extension PortableLibraryPackage {
                     return values
                 }
 
+                // Asset records may take long enough to read that membership changed after the
+                // shard scan began. Merge this batch into a fresh shard snapshot so the repair
+                // cannot overwrite newer ratings, flags, tombstones, or other summary edits.
+                var commitShard = try readMembershipShard(shardName)
                 for (assetID, fingerprint) in fingerprints {
-                    guard let index = shard.entries.firstIndex(where: { $0.assetID == assetID }),
-                          !shard.entries[index].isTombstone,
-                          shard.entries[index].summary.sourceFingerprint == nil else { continue }
-                    shard.entries[index].summary.sourceFingerprint = fingerprint
+                    guard let index = commitShard.entries.firstIndex(where: { $0.assetID == assetID }),
+                          !commitShard.entries[index].isTombstone,
+                          commitShard.entries[index].summary.sourceFingerprint == nil else { continue }
+                    commitShard.entries[index].summary.sourceFingerprint = fingerprint
                 }
                 let entries = fingerprints.compactMap { assetID, _ in
-                    shard.entries.first { $0.assetID == assetID && !$0.isTombstone }
+                    commitShard.entries.first {
+                        $0.assetID == assetID && !$0.isTombstone
+                            && $0.summary.sourceFingerprint != nil
+                    }
                         .map(LibraryIndexEntry.init(from:))
                 }
                 guard !entries.isEmpty else { continue }
@@ -329,7 +336,7 @@ extension PortableLibraryPackage {
                 var transaction = try beginTransaction(lease: lease)
                 do {
                     try transaction.stage(
-                        data: try encodedMembershipShard(shard),
+                        data: try encodedMembershipShard(commitShard),
                         at: "Catalog/Membership/\(shardName).json"
                     )
                     try transaction.commit(isCancelled: isCancelled)
