@@ -442,6 +442,20 @@ misses are tracked, unchanged and non-gating, by KRMA-748 and KRMA-749 under KRM
 ADR-LKF-001). Exact warm Edit paints at about 290 ms with zero renders, so the remaining first-pixel
 time is Edit-surface mount and SwiftUI work, not rendering or hashing.
 
+### Persisted package identity hash reuse (KRMA-753, 2026-10-01)
+
+Release last-known-frame capture after reusing the asset record's content hash for an unchanged
+embedded original: `scripts/run-kromora-capture.sh --benchmark last-known-frame --source
+realworldtest/DSC01019.ARW --iterations 30 --capture-id KRMA753 --output-dir
+/tmp/kromora-capture-krma753`. One run on Apple M1 Pro / macOS 27.0 (26A428), Xcode 27.0,
+9504×6336 DSC01019.ARW, 1440×897-point viewport, 30 warm navigation samples. The warm Edit
+first-pixel p50/p95 was 264.3 / 283.0 ms, versus the three-run KRMA-746/747 baseline median p95
+of 293 ms (about 10 ms lower in this run). The 50 ms p95 target remains unmet. Main-actor time
+before first suspension was 1.96 ms p95. Exact and stale warm Edit structural checks passed; the
+warm 30-cell grid p95 was 221.9 ms and remains over its 100 ms target. Capture records and trace:
+`/tmp/kromora-capture-krma753/KRMA753-DSC01019-20261001-201014-report.jsonl` and
+`/tmp/kromora-capture-krma753/KRMA753-DSC01019-20261001-201014.trace`.
+
 Also fixed in this pass: a package-library photo selected from the filmstrip left the previous
 photo's pixels on the canvas while its record resolved. `AppViewModel.openImage` now clears the
 surface and resets the presentation session before that suspension, covered by

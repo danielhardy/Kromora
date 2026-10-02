@@ -76,6 +76,27 @@ struct PortablePhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
         )
     }
 
+    /// Reuse a persisted full content hash only when the bounded source snapshot still matches.
+    /// Callers capture `currentSignature` once at the file boundary and pass it through, avoiding
+    /// both an unnecessary whole-file read and a second signature read.
+    static func refreshing(
+        _ persisted: Self,
+        sourceChangeSignature: PhotoSourceFingerprint?,
+        currentSignature: PhotoSourceFingerprint,
+        at url: URL
+    ) throws -> Self {
+        guard let sourceChangeSignature,
+              sourceChangeSignature.isSameFileSnapshot(as: currentSignature) else {
+            return try file(
+                at: url,
+                sourceRevision: persisted.sourceRevision,
+                decoderVersion: persisted.decoderVersion,
+                geometry: persisted.geometry
+            )
+        }
+        return persisted
+    }
+
     /// A delimiter-safe printable representation for future cache-key consumers.
     ///
     /// Only the portable fields participate. In particular, this must remain identical when the

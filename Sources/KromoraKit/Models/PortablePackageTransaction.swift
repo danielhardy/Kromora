@@ -578,6 +578,16 @@ struct PortablePackageTransaction {
         )
     }
 
+    /// URL of a staged file, for capturing metadata that must follow the file through its
+    /// same-volume publication rename.
+    func stagedURL(for relativePath: String) throws -> URL {
+        try validateRelativePath(relativePath)
+        guard let file = journal.files.first(where: { $0.relativePath == relativePath }) else {
+            throw PortablePackageTransactionError.invalidRelativePath(relativePath)
+        }
+        return try PackagePath(file.stagingPath).url(in: packageRoot)
+    }
+
     @discardableResult
     mutating func stage(
         data: Data,

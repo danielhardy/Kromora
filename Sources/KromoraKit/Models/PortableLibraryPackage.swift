@@ -288,6 +288,9 @@ struct PortablePackageEditHistoryPointers: Codable, Equatable, Sendable {
 struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     let identity: PortablePhotoIdentity
     var source: PortablePackageSourceReference
+    /// Bounded snapshot of the embedded original when its persisted content hash was produced.
+    /// Older records omit this and are rehashed once when opened.
+    var sourceChangeSignature: PhotoSourceFingerprint?
     /// A quarantined record remains durable so the package can restore it before reclaim.
     var isRemoved: Bool
     var currentRevision: UInt64
@@ -299,6 +302,7 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     init(
         identity: PortablePhotoIdentity,
         source: PortablePackageSourceReference,
+        sourceChangeSignature: PhotoSourceFingerprint? = nil,
         isRemoved: Bool = false,
         currentRevision: UInt64 = 0,
         editHistory: PortablePackageEditHistoryPointers = .init(),
@@ -306,6 +310,7 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     ) {
         self.identity = identity
         self.source = source
+        self.sourceChangeSignature = sourceChangeSignature
         self.isRemoved = isRemoved
         self.currentRevision = currentRevision
         self.editHistory = editHistory
@@ -313,13 +318,17 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey, CaseIterable {
-        case identity, source, isRemoved, currentRevision, editHistory, copyOfAssetID
+        case identity, source, sourceChangeSignature, isRemoved, currentRevision, editHistory,
+             copyOfAssetID
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         identity = try c.decode(PortablePhotoIdentity.self, forKey: .identity)
         source = try c.decode(PortablePackageSourceReference.self, forKey: .source)
+        sourceChangeSignature = try c.decodeIfPresent(
+            PhotoSourceFingerprint.self, forKey: .sourceChangeSignature
+        )
         // Added with package-native trash; old package records are active by default.
         isRemoved = try c.decodeIfPresent(Bool.self, forKey: .isRemoved) ?? false
         currentRevision = try c.decode(UInt64.self, forKey: .currentRevision)
@@ -331,6 +340,7 @@ struct PortablePackageAssetRecord: Codable, Equatable, Sendable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(identity, forKey: .identity)
         try c.encode(source, forKey: .source)
+        try c.encodeIfPresent(sourceChangeSignature, forKey: .sourceChangeSignature)
         try c.encode(isRemoved, forKey: .isRemoved)
         try c.encode(currentRevision, forKey: .currentRevision)
         try c.encode(editHistory, forKey: .editHistory)
