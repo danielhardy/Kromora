@@ -10,22 +10,34 @@ import Foundation
 enum OriginalThumbnailLoader {
     static func load(
         url: URL?, data: Data?, dataFingerprint: String?,
-        identity: PortablePhotoIdentity, store: ThumbnailFrameStore?
+        identity: PortablePhotoIdentity, store: ThumbnailFrameStore?,
+        ledger: FrameLookupLedger = .shared,
+        surface: FrameLookupSurface = .gridOriginal
     ) async -> CGImage? {
         let size = PlatformThumbnailProvider.libraryMaxPixelSize
         if let cached = PlatformThumbnailProvider.memoryCachedImage(
             identity: identity, maxPixelSize: size
         ) { return cached }
 
-        if let store, let hit = await store.read(.original, for: identity),
-           FrameClassifier.classify(
-               hit.frame.metadata, against: OriginalThumbnailSignature.currentInputs(for: identity)
-           ) == .exact
-        {
-            PlatformThumbnailProvider.primeMemoryCache(
-                hit.image, identity: identity, maxPixelSize: size
-            )
-            return hit.image
+        if let store {
+            let result = await store.readWithOutcome(.original, for: identity)
+            if let hit = result.hit {
+                let classification = FrameClassifier.classifyWithReason(
+                    hit.frame.metadata, against: OriginalThumbnailSignature.currentInputs(for: identity)
+                )
+                await ledger.record(surface: surface, outcome: Self.outcome(classification))
+                if classification.classification == .exact {
+                    PlatformThumbnailProvider.primeMemoryCache(
+                        hit.image, identity: identity, maxPixelSize: size
+                    )
+                    return hit.image
+                }
+            } else {
+                await ledger.record(
+                    surface: surface,
+                    outcome: result.corrupt ? .corrupt : .missingFile
+                )
+            }
         }
 
         let decoded = await Task.detached { () -> (image: CGImage, frame: PresentationFrame?)? in
@@ -51,5 +63,16 @@ enum OriginalThumbnailLoader {
         guard let decoded else { return nil }
         if let store, let frame = decoded.frame { await store.enqueueWrite(frame) }
         return decoded.image
+    }
+
+    private static func outcome(
+        _ result: (classification: FrameClassification, reason: FrameRejectionReason?)
+    ) -> FrameLookupOutcome {
+        switch result.classification {
+        case .exact: .exact
+        case .staleCompatible: .staleCompatible
+        case .provisionalOnly: .provisionalOnly
+        case .unusable: .rejected(result.reason ?? .sourceFingerprintMismatch)
+        }
     }
 }

@@ -114,6 +114,29 @@ final class PresentationFrameClassifierTests: XCTestCase {
         XCTAssertEqual(classify(frame, current()), .staleCompatible)
     }
 
+    func testEveryRejectionReportsItsFirstReason() {
+        let otherAsset = FrameFixtures.identity()
+        let otherFingerprint = FrameFixtures.identity(asset: identity.assetID, content: "replaced")
+        let placeholder = PortablePhotoIdentity(
+            assetID: identity.assetID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(contentHash: "", decoderVersion: "test")
+        )
+        let rows: [(FrameRejectionReason, PresentationFrameMetadata, FrameCurrentInputs)] = [
+            (.assetMismatch, FrameFixtures.metadata(identity: otherAsset), current()),
+            (.sourceFingerprintMismatch, FrameFixtures.metadata(identity: otherFingerprint), current()),
+            (.placeholderSourceIdentity, FrameFixtures.metadata(identity: identity), current(source: placeholder)),
+            (.dimensionsInvalid, FrameFixtures.metadata(identity: identity, width: 0), current()),
+            (.colorSpaceUnpresentable, FrameFixtures.metadata(identity: identity, raster: .displayP3), current())
+        ]
+
+        for (reason, metadata, inputs) in rows {
+            let result = FrameClassifier.classifyWithReason(metadata, against: inputs)
+            XCTAssertEqual(result.classification, .unusable, "\(reason)")
+            XCTAssertEqual(result.reason, reason, "\(reason)")
+            XCTAssertEqual(FrameClassifier.classify(metadata, against: inputs), .unusable, "\(reason)")
+        }
+    }
+
     func testSRGBFrameUnderAWiderWorkingSpaceIsStaleCompatible() {
         let frame = FrameFixtures.metadata(identity: identity, space: .sRGB, raster: .sRGB)
         XCTAssertEqual(classify(frame, current(space: .displayP3)), .staleCompatible)
@@ -235,6 +258,39 @@ final class ThumbnailFrameStoreTests: TempDirectoryTestCase {
             pixelHeight: baseMetadata.pixelHeight
         )
         return PresentationFrame(metadata: metadata, rasterData: base.rasterData)
+    }
+}
+
+final class FrameLookupLedgerTests: TempDirectoryTestCase {
+    func testPreviewStoreDistinguishesMissingAndCorruptFramesWithoutThrowing() async throws {
+        let directory = tempDirectory.appendingPathComponent("Previews", isDirectory: true)
+        let identity = FrameFixtures.identity()
+        let store = LatestPreviewFrameStore(directory: directory)
+        let missing = await store.readWithOutcome(for: identity)
+        XCTAssertNil(missing.hit)
+        XCTAssertFalse(missing.corrupt)
+
+        await store.enqueueWrite(try FrameFixtures.frame(identity: identity))
+        await store.waitForPendingWrites()
+        let file = directory.appendingPathComponent(
+            "\(LatestPreviewFrameStore.assetHash(identity.assetID)!).kframe"
+        )
+        try Data("damaged".utf8).write(to: file)
+        let corrupt = await store.readWithOutcome(for: identity)
+        XCTAssertNil(corrupt.hit)
+        XCTAssertTrue(corrupt.corrupt)
+    }
+
+    func testLedgerRecordsMonotonicEntriesAndSummarizesRejections() async {
+        let ledger = FrameLookupLedger()
+        await ledger.record(surface: .editPreview, outcome: .rejected(.assetMismatch))
+        await ledger.record(surface: .editPreview, outcome: .rejected(.assetMismatch))
+        await ledger.record(surface: .editPreview, outcome: .exact)
+        let records = await ledger.snapshot()
+        XCTAssertEqual(records.count, 3)
+        XCTAssertLessThanOrEqual(records[0].timestampNanoseconds, records[1].timestampNanoseconds)
+        let summary = await ledger.summary(for: .editPreview)
+        XCTAssertTrue(summary.contains("topRejection=assetMismatch:2"))
     }
 }
 

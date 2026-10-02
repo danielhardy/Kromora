@@ -98,6 +98,18 @@ actor ThumbnailFrameStore {
     struct StoredFrames: Sendable {
         let original: Hit?
         let edited: Hit?
+        let originalCorrupt: Bool
+        let editedCorrupt: Bool
+
+        init(
+            original: Hit?, edited: Hit?, originalCorrupt: Bool = false,
+            editedCorrupt: Bool = false
+        ) {
+            self.original = original
+            self.edited = edited
+            self.originalCorrupt = originalCorrupt
+            self.editedCorrupt = editedCorrupt
+        }
     }
 
     private let directory: URL
@@ -126,27 +138,34 @@ actor ThumbnailFrameStore {
     /// caller classifies it; this store guarantees only that the bytes are a well-formed frame of
     /// the requested kind for the same asset.
     func read(_ kind: ThumbnailFrameKind, for identity: PortablePhotoIdentity) -> Hit? {
-        guard let key = Self.key(kind, for: identity.assetID) else { return nil }
+        readWithOutcome(kind, for: identity).hit
+    }
+
+    func readWithOutcome(
+        _ kind: ThumbnailFrameKind, for identity: PortablePhotoIdentity
+    ) -> (hit: Hit?, corrupt: Bool) {
+        guard let key = Self.key(kind, for: identity.assetID) else { return (nil, false) }
         readCount += 1
         if let frame = pending[key] {
             guard let image = try? PresentationFrameEnvelope.decodeRaster(of: frame) else {
-                return nil
+                return (nil, true)
             }
-            return Hit(frame: frame, image: image)
+            return (Hit(frame: frame, image: image), false)
         }
-        guard openStoreIfNeeded() else { return nil }
+        guard openStoreIfNeeded() else { return (nil, false) }
         refreshIfExternallyReplaced()
+        var foundDamagedRecord = false
         for attempt in 0..<2 {
-            guard let store else { return nil }
+            guard let store else { return (nil, false) }
             let lookup: PortablePackagePackedThumbnailStore.LookupResult
-            do { lookup = try store.lookup(key) } catch { return nil }
+            do { lookup = try store.lookup(key) } catch { return (nil, foundDamagedRecord) }
             switch lookup {
             case .missing:
-                return nil
+                return (nil, foundDamagedRecord)
             case .stale:
                 // The offsets no longer describe these packs. Re-reading the index is the repair
                 // when another process compacted them; a second miss stays a miss.
-                guard attempt == 0, reloadIndex() else { return nil }
+                guard attempt == 0, reloadIndex() else { return (nil, foundDamagedRecord) }
             case .found(let data):
                 do {
                     let frame = try PresentationFrameEnvelope.decode(
@@ -154,23 +173,27 @@ actor ThumbnailFrameStore {
                     )
                     guard frame.kind == kind.presentationKind else { throw PresentationFrameEnvelope.DecodeError.identityMismatch }
                     let image = try PresentationFrameEnvelope.decodeRaster(of: frame)
-                    return Hit(frame: frame, image: image)
+                    return (Hit(frame: frame, image: image), false)
                 } catch {
+                    foundDamagedRecord = true
                     // Bytes that do not decode are either a damaged record or an offset into a
                     // replaced pack. Try a fresh index once; otherwise drop just this pointer.
                     if attempt == 0, reloadIndex() { continue }
                     try? store.remove(keys: [key])
-                    return nil
+                    return (nil, true)
                 }
             }
         }
-        return nil
+        return (nil, foundDamagedRecord)
     }
 
     /// Both records of a photo, for a visible-window hydration pass.
     func readFrames(for identity: PortablePhotoIdentity) -> StoredFrames {
-        StoredFrames(
-            original: read(.original, for: identity), edited: read(.edited, for: identity)
+        let original = readWithOutcome(.original, for: identity)
+        let edited = readWithOutcome(.edited, for: identity)
+        return StoredFrames(
+            original: original.hit, edited: edited.hit,
+            originalCorrupt: original.corrupt, editedCorrupt: edited.corrupt
         )
     }
 

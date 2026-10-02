@@ -176,6 +176,10 @@ boundary suites so injected failures stay reproducible and do not depend on a sc
 | Same-ID Look replacement and unchanged Look scans | `LUTLibraryTests`, `AppViewModelTests`, `EditedThumbnailCoordinatorTests` |
 | Transactional edit plus presented geometry and rollback | `PortableLibraryPackageTests.testEditRevisionAndPresentedGeometryPublishOrRollbackTogether` |
 | Packed-frame stable keys, read-window bounds, compaction, and interruptions | `ThumbnailFrameStoreTests`, `PortablePackageMaintenanceTests` |
+
+Persisted presentation frame reads are recorded by `FrameLookupLedger` with their surface, outcome,
+and monotonic timestamp; the ledger stores no paths or image data. The one-line `FrameLookupSummary`
+signpost groups outcomes by surface and names the most frequent rejection reason for quick cache-miss triage.
 | Launch-hint schema faults, wrong library, removed IDs, viewport supersession, and stale completion | `LaunchHintsTests`, `LibraryBrowsingCoordinatorTests` |
 | Rapid selection, newest-pending work, stale render/thumbnail publication, and actual drawable callbacks | `FilmstripNavigationTests`, `ThumbnailSwitchLifecycleTests`, `IdentityRegressionGateTests`, `PreviewSurfaceTests` |
 

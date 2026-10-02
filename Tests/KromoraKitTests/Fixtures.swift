@@ -781,10 +781,10 @@ class TempDirectoryTestCase: XCTestCase {
         portablePackageURL: URL? = nil,
         portableLibrarySession: PortableLibrarySession? = nil,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
-        originalThumbnailProvider: @escaping ImageCollection.OriginalThumbnailProvider = { url, data, fingerprint, identity, store in
+        originalThumbnailProvider: @escaping ImageCollection.OriginalThumbnailProvider = { url, data, fingerprint, identity, store, ledger, surface in
             await OriginalThumbnailLoader.load(
                 url: url, data: data, dataFingerprint: fingerprint,
-                identity: identity, store: store
+                identity: identity, store: store, ledger: ledger, surface: surface
             )
         },
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in

@@ -71,6 +71,15 @@ actor LatestPreviewFrameStore {
         }
     }
 
+    func readWithOutcome(for identity: PortablePhotoIdentity) -> (hit: Hit?, corrupt: Bool) {
+        let existed = loadIndex()
+            && Self.assetHash(identity.assetID).map { entries[$0] != nil } == true
+        let hit = read(for: identity)
+        let isMissing: Bool
+        if case .none = hit { isMissing = true } else { isMissing = false }
+        return (hit, existed && isMissing)
+    }
+
     /// Metadata only, for callers that need to know what is stored without paying to decode it.
     func metadata(for identity: PortablePhotoIdentity) -> PresentationFrameMetadata? {
         guard loadIndex(), let hash = Self.assetHash(identity.assetID), entries[hash] != nil

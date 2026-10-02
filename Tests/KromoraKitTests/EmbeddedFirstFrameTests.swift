@@ -100,7 +100,7 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         await fake.gatePreviews()
         let viewModel = makeAppViewModel(
             engine: fake,
-            originalThumbnailProvider: { _, _, _, _, _ in nil }
+            originalThumbnailProvider: { _, _, _, _, _, _, _ in nil }
         )
 
         viewModel.openImage(url: raw)
@@ -175,7 +175,7 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         await fake.failPreviews()
         let viewModel = makeAppViewModel(
             engine: fake,
-            originalThumbnailProvider: { _, _, _, _, _ in nil }
+            originalThumbnailProvider: { _, _, _, _, _, _, _ in nil }
         )
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()
@@ -212,7 +212,7 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
         await fake.gatePreviews()
         let viewModel = makeAppViewModel(
             engine: fake,
-            originalThumbnailProvider: { _, _, _, _, _ in nil },
+            originalThumbnailProvider: { _, _, _, _, _, _, _ in nil },
             embeddedFirstFrameProvider: { url in await gate.extract(url) }
         )
         viewModel.collection.loadFromFolder(tempDirectory)

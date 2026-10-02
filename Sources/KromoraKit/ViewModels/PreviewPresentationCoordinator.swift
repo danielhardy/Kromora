@@ -74,10 +74,15 @@ final class PreviewPresentationCoordinator {
     private var canonicalWriteTasks: [PortablePhotoAssetID: Task<Void, Never>] = [:]
     let store: LatestPreviewFrameStore
     private let engine: any RenderEngining
+    let frameLookupLedger: FrameLookupLedger
 
-    init(store: LatestPreviewFrameStore, engine: any RenderEngining = RenderEngine.shared) {
+    init(
+        store: LatestPreviewFrameStore, engine: any RenderEngining = RenderEngine.shared,
+        frameLookupLedger: FrameLookupLedger = .shared
+    ) {
         self.store = store
         self.engine = engine
+        self.frameLookupLedger = frameLookupLedger
     }
 
     func advanceDisplayRevision() { displayRevision &+= 1 }
@@ -285,7 +290,8 @@ final class PreviewPresentationCoordinator {
         let store = self.store
         storedFrameTask = Task { [weak self] in
             async let pin: Void = store.setPinned([identity.assetID])
-            let hit = await store.read(for: identity)
+            let result = await store.readWithOutcome(for: identity)
+            let hit = result.hit
             await pin
             guard !Task.isCancelled, let self else { return }
             guard self.storedFrameSessionGeneration == generation else { return }
@@ -295,13 +301,34 @@ final class PreviewPresentationCoordinator {
                 self.storedFrameSessionGeneration == generation
             else { return }
             let provisionalInputs = FrameCurrentInputs(source: identity)
-            if let hit,
-                FrameClassifier.classify(hit.frame.metadata, against: provisionalInputs).isPresentable
-            {
-                let candidate = StoredFrameCandidate(metadata: hit.frame.metadata, image: hit.image)
-                self.storedFrameLookup = .candidate(candidate)
-                completion(candidate)
+            if let hit {
+                let classification = FrameClassifier.classifyWithReason(
+                    hit.frame.metadata, against: provisionalInputs
+                )
+                let outcome: FrameLookupOutcome
+                switch classification.classification {
+                case .exact: outcome = .exact
+                case .staleCompatible: outcome = .staleCompatible
+                case .provisionalOnly: outcome = .provisionalOnly
+                case .unusable:
+                    outcome = .rejected(classification.reason ?? .sourceFingerprintMismatch)
+                }
+                await self.frameLookupLedger.record(surface: .editPreview, outcome: outcome)
+                guard !Task.isCancelled,
+                      self.storedFrameSessionGeneration == generation else { return }
+                if classification.classification.isPresentable {
+                    let candidate = StoredFrameCandidate(metadata: hit.frame.metadata, image: hit.image)
+                    self.storedFrameLookup = .candidate(candidate)
+                    completion(candidate)
+                } else {
+                    self.storedFrameLookup = .unavailable
+                    completion(nil)
+                }
             } else {
+                await self.frameLookupLedger.record(
+                    surface: .editPreview,
+                    outcome: result.corrupt ? .corrupt : .missingFile
+                )
                 self.storedFrameLookup = .unavailable
                 completion(nil)
             }

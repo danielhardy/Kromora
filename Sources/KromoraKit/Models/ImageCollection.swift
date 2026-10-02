@@ -16,7 +16,8 @@ import Observation
 @Observable
 final class ImageCollectionPresentationModel {
     typealias OriginalThumbnailProvider = @Sendable (
-        URL?, Data?, String?, PortablePhotoIdentity, ThumbnailFrameStore?
+        URL?, Data?, String?, PortablePhotoIdentity, ThumbnailFrameStore?, FrameLookupLedger,
+        FrameLookupSurface
     ) async -> CGImage?
     enum LibrarySourceKind: String, Sendable, Equatable { case managed }
 
@@ -259,6 +260,7 @@ final class ImageCollectionPresentationModel {
     private var cullingUndoStack: [CullingChange] = []
     private(set) var lastCullingAssetID: PhotoAssetID?
     private let scheduler: ImageWorkScheduler
+    let frameLookupLedger: FrameLookupLedger
     private let originalThumbnailProvider: OriginalThumbnailProvider
     private var thumbnailJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var thumbnailGeneration: UInt64 = 0
@@ -301,14 +303,16 @@ final class ImageCollectionPresentationModel {
 
     init(
         scheduler: ImageWorkScheduler = ImageWorkScheduler(),
-        originalThumbnailProvider: @escaping OriginalThumbnailProvider = { url, data, fingerprint, identity, store in
+        frameLookupLedger: FrameLookupLedger = .shared,
+        originalThumbnailProvider: @escaping OriginalThumbnailProvider = { url, data, fingerprint, identity, store, ledger, surface in
             await OriginalThumbnailLoader.load(
                 url: url, data: data, dataFingerprint: fingerprint,
-                identity: identity, store: store
+                identity: identity, store: store, ledger: ledger, surface: surface
             )
         }
     ) {
         self.scheduler = scheduler
+        self.frameLookupLedger = frameLookupLedger
         self.originalThumbnailProvider = originalThumbnailProvider
     }
 
@@ -877,39 +881,71 @@ final class ImageCollectionPresentationModel {
 
     private func applyStoredFrames(
         _ frames: ThumbnailFrameStore.StoredFrames, itemID: PhotoAssetID,
-        identity: PortablePhotoIdentity, generation: UInt64
+        identity: PortablePhotoIdentity, generation: UInt64,
+        surface: FrameLookupSurface = .gridOriginal
     ) {
         guard generation == thumbnailGeneration,
               let item = items.first(where: { $0.id == itemID }),
               item.asset.source.portableIdentity == identity else { return }
-        if let hit = frames.edited,
-           FrameClassifier.classify(hit.frame.metadata, against: FrameCurrentInputs(source: identity))
-               .isPresentable
-        {
-            let image = NSImage(
-                cgImage: hit.image,
-                size: NSSize(width: hit.image.width, height: hit.image.height)
+        if let hit = frames.edited {
+            let result = FrameClassifier.classifyWithReason(
+                hit.frame.metadata, against: FrameCurrentInputs(source: identity)
             )
-            if item.applyStoredEditedThumbnail(image) {
-                if item.adoptStoredGeometry(hit.frame.geometry) {
-                    cropGeneration += 1
-                    invalidateCollectionProjection(notify: true)
+            Task {
+                await frameLookupLedger.record(
+                    surface: surface == .launchHint ? surface : .gridEdited,
+                    outcome: Self.ledgerOutcome(result)
+                )
+            }
+            if result.classification.isPresentable {
+                let image = NSImage(
+                    cgImage: hit.image,
+                    size: NSSize(width: hit.image.width, height: hit.image.height)
+                )
+                if item.applyStoredEditedThumbnail(image) {
+                    if item.adoptStoredGeometry(hit.frame.geometry) {
+                        cropGeneration += 1
+                        invalidateCollectionProjection(notify: true)
+                    }
                 }
             }
+        } else {
+            Task {
+                await frameLookupLedger.record(
+                    surface: surface == .launchHint ? surface : .gridEdited,
+                    outcome: frames.editedCorrupt ? .corrupt : .missingFile
+                )
+            }
         }
-        if let hit = frames.original, item.originalThumbnailForPresentation == nil,
-           FrameClassifier.classify(
-               hit.frame.metadata, against: OriginalThumbnailSignature.currentInputs(for: identity)
-           ) == .exact
-        {
-            PlatformThumbnailProvider.primeMemoryCache(
-                hit.image, identity: identity, maxPixelSize: PlatformThumbnailProvider.libraryMaxPixelSize
+        if let hit = frames.original {
+            let result = FrameClassifier.classifyWithReason(
+                hit.frame.metadata,
+                against: OriginalThumbnailSignature.currentInputs(for: identity)
             )
-            item.setOriginalThumbnail(NSImage(
-                cgImage: hit.image,
-                size: NSSize(width: hit.image.width, height: hit.image.height)
-            ))
-            item.asset.thumbnailState = .ready
+            Task {
+                await frameLookupLedger.record(
+                    surface: surface == .launchHint ? surface : .gridOriginal,
+                    outcome: Self.ledgerOutcome(result)
+                )
+            }
+            if item.originalThumbnailForPresentation == nil && result.classification == .exact {
+                PlatformThumbnailProvider.primeMemoryCache(
+                    hit.image, identity: identity,
+                    maxPixelSize: PlatformThumbnailProvider.libraryMaxPixelSize
+                )
+                item.setOriginalThumbnail(NSImage(
+                    cgImage: hit.image,
+                    size: NSSize(width: hit.image.width, height: hit.image.height)
+                ))
+                item.asset.thumbnailState = .ready
+            }
+        } else {
+            Task {
+                await frameLookupLedger.record(
+                    surface: surface == .launchHint ? surface : .gridOriginal,
+                    outcome: frames.originalCorrupt ? .corrupt : .missingFile
+                )
+            }
         }
     }
 
@@ -921,8 +957,19 @@ final class ImageCollectionPresentationModel {
         for (id, candidate) in frames {
             applyStoredFrames(
                 candidate.1, itemID: id, identity: candidate.0,
-                generation: thumbnailGeneration
+                generation: thumbnailGeneration, surface: .launchHint
             )
+        }
+    }
+
+    private static func ledgerOutcome(
+        _ result: (classification: FrameClassification, reason: FrameRejectionReason?)
+    ) -> FrameLookupOutcome {
+        switch result.classification {
+        case .exact: .exact
+        case .staleCompatible: .staleCompatible
+        case .provisionalOnly: .provisionalOnly
+        case .unusable: .rejected(result.reason ?? .sourceFingerprintMismatch)
         }
     }
     private func enqueueThumbnails() {
@@ -943,7 +990,8 @@ final class ImageCollectionPresentationModel {
             let image = await self?.originalThumbnailProvider(
                 item.url, item.url == nil ? item.imageData : nil,
                 item.dataFingerprint, item.asset.source.portableIdentity,
-                self?.thumbnailFrameStore
+                self?.thumbnailFrameStore, self?.frameLookupLedger ?? .shared,
+                requested == .adjacentFilmstrip ? .filmstrip : .gridOriginal
             )
             guard !Task.isCancelled else { return }
             let thumbnail = image.map {

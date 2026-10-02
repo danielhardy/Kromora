@@ -2,6 +2,80 @@ import Foundation
 import os.log
 import CryptoKit
 
+enum FrameLookupSurface: String, Sendable, CaseIterable {
+    case editPreview
+    case gridOriginal
+    case gridEdited
+    case filmstrip
+    case launchHint
+}
+
+enum FrameLookupOutcome: Sendable, Equatable {
+    case missingFile
+    case corrupt
+    case rejected(FrameRejectionReason)
+    case staleCompatible
+    case provisionalOnly
+    case exact
+
+    var label: String {
+        switch self {
+        case .missingFile: "missingFile"
+        case .corrupt: "corrupt"
+        case .rejected(let reason): "rejected.\(reason.rawValue)"
+        case .staleCompatible: "staleCompatible"
+        case .provisionalOnly: "provisionalOnly"
+        case .exact: "exact"
+        }
+    }
+}
+
+struct FrameLookupRecord: Sendable, Equatable {
+    let surface: FrameLookupSurface
+    let outcome: FrameLookupOutcome
+    let timestampNanoseconds: UInt64
+}
+
+/// In-memory diagnostics for persisted presentation frame reads. Records contain no paths or
+/// image bytes and use a monotonic clock so ordering is meaningful across wall-clock changes.
+actor FrameLookupLedger {
+    static let shared = FrameLookupLedger()
+
+    private var records: [FrameLookupRecord] = []
+
+    func record(surface: FrameLookupSurface, outcome: FrameLookupOutcome) {
+        records.append(FrameLookupRecord(
+            surface: surface, outcome: outcome,
+            timestampNanoseconds: DispatchTime.now().uptimeNanoseconds
+        ))
+    }
+
+    func snapshot() -> [FrameLookupRecord] { records }
+
+    func summary(for surface: FrameLookupSurface) -> String {
+        let selected = records.filter { $0.surface == surface }
+        var counts: [String: Int] = [:]
+        var reasons: [String: Int] = [:]
+        for record in selected {
+            counts[record.outcome.label, default: 0] += 1
+            if case .rejected(let reason) = record.outcome {
+                reasons[reason.rawValue, default: 0] += 1
+            }
+        }
+        let countsText = counts.keys.sorted().compactMap { key in
+            counts[key].map { "\(key)=\($0)" }
+        }.joined(separator: ",")
+        let topReason = reasons.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }
+            .first.map { "\($0.key):\($0.value)" } ?? "none"
+        return "FrameLookup surface=\(surface.rawValue) count=\(selected.count) "
+            + "outcomes={\(countsText)} topRejection=\(topReason)"
+    }
+
+    func logSummary(for surface: FrameLookupSurface) {
+        KromoraObservability.event(.frameLookupSummary, detail: summary(for: surface))
+    }
+}
+
 /// The stable vocabulary used by the Points of Interest instrument.
 ///
 /// Keep these names static: Instruments groups intervals by signpost name, and a stable vocabulary
@@ -92,6 +166,7 @@ enum KromoraWorkflowEvent: CaseIterable {
     case launchFirstIndexPage
     case launchHintsSuperseded
     case launchHydrationComplete
+    case frameLookupSummary
 
     var name: StaticString {
         switch self {
@@ -117,6 +192,7 @@ enum KromoraWorkflowEvent: CaseIterable {
         case .launchFirstIndexPage: return "LaunchFirstIndexPage"
         case .launchHintsSuperseded: return "LaunchHintsSuperseded"
         case .launchHydrationComplete: return "LaunchHydrationComplete"
+        case .frameLookupSummary: return "FrameLookupSummary"
         }
     }
 }
