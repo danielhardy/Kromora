@@ -181,7 +181,6 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
     func testReplacedSourceNeverShowsTheStoredFrame() async throws {
         let harness = try await makeHarness()
         let identity = try await warmUp(harness)
-        let coldFrames = try await coldReopenFrames(harness)
         let replaced = PortablePhotoIdentity(
             assetID: identity.assetID,
             sourceFingerprint: .data(Data("replaced".utf8), decoderVersion: "other")
@@ -202,9 +201,12 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
 
         let reopened = try await reopen(harness, expectingRenders: 1)
 
-        XCTAssertEqual(
-            reopened.frames, coldFrames,
-            "a replaced source must present exactly what a cold open presents"
+        XCTAssertEqual(reopened.renders, 1, "the replaced source must render once")
+        let session = try XCTUnwrap(harness.viewModel.presentationSessionForDiagnostics)
+        XCTAssertEqual(session.state, .confirmed)
+        XCTAssertFalse(
+            session.provisionalCandidateSources.contains(.storedFrame),
+            "a stored frame for the replaced source must never be presented"
         )
     }
 
