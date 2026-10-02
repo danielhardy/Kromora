@@ -136,6 +136,43 @@ final class RenderEngineTests: TempDirectoryTestCase {
         XCTAssertLessThan(lowResolution.height, cropped.height)
     }
 
+    func testFractionalCropThumbnailRasterizesItsEdgesFromImageContent() async throws {
+        let source = ImageSource(
+            url: sourceURL, nativeExtent: CGSize(width: 96, height: 64)
+        )
+        let document = EditDocument(
+            crop: CropAdjustments(
+                normalizedRect: CGRect(x: 0.137, y: 0.173, width: 0.711, height: 0.613)
+            ),
+            rotation: .clockwise90
+        )
+        let rendered = await RenderEngine().makeThumbnailCGImage(RenderRequest(
+            source: source, document: document,
+            targetSize: CGSize(width: 240, height: 240), quality: .thumbnail, output: .raster
+        ))
+        let image = try XCTUnwrap(rendered)
+        let pixels = try Pixels.bytes(of: image)
+        let bytesPerRow = image.width * 4
+
+        // Quarter-turn geometry may leave transparent pixels in the very corners; the rounded
+        // Library clip masks those. The straight span between them must continue photo content.
+        for x in 2..<(image.width - 2) {
+            for edgeY in [0, image.height - 1] {
+                let edge = edgeY * bytesPerRow + x * 4
+                let neighborY = edgeY == 0 ? 1 : image.height - 2
+                let neighbor = neighborY * bytesPerRow + x * 4
+                XCTAssertEqual(pixels[edge + 3], 255, "the fractional crop edge must stay opaque")
+                for channel in 0..<3 {
+                    XCTAssertLessThanOrEqual(
+                        abs(Int(pixels[edge + channel]) - Int(pixels[neighbor + channel])),
+                        16,
+                        "the raster edge must continue the smooth photo content at x=\(x)"
+                    )
+                }
+            }
+        }
+    }
+
     /// A local camera RAW exercises the decoder branch that the synthetic PNG regression cannot.
     /// The embedded preview is checked separately because it is the provisional browsing image;
     /// the settled crop must still be planned from the sensor-native extent.
