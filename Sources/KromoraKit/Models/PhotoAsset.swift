@@ -275,11 +275,10 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
     ///
     /// Unlike `init(url:id:data:)`, this performs no file I/O: no resource lookup, no sample
     /// read, and no full-file hash. The caller supplies the derived embedded URL (see
-    /// `PortableLibraryPackage.browsingOriginalURL`) and the index summary. The placeholder
-    /// fingerprints are deterministic per asset UUID and digest-shaped so a browsing observation
-    /// can never alias another asset or a record-resolved observation in `matches(_)`; opening
-    /// the asset resolves the record identity and replaces this value before any render, cache,
-    /// or edit consumer depends on source bytes.
+    /// `PortableLibraryPackage.browsingOriginalURL`) and the index summary. A persisted summary
+    /// fingerprint passes through unchanged. Legacy summaries without one get a deterministic
+    /// placeholder per asset UUID, so their identity cannot alias another asset or a
+    /// record-resolved observation in `matches(_)`.
     init(
         browsingPortableAsset assetID: PortablePhotoAssetID,
         embeddedURL: URL,
@@ -298,7 +297,7 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         )
         self.portableIdentity = PortablePhotoIdentity(
             assetID: assetID,
-            sourceFingerprint: PortablePhotoSourceFingerprint(
+            sourceFingerprint: summary.sourceFingerprint ?? PortablePhotoSourceFingerprint(
                 contentHash: PortablePhotoSourceFingerprint.contentHash(
                     of: Data(("browsing:" + assetID.raw).utf8)
                 ),

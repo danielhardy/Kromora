@@ -232,6 +232,35 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         return try Self(libraryID: libraryID, entries: entries)
     }
 
+    /// Reconcile the denormalized source identity against the canonical membership summaries.
+    /// This is a cheap shard-only repair for an index write lost after a package transaction
+    /// committed; it never opens asset records and leaves all other disposable index fields alone.
+    func reconcilingSourceFingerprints(with package: PortableLibraryPackage) throws -> Self {
+        guard libraryID == package.manifest.libraryID else {
+            throw LibraryQueryError.invalidIndex("library ID does not match the package")
+        }
+        var byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.assetID, $0) })
+        var changed = false
+        for shardName in PortableLibraryPackage.allShards {
+            let shard = try package.readMembershipShard(shardName)
+            for membership in shard.entries where !membership.isTombstone {
+                guard let indexed = byID[membership.assetID],
+                      indexed.summary.sourceFingerprint != membership.summary.sourceFingerprint
+                else { continue }
+                var updated = indexed.summary
+                updated.sourceFingerprint = membership.summary.sourceFingerprint
+                byID[membership.assetID] = LibraryIndexEntry(
+                    assetID: indexed.assetID, recordPath: indexed.recordPath,
+                    addedRevision: indexed.addedRevision, deletedRevision: indexed.deletedRevision,
+                    summary: updated
+                )
+                changed = true
+            }
+        }
+        guard changed else { return self }
+        return try Self(libraryID: libraryID, entries: Array(byID.values))
+    }
+
     private static func readEntries(from package: PortableLibraryPackage) throws
         -> [LibraryIndexEntry]
     {

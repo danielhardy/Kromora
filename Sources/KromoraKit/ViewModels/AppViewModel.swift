@@ -1897,7 +1897,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         if !collectionAlreadySelected { focusCollectionItem(id: assetID) }
         let item = collection.items.first(where: { $0.id == assetID })
         if let item,
-            item.asset.source.portableIdentity.sourceFingerprint.decoderVersion == "browsing-v1",
+            item.asset.source.portableIdentity.sourceFingerprint.isBrowsingPlaceholder,
             let portableLibrary
         {
             // Record I/O and the bounded file signature lookup belong off the main actor. Fence

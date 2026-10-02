@@ -449,7 +449,10 @@ struct PortablePackageImporter: Sendable {
                 shard.entries.append(.init(
                     assetID: assetID,
                     recordPath: recordPath,
-                    summary: .init(displayName: source.name)
+                    summary: .init(
+                        sourceFingerprint: identity.sourceFingerprint,
+                        displayName: source.name
+                    )
                 ))
                 try transaction.stage(
                     data: try package.encodedMembershipShard(shard),
@@ -464,7 +467,11 @@ struct PortablePackageImporter: Sendable {
                 catalog.existingHashes[staged.checksum] = assetID
                 hashesSeenThisImport[staged.checksum] = assetID
                 indexUpserts.append(.init(
-                    assetID: assetID, recordPath: recordPath, summary: .init(displayName: source.name)
+                    assetID: assetID, recordPath: recordPath,
+                    summary: .init(
+                        sourceFingerprint: identity.sourceFingerprint,
+                        displayName: source.name
+                    )
                 ))
                 imported.append(.init(
                     source: source,

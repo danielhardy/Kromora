@@ -761,7 +761,7 @@ final class PreviewAdmissionCoordinator {
             .compactMap { index -> BrowsingDocumentCandidate? in
                 let item = collection.items[index]
                 let identity = item.asset.source.portableIdentity
-                guard identity.sourceFingerprint.decoderVersion == "browsing-v1" else {
+                guard identity.sourceFingerprint.isBrowsingPlaceholder else {
                     return nil
                 }
                 return BrowsingDocumentCandidate(
@@ -866,7 +866,7 @@ final class PreviewAdmissionCoordinator {
                 let item = destination.admissionCollection.items.first(where: {
                     $0.id == candidate.assetID
                 }),
-                item.asset.source.portableIdentity.sourceFingerprint.decoderVersion == "browsing-v1"
+                item.asset.source.portableIdentity.sourceFingerprint.isBrowsingPlaceholder
             else { continue }
 
             do {
@@ -882,8 +882,7 @@ final class PreviewAdmissionCoordinator {
                     let current = destination.admissionCollection.items.first(where: {
                         $0.id == candidate.assetID
                     }),
-                    current.asset.source.portableIdentity.sourceFingerprint.decoderVersion
-                        == "browsing-v1"
+                    current.asset.source.portableIdentity.sourceFingerprint.isBrowsingPlaceholder
                 else { continue }
 
                 current.asset = resolved
