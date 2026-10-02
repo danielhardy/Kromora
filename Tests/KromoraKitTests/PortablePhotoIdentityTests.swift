@@ -166,6 +166,17 @@ final class PortablePhotoIdentityTests: TempDirectoryTestCase {
         XCTAssertNotEqual(refreshed.contentHash, persisted.contentHash)
     }
 
+    func testSourceWithoutPersistedIdentityKeepsImageIODecoderVersionAndHashesFile() throws {
+        let url = tempDirectory.appendingPathComponent("fresh-source.ARW")
+        try Data("fresh bytes".utf8).write(to: url)
+
+        let source = PhotoAssetSource(url: url)
+
+        XCTAssertEqual(source.portableIdentity.sourceFingerprint.decoderVersion, "imageio-arw-v1")
+        XCTAssertEqual(source.portableIdentity.sourceFingerprint.contentHash,
+                       PortablePhotoSourceFingerprint.contentHash(of: Data("fresh bytes".utf8)))
+    }
+
     func testRelativePathResolutionIsExplicitlyAtRenderBoundary() throws {
         let root = tempDirectory.appendingPathComponent("Library", isDirectory: true)
         let resolved = try RenderBoundarySourceResolver.resolve(
