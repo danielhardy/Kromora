@@ -528,3 +528,19 @@ with the KRMA-757 baseline of 95.1 ms p50 (296 ms p95). The median improved by 3
 under-50 ms aim. The warmed path still measures selection through publication as a whole; the
 remaining time in the document cache-hit validation and source handoff has not been separately
 profiled, so no additional machinery was added.
+
+#### Histogram delay investigation (KRMA-759)
+
+The same Release `StoredEditAdoptionBenchmark` was run on an Apple M4 Pro Mac mini with macOS 27.2
+and `DSC01019.ARW`. The KRMA-757 baseline was 54.1 ms histogram-after-ready p50 across 30 warm
+switches. A 30-switch run that temporarily admitted histogram work at comparison priority before
+the supporting comparison render measured 54.4 ms p50, so changing queue order did not improve the
+result. The temporary scheduling change was removed.
+
+To split the delay, a temporary monotonic timestamp probe recorded the confirmed-frame callback,
+histogram enqueue, scheduler operation start, and completion of `engine.histogram` for 9 warm-switch
+samples. At p50, confirmed frame to enqueue was 0.013 ms, scheduler queue wait was 0.075 ms, and the
+histogram call took 53.3 ms. This is compute-bound; the histogram's bounded Core Image rasterization
+accounts for essentially all of the roughly 55 ms after-ready delay. The probe was removed, and no
+product change was retained. The previous chart remains visible while this computation runs by
+design, which adds to the perceived delay after a photo switch.
