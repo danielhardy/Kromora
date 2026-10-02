@@ -317,11 +317,13 @@ private struct LibraryGridCell: View {
                     }
                 }
             .overlay {
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(
-                        isActive ? KromoraTheme.primaryAccent : (isSelected ? KromoraTheme.primaryAccent.opacity(0.7) : .clear),
-                        lineWidth: isActive ? 3 : 2
-                    )
+                if isActive || isSelected {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(
+                            isActive ? KromoraTheme.primaryAccent : KromoraTheme.primaryAccent.opacity(0.7),
+                            lineWidth: isActive ? 3 : 2
+                        )
+                }
             }
 
             HStack(spacing: 5) {
