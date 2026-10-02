@@ -22,14 +22,21 @@ Options:
   --iterations COUNT          Metal presentation iterations
   --items COUNT               Concurrent export item count
   --gestures COUNT            Concurrent editing gesture count
+  --force            Re-run on a tree that was already captured (see below)
   -h, --help         Show this help
 
 The command requires a macOS display, xctrace, xctest, and a licensed RAW
 fixture. It is intentionally opt-in and is not a CI gate.
+
+These captures need an unlocked, awake display and take minutes, so they are release-time
+qualification evidence, not a per-ticket check (see CLAUDE.md). A repeat run on a tree that
+was already captured for the same benchmark and source is refused unless --force is given;
+cite the existing numbers in docs/TESTING.md instead.
 USAGE
 }
 
 benchmark=""
+force_repeat=0
 source_path=""
 capture_id=""
 output_dir=""
@@ -81,6 +88,10 @@ while (( $# > 0 )); do
             (( $# >= 2 )) || { print -u2 -- "--gestures requires a count"; exit 2; }
             gesture_count="$2"
             shift 2
+            ;;
+        --force)
+            force_repeat=1
+            shift
             ;;
         -h|--help)
             usage
@@ -167,6 +178,22 @@ fi
 
 mkdir -p "$output_dir"
 source_stem="${source_path:t:r}"
+
+# Display-bound captures are rare, release-time evidence. Refuse an immediate repeat on a tree
+# (HEAD plus uncommitted source/test/script changes) that was already captured, so a verifier
+# working from a ticket's acceptance criteria cannot churn the display for numbers that cannot
+# have changed. The stamp is written only after a capture completes.
+tree_id="$(git -C "$repo_root" rev-parse HEAD)-$(git -C "$repo_root" diff HEAD -- Sources Tests Package.swift scripts | shasum | cut -c1-12)"
+stamp_path="$output_dir/.last-capture-${benchmark}-${${source_path:t:r}}"
+if [[ -f "$stamp_path" && "$force_repeat" != 1 ]] && [[ "$(head -1 "$stamp_path")" == "$tree_id" ]]; then
+    print -u2 "Refusing to repeat the '$benchmark' capture: this tree was already captured."
+    print -u2 "  tree:    $tree_id"
+    print -u2 "  previous: $(sed -n 2p "$stamp_path")"
+    print -u2 "These captures need an unlocked display and are release-time evidence (CLAUDE.md)."
+    print -u2 "Cite the existing numbers in docs/TESTING.md, or pass --force if the tree is not"
+    print -u2 "actually the one measured (for example a different machine state)."
+    exit 3
+fi
 stamp="$(date +%Y%m%d-%H%M%S)"
 trace_path="$output_dir/${capture_id}-${source_stem}-${stamp}.trace"
 summary_path="$output_dir/${capture_id}-${source_stem}-${stamp}-summary.txt"
@@ -272,6 +299,7 @@ if [[ "$benchmark" == "concurrent-export-editing" && ${#secondary_env[@]} -gt 0 
 fi
 "$xctrace_path" "${xctrace_args[@]}" >> "$summary_path" 2>&1
 
+{ print "$tree_id"; print "$summary_path ($(date -u +%FT%TZ))" } > "$stamp_path"
 print "trace=$trace_path"
 print "summary=$summary_path"
 if [[ "$benchmark" == "last-known-frame" ]]; then
