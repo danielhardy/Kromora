@@ -31,6 +31,10 @@ actor LatestPreviewFrameStore {
 
     private let directory: URL
     private let capBytes: Int64
+    private let workScheduler: ImageWorkScheduler?
+    private let placeholderSweepJobID = ImageWorkScheduler.JobID(
+        "placeholder-preview-sweep-\(UUID().uuidString)"
+    )
     private var entries: [String: Entry] = [:]
     private var totalBytes: Int64 = 0
     private var didLoadIndex = false
@@ -39,14 +43,22 @@ actor LatestPreviewFrameStore {
     private var pendingWrites: [String: (token: UInt64, task: Task<Void, Never>)] = [:]
     private var nextWriteToken: UInt64 = 0
     private var legacyCleanupTask: Task<Void, Never>?
-    private var placeholderSweepTask: Task<Void, Never>?
+    private var placeholderSweepScheduled = false
+    private var placeholderSweepHasMore = false
     private var placeholderSweepKeys: [String] = []
     private var placeholderSweepCursor = 0
+    private(set) var placeholderSweepFilesExamined = 0
+    private(set) var placeholderSweepLargestBatch = 0
+    var placeholderSweepIsScheduled: Bool { placeholderSweepScheduled }
     private(set) var placeholderWritesSkipped = 0
 
-    init(directory: URL, capBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes) {
+    init(
+        directory: URL, capBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
+        workScheduler: ImageWorkScheduler? = nil
+    ) {
         self.directory = directory
         self.capBytes = max(0, capBytes)
+        self.workScheduler = workScheduler
     }
 
     nonisolated static func packageDirectory(for packageURL: URL) -> URL {
@@ -59,7 +71,6 @@ actor LatestPreviewFrameStore {
     /// caller classifies it; this store only guarantees the bytes are a well-formed frame for the
     /// same asset.
     func read(for identity: PortablePhotoIdentity) -> Hit? {
-        cancelPlaceholderSweep()
         lastReadWasPlaceholder = false
         guard loadIndex(), let hash = Self.assetHash(identity.assetID), entries[hash] != nil
         else { return nil }
@@ -97,7 +108,6 @@ actor LatestPreviewFrameStore {
 
     /// Metadata only, for callers that need to know what is stored without paying to decode it.
     func metadata(for identity: PortablePhotoIdentity) -> PresentationFrameMetadata? {
-        cancelPlaceholderSweep()
         guard loadIndex(), let hash = Self.assetHash(identity.assetID), entries[hash] != nil
         else { return nil }
         let url = fileURL(forHash: hash)
@@ -119,7 +129,6 @@ actor LatestPreviewFrameStore {
     }
 
     func contains(_ identity: PortablePhotoIdentity) -> Bool {
-        cancelPlaceholderSweep()
         guard loadIndex(), let hash = Self.assetHash(identity.assetID) else { return false }
         return entries[hash] != nil
     }
@@ -134,7 +143,6 @@ actor LatestPreviewFrameStore {
     /// Queue a serialized write. A later write for the same asset supersedes one that has not
     /// reached the filesystem yet, so a burst of settles leaves one file write, not one per tick.
     func enqueueWrite(_ frame: PresentationFrame) {
-        cancelPlaceholderSweep()
         guard !Self.hasPlaceholderIdentity(frame) else {
             placeholderWritesSkipped += 1
             KromoraObservability.event(.frameWriteSkippedPlaceholder)
@@ -170,12 +178,12 @@ actor LatestPreviewFrameStore {
         await legacyCleanupTask?.value
     }
 
-    /// Processes at most eight indexed files before yielding, so callers can drive deterministic
-    /// idle ticks in tests while the background task remains preemptible by reads and writes.
+    /// Processes one bounded batch. Production cleanup is admitted through the shared scheduler;
+    /// tests can call this to drive a specific number of idle ticks.
     func sweepPlaceholderFrames(maxFiles: Int = 8) {
         guard maxFiles > 0, loadIndex() else { return }
-        cancelPlaceholderSweep()
-        _ = sweepPlaceholderBatch(maxFiles: maxFiles)
+        placeholderSweepHasMore = sweepPlaceholderBatch(maxFiles: maxFiles)
+        if placeholderSweepHasMore { Task { await schedulePlaceholderSweep() } }
     }
 
     @discardableResult
@@ -186,6 +194,8 @@ actor LatestPreviewFrameStore {
         }
         let start = min(placeholderSweepCursor, placeholderSweepKeys.count)
         let batch = Array(placeholderSweepKeys.dropFirst(start).prefix(maxFiles))
+        placeholderSweepFilesExamined += batch.count
+        placeholderSweepLargestBatch = max(placeholderSweepLargestBatch, batch.count)
         for hash in batch {
             let url = fileURL(forHash: hash)
             let fileIdentity = Self.fileIdentity(at: url)
@@ -209,7 +219,6 @@ actor LatestPreviewFrameStore {
 
     /// Remove every frame belonging to these assets (deletion, source replacement).
     func invalidate(identities: Set<PortablePhotoIdentity>) {
-        cancelPlaceholderSweep()
         guard loadIndex() else { return }
         for identity in identities {
             guard let hash = Self.assetHash(identity.assetID) else { continue }
@@ -296,11 +305,6 @@ actor LatestPreviewFrameStore {
         return "\(device):\(inode)"
     }
 
-    private func cancelPlaceholderSweep() {
-        placeholderSweepTask?.cancel()
-        placeholderSweepTask = nil
-    }
-
     private static func hasPlaceholderIdentity(_ frame: PresentationFrame) -> Bool {
         frame.identity.sourceFingerprint.isBrowsingPlaceholder
             || frame.signature.source.sourceFingerprint.isBrowsingPlaceholder
@@ -339,7 +343,10 @@ actor LatestPreviewFrameStore {
 
     @discardableResult
     private func loadIndex() -> Bool {
-        if didLoadIndex { return true }
+        if didLoadIndex {
+            Task { [weak self] in await self?.schedulePlaceholderSweep() }
+            return true
+        }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let files = try FileManager.default.contentsOfDirectory(
@@ -367,32 +374,40 @@ actor LatestPreviewFrameStore {
             didLoadIndex = true
             enforceCap()
             scheduleLegacyCleanup(legacy)
-            schedulePlaceholderSweep()
+            Task { [weak self] in await self?.schedulePlaceholderSweep() }
             return true
         } catch {
             return false
         }
     }
 
-    private func schedulePlaceholderSweep() {
-        guard placeholderSweepTask == nil else { return }
-        placeholderSweepTask = Task(priority: .background) { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                let hasMore = await self.sweepPlaceholderBatch(maxFiles: 8)
-                guard !Task.isCancelled, hasMore else {
-                    await self.placeholderSweepFinished()
-                    return
-                }
-                await Task.yield()
+    private func schedulePlaceholderSweep() async {
+        guard !placeholderSweepScheduled, let workScheduler else { return }
+        placeholderSweepScheduled = true
+        let admitted = await workScheduler.enqueuePackageIO(
+            id: placeholderSweepJobID, lane: .maintenance, priority: .background,
+            onTerminal: { [weak self] outcome in
+                Task { await self?.placeholderSweepFinished(outcome: outcome) }
+            },
+            operation: { [weak self] in
+                guard let self else { return }
+                await self.runScheduledPlaceholderSweep()
             }
-        }
+        )
+        if !admitted { placeholderSweepScheduled = false }
     }
 
-    private func placeholderSweepFinished() { placeholderSweepTask = nil }
+    private func runScheduledPlaceholderSweep() {
+        placeholderSweepHasMore = sweepPlaceholderBatch(maxFiles: 8)
+    }
+
+    private func placeholderSweepFinished(outcome: ImageWorkScheduler.TerminalOutcome) async {
+        placeholderSweepScheduled = false
+        if outcome == .completed, placeholderSweepHasMore { await schedulePlaceholderSweep() }
+    }
 
     /// Exact-key JPEGs from the previous cache are never read. They are deleted a few at a time,
-    /// yielding between batches, so the cleanup cannot delay a read or write.
+    /// yielding to higher-priority scheduler work between batches.
     private func scheduleLegacyCleanup(_ urls: [URL]) {
         guard !urls.isEmpty else { return }
         legacyCleanupTask = Task {

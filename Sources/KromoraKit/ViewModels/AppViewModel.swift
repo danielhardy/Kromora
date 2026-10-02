@@ -1052,13 +1052,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let previewFrameStore = LatestPreviewFrameStore(
             directory: previewFrameStoreDirectory
                 ?? LatestPreviewFrameStore.packageDirectory(for: normalizedPortablePackageURL),
-            capBytes: previewFrameStoreCapBytes
+            capBytes: previewFrameStoreCapBytes,
+            workScheduler: workScheduler
         )
         self.previewPresentation = PreviewPresentationCoordinator(
             store: previewFrameStore, engine: engine, frameLookupLedger: frameLookupLedger)
         self.thumbnailFrameStore = ThumbnailFrameStore(
             directory: thumbnailFrameStoreDirectory
-                ?? ThumbnailFrameStore.packageDirectory(for: normalizedPortablePackageURL)
+                ?? ThumbnailFrameStore.packageDirectory(for: normalizedPortablePackageURL),
+            workScheduler: workScheduler
         )
         collection.thumbnailFrameStore = thumbnailFrameStore
         self.sourceSession = SourceSessionCoordinator(

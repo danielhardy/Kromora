@@ -4,6 +4,20 @@ import CoreImage
 import ImageIO
 @testable import KromoraKit
 
+private actor PlaceholderSweepGate {
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        let parked = waiters
+        waiters.removeAll()
+        for waiter in parked { waiter.resume() }
+    }
+}
+
 /// `XCTUnwrap` takes an autoclosure, which cannot await. Unwrap an already-awaited value.
 func unwrapAwaited<T>(
     _ value: T?, file: StaticString = #filePath, line: UInt = #line
@@ -121,6 +135,137 @@ final class LatestPreviewFrameStoreTests: TempDirectoryTestCase {
         await store.waitForPendingWrites()
         let persisted = await store.read(for: realIdentity)?.frame.signature.editHash
         XCTAssertEqual(persisted, "real")
+    }
+
+    func testScheduledPlaceholderSweepYieldsCancelsResumesAndKeepsRealFrames() async throws {
+        let directory = cacheDirectory("scheduled-placeholder-sweep")
+        let scheduler = ImageWorkScheduler()
+        let gate = PlaceholderSweepGate()
+        scheduler.enqueue(id: .init("visible-editor-work"), lane: .editor, priority: .activeEditor) {
+            await gate.wait()
+        }
+        try await waitUntil("visible editor work to start") { scheduler.runningEditorCount == 1 }
+
+        let placeholderIdentities = (0..<19).map { _ -> PortablePhotoIdentity in
+            let assetID = PortablePhotoAssetID()
+            return PortablePhotoIdentity(
+                assetID: assetID,
+                sourceFingerprint: PortablePhotoSourceFingerprint(
+                    contentHash: "browsing:\(assetID.raw)", decoderVersion: "browsing-v1"
+                )
+            )
+        }
+        let realIdentity = FrameFixtures.identity()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        for identity in placeholderIdentities + [realIdentity] {
+            let data = try PresentationFrameEnvelope.encode(FrameFixtures.frame(identity: identity))
+            try data.write(to: fileURL(for: identity, in: directory))
+        }
+
+        let store = LatestPreviewFrameStore(directory: directory, workScheduler: scheduler)
+        let containsReal = await store.contains(realIdentity)
+        XCTAssertTrue(containsReal)
+        try await waitUntil("placeholder maintenance to wait behind the editor") {
+            scheduler.pendingPackageIOCount == 1
+        }
+        let sweepID = try XCTUnwrap(scheduler.admissionLog.last?.id)
+        XCTAssertEqual(scheduler.admissionLog.last?.priority, .background)
+
+        scheduler.cancel(id: sweepID)
+        try await waitUntilAsync("the cancelled sweep to clear its scheduled state") {
+            !(await store.placeholderSweepIsScheduled)
+        }
+        let realDuringSweep = await store.read(for: realIdentity)
+        XCTAssertNotNil(realDuringSweep)
+        try await waitUntil("the resumed maintenance job to queue") {
+            scheduler.pendingPackageIOCount == 1
+        }
+        XCTAssertGreaterThanOrEqual(scheduler.admissionLog.filter { $0.id == sweepID }.count, 2)
+
+        await gate.release()
+        try await waitUntilAsync("all legacy placeholders to be swept") {
+            let remainingFrames = try self.frameFiles(in: directory).count
+            let scheduled = await store.placeholderSweepIsScheduled
+            return remainingFrames == 1 && !scheduled
+                && scheduler.pendingPackageIOCount == 0 && scheduler.runningPackageIOCount == 0
+        }
+        let largestBatch = await store.placeholderSweepLargestBatch
+        let filesExamined = await store.placeholderSweepFilesExamined
+        XCTAssertLessThanOrEqual(largestBatch, 8)
+        XCTAssertGreaterThan(filesExamined, 8)
+        let realAfterSweep = await store.read(for: realIdentity)
+        XCTAssertNotNil(realAfterSweep)
+        XCTAssertTrue(try FileManager.default.fileExists(atPath: fileURL(for: realIdentity, in: directory).path))
+        await scheduler.cancelAllAndWait()
+    }
+
+    func testThumbnailSweepResumesAcrossScheduledTicksAndPreservesRealRecord() async throws {
+        let directory = cacheDirectory("scheduled-thumbnail-sweep")
+        let scheduler = ImageWorkScheduler()
+        let gate = PlaceholderSweepGate()
+        scheduler.enqueue(id: .init("visible-thumbnail-work"), lane: .editor, priority: .activeEditor) {
+            await gate.wait()
+        }
+        try await waitUntil("visible thumbnail work to start") { scheduler.runningEditorCount == 1 }
+
+        let identities = (0..<18).map { _ -> PortablePhotoIdentity in
+            let assetID = PortablePhotoAssetID()
+            return PortablePhotoIdentity(
+                assetID: assetID,
+                sourceFingerprint: PortablePhotoSourceFingerprint(
+                    contentHash: "browsing:\(assetID.raw)", decoderVersion: "browsing-v1"
+                )
+            )
+        }
+        let realIdentity = FrameFixtures.identity()
+        let packed = try PortablePackagePackedThumbnailStore(at: directory)
+        let records = try identities.map { identity -> PortablePackagePackedThumbnailStore.Record in
+            let key = try XCTUnwrap(ThumbnailFrameStore.key(.original, for: identity.assetID))
+            return .init(
+                key: key,
+                data: try PresentationFrameEnvelope.encode(FrameFixtures.frame(identity: identity))
+            )
+        } + [
+            .init(
+                key: try XCTUnwrap(ThumbnailFrameStore.key(.original, for: realIdentity.assetID)),
+                data: try PresentationFrameEnvelope.encode(FrameFixtures.frame(identity: realIdentity))
+            )
+        ]
+        let realRecord = try XCTUnwrap(records.last?.data)
+        try packed.append(records: records)
+
+        let store = ThumbnailFrameStore(directory: directory, workScheduler: scheduler)
+        let initialCount = await store.liveEntryCount
+        XCTAssertEqual(initialCount, records.count)
+        try await waitUntil("thumbnail maintenance to wait behind the editor") {
+            scheduler.pendingPackageIOCount == 1
+        }
+        let sweepID = try XCTUnwrap(scheduler.admissionLog.last?.id)
+        scheduler.cancel(id: sweepID)
+        try await waitUntilAsync("the thumbnail sweep cancellation to settle") {
+            !(await store.placeholderSweepIsScheduled)
+        }
+        let resumedCount = await store.liveEntryCount
+        XCTAssertEqual(resumedCount, records.count)
+        try await waitUntil("the thumbnail maintenance job to resume") {
+            scheduler.pendingPackageIOCount == 1
+        }
+
+        await gate.release()
+        try await waitUntilAsync("thumbnail placeholders to be removed") {
+            let count = await store.liveEntryCount
+            let scheduled = await store.placeholderSweepIsScheduled
+            return count == 1 && !scheduled && scheduler.pendingPackageIOCount == 0
+                && scheduler.runningPackageIOCount == 0
+        }
+        let largestBatch = await store.placeholderSweepLargestBatch
+        let recordsExamined = await store.placeholderSweepRecordsExamined
+        XCTAssertLessThanOrEqual(largestBatch, 8)
+        XCTAssertGreaterThan(recordsExamined, 8)
+        let verify = try PortablePackagePackedThumbnailStore(at: directory)
+        let realKey = try XCTUnwrap(ThumbnailFrameStore.key(.original, for: realIdentity.assetID))
+        XCTAssertEqual(try verify.lookup(realKey), .found(realRecord))
+        await scheduler.cancelAllAndWait()
     }
 
     func testReadingLegacyPlaceholderRemovesOnlyItsFileAndCorrectsSizeIndex() async throws {
@@ -522,6 +667,19 @@ final class LatestPreviewFrameStoreTests: TempDirectoryTestCase {
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
+            if Date() > deadline {
+                throw TestSynchronizationError.timedOut(description, "condition did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func waitUntilAsync(
+        _ description: String, timeout: TimeInterval = 5,
+        _ condition: @MainActor @escaping () async throws -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while try !(await condition()) {
             if Date() > deadline {
                 throw TestSynchronizationError.timedOut(description, "condition did not settle")
             }
