@@ -826,8 +826,57 @@ actor RenderEngine: RenderEngining {
         else { return nil }
 
         let rect = image.extent.integral
-        return context.createCGImage(
+        guard let raster = context.createCGImage(
             image, from: rect, format: .RGBA8, colorSpace: request.space.cgColorSpace
+        ) else { return nil }
+        guard request.quality == .thumbnail else { return raster }
+        return fillingThumbnailCoverageFringe(in: raster)
+    }
+
+    /// Outward-rounded fractional crop extents can leave a partially covered horizontal edge
+    /// row in the thumbnail bitmap. Replace that single antialias row with its adjacent fully
+    /// covered photo row; rounded clipping already owns the visible tile silhouette.
+    private func fillingThumbnailCoverageFringe(in image: CGImage) -> CGImage? {
+        guard image.width > 0, image.height > 2,
+              let colorSpace = image.colorSpace ?? CGColorSpace(name: CGColorSpace.sRGB)
+        else { return image }
+        let bytesPerRow = image.width * 4
+        var pixels = [UInt8](repeating: 0, count: bytesPerRow * image.height)
+        guard let bitmap = CGContext(
+            data: &pixels, width: image.width, height: image.height, bitsPerComponent: 8,
+            bytesPerRow: bytesPerRow, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return image }
+        bitmap.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+        let last = image.height - 1
+        for x in 0..<image.width {
+            let edgePixel = x * 4
+            if pixels[edgePixel + 3] < 255,
+               let sourceRow = (1...min(4, last)).first(where: {
+                   pixels[$0 * bytesPerRow + edgePixel + 3] == 255
+               }) {
+                for channel in 0..<4 {
+                    pixels[edgePixel + channel] = pixels[sourceRow * bytesPerRow + edgePixel + channel]
+                }
+            }
+            let bottomPixel = last * bytesPerRow + edgePixel
+            if pixels[bottomPixel + 3] < 255,
+               let sourceRow = (1...min(4, last)).first(where: {
+                   pixels[(last - $0) * bytesPerRow + edgePixel + 3] == 255
+               }) {
+                for channel in 0..<4 {
+                    pixels[bottomPixel + channel] = pixels[(last - sourceRow) * bytesPerRow + edgePixel + channel]
+                }
+            }
+        }
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return image }
+        return CGImage(
+            width: image.width, height: image.height, bitsPerComponent: 8, bitsPerPixel: 32,
+            bytesPerRow: bytesPerRow, space: colorSpace,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true,
+            intent: .defaultIntent
         )
     }
 
