@@ -517,6 +517,14 @@ switch samples (10 A→B→C→B rounds), milliseconds from selection. Histogram
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | Relaunch (10) | 451 / 514 | 618 / 778 | 901 / 1111 | 916 / 1129 | 170 | 16 |
 | Warm switch (30) | 95 / 296 | 188 / 424 | 188 / 684 | 244 / 697 | 93 | 56 |
+| Warm switch after neighbour warming (KRMA-758, 30) | **92 / 140** | 182 / 268 | 182 / 649 | 237 / 662 | 91 | 54 |
 
 On this run, the histogram followed ready by 15.8 ms at the relaunch median and 55.6 ms after a warm
 switch. Warm-switch panel adoption was 95.1 ms at p50, below the cold relaunch's 450.9 ms.
+
+KRMA-758 ran the same Release switch scenario on Apple M4 Pro, macOS 27.2, using 10 rounds and the
+same 126 MB RAW. The warmed neighbour reached the panel in 91.6 ms at p50 (140.2 ms p95), compared
+with the KRMA-757 baseline of 95.1 ms p50 (296 ms p95). The median improved by 3.5 ms but missed the
+under-50 ms aim. The warmed path still measures selection through publication as a whole; the
+remaining time in the document cache-hit validation and source handoff has not been separately
+profiled, so no additional machinery was added.

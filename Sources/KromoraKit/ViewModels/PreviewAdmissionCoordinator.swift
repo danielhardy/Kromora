@@ -28,6 +28,9 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionSourceName: String { get }
     var admissionCollection: ImageCollection { get }
     var admissionEditStore: EditDocumentStore { get }
+    var admissionCanWarmAdjacentDocuments: Bool { get }
+    var admissionNavigationIsEdit: Bool { get }
+    func admissionResolveBrowsingAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset
     var admissionPresentation: PreviewPresentationCoordinator { get }
     var admissionSourceSessionIsBusy: Bool { get }
     var admissionPreviewDebouncing: Bool { get }
@@ -94,6 +97,10 @@ final class PreviewAdmissionCoordinator {
         let inMemoryDocument: EditDocument?
         let reference: EditSourceReference
     }
+    private struct BrowsingDocumentCandidate: Sendable {
+        let assetID: PhotoAssetID
+        let portableAssetID: PortablePhotoAssetID
+    }
     private struct IdlePreviewCandidate: Sendable {
         let index: Int
         let source: ImageSource
@@ -111,6 +118,7 @@ final class PreviewAdmissionCoordinator {
     private var idleBuildCursor: Int?
     private static let maxItemsPerIdleSession = 20
     private var prefetchDelayTask: Task<Void, Never>?
+    private var adjacentPrefetchGeneration: UInt64 = 0
     /// A settled submission held back while a stored frame might make the render unnecessary. The
     /// value is the submission's `preemptsPredecessor`. It is released by the lookup finishing or
     /// the stored edits resolving, whichever leaves the request able to be judged.
@@ -697,6 +705,7 @@ final class PreviewAdmissionCoordinator {
     }
 
     func cancelAdjacentPreviewPrefetch() {
+        adjacentPrefetchGeneration &+= 1
         workScheduler.cancel(id: adjacentPreviewPrefetchJobID, pump: false)
         prefetchDelayTask?.cancel()
         prefetchDelayTask = nil
@@ -704,6 +713,8 @@ final class PreviewAdmissionCoordinator {
 
     func scheduleAdjacentPreviewPrefetch() {
         guard let destination else { return }
+        adjacentPrefetchGeneration &+= 1
+        let generation = adjacentPrefetchGeneration
         let collection = destination.admissionCollection
         workScheduler.cancel(id: adjacentPreviewPrefetchJobID)
         prefetchDelayTask?.cancel()
@@ -722,14 +733,18 @@ final class PreviewAdmissionCoordinator {
                 let extent = CGSize(width: dimensions.width, height: dimensions.height)
                 let source: ImageSource
                 if let url = item.url {
-                    source = ImageSource(url: url, nativeExtent: extent,
+                    source = ImageSource(
+                        url: url, nativeExtent: extent,
                         portableIdentity: item.asset.source.portableIdentity,
                         existingFileChangeSignature: item.asset.source.fingerprint)
                 } else if let data = item.imageData {
-                    source = ImageSource(data: data, nativeExtent: extent,
+                    source = ImageSource(
+                        data: data, nativeExtent: extent,
                         dataFingerprint: item.dataFingerprint,
                         portableIdentity: item.asset.source.portableIdentity)
-                } else { return nil }
+                } else {
+                    return nil
+                }
                 return AdjacentPreviewCandidate(
                     source: source, inMemoryDocument: destination.admissionDocument(for: item.id),
                     reference: destination.admissionSourceReference(for: item)
@@ -739,9 +754,46 @@ final class PreviewAdmissionCoordinator {
         let revision = destination.admissionSourceRevision
         let assetID = destination.admissionActiveAssetID
         let editStore = destination.admissionEditStore
+        let browsingCandidates = collection.filteredIndices
+            .filter { $0 != selected && abs($0 - selected) <= 2 }
+            .sorted { abs($0 - selected) < abs($1 - selected) }
+            .prefix(2)
+            .compactMap { index -> BrowsingDocumentCandidate? in
+                let item = collection.items[index]
+                let identity = item.asset.source.portableIdentity
+                guard identity.sourceFingerprint.decoderVersion == "browsing-v1" else {
+                    return nil
+                }
+                return BrowsingDocumentCandidate(
+                    assetID: item.id, portableAssetID: identity.assetID
+                )
+            }
         prefetchDelayTask = Task { [weak self, weak destination, candidates] in
             try? await Task.sleep(for: .milliseconds(350))
             guard !Task.isCancelled, let self, let destination,
+                self.adjacentPrefetchGeneration == generation,
+                destination.admissionActiveAssetID == assetID,
+                destination.admissionSourceRevision == revision
+            else { return }
+            while !Task.isCancelled, self.adjacentPrefetchGeneration == generation,
+                destination.admissionActiveAssetID == assetID,
+                destination.admissionSourceRevision == revision,
+                destination.admissionCollection.isActive,
+                !destination.admissionCanWarmAdjacentDocuments
+            {
+                try? await Task.sleep(for: .milliseconds(40))
+            }
+            guard !Task.isCancelled, self.adjacentPrefetchGeneration == generation,
+                destination.admissionActiveAssetID == assetID,
+                destination.admissionSourceRevision == revision,
+                destination.admissionCollection.isActive,
+                destination.admissionCanWarmAdjacentDocuments
+            else { return }
+            await self.warmBrowsingNeighbourDocuments(
+                browsingCandidates, destination: destination, editStore: editStore,
+                selectedAssetID: assetID, sourceRevision: revision, generation: generation
+            )
+            guard !Task.isCancelled, self.adjacentPrefetchGeneration == generation,
                 destination.admissionActiveAssetID == assetID,
                 destination.admissionSourceRevision == revision
             else { return }
@@ -756,20 +808,23 @@ final class PreviewAdmissionCoordinator {
             requests.reserveCapacity(candidates.count)
             for candidate in candidates {
                 let document: EditDocument
-                if let inMemory = candidate.inMemoryDocument { document = inMemory }
-                else {
+                if let inMemory = candidate.inMemoryDocument {
+                    document = inMemory
+                } else {
                     let stored = storedResults[storedResultIndex]
                     storedResultIndex += 1
                     guard stored.isUsableForPrefetch else { continue }
                     document = stored.document
                 }
-                requests.append(destination.admissionSettledRequest(
-                    source: candidate.source, assetID: candidate.reference.assetID,
-                    document: document, lut: destination.admissionResolvedLUT(document.lut.lutID),
-                    plan: destination.admissionAdjacentPlan(
-                        for: document, nativeExtent: candidate.source.nativeExtent
-                    ), canonical: false
-                ))
+                requests.append(
+                    destination.admissionSettledRequest(
+                        source: candidate.source, assetID: candidate.reference.assetID,
+                        document: document,
+                        lut: destination.admissionResolvedLUT(document.lut.lutID),
+                        plan: destination.admissionAdjacentPlan(
+                            for: document, nativeExtent: candidate.source.nativeExtent
+                        ), canonical: false
+                    ))
             }
             guard !requests.isEmpty, !Task.isCancelled,
                 destination.admissionActiveAssetID == assetID,
@@ -792,6 +847,74 @@ final class PreviewAdmissionCoordinator {
                 }
             }
         }
+    }
+
+    private func warmBrowsingNeighbourDocuments(
+        _ candidates: [BrowsingDocumentCandidate],
+        destination: any PreviewAdmissionDestination, editStore: EditDocumentStore,
+        selectedAssetID: PhotoAssetID?, sourceRevision: UInt64, generation: UInt64
+    ) async {
+        // EditDocumentStore's 128-entry LRU is the explicit memory bound for warmed documents.
+        // Only the two nearest filtered neighbours are admitted in this idle session.
+        for candidate in candidates {
+            guard
+                isCurrentNeighbourWarm(
+                    candidate.assetID, destination: destination,
+                    selectedAssetID: selectedAssetID, sourceRevision: sourceRevision,
+                    generation: generation
+                ),
+                let item = destination.admissionCollection.items.first(where: {
+                    $0.id == candidate.assetID
+                }),
+                item.asset.source.portableIdentity.sourceFingerprint.decoderVersion == "browsing-v1"
+            else { continue }
+
+            do {
+                let resolved = try await destination.admissionResolveBrowsingAsset(
+                    for: candidate.portableAssetID
+                )
+                guard
+                    isCurrentNeighbourWarm(
+                        candidate.assetID, destination: destination,
+                        selectedAssetID: selectedAssetID, sourceRevision: sourceRevision,
+                        generation: generation
+                    ),
+                    let current = destination.admissionCollection.items.first(where: {
+                        $0.id == candidate.assetID
+                    }),
+                    current.asset.source.portableIdentity.sourceFingerprint.decoderVersion
+                        == "browsing-v1"
+                else { continue }
+
+                current.asset = resolved
+                let reference = destination.admissionSourceReference(for: current)
+                _ = await editStore.load(for: reference)
+            } catch {
+                // A failed speculative read is harmless; opening the photo will report its normal
+                // package status and retry through the active source path.
+            }
+        }
+    }
+
+    private func isCurrentNeighbourWarm(
+        _ assetID: PhotoAssetID, destination: any PreviewAdmissionDestination,
+        selectedAssetID: PhotoAssetID?, sourceRevision: UInt64, generation: UInt64
+    ) -> Bool {
+        guard !Task.isCancelled, adjacentPrefetchGeneration == generation,
+            !destination.admissionIsShuttingDown,
+            destination.admissionCollection.isActive,
+            destination.admissionNavigationIsEdit,
+            destination.admissionCanWarmAdjacentDocuments,
+            destination.admissionActiveAssetID == selectedAssetID,
+            destination.admissionSourceRevision == sourceRevision
+        else { return false }
+        let collection = destination.admissionCollection
+        let selected = collection.selectedIndex
+        return collection.filteredIndices
+            .filter { $0 != selected && abs($0 - selected) <= 2 }
+            .sorted { abs($0 - selected) < abs($1 - selected) }
+            .prefix(2)
+            .contains { collection.items[$0].id == assetID }
     }
 
     func scheduleIdlePreviewBuild() {

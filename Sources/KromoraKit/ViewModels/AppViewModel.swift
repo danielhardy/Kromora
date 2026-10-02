@@ -1732,6 +1732,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
 
     private func reloadPortableCollection() throws {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         try libraryBrowsingCoordinator.reloadPortableCollection()
     }
 
@@ -1739,6 +1740,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// ordering, filtering, and selection come from the query controller; the collection holds
     /// only the window's Items as a presentation adapter.
     func reloadPortableWindow(pageIndex: Int = 0) throws {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         try libraryBrowsingCoordinator.reloadPortableWindow(pageIndex: pageIndex)
     }
 
@@ -1751,14 +1753,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Portable filtering/sorting preserve user-visible behavior without materializing the full
     /// collection: the query controller re-pages from summaries and the window reloads page 0.
     func setPortableFilter(_ filter: LibraryFilter) {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         libraryBrowsingCoordinator.setPortableFilter(filter)
     }
 
     func setPortableSort(_ sort: LibraryQuerySort) {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         libraryBrowsingCoordinator.setPortableSort(sort)
     }
 
     func setPortableSearch(_ text: String?) {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         libraryBrowsingCoordinator.setPortableSearch(text)
     }
 
@@ -1878,6 +1883,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         url: URL, assetID: PhotoAssetID, selectionUptime: UInt64? = nil,
         collectionAlreadySelected: Bool = false
     ) {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         cancelPendingPreviewDebounce()
         // Assign the value so @Published sends immediately. This open path can now suspend while
         // resolving a browsing record, before `load` publishes its normal loading-state changes.
@@ -2913,6 +2919,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         case .grid:
             if isCropToolActive { cancelCrop() }
             guard collection.isActive else { return false }
+            previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
             // Release the editor inspector before composing the Library viewport. If it closes
             // after the workspace changes, SwiftUI first lays the grid out beside the inspector
             // and then animates its width, rebuilding the mosaic rows during the return.
@@ -2945,6 +2952,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
     /// Refresh the package-backed library query after an external package change.
     func refreshSource() {
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         cancelIdlePreviewBuild(resetCursor: true)
         try? reloadPortableCollection()
     }
@@ -3034,6 +3042,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func clearActiveSourceAfterLibraryDeletion() {
         loadRequestGeneration &+= 1
         sourceSession.cancel()
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         autoWorkflowCoordinator.invalidate { [weak self] state, progress in
             self?.publishAutoAdjustmentState(state, progress: progress)
         }
@@ -4658,6 +4667,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Invalidate every generation before awaiting anything. A renderer or framework call may
         // only observe cancellation when it returns, but it can no longer publish into this model.
         sourceSession.cancel()
+        previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         autoWorkflowCoordinator.invalidate { [weak self] state, progress in
             self?.publishAutoAdjustmentState(state, progress: progress)
         }
@@ -4952,6 +4962,17 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionSourceName: String { sourceName }
     var admissionCollection: ImageCollection { collection }
     var admissionEditStore: EditDocumentStore { editStore }
+    var admissionCanWarmAdjacentDocuments: Bool {
+        navigation.isEdit && previewState == .ready && !sourceSession.isBusy
+            && !previewAdmissionCoordinator.isPreviewDebouncing
+            && !isPreviewInteractionActive && workScheduler.runningEditorCount == 0
+    }
+    var admissionNavigationIsEdit: Bool { navigation.isEdit }
+    func admissionResolveBrowsingAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset
+    {
+        guard let portableLibrary else { throw CocoaError(.fileNoSuchFile) }
+        return try await portableLibrary.materializedAsset(for: assetID)
+    }
     var admissionPresentation: PreviewPresentationCoordinator { previewPresentation }
     var admissionSourceSessionIsBusy: Bool { sourceSession.isBusy }
     var admissionPreviewDebouncing: Bool { previewAdmissionCoordinator.isPreviewDebouncing }
