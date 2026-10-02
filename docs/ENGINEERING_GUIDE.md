@@ -199,6 +199,12 @@ unusable one falls back to the original inside the cell's final geometry. Cell a
 package membership summary's `presentedAspectRatio`, written in the same transaction as the edit
 revision, so raster arrival never changes a cell's size.
 
+The preview and thumbnail stores only accept frames with resolved source identities in both the
+frame identity and signature. Browsing placeholders have no source-byte identity and are skipped at
+the store boundary. Older placeholder records are treated as misses, removed on read, and purged by
+bounded background sweeps that yield to user-visible frame work; no launch-time placeholder scan is
+performed.
+
 `LaunchHints` is a device-local, disposable accelerator in Application Support (`LaunchHints.json`):
 library ID, last active asset, and at most 64 de-duplicated visible asset IDs, validated by schema
 version and bounds. It is never navigation or library truth: Kromora still launches into Library, a

@@ -117,6 +117,10 @@ actor ThumbnailFrameStore {
     private var openFailed = false
     private var pending: [String: PresentationFrame] = [:]
     private var flushTask: Task<Void, Never>?
+    private var placeholderSweepTask: Task<Void, Never>?
+    private var placeholderSweepKeys: [String] = []
+    private var placeholderSweepCursor = 0
+    private(set) var placeholderWritesSkipped = 0
     private(set) var readCount = 0
     private(set) var writeCount = 0
 
@@ -144,9 +148,14 @@ actor ThumbnailFrameStore {
     func readWithOutcome(
         _ kind: ThumbnailFrameKind, for identity: PortablePhotoIdentity
     ) -> (hit: Hit?, corrupt: Bool) {
+        cancelPlaceholderSweep()
         guard let key = Self.key(kind, for: identity.assetID) else { return (nil, false) }
         readCount += 1
         if let frame = pending[key] {
+            if Self.hasPlaceholderIdentity(frame) {
+                pending.removeValue(forKey: key)
+                return (nil, false)
+            }
             guard let image = try? PresentationFrameEnvelope.decodeRaster(of: frame) else {
                 return (nil, true)
             }
@@ -171,6 +180,10 @@ actor ThumbnailFrameStore {
                     let frame = try PresentationFrameEnvelope.decode(
                         data, expectedAssetID: identity.assetID
                     )
+                    if Self.hasPlaceholderIdentity(frame) {
+                        removeIfSameRecord(key: key, data: data)
+                        return (nil, false)
+                    }
                     guard frame.kind == kind.presentationKind else { throw PresentationFrameEnvelope.DecodeError.identityMismatch }
                     let image = try PresentationFrameEnvelope.decodeRaster(of: frame)
                     return (Hit(frame: frame, image: image), false)
@@ -201,6 +214,12 @@ actor ThumbnailFrameStore {
 
     /// Queue a record. A later write for the same key supersedes one not yet on disk.
     func enqueueWrite(_ frame: PresentationFrame) {
+        cancelPlaceholderSweep()
+        guard !Self.hasPlaceholderIdentity(frame) else {
+            placeholderWritesSkipped += 1
+            KromoraObservability.event(.frameWriteSkippedPlaceholder)
+            return
+        }
         guard let kind = ThumbnailFrameKind.allCases.first(where: { $0.presentationKind == frame.kind }),
               let key = Self.key(kind, for: frame.identity.assetID) else { return }
         pending[key] = frame
@@ -213,6 +232,7 @@ actor ThumbnailFrameStore {
 
     /// Write every queued record now.
     func flush() {
+        cancelPlaceholderSweep()
         flushTask?.cancel()
         flushTask = nil
         flushPending()
@@ -221,6 +241,7 @@ actor ThumbnailFrameStore {
     /// Drop a photo's record of one kind — for example the edited record after a reset to the
     /// original. The pointer is removed from the index; compaction reclaims the bytes.
     func remove(_ kind: ThumbnailFrameKind, for assetID: PortablePhotoAssetID) {
+        cancelPlaceholderSweep()
         guard let key = Self.key(kind, for: assetID) else { return }
         pending.removeValue(forKey: key)
         guard openStoreIfNeeded() else { return }
@@ -230,6 +251,7 @@ actor ThumbnailFrameStore {
 
     /// Drop both records of each photo (deletion, source replacement).
     func remove(assetIDs: Set<PortablePhotoAssetID>) {
+        cancelPlaceholderSweep()
         let keys = assetIDs.flatMap { id in
             ThumbnailFrameKind.allCases.compactMap { Self.key($0, for: id) }
         }
@@ -265,6 +287,13 @@ actor ThumbnailFrameStore {
     }
 
     var pendingWriteCount: Int { pending.count }
+
+    /// Removes at most eight indexed records. Repeated calls model scheduler idle ticks.
+    func sweepPlaceholderFrames(maxRecords: Int = 8) {
+        guard maxRecords > 0, openStoreIfNeeded() else { return }
+        cancelPlaceholderSweep()
+        _ = sweepPlaceholderBatch(maxRecords: maxRecords)
+    }
 
     /// Write anything still queued and stop the flush timer. Call before the owner is released.
     func shutdown() {
@@ -320,6 +349,7 @@ actor ThumbnailFrameStore {
         guard !openFailed else { return false }
         do {
             store = try PortablePackagePackedThumbnailStore(at: directory)
+            schedulePlaceholderSweep()
             return true
         } catch {
             // An unreadable or unsupported index is cache damage, not a package problem. Discard
@@ -327,12 +357,69 @@ actor ThumbnailFrameStore {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent("index.json"))
             do {
                 store = try PortablePackagePackedThumbnailStore(at: directory)
+                schedulePlaceholderSweep()
                 return true
             } catch {
                 openFailed = true
                 return false
             }
         }
+    }
+
+    private func removeIfSameRecord(key: String, data: Data) {
+        guard let store,
+              case .found(let current) = try? store.lookup(key), current == data else { return }
+        try? store.remove(keys: [key])
+    }
+
+    private func sweepPlaceholderBatch(maxRecords: Int) -> Bool {
+        guard let store else { return false }
+        if placeholderSweepKeys.isEmpty {
+            placeholderSweepKeys = store.keys.sorted()
+            placeholderSweepCursor = 0
+        }
+        let start = min(placeholderSweepCursor, placeholderSweepKeys.count)
+        let batch = Array(placeholderSweepKeys.dropFirst(start).prefix(maxRecords))
+        for key in batch {
+            guard case .found(let data) = try? store.lookup(key),
+                  let frame = try? PresentationFrameEnvelope.decode(data, expectedAssetID: nil),
+                  Self.hasPlaceholderIdentity(frame) else { continue }
+            removeIfSameRecord(key: key, data: data)
+        }
+        placeholderSweepCursor = min(start + batch.count, placeholderSweepKeys.count)
+        let hasMore = placeholderSweepCursor < placeholderSweepKeys.count
+        if !hasMore {
+            placeholderSweepKeys = []
+            placeholderSweepCursor = 0
+        }
+        return hasMore
+    }
+
+    private func schedulePlaceholderSweep() {
+        guard placeholderSweepTask == nil else { return }
+        placeholderSweepTask = Task(priority: .background) { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let hasMore = await self.sweepPlaceholderBatch(maxRecords: 8)
+                guard !Task.isCancelled, hasMore else {
+                    await self.placeholderSweepFinished()
+                    return
+                }
+                await Task.yield()
+            }
+        }
+    }
+
+    private func placeholderSweepFinished() { placeholderSweepTask = nil }
+
+    private func cancelPlaceholderSweep() {
+        placeholderSweepTask?.cancel()
+        placeholderSweepTask = nil
+    }
+
+    private static func hasPlaceholderIdentity(_ frame: PresentationFrame) -> Bool {
+        frame.identity.sourceFingerprint.isBrowsingPlaceholder
+            || frame.signature.source.sourceFingerprint.isBrowsingPlaceholder
     }
 
     private func refreshIfExternallyReplaced() {

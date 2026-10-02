@@ -34,10 +34,15 @@ actor LatestPreviewFrameStore {
     private var entries: [String: Entry] = [:]
     private var totalBytes: Int64 = 0
     private var didLoadIndex = false
+    private var lastReadWasPlaceholder = false
     private var pinned: Set<String> = []
     private var pendingWrites: [String: (token: UInt64, task: Task<Void, Never>)] = [:]
     private var nextWriteToken: UInt64 = 0
     private var legacyCleanupTask: Task<Void, Never>?
+    private var placeholderSweepTask: Task<Void, Never>?
+    private var placeholderSweepKeys: [String] = []
+    private var placeholderSweepCursor = 0
+    private(set) var placeholderWritesSkipped = 0
 
     init(directory: URL, capBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes) {
         self.directory = directory
@@ -54,13 +59,23 @@ actor LatestPreviewFrameStore {
     /// caller classifies it; this store only guarantees the bytes are a well-formed frame for the
     /// same asset.
     func read(for identity: PortablePhotoIdentity) -> Hit? {
+        cancelPlaceholderSweep()
+        lastReadWasPlaceholder = false
         guard loadIndex(), let hash = Self.assetHash(identity.assetID), entries[hash] != nil
         else { return nil }
         let url = fileURL(forHash: hash)
+        let fileIdentity = Self.fileIdentity(at: url)
         do {
             let frame = try PresentationFrameEnvelope.read(
                 from: url, expectedAssetID: identity.assetID
             )
+            if Self.hasPlaceholderIdentity(frame) {
+                lastReadWasPlaceholder = true
+                removeIfSameFile(
+                    url, hash: hash, metadata: frame.metadata, fileIdentity: fileIdentity
+                )
+                return nil
+            }
             guard frame.kind == .preview2048 else { return nil }
             let image = try PresentationFrameEnvelope.decodeRaster(of: frame)
             touch(hash)
@@ -77,18 +92,26 @@ actor LatestPreviewFrameStore {
         let hit = read(for: identity)
         let isMissing: Bool
         if case .none = hit { isMissing = true } else { isMissing = false }
-        return (hit, existed && isMissing)
+        return (hit, existed && isMissing && !lastReadWasPlaceholder)
     }
 
     /// Metadata only, for callers that need to know what is stored without paying to decode it.
     func metadata(for identity: PortablePhotoIdentity) -> PresentationFrameMetadata? {
+        cancelPlaceholderSweep()
         guard loadIndex(), let hash = Self.assetHash(identity.assetID), entries[hash] != nil
         else { return nil }
+        let url = fileURL(forHash: hash)
+        let fileIdentity = Self.fileIdentity(at: url)
         do {
-            return try PresentationFrameEnvelope.read(
-                from: fileURL(forHash: hash), expectedAssetID: identity.assetID,
+            let frame = try PresentationFrameEnvelope.read(
+                from: url, expectedAssetID: identity.assetID,
                 includeRaster: false
-            ).metadata
+            )
+            guard !Self.hasPlaceholderIdentity(frame) else {
+                removeIfSameFile(url, hash: hash, metadata: frame.metadata, fileIdentity: fileIdentity)
+                return nil
+            }
+            return frame.metadata
         } catch {
             discardIfDamaged(error, hash: hash)
             return nil
@@ -96,8 +119,14 @@ actor LatestPreviewFrameStore {
     }
 
     func contains(_ identity: PortablePhotoIdentity) -> Bool {
+        cancelPlaceholderSweep()
         guard loadIndex(), let hash = Self.assetHash(identity.assetID) else { return false }
         return entries[hash] != nil
+    }
+
+    var currentSizeBytes: Int64 {
+        _ = loadIndex()
+        return totalBytes
     }
 
     // MARK: Writes
@@ -105,6 +134,12 @@ actor LatestPreviewFrameStore {
     /// Queue a serialized write. A later write for the same asset supersedes one that has not
     /// reached the filesystem yet, so a burst of settles leaves one file write, not one per tick.
     func enqueueWrite(_ frame: PresentationFrame) {
+        cancelPlaceholderSweep()
+        guard !Self.hasPlaceholderIdentity(frame) else {
+            placeholderWritesSkipped += 1
+            KromoraObservability.event(.frameWriteSkippedPlaceholder)
+            return
+        }
         guard frame.kind == .preview2048,
               let hash = Self.assetHash(frame.identity.assetID) else { return }
         pendingWrites[hash]?.task.cancel()
@@ -135,10 +170,46 @@ actor LatestPreviewFrameStore {
         await legacyCleanupTask?.value
     }
 
+    /// Processes at most eight indexed files before yielding, so callers can drive deterministic
+    /// idle ticks in tests while the background task remains preemptible by reads and writes.
+    func sweepPlaceholderFrames(maxFiles: Int = 8) {
+        guard maxFiles > 0, loadIndex() else { return }
+        cancelPlaceholderSweep()
+        _ = sweepPlaceholderBatch(maxFiles: maxFiles)
+    }
+
+    @discardableResult
+    private func sweepPlaceholderBatch(maxFiles: Int) -> Bool {
+        if placeholderSweepKeys.isEmpty {
+            placeholderSweepKeys = entries.keys.sorted()
+            placeholderSweepCursor = 0
+        }
+        let start = min(placeholderSweepCursor, placeholderSweepKeys.count)
+        let batch = Array(placeholderSweepKeys.dropFirst(start).prefix(maxFiles))
+        for hash in batch {
+            let url = fileURL(forHash: hash)
+            let fileIdentity = Self.fileIdentity(at: url)
+            guard let frame = try? PresentationFrameEnvelope.read(
+                from: url, expectedAssetID: nil, includeRaster: false
+            ), Self.hasPlaceholderIdentity(frame) else { continue }
+            removeIfSameFile(
+                url, hash: hash, metadata: frame.metadata, fileIdentity: fileIdentity
+            )
+        }
+        placeholderSweepCursor = min(start + batch.count, placeholderSweepKeys.count)
+        let hasMore = placeholderSweepCursor < placeholderSweepKeys.count
+        if !hasMore {
+            placeholderSweepKeys = []
+            placeholderSweepCursor = 0
+        }
+        return hasMore
+    }
+
     // MARK: Invalidation and pinning
 
     /// Remove every frame belonging to these assets (deletion, source replacement).
     func invalidate(identities: Set<PortablePhotoIdentity>) {
+        cancelPlaceholderSweep()
         guard loadIndex() else { return }
         for identity in identities {
             guard let hash = Self.assetHash(identity.assetID) else { continue }
@@ -168,6 +239,11 @@ actor LatestPreviewFrameStore {
     }
 
     private func write(_ frame: PresentationFrame, hash: String) {
+        guard !Self.hasPlaceholderIdentity(frame) else {
+            placeholderWritesSkipped += 1
+            KromoraObservability.event(.frameWriteSkippedPlaceholder)
+            return
+        }
         guard !Task.isCancelled, loadIndex() else { return }
         do {
             let data = try PresentationFrameEnvelope.encode(frame)
@@ -199,6 +275,40 @@ actor LatestPreviewFrameStore {
         guard let entry = entries.removeValue(forKey: hash) else { return }
         try? FileManager.default.removeItem(at: fileURL(forHash: hash))
         totalBytes -= entry.size
+    }
+
+    private func removeIfSameFile(
+        _ url: URL, hash: String, metadata: PresentationFrameMetadata,
+        fileIdentity: String?
+    ) {
+        guard let fileIdentity, Self.fileIdentity(at: url) == fileIdentity,
+              entries[hash] != nil,
+              let current = try? PresentationFrameEnvelope.read(
+                from: url, expectedAssetID: nil, includeRaster: false
+              ), current.metadata == metadata else { return }
+        remove(hash: hash)
+    }
+
+    private static func fileIdentity(at url: URL) -> String? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let device = attributes[.systemNumber], let inode = attributes[.systemFileNumber]
+        else { return nil }
+        return "\(device):\(inode)"
+    }
+
+    private func cancelPlaceholderSweep() {
+        placeholderSweepTask?.cancel()
+        placeholderSweepTask = nil
+    }
+
+    private static func hasPlaceholderIdentity(_ frame: PresentationFrame) -> Bool {
+        frame.identity.sourceFingerprint.isBrowsingPlaceholder
+            || frame.signature.source.sourceFingerprint.isBrowsingPlaceholder
+    }
+
+    private static func hasPlaceholderIdentity(_ frame: PresentationFrameMetadata) -> Bool {
+        frame.identity.sourceFingerprint.isBrowsingPlaceholder
+            || frame.signature.source.sourceFingerprint.isBrowsingPlaceholder
     }
 
     /// Corruption removes exactly this entry. An unsupported container version or an unreadable
@@ -257,11 +367,29 @@ actor LatestPreviewFrameStore {
             didLoadIndex = true
             enforceCap()
             scheduleLegacyCleanup(legacy)
+            schedulePlaceholderSweep()
             return true
         } catch {
             return false
         }
     }
+
+    private func schedulePlaceholderSweep() {
+        guard placeholderSweepTask == nil else { return }
+        placeholderSweepTask = Task(priority: .background) { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let hasMore = await self.sweepPlaceholderBatch(maxFiles: 8)
+                guard !Task.isCancelled, hasMore else {
+                    await self.placeholderSweepFinished()
+                    return
+                }
+                await Task.yield()
+            }
+        }
+    }
+
+    private func placeholderSweepFinished() { placeholderSweepTask = nil }
 
     /// Exact-key JPEGs from the previous cache are never read. They are deleted a few at a time,
     /// yielding between batches, so the cleanup cannot delay a read or write.
