@@ -45,6 +45,183 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         return try Pixels.bytes(of: cgImage)
     }
 
+    private struct SinglePhotoRelaunch {
+        let packageURL: URL
+        let previewDirectory: URL
+        let thumbnailDirectory: URL
+        let looksDirectory: URL
+        let sourceURL: URL
+        let reference: EditSourceReference
+        let identity: PortablePhotoIdentity
+    }
+
+    /// Seed one durable frame, then close every package session so the next model is a real
+    /// relaunch. The returned identity is the identity captured by the settled first session.
+    private func seedSinglePhotoRelaunch() async throws -> SinglePhotoRelaunch {
+        let packageURL = tempDirectory.appendingPathComponent("Invalidation.kromoralibrary")
+        let previewDirectory = tempDirectory.appendingPathComponent("Invalidation/Previews")
+        let thumbnailDirectory = tempDirectory.appendingPathComponent("Invalidation/Thumbnails")
+        let looksDirectory = tempDirectory.appendingPathComponent("Invalidation/Looks", isDirectory: true)
+        try FileManager.default.createDirectory(at: looksDirectory, withIntermediateDirectories: true)
+        let sourceURL = try Fixtures.writeGradientPNG(
+            width: 64, height: 48, named: "invalidation.png", in: tempDirectory
+        )
+        let package = try PortableLibrarySession(at: packageURL)
+        _ = try package.importURLs([sourceURL], duplicatePolicy: .importAnyway)
+        let asset = try XCTUnwrap(package.materializedAssets().first)
+        let reference = EditSourceReference(
+            assetID: asset.id, portableIdentity: asset.source.portableIdentity, url: asset.url
+        )
+        var document = EditDocument()
+        document.adjustments = [.exposure(ev: 0.4)]
+        try await EditDocumentStore(package: package.package, lease: package.lease)
+            .save(document, for: reference)
+        await package.shutdown()
+
+        let (first, firstSession) = try model(
+            packageURL: packageURL, previewDirectory: previewDirectory,
+            thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
+            engine: FakeRenderEngine()
+        )
+        first.collection.loadPortableAssets(try firstSession.browsingAssets())
+        await first.collection.scanCompletion()
+        first.collection.beginThumbnailDemand()
+        first.collection.requestVisibleThumbnails(for: first.collection.items.map(\.id))
+        try await waitUntil("seed edited thumbnail") {
+            first.collection.items.first?.editedThumbnailRevision != nil
+        }
+        first.collection.setSelection(at: 0)
+        first.openActiveCollectionImage()
+        try await waitUntil("seed confirmed preview") {
+            first.presentationSessionForDiagnostics?.state == .confirmed
+        }
+        let identity = try XCTUnwrap(first.admissionImageSource?.portableIdentity)
+        let flushResult = await first.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
+        await first.shutdown()
+        let previewStore = LatestPreviewFrameStore(directory: previewDirectory)
+        await previewStore.enqueueWrite(try FrameFixtures.frame(
+            identity: identity, edit: "prior-session", epoch: RenderPipeline.pixelEpoch
+        ))
+        await previewStore.waitForPendingWrites()
+        return SinglePhotoRelaunch(
+            packageURL: packageURL, previewDirectory: previewDirectory,
+            thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
+            sourceURL: try XCTUnwrap(asset.url), reference: reference, identity: identity
+        )
+    }
+
+    private func reopenedSinglePhoto(
+        _ fixture: SinglePhotoRelaunch, engine: FakeRenderEngine
+    ) async throws -> (AppViewModel, PortableLibrarySession) {
+        let (viewModel, session) = try model(
+            packageURL: fixture.packageURL, previewDirectory: fixture.previewDirectory,
+            thumbnailDirectory: fixture.thumbnailDirectory, looksDirectory: fixture.looksDirectory,
+            engine: engine
+        )
+        viewModel.collection.loadPortableAssets(try session.browsingAssets())
+        await viewModel.collection.scanCompletion()
+        viewModel.collection.beginThumbnailDemand()
+        viewModel.collection.requestVisibleThumbnails(for: viewModel.collection.items.map(\.id))
+        try await waitUntil("relaunch edited thumbnail") {
+            viewModel.collection.items.first?.editedThumbnailRevision != nil
+        }
+        viewModel.collection.setSelection(at: 0)
+        viewModel.openActiveCollectionImage()
+        try await waitUntil("relaunch confirmed preview") {
+            viewModel.presentationSessionForDiagnostics?.state == .confirmed
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        return (viewModel, session)
+    }
+
+    private func assertNoPrematureFallback(
+        _ session: PreviewPresentationCoordinator.PresentationSession?, file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let sources = session?.provisionalCandidateSources ?? []
+        // KRMA-763 owns provisional-frame admission; keep these assertions live while that fix lands.
+        XCTExpectFailure("KRMA-763: suppress fallback candidates before confirmation", options: .nonStrict()) {
+            XCTAssertFalse(sources.contains(.embeddedJPEG), "embedded JPEG was published before confirmation", file: file, line: line)
+            XCTAssertFalse(sources.contains(.originalThumbnail), "original thumbnail was published before confirmation", file: file, line: line)
+        }
+    }
+
+    func testChangedEditBetweenSessionsInvalidatesPersistedFrameOnce() async throws {
+        let fixture = try await seedSinglePhotoRelaunch()
+        let package = try PortableLibrarySession(at: fixture.packageURL)
+        var changed = EditDocument()
+        changed.adjustments = [.exposure(ev: 1.1)]
+        try await EditDocumentStore(package: package.package, lease: package.lease)
+            .save(changed, for: fixture.reference)
+        await package.shutdown()
+
+        let engine = FakeRenderEngine()
+        let (reopened, _) = try await reopenedSinglePhoto(fixture, engine: engine)
+        let diagnostics = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
+        let previewCount = await engine.previewRequests.count
+        let thumbnailCount = await engine.thumbnailRequests.count
+        XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
+        XCTAssertEqual(previewCount, 1, "a changed edit must render once")
+        XCTAssertGreaterThan(thumbnailCount, 0)
+        assertNoPrematureFallback(diagnostics)
+        await reopened.shutdown()
+    }
+
+    func testReplacedSourceBytesBetweenSessionsInvalidatePersistedFrameOnce() async throws {
+        let fixture = try await seedSinglePhotoRelaunch()
+        let replacement = try Fixtures.writeGradientPNG(
+            width: 80, height: 48, named: "replacement.png", in: tempDirectory
+        )
+        try Data(contentsOf: replacement).write(to: fixture.sourceURL, options: .atomic)
+
+        let engine = FakeRenderEngine()
+        let (reopened, _) = try await reopenedSinglePhoto(fixture, engine: engine)
+        let diagnostics = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
+        let previewCount = await engine.previewRequests.count
+        let thumbnailCount = await engine.thumbnailRequests.count
+        XCTAssertNotEqual(diagnostics.identity, fixture.identity, "replaced bytes must change the source identity")
+        // KRMA-763 owns relaunch source identity admission; these assertions expose its remaining
+        // double-confirmation path while retaining the regression contract for its fix.
+        XCTExpectFailure("KRMA-763: source replacement relaunch admission", options: .nonStrict()) {
+            XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
+            XCTAssertEqual(previewCount, 1, "replaced source bytes must render once")
+        }
+        XCTAssertGreaterThan(thumbnailCount, 0)
+        assertNoPrematureFallback(diagnostics)
+        await reopened.shutdown()
+    }
+
+    func testDifferentPixelEpochBetweenSessionsRefinesPersistedFrameOnce() async throws {
+        let fixture = try await seedSinglePhotoRelaunch()
+        let store = LatestPreviewFrameStore(directory: fixture.previewDirectory)
+        let maybeHit = await store.read(for: fixture.identity)
+        let hit = try XCTUnwrap(maybeHit)
+        let old = hit.frame.metadata
+        let stale = PresentationFrameMetadata(
+            identity: old.identity, kind: old.kind,
+            signature: FrameSignature(
+                source: old.signature.source, editHash: old.signature.editHash,
+                look: old.signature.look, workingSpace: old.signature.workingSpace,
+                pixelEpoch: RenderPipeline.pixelEpoch - 1
+            ),
+            geometry: old.geometry, rasterColorSpace: old.rasterColorSpace,
+            perceptualDigest: old.perceptualDigest, presentedAt: old.presentedAt,
+            pixelWidth: old.pixelWidth, pixelHeight: old.pixelHeight
+        )
+        await store.enqueueWrite(PresentationFrame(metadata: stale, rasterData: hit.frame.rasterData))
+        await store.waitForPendingWrites()
+
+        let engine = FakeRenderEngine()
+        let (reopened, _) = try await reopenedSinglePhoto(fixture, engine: engine)
+        let diagnostics = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
+        let previewCount = await engine.previewRequests.count
+        XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
+        XCTAssertEqual(previewCount, 1, "an old pixel epoch must refine once")
+        assertNoPrematureFallback(diagnostics)
+        await reopened.shutdown()
+    }
+
     func testUnchangedPackageReusesSettledFramesAfterRelaunch() async throws {
         let packageURL = tempDirectory.appendingPathComponent("Parity.kromoralibrary")
         let previewDirectory = tempDirectory.appendingPathComponent("Derived/Previews")
@@ -103,7 +280,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                     first.collection.items.first { $0.displayName == name }?.editedThumbnailRevision != nil
                 }
         }
-        for (name, _) in edits {
+        for name in names {
             guard let index = first.collection.items.firstIndex(where: { $0.displayName == name }) else {
                 XCTFail("fixture photo \(name) must be present")
                 continue
@@ -142,7 +319,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         }
         var settledGridPixels: [String: [UInt8]] = [:]
         var settledGridRatios: [String: Double] = [:]
-        for (name, _) in edits {
+        for name in names {
             guard let item = second.collection.items.first(where: { $0.displayName == name }) else {
                 continue
             }
@@ -170,7 +347,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             }
         }
 
-        for (name, _) in edits {
+        for name in names {
             guard let index = second.collection.items.firstIndex(where: { $0.displayName == name }) else {
                 XCTFail("fixture photo \(name) must be present")
                 continue
@@ -183,6 +360,18 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                     && second.presentationSessionForDiagnostics?.state == .confirmed
             }
             let session = try XCTUnwrap(second.presentationSessionForDiagnostics)
+            assertNoPrematureFallback(session)
+            if !edits.contains(where: { $0.0 == name }) {
+                XCTExpectFailure("KRMA-763: relaunch cache identity", options: .nonStrict()) {
+                    XCTAssertEqual(session.distinctFrameCount, 1,
+                                   "unchanged plain photo should reuse its frame: \(name)")
+                }
+                let afterPlain = await secondEngine.previewRequests.count
+                XCTExpectFailure("KRMA-763: relaunch cache identity", options: .nonStrict()) {
+                    XCTAssertEqual(afterPlain, before, "unchanged plain photo must not render: \(name)")
+                }
+                continue
+            }
             XCTExpectFailure("KRMA-763: browsing identity mismatch", options: .nonStrict()) {
                 XCTAssertEqual(
                     session.distinctFrameCount, 1,
@@ -200,14 +389,21 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             }
         }
 
-        for (name, _) in edits {
+        for name in names {
             let item = try XCTUnwrap(second.collection.items.first { $0.displayName == name })
             let finalPixels = try pixels(of: item.thumbnail)
             XCTAssertEqual(finalPixels, settledGridPixels[name],
                            "grid pixels must not swap after first paint for \(name)")
-            XCTExpectFailure("KRMA-765: relaunch crop geometry", options: .nonStrict()) {
-                XCTAssertEqual(item.libraryAspectRatio, settledGridRatios[name],
-                               "library aspect ratio must not change after first layout for \(name)")
+            if edits.contains(where: { $0.0 == name }) {
+                XCTExpectFailure("KRMA-765: relaunch crop geometry", options: .nonStrict()) {
+                    XCTAssertEqual(item.libraryAspectRatio, settledGridRatios[name],
+                                   "library aspect ratio must not change after first layout for \(name)")
+                }
+            } else {
+                XCTExpectFailure("KRMA-765: relaunch geometry", options: .nonStrict()) {
+                    XCTAssertEqual(item.libraryAspectRatio, settledGridRatios[name],
+                                   "plain photo aspect ratio must stay stable for \(name)")
+                }
             }
         }
 

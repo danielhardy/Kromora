@@ -50,6 +50,8 @@ final class PreviewPresentationCoordinator {
         let selectionUptime: UInt64
         fileprivate(set) var state: SessionState
         fileprivate(set) var candidateSource: CandidateSource?
+        /// Preserves pre-confirmation provenance after a settled frame replaces the candidate.
+        fileprivate(set) var provisionalCandidateSources: [CandidateSource]
         fileprivate(set) var firstPixelLatencyMilliseconds: Double?
         fileprivate(set) var confirmedLatencyMilliseconds: Double?
         fileprivate(set) var distinctFrameCount: Int
@@ -97,6 +99,7 @@ final class PreviewPresentationCoordinator {
             assetID: assetID, identity: identity, generation: generation,
             selectionUptime: selectionUptime,
             state: .provisional, candidateSource: nil,
+            provisionalCandidateSources: [],
             firstPixelLatencyMilliseconds: nil, confirmedLatencyMilliseconds: nil,
             distinctFrameCount: 0, provisionalFrameCount: 0, confirmedFrameCount: 0,
             staleGenerationDrops: 0
@@ -130,6 +133,7 @@ final class PreviewPresentationCoordinator {
         }
         guard mayReplaceCurrent else { return false }
         session.candidateSource = source
+        session.provisionalCandidateSources.append(source)
         presentationSession = session
         Self.emitPresentationMetric(
             "PresentationCandidate", session: session, source: source.rawValue
