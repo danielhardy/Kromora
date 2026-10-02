@@ -59,6 +59,9 @@ final class SourceSessionCoordinator {
     private var pendingRequest: Request?
     private var workerTask: Task<Void, Never>?
     private var storedLoadTask: Task<EditDocumentLoadResult, Never>?
+    /// The request `storedLoadTask` was started for, so `prepare` reuses it instead of reading twice.
+    private var storedLoadRequest: Request?
+    private var storedPublishTask: Task<Void, Never>?
     private var metadataTask: Task<Void, Never>?
     private var capabilitiesTask: Task<Void, Never>?
     private var firstFrameTask: Task<Void, Never>?
@@ -74,6 +77,10 @@ final class SourceSessionCoordinator {
     var isBusy: Bool { pendingRequest != nil || workerTask != nil }
 
     var onPreparation: PreparationHandler?
+    /// Fires as soon as the stored edit document has been read for the active request, without
+    /// waiting for source preparation. Only work that needs no prepared source belongs here; the
+    /// source-dependent reconciliation still arrives through `onStoredDocument`.
+    var onStoredDocumentLoaded: StoredDocumentHandler?
     var onStoredDocument: StoredDocumentHandler?
     var onMetadata: MetadataHandler?
     var onCapabilities: CapabilitiesHandler?
@@ -113,8 +120,35 @@ final class SourceSessionCoordinator {
         firstFrameTask?.cancel()
         firstFrameTask = nil
         storedLoadTask?.cancel()
+        storedPublishTask?.cancel()
+        startStoredLoad(for: request, barrier: persistenceBarrier)
         if workerTask == nil { startWorker() }
         return sourceRevision
+    }
+
+    /// Reads the stored edit document at selection and publishes it the moment it is available.
+    /// Source preparation is serialized behind the previous source and can take far longer than
+    /// this small read, so neither may gate the panel. The publication is fenced to the active
+    /// request: a newer selection, `cancel()`, or shutdown drops it.
+    private func startStoredLoad(
+        for request: Request, barrier: Task<PersistenceFlushResult, Never>?
+    ) {
+        let editStore = self.editStore
+        let reference = request.sourceReference
+        let task = Task {
+            if let barrier {
+                _ = await barrier.value
+            }
+            return await editStore.load(for: reference)
+        }
+        storedLoadTask = task
+        storedLoadRequest = request
+        storedPublishTask = Task { [weak self] in
+            let result = await task.value
+            guard let self, !Task.isCancelled, self.isExpected(request) else { return }
+            self.onStoredDocumentLoaded?(
+                StoredDocumentPublication(request: request, result: result))
+        }
     }
 
     /// Invalidates the current source even when the next source has equal-valued bytes.
@@ -132,6 +166,9 @@ final class SourceSessionCoordinator {
         capabilitiesTask = nil
         storedLoadTask?.cancel()
         storedLoadTask = nil
+        storedLoadRequest = nil
+        storedPublishTask?.cancel()
+        storedPublishTask = nil
     }
 
     func shutdown() async {
@@ -144,19 +181,24 @@ final class SourceSessionCoordinator {
         storedDocumentBarrier = nil
         firstFrameTask?.cancel()
         storedLoadTask?.cancel()
+        storedPublishTask?.cancel()
         metadataTask?.cancel()
         capabilitiesTask?.cancel()
         let worker = workerTask
+        let storedPublish = storedPublishTask
         let stored = storedLoadTask
         let metadata = metadataTask
         let capabilities = capabilitiesTask
         let firstFrame = firstFrameTask
         workerTask = nil
         storedLoadTask = nil
+        storedLoadRequest = nil
+        storedPublishTask = nil
         metadataTask = nil
         capabilitiesTask = nil
         firstFrameTask = nil
         await worker?.value
+        _ = await storedPublish?.value
         _ = await stored?.value
         _ = await metadata?.value
         _ = await capabilities?.value
@@ -182,26 +224,39 @@ final class SourceSessionCoordinator {
     }
 
     private func prepare(_ request: Request) async {
-        let persistenceBarrier = storedDocumentBarrier
-        let storedTask = Task {
-            if let persistenceBarrier {
-                _ = await persistenceBarrier.value
+        let storedTask: Task<EditDocumentLoadResult, Never>
+        if storedLoadRequest == request, let started = storedLoadTask {
+            // Started at selection by `begin`; the panel may already have its values.
+            storedTask = started
+        } else {
+            let persistenceBarrier = storedDocumentBarrier
+            storedTask = Task {
+                if let persistenceBarrier {
+                    _ = await persistenceBarrier.value
+                }
+                return await editStore.load(for: request.sourceReference)
             }
-            return await editStore.load(for: request.sourceReference)
+            storedLoadTask = storedTask
+            storedLoadRequest = request
         }
-        storedLoadTask = storedTask
         let preparation = await engine.prepareSource(request.plan.source)
         guard isExpected(request) else {
             storedTask.cancel()
             _ = await storedTask.value
-            if storedLoadTask == storedTask { storedLoadTask = nil }
+            if storedLoadTask == storedTask {
+                storedLoadTask = nil
+                storedLoadRequest = nil
+            }
             return
         }
         guard let preparation else {
             onFailure?(request, "Error: Cannot load \(request.plan.name)")
             storedTask.cancel()
             _ = await storedTask.value
-            if storedLoadTask == storedTask { storedLoadTask = nil }
+            if storedLoadTask == storedTask {
+                storedLoadTask = nil
+                storedLoadRequest = nil
+            }
             return
         }
 
@@ -219,7 +274,10 @@ final class SourceSessionCoordinator {
         startFirstFrameIfNeeded(for: request, preparation: preparation)
 
         let stored = await storedTask.value
-        if storedLoadTask == storedTask { storedLoadTask = nil }
+        if storedLoadTask == storedTask {
+            storedLoadTask = nil
+            storedLoadRequest = nil
+        }
         // Stored edits belong to the request that admitted them. Unlike probes, they must not
         // publish while a newer request is pending, even if that request later fails.
         guard isCurrent(request), activeRequest == request else { return }
@@ -256,7 +314,8 @@ final class SourceSessionCoordinator {
         capabilitiesTask = Task { [weak self, engine] in
             let capabilities = await engine.rawCapabilities(for: source)
             guard let self, self.isCurrent(request), !Task.isCancelled else { return }
-            self.onCapabilities?(CapabilitiesPublication(request: request, capabilities: capabilities))
+            self.onCapabilities?(
+                CapabilitiesPublication(request: request, capabilities: capabilities))
         }
     }
 
@@ -268,10 +327,12 @@ final class SourceSessionCoordinator {
         let extractionTask = Task.detached(priority: .userInitiated) { await provider(url) }
         firstFrameTask = Task { [weak self, extractionTask] in
             guard let image = await extractionTask.value, let self,
-                self.isCurrent(request), !Task.isCancelled else { return }
-            self.onFirstFrame?(FirstFramePublication(
-                request: request, preparation: preparation, image: image
-            ))
+                self.isCurrent(request), !Task.isCancelled
+            else { return }
+            self.onFirstFrame?(
+                FirstFramePublication(
+                    request: request, preparation: preparation, image: image
+                ))
         }
     }
 }
