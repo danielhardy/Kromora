@@ -7,6 +7,42 @@ import XCTest
 
 @MainActor
 final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
+    func testStoredFrameLookupRecordsExactlyOneLedgerEntryForEachOutcome() async throws {
+        let ledger = FrameLookupLedger()
+        let directory = tempDirectory.appendingPathComponent("preview-ledger-\(UUID().uuidString)")
+        let store = LatestPreviewFrameStore(directory: directory)
+        let coordinator = PreviewPresentationCoordinator(store: store, frameLookupLedger: ledger)
+        let identity = FrameFixtures.identity()
+        let assetID = PhotoAssetID.imported(UUID())
+
+        coordinator.beginPresentationSession(assetID: assetID, identity: identity, generation: 1)
+        coordinator.beginStoredFrameLookup(assetID: assetID, identity: identity, generation: 1) { _ in }
+        try await waitForLedgerCount(1, ledger: ledger)
+        var records = await ledger.snapshot()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].surface, .editPreview)
+        XCTAssertEqual(records[0].outcome, .missingFile)
+
+        let corruptIdentity = FrameFixtures.identity()
+        await store.enqueueWrite(try FrameFixtures.frame(identity: corruptIdentity))
+        await store.waitForPendingWrites()
+        let assetHash = try XCTUnwrap(LatestPreviewFrameStore.assetHash(corruptIdentity.assetID))
+        try Data("damaged envelope".utf8).write(
+            to: directory.appendingPathComponent("\(assetHash).kframe")
+        )
+        coordinator.beginPresentationSession(
+            assetID: assetID, identity: corruptIdentity, generation: 2
+        )
+        coordinator.beginStoredFrameLookup(
+            assetID: assetID, identity: corruptIdentity, generation: 2
+        ) { _ in }
+        try await waitForLedgerCount(2, ledger: ledger)
+        records = await ledger.snapshot()
+        XCTAssertEqual(records.count, 2)
+        XCTAssertEqual(records.map(\.surface), [.editPreview, .editPreview])
+        XCTAssertEqual(records.map(\.outcome), [.missingFile, .corrupt])
+    }
+
     func testGenerationFencesAreIndependentAcrossPresentationSurfaces() throws {
         let coordinator = makeCoordinator()
 
@@ -302,6 +338,17 @@ final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
                 throw TestSynchronizationError.timedOut(description, "condition did not settle")
             }
             try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
+    private func waitForLedgerCount(
+        _ count: Int, ledger: FrameLookupLedger,
+        file: StaticString = #filePath, line: UInt = #line
+    ) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while await ledger.snapshot().count < count {
+            if Date() > deadline { return XCTFail("timed out waiting for ledger entry", file: file, line: line) }
+            try await Task.sleep(for: .milliseconds(5))
         }
     }
 }
