@@ -113,19 +113,28 @@ actor ThumbnailFrameStore {
     }
 
     private let directory: URL
+    private let workScheduler: ImageWorkScheduler?
+    private let placeholderSweepJobID = ImageWorkScheduler.JobID(
+        "placeholder-thumbnail-sweep-\(UUID().uuidString)"
+    )
     private var store: PortablePackagePackedThumbnailStore?
     private var openFailed = false
     private var pending: [String: PresentationFrame] = [:]
     private var flushTask: Task<Void, Never>?
-    private var placeholderSweepTask: Task<Void, Never>?
+    private var placeholderSweepScheduled = false
+    private var placeholderSweepHasMore = false
     private var placeholderSweepKeys: [String] = []
     private var placeholderSweepCursor = 0
+    private(set) var placeholderSweepRecordsExamined = 0
+    private(set) var placeholderSweepLargestBatch = 0
+    var placeholderSweepIsScheduled: Bool { placeholderSweepScheduled }
     private(set) var placeholderWritesSkipped = 0
     private(set) var readCount = 0
     private(set) var writeCount = 0
 
-    init(directory: URL) {
+    init(directory: URL, workScheduler: ImageWorkScheduler? = nil) {
         self.directory = directory
+        self.workScheduler = workScheduler
     }
 
     nonisolated static func packageDirectory(for packageURL: URL) -> URL {
@@ -148,7 +157,6 @@ actor ThumbnailFrameStore {
     func readWithOutcome(
         _ kind: ThumbnailFrameKind, for identity: PortablePhotoIdentity
     ) -> (hit: Hit?, corrupt: Bool) {
-        cancelPlaceholderSweep()
         guard let key = Self.key(kind, for: identity.assetID) else { return (nil, false) }
         readCount += 1
         if let frame = pending[key] {
@@ -214,7 +222,6 @@ actor ThumbnailFrameStore {
 
     /// Queue a record. A later write for the same key supersedes one not yet on disk.
     func enqueueWrite(_ frame: PresentationFrame) {
-        cancelPlaceholderSweep()
         guard !Self.hasPlaceholderIdentity(frame) else {
             placeholderWritesSkipped += 1
             KromoraObservability.event(.frameWriteSkippedPlaceholder)
@@ -232,7 +239,6 @@ actor ThumbnailFrameStore {
 
     /// Write every queued record now.
     func flush() {
-        cancelPlaceholderSweep()
         flushTask?.cancel()
         flushTask = nil
         flushPending()
@@ -241,7 +247,6 @@ actor ThumbnailFrameStore {
     /// Drop a photo's record of one kind — for example the edited record after a reset to the
     /// original. The pointer is removed from the index; compaction reclaims the bytes.
     func remove(_ kind: ThumbnailFrameKind, for assetID: PortablePhotoAssetID) {
-        cancelPlaceholderSweep()
         guard let key = Self.key(kind, for: assetID) else { return }
         pending.removeValue(forKey: key)
         guard openStoreIfNeeded() else { return }
@@ -251,7 +256,6 @@ actor ThumbnailFrameStore {
 
     /// Drop both records of each photo (deletion, source replacement).
     func remove(assetIDs: Set<PortablePhotoAssetID>) {
-        cancelPlaceholderSweep()
         let keys = assetIDs.flatMap { id in
             ThumbnailFrameKind.allCases.compactMap { Self.key($0, for: id) }
         }
@@ -288,11 +292,12 @@ actor ThumbnailFrameStore {
 
     var pendingWriteCount: Int { pending.count }
 
-    /// Removes at most eight indexed records. Repeated calls model scheduler idle ticks.
+    /// Removes one bounded batch. Production cleanup is admitted through the shared scheduler;
+    /// tests can call this to drive a specific number of idle ticks.
     func sweepPlaceholderFrames(maxRecords: Int = 8) {
         guard maxRecords > 0, openStoreIfNeeded() else { return }
-        cancelPlaceholderSweep()
-        _ = sweepPlaceholderBatch(maxRecords: maxRecords)
+        placeholderSweepHasMore = sweepPlaceholderBatch(maxRecords: maxRecords)
+        if placeholderSweepHasMore { Task { await schedulePlaceholderSweep() } }
     }
 
     /// Write anything still queued and stop the flush timer. Call before the owner is released.
@@ -345,11 +350,14 @@ actor ThumbnailFrameStore {
     }
 
     private func openStoreIfNeeded() -> Bool {
-        if store != nil { return true }
+        if store != nil {
+            Task { [weak self] in await self?.schedulePlaceholderSweep() }
+            return true
+        }
         guard !openFailed else { return false }
         do {
             store = try PortablePackagePackedThumbnailStore(at: directory)
-            schedulePlaceholderSweep()
+            Task { [weak self] in await self?.schedulePlaceholderSweep() }
             return true
         } catch {
             // An unreadable or unsupported index is cache damage, not a package problem. Discard
@@ -357,7 +365,7 @@ actor ThumbnailFrameStore {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent("index.json"))
             do {
                 store = try PortablePackagePackedThumbnailStore(at: directory)
-                schedulePlaceholderSweep()
+                Task { [weak self] in await self?.schedulePlaceholderSweep() }
                 return true
             } catch {
                 openFailed = true
@@ -380,6 +388,8 @@ actor ThumbnailFrameStore {
         }
         let start = min(placeholderSweepCursor, placeholderSweepKeys.count)
         let batch = Array(placeholderSweepKeys.dropFirst(start).prefix(maxRecords))
+        placeholderSweepRecordsExamined += batch.count
+        placeholderSweepLargestBatch = max(placeholderSweepLargestBatch, batch.count)
         for key in batch {
             guard case .found(let data) = try? store.lookup(key),
                   let frame = try? PresentationFrameEnvelope.decode(data, expectedAssetID: nil),
@@ -395,26 +405,29 @@ actor ThumbnailFrameStore {
         return hasMore
     }
 
-    private func schedulePlaceholderSweep() {
-        guard placeholderSweepTask == nil else { return }
-        placeholderSweepTask = Task(priority: .background) { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                let hasMore = await self.sweepPlaceholderBatch(maxRecords: 8)
-                guard !Task.isCancelled, hasMore else {
-                    await self.placeholderSweepFinished()
-                    return
-                }
-                await Task.yield()
+    private func schedulePlaceholderSweep() async {
+        guard !placeholderSweepScheduled, let workScheduler else { return }
+        placeholderSweepScheduled = true
+        let admitted = await workScheduler.enqueuePackageIO(
+            id: placeholderSweepJobID, lane: .maintenance, priority: .background,
+            onTerminal: { [weak self] outcome in
+                Task { await self?.placeholderSweepFinished(outcome: outcome) }
+            },
+            operation: { [weak self] in
+                guard let self else { return }
+                await self.runScheduledPlaceholderSweep()
             }
-        }
+        )
+        if !admitted { placeholderSweepScheduled = false }
     }
 
-    private func placeholderSweepFinished() { placeholderSweepTask = nil }
+    private func runScheduledPlaceholderSweep() {
+        placeholderSweepHasMore = sweepPlaceholderBatch(maxRecords: 8)
+    }
 
-    private func cancelPlaceholderSweep() {
-        placeholderSweepTask?.cancel()
-        placeholderSweepTask = nil
+    private func placeholderSweepFinished(outcome: ImageWorkScheduler.TerminalOutcome) async {
+        placeholderSweepScheduled = false
+        if outcome == .completed, placeholderSweepHasMore { await schedulePlaceholderSweep() }
     }
 
     private static func hasPlaceholderIdentity(_ frame: PresentationFrame) -> Bool {
