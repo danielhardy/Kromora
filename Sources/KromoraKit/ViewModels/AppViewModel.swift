@@ -158,6 +158,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Stored in a per-photo session keyed by stable source identity. Navigation restores the active
     /// photo's Light, other edits, and history without carrying them onto a different frame.
     @Published private(set) var document = EditDocument()
+    /// True while a cold photo-to-photo selection is waiting for its stored edit document. The
+    /// inspector holds its current slider presentation during this short interval; the published
+    /// document itself continues to belong to the newly selected photo.
+    @Published private(set) var isInspectorSourceDocumentPending = false
     /// Toolbar photo actions retain their last settled availability while another selected photo
     /// loads. Their action methods still validate the active source before doing any work.
     @Published private(set) var toolbarPhotoActionsAvailable = false
@@ -1225,6 +1229,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 request.assetID == self.activeAssetID
             else { return }
             self.isLoading = false
+            self.isInspectorSourceDocumentPending = false
             self.isNavigationLoading = false
             self.previewState = .failed
             self.toolbarPhotoActionsAvailable = self.sourceImage != nil
@@ -2015,6 +2020,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         loadRequestGeneration &+= 1
         let requestGeneration = loadRequestGeneration
         let previousActiveAssetID = activeAssetID
+        isInspectorSourceDocumentPending = previousActiveAssetID != nil
+            && previousActiveAssetID != importPlan.assetID
+            && editorDocument.session(for: importPlan.assetID) == nil
 
         // Make the source switch observable and invalidate old pixels immediately. Package state,
         // editor cleanup, and candidate materialization continue after the selection event yields.
@@ -2335,6 +2343,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func adoptStoredDocumentValues(
         _ stored: EditDocumentLoadResult, for request: SourceSessionCoordinator.Request
     ) {
+        defer { isInspectorSourceDocumentPending = false }
         // Reconciliation already ran for this source (it won the race to the main actor).
         guard storedEditsResolvedSourceRevision != sourceRevision else { return }
         // Same ownership rule as `adoptStoredEdits`: only a still-pristine, never-seen session
@@ -2358,6 +2367,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func adoptStoredEdits(
         _ stored: EditDocumentLoadResult, for request: SourceSessionCoordinator.Request
     ) {
+        defer { isInspectorSourceDocumentPending = false }
         let adoptedEarly = earlyStoredAdoption?.sourceRevision == request.sourceRevision
         let earlyDocumentChanged = adoptedEarly ? (earlyStoredAdoption?.documentChanged ?? false) : false
         earlyStoredAdoption = nil

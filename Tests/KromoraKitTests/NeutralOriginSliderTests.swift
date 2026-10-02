@@ -356,6 +356,42 @@ final class NeutralOriginSliderTests: XCTestCase {
         XCTAssertEqual(slider.doubleValue, -0.5, accuracy: 0.0001)
     }
 
+    func testKeyboardActionCancelsAnInFlightPresentationAnimation() async throws {
+        let coordinator = makeCoordinator()
+        let slider = NSSlider()
+        slider.minValue = -1
+        slider.maxValue = 1
+        slider.doubleValue = 0
+
+        coordinator.present(1, on: slider, animated: true)
+        try await Task.sleep(for: .milliseconds(80))
+        slider.doubleValue = -0.25
+        coordinator.sliderMoved(slider)
+        try await Task.sleep(for: .milliseconds(420))
+
+        XCTAssertEqual(slider.doubleValue, -0.25, accuracy: 0.0001)
+    }
+
+    func testPhotoSwitchHoldsSliderAtOutgoingValueUntilIncomingDocumentArrives() async throws {
+        let coordinator = makeCoordinator()
+        let slider = NSSlider()
+        slider.minValue = -1
+        slider.maxValue = 1
+        slider.doubleValue = 0.75
+        _ = coordinator.updateAnimationAssetID(nil, isAwaitingDocument: true)
+
+        coordinator.present(0, on: slider, animated: true, holdTarget: true)
+        XCTAssertEqual(slider.doubleValue, 0.75)
+
+        _ = coordinator.updateAnimationAssetID(nil, isAwaitingDocument: false)
+        coordinator.present(-0.5, on: slider, animated: true)
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertGreaterThan(slider.doubleValue, -0.5)
+        XCTAssertLessThan(slider.doubleValue, 0.75)
+        try await Task.sleep(for: .milliseconds(260))
+        XCTAssertEqual(slider.doubleValue, -0.5, accuracy: 0.0001)
+    }
+
     func testRetargetingAnAnimationPreservesItsCurrentValueAndVelocity() {
         var animation = SliderValueAnimation(from: 0, to: 1, at: 0, duration: 0.38)
         let retargetTime = 0.16

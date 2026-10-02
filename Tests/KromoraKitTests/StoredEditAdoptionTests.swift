@@ -156,4 +156,24 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.sourceName, "two.png")
         XCTAssertEqual(viewModel.document.light.exposure, -0.5)
     }
+
+    func testPhotoSwitchMarksSliderPresentationPendingUntilIncomingDocumentArrives() async throws {
+        let packageURL = try await makePackage(
+            storedExposures: ["one.png": 1.5, "two.png": -0.5])
+        let (viewModel, fake, _) = try await reopen(packageURL)
+        try select("one.png", in: viewModel)
+        try await waitForPreparationToStart(fake)
+        try await waitUntil("the first photo's stored exposure") {
+            viewModel.document.light.exposure == 1.5
+        }
+        await fake.releaseSourcePreparation()
+        try await waitUntil("the first photo to settle") { viewModel.previewState == .ready }
+
+        try select("two.png", in: viewModel)
+        XCTAssertTrue(viewModel.isInspectorSourceDocumentPending)
+        try await waitUntil("the second photo's stored exposure") {
+            viewModel.document.light.exposure == -0.5
+                && !viewModel.isInspectorSourceDocumentPending
+        }
+    }
 }
