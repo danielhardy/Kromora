@@ -1,0 +1,65 @@
+diff --git a/Tests/KromoraKitTests/LastKnownFrameReleaseBenchmark.swift b/Tests/KromoraKitTests/LastKnownFrameReleaseBenchmark.swift
+index 2807c152..1d12346f 100644
+--- a/Tests/KromoraKitTests/LastKnownFrameReleaseBenchmark.swift
++++ b/Tests/KromoraKitTests/LastKnownFrameReleaseBenchmark.swift
+@@ -4,6 +4,7 @@ import Foundation
+ import QuartzCore
+ import SwiftUI
+ import XCTest
++import os
+ 
+ @testable import KromoraKit
+ 
+@@ -22,6 +23,10 @@ import XCTest
+ ///   budget verdicts are reported in the records.
+ @MainActor
+ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
++    private static let gridSignposter = OSSignposter(
++        subsystem: "com.kromora.last-known-frame", category: "LibraryGrid"
++    )
++
+     private enum BenchmarkError: Error {
+         case presentationTimedOut(String)
+     }
+@@ -504,10 +509,18 @@ final class LastKnownFrameReleaseBenchmark: TempDirectoryTestCase {
+         let thumbnailsBefore = thumbnailSnapshot(model)
+         let mountsBefore = RenderDiagnostics.snapshot.gridMounts
+         let start = CACurrentMediaTime()
++        let gridInterval = Self.gridSignposter.beginInterval("grid re-entry")
++        defer { Self.gridSignposter.endInterval("grid re-entry", gridInterval) }
+         XCTAssertTrue(model.navigate(to: .grid))
++        let mountInterval = Self.gridSignposter.beginInterval("mount and visible cells")
+         try await waitForVisibleGrid(model, window: window, mountedAfter: mountsBefore)
++        Self.gridSignposter.endInterval("mount and visible cells", mountInterval)
++        let layoutInterval = Self.gridSignposter.beginInterval("AppKit layout")
+         try XCTUnwrap(window.contentView).layoutSubtreeIfNeeded()
++        Self.gridSignposter.endInterval("AppKit layout", layoutInterval)
++        let displayInterval = Self.gridSignposter.beginInterval("AppKit display")
+         window.displayIfNeeded()
++        Self.gridSignposter.endInterval("AppKit display", displayInterval)
+         return (
+             milliseconds(since: start),
+             changedThumbnails(from: thumbnailsBefore, to: thumbnailSnapshot(model))
+diff --git a/Sources/KromoraKit/ViewModels/AppViewModel.swift b/Sources/KromoraKit/ViewModels/AppViewModel.swift
+index bc004f14..78c6ba85 100644
+--- a/Sources/KromoraKit/ViewModels/AppViewModel.swift
++++ b/Sources/KromoraKit/ViewModels/AppViewModel.swift
+@@ -2845,9 +2852,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
+             guard collection.isActive else { return false }
+             // Release the editor inspector before composing the Library viewport. If it closes
+             // after the workspace changes, SwiftUI first lays the grid out beside the inspector
+-            // and then animates its width, rebuilding the mosaic rows during the return.
+-            inspectorState.isPresented = false
+-            navigation.move(to: .grid)
++            // and then animates its width, rebuilding the mosaic rows during the return. Treat
++            // this workspace handoff as one immediate layout change; the editor's inspector close
++            // animation otherwise delays the first stable Library display by a full transition.
++            var transaction = Transaction()
++            transaction.disablesAnimations = true
++            withTransaction(transaction) {
++                inspectorState.isPresented = false
++                navigation.move(to: .grid)
++            }
+             collection.beginThumbnailDemand()
+             return true
+ 
