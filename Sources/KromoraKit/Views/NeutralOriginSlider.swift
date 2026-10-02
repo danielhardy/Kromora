@@ -4,6 +4,7 @@ import SwiftUI
 struct SliderSourceAnimation: Equatable, Sendable {
     let assetID: PhotoAssetID?
     let isEnabled: Bool
+    var isAwaitingDocument = false
 }
 
 /// A cubic Hermite segment lets a changing bound value retarget an in-flight presentation without
@@ -142,7 +143,8 @@ struct NeutralOriginSlider: NSViewRepresentable {
             coordinator?.trackingChanged(isTracking)
         }
         _ = context.coordinator.updateAnimationAssetID(
-            context.environment.sliderSourceAnimation.assetID
+            context.environment.sliderSourceAnimation.assetID,
+            isAwaitingDocument: context.environment.sliderSourceAnimation.isAwaitingDocument
         )
         apply(to: slider, coordinator: context.coordinator, animated: false)
         return slider
@@ -153,7 +155,8 @@ struct NeutralOriginSlider: NSViewRepresentable {
         context.coordinator.step = step
         context.coordinator.onEditingChanged = onEditingChanged
         _ = context.coordinator.updateAnimationAssetID(
-            context.environment.sliderSourceAnimation.assetID
+            context.environment.sliderSourceAnimation.assetID,
+            isAwaitingDocument: context.environment.sliderSourceAnimation.isAwaitingDocument
         )
         apply(
             to: slider,
@@ -173,11 +176,19 @@ struct NeutralOriginSlider: NSViewRepresentable {
         // Never fight the drag: while the knob is being tracked the slider is the source of truth,
         // and the binding behind it is debounced, so writing back mid-gesture would stutter.
         if !coordinator.isTracking, slider.doubleValue != value {
-            coordinator.present(value, on: slider, animated: animated)
+            coordinator.present(
+                value, on: slider, animated: animated,
+                holdTarget: coordinator.isAwaitingSourceDocument
+            )
         }
 
         if let accessibilityTitle { slider.setAccessibilityLabel(accessibilityTitle) }
-        if let accessibilityReadout { slider.setAccessibilityValueDescription(accessibilityReadout) }
+        if let accessibilityReadout, !coordinator.isAwaitingSourceDocument {
+            coordinator.cacheAccessibilityReadout(accessibilityReadout)
+        }
+        if let readout = coordinator.accessibilityReadout {
+            slider.setAccessibilityValueDescription(readout)
+        }
         slider.needsDisplay = true
     }
 
@@ -192,12 +203,16 @@ struct NeutralOriginSlider: NSViewRepresentable {
         private var valueAnimationState: SliderValueAnimation?
         private var animationAssetID: PhotoAssetID?
         private var sourceAnimationDeadline = 0.0
+        private(set) var isAwaitingSourceDocument = false
+        private var lastAccessibilityReadout: String?
 
         var isSourceAnimationActive: Bool {
             ProcessInfo.processInfo.systemUptime < sourceAnimationDeadline
         }
 
-        func updateAnimationAssetID(_ assetID: PhotoAssetID?) -> Bool {
+        func updateAnimationAssetID(
+            _ assetID: PhotoAssetID?, isAwaitingDocument: Bool
+        ) -> Bool {
             let changed = animationAssetID != nil && animationAssetID != assetID
             if changed {
                 // The document and AppKit representables can update in separate SwiftUI passes.
@@ -205,7 +220,14 @@ struct NeutralOriginSlider: NSViewRepresentable {
                 sourceAnimationDeadline = ProcessInfo.processInfo.systemUptime + 1.2
             }
             animationAssetID = assetID
+            isAwaitingSourceDocument = isAwaitingDocument
             return changed
+        }
+
+        var accessibilityReadout: String? { lastAccessibilityReadout }
+
+        func cacheAccessibilityReadout(_ readout: String) {
+            lastAccessibilityReadout = readout
         }
 
         init(
@@ -219,6 +241,9 @@ struct NeutralOriginSlider: NSViewRepresentable {
         }
 
         @objc func sliderMoved(_ sender: NSSlider) {
+            // Keyboard and accessibility actions do not enter AppKit's pointer-tracking path.
+            // Stop a source-change animation before accepting either as the new source of truth.
+            cancelValueAnimation()
             let snapped = Self.snapped(
                 sender.doubleValue,
                 step: step,
@@ -228,7 +253,10 @@ struct NeutralOriginSlider: NSViewRepresentable {
             value.wrappedValue = snapped
         }
 
-        func present(_ target: Double, on slider: NSSlider, animated: Bool) {
+        func present(
+            _ target: Double, on slider: NSSlider, animated: Bool, holdTarget: Bool = false
+        ) {
+            guard !holdTarget else { return }
             guard animated else {
                 cancelValueAnimation()
                 slider.doubleValue = target

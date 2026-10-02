@@ -88,7 +88,8 @@ struct InfoInspectorView: View {
                         \.sliderSourceAnimation,
                         SliderSourceAnimation(
                             assetID: viewModel.maskingAssetID,
-                            isEnabled: !accessibilityReduceMotion
+                            isEnabled: !accessibilityReduceMotion,
+                            isAwaitingDocument: viewModel.isInspectorSourceDocumentPending
                         )
                     )
                     .animation(inspectorAnimation, value: viewModel.maskingAssetID)
