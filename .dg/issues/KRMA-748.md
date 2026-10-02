@@ -30,7 +30,7 @@ KRMA-747 resolves package browsing placeholders to persisted source identities o
 ## Acceptance criteria
 
 - [ ] Attribute and reduce the remaining first-pixel delay across Edit mount, SwiftUI graph updates, inspector, and stored-frame lookup; retain correct-photo presentation and generation fencing.
-- [ ] `scripts/run-kromora-capture.sh --benchmark last-known-frame --source realworldtest/DSC01019.ARW --iterations 30` reports warm Edit first-pixel p95 <= 50 ms and pre-suspension p95 <= 2 ms.
+- [ ] **Supervised, owner-started only (CLAUDE.md, display-bound benchmarks):** do not start this capture unattended or to verify an ordinary change. `scripts/run-kromora-capture.sh --benchmark last-known-frame --source realworldtest/DSC01019.ARW --iterations 30` reports warm Edit first-pixel p95 <= 50 ms and pre-suspension p95 <= 2 ms.
 - [ ] Focused tests, Release build, `git diff --check`, and `dg validate` pass.
 
 ## Implementation notes

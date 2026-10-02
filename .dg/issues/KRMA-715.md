@@ -12,7 +12,7 @@ labels:
   - interaction
   - ui
 created: 2026-09-29T16:44:14.772Z
-updated: 2026-09-29T23:37:00.657Z
+updated: 2026-10-02T04:13:18.348Z
 blockers:
   - id: evt_mun4xehs_zc41fz
     type: human
@@ -83,3 +83,13 @@ This effects all sliders. The easiest way to reproduce it is to have image A wit
 ### Comment — codex @ 2026-09-29T23:37:00.440Z
 
 The clarified reproduction is selection changes in Edit view from an unedited image to an edited image; the report says the behavior affects all sliders and gives max Exposure as an example. The root cause was repeated target updates restarting the 380 ms AppKit animation from its current value. Commit 484d073 retargets the active curve with a cubic Hermite segment that preserves position and velocity. Verification: swift test --filter NeutralOriginSliderTests (23 passed), git diff --check. I could not complete live visual verification: a macOS permission prompt for Terminal is covering the app and intercepting interaction. Exact photo identity and Exposure target value remain unspecified.
+
+
+### Comment — claude @ 2026-10-02T02:08:13.884Z
+
+Follow-up filed as KRMA-755 (stored edits are published only after source preparation, about 650 ms after the image) and KRMA-756 (make the photo-switch slider transition a single continuous move, with the live visual verification this ticket still needs). The velocity-preserving retargeting here is still correct; the remaining hesitation comes from the document arriving in two steps about a second apart, which is what those tickets address.
+
+
+### Comment — codex @ 2026-10-02T04:13:18.347Z
+
+KRMA-756 implementation update (commit 8b8c59e): the inspector now holds each slider's outgoing presentation and accessibility readout while the newly selected photo's stored document is pending, then animates directly to the incoming document. Deterministic tests cover the hold-to-target transition and keyboard interruption; focused tests and fast/serial lanes pass. Release visual verification is still pending because the currently open Kromora.app owns the library package lock. The library contains a reproducible pair: DSC03843.ARW at +0.00 EV to DSC01019.ARW at +1.21 EV and +10 Contrast.
