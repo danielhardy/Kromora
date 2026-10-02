@@ -167,6 +167,14 @@ enum FrameClassification: Sendable, Equatable {
     var isPresentable: Bool { self != .unusable }
 }
 
+enum FrameRejectionReason: String, Sendable, Equatable, CaseIterable {
+    case assetMismatch
+    case sourceFingerprintMismatch
+    case placeholderSourceIdentity
+    case dimensionsInvalid
+    case colorSpaceUnpresentable
+}
+
 /// The only freshness implementation. Pure: no I/O, no clock, no UI.
 enum FrameClassifier {
     /// The long edge every durable preview is rendered at. A larger raster is not a valid frame.
@@ -175,18 +183,26 @@ enum FrameClassifier {
     static func classify(
         _ frame: PresentationFrameMetadata, against current: FrameCurrentInputs
     ) -> FrameClassification {
+        classifyWithReason(frame, against: current).classification
+    }
+
+    static func classifyWithReason(
+        _ frame: PresentationFrameMetadata, against current: FrameCurrentInputs
+    ) -> (classification: FrameClassification, reason: FrameRejectionReason?) {
+        if isPlaceholder(current.source) { return (.unusable, .placeholderSourceIdentity) }
         guard frame.identity.assetID == current.source.assetID,
-              frame.signature.source.assetID == current.source.assetID,
-              frame.identity.sourceFingerprint.matches(current.source.sourceFingerprint)
-        else { return .unusable }
+              frame.signature.source.assetID == current.source.assetID
+        else { return (.unusable, .assetMismatch) }
+        guard frame.identity.sourceFingerprint.matches(current.source.sourceFingerprint)
+        else { return (.unusable, .sourceFingerprintMismatch) }
         guard frame.pixelWidth > 0, frame.pixelHeight > 0,
               max(frame.pixelWidth, frame.pixelHeight) <= previewLongEdge
-        else { return .unusable }
+        else { return (.unusable, .dimensionsInvalid) }
         guard frame.rasterColorSpace.isLosslesslyPresentable(in: current.workingSpace)
-        else { return .unusable }
+        else { return (.unusable, .colorSpaceUnpresentable) }
         guard let editHash = current.editHash, let look = current.look,
               look.permitsExactReuse
-        else { return .provisionalOnly }
+        else { return (.provisionalOnly, nil) }
 
         let signature = frame.signature
         let matches = signature.source.sourceFingerprint.matches(current.source.sourceFingerprint)
@@ -194,7 +210,11 @@ enum FrameClassifier {
             && signature.look.isExactMatch(of: look)
             && signature.workingSpace == current.workingSpace
             && signature.pixelEpoch == current.pixelEpoch
-        return matches ? .exact : .staleCompatible
+        return (matches ? .exact : .staleCompatible, nil)
+    }
+
+    private static func isPlaceholder(_ identity: PortablePhotoIdentity) -> Bool {
+        identity.sourceFingerprint.contentHash.isEmpty || identity.sourceFingerprint.decoderVersion.isEmpty
     }
 }
 

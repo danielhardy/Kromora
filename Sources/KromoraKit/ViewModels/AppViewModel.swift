@@ -691,11 +691,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Edit-aware collection thumbnail scheduling and cache publication.
     private lazy var editedThumbnailCoordinator = EditedThumbnailCoordinator(
         workScheduler: workScheduler, engine: engine, editStore: editStore,
-        frameStore: thumbnailFrameStore, destination: self
+        frameStore: thumbnailFrameStore, frameLookupLedger: frameLookupLedger, destination: self
     )
     /// Persisted original and latest-edited thumbnails in `Derived/Thumbnails`. Rebuildable cache:
     /// losing it costs a decode or render, never an edit.
     let thumbnailFrameStore: ThumbnailFrameStore
+    let frameLookupLedger: FrameLookupLedger
     let lookPreviewCoordinator: LookPreviewCoordinator
     let collection: ImageCollection
     let editStore: EditDocumentStore
@@ -940,10 +941,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         thumbnailFrameStoreDirectory: URL? = nil,
         portablePackageURL: URL,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
-        originalThumbnailProvider: @escaping ImageCollection.OriginalThumbnailProvider = { url, data, fingerprint, identity, store in
+        frameLookupLedger: FrameLookupLedger = .shared,
+        originalThumbnailProvider: @escaping ImageCollection.OriginalThumbnailProvider = { url, data, fingerprint, identity, store, ledger, surface in
             await OriginalThumbnailLoader.load(
                 url: url, data: data, dataFingerprint: fingerprint,
-                identity: identity, store: store
+                identity: identity, store: store, ledger: ledger, surface: surface
             )
         },
         embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
@@ -959,6 +961,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         defer { interval.end() }
 
         self.engine = engine
+        self.frameLookupLedger = frameLookupLedger
         let analysisCoordinator =
             photoAnalysisCoordinator ?? PhotoAnalysisCoordinator(engine: engine)
         self.photoAnalysisCoordinator = analysisCoordinator
@@ -1032,6 +1035,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
         self.collection = ImageCollection(
             scheduler: workScheduler,
+            frameLookupLedger: frameLookupLedger,
             originalThumbnailProvider: originalThumbnailProvider
         )
         self.library = LUTLibrary(
@@ -1051,7 +1055,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             capBytes: previewFrameStoreCapBytes
         )
         self.previewPresentation = PreviewPresentationCoordinator(
-            store: previewFrameStore, engine: engine)
+            store: previewFrameStore, engine: engine, frameLookupLedger: frameLookupLedger)
         self.thumbnailFrameStore = ThumbnailFrameStore(
             directory: thumbnailFrameStoreDirectory
                 ?? ThumbnailFrameStore.packageDirectory(for: normalizedPortablePackageURL)
@@ -1734,6 +1738,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func reloadPortableCollection() throws {
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         try libraryBrowsingCoordinator.reloadPortableCollection()
+        logFrameLookupSummaries([.gridOriginal, .gridEdited, .filmstrip, .launchHint])
     }
 
     /// Publish one query page as the visible window (KRMA-519 scope items 2-3). Membership,
@@ -1742,6 +1747,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func reloadPortableWindow(pageIndex: Int = 0) throws {
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         try libraryBrowsingCoordinator.reloadPortableWindow(pageIndex: pageIndex)
+        logFrameLookupSummaries([.gridOriginal, .gridEdited, .filmstrip, .launchHint])
     }
 
     /// Fault the next page when the visible window approaches its tail. Grid/filmstrip call this
@@ -3122,7 +3128,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         priority: ImageWorkScheduler.Priority,
         force: Bool = false
     ) {
-        editedThumbnailCoordinator.request(for: assetID, priority: priority, force: force)
+        editedThumbnailCoordinator.request(
+            for: assetID, priority: priority, force: force,
+            surface: priority == .adjacentFilmstrip ? .filmstrip : .gridEdited
+        )
     }
 
     private func scheduleEditedThumbnailAfterSettle(
@@ -3773,6 +3782,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     }
     private func scheduleSettledPreviewAfterDebounce() {
         previewAdmissionCoordinator.scheduleSettledPreviewAfterDebounce()
+        logFrameLookupSummaries([.editPreview])
+    }
+
+    private func logFrameLookupSummaries(_ surfaces: [FrameLookupSurface]) {
+        let ledger = frameLookupLedger
+        Task {
+            for surface in surfaces { await ledger.logSummary(for: surface) }
+        }
     }
 
     func beginPreviewInteraction() {

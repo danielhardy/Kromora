@@ -56,6 +56,7 @@ final class EditedThumbnailCoordinator {
     private let workScheduler: ImageWorkScheduler
     private let engine: any EditedThumbnailRendering
     private let editStore: EditDocumentStore
+    private let frameLookupLedger: FrameLookupLedger
     /// Persisted thumbnail frames. With none, every demand renders, exactly as an unpersisted
     /// collection always did.
     var frameStore: ThumbnailFrameStore?
@@ -66,12 +67,14 @@ final class EditedThumbnailCoordinator {
         engine: any EditedThumbnailRendering,
         editStore: EditDocumentStore,
         frameStore: ThumbnailFrameStore? = nil,
+        frameLookupLedger: FrameLookupLedger = .shared,
         destination: (any EditedThumbnailDestination)? = nil
     ) {
         self.workScheduler = workScheduler
         self.engine = engine
         self.editStore = editStore
         self.frameStore = frameStore
+        self.frameLookupLedger = frameLookupLedger
         self.destination = destination
     }
 
@@ -125,7 +128,8 @@ final class EditedThumbnailCoordinator {
     func request(
         for assetID: PhotoAssetID,
         priority: ImageWorkScheduler.Priority,
-        force: Bool = false
+        force: Bool = false,
+        surface: FrameLookupSurface = .gridEdited
     ) {
         guard let destination, !destination.isEditedThumbnailShuttingDown,
             let item = destination.editedThumbnailItem(for: assetID)
@@ -287,34 +291,58 @@ final class EditedThumbnailCoordinator {
 
             // A persisted frame is judged by the shared classifier. Exact pixels are published
             // and nothing renders; stale pixels are shown, inert, while one render refines them.
-            if let frameStore = self.frameStore,
-               let hit = await frameStore.read(.edited, for: thumbnailSourceIdentity)
-            {
-                guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
-                    assetID: assetID, generation: generation,
-                    sourceRevision: thumbnailSourceRevision,
-                    documentRevision: thumbnailDocumentRevision,
-                    sourceIdentity: thumbnailSourceIdentity
-                ), let destination = self.destination
-                else { return }
-                let storedImage = NSImage(
-                    cgImage: hit.image,
-                    size: NSSize(width: hit.image.width, height: hit.image.height)
+            if let frameStore = self.frameStore {
+                let result = await frameStore.readWithOutcome(
+                    .edited, for: thumbnailSourceIdentity
                 )
-                switch FrameClassifier.classify(
-                    hit.frame.metadata,
-                    against: FrameCurrentInputs(
-                        source: thumbnailSourceIdentity, editHash: document.editHash, look: frameLook
+                if let hit = result.hit {
+                    guard !Task.isCancelled, self.isCurrentEditedThumbnailRequest(
+                        assetID: assetID, generation: generation,
+                        sourceRevision: thumbnailSourceRevision,
+                        documentRevision: thumbnailDocumentRevision,
+                        sourceIdentity: thumbnailSourceIdentity
+                    ), let destination = self.destination
+                    else { return }
+                    let storedImage = NSImage(
+                        cgImage: hit.image,
+                        size: NSSize(width: hit.image.width, height: hit.image.height)
                     )
-                ) {
-                case .exact:
-                    destination.applyEditedThumbnail(storedImage, for: assetID, revision: frameRevision)
-                    self.materializedThumbnails[assetID] = materialized
-                    return
-                case .staleCompatible, .provisionalOnly:
-                    destination.applyStoredEditedThumbnail(storedImage, for: assetID)
-                case .unusable:
-                    break
+                    let classification = FrameClassifier.classifyWithReason(
+                        hit.frame.metadata,
+                        against: FrameCurrentInputs(
+                            source: thumbnailSourceIdentity,
+                            editHash: document.editHash,
+                            look: frameLook
+                        )
+                    )
+                    let outcome: FrameLookupOutcome
+                    switch classification.classification {
+                    case .exact: outcome = .exact
+                    case .staleCompatible: outcome = .staleCompatible
+                    case .provisionalOnly: outcome = .provisionalOnly
+                    case .unusable:
+                        outcome = .rejected(
+                            classification.reason ?? .sourceFingerprintMismatch
+                        )
+                    }
+                    await self.frameLookupLedger.record(surface: surface, outcome: outcome)
+                    switch classification.classification {
+                    case .exact:
+                        destination.applyEditedThumbnail(
+                            storedImage, for: assetID, revision: frameRevision
+                        )
+                        self.materializedThumbnails[assetID] = materialized
+                        return
+                    case .staleCompatible, .provisionalOnly:
+                        destination.applyStoredEditedThumbnail(storedImage, for: assetID)
+                    case .unusable:
+                        break
+                    }
+                } else {
+                    await self.frameLookupLedger.record(
+                        surface: surface,
+                        outcome: result.corrupt ? .corrupt : .missingFile
+                    )
                 }
             }
 

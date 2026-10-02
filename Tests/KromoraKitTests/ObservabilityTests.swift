@@ -19,7 +19,7 @@ final class ObservabilityTests: XCTestCase {
     func testWorkflowEventsCoverCacheAndSupersededWork() {
         let names = KromoraWorkflowEvent.allCases.map { String(describing: $0.name) }
 
-        XCTAssertEqual(names, ["CacheHit", "CacheMiss", "Cancellation", "Coalesced", "PointerInput", "RenderStart", "RenderEnd", "GPUComplete", "PresentationMaterialized", "PresentationEncoded", "DrawablePresented", "StaleRevision", "MaskOverlayPointerInput", "MaskOverlayPresentationEncoded", "MaskOverlayGPUComplete", "MaskOverlayDrawablePresented", "LibraryIndexWarm", "LibraryIndexRebuild", "LaunchHintsValidation", "LaunchFirstIndexPage", "LaunchHintsSuperseded", "LaunchHydrationComplete"])
+        XCTAssertEqual(names, ["CacheHit", "CacheMiss", "Cancellation", "Coalesced", "PointerInput", "RenderStart", "RenderEnd", "GPUComplete", "PresentationMaterialized", "PresentationEncoded", "DrawablePresented", "StaleRevision", "MaskOverlayPointerInput", "MaskOverlayPresentationEncoded", "MaskOverlayGPUComplete", "MaskOverlayDrawablePresented", "LibraryIndexWarm", "LibraryIndexRebuild", "LaunchHintsValidation", "LaunchFirstIndexPage", "LaunchHintsSuperseded", "LaunchHydrationComplete", "FrameLookupSummary"])
     }
 
     func testSourceTokensAreStablePrivateSafeAndDistinct() {
