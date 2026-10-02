@@ -9,6 +9,44 @@ private let noLookRevisionSuffix = ":" + LookSignature.none.cacheComponent
 
 @MainActor
 final class EditedThumbnailCoordinatorTests: XCTestCase {
+    func testPersistedEditedThumbnailLookupRecordsOneEntryForMissingAndCorruptFrames() async throws {
+        let ledger = FrameLookupLedger()
+        let fixture = makeFixture(frameLookupLedger: ledger)
+        let store = ThumbnailFrameStore(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("edited-ledger-\(UUID().uuidString)"))
+        fixture.coordinator.frameStore = store
+
+        fixture.coordinator.request(for: fixture.assetID, priority: .visibleGrid)
+        try await waitForLedgerCount(1, ledger: ledger)
+        var records = await ledger.snapshot()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].surface, .gridEdited)
+        XCTAssertEqual(records[0].outcome, .missingFile)
+        await fixture.scheduler.cancelAllAndWait()
+
+        let corruptLedger = FrameLookupLedger()
+        let corruptFixture = makeFixture(frameLookupLedger: corruptLedger)
+        let corruptStore = ThumbnailFrameStore(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("edited-ledger-corrupt-\(UUID().uuidString)"))
+        let identity = corruptFixture.item.asset.source.portableIdentity
+        await corruptStore.enqueueWrite(PresentationFrame(
+            metadata: FrameFixtures.metadata(
+                identity: identity,
+                edit: corruptFixture.destination.document.editHash,
+                kind: .editedThumbnail480
+            ),
+            rasterData: Data("damaged raster".utf8)
+        ))
+        corruptFixture.coordinator.frameStore = corruptStore
+        corruptFixture.coordinator.request(for: corruptFixture.assetID, priority: .visibleGrid)
+        try await waitForLedgerCount(1, ledger: corruptLedger)
+        records = await corruptLedger.snapshot()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].surface, .gridEdited)
+        XCTAssertEqual(records[0].outcome, .corrupt)
+        await corruptFixture.scheduler.cancelAllAndWait()
+    }
+
     func testDebounceCoalescesBurstToOneTrailingRequest() async throws {
         let fixture = makeFixture()
         for _ in 0..<5 {
@@ -521,7 +559,8 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         lut: CubeLUT? = nil,
         rendererWaits: Bool = false,
         rendererNilResponses: Int = 0,
-        active: Bool = true
+        active: Bool = true,
+        frameLookupLedger: FrameLookupLedger = .shared
     ) -> Fixture {
         let assetID = PhotoAssetID.imported(UUID())
         let item = ImageCollection.Item(
@@ -536,7 +575,8 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         )
         let coordinator = EditedThumbnailCoordinator(
             workScheduler: scheduler, engine: engine,
-            editStore: EditDocumentStore.makeInMemoryProjectionStore(), destination: destination
+            editStore: EditDocumentStore.makeInMemoryProjectionStore(),
+            frameLookupLedger: frameLookupLedger, destination: destination
         )
         return Fixture(
             assetID: assetID, item: item, destination: destination,
@@ -552,6 +592,16 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         while !(await condition()) {
             if Date() > deadline { return XCTFail("timed out waiting for \(description)") }
+            try await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    private func waitForLedgerCount(
+        _ count: Int, ledger: FrameLookupLedger
+    ) async throws {
+        let deadline = Date().addingTimeInterval(3)
+        while await ledger.snapshot().count < count {
+            if Date() > deadline { return XCTFail("timed out waiting for ledger entry") }
             try await Task.sleep(for: .milliseconds(5))
         }
     }

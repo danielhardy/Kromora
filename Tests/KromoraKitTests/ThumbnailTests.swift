@@ -14,6 +14,42 @@ import UniformTypeIdentifiers
 /// other would have been a silent, green change.
 @MainActor
 final class ThumbnailTests: TempDirectoryTestCase {
+    func testOriginalThumbnailLookupRecordsExactlyOneEntryForMissingAndCorruptFrames() async {
+        let ledger = FrameLookupLedger()
+        let store = ThumbnailFrameStore(
+            directory: tempDirectory.appendingPathComponent("original-ledger-\(UUID().uuidString)")
+        )
+        let missingIdentity = FrameFixtures.identity()
+
+        let missing = await OriginalThumbnailLoader.load(
+            url: nil, data: nil, dataFingerprint: nil, identity: missingIdentity,
+            store: store, ledger: ledger, surface: .filmstrip
+        )
+        XCTAssertNil(missing)
+        var records = await ledger.snapshot()
+        XCTAssertEqual(records.count, 1)
+        XCTAssertEqual(records[0].surface, .filmstrip)
+        XCTAssertEqual(records[0].outcome, .missingFile)
+
+        let corruptIdentity = FrameFixtures.identity()
+        let corruptFrame = PresentationFrame(
+            metadata: FrameFixtures.metadata(
+                identity: corruptIdentity, kind: .originalThumbnail480
+            ),
+            rasterData: Data("damaged raster".utf8)
+        )
+        await store.enqueueWrite(corruptFrame)
+        let corrupt = await OriginalThumbnailLoader.load(
+            url: nil, data: nil, dataFingerprint: nil, identity: corruptIdentity,
+            store: store, ledger: ledger, surface: .gridOriginal
+        )
+        XCTAssertNil(corrupt)
+        records = await ledger.snapshot()
+        XCTAssertEqual(records.count, 2)
+        XCTAssertEqual(records.map(\.surface), [.filmstrip, .gridOriginal])
+        XCTAssertEqual(records.map(\.outcome), [.missingFile, .corrupt])
+    }
+
 
     private func waitUntil(
         _ description: String, timeout: TimeInterval = 5, _ condition: @MainActor () -> Bool
