@@ -149,6 +149,23 @@ struct PhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
             && sampleDigest == other.sampleDigest
     }
 
+    /// Compare a persisted snapshot with a fresh resource-values read. Package JSON stores dates
+    /// as ISO-8601 whole seconds, so allow that subsecond truncation while requiring the byte count,
+    /// resource identity, and bounded content sample to remain identical.
+    func isSameFileSnapshot(as other: PhotoSourceFingerprint) -> Bool {
+        guard byteCount == other.byteCount,
+              resourceIdentifier == other.resourceIdentifier,
+              sampleDigest == other.sampleDigest else { return false }
+        switch (modificationDate, other.modificationDate) {
+        case (let lhs?, let rhs?):
+            return abs(lhs.timeIntervalSince(rhs)) < 1
+        case (nil, nil):
+            return true
+        default:
+            return false
+        }
+    }
+
     private static func sampleDigest(at url: URL, byteCount: Int64?) -> String? {
         guard let byteCount, byteCount >= 0,
               let handle = try? FileHandle(forReadingFrom: url) else { return nil }
@@ -210,7 +227,8 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         url: URL,
         bookmarkData: Data? = nil,
         fingerprint: PhotoSourceFingerprint? = nil,
-        portableIdentity: PortablePhotoIdentity? = nil
+        portableIdentity: PortablePhotoIdentity? = nil,
+        sourceChangeSignature: PhotoSourceFingerprint? = nil
     ) {
         let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
         let resolvedFingerprint = fingerprint ?? PhotoSourceFingerprint.file(at: canonical)
@@ -221,7 +239,9 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         self.fingerprint = resolvedFingerprint
         self.portableIdentity = Self.makePortableIdentity(
             at: canonical, assetID: self.id,
-            existing: portableIdentity
+            existing: portableIdentity,
+            sourceChangeSignature: sourceChangeSignature,
+            currentSignature: resolvedFingerprint
         )
     }
 
@@ -234,16 +254,20 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
         data: Data?,
         bookmarkData: Data? = nil,
         fingerprint: PhotoSourceFingerprint? = nil,
-        portableIdentity: PortablePhotoIdentity? = nil
+        portableIdentity: PortablePhotoIdentity? = nil,
+        sourceChangeSignature: PhotoSourceFingerprint? = nil
     ) {
         let canonical = url.standardizedFileURL.resolvingSymlinksInPath()
         self.id = id
         self.url = canonical
         self.data = data
         self.bookmarkData = bookmarkData
-        self.fingerprint = fingerprint ?? PhotoSourceFingerprint.file(at: canonical)
+        let currentSignature = fingerprint ?? PhotoSourceFingerprint.file(at: canonical)
+        self.fingerprint = currentSignature
         self.portableIdentity = Self.makePortableIdentity(
-            at: canonical, assetID: id, existing: portableIdentity
+            at: canonical, assetID: id, existing: portableIdentity,
+            sourceChangeSignature: sourceChangeSignature,
+            currentSignature: currentSignature
         )
     }
 
@@ -341,22 +365,24 @@ struct PhotoAssetSource: Codable, Hashable, Sendable, Equatable {
 
     private static func makePortableIdentity(
         at url: URL, assetID: PhotoAssetID,
-        existing: PortablePhotoIdentity?
+        existing: PortablePhotoIdentity?,
+        sourceChangeSignature: PhotoSourceFingerprint?,
+        currentSignature: PhotoSourceFingerprint
     ) -> PortablePhotoIdentity {
-        let fingerprint = (try? PortablePhotoSourceFingerprint.file(
-            at: url,
-            sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
-            decoderVersion: existing?.sourceFingerprint.decoderVersion
-                ?? "imageio-\(url.pathExtension.lowercased())-v1",
-            geometry: existing?.sourceFingerprint.geometry
-        )) ?? PortablePhotoSourceFingerprint(
+        let fallbackFingerprint = PortablePhotoSourceFingerprint(
             contentHash: PortablePhotoSourceFingerprint.contentHash(
                 of: Data(("unavailable:" + PhotoAssetID.file(url).raw).utf8)
             ),
-            sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
             decoderVersion: existing?.sourceFingerprint.decoderVersion ?? "legacy-fallback-v1",
             geometry: existing?.sourceFingerprint.geometry
         )
+        let initialFingerprint = existing?.sourceFingerprint ?? fallbackFingerprint
+        let fingerprint = (try? PortablePhotoSourceFingerprint.refreshing(
+            initialFingerprint,
+            sourceChangeSignature: sourceChangeSignature,
+            currentSignature: currentSignature,
+            at: url
+        )) ?? initialFingerprint
         // A file URL is a referenced source, not a data-only import. Two different files can have
         // identical bytes and still require independent edit documents, so their compatibility
         // identity must follow the file asset identity rather than the content fingerprint. The

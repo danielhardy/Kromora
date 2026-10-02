@@ -124,6 +124,48 @@ final class PortablePhotoIdentityTests: TempDirectoryTestCase {
                           oldFingerprint.contentHash)
     }
 
+    func testPersistedIdentityReusesHashForMatchingFileSignatureWithoutReadingFile() throws {
+        let url = tempDirectory.appendingPathComponent("removed-after-signature.ARW")
+        try Data("original bytes".utf8).write(to: url)
+        let signature = PhotoSourceFingerprint.file(at: url)
+        let persisted = try PortablePhotoSourceFingerprint.file(
+            at: url, decoderVersion: "imageio-raw-v1"
+        )
+        try FileManager.default.removeItem(at: url)
+
+        let refreshed = try PortablePhotoSourceFingerprint.refreshing(
+            persisted,
+            sourceChangeSignature: signature,
+            currentSignature: signature,
+            at: url
+        )
+
+        XCTAssertEqual(refreshed, persisted)
+    }
+
+    func testPersistedIdentityRehashesWhenFileSignatureChanges() throws {
+        let url = tempDirectory.appendingPathComponent("changed-after-signature.ARW")
+        try Data("original bytes".utf8).write(to: url)
+        let originalSignature = PhotoSourceFingerprint.file(at: url)
+        let persisted = try PortablePhotoSourceFingerprint.file(
+            at: url, sourceRevision: 4, decoderVersion: "imageio-raw-v1"
+        )
+        try Data("replacement bytes".utf8).write(to: url)
+        let currentSignature = PhotoSourceFingerprint.file(at: url)
+
+        let refreshed = try PortablePhotoSourceFingerprint.refreshing(
+            persisted,
+            sourceChangeSignature: originalSignature,
+            currentSignature: currentSignature,
+            at: url
+        )
+
+        XCTAssertEqual(refreshed.contentHash,
+                       PortablePhotoSourceFingerprint.contentHash(of: Data("replacement bytes".utf8)))
+        XCTAssertEqual(refreshed.sourceRevision, 4)
+        XCTAssertNotEqual(refreshed.contentHash, persisted.contentHash)
+    }
+
     func testRelativePathResolutionIsExplicitlyAtRenderBoundary() throws {
         let root = tempDirectory.appendingPathComponent("Library", isDirectory: true)
         let resolved = try RenderBoundarySourceResolver.resolve(

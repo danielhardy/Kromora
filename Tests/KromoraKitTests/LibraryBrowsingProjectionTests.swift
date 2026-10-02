@@ -144,6 +144,10 @@ final class LibraryBrowsingProjectionTests: TempDirectoryTestCase {
         let assetID = browsingAsset.source.portableIdentity.assetID
         let openedAsset = try await session.materializedAsset(for: assetID)
         let openedIdentity = openedAsset.source.portableIdentity
+        let storedSignature = try XCTUnwrap(
+            session.package.readAssetRecord(for: assetID).sourceChangeSignature
+        )
+        XCTAssertTrue(openedAsset.source.fingerprint.isSameFileSnapshot(as: storedSignature))
         XCTAssertNotEqual(openedIdentity.sourceFingerprint.decoderVersion, "browsing-v1")
         XCTAssertEqual(
             openedIdentity.sourceFingerprint.contentHash,

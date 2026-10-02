@@ -865,7 +865,8 @@ final class PortableLibrarySession {
                 id: PhotoAssetID(rawValue: "portable:\(assetID.raw)"),
                 data: nil,
                 bookmarkData: nil,
-                portableIdentity: record.identity
+                portableIdentity: record.identity,
+                sourceChangeSignature: record.sourceChangeSignature
             )
             return PhotoAsset(
                 source: source,

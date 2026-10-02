@@ -426,7 +426,10 @@ struct PortablePackageImporter: Sendable {
                     }
                 }
 
-                if isCancelled() { throw CancellationError() }
+                if isCancelled() {
+                    throw CancellationError()
+                }
+                let stagedOriginalURL = try transaction.stagedURL(for: sourcePath)
                 let identity = PortablePhotoIdentity(
                     assetID: assetID,
                     sourceFingerprint: PortablePhotoSourceFingerprint(
@@ -434,9 +437,11 @@ struct PortablePackageImporter: Sendable {
                         decoderVersion: "import-v1"
                     )
                 )
+                let sourceChangeSignature = PhotoSourceFingerprint.file(at: stagedOriginalURL)
                 let record = PortablePackageAssetRecord(
                     identity: identity,
-                    source: .embedded(relativePath: sourcePath)
+                    source: .embedded(relativePath: sourcePath),
+                    sourceChangeSignature: sourceChangeSignature
                 )
                 try transaction.stage(data: try Self.encode(record), at: recordPath)
 
