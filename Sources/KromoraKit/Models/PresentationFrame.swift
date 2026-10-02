@@ -189,12 +189,16 @@ enum FrameClassifier {
     static func classifyWithReason(
         _ frame: PresentationFrameMetadata, against current: FrameCurrentInputs
     ) -> (classification: FrameClassification, reason: FrameRejectionReason?) {
-        if isPlaceholder(current.source) { return (.unusable, .placeholderSourceIdentity) }
         guard frame.identity.assetID == current.source.assetID,
               frame.signature.source.assetID == current.source.assetID
         else { return (.unusable, .assetMismatch) }
-        guard frame.identity.sourceFingerprint.matches(current.source.sourceFingerprint)
-        else { return (.unusable, .sourceFingerprintMismatch) }
+        guard frame.identity.sourceFingerprint.matches(current.source.sourceFingerprint) else {
+            // A placeholder identity only refines the reason; it never changes what is accepted.
+            return (
+                .unusable,
+                isPlaceholder(current.source) ? .placeholderSourceIdentity : .sourceFingerprintMismatch
+            )
+        }
         guard frame.pixelWidth > 0, frame.pixelHeight > 0,
               max(frame.pixelWidth, frame.pixelHeight) <= previewLongEdge
         else { return (.unusable, .dimensionsInvalid) }
