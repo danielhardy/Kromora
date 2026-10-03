@@ -46,16 +46,22 @@ final class PortableLibrarySession {
     private let heartbeatJobID: ImageWorkScheduler.JobID
     private let indexWriteJobID: ImageWorkScheduler.JobID
     private let indexLoadJobID: ImageWorkScheduler.JobID
+    private let presentedAspectRatioRepairJobID: ImageWorkScheduler.JobID
     private let sourceFingerprintBackfillJobID: ImageWorkScheduler.JobID
     private(set) var indexLoadingState: LibraryIndexLoadingState?
     private(set) var isLoadingIndex = false
     var onIndexLoadingStateChange: (@MainActor (LibraryIndexLoadingState) -> Void)?
+    var onPresentedAspectRatioUpdates: (@MainActor ([PortablePhotoAssetID: Double]) -> Void)?
     private var activeImportJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var asyncImportCatalog: ImportCatalogState?
     private var pendingImportIndexDelta = LibraryIndexDelta.empty
     private var heartbeatTask: Task<Void, Never>?
     private var detachedIndexLoadTask: Task<Void, Never>?
+    private var detachedPresentedAspectRatioRepairTask: Task<Void, Never>?
     private var detachedSourceFingerprintBackfillTask: Task<Void, Never>?
+    private var didStartPresentedAspectRatioRepair = false
+    private var presentedAspectRatioRepairShards: [String] = []
+    private var nextPresentedAspectRatioRepairShard = 0
     private var didStartSourceFingerprintBackfill = false
     private var isShuttingDown = false
     private var lostDuringSession = false
@@ -127,6 +133,9 @@ final class PortableLibrarySession {
             self.indexLoadJobID = ImageWorkScheduler.JobID(
                 "portable-package-index-load-\(lease.ownerID.uuidString)"
             )
+            self.presentedAspectRatioRepairJobID = ImageWorkScheduler.JobID(
+                "portable-package-presented-aspect-ratio-repair-\(lease.ownerID.uuidString)"
+            )
             self.sourceFingerprintBackfillJobID = ImageWorkScheduler.JobID(
                 "portable-package-source-fingerprint-backfill-\(lease.ownerID.uuidString)"
             )
@@ -135,7 +144,7 @@ final class PortableLibrarySession {
                 self.isLoadingIndex = true
                 startIndexLoading(package: package)
             } else {
-                startSourceFingerprintBackfill()
+                startPresentedAspectRatioRepair()
             }
         } catch {
             try? lease.release()
@@ -183,10 +192,10 @@ final class PortableLibrarySession {
                 )
                 self.indexLoadingState = state
                 if state.isComplete { self.isLoadingIndex = false }
-                self.onIndexLoadingStateChange?(state)
                 if state.isComplete, error == nil {
-                    self.startSourceFingerprintBackfill()
+                    self.startPresentedAspectRatioRepair()
                 }
+                self.onIndexLoadingStateChange?(state)
             }
         }
         let operation: @Sendable () async -> Void = {
@@ -235,6 +244,125 @@ final class PortableLibrarySession {
         } else {
             detachedIndexLoadTask = Task.detached(operation: operation)
         }
+    }
+
+    /// Repairs legacy edit geometry only after a usable package index is published. The gate is
+    /// computed entirely from that in-memory projection, so a current package performs no record
+    /// reads for this maintenance pass. Scheduler-backed opens admit one shard per job at the
+    /// lowest priority, returning the package-I/O lane between shards.
+    private func startPresentedAspectRatioRepair() {
+        guard !didStartPresentedAspectRatioRepair, !isShuttingDown else { return }
+        let missing = queryController.index.entries.filter {
+            $0.deletedRevision == nil && $0.summary.presentedAspectRatio == nil
+        }
+        guard !missing.isEmpty else {
+            startSourceFingerprintBackfill()
+            return
+        }
+        didStartPresentedAspectRatioRepair = true
+        presentedAspectRatioRepairShards = Array(Set(missing.map {
+            PortableLibraryPackage.shard(for: $0.assetID)
+        })).sorted()
+        nextPresentedAspectRatioRepairShard = 0
+
+        guard !presentedAspectRatioRepairShards.isEmpty else {
+            startSourceFingerprintBackfill()
+            return
+        }
+
+        if scheduler != nil {
+            enqueueNextPresentedAspectRatioRepairShard()
+            return
+        }
+
+        let package = self.package
+        let lease = self.lease
+        let shardNames = presentedAspectRatioRepairShards
+        let operation: @Sendable () async -> Void = { [weak self] in
+            do {
+                _ = try await package.repairPresentedAspectRatios(
+                    lease: lease,
+                    shardNames: shardNames,
+                    isCancelled: { Task.isCancelled },
+                    onBatch: { [weak self] entries in
+                        await MainActor.run {
+                            self?.publishPresentedAspectRatioRepairBatch(entries)
+                        }
+                    }
+                )
+            } catch {
+                // Earlier shard commits remain valid; a later package open resumes missing ones.
+            }
+            await MainActor.run { [weak self] in
+                guard let self, !self.isShuttingDown else { return }
+                self.startSourceFingerprintBackfill()
+            }
+        }
+        detachedPresentedAspectRatioRepairTask = Task.detached(operation: operation)
+    }
+
+    private func enqueueNextPresentedAspectRatioRepairShard() {
+        guard !isShuttingDown, let scheduler else { return }
+        guard presentedAspectRatioRepairShards.indices.contains(
+            nextPresentedAspectRatioRepairShard
+        ) else {
+            presentedAspectRatioRepairShards = []
+            startSourceFingerprintBackfill()
+            return
+        }
+
+        let shardName = presentedAspectRatioRepairShards[nextPresentedAspectRatioRepairShard]
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now
+        _ = scheduler.enqueuePackageIO(
+            id: presentedAspectRatioRepairJobID,
+            lane: .maintenance,
+            priority: .background,
+            onTerminal: { [weak self] outcome in
+                guard let self, !self.isShuttingDown else { return }
+                switch outcome {
+                case .completed:
+                    self.nextPresentedAspectRatioRepairShard += 1
+                    self.enqueueNextPresentedAspectRatioRepairShard()
+                case .cancelled:
+                    break
+                case .evicted, .rejected:
+                    // The missing summaries are durable repair markers and the next open retries.
+                    self.startSourceFingerprintBackfill()
+                }
+            },
+            operation: { [weak self] in
+                do {
+                    _ = try await package.repairPresentedAspectRatios(
+                        lease: lease,
+                        shardNames: [shardName],
+                        now: now(),
+                        isCancelled: { Task.isCancelled },
+                        onBatch: { [weak self] entries in
+                            await MainActor.run {
+                                self?.publishPresentedAspectRatioRepairBatch(entries)
+                            }
+                        }
+                    )
+                } catch is CancellationError {
+                    // Committed shards remain valid and the next package open resumes the scan.
+                } catch {
+                    // A bad shard does not prevent the remaining legacy summaries being repaired.
+                }
+            }
+        )
+    }
+
+    private func publishPresentedAspectRatioRepairBatch(_ entries: [LibraryIndexEntry]) {
+        let updates = Dictionary(
+            entries.compactMap { entry in
+                entry.summary.presentedAspectRatio.map { (entry.assetID, $0) }
+            },
+            uniquingKeysWith: { _, latest in latest }
+        )
+        guard !updates.isEmpty else { return }
+        _ = try? applyIndexDelta(.init(presentedAspectRatioUpdates: updates))
     }
 
     /// Starts legacy summary repair only after a usable index has been published. Browsing and
@@ -346,10 +474,14 @@ final class PortableLibrarySession {
         activeImportJobIDs.removeAll()
         await scheduler?.cancelAndWait(id: indexWriteJobID)
         await scheduler?.cancelAndWait(id: indexLoadJobID)
+        await scheduler?.cancelAndWait(id: presentedAspectRatioRepairJobID)
         await scheduler?.cancelAndWait(id: sourceFingerprintBackfillJobID)
         detachedIndexLoadTask?.cancel()
         await detachedIndexLoadTask?.value
         detachedIndexLoadTask = nil
+        detachedPresentedAspectRatioRepairTask?.cancel()
+        await detachedPresentedAspectRatioRepairTask?.value
+        detachedPresentedAspectRatioRepairTask = nil
         detachedSourceFingerprintBackfillTask?.cancel()
         await detachedSourceFingerprintBackfillTask?.value
         detachedSourceFingerprintBackfillTask = nil
@@ -486,6 +618,9 @@ final class PortableLibrarySession {
             activeAssetID: activeAssetID
         )
         importCatalog = nil
+        if !delta.presentedAspectRatioUpdates.isEmpty {
+            onPresentedAspectRatioUpdates?(delta.presentedAspectRatioUpdates)
+        }
         if persistSynchronously {
             try projection.write(to: indexURL)
         } else {
@@ -1087,9 +1222,14 @@ final class PortableLibrarySession {
     @discardableResult
     func removeFromLibrary(_ assetID: PortablePhotoAssetID) throws -> PortablePackageRemovalResult {
         try ensureWritableLease()
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now()
         let result: PortablePackageRemovalResult
         do {
-            result = try package.removeFromLibrary(assetID, lease: lease)
+            result = try lease.withWriterMutationLock {
+                try package.removeFromLibrary(assetID, lease: lease, now: now)
+            }
         } catch PortablePackageTrashError.alreadyRemoved(let removedID) {
             // A prior removal committed its tombstone but did not finish updating the projection.
             // Reconcile the index so the item leaves the grid, then let the caller finish cleanup.
@@ -1120,36 +1260,42 @@ final class PortableLibrarySession {
     ) throws {
         try ensureWritableLease()
         let shardName = PortableLibraryPackage.shard(for: assetID)
-        var shard = try package.readMembershipShard(shardName)
-        guard
-            let index = shard.entries.firstIndex(where: {
-            $0.assetID == assetID && !$0.isTombstone
-            })
-        else {
-            throw PortablePackageTrashError.assetNotFound(assetID)
-        }
-        guard
-            shard.entries[index].summary.rating != rating
-                || shard.entries[index].summary.flag != flag.rawValue
-        else { return }
-        shard.entries[index].summary.rating = min(max(rating, 0), 5)
-        shard.entries[index].summary.flag = flag.rawValue
-        shard.entries[index].summary.assetRevision &+= 1
-
-        var transaction = try package.beginTransaction(lease: lease, now: clock.now())
+        let package = self.package
+        let lease = self.lease
+        let now = clock.now()
+        let updatedEntry: LibraryIndexEntry?
         do {
-            try transaction.stage(
-                data: try package.encodedMembershipShard(shard),
-                at: "Catalog/Membership/\(shardName).json"
-            )
-            try transaction.commit()
+            updatedEntry = try lease.withWriterMutationLock {
+                var shard = try package.readMembershipShard(shardName)
+                guard let index = shard.entries.firstIndex(where: {
+                    $0.assetID == assetID && !$0.isTombstone
+                }) else {
+                    throw PortablePackageTrashError.assetNotFound(assetID)
+                }
+                guard shard.entries[index].summary.rating != rating
+                        || shard.entries[index].summary.flag != flag.rawValue
+                else { return nil }
+                shard.entries[index].summary.rating = min(max(rating, 0), 5)
+                shard.entries[index].summary.flag = flag.rawValue
+                shard.entries[index].summary.assetRevision &+= 1
+
+                var transaction = try package.beginTransaction(lease: lease, now: now)
+                do {
+                    try transaction.stage(
+                        data: try package.encodedMembershipShard(shard),
+                        at: "Catalog/Membership/\(shardName).json"
+                    )
+                    try transaction.commit(now: now)
+                } catch {
+                    try? transaction.abort()
+                    throw error
+                }
+                return LibraryIndexEntry(from: shard.entries[index])
+            }
         } catch {
-            try? transaction.abort()
             throw ensureLeaseError(error)
         }
-        _ = try applyIndexDelta(
-            .init(upserts: [.init(from: shard.entries[index])])
-        )
+        if let updatedEntry { _ = try applyIndexDelta(.init(upserts: [updatedEntry])) }
     }
 
 }

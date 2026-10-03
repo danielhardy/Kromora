@@ -2,6 +2,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import XCTest
+import os.lock
 
 @testable import KromoraKit
 
@@ -184,6 +185,69 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(library.requestedPages, [0, 0, 0, 0])
         XCTAssertEqual(destination.portableQuery.searchText, "photo")
+    }
+
+    func testPresentedAspectRatioDeltaTouchesOnlyGeometryAndDoesNotRequestPixels() async throws {
+        let assetID = PortablePhotoAssetID()
+        let summary = PortablePackageAssetSummary(
+            rating: 4, flag: PhotoFlag.pick.rawValue,
+            dimensions: PhotoPixelDimensions(width: 40, height: 20),
+            aspectRatio: 2, displayName: "ratio-only.jpg", assetRevision: 7
+        )
+        let entry = LibraryIndexEntry(
+            assetID: assetID,
+            recordPath: "Assets/\(PortableLibraryPackage.shard(for: assetID))/\(assetID.raw)/asset.json",
+            summary: summary
+        )
+        let index = try LibraryIndexProjection(libraryID: UUID(), entries: [entry])
+        let ratioDelta = LibraryIndexDelta(
+            presentedAspectRatioUpdates: [assetID: 1]
+        )
+        XCTAssertTrue(ratioDelta.upserts.isEmpty)
+        let projected = try index.applying(ratioDelta)
+        let projectedEntry = try XCTUnwrap(projected.entry(for: assetID))
+        var expectedSummary = summary
+        expectedSummary.presentedAspectRatio = 1
+        XCTAssertEqual(projectedEntry.summary, expectedSummary)
+        XCTAssertEqual(projectedEntry.recordPath, entry.recordPath)
+
+        let scheduler = ImageWorkScheduler()
+        let providerCalls = OSAllocatedUnfairLock(initialState: 0)
+        let collection = ImageCollection(
+            scheduler: scheduler,
+            originalThumbnailProvider: { _, _, _, _, _, _, _ in
+                providerCalls.withLock { $0 += 1 }
+                return nil
+            }
+        )
+        collections.append(collection)
+        let identity = PortablePhotoIdentity(
+            assetID: assetID,
+            sourceFingerprint: .data(Data("ratio-only".utf8), decoderVersion: "test")
+        )
+        let source = PhotoAssetSource(
+            data: Data([0x01]), id: PhotoAssetID(rawValue: "portable:\(assetID.raw)"),
+            portableIdentity: identity
+        )
+        let item = ImageCollection.Item(asset: PhotoAsset(
+            source: source, filename: summary.displayName, fileType: "jpg",
+            metadata: PhotoAssetMetadata(dimensions: summary.dimensions),
+            presentedAspectRatio: nil
+        ))
+        collection.items = [item]
+        let thumbnailDemands = OSAllocatedUnfairLock(initialState: 0)
+        collection.onThumbnailDemand = { _, _ in
+            thumbnailDemands.withLock { $0 += 1 }
+        }
+
+        collection.applyPresentedAspectRatioUpdates([assetID: 1])
+
+        XCTAssertEqual(item.asset.presentedAspectRatio, 1)
+        XCTAssertEqual(item.libraryAspectRatio, 1)
+        XCTAssertEqual(collection.cropGeneration, 1)
+        XCTAssertEqual(thumbnailDemands.withLock { $0 }, 0)
+        XCTAssertEqual(providerCalls.withLock { $0 }, 0)
+        XCTAssertTrue(scheduler.admissionLog.isEmpty)
     }
 
     func testKeyboardNextAtWindowTailLoadsNextPageBeforeSelecting() throws {

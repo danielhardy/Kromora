@@ -80,15 +80,19 @@ struct LibraryIndexEntry: Codable, Equatable, Hashable, Sendable, Identifiable {
 struct LibraryIndexDelta: Equatable, Sendable {
     let upserts: [LibraryIndexEntry]
     let removals: [PortablePhotoAssetID]
+    /// Narrow presentation-only updates that must not replace unrelated summary fields.
+    let presentedAspectRatioUpdates: [PortablePhotoAssetID: Double]
 
-    static let empty = Self(upserts: [], removals: [])
+    static let empty = Self(upserts: [], removals: [], presentedAspectRatioUpdates: [:])
 
     init(
         upserts: [LibraryIndexEntry] = [],
-        removals: [PortablePhotoAssetID] = []
+        removals: [PortablePhotoAssetID] = [],
+        presentedAspectRatioUpdates: [PortablePhotoAssetID: Double] = [:]
     ) {
         self.upserts = upserts
         self.removals = removals
+        self.presentedAspectRatioUpdates = presentedAspectRatioUpdates
     }
 
     func merging(_ other: Self) -> Self {
@@ -102,7 +106,14 @@ struct LibraryIndexDelta: Equatable, Sendable {
             removalsByID.remove(entry.assetID)
             upsertsByID[entry.assetID] = entry
         }
-        return Self(upserts: Array(upsertsByID.values), removals: Array(removalsByID))
+        var ratioUpdates = presentedAspectRatioUpdates
+        for assetID in other.removals { ratioUpdates.removeValue(forKey: assetID) }
+        for entry in other.upserts { ratioUpdates.removeValue(forKey: entry.assetID) }
+        ratioUpdates.merge(other.presentedAspectRatioUpdates) { _, newest in newest }
+        return Self(
+            upserts: Array(upsertsByID.values), removals: Array(removalsByID),
+            presentedAspectRatioUpdates: ratioUpdates
+        )
     }
 }
 
@@ -141,6 +152,16 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         }
         for entry in delta.upserts {
             entries[entry.assetID] = entry
+        }
+        for (assetID, ratio) in delta.presentedAspectRatioUpdates {
+            guard let entry = entries[assetID], entry.deletedRevision == nil else { continue }
+            var summary = entry.summary
+            summary.presentedAspectRatio = ratio
+            entries[assetID] = LibraryIndexEntry(
+                assetID: entry.assetID, recordPath: entry.recordPath,
+                addedRevision: entry.addedRevision, deletedRevision: entry.deletedRevision,
+                summary: summary
+            )
         }
         return try Self(libraryID: libraryID, entries: Array(entries.values))
     }

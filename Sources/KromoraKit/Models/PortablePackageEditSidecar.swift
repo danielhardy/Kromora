@@ -222,6 +222,19 @@ extension PortableLibraryPackage {
         lease: PortablePackageLease,
         now: Date = Date()
     ) throws -> LibraryIndexEntry? {
+        try lease.withWriterMutationLock {
+            try replaceSourceFingerprintUnderWriterLock(
+                for: assetID, with: fingerprint, lease: lease, now: now
+            )
+        }
+    }
+
+    private func replaceSourceFingerprintUnderWriterLock(
+        for assetID: PortablePhotoAssetID,
+        with fingerprint: PortablePhotoSourceFingerprint,
+        lease: PortablePackageLease,
+        now: Date
+    ) throws -> LibraryIndexEntry? {
         var record = try readAssetRecord(for: assetID)
         var shard = try readMembershipShard(Self.shard(for: assetID))
         guard let index = shard.entries.firstIndex(where: { $0.assetID == assetID }) else {
@@ -383,6 +396,25 @@ extension PortableLibraryPackage {
         isCancelled: @Sendable () -> Bool = { false },
         faultInjector: PortablePackageFaultInjector? = nil
     ) throws -> PortablePackageEditCommit {
+        try lease.withWriterMutationLock {
+            try commitEditRevisionUnderWriterLock(
+                for: assetID, document: document, snapshotName: snapshotName,
+                lookBytes: lookBytes, lease: lease, now: now,
+                isCancelled: isCancelled, faultInjector: faultInjector
+            )
+        }
+    }
+
+    private func commitEditRevisionUnderWriterLock(
+        for assetID: PortablePhotoAssetID,
+        document: EditDocument,
+        snapshotName: String? = nil,
+        lookBytes: [Data] = [],
+        lease: PortablePackageLease,
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false },
+        faultInjector: PortablePackageFaultInjector? = nil
+    ) throws -> PortablePackageEditCommit {
         var record = try readAssetRecord(for: assetID)
         let recordedRevision = max(
             record.currentRevision,
@@ -532,23 +564,58 @@ extension PortableLibraryPackage {
         return shard.entries[index]
     }
 
-    /// Recompute `presentedAspectRatio` for every live asset whose summary lacks the current
-    /// edit's geometry, reading each asset's current edit sidecar. This is the explicit repair for
-    /// packages written before the field existed; the sidecar remains the truth and the summary is
-    /// rebuilt from it. Returns the assets whose summary changed.
+    /// Recompute the missing presented geometry in bounded membership-shard transactions.
+    /// Each committed shard is independently valid, and `onBatch` publishes only after its
+    /// package transaction succeeds. Cancellation leaves earlier shards durable and later opens
+    /// resume from the still-missing summaries.
     @discardableResult
     func repairPresentedAspectRatios(
         lease: PortablePackageLease,
+        shardNames: [String] = Self.allShards,
+        now: Date = Date(),
+        isCancelled: @Sendable () -> Bool = { false },
+        onBatch: (@Sendable ([LibraryIndexEntry]) async -> Void)? = nil
+    ) async throws -> [PortablePhotoAssetID] {
+        var repaired: [PortablePhotoAssetID] = []
+        for shardName in shardNames {
+            try Task.checkCancellation()
+            if isCancelled() { throw CancellationError() }
+            let entries = try repairPresentedAspectRatioShard(
+                shardName, lease: lease, now: now, isCancelled: isCancelled
+            )
+            guard !entries.isEmpty else { continue }
+            repaired.append(contentsOf: entries.map(\.assetID))
+            await onBatch?(entries)
+            await Task.yield()
+        }
+        return repaired
+    }
+
+    /// Repairs one shard so the scheduler can return to queued user-visible package work between
+    /// transactions. The lease mutation lock covers sidecar reads through commit: if an edit is
+    /// already in progress it wins first and repair reads that edit, and if repair is first the
+    /// later edit publishes after it. A fresh membership read immediately before staging also
+    /// preserves concurrent catalog changes such as ratings and tombstones.
+    func repairPresentedAspectRatioShard(
+        _ shardName: String,
+        lease: PortablePackageLease,
         now: Date = Date(),
         isCancelled: @Sendable () -> Bool = { false }
-    ) throws -> [PortablePhotoAssetID] {
-        var repaired: [PortablePhotoAssetID] = []
-        for shardName in Self.allShards {
+    ) throws -> [LibraryIndexEntry] {
+        try lease.withWriterMutationLock {
+            guard Self.isValidShard(shardName) else {
+                throw PortablePackageError.invalidShard(shardName)
+            }
             if isCancelled() { throw CancellationError() }
-            var shard = try readMembershipShard(shardName)
-            var changed = false
-            for index in shard.entries.indices where !shard.entries[index].isTombstone {
-                let assetID = shard.entries[index].assetID
+            let scannedShard = try readMembershipShard(shardName)
+            let missingIDs = scannedShard.entries
+                .filter { !$0.isTombstone && $0.summary.presentedAspectRatio == nil }
+                .map(\.assetID)
+            guard !missingIDs.isEmpty else { return [] }
+
+            var presentedRatios: [PortablePhotoAssetID: Double] = [:]
+            for assetID in missingIDs {
+                if isCancelled() { throw CancellationError() }
                 let document: EditDocument
                 if let record = try? readAssetRecord(for: assetID), record.currentRevision > 0,
                    let revision = try? readEditRevision(for: assetID) {
@@ -556,19 +623,33 @@ extension PortableLibraryPackage {
                 } else {
                     document = EditDocument()
                 }
-                let presented = shard.entries[index].summary.presentedAspectRatio(for: document)
-                guard shard.entries[index].summary.presentedAspectRatio != presented else {
-                    continue
+                if let ratio = scannedShard.entries.first(where: { $0.assetID == assetID })?
+                    .summary.presentedAspectRatio(for: document) {
+                    presentedRatios[assetID] = ratio
                 }
-                shard.entries[index].summary.presentedAspectRatio = presented
-                repaired.append(assetID)
-                changed = true
             }
-            guard changed else { continue }
+
+            // Do not publish the scanned shard: catalog values may have changed while the
+            // sidecars were read. Merge only this repair's field into the latest membership data.
+            var commitShard = try readMembershipShard(shardName)
+            for index in commitShard.entries.indices {
+                let entry = commitShard.entries[index]
+                guard !entry.isTombstone,
+                      entry.summary.presentedAspectRatio == nil,
+                      let ratio = presentedRatios[entry.assetID]
+                else { continue }
+                commitShard.entries[index].summary.presentedAspectRatio = ratio
+            }
+            let repairedEntries = commitShard.entries
+                .filter { !$0.isTombstone && presentedRatios[$0.assetID] != nil
+                    && $0.summary.presentedAspectRatio == presentedRatios[$0.assetID] }
+                .map(LibraryIndexEntry.init(from:))
+            guard !repairedEntries.isEmpty else { return [] }
+
             var transaction = try beginTransaction(lease: lease, now: now)
             do {
                 try transaction.stage(
-                    data: try encodedMembershipShard(shard),
+                    data: try encodedMembershipShard(commitShard),
                     at: "Catalog/Membership/\(shardName).json"
                 )
                 try transaction.commit(now: now, isCancelled: isCancelled)
@@ -576,8 +657,8 @@ extension PortableLibraryPackage {
                 try? transaction.abort()
                 throw error
             }
+            return repairedEntries
         }
-        return repaired
     }
 
     /// The highest revision number already stored as an edit JSON or XMP sidecar.
@@ -631,6 +712,19 @@ extension PortableLibraryPackage {
         revision: UInt64,
         lease: PortablePackageLease,
         now: Date = Date()
+    ) throws -> PortablePackageMembershipEntry? {
+        try lease.withWriterMutationLock {
+            try selectEditRevisionUnderWriterLock(
+                for: assetID, revision: revision, lease: lease, now: now
+            )
+        }
+    }
+
+    private func selectEditRevisionUnderWriterLock(
+        for assetID: PortablePhotoAssetID,
+        revision: UInt64,
+        lease: PortablePackageLease,
+        now: Date
     ) throws -> PortablePackageMembershipEntry? {
         var record = try readAssetRecord(for: assetID)
         guard record.editHistory.edits.contains(where: { $0.revision == revision }) else {
