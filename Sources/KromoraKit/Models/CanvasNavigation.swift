@@ -51,6 +51,11 @@ final class CanvasInteractionState {
     func reset() { navigation.reset() }
     func toggleFitAndRememberedZoom() { navigation.toggleFitAndRememberedZoom() }
 
+    @discardableResult
+    func updateCanvasGeometry(imageExtent: CGRect, viewportSize: CGSize) -> Bool {
+        navigation.updateGeometry(imageExtent: imageExtent, viewportSize: viewportSize)
+    }
+
     func setZoom(_ value: CGFloat) {
         navigation.setZoom(value)
     }
@@ -308,6 +313,7 @@ struct CanvasNavigation: Equatable, Sendable {
         case custom
     }
 
+    /// Safe lower bound while the canvas has not reported source and viewport geometry yet.
     static let minimumZoom: CGFloat = 0.1
     static let maximumZoom: CGFloat = 16
 
@@ -319,6 +325,9 @@ struct CanvasNavigation: Equatable, Sendable {
     /// The last finite zoom selected by an explicit control or a zoom gesture. Fit and Fill do not
     /// clear this value so the canvas can return to the user's previous detail level.
     private(set) var rememberedZoom: CGFloat?
+    /// Minimum fit-relative zoom for the current source and viewport. It is Fit when Fit would
+    /// shrink the source, and the native 1:1 scale when Fit would enlarge it.
+    private(set) var minimumZoomMultiplier = Self.minimumZoom
 
     /// A predictable detail level for the first double-click, before the user has chosen a custom
     /// zoom. This is presentation state only and is intentionally independent of edit history.
@@ -328,7 +337,16 @@ struct CanvasNavigation: Equatable, Sendable {
         self.rememberedZoom = rememberedZoom.map(Self.clampZoom)
     }
 
+    /// Custom zoom is measured relative to Fit, which is the coordinate space used by presets.
     var zoomPercent: Int { Int((zoom * 100).rounded()) }
+
+    var zoomAccessibilityValue: String {
+        switch mode {
+        case .fit: "Fit"
+        case .fill: "Fill"
+        case .custom: "\(zoomPercent)% of Fit"
+        }
+    }
 
     mutating func fit() {
         mode = .fit
@@ -348,13 +366,38 @@ struct CanvasNavigation: Equatable, Sendable {
         self = CanvasNavigation()
     }
 
+    /// Reconcile the fit-relative zoom bound with the displayed source and viewport geometry.
+    /// Returning to a smaller viewport can raise the minimum, so clamp both the active zoom and
+    /// the value that a later Fit/Fill toggle will restore.
+    @discardableResult
+    mutating func updateGeometry(imageExtent: CGRect, viewportSize: CGSize) -> Bool {
+        guard Self.isValidSize(imageExtent.size), Self.isValidSize(viewportSize) else { return false }
+        let fitScale = min(
+            viewportSize.width / imageExtent.width,
+            viewportSize.height / imageExtent.height
+        )
+        guard fitScale.isFinite, fitScale > 0 else { return false }
+        let nextMinimum = Self.minimumZoomMultiplier(forFitScale: fitScale)
+        guard nextMinimum != minimumZoomMultiplier else { return false }
+
+        minimumZoomMultiplier = nextMinimum
+        if mode == .custom {
+            zoom = Self.clampZoom(zoom, minimum: nextMinimum)
+        }
+        if let rememberedZoom {
+            self.rememberedZoom = Self.clampZoom(rememberedZoom, minimum: nextMinimum)
+        }
+        return true
+    }
+
     mutating func toggleFitAndRememberedZoom() {
         guard mode == .fit else {
             fit()
             return
         }
 
-        let target = Self.clampZoom(rememberedZoom ?? Self.doubleClickFallbackZoom)
+        let target = Self.clampZoom(
+            rememberedZoom ?? Self.doubleClickFallbackZoom, minimum: minimumZoomMultiplier)
         rememberedZoom = target
         mode = .custom
         zoom = target
@@ -371,13 +414,14 @@ struct CanvasNavigation: Equatable, Sendable {
             return
         }
 
-        let target = Self.clampZoom(rememberedZoom ?? Self.doubleClickFallbackZoom)
+        let target = Self.clampZoom(
+            rememberedZoom ?? Self.doubleClickFallbackZoom, minimum: minimumZoomMultiplier)
         zoom(by: target, at: viewportPoint, imageExtent: imageExtent, viewportSize: viewportSize)
     }
 
     mutating func setZoom(_ value: CGFloat) {
         mode = .custom
-        zoom = Self.clampZoom(value)
+        zoom = Self.clampZoom(value, minimum: minimumZoomMultiplier)
         if value.isFinite {
             rememberedZoom = zoom
         }
@@ -403,13 +447,14 @@ struct CanvasNavigation: Equatable, Sendable {
             imageExtent: imageExtent, viewportSize: viewportSize)
         guard before.scale.isFinite, before.scale > 0 else { return }
 
-        let targetZoom = Self.clampZoom(zoom * factor)
-        // A gesture that is already at a zoom limit must not turn into an implicit pan merely
+        let targetZoom = Self.clampZoom(zoom * factor, minimum: minimumZoomMultiplier)
+        // A gesture at a limit must not turn into an implicit pan or leave Fit mode merely
         // because its pointer is away from the current focal point.
-        guard targetZoom != zoom || mode == .fit else { return }
+        guard targetZoom != zoom else { return }
         let target = Self.transform(
             imageExtent: imageExtent, viewportSize: viewportSize,
-            mode: .custom, zoom: targetZoom, focalPoint: focalPoint
+            mode: .custom, zoom: targetZoom,
+            minimumZoomMultiplier: minimumZoomMultiplier, focalPoint: focalPoint
         )
         guard target.scale.isFinite, target.scale > 0 else { return }
 
@@ -437,7 +482,8 @@ struct CanvasNavigation: Equatable, Sendable {
         guard delta.width.isFinite, delta.height.isFinite else { return }
         let transform = Self.transform(
             imageExtent: imageExtent, viewportSize: viewportSize,
-            mode: mode, zoom: zoom, focalPoint: focalPoint
+            mode: mode, zoom: zoom,
+            minimumZoomMultiplier: minimumZoomMultiplier, focalPoint: focalPoint
         )
         focalPoint = Self.focalPoint(
             afterMovingOrigin: CGSize(width: transform.origin.x + delta.width,
@@ -451,7 +497,8 @@ struct CanvasNavigation: Equatable, Sendable {
     func transform(imageExtent: CGRect, viewportSize: CGSize) -> CanvasTransform {
         Self.transform(
             imageExtent: imageExtent, viewportSize: viewportSize,
-            mode: mode, zoom: zoom, focalPoint: focalPoint
+            mode: mode, zoom: zoom,
+            minimumZoomMultiplier: minimumZoomMultiplier, focalPoint: focalPoint
         )
     }
 
@@ -474,9 +521,17 @@ struct CanvasNavigation: Equatable, Sendable {
         value.clamped(to: minimumZoom...maximumZoom, default: 1)
     }
 
+    private static func clampZoom(_ value: CGFloat, minimum: CGFloat) -> CGFloat {
+        value.clamped(to: minimum...maximumZoom, default: 1)
+    }
+
+    private static func minimumZoomMultiplier(forFitScale fitScale: CGFloat) -> CGFloat {
+        min(1, 1 / fitScale)
+    }
+
     private static func transform(
         imageExtent: CGRect, viewportSize: CGSize, mode: Mode, zoom: CGFloat,
-        focalPoint: CGPoint
+        minimumZoomMultiplier: CGFloat, focalPoint: CGPoint
     ) -> CanvasTransform {
         guard isValidSize(imageExtent.size), isValidSize(viewportSize) else {
             return CanvasTransform(scale: 1, origin: .zero, imageSize: .zero)
@@ -487,7 +542,10 @@ struct CanvasNavigation: Equatable, Sendable {
         let fillScale = max(viewportSize.width / imageExtent.width,
                             viewportSize.height / imageExtent.height)
         let baseScale = mode == .fill ? fillScale : fitScale
-        let scale = baseScale * clampZoom(zoom)
+        let effectiveZoom = mode == .custom
+            ? clampZoom(zoom, minimum: minimumZoomMultiplier)
+            : clampZoom(zoom)
+        let scale = baseScale * effectiveZoom
         let imageSize = CGSize(width: imageExtent.width * scale,
                                height: imageExtent.height * scale)
         let focal = CGPoint(x: min(max(focalPoint.x, 0), 1),

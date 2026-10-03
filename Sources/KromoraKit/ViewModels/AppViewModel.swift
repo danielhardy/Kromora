@@ -3965,6 +3965,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func scheduleCropEntryPreview() { previewAdmissionCoordinator.scheduleCropEntryPreview() }
     private func scheduleCorrectivePreview() { previewAdmissionCoordinator.scheduleCorrectivePreview() }
     private func scheduleInteractivePreview() { previewAdmissionCoordinator.scheduleInteractivePreview() }
+    func updateCanvasBackingSize(_ size: CGSize) -> CanvasNavigation {
+        canvasWorkflow.updateCanvasBackingSize(size)
+        return canvasState.navigation
+    }
     func updatePreviewBackingSize(_ size: CGSize) {
         previewAdmissionCoordinator.updatePreviewBackingSize(size)
     }

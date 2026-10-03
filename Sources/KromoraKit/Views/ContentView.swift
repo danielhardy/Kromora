@@ -543,7 +543,9 @@ private struct CanvasToolbarControls: View {
             Button("Fill") { viewModel.fillCanvas() }
             Divider()
             ForEach([0.25, 0.5, 1.0, 2.0, 4.0, 8.0], id: \.self) { zoom in
-                Button("\(Int(zoom * 100))%") { viewModel.setCanvasZoom(CGFloat(zoom)) }
+                Button("\(Int(zoom * 100))% of Fit") {
+                    viewModel.setCanvasZoom(CGFloat(zoom))
+                }
             }
             Divider()
             Button("Reset View") { viewModel.resetCanvas() }
@@ -552,9 +554,12 @@ private struct CanvasToolbarControls: View {
             Label("Zoom", systemImage: "magnifyingglass")
         }
         .menuIndicator(.hidden)
-        .help("Canvas zoom \(canvasState.navigation.zoomPercent)%: fit, fill, or an explicit zoom")
+        .help(
+            "Canvas zoom \(canvasState.navigation.zoomAccessibilityValue). "
+                + "Zoom out stops at Fit or 100% source scale."
+        )
         .accessibilityLabel("Canvas zoom")
-        .accessibilityValue("\(canvasState.navigation.zoomPercent)%")
+        .accessibilityValue(canvasState.navigation.zoomAccessibilityValue)
         .disabled(!hasImage)
     }
 }

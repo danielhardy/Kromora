@@ -860,6 +860,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
     /// The drawable reports backing pixels, which is the only reliable size across mixed-DPI
     /// windows and side-by-side panels. SwiftUI point geometry is not sufficient here.
     var onDrawableSizeChange: ((CGSize) -> Void)?
+    /// Supplies the clamped navigation state after source/viewport geometry is reconciled.
+    var onCanvasGeometryChange: ((CGSize) -> CanvasNavigation?)?
     /// Crop-mode Straighten is deliberately a view-space transform. The render request remains
     /// unstraightened so the photo can turn beneath the stable, axis-aligned crop overlay.
     var viewSpaceRotationAngle: Double = 0
@@ -893,6 +895,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         context.coordinator.navigation = navigation
         context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
+        context.coordinator.onCanvasGeometryChange = onCanvasGeometryChange
         view.onScrollZoom = onScrollZoom
         view.onDoubleClick = onDoubleClick
         view.onCanvasInteractionBegan = onCanvasInteractionBegan
@@ -925,6 +928,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         context.coordinator.navigation = navigation
         context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
+        context.coordinator.onCanvasGeometryChange = onCanvasGeometryChange
         if let view = view as? PreviewMTKView {
             view.onScrollZoom = onScrollZoom
             view.onDoubleClick = onDoubleClick
@@ -958,6 +962,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         var navigation = CanvasNavigation()
         var viewSpaceRotationAngle: Double = 0
         var onDrawableSizeChange: ((CGSize) -> Void)?
+        var onCanvasGeometryChange: ((CGSize) -> CanvasNavigation?)?
         private var lastDrawnRevision: UInt64?
         private var lastDrawnNavigation: CanvasNavigation?
         private var lastDrawnViewSpaceRotationAngle: Double?
@@ -1158,8 +1163,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 needsDisplayAfterInFlightDraw = true
                 return
             }
-            guard let surface, let stack = surface.presentationStack(for: navigation) else { return }
-            let frame = stack.detail
+            guard let surface else { return }
             let drawableAcquisitionStart = LiveEditTelemetryClock.now
             guard let drawable = view.currentDrawable,
                 let commandBuffer = commandQueue.makeCommandBuffer()
@@ -1170,7 +1174,13 @@ struct PreviewSurfaceView: NSViewRepresentable {
             )
 
             let drawableSize = (drawable.texture.width, drawable.texture.height)
-            onDrawableSizeChange?(CGSize(width: drawableSize.0, height: drawableSize.1))
+            let backingSize = CGSize(width: drawableSize.0, height: drawableSize.1)
+            if let updatedNavigation = onCanvasGeometryChange?(backingSize) {
+                navigation = updatedNavigation
+            }
+            onDrawableSizeChange?(backingSize)
+            guard let stack = surface.presentationStack(for: navigation) else { return }
+            let frame = stack.detail
             let drawNavigation = frame.navigation
             let drawTextureGeneration = Self.textureGeneration(for: stack)
             let sameDrawableSize =
@@ -1582,8 +1592,12 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
             lastDrawableSize = nil
-            onDrawableSizeChange?(
-                CGSize(width: size.width.rounded(.down), height: size.height.rounded(.down)))
+            let backingSize = CGSize(
+                width: size.width.rounded(.down), height: size.height.rounded(.down))
+            if let updatedNavigation = onCanvasGeometryChange?(backingSize) {
+                navigation = updatedNavigation
+            }
+            onDrawableSizeChange?(backingSize)
             view.setNeedsDisplay(view.bounds)
         }
 

@@ -44,6 +44,7 @@ final class CanvasWorkflowCoordinator {
     let interactionState: CanvasInteractionState
     weak var destination: (any CanvasWorkflowDestination)?
     private var cropPresentation: CropWorkflowPresentation?
+    private var canvasBackingSize: CGSize?
 
     init(
         interactionState: CanvasInteractionState = CanvasInteractionState(),
@@ -60,6 +61,26 @@ final class CanvasWorkflowCoordinator {
     func resetForSource() {
         cropPresentation = nil
         interactionState.resetForSource()
+    }
+
+    func updateCanvasBackingSize(_ size: CGSize) {
+        guard size.width.isFinite, size.height.isFinite, size.width > 0, size.height > 0 else {
+            return
+        }
+        canvasBackingSize = size
+        synchronizeCanvasGeometry()
+    }
+
+    private func synchronizeCanvasGeometry() {
+        // The preview reports drawable pixels and the destination exposes the oriented source
+        // extent in pixels, so the dynamic 1:1 threshold uses matching units. Pointer transforms
+        // can use point-space viewport dimensions because they share the same fit-relative zoom.
+        guard let canvasBackingSize, let imageExtent = destination?.canvasWorkflowImageExtent else {
+            return
+        }
+        interactionState.updateCanvasGeometry(
+            imageExtent: imageExtent, viewportSize: canvasBackingSize
+        )
     }
 
     func discardCropForSourceChange() {
@@ -231,12 +252,28 @@ final class CanvasWorkflowCoordinator {
         destination.setCanvasWorkflowStatus("Rotated \(clockwise ? "clockwise" : "counterclockwise")")
     }
 
-    func fitCanvas() { applyNavigation { interactionState.fit() } }
-    func fillCanvas() { applyNavigation { interactionState.fill() } }
-    func resetCanvas() { applyNavigation { interactionState.reset() } }
-    func toggleCanvasZoom() { applyNavigation { interactionState.toggleFitAndRememberedZoom() } }
+    func fitCanvas() {
+        synchronizeCanvasGeometry()
+        applyNavigation { interactionState.fit() }
+    }
+
+    func fillCanvas() {
+        synchronizeCanvasGeometry()
+        applyNavigation { interactionState.fill() }
+    }
+
+    func resetCanvas() {
+        synchronizeCanvasGeometry()
+        applyNavigation { interactionState.reset() }
+    }
+
+    func toggleCanvasZoom() {
+        synchronizeCanvasGeometry()
+        applyNavigation { interactionState.toggleFitAndRememberedZoom() }
+    }
 
     func toggleCanvasZoom(at point: CGPoint, viewportSize: CGSize) {
+        synchronizeCanvasGeometry()
         guard let imageExtent = destination?.canvasWorkflowImageExtent else {
             toggleCanvasZoom()
             return
@@ -254,6 +291,7 @@ final class CanvasWorkflowCoordinator {
     }
 
     func setCanvasZoom(_ value: CGFloat) {
+        synchronizeCanvasGeometry()
         let old = interactionState.navigation
         interactionState.setZoom(value)
         guard interactionState.navigation != old else { return }
@@ -262,12 +300,14 @@ final class CanvasWorkflowCoordinator {
 
     func zoomCanvas(by factor: CGFloat) {
         guard factor.isFinite, factor > 0 else { return }
+        synchronizeCanvasGeometry()
         setCanvasZoom(interactionState.navigation.zoom * factor)
     }
 
     func zoomCanvas(by factor: CGFloat, at point: CGPoint, viewportSize: CGSize) {
         guard factor.isFinite, factor > 0,
               let imageExtent = destination?.canvasWorkflowImageExtent else { return }
+        synchronizeCanvasGeometry()
         let old = interactionState.navigation
         interactionState.zoom(by: factor, at: point, imageExtent: imageExtent, viewportSize: viewportSize)
         guard interactionState.navigation != old else { return }
@@ -276,6 +316,7 @@ final class CanvasWorkflowCoordinator {
 
     func panCanvas(by delta: CGSize, viewportSize: CGSize) {
         guard let destination, let imageExtent = destination.canvasWorkflowImageExtent else { return }
+        synchronizeCanvasGeometry()
         let old = interactionState.navigation
         interactionState.pan(by: delta, imageExtent: imageExtent, viewportSize: viewportSize)
         guard interactionState.navigation != old else { return }
