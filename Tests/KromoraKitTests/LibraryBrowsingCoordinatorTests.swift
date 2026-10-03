@@ -1,3 +1,5 @@
+import AppKit
+import CoreGraphics
 import Foundation
 import XCTest
 
@@ -22,7 +24,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         private(set) var requestedPages: [Int] = []
         private(set) var persistedStates: [(PortablePhotoAssetID, Int, PhotoFlag)] = []
 
-        init(count: Int, pageSize: Int) {
+        init(count: Int, pageSize: Int, presentedAspectRatio: Double? = nil) {
             self.pageSize = pageSize
             self.indexedAssetCount = count
             self.assets = (0..<count).map { index in
@@ -40,7 +42,8 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
                     portableIdentity: identity
                 )
                 return PhotoAsset(
-                    source: source, filename: "photo-\(index).jpg", fileType: "jpg"
+                    source: source, filename: "photo-\(index).jpg", fileType: "jpg",
+                    presentedAspectRatio: presentedAspectRatio
                 )
             }
         }
@@ -107,6 +110,12 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         func updateLibraryState(for assetID: PortablePhotoAssetID, rating: Int, flag: PhotoFlag) throws {
             persistedStates.append((assetID, rating, flag))
         }
+    }
+
+    @MainActor
+    private final class RasterAssignmentProbe {
+        private(set) var images: [NSImage] = []
+        func record(_ image: NSImage) { images.append(image) }
     }
 
     private actor FrameReadProbe: LaunchHintFrameReading {
@@ -361,6 +370,123 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(coordinator.launchHydrationMetrics.usefulHits, 1)
         XCTAssertGreaterThan(coordinator.launchHydrationMetrics.bytesRead, 0)
         await coordinator.shutdown()
+    }
+
+    func testLaunchHintsAndViewportPublishTheSamePersistedFrame() async throws {
+        enum HydrationPath: CaseIterable, Equatable { case viewport, launchHints }
+
+        let root = try Fixtures.makeTempDirectory("LibraryBrowsingParity")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let library = FakeLibrary(count: 1, pageSize: 1, presentedAspectRatio: 1.25)
+        let asset = try XCTUnwrap(library.assets.first)
+        let identity = asset.source.portableIdentity
+        let editedFrame = PresentationFrame(
+            metadata: FrameFixtures.metadata(
+                identity: identity, edit: "saved-edit", kind: .editedThumbnail480
+            ),
+            rasterData: try FrameFixtures.jpeg(red: 0.72)
+        )
+        let originalFrame = PresentationFrame(
+            metadata: FrameFixtures.metadata(
+                identity: identity, edit: OriginalThumbnailSignature.editHash,
+                kind: .originalThumbnail480
+            ),
+            rasterData: try FrameFixtures.jpeg(red: 0.28)
+        )
+        let frameStore = ThumbnailFrameStore(directory: root.appendingPathComponent("Frames"))
+        await frameStore.enqueueWrite(originalFrame)
+        await frameStore.enqueueWrite(editedFrame)
+        await frameStore.flush()
+
+        var viewportPixels: [UInt8]?
+        var viewportOutcomes: [String] = []
+        var viewportRatio = 0.0
+        var viewportAssignments = 0
+        var launchPixels: [UInt8]?
+        var launchOutcomes: [String] = []
+        var launchRatio = 0.0
+        var launchAssignments = 0
+
+        for path in HydrationPath.allCases {
+            let scheduler = ImageWorkScheduler()
+            let ledger = FrameLookupLedger()
+            let collection = ImageCollection(scheduler: scheduler, frameLookupLedger: ledger)
+            collections.append(collection)
+            collection.thumbnailFrameStore = frameStore
+            let item: ImageCollection.Item
+            var browsingCoordinator: LibraryBrowsingCoordinator?
+
+            if path == .launchHints {
+                let destination = FakeDestination()
+                let hintsStore = LaunchHintsStore(url: root.appendingPathComponent("LaunchHints.json"))
+                await hintsStore.scheduleWrite(LaunchHints(
+                    libraryID: library.libraryID, activeAssetID: nil,
+                    visibleAssetIDs: [identity.assetID]
+                ))
+                await hintsStore.flush()
+                let coordinator = LibraryBrowsingCoordinator(
+                    collection: collection, library: library, destination: destination,
+                    scheduler: scheduler, frameStore: frameStore, hintsStore: hintsStore
+                )
+                browsingCoordinator = coordinator
+                coordinator.prepareLaunchHints()
+                try await waitUntil("launch hints validated") {
+                    coordinator.launchHydrationMetrics.validation == "valid"
+                }
+                try coordinator.reloadPortableWindow()
+                try await waitUntil("launch frame read") {
+                    coordinator.launchHydrationMetrics.readCount == 1
+                }
+                item = try XCTUnwrap(collection.items.first)
+            } else {
+                collection.loadPortableAssets([asset])
+                await collection.scanCompletion()
+                collection.beginThumbnailDemand()
+                item = try XCTUnwrap(collection.items.first)
+            }
+
+            let assignments = RasterAssignmentProbe()
+            item.onThumbnailAssignment = { assignments.record($0) }
+            collection.requestVisibleThumbnails(for: [item.id])
+            try await waitUntil("persisted cell frame") {
+                let records = await ledger.snapshot()
+                return item.thumbnail != nil && records.count >= 2
+            }
+            let image = try XCTUnwrap(item.thumbnail)
+            var proposedRect = CGRect(origin: .zero, size: image.size)
+            let cgImage = try XCTUnwrap(image.cgImage(
+                forProposedRect: &proposedRect, context: nil, hints: nil
+            ))
+            let pixels = try Pixels.bytes(of: cgImage)
+            let outcomes = Array(Set(await ledger.snapshot().map { $0.outcome.label })).sorted()
+            XCTAssertEqual(outcomes, ["exact", "provisionalOnly"])
+            XCTAssertEqual(assignments.images.count, 1,
+                           "one stored edited raster should paint once on either hydration path")
+            let expectedImage = try PresentationFrameEnvelope.decodeRaster(of: editedFrame)
+            XCTAssertEqual(pixels, try Pixels.bytes(of: expectedImage))
+            XCTAssertEqual(item.libraryAspectRatio, 1.25, accuracy: 0.000_001)
+            XCTAssertTrue(item.shouldFillLibraryThumbnail)
+
+            switch path {
+            case .viewport:
+                viewportPixels = pixels
+                viewportOutcomes = outcomes
+                viewportRatio = item.libraryAspectRatio
+                viewportAssignments = assignments.images.count
+            case .launchHints:
+                launchPixels = pixels
+                launchOutcomes = outcomes
+                launchRatio = item.libraryAspectRatio
+                launchAssignments = assignments.images.count
+            }
+            await browsingCoordinator?.shutdown()
+            await collection.shutdown()
+        }
+
+        XCTAssertEqual(launchPixels, viewportPixels)
+        XCTAssertEqual(launchOutcomes, viewportOutcomes)
+        XCTAssertEqual(launchRatio, viewportRatio, accuracy: 0.000_001)
+        XCTAssertEqual(launchAssignments, viewportAssignments)
     }
 
     func testHintFrameCannotPublishAfterSourceReplacementKeepsAssetID() throws {

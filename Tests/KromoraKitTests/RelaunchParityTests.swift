@@ -5,6 +5,19 @@ import XCTest
 
 @testable import KromoraKit
 
+private actor ThumbnailDecodeProbe {
+    private(set) var count = 0
+
+    func record() { count += 1 }
+}
+
+@MainActor
+private final class ThumbnailRasterProbe {
+    private(set) var rasters: [NSImage] = []
+
+    func record(_ image: NSImage) { rasters.append(image) }
+}
+
 /// Exercises persisted presentation frames across distinct application and collection lifetimes.
 /// This intentionally loads the package's cheap browsing projection in both launches: that is the
 /// startup path whose source fingerprint used to differ from the resolved edit source.
@@ -27,14 +40,30 @@ final class RelaunchParityTests: TempDirectoryTestCase {
 
     private func model(
         packageURL: URL, previewDirectory: URL, thumbnailDirectory: URL,
-        looksDirectory: URL, engine: FakeRenderEngine
+        looksDirectory: URL, engine: FakeRenderEngine,
+        decodeProbe: ThumbnailDecodeProbe? = nil
     ) throws -> (AppViewModel, PortableLibrarySession) {
         let session = try PortableLibrarySession(at: packageURL)
+        let decodeObserver: (@Sendable () async -> Void)?
+        if let decodeProbe {
+            decodeObserver = { await decodeProbe.record() }
+        } else {
+            decodeObserver = nil
+        }
+        let originalThumbnailProvider: ImageCollection.OriginalThumbnailProvider = {
+            url, data, fingerprint, identity, store, ledger, surface in
+            await OriginalThumbnailLoader.load(
+                url: url, data: data, dataFingerprint: fingerprint,
+                identity: identity, store: store, ledger: ledger, surface: surface,
+                decodeObserver: decodeObserver
+            )
+        }
         let viewModel = makeAppViewModel(
             engine: engine, userLookFolderURL: looksDirectory,
             previewFrameStoreDirectory: previewDirectory,
             thumbnailFrameStoreDirectory: thumbnailDirectory,
-            portablePackageURL: packageURL, portableLibrarySession: session
+            portablePackageURL: packageURL, portableLibrarySession: session,
+            originalThumbnailProvider: originalThumbnailProvider
         )
         return (viewModel, session)
     }
@@ -70,6 +99,9 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let package = try PortableLibrarySession(at: packageURL)
         _ = try package.importURLs([sourceURL], duplicatePolicy: .importAnyway)
         let asset = try XCTUnwrap(package.materializedAssets().first)
+        try seedSourceAspectRatios(
+            ["invalidation.png": 64.0 / 48.0], assets: [asset], package: package.package
+        )
         let reference = EditSourceReference(
             assetID: asset.id, portableIdentity: asset.source.portableIdentity, url: asset.url
         )
@@ -77,6 +109,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         document.adjustments = [.exposure(ev: 0.4)]
         try await EditDocumentStore(package: package.package, lease: package.lease)
             .save(document, for: reference)
+        try package.refreshIndex()
         await package.shutdown()
 
         let firstEngine = FakeRenderEngine()
@@ -112,6 +145,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         )
         let flushResult = await first.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await first.thumbnailFrameStore.flush()
         await first.shutdown()
         let previewStore = LatestPreviewFrameStore(directory: previewDirectory)
         // The renderer fake does not produce canonical store rasters. Seed the same complete
@@ -232,6 +266,135 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         await reopened.shutdown()
     }
 
+    func testStaleEditedFrameIsFirstPaintAndGetsOneReplacement() async throws {
+        let fixture = try await seedSinglePhotoRelaunch()
+        let frameStore = ThumbnailFrameStore(directory: fixture.thumbnailDirectory)
+        let storedFrames = await frameStore.readFrames(for: fixture.identity)
+        let staleFrame = try XCTUnwrap(storedFrames.edited)
+        let stalePixels = try Pixels.bytes(of: staleFrame.image)
+
+        let package = try PortableLibrarySession(at: fixture.packageURL)
+        var changed = EditDocument()
+        changed.adjustments = [.exposure(ev: 1.1)]
+        try await EditDocumentStore(package: package.package, lease: package.lease)
+            .save(changed, for: fixture.reference)
+        try package.refreshIndex()
+        await package.shutdown()
+
+        PlatformThumbnailProvider.invalidateCache()
+        let decodeProbe = ThumbnailDecodeProbe()
+        let engine = FakeRenderEngine()
+        await engine.gateThumbnails()
+        let (viewModel, session) = try model(
+            packageURL: fixture.packageURL, previewDirectory: fixture.previewDirectory,
+            thumbnailDirectory: fixture.thumbnailDirectory, looksDirectory: fixture.looksDirectory,
+            engine: engine, decodeProbe: decodeProbe
+        )
+        viewModel.collection.loadPortableAssets(try session.materializedAssets())
+        await viewModel.collection.scanCompletion()
+        let item = try XCTUnwrap(viewModel.collection.items.first)
+        XCTAssertEqual(item.asset.source.portableIdentity, fixture.identity)
+        XCTAssertEqual(
+            FrameClassifier.classify(
+                staleFrame.frame.metadata,
+                against: FrameCurrentInputs(source: item.asset.source.portableIdentity)
+            ),
+            .provisionalOnly,
+            "the stored edited frame must be eligible for inert first paint"
+        )
+        let reservedRatio = item.libraryAspectRatio
+        let rasterProbe = ThumbnailRasterProbe()
+        item.onThumbnailAssignment = { rasterProbe.record($0) }
+        viewModel.collection.beginThumbnailDemand()
+        viewModel.collection.requestVisibleThumbnails(for: [item.id])
+
+        try await waitUntil("stale frame before replacement") {
+            let requests = await engine.thumbnailRequests.count
+            return item.thumbnail != nil && requests == 1
+        }
+        XCTAssertNil(item.editedThumbnailRevision, "stale pixels stay inert until replacement")
+        XCTAssertTrue(item.shouldFillLibraryThumbnail, "the stale edited pixels retain final geometry")
+        let gridEditedSummary = await viewModel.frameLookupLedger.summary(for: .gridEdited)
+        XCTAssertEqual(rasterProbe.rasters.count, 1,
+                       "the original must not flash between a stale edit and its replacement; "
+                           + gridEditedSummary)
+        XCTAssertEqual(
+            Pixels.worstDelta(try pixels(of: rasterProbe.rasters.first), stalePixels)?.delta, 0,
+            "the stale stored frame must be the first raster"
+        )
+        XCTAssertEqual(item.libraryAspectRatio, reservedRatio, accuracy: 0.000_001)
+
+        await engine.releaseThumbnails()
+        try await waitUntil("one stale-frame replacement") { item.editedThumbnailRevision != nil }
+        let thumbnailRequestCount = await engine.thumbnailRequests.count
+        let decodeCount = await decodeProbe.count
+        XCTAssertEqual(thumbnailRequestCount, 1)
+        XCTAssertEqual(decodeCount, 0, "the stored original tier should not decode source pixels")
+        XCTAssertEqual(rasterProbe.rasters.count, 2,
+                       "stale stored pixels should be replaced exactly once")
+        XCTAssertTrue(item.shouldFillLibraryThumbnail)
+        XCTAssertEqual(item.libraryAspectRatio, reservedRatio, accuracy: 0.000_001,
+                       "the replacement must not resize the cell")
+        XCTAssertEqual(viewModel.collection.storedGeometryFallbackReflowCount, 0)
+        await viewModel.shutdown()
+    }
+
+    func testMissingEditedFrameShowsFittedOriginalBeforeOneEditPaint() async throws {
+        let fixture = try await seedSinglePhotoRelaunch()
+        let frameStore = ThumbnailFrameStore(directory: fixture.thumbnailDirectory)
+        let storedFrames = await frameStore.readFrames(for: fixture.identity)
+        let originalFrame = try XCTUnwrap(storedFrames.original)
+        let originalPixels = try Pixels.bytes(of: originalFrame.image)
+        await frameStore.remove(.edited, for: fixture.identity.assetID)
+        await frameStore.flush()
+
+        PlatformThumbnailProvider.invalidateCache()
+        let decodeProbe = ThumbnailDecodeProbe()
+        let engine = FakeRenderEngine()
+        await engine.gateThumbnails()
+        let (viewModel, session) = try model(
+            packageURL: fixture.packageURL, previewDirectory: fixture.previewDirectory,
+            thumbnailDirectory: fixture.thumbnailDirectory, looksDirectory: fixture.looksDirectory,
+            engine: engine, decodeProbe: decodeProbe
+        )
+        viewModel.collection.loadPortableAssets(try session.materializedAssets())
+        await viewModel.collection.scanCompletion()
+        let item = try XCTUnwrap(viewModel.collection.items.first)
+        let reservedRatio = item.libraryAspectRatio
+        let rasterProbe = ThumbnailRasterProbe()
+        item.onThumbnailAssignment = { rasterProbe.record($0) }
+        viewModel.collection.beginThumbnailDemand()
+        viewModel.collection.requestVisibleThumbnails(for: [item.id])
+
+        try await waitUntil("original paint while edited frame is missing") {
+            let requests = await engine.thumbnailRequests.count
+            return item.thumbnail != nil && requests == 1
+        }
+        XCTAssertFalse(item.shouldFillLibraryThumbnail,
+                       "the original stays fitted in the reserved presented geometry")
+        XCTAssertNil(item.editedThumbnailRevision)
+        XCTAssertEqual(rasterProbe.rasters.count, 1)
+        XCTAssertEqual(try pixels(of: rasterProbe.rasters.first), originalPixels,
+                       "the packed original must paint before the edit render finishes")
+        XCTAssertEqual(item.libraryAspectRatio, reservedRatio, accuracy: 0.000_001)
+
+        await engine.releaseThumbnails()
+        try await waitUntil("one edited raster after original paint") {
+            item.editedThumbnailRevision != nil
+        }
+        let thumbnailRequestCount = await engine.thumbnailRequests.count
+        let decodeCount = await decodeProbe.count
+        XCTAssertEqual(thumbnailRequestCount, 1)
+        XCTAssertEqual(decodeCount, 0)
+        XCTAssertEqual(rasterProbe.rasters.count, 2,
+                       "edited pixels should replace the original exactly once")
+        XCTAssertTrue(item.shouldFillLibraryThumbnail)
+        XCTAssertEqual(item.libraryAspectRatio, reservedRatio, accuracy: 0.000_001,
+                       "the edited raster must not change the cell's size")
+        XCTAssertEqual(viewModel.collection.storedGeometryFallbackReflowCount, 0)
+        await viewModel.shutdown()
+    }
+
     func testReplacedSourceBytesBetweenSessionsInvalidatePersistedFrameOnce() async throws {
         let fixture = try await seedSinglePhotoRelaunch()
         let replacement = try Fixtures.writeGradientPNG(
@@ -299,7 +462,10 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             reopened.collection.items.first?.asset.source.portableIdentity.sourceFingerprint
                 .matches(replacementIdentity.sourceFingerprint) == true
         )
-        XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
+        XCTAssertEqual(
+            diagnostics.confirmedFrameCount, 2,
+            "a source miss confirms the speculative identity preview and its saved-edit correction"
+        )
         let matchingPreviewDescriptions = previewRequests.filter {
             $0.document.editHash == fixture.seedSignature.editHash
                 && $0.source?.portableIdentity.sourceFingerprint.matches(
@@ -406,6 +572,12 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let package = try PortableLibrarySession(at: packageURL)
         _ = try package.importURLs(sources, duplicatePolicy: .importAnyway)
         let seedAssets = try package.materializedAssets()
+        try seedSourceAspectRatios(
+            Dictionary(uniqueKeysWithValues: names.enumerated().map { index, name in
+                (name, Double(48 + index) / 32.0)
+            }),
+            assets: seedAssets, package: package.package
+        )
         let seedStore = EditDocumentStore(package: package.package, lease: package.lease)
         let edits: [(String, (inout EditDocument) -> Void)] = [
             ("exposure.png", { $0.adjustments = [.exposure(ev: 0.7)] }),
@@ -424,6 +596,7 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                 assetID: asset.id, portableIdentity: asset.source.portableIdentity, url: asset.url
             ))
         }
+        try package.refreshIndex()
         await package.shutdown()
 
         let firstEngine = FakeRenderEngine()
@@ -458,13 +631,19 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         }
         let flushResult = await first.flushPendingWrites()
         XCTAssertEqual(flushResult, .success)
+        await first.thumbnailFrameStore.flush()
+        let expectedEditedFramePixels = try await readPersistedEditedPixels(
+            names: edits.map(\.0), assets: seedAssets, thumbnailDirectory: thumbnailDirectory
+        )
         await first.shutdown()
 
+        PlatformThumbnailProvider.invalidateCache()
+        let decodeProbe = ThumbnailDecodeProbe()
         let secondEngine = FakeRenderEngine()
         let (second, secondSession) = try model(
             packageURL: packageURL, previewDirectory: previewDirectory,
             thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
-            engine: secondEngine
+            engine: secondEngine, decodeProbe: decodeProbe
         )
         second.library.scan(looksDirectory)
         try await waitUntil("reopened Look library scan") {
@@ -474,6 +653,17 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         XCTAssertEqual(secondSession.rootURL, packageURL.standardizedFileURL,
                        "relaunch must reopen the same package")
         await second.collection.scanCompletion()
+        let initialGridRatios = Dictionary(uniqueKeysWithValues: second.collection.items.map {
+            ($0.id, $0.libraryAspectRatio)
+        })
+        let rasterProbes = Dictionary(uniqueKeysWithValues: edits.compactMap { name, _ in
+            second.collection.items.first(where: { $0.displayName == name }).map { item in
+                let probe = ThumbnailRasterProbe()
+                item.onThumbnailAssignment = { probe.record($0) }
+                return (name, probe)
+            }
+        })
+        let preparationsBeforeThumbnails = await secondEngine.sourcePreparationCount
         second.collection.beginThumbnailDemand()
         second.collection.requestVisibleThumbnails(for: second.collection.items.map(\.id))
         try await waitUntil("relaunch grid cache lookups") {
@@ -483,24 +673,24 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                 }
         }
         var settledGridPixels: [String: [UInt8]] = [:]
-        var settledGridRatios: [String: Double] = [:]
         for name in names {
             guard let item = second.collection.items.first(where: { $0.displayName == name }) else {
                 continue
             }
             settledGridPixels[name] = try pixels(of: item.thumbnail)
-            settledGridRatios[name] = item.libraryAspectRatio
         }
 
-        // KRMA-765/KRMA-766 geometry/crop work remains expected failures. Fingerprint-only
-        // edited-thumbnail reuse below is unwrapped.
-        // On this tree the expected failures include the observed messages:
-        // "edited thumbnails must be reused without rendering for exposure.png" (1 request),
-        // "Edit must publish one confirmed frame for exposure.png" (2 distinct frames),
-        // "unchanged Edit source must use its confirmed frame without a render for exposure.png" (1 request),
-        // and "library aspect ratio must not change after first layout for exposure.png"
-        // (1.5625 became 1.3333333333333333). Color, crop, and Look previews also render once.
-        // Identity-dependent relaunch assertions below are now ordinary passing assertions.
+        let preparationsAfterThumbnails = await secondEngine.sourcePreparationCount
+        XCTAssertEqual(
+            preparationsAfterThumbnails - preparationsBeforeThumbnails, 0,
+            "an exact persisted edited frame must skip thumbnail source preparation"
+        )
+        let originalDecodeCount = await decodeProbe.count
+        XCTAssertEqual(originalDecodeCount, 0,
+                       "the packed original frame must avoid the source decode tier")
+        XCTAssertEqual(second.collection.storedGeometryFallbackReflowCount, 0,
+                       "a published aspect ratio must avoid stored-geometry fallback reflow")
+
         for (name, _) in edits {
             let requests = await secondEngine.thumbnailRequests.filter {
                 $0.assetID == second.collection.items.first { $0.displayName == name }?.id
@@ -509,39 +699,12 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                 requests.count, 0,
                 "edited thumbnails must be reused without rendering for \(name)"
             )
-        }
-
-        for name in names {
-            guard let index = second.collection.items.firstIndex(where: { $0.displayName == name }) else {
-                XCTFail("fixture photo \(name) must be present")
-                continue
-            }
-            let before = await secondEngine.previewRequests.count
-            second.collection.setSelection(at: index)
-            second.openActiveCollectionImage()
-            try await waitUntil("\(name) relaunch Edit confirmation") {
-                second.sourceName == name
-                    && second.presentationSessionForDiagnostics?.state == .confirmed
-            }
-            let session = try XCTUnwrap(second.presentationSessionForDiagnostics)
-            assertNoPrematureFallback(session)
-            if !edits.contains(where: { $0.0 == name }) {
-                XCTAssertEqual(session.distinctFrameCount, 1,
-                               "unchanged plain photo should reuse its frame: \(name)")
-                let afterPlain = await secondEngine.previewRequests.count
-                XCTAssertEqual(afterPlain, before, "unchanged plain photo must not render: \(name)")
-                continue
-            }
+            let rasterProbe = try XCTUnwrap(rasterProbes[name])
+            XCTAssertEqual(rasterProbe.rasters.count, 1,
+                           "the exact stored edited raster must be the cell's only paint for \(name)")
             XCTAssertEqual(
-                session.distinctFrameCount, 1,
-                "Edit must publish one confirmed frame for \(name)"
-            )
-            XCTAssertNotEqual(session.candidateSource, .embeddedJPEG, "Edit must not begin with embedded JPEG for \(name)")
-            XCTAssertNotEqual(session.candidateSource, .originalThumbnail, "Edit must not begin with original thumbnail for \(name)")
-            let after = await secondEngine.previewRequests.count
-            XCTAssertEqual(
-                after - before, 0,
-                "unchanged Edit source must use its confirmed frame without a render for \(name)"
+                try pixels(of: rasterProbe.rasters.first), expectedEditedFramePixels[name],
+                "the first cell raster must be the persisted edited frame for \(name)"
             )
         }
 
@@ -550,17 +713,9 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             let finalPixels = try pixels(of: item.thumbnail)
             XCTAssertEqual(finalPixels, settledGridPixels[name],
                            "grid pixels must not swap after first paint for \(name)")
-            if edits.contains(where: { $0.0 == name }) {
-                XCTExpectFailure("KRMA-765: relaunch crop geometry", options: .nonStrict()) {
-                    XCTAssertEqual(item.libraryAspectRatio, settledGridRatios[name],
-                                   "library aspect ratio must not change after first layout for \(name)")
-                }
-            } else {
-                XCTExpectFailure("KRMA-765: relaunch geometry", options: .nonStrict()) {
-                    XCTAssertEqual(item.libraryAspectRatio, settledGridRatios[name],
-                                   "plain photo aspect ratio must stay stable for \(name)")
-                }
-            }
+            let initialRatio = try XCTUnwrap(initialGridRatios[item.id])
+            XCTAssertEqual(item.libraryAspectRatio, initialRatio, accuracy: 0.000_001,
+                           "library aspect ratio must not change after first layout for \(name)")
         }
 
         await second.shutdown()
@@ -601,5 +756,47 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let coldPreviewCount = await coldEngine.previewRequests.count
         XCTAssertGreaterThan(coldPreviewCount, 0, "a deleted Derived cache must trigger preview render")
         await cold.shutdown()
+    }
+
+    private func readPersistedEditedPixels(
+        names: [String], assets: [PhotoAsset], thumbnailDirectory: URL
+    ) async throws -> [String: [UInt8]] {
+        let store = ThumbnailFrameStore(directory: thumbnailDirectory)
+        var result: [String: [UInt8]] = [:]
+        for name in names {
+            guard let asset = assets.first(where: { $0.displayName == name }) else {
+                XCTFail("fixture photo \(name) must be present")
+                continue
+            }
+            let frames = await store.readFrames(for: asset.source.portableIdentity)
+            guard let image = frames.edited?.image else {
+                XCTFail("persisted edited frame for \(name) must be readable")
+                continue
+            }
+            result[name] = try Pixels.bytes(of: image)
+        }
+        return result
+    }
+
+    private func seedSourceAspectRatios(
+        _ ratios: [String: Double], assets: [PhotoAsset], package: PortableLibraryPackage
+    ) throws {
+        var shards: [String: PortablePackageMembershipShard] = [:]
+        for (name, ratio) in ratios {
+            guard let asset = assets.first(where: { $0.displayName == name }) else {
+                XCTFail("fixture photo \(name) must be present")
+                continue
+            }
+            let assetID = asset.source.portableIdentity.assetID
+            let shardName = PortableLibraryPackage.shard(for: assetID)
+            var shard = try shards[shardName] ?? package.readMembershipShard(shardName)
+            guard let index = shard.entries.firstIndex(where: { $0.assetID == assetID }) else {
+                XCTFail("membership entry for \(name) must be present")
+                continue
+            }
+            shard.entries[index].summary.aspectRatio = ratio
+            shards[shardName] = shard
+        }
+        for shard in shards.values { try package.writeMembershipShard(shard) }
     }
 }

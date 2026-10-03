@@ -60,13 +60,23 @@ final class ImageCollectionPresentationModel {
     @Observable
     final class Item: Identifiable {
         var asset: PhotoAsset
-        var thumbnail: NSImage?
+        private var displayedThumbnail: NSImage?
+        @MainActor var thumbnail: NSImage? {
+            get { displayedThumbnail }
+            set {
+                displayedThumbnail = newValue
+                if let newValue { onThumbnailAssignment?(newValue) }
+            }
+        }
+        /// Optional observation seam used by relaunch tests to record the rasters that reach a cell.
+        @MainActor var onThumbnailAssignment: (@MainActor @Sendable (NSImage) -> Void)?
         var metadata: ImageMetadata?
         var subfolder: String
         private var displayNameOverride: String?
         private var originalThumbnail: NSImage?
         private var editedThumbnailImage: NSImage?
         private var editedThumbnailUsesFallback = false
+        private var storedEditedFrameMetadata: PresentationFrameMetadata?
         private(set) var editedThumbnailRevision: String?
         private var presentedCrop = CropAdjustments.neutral
         private var presentedRotation = ImageRotation.zero
@@ -132,7 +142,7 @@ final class ImageCollectionPresentationModel {
             metadata: ImageMetadata? = nil, subfolder: String = ""
         ) {
             self.asset = asset
-            self.thumbnail = thumbnail
+            self.displayedThumbnail = thumbnail
             self.originalThumbnail = thumbnail
             self.metadata = metadata
             self.subfolder = subfolder
@@ -157,7 +167,7 @@ final class ImageCollectionPresentationModel {
             }
         }
 
-        func setOriginalThumbnail(_ thumbnail: NSImage?) {
+        @MainActor func setOriginalThumbnail(_ thumbnail: NSImage?) {
             originalThumbnail = thumbnail
             // A displayed edited raster — current or stale — is never replaced by the original.
             if editedThumbnailImage == nil || editedThumbnailUsesFallback { self.thumbnail = thumbnail }
@@ -169,10 +179,11 @@ final class ImageCollectionPresentationModel {
             displayNameOverride = name
         }
 
-        func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
+        @MainActor func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
             editedThumbnailRevision = revision
             editedThumbnailUsesFallback = thumbnail == nil
             editedThumbnailImage = thumbnail
+            storedEditedFrameMetadata = nil
             self.thumbnail = thumbnail ?? originalThumbnail
         }
 
@@ -182,14 +193,32 @@ final class ImageCollectionPresentationModel {
             editedThumbnailRevision = nil
         }
 
+        /// Confirm a persisted raster already on screen without assigning its pixels a second time.
+        /// The frame metadata ties the confirmation to the specific stored raster, even when an
+        /// older edit was displayed before this request began.
+        @discardableResult
+        func confirmStoredEditedThumbnail(
+            revision: String, metadata: PresentationFrameMetadata
+        ) -> Bool {
+            guard storedEditedFrameMetadata == metadata, editedThumbnailImage != nil else {
+                return false
+            }
+            editedThumbnailRevision = revision
+            editedThumbnailUsesFallback = false
+            return true
+        }
+
         /// Show a persisted edited frame while the current edit is being confirmed. It carries no
         /// revision, so the edited-thumbnail coordinator still classifies it and refines it once if
         /// it is stale. Ignored when edited pixels are already displayed.
         @discardableResult
-        func applyStoredEditedThumbnail(_ thumbnail: NSImage) -> Bool {
+        @MainActor func applyStoredEditedThumbnail(
+            _ thumbnail: NSImage, metadata: PresentationFrameMetadata
+        ) -> Bool {
             guard editedThumbnailImage == nil else { return false }
             editedThumbnailUsesFallback = false
             editedThumbnailImage = thumbnail
+            storedEditedFrameMetadata = metadata
             self.thumbnail = thumbnail
             return true
         }
@@ -237,6 +266,7 @@ final class ImageCollectionPresentationModel {
     private(set) var portablePageSize = 500
     private(set) var portableQuery = LibraryQuery.all
     private(set) var cropGeneration = 0
+    private(set) var storedGeometryFallbackReflowCount = 0
 
     var onThumbnailDemand: (@MainActor @Sendable (PhotoAssetID, ImageWorkScheduler.Priority) -> Void)?
 
@@ -269,10 +299,10 @@ final class ImageCollectionPresentationModel {
     private var thumbnailDemandPriorities: [PhotoAssetID: ImageWorkScheduler.Priority] = [:]
     private var preparedThumbnailIDs: Set<PhotoAssetID> = []
     /// Photos whose edited thumbnails the visible window asked for. Originals are queued
-    /// immediately; edited renders are flushed on the next turn so they cannot occupy a
-    /// thumbnail slot before the fast previews.
+    /// only after packed-frame reads; edited renders then follow the original fallback.
     private var visibleEditedThumbnailIDs: [PhotoAssetID] = []
     private var visibleEditedDemandScheduled = false
+    private var visibleEditedDemandGeneration: UInt64 = 0
 
     /// IDs whose edited thumbnails are currently requested by the visible grid or filmstrip.
     /// Scan-driven Look refreshes use this to avoid rebuilding thumbnails that have scrolled away.
@@ -531,9 +561,8 @@ final class ImageCollectionPresentationModel {
         guard !isThumbnailDemandDriven else { return }
         isThumbnailDemandDriven = true
         cancelThumbnailWork()
-        // Originals only. The grid admits edited thumbnails for the whole viewport after those
-        // previews are queued; doing it here would start a handful of full renders first and
-        // leave the rest of the window blank.
+        // Admit packed reads for the selected/adjacent window first. Original decodes are queued
+        // by `fillThumbnailQueue` only after those reads resolve.
         prepareAdjacentThumbnails(around: selectedIndex, requestsEditedThumbnails: false)
         fillThumbnailQueue()
     }
@@ -545,8 +574,18 @@ final class ImageCollectionPresentationModel {
     ) {
         guard isThumbnailDemandDriven, let index = items.firstIndex(where: { $0.id == id }) else { return }
         admitFrameReads(visible: [id], indexByID: [id: index], prefetch: false)
-        requestOriginalThumbnail(for: id, at: index, priority: priority)
-        if requestsEditedThumbnail { onThumbnailDemand?(id, priority) }
+        if pendingFrameReadIDs.contains(id) {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await self.waitForFrameReads(of: [id])
+                guard let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
+                self.requestOriginalThumbnail(for: id, at: currentIndex, priority: priority)
+                if requestsEditedThumbnail { self.onThumbnailDemand?(id, priority) }
+            }
+        } else {
+            requestOriginalThumbnail(for: id, at: index, priority: priority)
+            if requestsEditedThumbnail { onThumbnailDemand?(id, priority) }
+        }
     }
 
     /// Admit fast previews for the photos in the viewport, then their edited renders.
@@ -567,10 +606,6 @@ final class ImageCollectionPresentationModel {
         // Persisted frames are read for the whole window before any source decode or edited
         // render is admitted; both of those then find most of the window already painted.
         admitFrameReads(visible: admitted, indexByID: indexByID, prefetch: true)
-        for id in admitted {
-            guard let index = indexByID[id] else { continue }
-            requestOriginalThumbnail(for: id, at: index, priority: priority(for: index))
-        }
         visibleEditedThumbnailIDs = admitted
         scheduleVisibleEditedThumbnails()
     }
@@ -647,8 +682,18 @@ final class ImageCollectionPresentationModel {
     func applyEditedThumbnail(_ thumbnail: NSImage?, for id: PhotoAssetID, revision: String) {
         items.first { $0.id == id }?.applyEditedThumbnail(thumbnail, revision: revision)
     }
-    func applyStoredEditedThumbnail(_ thumbnail: NSImage, for id: PhotoAssetID) {
-        items.first { $0.id == id }?.applyStoredEditedThumbnail(thumbnail)
+    func applyStoredEditedThumbnail(
+        _ thumbnail: NSImage, metadata: PresentationFrameMetadata, for id: PhotoAssetID
+    ) {
+        items.first { $0.id == id }?.applyStoredEditedThumbnail(thumbnail, metadata: metadata)
+    }
+    @discardableResult
+    func confirmStoredEditedThumbnail(
+        revision: String, metadata: PresentationFrameMetadata, for id: PhotoAssetID
+    ) -> Bool {
+        items.first { $0.id == id }?.confirmStoredEditedThumbnail(
+            revision: revision, metadata: metadata
+        ) ?? false
     }
     func setPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation = .zero, for id: PhotoAssetID
@@ -803,6 +848,12 @@ final class ImageCollectionPresentationModel {
         frameReadJobIDs.removeAll()
         pendingFrameReadIDs.removeAll()
         completedFrameReadIDs.removeAll()
+        thumbnailDemandIDs.removeAll()
+        thumbnailDemandPriorities.removeAll()
+        preparedThumbnailIDs.removeAll()
+        visibleEditedThumbnailIDs.removeAll()
+        visibleEditedDemandGeneration &+= 1
+        visibleEditedDemandScheduled = false
         resumeFrameReadWaiters()
     }
 
@@ -862,6 +913,7 @@ final class ImageCollectionPresentationModel {
         pendingFrameReadIDs.remove(id)
         frameReadJobIDs.remove(jobID)
         if outcome == .completed { completedFrameReadIDs.insert(id) }
+        fillThumbnailQueue()
         resumeFrameReadWaiters()
     }
 
@@ -902,8 +954,9 @@ final class ImageCollectionPresentationModel {
                     cgImage: hit.image,
                     size: NSSize(width: hit.image.width, height: hit.image.height)
                 )
-                if item.applyStoredEditedThumbnail(image) {
+                if item.applyStoredEditedThumbnail(image, metadata: hit.frame.metadata) {
                     if item.adoptStoredGeometry(hit.frame.geometry) {
+                        storedGeometryFallbackReflowCount += 1
                         cropGeneration += 1
                         invalidateCollectionProjection(notify: true)
                     }
@@ -973,6 +1026,10 @@ final class ImageCollectionPresentationModel {
         }
     }
     private func enqueueThumbnails() {
+        // A package-backed collection must learn its real viewport before decoding source
+        // originals. The viewport path first admits packed-frame reads, which may already hold
+        // the last presented edited raster and final geometry.
+        guard thumbnailFrameStore == nil else { return }
         if isThumbnailDemandDriven { fillThumbnailQueue(); return }
         for (index, item) in items.enumerated() where item.thumbnail == nil {
             guard scheduler.canQueueThumbnail else { return }
@@ -1017,7 +1074,8 @@ final class ImageCollectionPresentationModel {
     private func requestOriginalThumbnail(
         for id: PhotoAssetID, at index: Int, priority: ImageWorkScheduler.Priority
     ) {
-        guard items.indices.contains(index), items[index].thumbnail == nil else { return }
+        guard items.indices.contains(index), items[index].thumbnail == nil,
+              !pendingFrameReadIDs.contains(id) else { return }
         thumbnailDemandIDs.insert(id)
         thumbnailDemandPriorities[id] = priority
         let jobID = thumbnailJobID(for: items[index])
@@ -1032,21 +1090,33 @@ final class ImageCollectionPresentationModel {
     private func scheduleVisibleEditedThumbnails() {
         guard !visibleEditedDemandScheduled else { return }
         visibleEditedDemandScheduled = true
+        let demandGeneration = visibleEditedDemandGeneration
         Task { @MainActor [weak self] in
             guard let self else { return }
-            // Frame reads precede render admission: the coordinator classifies against a frame
-            // the read has already published rather than racing it to a render.
-            await self.waitForFrameReads(of: self.visibleEditedThumbnailIDs)
+            // Let the complete visible window hydrate before admitting source decodes or edited
+            // renders. This keeps a stored edited raster as the first paint and still queues an
+            // original preview before refinement when the edited frame is missing.
+            var ids = self.visibleEditedThumbnailIDs
+            while true {
+                await self.waitForFrameReads(of: ids)
+                guard self.visibleEditedDemandGeneration == demandGeneration else { return }
+                let latestIDs = self.visibleEditedThumbnailIDs
+                guard latestIDs != ids else { break }
+                ids = latestIDs
+            }
+            guard self.visibleEditedDemandGeneration == demandGeneration else { return }
             self.visibleEditedDemandScheduled = false
-            let ids = self.visibleEditedThumbnailIDs
             for id in ids {
+                guard let index = self.items.firstIndex(where: { $0.id == id }) else { continue }
+                self.requestOriginalThumbnail(for: id, at: index, priority: self.priority(for: index))
                 self.onThumbnailDemand?(id, .background)
             }
         }
     }
     private func fillThumbnailQueue() {
         let candidates = items.indices.filter {
-            items[$0].thumbnail == nil && (!isThumbnailDemandDriven || thumbnailDemandIDs.contains(items[$0].id) || preparedThumbnailIDs.contains(items[$0].id))
+            items[$0].thumbnail == nil && !pendingFrameReadIDs.contains(items[$0].id)
+                && (!isThumbnailDemandDriven || thumbnailDemandIDs.contains(items[$0].id) || preparedThumbnailIDs.contains(items[$0].id))
         }.sorted { priority(for: $0).rawValue < priority(for: $1).rawValue }
         for index in candidates {
             guard scheduler.canQueueThumbnail else { return }
@@ -1063,6 +1133,12 @@ final class ImageCollectionPresentationModel {
         for id in preparedThumbnailIDs {
             thumbnailDemandPriorities[id] = .adjacentFilmstrip
         }
+        var indexByID: [PhotoAssetID: Int] = [:]
+        indexByID.reserveCapacity(items.count)
+        for (itemIndex, item) in items.enumerated() { indexByID[item.id] = itemIndex }
+        let preparedIDs = items.indices.filter { preparedThumbnailIDs.contains(items[$0].id) }
+            .map { items[$0].id }
+        admitFrameReads(visible: preparedIDs, indexByID: indexByID, prefetch: false)
         fillThumbnailQueue()
         guard requestsEditedThumbnails else { return }
         for id in preparedThumbnailIDs { onThumbnailDemand?(id, .adjacentFilmstrip) }
