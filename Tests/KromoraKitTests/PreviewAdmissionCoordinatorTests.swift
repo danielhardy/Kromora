@@ -102,19 +102,6 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
-    func testIdleAdmissionNeverCallsPreviewPublication() async {
-        let engine = FakeRenderEngine()
-        let destination = makeDestination(engine: engine)
-        let coordinator = makeCoordinator(destination: destination, engine: engine)
-
-        coordinator.scheduleIdlePreviewBuild()
-        try? await Task.sleep(for: .milliseconds(50))
-
-        XCTAssertEqual(destination.cachePublicationCount, 0)
-        XCTAssertEqual(destination.histogramPublicationCount, 0)
-        coordinator.shutdown()
-    }
-
     func testComparisonRetryRunsOncePerComparisonRevision() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)

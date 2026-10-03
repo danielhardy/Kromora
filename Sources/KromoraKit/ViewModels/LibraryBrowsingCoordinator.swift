@@ -70,6 +70,17 @@ final class LibraryBrowsingCoordinator {
     private var launchReadSuperseded = false
     private var hasPublishedVisibleIDs = false
 
+    private(set) var hasPublishedFirstIndexPage = false
+    private(set) var hasPublishedVisibleWindow = false
+    var onViewportPublished: (@MainActor @Sendable ([PhotoAssetID]) -> Void)?
+
+    var launchHintRecencyOrder: [PortablePhotoAssetID] {
+        guard let launchHints else { return [] }
+        var seen = Set<PortablePhotoAssetID>()
+        return ([launchHints.activeAssetID].compactMap { $0 } + launchHints.visibleAssetIDs)
+            .filter { seen.insert($0).inserted }
+    }
+
     var launchHydrationMetrics: LaunchHydrationMetrics { metrics }
 
     init(
@@ -96,6 +107,7 @@ final class LibraryBrowsingCoordinator {
         let query = destination.portableQuery
         let window = try library.browsingWindow(pageIndex: pageIndex, query: query)
         if pageIndex == 0, metrics.timeToFirstIndexPageMilliseconds == nil {
+            hasPublishedFirstIndexPage = true
             metrics.timeToFirstIndexPageMilliseconds = elapsedMilliseconds
             KromoraObservability.event(.launchFirstIndexPage,
                 detail: "first_index_ms=\(metrics.timeToFirstIndexPageMilliseconds ?? 0)")
@@ -184,6 +196,8 @@ final class LibraryBrowsingCoordinator {
     private func visibleIDsPublished(_ ids: [PhotoAssetID]) {
         guard library != nil else { return }
         latestVisibleIDs = ids
+        hasPublishedVisibleWindow = true
+        onViewportPublished?(ids)
         guard !hasPublishedVisibleIDs else {
             scheduleLaunchHintsIfVisible()
             return

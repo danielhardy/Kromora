@@ -239,6 +239,47 @@ actor ThumbnailFrameStore {
         return (nil, foundDamagedRecord)
     }
 
+    /// Read a frame's identity and render signature without decoding its raster. The idle warmer
+    /// uses this before it asks the source or renderer for pixels, so exact cache hits stay cheap.
+    func metadata(
+        _ kind: ThumbnailFrameKind, for identity: PortablePhotoIdentity
+    ) -> PresentationFrameMetadata? {
+        guard let key = Self.key(kind, for: identity.assetID) else { return nil }
+        readCount += 1
+        if let frame = pending[key] {
+            guard frame.kind == kind.presentationKind,
+                  !Self.hasPlaceholderIdentity(frame) else { return nil }
+            return frame.metadata
+        }
+        guard openStoreIfNeeded() else { return nil }
+        refreshIfExternallyReplaced()
+        for attempt in 0..<2 {
+            guard let store else { return nil }
+            let lookup: PortablePackagePackedThumbnailStore.LookupResult
+            do { lookup = try store.lookup(key) } catch { return nil }
+            switch lookup {
+            case .missing:
+                return nil
+            case .stale:
+                guard attempt == 0, reloadIndex() else { return nil }
+            case .found(let data):
+                guard let frame = try? PresentationFrameEnvelope.decode(
+                    data, expectedAssetID: identity.assetID, includeRaster: false
+                ), frame.kind == kind.presentationKind else {
+                    if attempt == 0, reloadIndex() { continue }
+                    try? store.remove(keys: [key])
+                    return nil
+                }
+                guard !Self.hasPlaceholderIdentity(frame) else {
+                    removeIfSameRecord(key: key, data: data)
+                    return nil
+                }
+                return frame.metadata
+            }
+        }
+        return nil
+    }
+
     /// Both records of a photo, for a visible-window hydration pass.
     func readFrames(for identity: PortablePhotoIdentity) -> StoredFrames {
         let original = readWithOutcome(.original, for: identity)

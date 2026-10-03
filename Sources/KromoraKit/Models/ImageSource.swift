@@ -60,6 +60,8 @@ struct ImageSource: Sendable, Equatable {
     let portableIdentity: PortablePhotoIdentity
     private let fileChangeSignature: PhotoSourceFingerprint?
     private let dataFingerprint: String?
+
+    var sourceDataFingerprint: String? { dataFingerprint }
     /// Captured when this source session is created. This is for observability grouping only;
     /// cache identity must continue to use the dynamic `cacheFingerprint` below.
     let traceToken: String

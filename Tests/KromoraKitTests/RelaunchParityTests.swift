@@ -836,6 +836,131 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         await reopened.shutdown()
     }
 
+    func testIdleWarmFramesRemainExactAcrossPackageRelaunch() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("IdleWarmParity.kromoralibrary")
+        let previewDirectory = tempDirectory.appendingPathComponent("IdleWarmParity/Previews")
+        let thumbnailDirectory = tempDirectory.appendingPathComponent("IdleWarmParity/Thumbnails")
+        let looksDirectory = tempDirectory.appendingPathComponent("IdleWarmParity/Looks", isDirectory: true)
+        try FileManager.default.createDirectory(at: looksDirectory, withIntermediateDirectories: true)
+        let sourceURLs = try (0..<3).map { index in
+            try Fixtures.writeGradientPNG(
+                width: 64 + index, height: 48, named: "idle-warm-\(index).png",
+                in: tempDirectory
+            )
+        }
+        let seedSession = try PortableLibrarySession(at: packageURL)
+        _ = try seedSession.importURLs(sourceURLs, duplicatePolicy: .importAnyway)
+        let seedAssets = try seedSession.materializedAssets()
+        XCTAssertEqual(seedAssets.count, sourceURLs.count)
+        var document = EditDocument()
+        document.adjustments = [.exposure(ev: 0.45)]
+        let seedEditStore = EditDocumentStore(package: seedSession.package, lease: seedSession.lease)
+        for asset in seedAssets {
+            let reference = EditSourceReference(
+                assetID: asset.id,
+                portableIdentity: asset.source.portableIdentity,
+                url: asset.url
+            )
+            try await seedEditStore.save(document, for: reference)
+        }
+        try seedSession.refreshIndex()
+        await seedSession.shutdown()
+
+        let warmSession = try PortableLibrarySession(at: packageURL)
+        let assets = try warmSession.browsingAssets()
+        XCTAssertEqual(assets.count, sourceURLs.count)
+        let candidates = assets.enumerated().map { index, asset in
+            let identity = asset.source.portableIdentity
+            let url = asset.url!
+            let source = ImageSource(
+                url: url, nativeExtent: CGSize(
+                    width: 64 + index, height: 48
+                ), portableIdentity: identity,
+                existingFileChangeSignature: asset.source.fingerprint
+            )
+            return IdleFrameWarmCandidate(
+                index: index, assetID: asset.id, source: source,
+                reference: EditSourceReference(
+                    assetID: asset.id, portableIdentity: identity, url: url
+                ),
+                inMemoryDocument: document, inMemoryLookSignature: LookSignature.none,
+                distanceFromViewport: index, launchHintRecencyRank: index
+            )
+        }
+        let scheduler = ImageWorkScheduler()
+        let warmEngine = IdleWarmTestEngine(image: try Fixtures.makeCGImage(width: 16, height: 12))
+        let warmThumbnailStore = ThumbnailFrameStore(directory: thumbnailDirectory)
+        let warmPreviewStore = LatestPreviewFrameStore(directory: previewDirectory)
+        let warmPresentation = PreviewPresentationCoordinator(
+            store: warmPreviewStore, engine: warmEngine
+        )
+        let destination = IdleWarmTestDestination()
+        destination.idleFrameWarmerCandidates = candidates
+        destination.idleFrameWarmerVisiblePortableAssetIDs = Set(
+            candidates.prefix(1).map(\.identity.assetID)
+        )
+        let warmer = IdleFrameWarmerCoordinator(
+            scheduler: scheduler, engine: warmEngine,
+            editStore: EditDocumentStore(package: warmSession.package, lease: warmSession.lease),
+            thumbnailStore: warmThumbnailStore, previewPresentation: warmPresentation,
+            idleDelay: .zero, observesSystemChanges: false, destination: destination
+        )
+        warmer.schedule()
+        try await waitUntil("idle warm persisted all presentation tiers") {
+            warmer.progress == IdleFrameWarmerProgress(done: candidates.count, remaining: 0)
+        }
+        for candidate in candidates {
+            let original = await warmThumbnailStore.metadata(.original, for: candidate.identity)
+            let edited = await warmThumbnailStore.metadata(.edited, for: candidate.identity)
+            let preview = await warmPreviewStore.metadata(for: candidate.identity)
+            XCTAssertEqual(original?.kind, .originalThumbnail480)
+            XCTAssertEqual(edited?.kind, .editedThumbnail480)
+            XCTAssertEqual(preview?.kind, .preview2048)
+        }
+        await warmThumbnailStore.flush()
+        await warmer.shutdown()
+        await warmPresentation.shutdown()
+        await warmThumbnailStore.shutdown()
+        await warmPreviewStore.waitForPendingWrites()
+        await scheduler.cancelAllAndWait()
+        await warmSession.shutdown()
+
+        PlatformThumbnailProvider.invalidateCache()
+        let decodeProbe = ThumbnailDecodeProbe()
+        let secondEngine = FakeRenderEngine()
+        let (reopened, reopenedSession) = try model(
+            packageURL: packageURL, previewDirectory: previewDirectory,
+            thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
+            engine: secondEngine, decodeProbe: decodeProbe
+        )
+        reopened.collection.loadPortableAssets(try reopenedSession.browsingAssets())
+        await reopened.collection.scanCompletion()
+        reopened.collection.beginThumbnailDemand()
+        reopened.collection.requestVisibleThumbnails(for: reopened.collection.items.map(\.id))
+        try await waitUntil("idle-warmed grid tiers are exact") {
+            reopened.collection.items.count == candidates.count
+                && reopened.collection.items.allSatisfy {
+                    $0.thumbnail != nil && $0.editedThumbnailRevision != nil
+                }
+        }
+        let decodeCount = await decodeProbe.count
+        let gridRenderCount = await secondEngine.thumbnailRequests.count
+        XCTAssertEqual(decodeCount, 0)
+        XCTAssertEqual(gridRenderCount, 0)
+
+        for (index, asset) in assets.enumerated() {
+            reopened.collection.setSelection(at: index)
+            reopened.openActiveCollectionImage()
+            try await waitUntil("idle-warmed editor preview is confirmed for \(asset.displayName)") {
+                reopened.sourceName == asset.displayName
+                    && reopened.presentationSessionForDiagnostics?.state == .confirmed
+            }
+        }
+        let previewRenderCount = await secondEngine.previewRequests.count
+        XCTAssertEqual(previewRenderCount, 0)
+        await reopened.shutdown()
+    }
+
     func testUnchangedPackageReusesSettledFramesAfterRelaunch() async throws {
         let packageURL = tempDirectory.appendingPathComponent("Parity.kromoralibrary")
         let previewDirectory = tempDirectory.appendingPathComponent("Derived/Previews")

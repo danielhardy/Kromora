@@ -31,7 +31,8 @@ fences. Feature workflows do not reach into one another's private state.
 | Library browsing | `LibraryBrowsingCoordinator` owns portable query-window paging, mirrored selection, culling-state persistence, and deletion confirmation; `AppViewModel` owns source loading, deletion cleanup, and the edit handoff | query values, page summaries/assets, selection IDs, deletion candidates/results, and open/status callbacks |
 | Editor document and history | `AppViewModel` owns the published active `EditDocument`; `EditorDocumentCoordinator` owns per-photo sessions and bounded undo/redo; package sidecars own durable commit history, named snapshots, and virtual-copy identity | `EditDocument`, `PhotoEditSession`, `EditClipboardPayload`, immutable revision numbers, copy source asset ID |
 | Edited thumbnails | `EditedThumbnailCoordinator` owns per-asset request generations, debounce handles, and scheduler job IDs; `AppViewModel` owns documents and the collection projection | source/document revisions, cache identity, bounded raster thumbnail and edit/LUT revision |
-| Preview and comparison | `PreviewAdmissionCoordinator` owns preview, histogram, prefetch, idle-fill, debounce, and comparison-retry admission; `PreviewPublicationCoordinator` owns settled/interactive publication and presented-frame state; `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render submission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
+| Idle frame warming | `IdleFrameWarmerCoordinator` owns sequential background fills for original/edited thumbnails and canonical previews; `LibraryBrowsingCoordinator` supplies paged package candidates and launch-hint order; `AppViewModel` supplies readiness, activity, and system conditions | portable identities, source references, edit/look values, viewport distances, and progress |
+| Preview and comparison | `PreviewAdmissionCoordinator` owns preview, histogram, adjacent-prefetch, debounce, and comparison-retry admission; `PreviewPublicationCoordinator` owns settled/interactive publication and presented-frame state; `PreviewPresentationCoordinator` owns display/comparison generations, resolution planners, cache identity/access, and canonical cache writes; `PreviewCoordinator` owns render submission; `AppViewModel` owns the published document and presentation surfaces; `ComparisonFramePolicy` owns pure baseline rules | `RenderRequest`, `PreviewCoordinator.Publication`, source/document/display revisions |
 | Crop, rotation, and canvas navigation | `CanvasWorkflowCoordinator` owns crop-session commands and presentation snapshot, crop/rotation commands, and fit/fill/zoom/pan navigation; `CanvasInteractionState` owns observable draft and viewport values; `AppViewModel` owns document history, persistence, and render scheduling | crop presentation snapshot, `EditDocument` mutation closures, source size, image extent, and render/navigation callbacks |
 | Analysis and masking | `PhotoAnalysisCoordinator` owns analysis/cache work; `MaskingWorkflowCoordinator` owns masking-workspace selection, transient creation, and smart-mask analysis lifecycle | analysis value results, mask recipes, asset/source revisions |
 | Export and Looks | `ExportCoordinator`, `DeriveCoordinator`, `LookSaveCoordinator`, and `LUTLibrary` | render requests, export items, LUT IDs/values, status/error callbacks |
@@ -56,8 +57,16 @@ child tasks.
 ## Preview-presentation ownership
 
 `PreviewAdmissionCoordinator` owns request admission, debounce handles, histogram jobs,
-adjacent prefetch, idle cache fill, and comparison-preview admission, including its scheduled and
-retried revision state and retry task. `PreviewPublicationCoordinator` owns the settled and
+adjacent prefetch, and comparison-preview admission, including its scheduled and retried revision
+state and retry task. `IdleFrameWarmerCoordinator` handles all-photo package warming separately:
+it waits for the first index page and viewport, chooses by viewport distance and launch-hint
+recency, then admits one `.background` editor operation per photo. It asks the frame stores for
+metadata before opening a source, skips exact tiers, and writes only original/edited thumbnail
+records and complete canonical preview frames. It never publishes to a canvas or histogram
+surface. `AppViewModel` cancels it for selection, navigation, visible interaction, export, library
+activity, app deactivation, shutdown, Low Power Mode, or serious thermal pressure; low-water
+admission leaves room below the preview-store cap while the normal pin-aware LRU protects the
+active and visible photos. Progress reports completed and remaining photos. `PreviewPublicationCoordinator` owns the settled and
 interactive publication funnel, presented-frame state, and latest-wins publication fences;
 `PreviewPresentationCoordinator` owns display/comparison generations, per-surface
 resolution-planner hysteresis, the selection-time stored-frame lookup and its classification, and

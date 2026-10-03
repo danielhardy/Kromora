@@ -82,6 +82,13 @@ protocol PreviewAdmissionDestination: AnyObject {
     func publishAdmissionStatus(_ message: String)
     func admissionPresentOriginalPreview(_ image: CIImage, request: RenderRequest) -> Bool
     func admissionClearOriginalPreview()
+    func admissionScheduleIdleFrameWarmup()
+    func admissionCancelIdleFrameWarmup(resetProgress: Bool)
+}
+
+extension PreviewAdmissionDestination {
+    func admissionScheduleIdleFrameWarmup() {}
+    func admissionCancelIdleFrameWarmup(resetProgress: Bool) {}
 }
 
 /// Admission policy for preview and supporting work. Render execution remains in
@@ -105,22 +112,8 @@ final class PreviewAdmissionCoordinator {
         let assetID: PhotoAssetID
         let portableAssetID: PortablePhotoAssetID
     }
-    private struct IdlePreviewCandidate: Sendable {
-        let index: Int
-        let source: ImageSource
-        let inMemoryDocument: EditDocument?
-        let reference: EditSourceReference
-    }
-    private struct IdlePreviewWorkItem: Sendable {
-        let cursor: Int
-        let request: RenderRequest?
-    }
     let idlePreviewBuildJobID = ImageWorkScheduler.JobID("idle-preview-build")
     let adjacentPreviewPrefetchJobID = ImageWorkScheduler.JobID("adjacent-preview-prefetch")
-    private var idleBuildTask: Task<Void, Never>?
-    private var idleBuildGeneration: UInt64 = 0
-    private var idleBuildCursor: Int?
-    private static let maxItemsPerIdleSession = 20
     private var prefetchDelayTask: Task<Void, Never>?
     private var adjacentPrefetchGeneration: UInt64 = 0
     /// A settled submission held back while a stored frame might make the render unnecessary. The
@@ -272,8 +265,6 @@ final class PreviewAdmissionCoordinator {
         workScheduler.cancel(id: adjacentPreviewPrefetchJobID, pump: false)
         prefetchDelayTask?.cancel()
         prefetchDelayTask = nil
-        idleBuildTask?.cancel()
-        idleBuildTask = nil
         previewDebounceGeneration &+= 1
         previewDebounceTask?.cancel()
         previewDebounceTask = nil
@@ -715,11 +706,8 @@ final class PreviewAdmissionCoordinator {
     }
 
     func cancelIdlePreviewBuild(resetCursor: Bool = false) {
-        idleBuildGeneration &+= 1
-        idleBuildTask?.cancel()
-        idleBuildTask = nil
         workScheduler.cancel(id: idlePreviewBuildJobID, pump: false)
-        if resetCursor { idleBuildCursor = nil }
+        destination?.admissionCancelIdleFrameWarmup(resetProgress: resetCursor)
     }
 
     func cancelAdjacentPreviewPrefetch() {
@@ -935,154 +923,6 @@ final class PreviewAdmissionCoordinator {
     }
 
     func scheduleIdlePreviewBuild() {
-        guard let destination, idleBuildTask == nil else { return }
-        cancelIdlePreviewBuild()
-        let collection = destination.admissionCollection
-        guard collection.isActive, !collection.isScanning,
-            !destination.admissionSourceSessionIsBusy,
-            !destination.admissionPreviewDebouncing,
-            !destination.admissionPreviewInteractionActive,
-            NSApplication.shared.isActive
-        else { return }
-        let candidates = collection.filteredIndices
-            .filter { $0 != collection.selectedIndex }
-            .sorted { abs($0 - collection.selectedIndex) < abs($1 - collection.selectedIndex) }
-            .compactMap { index -> IdlePreviewCandidate? in
-                let item = collection.items[index]
-                guard let dimensions = item.asset.dimensions,
-                    dimensions.width > 0, dimensions.height > 0
-                else { return nil }
-                let extent = CGSize(width: dimensions.width, height: dimensions.height)
-                let source: ImageSource
-                if let url = item.url {
-                    source = ImageSource(url: url, nativeExtent: extent,
-                        portableIdentity: item.asset.source.portableIdentity,
-                        existingFileChangeSignature: item.asset.source.fingerprint)
-                } else if let data = item.imageData {
-                    source = ImageSource(data: data, nativeExtent: extent,
-                        dataFingerprint: item.dataFingerprint,
-                        portableIdentity: item.asset.source.portableIdentity)
-                } else { return nil }
-                return IdlePreviewCandidate(
-                    index: index, source: source,
-                    inMemoryDocument: destination.admissionDocument(for: item.id),
-                    reference: destination.admissionSourceReference(for: item)
-                )
-            }
-        guard !candidates.isEmpty else { return }
-        let generation = idleBuildGeneration
-        let revision = destination.admissionSourceRevision
-        let selectedAssetID = destination.admissionActiveAssetID
-        idleBuildTask = Task { [weak self, weak destination, candidates] in
-            try? await Task.sleep(for: .milliseconds(1500))
-            guard !Task.isCancelled, let self, let destination,
-                !destination.admissionIsShuttingDown,
-                self.idleBuildGeneration == generation,
-                destination.admissionSourceRevision == revision,
-                destination.admissionActiveAssetID == selectedAssetID,
-                destination.admissionCollection.isActive,
-                !destination.admissionCollection.isScanning,
-                !destination.admissionSourceSessionIsBusy,
-                !destination.admissionPreviewDebouncing,
-                !destination.admissionPreviewInteractionActive,
-                NSApplication.shared.isActive
-            else {
-                if let self, self.idleBuildGeneration == generation { self.idleBuildTask = nil }
-                return
-            }
-            await self.runIdlePreviewBuild(
-                candidates: candidates, generation: generation, sourceRevision: revision,
-                selectedAssetID: selectedAssetID
-            )
-            if self.idleBuildGeneration == generation { self.idleBuildTask = nil }
-        }
-    }
-
-    private func runIdlePreviewBuild(
-        candidates: [IdlePreviewCandidate], generation: UInt64, sourceRevision: UInt64,
-        selectedAssetID: PhotoAssetID?
-    ) async {
-        guard let destination else { return }
-        let start = min(idleBuildCursor ?? 0, candidates.count)
-        guard start < candidates.count else { return }
-        let sessionCandidates = Array(candidates[start..<candidates.count].prefix(Self.maxItemsPerIdleSession))
-        let coldCandidates = sessionCandidates.filter { $0.inMemoryDocument == nil }
-        let storedResults = await destination.admissionEditStore.load(for: coldCandidates.map(\.reference))
-        guard !Task.isCancelled, idleBuildGeneration == generation,
-            destination.admissionSourceRevision == sourceRevision,
-            destination.admissionActiveAssetID == selectedAssetID,
-            !destination.admissionCollection.isScanning, NSApplication.shared.isActive
-        else { return }
-        var storedResultIndex = 0
-        var workItems: [IdlePreviewWorkItem] = []
-        for (offset, candidate) in sessionCandidates.enumerated() {
-            let cursor = start + offset
-            let document: EditDocument
-            if let inMemory = candidate.inMemoryDocument { document = inMemory }
-            else if storedResults.indices.contains(storedResultIndex) {
-                let stored = storedResults[storedResultIndex]
-                storedResultIndex += 1
-                guard stored.isUsableForPrefetch else {
-                    workItems.append(IdlePreviewWorkItem(cursor: cursor, request: nil)); continue
-                }
-                document = stored.document
-            } else {
-                storedResultIndex += 1
-                workItems.append(IdlePreviewWorkItem(cursor: cursor, request: nil)); continue
-            }
-            let plan = destination.admissionCanonicalPlan(
-                for: document, nativeExtent: candidate.source.nativeExtent
-            )
-            let request = destination.admissionSettledRequest(
-                source: candidate.source, assetID: candidate.reference.assetID, document: document,
-                lut: destination.admissionResolvedLUT(document.lut.lutID), plan: plan, canonical: true
-            )
-            // An unresolved Look cannot be persisted, so idle building it would render for
-            // nothing; a frame that already matches exactly needs no rebuild either.
-            let needsFrame = request.lookSignature.permitsExactReuse
-                ? await !destination.admissionPresentation.storedFrameIsExact(for: request)
-                : false
-            workItems.append(IdlePreviewWorkItem(
-                cursor: cursor, request: needsFrame ? request : nil
-            ))
-        }
-        guard !workItems.isEmpty, !Task.isCancelled else { return }
-        let engine = self.engine
-        let presentation = destination.admissionPresentation
-        let scheduler = workScheduler
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            scheduler.enqueue(
-                id: idlePreviewBuildJobID, lane: .editor, priority: .background,
-                onTerminal: { _ in continuation.resume() }
-            ) { [weak self, weak destination, engine, presentation, workItems,
-                generation, sourceRevision, selectedAssetID] in
-                guard let self, let destination else { return }
-                for item in workItems {
-                    guard !Task.isCancelled,
-                        self.idleBuildGeneration == generation,
-                        destination.admissionSourceRevision == sourceRevision,
-                        destination.admissionActiveAssetID == selectedAssetID,
-                        !destination.admissionCollection.isScanning,
-                        NSApplication.shared.isActive
-                    else { return }
-                    guard let request = item.request else {
-                        self.idleBuildCursor = item.cursor + 1; continue
-                    }
-                    guard request.lookSignature.permitsExactReuse,
-                        await !presentation.storedFrameIsExact(for: request)
-                    else {
-                        self.idleBuildCursor = item.cursor + 1; continue
-                    }
-                    let image = await engine.makeCIImage(request)
-                    guard !Task.isCancelled,
-                        self.idleBuildGeneration == generation,
-                        destination.admissionSourceRevision == sourceRevision,
-                        destination.admissionActiveAssetID == selectedAssetID
-                    else { return }
-                    if let image { presentation.writeCanonical(image, for: request) }
-                    self.idleBuildCursor = item.cursor + 1
-                }
-            }
-        }
+        destination?.admissionScheduleIdleFrameWarmup()
     }
 }
