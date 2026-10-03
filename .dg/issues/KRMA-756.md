@@ -2,8 +2,41 @@
 id: KRMA-756
 title: "Smooth the Edit panel on photo switch: one continuous slider transition from A's values to B's (builds on KRMA-715)"
 type: bug
-status: review
+status: done
 priority: high
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Release switch moves every slider in one continuous transition; procedure recorded
+      result: pass
+      notes: Release evidence frames attached (krma-756-release-evidence.png); procedure recorded in comments. I did not re-run the live capture.
+    - criterion: No intermediate default-values frame on photo-to-photo switch
+      result: pass
+      notes: Cold switches hold slider values and accessibility readout until the stored document is published (isInspectorSourceDocumentPending, cleared on adopt and on failure).
+    - criterion: Retargeting without restart/jump; stale values cannot overwrite newer
+      result: pass
+      notes: KRMA-715 Hermite retarget retained; pending flag is reset on every beginLoad.
+    - criterion: Pointer, keyboard, accessibility unaffected
+      result: pass
+      notes: sliderMoved cancels programmatic animation; tracking guard unchanged.
+    - criterion: Deterministic regression coverage and gates
+      result: pass
+      notes: Focused suites (31 tests) pass in my run; implementer reports fast, serial, warning gate.
+    - criterion: KRMA-715 updated
+      result: pass
+      notes: Reported in implementer comments.
+  checks_run:
+    - swift test --filter InfoInspectorViewTests|NeutralOriginSliderTests|StoredEditAdoptionTests (31 passed)
+    - git diff --check (clean)
+    - dg validate (OK)
+    - code review of 8b8c59e and edaa1a9
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-02T15:50:35.445Z
+  session: 01MUR52OP8BY8NVTWM
 creation_provenance:
   runner: claude
   model: unknown
@@ -12,7 +45,7 @@ labels:
   - interaction
   - ui
 created: 2026-10-02T02:07:48.913Z
-updated: 2026-10-02T04:13:36.879Z
+updated: 2026-10-02T15:50:35.447Z
 depends_on:
   - KRMA-755
 blockers:
@@ -21,6 +54,8 @@ blockers:
     reason: Live Release visual verification is required, but the currently open Kromora.app holds the library package lock.
     action: Quit the open Kromora.app to release the package lock, then tell me it is closed so I can record the Release transition from DSC03843.ARW (+0.00 EV) to DSC01019.ARW (+1.21 EV, +10 Contrast).
     created_at: 2026-10-02T04:13:36.879Z
+    resolved_at: 2026-10-02T14:53:56.269Z
+    resolved_by: web
 order: a0
 board: product
 blocked_reason: Live Release visual verification is required, but the currently open Kromora.app holds the library package lock.
@@ -58,3 +93,41 @@ KRMA-755 landed (d556d7c4): the panel now gets B's stored values about 154 ms af
 ### Comment — codex @ 2026-10-02T04:13:28.525Z
 
 Implemented and committed as 8b8c59e. Cold photo switches hold slider values and accessibility readouts until the incoming stored document is published, then animate to that target; in-memory photo documents transition immediately. Keyboard/accessibility slider actions cancel programmatic animation. Deterministic regressions pass. Checks: focused suites, debug and Release warnings-as-errors builds, fast lane (1,469 tests), serial lane (457 tests), git diff --check, and dg validate. Live Release visual capture remains pending because the currently open Kromora.app holds the library package lock. KRMA-715 was updated with the implementation and available A/B pair.
+
+### Comment - HUMAN
+
+I have close the app
+
+![Release Edit slider transition from A through an intermediate frame to B](../assets/KRMA-756/krma-756-release-evidence.png)
+
+
+### Comment — codex @ 2026-10-02T15:49:19.856Z
+
+Completed implementation and Release verification. Follow-up commit edaa1a9 keeps the inspector controls mounted until the replacement frame is presented, closing the empty-inspector gap seen during cold RAW switches; the original slider hold/retarget implementation is 8b8c59e. Added InfoInspectorViewTests. Verified: focused test (1 passed), warning gate, fast lane (1,478 passed), serial lane (460 passed), git diff --check, dg validate, and packaged arm64 Release build. Live procedure: Edit view, DSC00969.ARW (+0.00 EV / +0 Contrast) to DSC01019.ARW (+0.88 EV / +11 Contrast). Captured frames show the sliders remain present and move monotonically without a default-values frame. Evidence attached as krma-756-release-evidence.png. DSC03843.ARW was absent from the local package, so DSC00969.ARW was used as A. KRMA-715 has the verification result.
+
+## Agent log
+
+- 2026-10-02T15:50:35.445Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Release switch moves every slider in one continuous transition; procedure recorded (pass) — Release evidence frames attached (krma-756-release-evidence.png); procedure recorded in comments. I did not re-run the live capture.
+- [x] No intermediate default-values frame on photo-to-photo switch (pass) — Cold switches hold slider values and accessibility readout until the stored document is published (isInspectorSourceDocumentPending, cleared on adopt and on failure).
+- [x] Retargeting without restart/jump; stale values cannot overwrite newer (pass) — KRMA-715 Hermite retarget retained; pending flag is reset on every beginLoad.
+- [x] Pointer, keyboard, accessibility unaffected (pass) — sliderMoved cancels programmatic animation; tracking guard unchanged.
+- [x] Deterministic regression coverage and gates (pass) — Focused suites (31 tests) pass in my run; implementer reports fast, serial, warning gate.
+- [x] KRMA-715 updated (pass) — Reported in implementer comments.
+Checks run:
+- swift test --filter InfoInspectorViewTests|NeutralOriginSliderTests|StoredEditAdoptionTests (31 passed)
+- git diff --check (clean)
+- dg validate (OK)
+- code review of 8b8c59e and edaa1a9
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUR52OP8BY8NVTWM
+Summary: Verified: focused tests, diff check, dg validate pass; code review found no issues.

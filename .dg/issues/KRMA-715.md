@@ -12,7 +12,7 @@ labels:
   - interaction
   - ui
 created: 2026-09-29T16:44:14.772Z
-updated: 2026-10-02T04:13:18.348Z
+updated: 2026-10-02T15:49:07.308Z
 blockers:
   - id: evt_mun4xehs_zc41fz
     type: human
@@ -93,3 +93,8 @@ Follow-up filed as KRMA-755 (stored edits are published only after source prepar
 ### Comment — codex @ 2026-10-02T04:13:18.347Z
 
 KRMA-756 implementation update (commit 8b8c59e): the inspector now holds each slider's outgoing presentation and accessibility readout while the newly selected photo's stored document is pending, then animates directly to the incoming document. Deterministic tests cover the hold-to-target transition and keyboard interruption; focused tests and fast/serial lanes pass. Release visual verification is still pending because the currently open Kromora.app owns the library package lock. The library contains a reproducible pair: DSC03843.ARW at +0.00 EV to DSC01019.ARW at +1.21 EV and +10 Contrast.
+
+
+### Comment — codex @ 2026-10-02T15:49:07.307Z
+
+Release visual verification completed in the packaged Release app. Procedure: in Edit, switch from unedited DSC00969.ARW (+0.00 EV, +0 Contrast) to edited DSC01019.ARW (+0.88 EV, +11 Contrast). The Light inspector stayed mounted; sampled Exposure and Contrast knobs moved monotonically through an intermediate position to B, with no default-values frame or backward movement. The Release frame sequence is attached to KRMA-756 at .dg/assets/KRMA-756/krma-756-release-evidence.png. The earlier DSC03843.ARW source was not present in this local package, so DSC00969.ARW was used for A.
