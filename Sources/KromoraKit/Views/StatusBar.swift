@@ -76,6 +76,8 @@ struct StatusBar: View {
 
             Spacer()
 
+            MaskActivityIndicator(state: viewModel.maskInteractionState)
+
             if showsKeyHints {
                 // Hints
                 HStack(spacing: 12) {
@@ -103,6 +105,26 @@ struct StatusBar: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
         .background(surface)
+    }
+}
+
+/// Trailing busy indicator for mask analysis. Shown here rather than in the inspector so
+/// its appearance never shifts the controls the user is dragging.
+private struct MaskActivityIndicator: View {
+    @ObservedObject var state: MaskInteractionState
+
+    var body: some View {
+        if case .loading = state.resolutionState {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Analyzing mask…")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Analyzing selected mask")
+        }
     }
 }
 
