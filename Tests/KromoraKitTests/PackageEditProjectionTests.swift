@@ -1,9 +1,76 @@
 import Foundation
 import XCTest
+import os.lock
 
 @testable import KromoraKit
 
 final class PackageEditProjectionTests: TempDirectoryTestCase {
+    private struct LegacyGeometryAsset: Sendable {
+        let assetID: PortablePhotoAssetID
+        let shardName: String
+        let document: EditDocument
+        let expectedRatio: Double
+    }
+
+    private func makeLegacyGeometryPackage(
+        name: String, assetCount: Int
+    ) throws -> (PortableLibraryPackage, PortablePackageLease, [LegacyGeometryAsset]) {
+        let packageURL = tempDirectory.appendingPathComponent("\(name).kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        let crops = [
+            CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0.5, height: 1)),
+            CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 1, height: 0.5)),
+            CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0, width: 0.75, height: 0.5))
+        ]
+        let rotations: [ImageRotation] = [.zero, .clockwise90, .counterClockwise90]
+        var assets: [LegacyGeometryAsset] = []
+        var selectedShards = Set<String>()
+        var ordinal = 0
+        while assets.count < assetCount {
+            let sourceURL = try Fixtures.writeJPEG(
+                width: 24 + ordinal * 2, height: 12, orientation: 1,
+                named: "\(name)-\(ordinal).jpg", in: tempDirectory
+            )
+            let imported = try package.importSources([.init(url: sourceURL)], lease: lease)
+            let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+            let shardName = PortableLibraryPackage.shard(for: assetID)
+            ordinal += 1
+            guard selectedShards.insert(shardName).inserted else { continue }
+
+            let width = 24 + (ordinal - 1) * 2
+            var shard = try package.readMembershipShard(shardName)
+            if let index = shard.entries.firstIndex(where: { $0.assetID == assetID }) {
+                shard.entries[index].summary.dimensions = PhotoPixelDimensions(width: width, height: 12)
+                shard.entries[index].summary.aspectRatio = Double(width) / 12
+                try package.writeMembershipShard(shard)
+            }
+
+            let document = EditDocument(
+                crop: crops[assets.count % crops.count],
+                rotation: rotations[assets.count % rotations.count]
+            )
+            let commit = try package.commitEditRevision(
+                for: assetID, document: document, lease: lease
+            )
+            let expectedRatio = try XCTUnwrap(commit.membership?.summary.presentedAspectRatio)
+            assets.append(LegacyGeometryAsset(
+                assetID: assetID, shardName: shardName,
+                document: document, expectedRatio: expectedRatio
+            ))
+        }
+
+        for shardName in Set(assets.map(\.shardName)) {
+            var shard = try package.readMembershipShard(shardName)
+            let assetIDs = Set(assets.filter { $0.shardName == shardName }.map(\.assetID))
+            for index in shard.entries.indices where assetIDs.contains(shard.entries[index].assetID) {
+                shard.entries[index].summary.presentedAspectRatio = nil
+            }
+            try package.writeMembershipShard(shard)
+        }
+        return (package, lease, assets)
+    }
+
     func testPackageIsCanonicalAndProjectionRebuildPreservesExactDocument() async throws {
         let packageURL = tempDirectory.appendingPathComponent("Canonical.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)
@@ -73,6 +140,113 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         let reopened = try PortableLibraryPackage.open(at: packageURL)
         let reopenedHistory = try reopened.readEditHistory(for: asset.assetID)
         XCTAssertEqual(reopenedHistory, history)
+    }
+
+    func testPresentedAspectRatioRepairResumesAtCommittedShardBoundaries() async throws {
+        let (package, lease, assets) = try makeLegacyGeometryPackage(
+            name: "LegacyGeometryResume", assetCount: 3
+        )
+        defer { try? lease.release() }
+        let shardNames = assets.map(\.shardName)
+
+        for cancellationPoint in 1..<assets.count {
+            let committedBatches = OSAllocatedUnfairLock(initialState: 0)
+            let shouldCancel = OSAllocatedUnfairLock(initialState: false)
+            do {
+                _ = try await package.repairPresentedAspectRatios(
+                    lease: lease,
+                    shardNames: shardNames,
+                    isCancelled: { shouldCancel.withLock { $0 } },
+                    onBatch: { _ in
+                        committedBatches.withLock { $0 += 1 }
+                        shouldCancel.withLock { $0 = true }
+                    }
+                )
+                XCTFail("repair should stop after one committed shard")
+            } catch is CancellationError {
+                XCTAssertEqual(committedBatches.withLock { $0 }, 1)
+            }
+
+            XCTAssertNoThrow(try PortableLibraryPackage.open(at: package.rootURL))
+            let repairedCount = try assets.filter { asset in
+                try package.readMembershipShard(asset.shardName).entries
+                    .first { $0.assetID == asset.assetID }?.summary.presentedAspectRatio
+                    == asset.expectedRatio
+            }.count
+            XCTAssertEqual(repairedCount, cancellationPoint)
+        }
+
+        _ = try await package.repairPresentedAspectRatios(
+            lease: lease, shardNames: shardNames
+        )
+        XCTAssertNoThrow(try PortableLibraryPackage.open(at: package.rootURL))
+        for asset in assets {
+            let summary = try XCTUnwrap(
+                package.readMembershipShard(asset.shardName).entries
+                    .first { $0.assetID == asset.assetID }?.summary
+            )
+            let ratio = try XCTUnwrap(summary.presentedAspectRatio)
+            XCTAssertEqual(ratio, asset.expectedRatio, accuracy: 1e-9)
+        }
+    }
+
+    func testEditCommitDuringPresentedAspectRatioRepairWins() async throws {
+        let (package, lease, assets) = try makeLegacyGeometryPackage(
+            name: "LegacyGeometryEditRace", assetCount: 1
+        )
+        defer { try? lease.release() }
+        let asset = try XCTUnwrap(assets.first)
+        let userDocument = EditDocument(
+            crop: CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0.5, height: 1)),
+            rotation: .clockwise90
+        )
+        let expectedRatio = try XCTUnwrap(
+            package.readMembershipShard(asset.shardName).entries
+                .first { $0.assetID == asset.assetID }?.summary
+                .presentedAspectRatio(for: userDocument)
+        )
+        let bothStarted = OSAllocatedUnfairLock(initialState: 0)
+        let tasks = OSAllocatedUnfairLock(initialState: (
+            repair: Optional<Task<[LibraryIndexEntry], Error>>.none,
+            edit: Optional<Task<PortablePackageEditCommit, Error>>.none
+        ))
+
+        // Hold the shared writer mutation gate until both package operations have started. Once
+        // released, either ordering is safe: edit follows repair, or repair reads the new edit.
+        lease.withWriterMutationLock {
+            let repairTask = Task.detached {
+                bothStarted.withLock { $0 += 1 }
+                return try package.repairPresentedAspectRatioShard(
+                    asset.shardName, lease: lease
+                )
+            }
+            let editTask = Task.detached {
+                bothStarted.withLock { $0 += 1 }
+                return try package.commitEditRevision(
+                    for: asset.assetID, document: userDocument, lease: lease
+                )
+            }
+            tasks.withLock { $0 = (repairTask, editTask) }
+            while bothStarted.withLock({ $0 < 2 }) {
+                Thread.sleep(forTimeInterval: 0.001)
+            }
+        }
+
+        let startedTasks = tasks.withLock { $0 }
+        let repairTask = try XCTUnwrap(startedTasks.repair)
+        let editTask = try XCTUnwrap(startedTasks.edit)
+        _ = try await repairTask.value
+        let editCommit = try await editTask.value
+        XCTAssertEqual(editCommit.membership?.summary.presentedAspectRatio, expectedRatio)
+        XCTAssertEqual(
+            try package.readEditRevision(for: asset.assetID).document, userDocument
+        )
+        XCTAssertEqual(
+            try package.readMembershipShard(asset.shardName).entries
+                .first { $0.assetID == asset.assetID }?.summary.presentedAspectRatio,
+            expectedRatio
+        )
+        XCTAssertNoThrow(try PortableLibraryPackage.open(at: package.rootURL))
     }
 
     func testHistoryNavigationBranchesWithoutWritingAndPreservesNamedSnapshots() async throws {

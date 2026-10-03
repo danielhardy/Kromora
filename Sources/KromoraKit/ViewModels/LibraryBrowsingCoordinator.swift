@@ -102,6 +102,12 @@ final class LibraryBrowsingCoordinator {
 
     func reloadPortableCollection() throws { try reloadPortableWindow(pageIndex: 0) }
 
+    /// Propagate a package ratio-only repair into retained cells without rebuilding their assets
+    /// or admitting any new thumbnail work.
+    func applyPresentedAspectRatioUpdates(_ updates: [PortablePhotoAssetID: Double]) {
+        collection.applyPresentedAspectRatioUpdates(updates)
+    }
+
     func reloadPortableWindow(pageIndex: Int = 0) throws {
         guard let library, let destination else { return }
         let query = destination.portableQuery

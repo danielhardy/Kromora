@@ -169,6 +169,7 @@ enum KromoraWorkflowEvent: CaseIterable {
     case launchHydrationComplete
     case frameLookupSummary
     case frameWriteSkippedPlaceholder
+    case cellGeometryReflow
 
     var name: StaticString {
         switch self {
@@ -196,6 +197,7 @@ enum KromoraWorkflowEvent: CaseIterable {
         case .launchHydrationComplete: return "LaunchHydrationComplete"
         case .frameLookupSummary: return "FrameLookupSummary"
         case .frameWriteSkippedPlaceholder: return "FrameWriteSkippedPlaceholder"
+        case .cellGeometryReflow: return "CellGeometryReflow"
         }
     }
 }

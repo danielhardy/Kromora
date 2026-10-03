@@ -217,6 +217,7 @@ private struct LibraryMosaicRow: View {
                     )
                     .frame(width: CGFloat(cell.width))
                     .onAppear {
+                        item.markLibraryLayoutPresented()
                         // Make the cell callback order-independent: SwiftUI may deliver a child's
                         // appearance before its row's appearance. The fast preview starts here;
                         // edited renders are admitted for the whole viewport so a missing

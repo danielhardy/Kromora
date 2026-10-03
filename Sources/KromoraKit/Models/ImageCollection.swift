@@ -84,6 +84,7 @@ final class ImageCollectionPresentationModel {
         /// not the package summary's published ratio, define the cell shape (a reset to identity
         /// must return the cell to the source shape).
         private var hasLivePresentedGeometry = false
+        private var hasAppearedInLibraryGrid = false
 
         var id: PhotoAssetID { asset.id }
         var url: URL? { asset.url }
@@ -234,7 +235,9 @@ final class ImageCollectionPresentationModel {
             let before = libraryAspectRatio
             presentedCrop = geometry.crop
             presentedRotation = geometry.rotation
-            return abs(libraryAspectRatio - before) > 1e-9
+            let after = libraryAspectRatio
+            recordCellGeometryReflow(from: before, to: after)
+            return abs(after - before) > 1e-9
         }
 
         /// Install the document's crop and rotation. Returns true only when the cell shape changes,
@@ -245,7 +248,33 @@ final class ImageCollectionPresentationModel {
             presentedCrop = crop
             presentedRotation = rotation
             hasLivePresentedGeometry = true
-            return abs(libraryAspectRatio - before) > 1e-9
+            let after = libraryAspectRatio
+            recordCellGeometryReflow(from: before, to: after)
+            return abs(after - before) > 1e-9
+        }
+
+        /// Apply a package repair's narrow geometry update without replacing the asset snapshot,
+        /// restarting thumbnail work, or overriding a live document already installed in Edit.
+        @discardableResult
+        func adoptPublishedPresentedAspectRatio(_ ratio: Double) -> Bool {
+            guard ratio.isFinite, ratio > 0 else { return false }
+            let before = libraryAspectRatio
+            asset.presentedAspectRatio = LibraryGridLayout.normalizedAspectRatio(ratio)
+            let after = libraryAspectRatio
+            recordCellGeometryReflow(from: before, to: after)
+            return abs(after - before) > 1e-9
+        }
+
+        func markLibraryLayoutPresented() {
+            hasAppearedInLibraryGrid = true
+        }
+
+        private func recordCellGeometryReflow(from before: Double, to after: Double) {
+            guard hasAppearedInLibraryGrid, abs(after - before) > 1e-9 else { return }
+            KromoraObservability.event(
+                .cellGeometryReflow,
+                detail: "previous_ratio=\(before) next_ratio=\(after)"
+            )
         }
     }
 
@@ -700,6 +729,20 @@ final class ImageCollectionPresentationModel {
     ) {
         guard let item = items.first(where: { $0.id == id }),
               item.setPresentedCrop(crop, rotation: rotation) else { return }
+        cropGeneration += 1
+        invalidateCollectionProjection(notify: true)
+    }
+
+    /// Patch only the package-published cell geometry. This invalidates the mosaic's placement
+    /// snapshot but never requeues reads or edited renders for the affected thumbnails.
+    func applyPresentedAspectRatioUpdates(_ updates: [PortablePhotoAssetID: Double]) {
+        var geometryChanged = false
+        for (assetID, ratio) in updates {
+            let photoID = Self.photoID(for: assetID)
+            guard let item = items.first(where: { $0.id == photoID }) else { continue }
+            geometryChanged = item.adoptPublishedPresentedAspectRatio(ratio) || geometryChanged
+        }
+        guard geometryChanged else { return }
         cropGeneration += 1
         invalidateCollectionProjection(notify: true)
     }

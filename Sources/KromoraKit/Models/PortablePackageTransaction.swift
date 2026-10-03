@@ -193,8 +193,17 @@ final class PortablePackageLease: Sendable {
     let ownerID: UUID
     private let duration: TimeInterval
     private let state: OSAllocatedUnfairLock<State>
+    private let writerMutationLock = OSAllocatedUnfairLock(initialState: ())
 
     var info: PortablePackageLeaseInfo { state.withLock { $0.info } }
+
+    /// Serializes same-session package mutations that must read a current value and publish a
+    /// related transaction without a concurrent edit slipping between those steps.
+    func withWriterMutationLock<T: Sendable>(
+        _ body: @Sendable () throws -> T
+    ) rethrows -> T {
+        try writerMutationLock.withLock { _ in try body() }
+    }
 
     private init(packageRoot: URL, info: PortablePackageLeaseInfo, duration: TimeInterval) {
         self.packageRoot = packageRoot

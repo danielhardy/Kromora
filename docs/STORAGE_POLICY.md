@@ -120,3 +120,15 @@ valid on its own, and a later launch resumes the remaining summaries. The dispos
 round-trips this optional field and can always be rebuilt from the membership shards. The summary
 field is rebuildable from `asset.json`, so a missing or stale summary remains safe and is repaired
 without making the package unavailable.
+
+## Membership summary presented geometry
+
+Older packages also decode a missing `presentedAspectRatio` as `nil`. Once the package index is
+published, Kromora checks that already-loaded projection and schedules a lowest-priority,
+background repair only for shards with live summaries missing this field. The repair reads each
+current edit sidecar, merges only the ratio into a fresh membership shard, and commits one shard per
+transaction. Each committed shard is valid on its own; cancellation or interruption leaves the
+remaining summaries for the next package open. Successful batches update the disposable index and
+current grid cells through ratio-only deltas, without reopening asset records or requesting new
+thumbnails. The repair is automatic and idempotent: once all live summaries have the field, later
+opens skip the work.

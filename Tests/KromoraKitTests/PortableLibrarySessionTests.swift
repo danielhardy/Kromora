@@ -6,6 +6,20 @@ import os.lock
 
 @MainActor
 final class PortableLibrarySessionTests: TempDirectoryTestCase {
+    private func waitUntil(
+        _ description: String,
+        timeout: Duration = .seconds(10),
+        _ condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            if ContinuousClock.now >= deadline {
+                throw TestSynchronizationError.timedOut(description, "condition did not settle")
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     private final class TestLeaseClock: @unchecked Sendable {
         private let lock = NSLock()
         private var value: Date
@@ -200,6 +214,150 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         )
         XCTAssertEqual(repaired, try package.readAssetRecord(for: assetID).identity.sourceFingerprint)
         await session.shutdown()
+    }
+
+    func testPackageOpenRepairsLegacyPresentedGeometryAndSecondOpenSkipsTheGate() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LegacyPresentedGeometry.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("LegacyPresentedGeometry.index")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let setupLease = try PortablePackageLease.acquire(at: packageURL)
+        let sourceURLs = try (0..<3).map { index in
+            try Fixtures.writeJPEG(
+                width: 30 + index * 2, height: 12, orientation: 1,
+                named: "legacy-presented-\(index).jpg", in: tempDirectory
+            )
+        }
+        let imported = try package.importSources(
+            sourceURLs.map { .init(url: $0) }, lease: setupLease
+        )
+        let documents = [
+            EditDocument(
+                crop: CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 0.5, height: 1))
+            ),
+            EditDocument(
+                crop: CropAdjustments(normalizedRect: CGRect(x: 0, y: 0, width: 1, height: 0.5)),
+                rotation: .clockwise90
+            ),
+            EditDocument(
+                crop: CropAdjustments(normalizedRect: CGRect(x: 0.1, y: 0, width: 0.75, height: 0.5)),
+                rotation: .counterClockwise90
+            )
+        ]
+        var expectedRatios: [PortablePhotoAssetID: Double] = [:]
+        for (index, pair) in zip(imported.imported, documents).enumerated() {
+            let (asset, document) = pair
+            let shardName = PortableLibraryPackage.shard(for: asset.assetID)
+            var shard = try package.readMembershipShard(shardName)
+            let entryIndex = try XCTUnwrap(
+                shard.entries.firstIndex { $0.assetID == asset.assetID }
+            )
+            let width = 30 + index * 2
+            shard.entries[entryIndex].summary.dimensions = PhotoPixelDimensions(width: width, height: 12)
+            shard.entries[entryIndex].summary.aspectRatio = Double(width) / 12
+            try package.writeMembershipShard(shard)
+            let commit = try package.commitEditRevision(
+                for: asset.assetID, document: document, lease: setupLease
+            )
+            expectedRatios[asset.assetID] = try XCTUnwrap(
+                commit.membership?.summary.presentedAspectRatio
+            )
+        }
+        for shardName in Set(imported.imported.map {
+            PortableLibraryPackage.shard(for: $0.assetID)
+        }) {
+            var shard = try package.readMembershipShard(shardName)
+            for index in shard.entries.indices
+                where expectedRatios[shard.entries[index].assetID] != nil {
+                shard.entries[index].summary.presentedAspectRatio = nil
+            }
+            try package.writeMembershipShard(shard)
+        }
+        try setupLease.release()
+
+        let scheduler = ImageWorkScheduler()
+        let blockerStarted = OSAllocatedUnfairLock(initialState: false)
+        let blockerRelease = OSAllocatedUnfairLock(initialState: false)
+        XCTAssertTrue(scheduler.enqueuePackageIO(
+            id: .init("presented-geometry-test-blocker"), lane: .maintenance
+        ) {
+            blockerStarted.withLock { $0 = true }
+            while !blockerRelease.withLock({ $0 }) { await Task.yield() }
+        })
+        for _ in 0..<10_000 where !blockerStarted.withLock({ $0 }) { await Task.yield() }
+        XCTAssertTrue(blockerStarted.withLock { $0 })
+
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, scheduler: scheduler
+        )
+        XCTAssertEqual(
+            session.queryController.index.entries.filter {
+                $0.summary.presentedAspectRatio == nil
+            }.count,
+            expectedRatios.count
+        )
+        let collection = ImageCollection()
+        var mainActorRecordReads: [PortablePhotoAssetID] = []
+        var publishedUpdates: [PortablePhotoAssetID: Double] = [:]
+        session.assetRecordReadObserver = { assetID in
+            if Thread.isMainThread { mainActorRecordReads.append(assetID) }
+        }
+        collection.items = try session.browsingAssets().map { ImageCollection.Item(asset: $0) }
+        XCTAssertTrue(collection.items.allSatisfy { $0.asset.presentedAspectRatio == nil })
+        session.onPresentedAspectRatioUpdates = { updates in
+            publishedUpdates.merge(updates) { _, latest in latest }
+            collection.applyPresentedAspectRatioUpdates(updates)
+        }
+
+        blockerRelease.withLock { $0 = true }
+        let repairJobID = ImageWorkScheduler.JobID(
+            "portable-package-presented-aspect-ratio-repair-\(session.lease.ownerID.uuidString)"
+        )
+        let indexWriteJobID = ImageWorkScheduler.JobID(
+            "portable-package-index-write-\(session.lease.ownerID.uuidString)"
+        )
+        try await waitUntil("presented aspect ratio repair and index publication") {
+            expectedRatios.allSatisfy { assetID, ratio in
+                session.queryController.index.entry(for: assetID)?.summary.presentedAspectRatio
+                    == ratio
+                    && collection.items.first(where: {
+                        $0.asset.source.portableIdentity.assetID == assetID
+                    })?.libraryAspectRatio == ratio
+            }
+                && !scheduler.contains(repairJobID)
+                && !scheduler.contains(indexWriteJobID)
+        }
+
+        XCTAssertEqual(publishedUpdates, expectedRatios)
+        XCTAssertEqual(
+            scheduler.admissionLog.filter {
+                $0.id.rawValue.hasPrefix("portable-package-presented-aspect-ratio-repair-")
+            }.count,
+            Set(expectedRatios.keys.map(PortableLibraryPackage.shard(for:))).count
+        )
+        XCTAssertEqual(mainActorRecordReads, [])
+        for (assetID, ratio) in expectedRatios {
+            XCTAssertEqual(
+                session.queryController.index.entry(for: assetID)?.summary.presentedAspectRatio,
+                ratio
+            )
+            XCTAssertEqual(
+                collection.items.first {
+                    $0.asset.source.portableIdentity.assetID == assetID
+                }?.libraryAspectRatio,
+                ratio
+            )
+        }
+        await collection.shutdown()
+        await session.shutdown()
+
+        let secondScheduler = ImageWorkScheduler()
+        let secondSession = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, scheduler: secondScheduler
+        )
+        XCTAssertFalse(secondScheduler.admissionLog.contains {
+            $0.id.rawValue.hasPrefix("portable-package-presented-aspect-ratio-repair-")
+        }, "a complete projection must skip ratio repair on the next open")
+        await secondSession.shutdown()
     }
 
     func testSourceReplacementUpdatesRecordAndMembershipInOneTransaction() throws {

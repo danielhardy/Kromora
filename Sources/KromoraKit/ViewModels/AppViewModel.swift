@@ -1379,6 +1379,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
+        portableLibrary?.onPresentedAspectRatioUpdates = { [weak self] updates in
+            self?.libraryBrowsingCoordinator.applyPresentedAspectRatioUpdates(updates)
+        }
         libraryBrowsingCoordinator.prepareLaunchHints()
         if let portableLibrary, portableLibrary.isLoadingIndex {
             statusMessage = "Opening library index…"
