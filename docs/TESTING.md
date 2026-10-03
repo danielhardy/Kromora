@@ -172,6 +172,7 @@ boundary suites so injected failures stay reproducible and do not depend on a sc
 | --- | --- |
 | Freshness rows, unresolved Looks, source replacement, color-space mismatch, and pixel-epoch changes | `PresentationFrameClassifierTests`, `LookSignatureTests` |
 | Truncated/overflow/corrupt preview envelopes, unsupported storage format, per-entry isolation, LRU cap and pinning | `PresentationFrameEnvelopeTests`, `LatestPreviewFrameStoreTests` |
+| Canonical frame reaches a fresh store within the two-second settle-to-disk bound; interrupted atomic replacement preserves the prior complete frame | `LatestPreviewFrameStoreTests` |
 | Exact/stale/missing stored frames, candidate ordering, renderer failure, and obsolete generations | `WarmReopenPresentationTests`, `PreviewPresentationCoordinatorTests`, `EmbeddedFirstFrameTests`, `PreviewCutoverTests` |
 | Same-ID Look replacement and unchanged Look scans | `LUTLibraryTests`, `AppViewModelTests`, `EditedThumbnailCoordinatorTests` |
 | Transactional edit plus presented geometry and rollback | `PortableLibraryPackageTests.testEditRevisionAndPresentedGeometryPublishOrRollbackTogether` |
@@ -186,6 +187,16 @@ signpost groups outcomes by surface and names the most frequent rejection reason
 Run this matrix with `swift test`, then `scripts/ci-tests.sh fast`, `serial`, and `identity`. These
 assertions establish correctness and bounded work; fake renderer timings remain orchestration data
 and do not count toward the release latency budgets.
+
+### Canonical preview write bound
+
+`LatestPreviewFrameStore` writes canonical preview envelopes at user-initiated task priority. The
+named `maxSettleToDiskDelay` is two seconds from the first queued frame; newer frames for the same
+asset coalesce into that pending write without moving its deadline. The store test polls fresh store
+instances until the frame is readable and never calls `flush()` or `shutdown()`. Its interruption
+test damages the staged bytes immediately before atomic replacement and verifies that the prior
+complete envelope remains readable. Existing replacement coverage verifies that a successful
+write exposes the new complete frame.
 
 ### Packed thumbnail write batching
 

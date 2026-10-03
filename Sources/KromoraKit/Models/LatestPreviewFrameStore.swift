@@ -1,5 +1,6 @@
 import CoreGraphics
 import CryptoKit
+import Darwin
 import Foundation
 
 /// Durable store for the latest presented 2048 px preview of each photo.
@@ -16,6 +17,8 @@ import Foundation
 actor LatestPreviewFrameStore {
     static let defaultCapBytes: Int64 = 1_000_000_000
     static let canonicalLongEdge = FrameClassifier.previewLongEdge
+    /// Maximum time a settled canonical preview may wait in the store's write queue.
+    static let maxSettleToDiskDelay: Duration = .seconds(2)
 
     /// A decoded frame. The JPEG is decoded inside the actor so presentation never pays for it on
     /// the main actor.
@@ -29,9 +32,19 @@ actor LatestPreviewFrameStore {
         var lastAccess: Date
     }
 
+    private struct PendingWrite {
+        let deadlineID: UInt64
+        let deadline: ContinuousClock.Instant
+        let frame: PresentationFrame
+        let token: UInt64
+        let task: Task<Void, Never>
+        let deadlineTask: Task<Void, Never>
+    }
+
     private let directory: URL
     private let capBytes: Int64
     private let workScheduler: ImageWorkScheduler?
+    private let beforeAtomicReplace: (@Sendable (URL, URL) throws -> Void)?
     private let placeholderSweepJobID = ImageWorkScheduler.JobID(
         "placeholder-preview-sweep-\(UUID().uuidString)"
     )
@@ -40,7 +53,7 @@ actor LatestPreviewFrameStore {
     private var didLoadIndex = false
     private var lastReadWasPlaceholder = false
     private var pinned: Set<String> = []
-    private var pendingWrites: [String: (token: UInt64, task: Task<Void, Never>)] = [:]
+    private var pendingWrites: [String: PendingWrite] = [:]
     private var nextWriteToken: UInt64 = 0
     private var legacyCleanupTask: Task<Void, Never>?
     private var placeholderSweepScheduled = false
@@ -55,11 +68,13 @@ actor LatestPreviewFrameStore {
 
     init(
         directory: URL, capBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
-        workScheduler: ImageWorkScheduler? = nil
+        workScheduler: ImageWorkScheduler? = nil,
+        beforeAtomicReplace: (@Sendable (URL, URL) throws -> Void)? = nil
     ) {
         self.directory = directory
         self.capBytes = max(0, capBytes)
         self.workScheduler = workScheduler
+        self.beforeAtomicReplace = beforeAtomicReplace
     }
 
     nonisolated static func packageDirectory(for packageURL: URL) -> URL {
@@ -151,26 +166,49 @@ actor LatestPreviewFrameStore {
         }
         guard frame.kind == .preview2048,
               let hash = Self.assetHash(frame.identity.assetID) else { return }
-        pendingWrites[hash]?.task.cancel()
+        let previous = pendingWrites[hash]
+        previous?.task.cancel()
         nextWriteToken &+= 1
         let token = nextWriteToken
-        let task = Task { [weak self] in
+        let deadlineID = previous?.deadlineID ?? token
+        let deadline = previous?.deadline
+            ?? ContinuousClock.now.advanced(by: Self.maxSettleToDiskDelay)
+
+        let deadlineTask: Task<Void, Never>
+        if let previous {
+            deadlineTask = previous.deadlineTask
+        } else {
+            deadlineTask = Task(priority: .userInitiated) { [weak self] in
+                let remaining = max(.zero, ContinuousClock.now.duration(to: deadline))
+                do { try await ContinuousClock().sleep(for: remaining) } catch { return }
+                guard !Task.isCancelled, let self else { return }
+                await self.writeLatestPendingWrite(hash: hash, deadlineID: deadlineID)
+            }
+        }
+        let task = Task(priority: .userInitiated) { [weak self] in
             await Task.yield()
             guard !Task.isCancelled, let self else { return }
-            await self.write(frame, hash: hash)
-            await self.finishedWrite(hash: hash, token: token)
+            await self.writePendingWrite(hash: hash, token: token)
         }
-        pendingWrites[hash] = (token, task)
+        pendingWrites[hash] = PendingWrite(
+            deadlineID: deadlineID, deadline: deadline, frame: frame, token: token,
+            task: task, deadlineTask: deadlineTask
+        )
     }
 
     func cancelPendingWrites() {
-        for pending in pendingWrites.values { pending.task.cancel() }
+        for pending in pendingWrites.values {
+            pending.task.cancel()
+            pending.deadlineTask.cancel()
+        }
         pendingWrites.removeAll()
     }
 
     /// Wait until every queued write has reached the filesystem.
     func waitForPendingWrites() async {
-        for task in pendingWrites.values.map(\.task) { await task.value }
+        for task in pendingWrites.values.flatMap({ [$0.task, $0.deadlineTask] }) {
+            await task.value
+        }
     }
 
     /// Wait for the lazy legacy cleanup started by the index load, if any.
@@ -224,8 +262,7 @@ actor LatestPreviewFrameStore {
         guard loadIndex() else { return }
         for identity in identities {
             guard let hash = Self.assetHash(identity.assetID) else { continue }
-            pendingWrites[hash]?.task.cancel()
-            pendingWrites.removeValue(forKey: hash)
+            cancelPendingWrite(forHash: hash)
             remove(hash: hash)
         }
     }
@@ -245,21 +282,35 @@ actor LatestPreviewFrameStore {
         directory.appendingPathComponent("\(hash).\(PresentationFrameEnvelope.fileExtension)")
     }
 
-    private func finishedWrite(hash: String, token: UInt64) {
-        if pendingWrites[hash]?.token == token { pendingWrites.removeValue(forKey: hash) }
+    private func cancelPendingWrite(forHash hash: String) {
+        guard let pending = pendingWrites.removeValue(forKey: hash) else { return }
+        pending.task.cancel()
+        pending.deadlineTask.cancel()
     }
 
-    private func write(_ frame: PresentationFrame, hash: String) {
+    private func writePendingWrite(hash: String, token: UInt64) {
+        guard let pending = pendingWrites[hash], pending.token == token else { return }
+        write(pending.frame, hash: hash, token: token)
+        guard pendingWrites[hash]?.token == token else { return }
+        pendingWrites.removeValue(forKey: hash)?.deadlineTask.cancel()
+    }
+
+    private func writeLatestPendingWrite(hash: String, deadlineID: UInt64) {
+        guard let pending = pendingWrites[hash], pending.deadlineID == deadlineID else { return }
+        writePendingWrite(hash: hash, token: pending.token)
+    }
+
+    private func write(_ frame: PresentationFrame, hash: String, token: UInt64) {
         guard !Self.hasPlaceholderIdentity(frame) else {
             placeholderWritesSkipped += 1
             KromoraObservability.event(.frameWriteSkippedPlaceholder)
             return
         }
-        guard !Task.isCancelled, loadIndex() else { return }
+        guard !Task.isCancelled, pendingWrites[hash]?.token == token, loadIndex() else { return }
         do {
             let data = try PresentationFrameEnvelope.encode(frame)
             let url = fileURL(forHash: hash)
-            try data.write(to: url, options: .atomic)
+            try writeAtomically(data, to: url)
             let now = Date()
             try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: url.path)
             if let old = entries.updateValue(
@@ -269,6 +320,30 @@ actor LatestPreviewFrameStore {
             enforceCap(protecting: hash)
         } catch {
             // The store is an optimization and never a render prerequisite.
+        }
+    }
+
+    /// Stage a complete envelope beside its destination, then use the filesystem's atomic rename
+    /// to publish it. A process interruption while staging leaves the old entry untouched; an
+    /// interruption during rename exposes either the prior complete envelope or the new one.
+    private func writeAtomically(_ data: Data, to destination: URL) throws {
+        let staging = directory.appendingPathComponent(
+            ".\(destination.lastPathComponent).\(UUID().uuidString).partial"
+        )
+        defer { try? FileManager.default.removeItem(at: staging) }
+
+        try data.write(to: staging)
+        try beforeAtomicReplace?(staging, destination)
+        let result = staging.withUnsafeFileSystemRepresentation { source -> Int32? in
+            guard let source else { return nil }
+            return destination.withUnsafeFileSystemRepresentation { target -> Int32? in
+                guard let target else { return nil }
+                return Darwin.rename(source, target)
+            }
+        }
+        guard let result else { throw POSIXError(.EINVAL) }
+        guard result == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
         }
     }
 

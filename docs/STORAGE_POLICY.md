@@ -59,7 +59,13 @@ Every length is validated against the file size before any buffer is allocated.
   presentation.
 - **Budget.** The 1 GB cap is enforced incrementally from an in-memory index loaded off the main
   actor on first use (construction performs no I/O). Eviction is strict LRU except for pinned assets
-  (the active photo). Writes coalesce per asset.
+  (the active photo). Writes coalesce per asset and run at user-initiated task priority. The named
+  `LatestPreviewFrameStore.maxSettleToDiskDelay` is two seconds from the first queued frame; a newer
+  settle replaces the queued frame without moving that deadline. With successful local storage, the
+  newest canonical frame therefore reaches disk within two seconds of entering the store's queue.
+- **Replacement.** The complete envelope is staged beside its destination and published with an
+  atomic rename. Interruption during staging leaves the previous file intact; interruption during
+  rename leaves either the previous complete frame or the new complete frame readable.
 - **Legacy files.** `preview-*.jpg` and the old `version` file are never read. They are deleted a few
   at a time after the index loads, off the main actor.
 - **Truth.** A frame is a hint for presentation only. It is never used for export, masks, analysis,

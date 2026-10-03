@@ -75,6 +75,72 @@ final class LatestPreviewFrameStoreTests: TempDirectoryTestCase {
         XCTAssertLessThan(total / Double(expected.count), 3.0 / 255.0)
     }
 
+    func testSettledFrameReachesAFreshStoreWithinTheWriteBound() async throws {
+        let directory = cacheDirectory("bounded-settle-write")
+        let identity = FrameFixtures.identity()
+        let frame = try FrameFixtures.frame(identity: identity)
+        let store = LatestPreviewFrameStore(directory: directory)
+        let started = ContinuousClock.now
+        let deadline = started.advanced(by: LatestPreviewFrameStore.maxSettleToDiskDelay)
+
+        await store.enqueueWrite(frame)
+
+        var hit: LatestPreviewFrameStore.Hit?
+        while ContinuousClock.now < deadline {
+            let relaunched = LatestPreviewFrameStore(directory: directory)
+            if let persisted = await relaunched.read(for: identity) {
+                hit = persisted
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        XCTAssertEqual(hit?.frame, frame, "the write must settle without flush or shutdown")
+        XCTAssertLessThanOrEqual(
+            started.duration(to: ContinuousClock.now), LatestPreviewFrameStore.maxSettleToDiskDelay
+        )
+    }
+
+    func testInterruptionBeforeAtomicReplacementKeepsThePreviousCompleteFrame() async throws {
+        enum InjectedInterruption: Error { case beforeReplace }
+
+        let directory = cacheDirectory("interrupted-replacement")
+        let identity = FrameFixtures.identity()
+        let previous = try FrameFixtures.frame(identity: identity, edit: "previous")
+        let replacement = try FrameFixtures.frame(identity: identity, edit: "replacement", red: 0.9)
+        let seed = LatestPreviewFrameStore(directory: directory)
+        await seed.enqueueWrite(previous)
+        await seed.waitForPendingWrites()
+
+        let interrupted = LatestPreviewFrameStore(
+            directory: directory,
+            beforeAtomicReplace: { staging, _ in
+                try Data("partial envelope".utf8).write(to: staging)
+                throw InjectedInterruption.beforeReplace
+            }
+        )
+        await interrupted.enqueueWrite(replacement)
+        await interrupted.waitForPendingWrites()
+
+        let files = try FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: nil
+        )
+        XCTAssertEqual(files.filter { $0.pathExtension == "kframe" }.count, 1)
+        XCTAssertFalse(files.contains { $0.pathExtension == "partial" })
+
+        let relaunched = LatestPreviewFrameStore(directory: directory)
+        let hit = try unwrapAwaited(await relaunched.read(for: identity))
+        XCTAssertEqual(hit.frame, previous)
+        XCTAssertNotEqual(hit.frame, replacement, "partial bytes must never become a cache hit")
+
+        let recovered = LatestPreviewFrameStore(directory: directory)
+        await recovered.enqueueWrite(replacement)
+        await recovered.waitForPendingWrites()
+        let afterReplacement = LatestPreviewFrameStore(directory: directory)
+        let replacedHit = try unwrapAwaited(await afterReplacement.read(for: identity))
+        XCTAssertEqual(replacedHit.frame, replacement)
+    }
+
     func testEachAssetHasExactlyOneReplaceableFile() async throws {
         let directory = cacheDirectory()
         let store = LatestPreviewFrameStore(directory: directory)
