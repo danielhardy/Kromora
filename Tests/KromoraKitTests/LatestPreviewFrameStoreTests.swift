@@ -572,6 +572,10 @@ final class LatestPreviewFrameStoreTests: TempDirectoryTestCase {
         await store.waitForPendingWrites()
         let awaited20 = await store.read(for: identity)
         XCTAssertNil(awaited20)
+
+        let reopened = LatestPreviewFrameStore(directory: blocker.appendingPathComponent("frames"))
+        let reopenedHit = await reopened.read(for: identity)
+        XCTAssertNil(reopenedHit, "a failed cache write must reopen as a cache miss")
     }
 
     func testSettledHitSkipsTheRendererAndStillAdmitsHistogram() async throws {

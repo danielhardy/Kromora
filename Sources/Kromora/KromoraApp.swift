@@ -48,6 +48,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        // AppKit routes the last-window close through applicationShouldTerminate below, where
+        // `.terminateLater` remains pending until the edit and frame-store flushes finish.
         true
     }
 

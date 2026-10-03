@@ -229,6 +229,23 @@ final class ThumbnailFrameStoreTests: TempDirectoryTestCase {
         XCTAssertEqual(relaunchedCount, 2)
     }
 
+    func testUnavailableDirectoryWriteReopensAsCacheMiss() async throws {
+        let blocker = tempDirectory.appendingPathComponent("thumbnail-blocker")
+        try Data("file".utf8).write(to: blocker)
+        let directory = blocker.appendingPathComponent("Thumbnails")
+        let identity = FrameFixtures.identity()
+        let store = ThumbnailFrameStore(directory: directory)
+        await store.enqueueWrite(try thumbnailFrame(
+            identity: identity, kind: .editedThumbnail480, red: 0.6
+        ))
+        await store.flush()
+
+        let reopened = ThumbnailFrameStore(directory: directory)
+        let frames = await reopened.readFrames(for: identity)
+        XCTAssertNil(frames.original)
+        XCTAssertNil(frames.edited, "a failed cache write must reopen as a cache miss")
+    }
+
     func testReadWindowIsVisibleIDsPlusAtMostOnePrefetchPage() {
         let visible = (0..<5).map { PhotoAssetID(rawValue: "visible-\($0)") }
         let following = (0..<80).map { PhotoAssetID(rawValue: "following-\($0)") }

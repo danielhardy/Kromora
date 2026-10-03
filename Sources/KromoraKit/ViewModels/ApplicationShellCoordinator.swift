@@ -21,6 +21,7 @@ final class ApplicationShellCoordinator {
 
     var onMediaChanged: (@MainActor () -> Void)?
     var onApplicationActivated: (@MainActor () -> Void)?
+    var onApplicationDeactivated: (@MainActor () -> Void)?
 
     init(
         mediaNotificationCenter: NotificationCenter,
@@ -59,6 +60,16 @@ final class ApplicationShellCoordinator {
                     self.scheduleMediaRefresh()
                     self.scheduleMaintenance()
                     self.onApplicationActivated?()
+                }
+            }
+        )
+        applicationObservers.append(
+            applicationNotificationCenter.addObserver(
+                forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    guard let self, !self.isShuttingDown else { return }
+                    self.onApplicationDeactivated?()
                 }
             }
         )
