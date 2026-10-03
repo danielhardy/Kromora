@@ -21,9 +21,10 @@ final class PreviewPresentationCoordinator {
         case rendered
     }
 
-    /// A persisted preview read at selection time, before the source has been prepared. It is
-    /// inert: it may fill the canvas and, once every current input is known and matches, stand in
-    /// for the settled render. It never drives editing tools, histograms, or writes.
+    /// A persisted preview read at selection time, before the source has been prepared. It may fill
+    /// the canvas while inputs are unresolved. Once every current input is known and matches, it
+    /// may also drive histogram work and stand in for the settled render. It never drives editing
+    /// tools or writes.
     struct StoredFrameCandidate {
         let metadata: PresentationFrameMetadata
         let image: CGImage
@@ -410,6 +411,32 @@ final class PreviewPresentationCoordinator {
             workingSpace: request.space
         )
         return (FrameClassifier.classify(candidate.metadata, against: inputs), candidate)
+    }
+
+    /// Classify the selected frame before source preparation. The package record supplies the
+    /// stable source identity, and early edit adoption supplies the edit and Look signatures. Only
+    /// an exact candidate is returned; stale or unresolved pixels remain presentation-only.
+    func exactStoredFrameCandidate(
+        identity: PortablePhotoIdentity, document: EditDocument, look: LookSignature,
+        workingSpace: WorkingSpace = .current, sourceRevision: UInt64
+    ) -> StoredFrameCandidate? {
+        guard case .candidate(let candidate) = storedFrameLookup,
+            storedFrameSessionGeneration == sourceRevision,
+            let session = presentationSession,
+            session.generation == sourceRevision,
+            session.state == .provisional,
+            session.candidateSource == .storedFrame,
+            session.provisionalFrameCount > 0,
+            Self.identitiesMatch(session.identity, identity)
+        else { return nil }
+        let inputs = FrameCurrentInputs(
+            source: identity, editHash: document.editHash, look: look,
+            workingSpace: workingSpace
+        )
+        guard FrameClassifier.classify(candidate.metadata, against: inputs) == .exact else {
+            return nil
+        }
+        return candidate
     }
 
     var isStoredFrameLookupLoading: Bool {
