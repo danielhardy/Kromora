@@ -345,6 +345,9 @@ struct PreviewView: View {
                         at: point, viewportSize: viewportSize, commit: commit)
                 },
                 onDrawableSizeChange: { size in viewModel.updatePreviewBackingSize(size) },
+                onCanvasGeometryChange: showsMaskOverlay
+                    ? { size in viewModel.updateCanvasBackingSize(size) }
+                    : nil,
                 viewSpaceRotationAngle: canvasState.isCropToolActive
                     ? canvasState.cropStraightenAngle : 0,
                 ignoresHits: canvasState.isCropToolActive,

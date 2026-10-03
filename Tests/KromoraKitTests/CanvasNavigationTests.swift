@@ -105,6 +105,103 @@ final class CanvasNavigationTests: XCTestCase {
         XCTAssertEqual(navigation.focalPoint, focalBeforeLimitGesture)
     }
 
+    func testZoomOutStopsAtFitWhenFitDoesNotEnlargeTheSource() {
+        var navigation = CanvasNavigation()
+        XCTAssertTrue(navigation.updateGeometry(imageExtent: landscape, viewportSize: viewport))
+
+        navigation.setZoom(0.25)
+        XCTAssertEqual(navigation.zoom, 1)
+        XCTAssertEqual(navigation.transform(imageExtent: landscape, viewportSize: viewport).scale,
+                       0.75, accuracy: 0.000_001)
+
+        let atFit = navigation
+        navigation.zoom(
+            by: 0.1, at: CGPoint(x: 20, y: 30),
+            imageExtent: landscape, viewportSize: viewport
+        )
+        XCTAssertEqual(navigation, atFit)
+        XCTAssertEqual(navigation.zoomAccessibilityValue, "100% of Fit")
+    }
+
+    func testZoomOutStopsAtNativeScaleWhenFitWouldEnlargeTheSource() {
+        let imageExtent = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let viewportSize = CGSize(width: 800, height: 600)
+        var navigation = CanvasNavigation()
+        XCTAssertTrue(navigation.updateGeometry(
+            imageExtent: imageExtent, viewportSize: viewportSize
+        ))
+
+        navigation.setZoom(0.1)
+        XCTAssertEqual(navigation.zoom, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(navigation.rememberedZoom, 0.25)
+        XCTAssertEqual(navigation.transform(
+            imageExtent: imageExtent, viewportSize: viewportSize
+        ).scale, 1, accuracy: 0.000_001)
+
+        navigation.fit()
+        navigation.toggleFitAndRememberedZoom()
+        XCTAssertEqual(navigation.zoom, 0.25, accuracy: 0.000_001)
+        XCTAssertEqual(navigation.transform(
+            imageExtent: imageExtent, viewportSize: viewportSize
+        ).scale, 1, accuracy: 0.000_001)
+
+        var restored = CanvasNavigation(rememberedZoom: 0.1)
+        restored.updateGeometry(imageExtent: imageExtent, viewportSize: viewportSize)
+        XCTAssertEqual(restored.rememberedZoom, 0.25)
+        restored.toggleFitAndRememberedZoom()
+        XCTAssertEqual(restored.zoom, 0.25, accuracy: 0.000_001)
+    }
+
+    func testViewportAndSourceGeometryChangesClampActiveAndRememberedZoom() {
+        var navigation = CanvasNavigation()
+        let smallSource = CGRect(x: 0, y: 0, width: 200, height: 100)
+        XCTAssertTrue(navigation.updateGeometry(
+            imageExtent: smallSource, viewportSize: CGSize(width: 800, height: 600)
+        ))
+        navigation.setZoom(0.4)
+
+        XCTAssertTrue(navigation.updateGeometry(
+            imageExtent: smallSource, viewportSize: CGSize(width: 100, height: 60)
+        ))
+        XCTAssertEqual(navigation.zoom, 1, accuracy: 0.000_001)
+        XCTAssertEqual(navigation.rememberedZoom, 1)
+
+        let largerSource = CGRect(x: 0, y: 0, width: 200, height: 100)
+        XCTAssertTrue(navigation.updateGeometry(
+            imageExtent: CGRect(x: 0, y: 0, width: 50, height: 25),
+            viewportSize: CGSize(width: 100, height: 60)
+        ))
+        navigation.setZoom(0.4)
+        XCTAssertTrue(navigation.updateGeometry(
+            imageExtent: largerSource, viewportSize: CGSize(width: 100, height: 60)
+        ))
+        XCTAssertEqual(navigation.zoom, 1, accuracy: 0.000_001)
+        XCTAssertEqual(navigation.rememberedZoom, 1)
+    }
+
+    func testPointerZoomAtNativeLimitDoesNotPanOnFurtherZoomOut() {
+        let imageExtent = CGRect(x: 0, y: 0, width: 200, height: 100)
+        let viewportSize = CGSize(width: 400, height: 300)
+        var navigation = CanvasNavigation()
+        navigation.updateGeometry(imageExtent: imageExtent, viewportSize: viewportSize)
+        navigation.setZoom(1)
+        navigation.zoom(
+            by: 0.1, at: CGPoint(x: 24, y: 36),
+            imageExtent: imageExtent, viewportSize: viewportSize
+        )
+
+        XCTAssertEqual(navigation.zoom, 0.5, accuracy: 0.000_001)
+        let atNativeLimit = navigation
+        navigation.zoom(
+            by: 0.5, at: CGPoint(x: 370, y: 250),
+            imageExtent: imageExtent, viewportSize: viewportSize
+        )
+        XCTAssertEqual(navigation, atNativeLimit)
+        let transform = navigation.transform(imageExtent: imageExtent, viewportSize: viewportSize)
+        XCTAssertEqual(transform.scale, 1, accuracy: 0.000_001)
+        XCTAssertEqual(transform.origin, CGPoint(x: 100, y: 100))
+    }
+
     func testDoubleClickUsesDeterministicFallbackAndTogglesBackToFit() {
         var navigation = CanvasNavigation()
 
