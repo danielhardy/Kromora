@@ -229,11 +229,6 @@ struct MaskingWorkspace: View {
     @ViewBuilder
     private var renderStatus: some View {
         switch maskingState.resolutionState {
-        case .loading:
-            Label("Analyzing mask…", systemImage: "hourglass")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Selected mask is loading")
         case .empty:
             Label(
                 maskingState.resolutionState.message ?? "Mask is empty",
@@ -250,16 +245,12 @@ struct MaskingWorkspace: View {
             statusBanner(
                 title: "Mask analysis failed", message: message,
                 retryTitle: "Retry mask analysis", retry: viewModel.retryMaskAnalysis)
-        case .idle, .ready:
+        case .idle, .loading, .ready:
+            // Transient progress lives in the status bar so the panel never reflows.
             EmptyView()
         }
 
         switch viewModel.previewState {
-        case .loading:
-            Label("Rendering preview…", systemImage: "hourglass")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityLabel("Mask preview is loading")
         case .failed:
             statusBanner(
                 title: "Preview unavailable", message: viewModel.statusMessage,
