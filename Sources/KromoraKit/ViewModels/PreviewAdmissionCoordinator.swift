@@ -96,10 +96,30 @@ extension PreviewAdmissionDestination {
 /// `PreviewPresentationCoordinator`.
 @MainActor
 final class PreviewAdmissionCoordinator {
-    private var histogramTaskRequest: RenderRequest?
+    private struct HistogramIdentity: Sendable {
+        let source: PortablePhotoIdentity
+        let document: EditDocument
+        let look: LookSignature
+        let space: WorkingSpace
+
+        func hasSameImageContent(as other: Self) -> Bool {
+            source.assetID == other.source.assetID
+                && source.sourceFingerprint.matches(other.source.sourceFingerprint)
+                && document == other.document
+                && look == other.look
+                && space == other.space
+        }
+    }
+
+    private enum HistogramValidation: Sendable {
+        case prepared(RenderRequest)
+        case exactStoredFrame(PortablePhotoIdentity)
+    }
+
+    private var histogramTaskIdentity: HistogramIdentity?
     private var histogramTaskAssetID: PhotoAssetID?
     private var histogramTaskSourceRevision: UInt64?
-    private var completedHistogramRequest: RenderRequest?
+    private var completedHistogramIdentity: HistogramIdentity?
     private var completedHistogramAssetID: PhotoAssetID?
     private var completedHistogramSourceRevision: UInt64?
     private let histogramJobID = ImageWorkScheduler.JobID("histogram")
@@ -158,7 +178,7 @@ final class PreviewAdmissionCoordinator {
             return
         }
         guard let imageSource = destination.admissionImageSource else {
-            cancelHistogram(clear: true)
+            admitExactStoredFrameHistogramIfAvailable()
             return
         }
         guard let request = displayedRequest ?? destination.admissionLastPresentedRequest else {
@@ -173,23 +193,91 @@ final class PreviewAdmissionCoordinator {
         }
         guard let image = presentedImage ?? destination.admissionLastPresentedImage else { return }
 
-        let sourceRevision = destination.admissionSourceRevision
-        let assetID = destination.admissionActiveAssetID
+        scheduleHistogram(
+            from: image,
+            identity: Self.histogramIdentity(for: request, destination: destination),
+            assetID: destination.admissionActiveAssetID,
+            sourceRevision: destination.admissionSourceRevision,
+            validation: .prepared(request)
+        )
+    }
+
+    /// Start the histogram from a cached raster only after source, edit, and Look identities prove
+    /// that it is exact. The same key is used after source preparation, so the confirmed-frame tail
+    /// does not enqueue duplicate work.
+    func admitExactStoredFrameHistogramIfAvailable() {
+        guard let destination,
+            destination.admissionInspectorPresented,
+            destination.admissionStoredEditsResolved,
+            !destination.admissionIsShowingOriginal,
+            !destination.admissionCropToolActive,
+            let session = destination.admissionPresentation.presentationSession,
+            session.assetID == destination.admissionActiveAssetID,
+            session.generation == destination.admissionSourceRevision
+        else { return }
+        let document = destination.admissionDisplayDocument
+        let look = Self.lookSignature(
+            for: document, resolved: destination.admissionDisplayLUT,
+            destination: destination
+        )
+        guard
+            let candidate = destination.admissionPresentation.exactStoredFrameCandidate(
+                identity: session.identity, document: document, look: look,
+                sourceRevision: session.generation
+            )
+        else { return }
+        let identity = HistogramIdentity(
+            source: session.identity, document: document, look: look, space: .current
+        )
+        scheduleHistogram(
+            from: CIImage(cgImage: candidate.image), identity: identity,
+            assetID: session.assetID, sourceRevision: session.generation,
+            validation: .exactStoredFrame(session.identity)
+        )
+    }
+
+    func cancelHistogram(clear: Bool, pump: Bool = true) {
+        workScheduler.cancel(id: histogramJobID, pump: pump)
+        histogramTaskIdentity = nil
+        histogramTaskAssetID = nil
+        histogramTaskSourceRevision = nil
+        guard let destination else { return }
+        if destination.admissionHistogramLoading {
+            destination.publishAdmissionHistogramLoading(false)
+        }
+        if destination.admissionHistogramErrorMessage != nil {
+            destination.publishAdmissionHistogramError(nil)
+        }
+        if clear, destination.admissionHistogram != nil {
+            destination.publishAdmissionHistogram(nil)
+        }
+        if clear {
+            completedHistogramIdentity = nil
+            completedHistogramAssetID = nil
+            completedHistogramSourceRevision = nil
+        }
+    }
+
+    private func scheduleHistogram(
+        from image: CIImage, identity: HistogramIdentity, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, validation: HistogramValidation
+    ) {
+        guard let destination else { return }
         if workScheduler.contains(histogramJobID),
             histogramTaskAssetID == assetID,
             histogramTaskSourceRevision == sourceRevision,
-            Self.hasSameImageContent(histogramTaskRequest, request)
+            histogramTaskIdentity?.hasSameImageContent(as: identity) == true
         {
             return
         }
         if completedHistogramAssetID == assetID,
             completedHistogramSourceRevision == sourceRevision,
-            Self.hasSameImageContent(completedHistogramRequest, request)
+            completedHistogramIdentity?.hasSameImageContent(as: identity) == true
         {
             return
         }
         cancelHistogram(clear: false)
-        histogramTaskRequest = request
+        histogramTaskIdentity = identity
         histogramTaskAssetID = assetID
         histogramTaskSourceRevision = sourceRevision
         destination.publishAdmissionHistogramLoading(true)
@@ -201,17 +289,15 @@ final class PreviewAdmissionCoordinator {
                 !destination.admissionIsShuttingDown
             else { return }
             let result = await engine.histogram(
-                presentedImage: image, space: request.space, maxDimension: 512
+                presentedImage: image, space: identity.space, maxDimension: 512
             )
             guard !Task.isCancelled, !destination.admissionIsShuttingDown,
-                destination.admissionInspectorPresented,
-                assetID == destination.admissionActiveAssetID,
-                sourceRevision == destination.admissionSourceRevision,
-                destination.admissionImageSource == request.source,
-                destination.admissionDisplayDocument == request.document,
-                destination.admissionDisplayLUT == request.lut
+                self.isCurrentHistogram(
+                    identity, assetID: assetID, sourceRevision: sourceRevision,
+                    validation: validation, destination: destination
+                )
             else { return }
-            self.completedHistogramRequest = request
+            self.completedHistogramIdentity = identity
             self.completedHistogramAssetID = assetID
             self.completedHistogramSourceRevision = sourceRevision
             destination.publishAdmissionHistogram(result)
@@ -226,37 +312,69 @@ final class PreviewAdmissionCoordinator {
         }
     }
 
-    func cancelHistogram(clear: Bool, pump: Bool = true) {
-        workScheduler.cancel(id: histogramJobID, pump: pump)
-        histogramTaskRequest = nil
-        histogramTaskAssetID = nil
-        histogramTaskSourceRevision = nil
-        guard let destination else { return }
-        if destination.admissionHistogramLoading {
-            destination.publishAdmissionHistogramLoading(false)
-        }
-        if destination.admissionHistogramErrorMessage != nil {
-            destination.publishAdmissionHistogramError(nil)
-        }
-        if clear, destination.admissionHistogram != nil {
-            destination.publishAdmissionHistogram(nil)
-        }
-        if clear {
-            completedHistogramRequest = nil
-            completedHistogramAssetID = nil
-            completedHistogramSourceRevision = nil
+    private func isCurrentHistogram(
+        _ identity: HistogramIdentity, assetID: PhotoAssetID?, sourceRevision: UInt64,
+        validation: HistogramValidation, destination: any PreviewAdmissionDestination
+    ) -> Bool {
+        guard destination.admissionInspectorPresented,
+            assetID == destination.admissionActiveAssetID,
+            sourceRevision == destination.admissionSourceRevision,
+            destination.admissionDisplayDocument == identity.document,
+            Self.lookSignature(
+                for: identity.document, resolved: destination.admissionDisplayLUT,
+                destination: destination
+            ) == identity.look
+        else { return false }
+
+        switch validation {
+        case .prepared(let request):
+            return destination.admissionImageSource == request.source
+                && destination.admissionDisplayLUT == request.lut
+                && request.source.portableIdentity.sourceFingerprint.matches(
+                    identity.source.sourceFingerprint
+                )
+        case .exactStoredFrame(let sourceIdentity):
+            guard !destination.admissionIsShowingOriginal,
+                !destination.admissionCropToolActive,
+                let session = destination.admissionPresentation.presentationSession,
+                session.assetID == assetID,
+                session.generation == sourceRevision,
+                session.identity.sourceFingerprint.matches(sourceIdentity.sourceFingerprint),
+                sourceIdentity.sourceFingerprint.matches(identity.source.sourceFingerprint)
+            else { return false }
+            if let imageSource = destination.admissionImageSource {
+                return imageSource.portableIdentity.sourceFingerprint.matches(
+                    sourceIdentity.sourceFingerprint
+                )
+            }
+            return true
         }
     }
 
-    /// Histogram identity follows the rendered photo, not the preview's viewport, resolution, or
-    /// navigation metadata. A zoom can publish a different preview request while the image content
-    /// remains identical; edits and crops change the document and therefore admit a new tally.
-    private static func hasSameImageContent(_ lhs: RenderRequest?, _ rhs: RenderRequest) -> Bool {
-        guard let lhs else { return false }
-        return lhs.source == rhs.source
-            && lhs.document == rhs.document
-            && lhs.lut == rhs.lut
-            && lhs.space == rhs.space
+    private static func histogramIdentity(
+        for request: RenderRequest, destination: any PreviewAdmissionDestination
+    ) -> HistogramIdentity {
+        HistogramIdentity(
+            source: request.source.portableIdentity,
+            document: request.document,
+            look: lookSignature(
+                for: request.document, resolved: request.lut, destination: destination
+            ),
+            space: request.space
+        )
+    }
+
+    private static func lookSignature(
+        for document: EditDocument, resolved lut: CubeLUT?,
+        destination: any PreviewAdmissionDestination
+    ) -> LookSignature {
+        let live = LookSignature(settings: document.lut, resolved: lut)
+        guard !live.permitsExactReuse,
+            let stored = destination.admissionStoredLookSignature(for: document.lut.lutID),
+            stored.lutID == live.lutID,
+            stored.permitsExactReuse
+        else { return live }
+        return stored
     }
 
     func shutdown() {
@@ -510,7 +628,6 @@ final class PreviewAdmissionCoordinator {
             let source = destination.admissionImageSource
         else { destination.admissionClearPreview(); return }
         destination.admissionPresentation.advanceDisplayRevision()
-        cancelHistogram(clear: false, pump: false)
         let (requested, look) = displayRequest
         let plan = destination.admissionPresentation.plan(
             for: requested, nativeExtent: source.nativeExtent, viewportSize: previewBackingSize,
@@ -526,6 +643,14 @@ final class PreviewAdmissionCoordinator {
         let assetID = destination.admissionActiveAssetID
         let sourceRevision = destination.admissionSourceRevision
         let displayRevision = destination.admissionDisplayRevision
+        let histogramIdentity = Self.histogramIdentity(for: request, destination: destination)
+        let keepsExactStoredFrameHistogram = workScheduler.contains(histogramJobID)
+            && histogramTaskAssetID == assetID
+            && histogramTaskSourceRevision == sourceRevision
+            && histogramTaskIdentity?.hasSameImageContent(as: histogramIdentity) == true
+        if !keepsExactStoredFrameHistogram {
+            cancelHistogram(clear: false, pump: false)
+        }
 
         // The stored frame describes the photo's own edit at canvas size. A region of interest,
         // the original/comparison baseline, and the crop tool's transient geometry are all

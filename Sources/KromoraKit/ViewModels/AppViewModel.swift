@@ -2354,6 +2354,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 )
                 if source == .storedFrame {
                     self.completePendingStoredFrameConfirmation(generation: generation)
+                    self.previewAdmissionCoordinator.admitExactStoredFrameHistogramIfAvailable()
                 }
                 self.isNavigationLoading = false
             }
@@ -2546,6 +2547,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             request.sourceRevision,
             documentChanged && previewAdmissionCoordinator.scheduledSourceRevision == sourceRevision
         )
+        previewAdmissionCoordinator.admitExactStoredFrameHistogramIfAvailable()
     }
 
     private func adoptStoredEdits(
@@ -2585,6 +2587,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         storedEditsResolvedSourceRevision = sourceRevision
         storedEditLook = stored.lookSignature
+        previewAdmissionCoordinator.admitExactStoredFrameHistogramIfAvailable()
         // A cold open already rendered the identity document speculatively. Only an adopted disk
         // document that differs from that first request needs a corrective render. In-memory
         // sessions and edits made while loading remain authoritative and must not be replaced.

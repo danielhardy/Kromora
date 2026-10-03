@@ -168,12 +168,20 @@ classify(frame, currentInputs):
   otherwise, same source and presentable color space   -> stale-compatible
 ```
 
-- **Exact:** present and skip the settled render. Route the raster through the normal confirmed
-  visible-frame tail so histogram and supporting work are admitted exactly once.
+- **Exact:** present and skip the settled render. Once source identity, edit hash, and resolved Look
+  are known, classify the stored raster before source preparation and admit its histogram directly
+  from those pixels. Reuse the same content key at the confirmed visible-frame tail so it does not
+  enqueue duplicate work; other supporting work still enters through that tail exactly once.
 - **Stale-compatible:** present inert pixels immediately, render current inputs, then replace once.
 - **Provisional-only:** current edit or Look truth is not known yet. The frame may hide latency but
   cannot skip work.
 - **Unusable:** do not decode/present further. Continue to the next fallback.
+
+An exact cached raster remains analysis-safe before source preparation because its stored
+signature proves which source, edits, Look, working space, and pixel epoch produced those pixels.
+The early histogram path consumes only that candidate raster and is fenced by the same selection,
+document, and Look revisions as the normal histogram path. A provisional or stale-compatible frame
+never starts analysis.
 
 The classifier is independent of storage and UI. Preview, thumbnail, launch, and tests use the same
 implementation. No caller reimplements key comparison.
