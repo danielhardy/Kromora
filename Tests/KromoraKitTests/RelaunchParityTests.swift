@@ -18,6 +18,29 @@ private final class ThumbnailRasterProbe {
     func record(_ image: NSImage) { rasters.append(image) }
 }
 
+private actor DelayedRelaunchEmbeddedFrame {
+    private let image: NSImage
+    private var continuation: CheckedContinuation<NSImage?, Never>?
+    private(set) var requestCount = 0
+    private(set) var completedCount = 0
+
+    init(image: NSImage) { self.image = image }
+
+    func load() async -> NSImage? {
+        requestCount += 1
+        let result = await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+        completedCount += 1
+        return result
+    }
+
+    func release() {
+        continuation?.resume(returning: image)
+        continuation = nil
+    }
+}
+
 /// Exercises persisted presentation frames across distinct application and collection lifetimes.
 /// This intentionally loads the package's cheap browsing projection in both launches: that is the
 /// startup path whose source fingerprint used to differ from the resolved edit source.
@@ -41,7 +64,10 @@ final class RelaunchParityTests: TempDirectoryTestCase {
     private func model(
         packageURL: URL, previewDirectory: URL, thumbnailDirectory: URL,
         looksDirectory: URL, engine: FakeRenderEngine,
-        decodeProbe: ThumbnailDecodeProbe? = nil
+        decodeProbe: ThumbnailDecodeProbe? = nil,
+        embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
+            Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
+        }
     ) throws -> (AppViewModel, PortableLibrarySession) {
         let session = try PortableLibrarySession(at: packageURL)
         let decodeObserver: (@Sendable () async -> Void)?
@@ -63,7 +89,8 @@ final class RelaunchParityTests: TempDirectoryTestCase {
             previewFrameStoreDirectory: previewDirectory,
             thumbnailFrameStoreDirectory: thumbnailDirectory,
             portablePackageURL: packageURL, portableLibrarySession: session,
-            originalThumbnailProvider: originalThumbnailProvider
+            originalThumbnailProvider: originalThumbnailProvider,
+            embeddedFirstFrameProvider: embeddedFirstFrameProvider
         )
         return (viewModel, session)
     }
@@ -260,6 +287,9 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let previewCount = await engine.previewRequests.count
         let thumbnailCount = await engine.thumbnailRequests.count
         XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
+        XCTAssertEqual(diagnostics.provisionalCandidateSources, [.storedFrame])
+        XCTAssertEqual(diagnostics.distinctFrameCount, 2,
+                       "the stale stored frame and its replacement are the only distinct frames")
         XCTAssertEqual(previewCount, 1, "a changed edit must render once")
         XCTAssertEqual(thumbnailCount, 1, "a changed edit must render its edited thumbnail once")
         assertNoPrematureFallback(diagnostics)
@@ -463,8 +493,12 @@ final class RelaunchParityTests: TempDirectoryTestCase {
                 .matches(replacementIdentity.sourceFingerprint) == true
         )
         XCTAssertEqual(
-            diagnostics.confirmedFrameCount, 2,
-            "a source miss confirms the speculative identity preview and its saved-edit correction"
+            diagnostics.confirmedFrameCount, 1,
+            "the replacement source's saved edit confirms once"
+        )
+        XCTAssertFalse(
+            diagnostics.provisionalCandidateSources.contains(.storedFrame),
+            "a frame with the old source fingerprint must not be presented"
         )
         let matchingPreviewDescriptions = previewRequests.filter {
             $0.document.editHash == fixture.seedSignature.editHash
@@ -528,6 +562,154 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         await reopened.shutdown()
     }
 
+    func testJPEGAndRAWLikeRelaunchesPublishOnlyTheExactStoredFrame() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("Formats.kromoralibrary")
+        let previewDirectory = tempDirectory.appendingPathComponent("Formats/Previews")
+        let thumbnailDirectory = tempDirectory.appendingPathComponent("Formats/Thumbnails")
+        let looksDirectory = tempDirectory.appendingPathComponent("Formats/Looks", isDirectory: true)
+        try FileManager.default.createDirectory(at: looksDirectory, withIntermediateDirectories: true)
+        let sources = try ["portrait.jpg", "camera.ARW"].map { name in
+            try Fixtures.writeJPEG(
+                width: 48, height: 32, orientation: 1, named: name, in: tempDirectory
+            )
+        }
+        let package = try PortableLibrarySession(at: packageURL)
+        _ = try package.importURLs(sources, duplicatePolicy: .importAnyway)
+        let assets = try package.materializedAssets()
+        await package.shutdown()
+
+        let firstEngine = FakeRenderEngine()
+        let (first, _) = try model(
+            packageURL: packageURL, previewDirectory: previewDirectory,
+            thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
+            engine: firstEngine
+        )
+        first.collection.loadPortableAssets(assets)
+        await first.collection.scanCompletion()
+        first.collection.beginThumbnailDemand()
+        first.collection.requestVisibleThumbnails(for: first.collection.items.map(\.id))
+        try await waitUntil("first-launch format thumbnails") {
+            first.collection.items.allSatisfy { $0.thumbnail != nil }
+        }
+        for asset in assets {
+            guard let index = first.collection.items.firstIndex(where: { $0.id == asset.id }) else {
+                XCTFail("missing first-launch asset \(asset.displayName)")
+                continue
+            }
+            first.collection.setSelection(at: index)
+            first.openActiveCollectionImage()
+            try await waitUntil("first-launch \(asset.displayName) confirmation") {
+                first.sourceName == asset.displayName
+                    && first.presentationSessionForDiagnostics?.state == .confirmed
+            }
+        }
+        let firstRequests = await firstEngine.previewRequests
+        let flushResult = await first.flushPendingWrites()
+        XCTAssertEqual(flushResult, .success)
+        await first.thumbnailFrameStore.flush()
+        await first.shutdown()
+
+        let store = LatestPreviewFrameStore(directory: previewDirectory)
+        for asset in assets {
+            guard let request = firstRequests.last(where: { $0.assetID == asset.id }),
+                let source = request.source
+            else {
+                XCTFail("missing first-launch settled request for \(asset.displayName)")
+                continue
+            }
+            await store.enqueueWrite(try FrameFixtures.frame(
+                identity: source.portableIdentity, edit: request.document.editHash,
+                look: .none, space: request.space,
+                epoch: RenderPipeline.pixelEpoch, width: 2048, height: 1365
+            ))
+        }
+        await store.waitForPendingWrites()
+
+        let embeddedImage = NSImage(
+            cgImage: try Fixtures.makeCGImage(width: 4, height: 3, red: 0.8, green: 0.2, blue: 0.1),
+            size: NSSize(width: 4, height: 3)
+        )
+        let embeddedGate = DelayedRelaunchEmbeddedFrame(image: embeddedImage)
+        let secondEngine = FakeRenderEngine()
+        let (second, secondSession) = try model(
+            packageURL: packageURL, previewDirectory: previewDirectory,
+            thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
+            engine: secondEngine,
+            embeddedFirstFrameProvider: { url in
+                guard url.pathExtension.lowercased() == "arw" else { return nil }
+                return await embeddedGate.load()
+            }
+        )
+        addTeardownBlock {
+            await embeddedGate.release()
+            await second.shutdown()
+        }
+        second.collection.loadPortableAssets(try secondSession.materializedAssets())
+        await second.collection.scanCompletion()
+        second.collection.beginThumbnailDemand()
+        second.collection.requestVisibleThumbnails(for: second.collection.items.map(\.id))
+        try await waitUntil("relaunch format thumbnails") {
+            second.collection.items.allSatisfy { $0.thumbnail != nil }
+        }
+
+        let thumbnailsBeforeOpen = await secondEngine.thumbnailRequests.count
+        let relaunchAssets = assets.sorted {
+            $0.displayName.lowercased().hasSuffix(".arw")
+                ? false : $1.displayName.lowercased().hasSuffix(".arw")
+        }
+        for asset in relaunchAssets {
+            guard let index = second.collection.items.firstIndex(where: { $0.id == asset.id }) else {
+                XCTFail("missing relaunch asset \(asset.displayName)")
+                continue
+            }
+            let priorGeneration = second.presentationSessionForDiagnostics?.generation ?? 0
+            second.collection.setSelection(at: index)
+            let surfaceRevisionBeforeOpen = second.previewSurface.revision
+            second.openActiveCollectionImage()
+            try await waitUntil("new \(asset.displayName) presentation session") {
+                (second.presentationSessionForDiagnostics?.generation ?? 0) > priorGeneration
+            }
+            try await waitUntil("exact \(asset.displayName) relaunch") {
+                second.sourceName == asset.displayName
+                    && second.presentationSessionForDiagnostics?.state == .confirmed
+            }
+            let presentation = try XCTUnwrap(second.presentationSessionForDiagnostics)
+            XCTAssertEqual(presentation.confirmedFrameCount, 1, asset.displayName)
+            XCTAssertEqual(presentation.distinctFrameCount, 1, asset.displayName)
+            XCTAssertEqual(presentation.provisionalFrameCount, 1, asset.displayName)
+            XCTAssertEqual(presentation.provisionalCandidateSources, [.storedFrame], asset.displayName)
+            XCTAssertEqual(second.previewSurface.revision, surfaceRevisionBeforeOpen + 2,
+                           "source clear plus one stored raster publication for \(asset.displayName)")
+            XCTAssertEqual(
+                max(second.previewSurface.image?.extent.width ?? 0,
+                    second.previewSurface.image?.extent.height ?? 0),
+                2048, accuracy: 0.001, asset.displayName
+            )
+            let previewCount = await secondEngine.previewRequests.count
+            XCTAssertEqual(previewCount, 0, asset.displayName)
+        }
+        let rawSurfaceRevision = second.previewSurface.revision
+        try await waitUntil("the RAW-like embedded extraction to start") {
+            await embeddedGate.requestCount == 1
+        }
+        await embeddedGate.release()
+        try await waitUntil("the late embedded extraction to finish") {
+            await embeddedGate.completedCount == 1
+        }
+        try await Task.sleep(for: .milliseconds(50))
+
+        let finalPresentation = try XCTUnwrap(second.presentationSessionForDiagnostics)
+        XCTAssertEqual(finalPresentation.provisionalCandidateSources, [.storedFrame])
+        XCTAssertEqual(finalPresentation.distinctFrameCount, 1,
+                       "the late camera JPEG cannot replace the stored 2048 px frame")
+        XCTAssertEqual(second.previewSurface.revision, rawSurfaceRevision,
+                       "the late embedded frame cannot submit another surface publication")
+        let thumbnailCount = await secondEngine.thumbnailRequests.count
+        XCTAssertEqual(thumbnailCount, thumbnailsBeforeOpen,
+                       "an exact relaunch reuses its supporting thumbnail")
+        await second.shutdown()
+    }
+
     func testUnchangedSinglePhotoSeedIsReusedAfterRelaunch() async throws {
         let fixture = try await seedSinglePhotoRelaunch()
         let engine = FakeRenderEngine()
@@ -548,8 +730,109 @@ final class RelaunchParityTests: TempDirectoryTestCase {
         let thumbnailCount = await engine.thumbnailRequests.count
 
         XCTAssertEqual(diagnostics.confirmedFrameCount, 1)
+        XCTAssertEqual(
+            diagnostics.provisionalCandidateSources, [.storedFrame],
+            "an exact relaunch must paint the stored preview without an original/edited thumbnail or embedded JPEG"
+        )
+        XCTAssertEqual(diagnostics.distinctFrameCount, 1,
+                       "the exact persisted preview is the only presented frame")
         XCTAssertEqual(previewCount, 0, "an exact seed frame must skip preview rendering")
         XCTAssertEqual(thumbnailCount, 0, "an exact seed thumbnail must skip rendering")
+        await reopened.shutdown()
+    }
+
+    func testSavedLookIdentityKeepsRelaunchExactBeforeTheLookScan() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LookWarm.kromoralibrary")
+        let previewDirectory = tempDirectory.appendingPathComponent("LookWarm/Previews")
+        let thumbnailDirectory = tempDirectory.appendingPathComponent("LookWarm/Thumbnails")
+        let looksDirectory = tempDirectory.appendingPathComponent("LookWarm/Looks", isDirectory: true)
+        try FileManager.default.createDirectory(at: looksDirectory, withIntermediateDirectories: true)
+        let lookURL = try Fixtures.writeCube(
+            Fixtures.identityCubeText(size: 2), named: "Warm Look.cube", in: looksDirectory
+        )
+        let look = try CubeLUT(url: lookURL)
+        let sourceURL = try Fixtures.writeGradientPNG(
+            width: 48, height: 32, named: "look-warm.png", in: tempDirectory
+        )
+        let package = try PortableLibrarySession(at: packageURL)
+        _ = try package.importURLs([sourceURL], duplicatePolicy: .importAnyway)
+        let asset = try XCTUnwrap(package.materializedAssets().first)
+        var document = EditDocument()
+        document.lut = LUTSettings(lutID: look.lutID, intensity: 0.8)
+        let editStore = EditDocumentStore(package: package.package, lease: package.lease)
+        await editStore.setEmbeddedLookBytes([
+            look.lutID.raw: try Data(contentsOf: lookURL)
+        ])
+        try await editStore.save(document, for: EditSourceReference(
+            assetID: asset.id, portableIdentity: asset.source.portableIdentity, url: asset.url
+        ))
+        try package.refreshIndex()
+        await package.shutdown()
+
+        let firstEngine = FakeRenderEngine()
+        let (first, firstSession) = try model(
+            packageURL: packageURL, previewDirectory: previewDirectory,
+            thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
+            engine: firstEngine
+        )
+        first.library.scan(looksDirectory)
+        try await waitUntil("first Look scan") { first.library.allLUTs.contains { $0.lutID == look.lutID } }
+        first.collection.loadPortableAssets(try firstSession.materializedAssets())
+        await first.collection.scanCompletion()
+        first.collection.setSelection(at: 0)
+        first.openActiveCollectionImage()
+        try await waitUntil("seed Look preview") {
+            first.admissionDocument.lut.lutID == look.lutID
+                && first.presentationSessionForDiagnostics?.state == .confirmed
+        }
+        let firstRequests = await firstEngine.previewRequests
+        let firstRequest = try XCTUnwrap(firstRequests.last)
+        XCTAssertEqual(firstRequest.document.editHash, document.editHash)
+        XCTAssertEqual(firstRequest.lutID, look.lutID)
+        await first.shutdown()
+
+        let previewStore = LatestPreviewFrameStore(directory: previewDirectory)
+        await previewStore.enqueueWrite(try FrameFixtures.frame(
+            identity: asset.source.portableIdentity, edit: document.editHash,
+            look: look.lookSignature, space: firstRequest.space,
+            epoch: RenderPipeline.pixelEpoch, width: 2048, height: 1365
+        ))
+        await previewStore.waitForPendingWrites()
+        let maybeSeededLookMetadata = await previewStore.metadata(for: asset.source.portableIdentity)
+        let seededLookMetadata = try XCTUnwrap(maybeSeededLookMetadata)
+        XCTAssertEqual(seededLookMetadata.signature.editHash, document.editHash)
+        XCTAssertEqual(seededLookMetadata.signature.look, look.lookSignature)
+        XCTAssertEqual(seededLookMetadata.signature.workingSpace, firstRequest.space)
+
+        let reopenedEngine = FakeRenderEngine()
+        let (reopened, reopenedSession) = try model(
+            packageURL: packageURL, previewDirectory: previewDirectory,
+            thumbnailDirectory: thumbnailDirectory, looksDirectory: looksDirectory,
+            engine: reopenedEngine
+        )
+        XCTAssertFalse(reopened.library.allLUTs.contains { $0.lutID == look.lutID })
+        reopened.collection.loadPortableAssets(try reopenedSession.materializedAssets())
+        await reopened.collection.scanCompletion()
+        reopened.collection.setSelection(at: 0)
+        reopened.openActiveCollectionImage()
+        try await waitUntil("exact open with unresolved Look browser") {
+            reopened.admissionDocument.lut.lutID == look.lutID
+                && reopened.admissionStoredEditsResolved
+                && reopened.presentationSessionForDiagnostics?.state == .confirmed
+        }
+        XCTAssertEqual(reopened.admissionDocument.editHash, document.editHash)
+        XCTAssertEqual(
+            reopened.admissionStoredLookSignature(for: look.lutID), look.lookSignature,
+            "stored package Look content hash must match the rendered Look"
+        )
+
+        let previewCount = await reopenedEngine.previewRequests.count
+        XCTAssertEqual(previewCount, 0, "the saved Look reference is enough to classify the frame exact")
+        let presentation = try XCTUnwrap(reopened.presentationSessionForDiagnostics)
+        XCTAssertEqual(presentation.provisionalCandidateSources, [.storedFrame])
+        XCTAssertEqual(presentation.distinctFrameCount, 1)
+        XCTAssertFalse(reopened.library.allLUTs.contains { $0.lutID == look.lutID },
+                       "Edit exactness cannot wait for the browser scan")
         await reopened.shutdown()
     }
 

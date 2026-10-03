@@ -62,6 +62,10 @@ protocol PreviewAdmissionDestination: AnyObject {
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64
     )
+    func admissionConfirmExistingStoredFrame(
+        _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, displayRevision: UInt64
+    ) -> Bool
     func admissionPrepareStaleRefinement(using digest: PerceptualDigest)
     func admissionDocument(for assetID: PhotoAssetID) -> EditDocument?
     func admissionSourceReference(for item: ImageCollection.Item) -> EditSourceReference
@@ -540,6 +544,13 @@ final class PreviewAdmissionCoordinator {
         if mayUseStoredFrame {
             let presentation = destination.admissionPresentation
             let editsResolved = destination.admissionStoredEditsResolved
+            if !editsResolved {
+                // A miss is not permission to render the identity document before the package
+                // edit read completes. The stored frame may be unusable for a replaced source,
+                // but the one settled render still needs the current saved edit.
+                deferredSettledPreview = preemptsPredecessor
+                return
+            }
             if let stored = presentation.classifyStoredFrame(
                 for: request, sourceRevision: sourceRevision, editsResolved: editsResolved,
                 storedLook: destination.admissionStoredLookSignature(for: request.document.lut.lutID)
@@ -547,11 +558,18 @@ final class PreviewAdmissionCoordinator {
                 switch stored.classification {
                 case .exact:
                     destination.admissionPreviewCoordinator.cancel()
-                    destination.admissionPresentCacheRaster(
-                        CIImage(cgImage: stored.candidate.image), request: request,
-                        assetID: assetID, sourceRevision: sourceRevision,
-                        displayRevision: displayRevision
-                    )
+                    let image = CIImage(cgImage: stored.candidate.image)
+                    if presentation.hasStoredFrameCandidate(generation: sourceRevision) {
+                        _ = destination.admissionConfirmExistingStoredFrame(
+                            image, request: request, assetID: assetID,
+                            sourceRevision: sourceRevision, displayRevision: displayRevision
+                        )
+                    } else {
+                        destination.admissionPresentCacheRaster(
+                            image, request: request, assetID: assetID,
+                            sourceRevision: sourceRevision, displayRevision: displayRevision
+                        )
+                    }
                     return
                 case .provisionalOnly where !editsResolved:
                     // Rendering now would use the speculative identity document and then

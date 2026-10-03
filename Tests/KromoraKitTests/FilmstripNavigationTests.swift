@@ -185,8 +185,8 @@ final class FilmstripNavigationTests: TempDirectoryTestCase {
         XCTAssertEqual(request.document, storedDocument)
         let previewCount = await engine.previewRequests.count
         XCTAssertEqual(
-            previewCount, 3,
-            "the stored-edit open corrects its speculative preview instead of replacing it silently"
+            previewCount, 2,
+            "the stored-edit open renders only the saved document"
         )
     }
 

@@ -60,14 +60,17 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
         await store.waitForPendingWrites()
     }
 
-    /// Reopen the photo and report how many frames reached the surface and how many renders the
-    /// reopen submitted, once everything has settled.
+    /// Reopen the photo and report the presentation session's distinct frames and render count.
     private func reopen(_ harness: Harness, expectingRenders: Int) async throws
-        -> (frames: UInt64, renders: Int)
+        -> (frames: Int, renders: Int)
     {
         let rendersBefore = await harness.fake.previewRequests.count
+        let priorGeneration = harness.viewModel.presentationSessionForDiagnostics?.generation ?? 0
         harness.viewModel.openImage(data: harness.data, name: "warm.png")
-        // Selection clears the canvas synchronously; count what reaches the surface afterwards.
+        try await waitUntil("new presentation session") {
+            (harness.viewModel.presentationSessionForDiagnostics?.generation ?? 0) > priorGeneration
+        }
+        // Begin-load clears the old asset before this point. Count only frames for the new session.
         let revisionBefore = harness.viewModel.previewSurface.revision
         try await waitUntil("reopen settled") {
             await harness.fake.previewRequests.count == rendersBefore + expectingRenders
@@ -75,12 +78,14 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
         }
         try await Task.sleep(for: .milliseconds(200))
         let renders = await harness.fake.previewRequests.count - rendersBefore
-        return (harness.viewModel.previewSurface.revision - revisionBefore, renders)
+        let frameCount = harness.viewModel.presentationSessionForDiagnostics?.distinctFrameCount
+            ?? Int(harness.viewModel.previewSurface.revision - revisionBefore)
+        return (frameCount, renders)
     }
 
     /// Frames a reopen presents when nothing usable is stored: the selection-time thumbnail
     /// candidate (if any) plus the rendered frame. Stored-frame scenarios are compared against it.
-    private func coldReopenFrames(_ harness: Harness) async throws -> UInt64 {
+    private func coldReopenFrames(_ harness: Harness) async throws -> Int {
         for url in try FileManager.default.contentsOfDirectory(
             at: harness.directory, includingPropertiesForKeys: nil
         ) { try FileManager.default.removeItem(at: url) }
@@ -103,6 +108,9 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
 
         harness.viewModel.openImage(data: harness.data, name: "warm.png")
         try await waitUntil("warm preview") { harness.viewModel.previewState == .ready }
+        try await waitUntil("stored-frame presentation confirmation") {
+            harness.viewModel.presentationSessionForDiagnostics?.confirmedFrameCount == 1
+        }
         try await waitUntil("warm histogram") {
             await harness.fake.histogramRequests.count == firstHistograms + 1
         }
@@ -112,12 +120,17 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
         XCTAssertEqual(warmRenders, firstRenders, "an exact frame must not submit a preview render")
         let warmHistograms = await harness.fake.histogramRequests.count
         XCTAssertEqual(warmHistograms, firstHistograms + 1, "supporting work is admitted once")
+        let presentation = try XCTUnwrap(harness.viewModel.presentationSessionForDiagnostics)
+        XCTAssertEqual(presentation.provisionalCandidateSources, [.storedFrame])
+        XCTAssertEqual(presentation.distinctFrameCount, 1)
+        let warmThumbnails = await harness.fake.thumbnailRequests.count
+        XCTAssertEqual(warmThumbnails, 0)
     }
 
     func testPixelEpochBumpShowsTheFrameThenRendersOnceAndRewrites() async throws {
         let harness = try await makeHarness()
         let identity = try await warmUp(harness)
-        let coldFrames = try await coldReopenFrames(harness)
+        _ = try await coldReopenFrames(harness)
         try await rewriteStoredFrame(harness, identity: identity) { old in
             PresentationFrameMetadata(
                 identity: old.identity, kind: old.kind,
@@ -135,12 +148,12 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
         let warm = try await reopen(harness, expectingRenders: 1)
 
         XCTAssertEqual(warm.renders, 1, "a stale frame costs exactly one render")
-        XCTExpectFailure("KRMA-764: provisional frame admission", options: .nonStrict()) {
-            XCTAssertEqual(
-                warm.frames, coldFrames + 1,
-                "the stored frame is the one extra provisional presentation; the render is the one replacement"
-            )
-        }
+        XCTAssertEqual(warm.frames, 2,
+                       "the inert stored frame and its settled replacement are the only distinct frames")
+        let presentation = try XCTUnwrap(harness.viewModel.presentationSessionForDiagnostics)
+        XCTAssertEqual(presentation.provisionalCandidateSources, [.storedFrame])
+        XCTAssertEqual(presentation.distinctFrameCount, 2)
+        XCTAssertEqual(presentation.confirmedFrameCount, 1)
         let store = LatestPreviewFrameStore(directory: harness.directory)
         try await waitUntil("frame refreshed at the current epoch") {
             let metadata = await store.metadata(for: identity)
@@ -166,16 +179,36 @@ final class WarmReopenPresentationTests: TempDirectoryTestCase {
             )
         }
         let rendersBefore = await harness.fake.previewRequests.count
+        await harness.fake.gatePreviews()
+        let previousGeneration = harness.viewModel.presentationSessionForDiagnostics?.generation ?? 0
 
         harness.viewModel.openImage(data: harness.data, name: "warm.png")
-        try await waitUntil("stale-edit reopen settled") {
+        try await waitUntil("new stale-frame session") {
+            (harness.viewModel.presentationSessionForDiagnostics?.generation ?? 0) > previousGeneration
+        }
+        harness.viewModel.inspectorState.isPresented = true
+        try await waitUntil("stale frame with one replacement render pending") {
             await harness.fake.previewRequests.count == rendersBefore + 1
-                && harness.viewModel.previewState == .ready
+                && harness.viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources
+                    == [.storedFrame]
+                && harness.viewModel.presentationSessionForDiagnostics?.provisionalFrameCount == 1
+        }
+        let histogramsBeforeReplacement = await harness.fake.histogramRequests.count
+        XCTAssertEqual(histogramsBeforeReplacement, 0,
+                       "an inert stale frame cannot admit supporting histogram work")
+        await harness.fake.releasePreviews()
+        try await waitUntil("stale-edit reopen settled") {
+            guard harness.viewModel.previewState == .ready else { return false }
+            return await harness.fake.histogramRequests.count == 1
         }
         try await Task.sleep(for: .milliseconds(150))
 
         let rendersAfter = await harness.fake.previewRequests.count
         XCTAssertEqual(rendersAfter, rendersBefore + 1)
+        let presentation = try XCTUnwrap(harness.viewModel.presentationSessionForDiagnostics)
+        XCTAssertEqual(presentation.provisionalCandidateSources, [.storedFrame])
+        XCTAssertEqual(presentation.distinctFrameCount, 2)
+        XCTAssertEqual(presentation.confirmedFrameCount, 1)
     }
 
     func testReplacedSourceNeverShowsTheStoredFrame() async throws {

@@ -172,7 +172,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         }
     }
 
-    func testOpeningStoredEditsSpeculatesThenSubmitsTheStoredDocument() async throws {
+    func testOpeningStoredEditsSubmitsOnlyTheStoredDocument() async throws {
         let image = try makeImageFile()
         let storedDocument = EditDocument(
             rawDevelop: RAWDevelopSettings(exposure: 0.75),
@@ -194,10 +194,7 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == image })
 
         viewModel.selectCollectionImage(at: index)
-        let speculative = try await awaitRequest(reader, fake, "the speculative opening render") { _ in true }
-        XCTAssertEqual(speculative.document, EditDocument())
-
-        let stored = try await awaitRequest(reader, fake, "the stored-edit corrective render") { request in
+        let stored = try await awaitRequest(reader, fake, "the saved-document opening render") { request in
             request.document == storedDocument
         }
         XCTAssertEqual(stored.document, storedDocument)
@@ -206,15 +203,13 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
             viewModel.previewState == .ready
         }
         let previewCount = await fake.previewRequests.count
-        XCTAssertEqual(previewCount, 2, "stored edits correct the speculative opening preview")
+        XCTAssertEqual(previewCount, 1, "the first settled request already uses the saved document")
     }
 
-    /// LUMO-317's `submitCorrective` intentionally leaves the speculative predecessor running
-    /// instead of cancelling it, so both renders can be observed in order. That predecessor must
-    /// not become a permanent lease on the single editor lane once the caller moves on: navigating
-    /// away before it finishes must still free the lane for the next photo immediately, not once
-    /// the abandoned render happens to finish on its own.
-    func testOrphanedSpeculativePredecessorDoesNotBlockTheNextPhoto() async throws {
+    /// A settled render parked by the renderer must not become a permanent lease on the single
+    /// editor lane once the caller moves on. Navigating away must submit the next photo's request
+    /// without waiting for the abandoned render to finish.
+    func testOrphanedSettledPreviewDoesNotBlockTheNextPhoto() async throws {
         let first = try Fixtures.writeGradientPNG(
             width: 16, height: 12, named: "orphan-first.png", in: tempDirectory
         )
@@ -243,18 +238,14 @@ final class PreviewCutoverTests: TempDirectoryTestCase {
         let secondIndex = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.url == second })
 
         viewModel.selectCollectionImage(at: firstIndex)
-        // The speculative identity render enters the fake and parks there, modeling a real render
-        // that is still running when the corrective is submitted behind it.
-        _ = try await TestSynchronization.nextEvent(from: reader, "speculative parked") {
-            if case .previewRequested(let request) = $0 { return request.document == EditDocument() }
+        // The saved-document render enters the fake and parks there, modeling work that is still
+        // running when the user changes selection.
+        _ = try await TestSynchronization.nextEvent(from: reader, "saved preview parked") {
+            if case .previewRequested(let request) = $0 { return request.document == storedDocument }
             return false
         } diagnostics: { "" }
 
-        // Give the in-memory store lookup time to resolve and submit the corrective behind it,
-        // before the parked speculative render is ever released.
-        try await Task.sleep(for: .milliseconds(50))
-
-        // Navigate away before the parked speculative predecessor ever finishes.
+        // Navigate away before the parked first-photo render ever finishes.
         viewModel.selectCollectionImage(at: secondIndex)
 
         // The second photo's own preview must reach the engine without waiting for the abandoned

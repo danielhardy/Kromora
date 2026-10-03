@@ -105,6 +105,10 @@ final class StoredEditAdoptionTests: TempDirectoryTestCase {
             viewModel.document.light.exposure == 1.5
         }
         XCTAssertEqual(viewModel.previewState, .loading, "the source must still be preparing")
+        XCTAssertTrue(
+            viewModel.admissionStoredEditsResolved,
+            "stored edit and Look identity must resolve before source preparation finishes"
+        )
 
         await fake.releaseSourcePreparation()
         try await waitUntil("the photo to settle") { viewModel.previewState == .ready }

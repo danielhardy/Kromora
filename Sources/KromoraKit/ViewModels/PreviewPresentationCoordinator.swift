@@ -176,7 +176,8 @@ final class PreviewPresentationCoordinator {
     }
 
     func confirmRenderedFrame(
-        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64,
+        as source: CandidateSource = .rendered
     ) {
         guard var session = presentationSession,
             session.assetID == assetID, Self.identitiesMatch(session.identity, identity),
@@ -184,10 +185,13 @@ final class PreviewPresentationCoordinator {
                 recordStaleGenerationDrop(identity: identity)
                 return
             }
+        let confirmsVisibleStoredFrame = session.state == .provisional
+            && session.candidateSource == .storedFrame && session.provisionalFrameCount > 0
+            && source == .storedFrame
         session.state = .confirmed
-        session.candidateSource = .rendered
+        session.candidateSource = source
         consumeStoredFrame()
-        session.distinctFrameCount += 1
+        if !confirmsVisibleStoredFrame { session.distinctFrameCount += 1 }
         session.confirmedFrameCount += 1
         if session.firstPixelLatencyMilliseconds == nil {
             session.firstPixelLatencyMilliseconds = Self.elapsedMilliseconds(
@@ -203,6 +207,17 @@ final class PreviewPresentationCoordinator {
         Self.emitPresentationMetric(
             "PresentationConfirmed", session: session, source: CandidateSource.rendered.rawValue
         )
+    }
+
+    func hasPresentedStoredFrame(generation: UInt64) -> Bool {
+        guard let session = presentationSession, session.generation == generation else { return false }
+        return session.state == .provisional && session.candidateSource == .storedFrame
+            && session.provisionalFrameCount > 0
+    }
+
+    func hasStoredFrameCandidate(generation: UInt64) -> Bool {
+        guard let session = presentationSession, session.generation == generation else { return false }
+        return session.state == .provisional && session.candidateSource == .storedFrame
     }
 
     private func recordStaleGenerationDrop(identity: PortablePhotoIdentity) {

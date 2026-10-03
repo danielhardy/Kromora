@@ -142,6 +142,7 @@ final class PreviewPublicationCoordinatorTests: XCTestCase {
     func testFrameStoreRastersAreConfirmedWithoutBeingRewritten() throws {
         let destination = FakeDestination()
         destination.storedEditsResolvedSourceRevision = destination.sourceRevision
+        destination.isSideBySideVisible = true
         let coordinator = PreviewPublicationCoordinator(destination: destination)
         let publication = try makePublication(destination: destination)
 
@@ -153,6 +154,8 @@ final class PreviewPublicationCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(destination.presentCount, 1)
         XCTAssertEqual(destination.histogramCount, 1, "supporting work is admitted exactly once")
+        XCTAssertEqual(destination.originalScheduleCount, 1,
+                       "the comparison baseline is admitted once for the confirmed stored frame")
         XCTAssertEqual(destination.idleCount, 1)
         XCTAssertEqual(destination.canonicalWriteCount, 0)
         XCTAssertEqual(destination.previewState, .ready)
@@ -248,7 +251,8 @@ private final class FakeDestination: PreviewPublicationDestination {
             && generation == sourceRevision
     }
     func confirmPresentationFrame(
-        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64,
+        source: PreviewPresentationCoordinator.CandidateSource
     ) {}
 
     func publishPreviewReady() { previewState = .ready }
