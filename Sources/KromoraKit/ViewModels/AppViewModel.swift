@@ -886,6 +886,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     var previewRenderAdmissionCountForDiagnostics: Int {
         previewCoordinator.renderAdmissionCount
     }
+    var canonicalWriteAdmissionCountForDiagnostics: Int {
+        previewPresentation.canonicalWriteAdmissionCount
+    }
+    func waitForCanonicalWriteForDiagnostics(for identity: PortablePhotoIdentity) async {
+        await previewPresentation.waitForCanonicalWriteForDiagnostics(for: identity)
+    }
     private lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
         workScheduler: workScheduler, engine: engine, destination: self
     )
@@ -2338,6 +2344,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         if source != .embeddedJPEG { deferredEmbeddedFirstFrame = nil }
         let extent = nativeExtent.width > 0 && nativeExtent.height > 0
             ? CGRect(origin: .zero, size: nativeExtent) : image.extent
+        let rasterSource: PresentationRasterSource
+        switch source {
+        case .storedFrame: rasterSource = .stored
+        case .editedThumbnail, .originalThumbnail: rasterSource = .thumbnail
+        case .embeddedJPEG: rasterSource = .embedded
+        case .rendered: rasterSource = .settled
+        }
         _ = previewSurface.present(
             image, space: .current,
             revision: UInt64.max - generation,
@@ -2345,6 +2358,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             presentationImageExtent: extent,
             coversPresentationExtent: true,
             perceptualDigest: perceptualDigest,
+            presentationAssetID: assetID,
+            rasterSource: rasterSource,
             onPresented: { [weak self] in
                 guard let self,
                     self.previewPresentation.presentationSession?.generation == generation,
@@ -2478,6 +2493,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 quality: .preview,
                 presentationImageExtent: CGRect(origin: .zero, size: native),
                 coversPresentationExtent: true,
+                presentationAssetID: publication.request.assetID,
+                rasterSource: .embedded,
                 onPresented: { [weak self] in
                     guard let self, !self.isShuttingDown,
                         publication.request.sourceRevision == self.sourceRevision,
@@ -5137,6 +5154,8 @@ extension AppViewModel: PreviewPublicationDestination {
             documentHash: request.document.editHash,
             space: request.space
         )
+        let rasterSource: PresentationRasterSource = request.quality == .interactive
+            || previewSurface.hasPresentedDigest ? .refinement : .settled
         let publish: (PerceptualDigest?) -> Bool = { digest in
             self.previewSurface.present(
             image, space: request.space,
@@ -5151,6 +5170,8 @@ extension AppViewModel: PreviewPublicationDestination {
             layoutImageExtent: request.presentationLayoutExtent,
             presentationNavigation: request.presentationNavigation,
             perceptualDigest: digest,
+            presentationAssetID: request.assetID,
+            rasterSource: rasterSource,
             onPresented: onPresented
             )
         }

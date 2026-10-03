@@ -61,11 +61,16 @@ final class ImageCollectionPresentationModel {
     final class Item: Identifiable {
         var asset: PhotoAsset
         private var displayedThumbnail: NSImage?
+        @ObservationIgnored var presentationChangeLedger: PresentationChangeLedger?
+        @ObservationIgnored private var pendingThumbnailSource: PresentationRasterSource?
         @MainActor var thumbnail: NSImage? {
             get { displayedThumbnail }
             set {
                 displayedThumbnail = newValue
-                if let newValue { onThumbnailAssignment?(newValue) }
+                if let newValue {
+                    onThumbnailAssignment?(newValue)
+                    recordThumbnailAssignmentIfNeeded(source: pendingThumbnailSource ?? .settled)
+                }
             }
         }
         /// Optional observation seam used by relaunch tests to record the rasters that reach a cell.
@@ -171,7 +176,9 @@ final class ImageCollectionPresentationModel {
         @MainActor func setOriginalThumbnail(_ thumbnail: NSImage?) {
             originalThumbnail = thumbnail
             // A displayed edited raster — current or stale — is never replaced by the original.
-            if editedThumbnailImage == nil || editedThumbnailUsesFallback { self.thumbnail = thumbnail }
+            if editedThumbnailImage == nil || editedThumbnailUsesFallback {
+                assignThumbnail(thumbnail, source: .thumbnail)
+            }
         }
 
         /// Open Image… historically presents selected files without their extensions. Keep that
@@ -181,11 +188,15 @@ final class ImageCollectionPresentationModel {
         }
 
         @MainActor func applyEditedThumbnail(_ thumbnail: NSImage?, revision: String) {
+            let replacesStoredFrame = storedEditedFrameMetadata != nil && thumbnail != nil
             editedThumbnailRevision = revision
             editedThumbnailUsesFallback = thumbnail == nil
             editedThumbnailImage = thumbnail
             storedEditedFrameMetadata = nil
-            self.thumbnail = thumbnail ?? originalThumbnail
+            assignThumbnail(
+                thumbnail ?? originalThumbnail,
+                source: thumbnail == nil ? .thumbnail : (replacesStoredFrame ? .refinement : .settled)
+            )
         }
 
         /// Keep the displayed raster while marking its edit revision as stale. A replacement can
@@ -220,14 +231,29 @@ final class ImageCollectionPresentationModel {
             editedThumbnailUsesFallback = false
             editedThumbnailImage = thumbnail
             storedEditedFrameMetadata = metadata
-            self.thumbnail = thumbnail
+            assignThumbnail(thumbnail, source: .stored)
             return true
+        }
+
+        @MainActor private func assignThumbnail(
+            _ thumbnail: NSImage?, source: PresentationRasterSource
+        ) {
+            pendingThumbnailSource = source
+            self.thumbnail = thumbnail
+            pendingThumbnailSource = nil
+        }
+
+        @MainActor @inline(__always)
+        private func recordThumbnailAssignmentIfNeeded(source: PresentationRasterSource) {
+            guard let ledger = presentationChangeLedger else { return }
+            ledger.recordRasterAssignment(on: .gridCell(id), source: source)
+            ledger.recordRasterAssignment(on: .filmstripCell(id), source: source)
         }
 
         /// Adopt the geometry a persisted frame was presented with, for a package whose summary has
         /// no published ratio. Never overrides live document geometry or a published ratio.
         @discardableResult
-        func adoptStoredGeometry(_ geometry: PresentedGeometry) -> Bool {
+        @MainActor func adoptStoredGeometry(_ geometry: PresentedGeometry) -> Bool {
             guard !hasLivePresentedGeometry,
                   !Self.isUsableRatio(asset.presentedAspectRatio),
                   let dimensions = asset.dimensions, dimensions.width > 0, dimensions.height > 0
@@ -243,7 +269,9 @@ final class ImageCollectionPresentationModel {
         /// Install the document's crop and rotation. Returns true only when the cell shape changes,
         /// so a document that agrees with the published ratio causes no relayout.
         @discardableResult
-        func setPresentedCrop(_ crop: CropAdjustments, rotation: ImageRotation) -> Bool {
+        @MainActor func setPresentedCrop(
+            _ crop: CropAdjustments, rotation: ImageRotation
+        ) -> Bool {
             let before = libraryAspectRatio
             presentedCrop = crop
             presentedRotation = rotation
@@ -256,7 +284,7 @@ final class ImageCollectionPresentationModel {
         /// Apply a package repair's narrow geometry update without replacing the asset snapshot,
         /// restarting thumbnail work, or overriding a live document already installed in Edit.
         @discardableResult
-        func adoptPublishedPresentedAspectRatio(_ ratio: Double) -> Bool {
+        @MainActor func adoptPublishedPresentedAspectRatio(_ ratio: Double) -> Bool {
             guard ratio.isFinite, ratio > 0 else { return false }
             let before = libraryAspectRatio
             asset.presentedAspectRatio = LibraryGridLayout.normalizedAspectRatio(ratio)
@@ -269,12 +297,22 @@ final class ImageCollectionPresentationModel {
             hasAppearedInLibraryGrid = true
         }
 
-        private func recordCellGeometryReflow(from before: Double, to after: Double) {
+        @MainActor private func recordCellGeometryReflow(from before: Double, to after: Double) {
             guard hasAppearedInLibraryGrid, abs(after - before) > 1e-9 else { return }
+            recordCellGeometryIfNeeded(from: before, to: after)
             KromoraObservability.event(
                 .cellGeometryReflow,
                 detail: "previous_ratio=\(before) next_ratio=\(after)"
             )
+        }
+
+        @MainActor @inline(__always)
+        private func recordCellGeometryIfNeeded(from before: Double, to after: Double) {
+            guard let ledger = presentationChangeLedger else { return }
+            let oldRatio = String(format: "%.6f", before)
+            let newRatio = String(format: "%.6f", after)
+            ledger.recordGeometryChange(on: .gridCell(id), from: oldRatio, to: newRatio)
+            ledger.recordGeometryChange(on: .filmstripCell(id), from: oldRatio, to: newRatio)
         }
     }
 
@@ -309,6 +347,7 @@ final class ImageCollectionPresentationModel {
     private var frameReadWaiters: [CheckedContinuation<Void, Never>] = []
 
     private var collectionRevision: UInt64 = 0
+    @ObservationIgnored private var presentationChangeLedger: PresentationChangeLedger?
     private var filterRevision: UInt64 = 0
     private let projectionCache = CollectionProjection.Cache()
     private struct CullingChange {
@@ -477,6 +516,9 @@ final class ImageCollectionPresentationModel {
         cancelThumbnailWork()
         stopMetadataLoading()
         items = assets.map { Item(asset: $0) }
+        if let presentationChangeLedger {
+            items.forEach { $0.presentationChangeLedger = presentationChangeLedger }
+        }
         selectedIndex = 0
         selection.clear()
         portableTotalCount = totalCount
@@ -758,6 +800,18 @@ final class ImageCollectionPresentationModel {
         // revision bump automatically; no manual objectWillChange fan-out is needed.
         _ = notify
         collectionRevision &+= 1
+        recordCollectionProjectionInvalidationIfNeeded()
+    }
+
+    @inline(__always)
+    private func recordCollectionProjectionInvalidationIfNeeded() {
+        guard let ledger = presentationChangeLedger else { return }
+        ledger.recordCollectionProjectionInvalidation()
+    }
+
+    func installPresentationChangeLedger(_ ledger: PresentationChangeLedger?) {
+        presentationChangeLedger = ledger
+        items.forEach { $0.presentationChangeLedger = ledger }
     }
     private func recordCullingChange(itemID: PhotoAssetID, oldState: PhotoAssetLibraryState) {
         cullingUndoStack.append(.init(itemID: itemID, oldState: oldState, activeIDBefore: selection.activeID))

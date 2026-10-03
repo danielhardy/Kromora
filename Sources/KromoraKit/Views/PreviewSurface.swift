@@ -99,6 +99,9 @@ final class PreviewSurface: ObservableObject {
     private var skippedPresentationConfirmations: Set<UInt64> = []
     private var hasManagedPresentationLifecycle = false
     var onPresentationFailure: (() -> Void)?
+    /// Optional test recorder. The production publication path has a single nil check and
+    /// allocates no change records when no recorder is installed.
+    var presentationChangeLedger: PresentationChangeLedger?
 
     var hasPresentedDigest: Bool { staleRefinementPending && presentedDigest != nil }
     var retainsTransitionTexture: Bool { transitionTexture != nil }
@@ -159,6 +162,8 @@ final class PreviewSurface: ObservableObject {
         layoutImageExtent: CGRect? = nil,
         presentationNavigation: CanvasNavigation? = nil,
         perceptualDigest: PerceptualDigest? = nil,
+        presentationAssetID: PhotoAssetID? = nil,
+        rasterSource: PresentationRasterSource = .settled,
         onPresented: (() -> Void)? = nil
     ) -> Bool {
         guard let image,
@@ -184,6 +189,13 @@ final class PreviewSurface: ObservableObject {
             // request will still be accepted when it reaches the coordinator.
             return false
         }
+        let nextPresentationImageExtent = Self.presentationExtentMatchingPixelAxes(
+            planned: presentationImageExtent, pixels: image.extent,
+            covers: coversPresentationExtent
+        )
+        recordPresentationAssignmentIfNeeded(
+            assetID: presentationAssetID, source: rasterSource, nextExtent: nextPresentationImageExtent
+        )
         let transition: FrameTransition = staleRefinementPending
             && quality == .preview && coversPresentationExtent
             ? FrameRefinementPolicy.transition(
@@ -193,6 +205,7 @@ final class PreviewSurface: ObservableObject {
         if case .crossfade = transition,
             let oldTexture = presentationTexture ?? lastValidPresentationTexture
         {
+            recordCrossfadeIfNeeded(assetID: presentationAssetID)
             crossfadeAdmissionCount &+= 1
             transitionTexture = oldTexture
             transitionTextureExtent = presentationTextureExtent ?? lastValidPresentationTextureExtent
@@ -206,10 +219,7 @@ final class PreviewSurface: ObservableObject {
         self.image = image
         presentedDigest = perceptualDigest
         staleRefinementPending = false
-        self.presentationImageExtent = Self.presentationExtentMatchingPixelAxes(
-            planned: presentationImageExtent, pixels: image.extent,
-            covers: coversPresentationExtent
-        )
+        self.presentationImageExtent = nextPresentationImageExtent
         self.coversPresentationExtent = coversPresentationExtent
         self.layoutImageExtent = layoutImageExtent
         self.presentationNavigation = presentationNavigation
@@ -279,6 +289,32 @@ final class PreviewSurface: ObservableObject {
         }
         requestDisplay()
         return true
+    }
+
+    private static func geometryDescription(_ extent: CGRect) -> String {
+        "\(Int(extent.width))×\(Int(extent.height))"
+    }
+
+    @inline(__always)
+    private func recordPresentationAssignmentIfNeeded(
+        assetID: PhotoAssetID?, source: PresentationRasterSource, nextExtent: CGRect?
+    ) {
+        guard let ledger = presentationChangeLedger else { return }
+        let surface = assetID.map(PresentationSurface.editCanvas) ?? .unidentifiedEditCanvas
+        ledger.recordRasterAssignment(on: surface, source: source)
+        if let previous = presentationImageExtent, let nextExtent, previous != nextExtent {
+            ledger.recordGeometryChange(
+                on: surface,
+                from: Self.geometryDescription(previous), to: Self.geometryDescription(nextExtent)
+            )
+        }
+    }
+
+    @inline(__always)
+    private func recordCrossfadeIfNeeded(assetID: PhotoAssetID?) {
+        guard let ledger = presentationChangeLedger else { return }
+        let surface = assetID.map(PresentationSurface.editCanvas) ?? .unidentifiedEditCanvas
+        ledger.recordCrossfade(on: surface)
     }
     /// A complete frame must keep the pixels' landscape/portrait axes. Stretching a 4000×6000
     /// photo onto a 3:2 planner rectangle fills the window by distorting, and Fill then has no
