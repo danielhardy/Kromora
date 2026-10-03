@@ -58,6 +58,19 @@ enum ThumbnailFrameReadPolicy {
     }
 }
 
+/// Injectable timer sleep for deterministic thumbnail batching tests.
+struct ThumbnailFrameStoreFlushTimer: Sendable {
+    let sleep: @Sendable (Duration) async throws -> Void
+
+    init(
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { duration in
+            try await Task.sleep(for: duration)
+        }
+    ) {
+        self.sleep = sleep
+    }
+}
+
 /// How an unedited thumbnail is expressed in the shared frame model, so the same classifier answers
 /// "may these pixels stand in for this photo?" for every frame kind.
 enum OriginalThumbnailSignature {
@@ -85,9 +98,11 @@ enum OriginalThumbnailSignature {
 ///
 /// Writes are coalesced. The packed store rewrites its whole index per append, so records wait in
 /// memory (and are readable there) and reach disk as one batch after a short quiet period, when the
-/// batch reaches `maxPendingWrites`, or when `flush()` is called.
+/// batch reaches `maxPendingWrites`, after `maxPendingWriteAge`, or when `flush()` is called.
 actor ThumbnailFrameStore {
     static let flushDelay: Duration = .milliseconds(250)
+    /// Maximum time a settled thumbnail batch stays only in memory while writes keep arriving.
+    static let maxPendingWriteAge: Duration = .seconds(2)
     static let maxPendingWrites = 32
 
     struct Hit: Sendable {
@@ -114,13 +129,20 @@ actor ThumbnailFrameStore {
 
     private let directory: URL
     private let workScheduler: ImageWorkScheduler?
+    private let flushTimer: ThumbnailFrameStoreFlushTimer
     private let placeholderSweepJobID = ImageWorkScheduler.JobID(
         "placeholder-thumbnail-sweep-\(UUID().uuidString)"
     )
     private var store: PortablePackagePackedThumbnailStore?
     private var openFailed = false
     private var pending: [String: PresentationFrame] = [:]
-    private var flushTask: Task<Void, Never>?
+    private var quietFlushTask: Task<Void, Never>?
+    private var maxAgeFlushTask: Task<Void, Never>?
+    private var pendingBatchID: UInt64?
+    private var nextPendingBatchID: UInt64 = 0
+    private var quietFlushTimerID: UInt64?
+    private var maxAgeFlushTimerID: UInt64?
+    private var nextFlushTimerID: UInt64 = 0
     private var placeholderSweepScheduled = false
     private var placeholderSweepHasMore = false
     private var placeholderSweepCompletedPass = false
@@ -132,10 +154,18 @@ actor ThumbnailFrameStore {
     private(set) var placeholderWritesSkipped = 0
     private(set) var readCount = 0
     private(set) var writeCount = 0
+    private(set) var indexRewriteCount = 0
+    private(set) var quietTriggeredFlushCount = 0
+    private(set) var maxAgeTriggeredFlushCount = 0
+    private(set) var countTriggeredFlushCount = 0
 
-    init(directory: URL, workScheduler: ImageWorkScheduler? = nil) {
+    init(
+        directory: URL, workScheduler: ImageWorkScheduler? = nil,
+        flushTimer: ThumbnailFrameStoreFlushTimer = .init()
+    ) {
         self.directory = directory
         self.workScheduler = workScheduler
+        self.flushTimer = flushTimer
     }
 
     nonisolated static func packageDirectory(for packageURL: URL) -> URL {
@@ -230,19 +260,20 @@ actor ThumbnailFrameStore {
         }
         guard let kind = ThumbnailFrameKind.allCases.first(where: { $0.presentationKind == frame.kind }),
               let key = Self.key(kind, for: frame.identity.assetID) else { return }
+        if pendingBatchID == nil { beginPendingBatch() }
+        guard let batchID = pendingBatchID else { return }
         pending[key] = frame
         if pending.count >= Self.maxPendingWrites {
-            flushPending()
+            flushPending(trigger: .count)
         } else {
-            scheduleFlush()
+            scheduleQuietFlush(for: batchID)
+            scheduleMaxAgeFlush(for: batchID)
         }
     }
 
     /// Write every queued record now.
     func flush() {
-        flushTask?.cancel()
-        flushTask = nil
-        flushPending()
+        flushPending(trigger: .explicit)
     }
 
     /// Drop a photo's record of one kind — for example the edited record after a reset to the
@@ -250,6 +281,7 @@ actor ThumbnailFrameStore {
     func remove(_ kind: ThumbnailFrameKind, for assetID: PortablePhotoAssetID) {
         guard let key = Self.key(kind, for: assetID) else { return }
         pending.removeValue(forKey: key)
+        clearBatchIfEmpty()
         guard openStoreIfNeeded() else { return }
         refreshIfExternallyReplaced()
         try? store?.remove(keys: [key])
@@ -261,6 +293,7 @@ actor ThumbnailFrameStore {
             ThumbnailFrameKind.allCases.compactMap { Self.key($0, for: id) }
         }
         for key in keys { pending.removeValue(forKey: key) }
+        clearBatchIfEmpty()
         guard openStoreIfNeeded() else { return }
         refreshIfExternallyReplaced()
         try? store?.remove(keys: keys)
@@ -308,24 +341,98 @@ actor ThumbnailFrameStore {
 
     // MARK: Internals
 
-    private func scheduleFlush() {
-        guard flushTask == nil else { return }
-        flushTask = Task { [weak self] in
-            try? await Task.sleep(for: Self.flushDelay)
+    private enum FlushTrigger: Equatable {
+        case quiet
+        case maxAge
+        case count
+        case explicit
+    }
+
+    private func beginPendingBatch() {
+        nextPendingBatchID &+= 1
+        pendingBatchID = nextPendingBatchID
+    }
+
+    private func nextTimerID() -> UInt64 {
+        nextFlushTimerID &+= 1
+        return nextFlushTimerID
+    }
+
+    private func scheduleQuietFlush(for batchID: UInt64) {
+        quietFlushTask?.cancel()
+        let timerID = nextTimerID()
+        quietFlushTimerID = timerID
+        let deadline = ContinuousClock.now.advanced(by: Self.flushDelay)
+        let sleep = flushTimer.sleep
+        quietFlushTask = Task { [weak self] in
+            let remaining = max(.zero, ContinuousClock.now.duration(to: deadline))
+            do { try await sleep(remaining) } catch { return }
             guard !Task.isCancelled else { return }
-            await self?.flushScheduled()
+            await self?.flushScheduled(batchID: batchID, timerID: timerID, trigger: .quiet)
         }
     }
 
-    private func flushScheduled() {
-        flushTask = nil
-        flushPending()
+    private func scheduleMaxAgeFlush(for batchID: UInt64) {
+        guard maxAgeFlushTask == nil else { return }
+        let timerID = nextTimerID()
+        maxAgeFlushTimerID = timerID
+        let deadline = ContinuousClock.now.advanced(by: Self.maxPendingWriteAge)
+        let sleep = flushTimer.sleep
+        maxAgeFlushTask = Task { [weak self] in
+            let remaining = max(.zero, ContinuousClock.now.duration(to: deadline))
+            do { try await sleep(remaining) } catch { return }
+            guard !Task.isCancelled else { return }
+            await self?.flushScheduled(batchID: batchID, timerID: timerID, trigger: .maxAge)
+        }
     }
 
-    private func flushPending() {
-        guard !pending.isEmpty else { return }
+    private func flushScheduled(batchID: UInt64, timerID: UInt64, trigger: FlushTrigger) {
+        guard pendingBatchID == batchID, !pending.isEmpty else { return }
+        switch trigger {
+        case .quiet:
+            guard quietFlushTimerID == timerID else { return }
+            quietFlushTask = nil
+            quietFlushTimerID = nil
+        case .maxAge:
+            guard maxAgeFlushTimerID == timerID else { return }
+            maxAgeFlushTask = nil
+            maxAgeFlushTimerID = nil
+        case .count, .explicit:
+            return
+        }
+        flushPending(trigger: trigger)
+    }
+
+    private func cancelFlushTimers() {
+        quietFlushTask?.cancel()
+        quietFlushTask = nil
+        quietFlushTimerID = nil
+        maxAgeFlushTask?.cancel()
+        maxAgeFlushTask = nil
+        maxAgeFlushTimerID = nil
+    }
+
+    private func clearBatchIfEmpty() {
+        guard pending.isEmpty else { return }
+        cancelFlushTimers()
+        pendingBatchID = nil
+    }
+
+    private func flushPending(trigger: FlushTrigger) {
+        cancelFlushTimers()
+        guard !pending.isEmpty else {
+            pendingBatchID = nil
+            return
+        }
+        switch trigger {
+        case .quiet: quietTriggeredFlushCount += 1
+        case .maxAge: maxAgeTriggeredFlushCount += 1
+        case .count: countTriggeredFlushCount += 1
+        case .explicit: break
+        }
         let batch = pending
         pending.removeAll(keepingCapacity: true)
+        pendingBatchID = nil
         var records: [PortablePackagePackedThumbnailStore.Record] = []
         records.reserveCapacity(batch.count)
         for (key, frame) in batch {
@@ -333,19 +440,34 @@ actor ThumbnailFrameStore {
             records.append(.init(key: key, data: data))
         }
         guard !records.isEmpty else { return }
+        var didAppend = false
         for attempt in 0..<2 {
-            guard openStoreIfNeeded(), let store else { return }
+            guard openStoreIfNeeded(), let store else { break }
             refreshIfExternallyReplaced()
             do {
                 try store.append(records: records)
                 writeCount += records.count
-                return
+                indexRewriteCount += 1
+                didAppend = true
+                break
             } catch {
                 // A deleted `Derived/Thumbnails` or an unwritable pack: reopen from scratch once so
                 // the directory is recreated, then give up quietly. The records regenerate.
-                guard attempt == 0 else { return }
                 self.store = nil
                 openFailed = false
+                guard attempt == 0 else { break }
+            }
+        }
+        guard !didAppend else { return }
+
+        // Appends publish one index after all pack bytes are written. Reopen from that last
+        // published index on failure, then keep the batch available for a later retry.
+        openFailed = false
+        for (key, frame) in batch where pending[key] == nil { pending[key] = frame }
+        if !pending.isEmpty {
+            beginPendingBatch()
+            if trigger != .explicit, let batchID = pendingBatchID {
+                scheduleMaxAgeFlush(for: batchID)
             }
         }
     }
