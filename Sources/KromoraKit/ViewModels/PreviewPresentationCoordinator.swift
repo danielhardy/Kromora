@@ -77,6 +77,7 @@ final class PreviewPresentationCoordinator {
     private var canonicalWriteTasks: [PortablePhotoAssetID: Task<Void, Never>] = [:]
     private var acceptsCanonicalWrites = true
     private var canonicalStoreEnqueueCount = 0
+    private(set) var canonicalWriteAdmissionCount = 0
     private var canonicalStoreEnqueueWaiters: [CheckedContinuation<Void, Never>] = []
     let store: LatestPreviewFrameStore
     private let engine: any RenderEngining
@@ -493,6 +494,7 @@ final class PreviewPresentationCoordinator {
         let identity = request.source.portableIdentity
         let extent = image.extent
         guard extent.width > 0, extent.height > 0 else { return }
+        canonicalWriteAdmissionCount += 1
         let signature = FrameSignature(
             source: identity, editHash: request.document.editHash, look: look,
             workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
@@ -587,6 +589,13 @@ final class PreviewPresentationCoordinator {
     /// Wait for writes already admitted by the preview store. Canonical rasterization that has
     /// not reached the store remains ordinary cancellable renderer work.
     func flushPendingWrites() async {
+        await store.waitForPendingWrites()
+    }
+
+    func waitForCanonicalWriteForDiagnostics(for identity: PortablePhotoIdentity) async {
+        if let task = canonicalWriteTasks[identity.assetID] {
+            await task.value
+        }
         await store.waitForPendingWrites()
     }
 

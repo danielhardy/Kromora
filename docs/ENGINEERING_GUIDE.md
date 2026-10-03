@@ -242,6 +242,32 @@ Rules that keep this safe:
   an unreferenced Look, does no engine or image work; a referenced change releases only those
   `LUTID`s (`invalidateLUTCache(ids:)`) and re-admits only the affected canvas and thumbnails.
 
+## Presentation budget
+
+`PresentationBudgetTests` records visible raster assignments, geometry changes, and crossfades at
+the assignment points in `PreviewSurface.present` and `ImageCollection.Item.thumbnail`. A failure
+prints the surface and its ordered changes with raster sources. The recorder is optional; the hooked
+paths use an inlined `guard` and return before making a record or taking a lock when it is absent.
+Grid and filmstrip assignments are both recorded because those views share one item thumbnail.
+
+| Scenario | Budget |
+| --- | --- |
+| Exact stored Edit open, same session or relaunch | 1 raster assignment, 0 render requests, 0 geometry changes |
+| Stale stored Edit frame | 2 raster assignments (stored, refinement), 1 render request, at most 1 crossfade |
+| Cold Edit open | At most 3 raster assignments (thumbnail or embedded, settled) and a canonical write |
+| Photo A → B → A | 0 assignments of A's pixels to B's canvas; each open stays within its cold or warm row |
+| Exact stored grid cell after relaunch | 1 raster assignment, 0 geometry changes, 0 renders |
+| Grid edit change | Stored frame then one refinement; 0 geometry changes unless crop changes |
+| Identical Look rescan | 0 render admissions, 0 raster assignments, 0 collection-projection invalidations |
+| One referenced Look changes | Only photos referencing it render, once each |
+| Slider drag and settle | Interactive frames are never stored; one canonical write after settle |
+
+To add a surface, identify the single setter that makes its pixels visible, add a surface key and
+source at that hook, and record geometry at the mutation that changes the surface's presented shape.
+Keep a structural test proving raster assignment cannot bypass the hook, and add a budget scenario
+with a named limit and a one-line reason. Every PR that changes a presentation budget must say why
+in its change summary.
+
 ## Inspector controls
 
 Every inspector slider is `NeutralOriginSlider`, not `SwiftUI.Slider`. It wraps `NSSlider` and

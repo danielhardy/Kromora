@@ -33,6 +33,11 @@ Core Image, render, and AppKit/UI-sensitive tests. `scripts/ci-tests.sh optional
 benchmark, and packaging checks when their inputs are available. Procedural fixtures are created by
 the tests and are not committed; the photo-intelligence resource exception is documented below.
 
+`PresentationBudgetTests` is part of `serial`. It uses generated package fixtures and two distinct
+`AppViewModel` lifetimes for the exact-frame relaunch cases; the cold canonical-write case uses the
+real renderer. The ten-test suite took 6.3 seconds to execute on an Apple M4 Pro running macOS 27.2
+(targeted serialized run, excluding build time).
+
 The photo-intelligence corpus has two intentionally separate checks. The fast
 `PhotoIntelligenceDecisionLogicTests` suite uses deterministic fakes to test scene/Auto decision
 logic. The serial `PhotoIntelligenceRealCorpusTests` suite writes deterministic procedural PNGs to
