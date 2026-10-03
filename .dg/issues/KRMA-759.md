@@ -2,8 +2,34 @@
 id: KRMA-759
 title: Find and fix what delays the histogram after a photo switch (queue order vs compute)
 type: bug
-status: ready
+status: done
 priority: medium
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Comment gives measured split with sample counts and states which case applies
+      result: pass
+      notes: "Ticket comment and docs/TESTING.md: 0.013 ms enqueue, 0.075 ms queued, 53.3 ms compute (9 samples); compute-bound."
+    - criterion: "If queue order was the cause: test and lower p50"
+      result: pass
+      notes: Not applicable; queue-order experiment gave 54.4 ms vs 54.1 ms baseline and was removed.
+    - criterion: "If not queue order: no product change, numbers in docs/TESTING.md"
+      result: pass
+      notes: HEAD commit touches only docs/TESTING.md.
+    - criterion: Exact-hit bypass and admitted-once behaviour unchanged
+      result: pass
+      notes: No product source changed.
+  checks_run:
+    - git show --stat HEAD (docs-only)
+    - git diff --check
+    - dg validate
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-02T05:23:49.344Z
+  session: 01MUQIPD73QKIZWC6I
 creation_provenance:
   runner: claude
   model: unknown
@@ -12,11 +38,11 @@ labels:
   - performance
   - interaction
 created: 2026-10-02T03:33:21.222Z
-updated: 2026-10-02T03:34:20.760Z
+updated: 2026-10-02T05:23:49.346Z
 depends_on:
   - KRMA-757
 blockers: []
-order: t
+order: a0
 board: product
 ---
 
@@ -53,3 +79,31 @@ After a photo switch the histogram appears noticeably later than the photo and t
 - Keep the change to what this ticket lists. Do not touch the slider animation (KRMA-756, in progress), the capture script, or the wall-clock budgets (ADR-LKF-001).
 - Commit with a subject that starts `KRMA-<this id>:`. Do not push. Do not stash, reset, or revert anyone elses uncommitted changes in the tree.
 - Gate before handoff: `swift test --filter` for the suites you touched, `scripts/ci-tests.sh warning-gate`, `scripts/ci-tests.sh fast`, `swift format lint` on changed Swift files, `git diff --check`, `dg validate`.
+
+
+### Comment — codex @ 2026-10-02T05:23:23.187Z
+
+Release timing on Apple M4 Pro / macOS 27.2 with DSC01019.ARW: 9 warm-switch samples measured p50 confirmed-frame→enqueue 0.013 ms, queued 0.075 ms, and histogram call 53.3 ms. This is compute-bound. The 30-switch histogram_after_ready p50 was 54.4 ms in the temporary queue-order experiment versus the KRMA-757 baseline of 54.1 ms, so I removed the scheduling experiment and retained no product change. The previous photo's histogram intentionally stays visible until replacement, contributing to the perceived lag. Results are in docs/TESTING.md. Verification: 68 targeted tests pass; fast lane (1,471 tests), warning gate, Release benchmark, git diff --check, and dg validate pass.
+
+## Agent log
+
+- 2026-10-02T05:23:49.344Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Comment gives measured split with sample counts and states which case applies (pass) — Ticket comment and docs/TESTING.md: 0.013 ms enqueue, 0.075 ms queued, 53.3 ms compute (9 samples); compute-bound.
+- [x] If queue order was the cause: test and lower p50 (pass) — Not applicable; queue-order experiment gave 54.4 ms vs 54.1 ms baseline and was removed.
+- [x] If not queue order: no product change, numbers in docs/TESTING.md (pass) — HEAD commit touches only docs/TESTING.md.
+- [x] Exact-hit bypass and admitted-once behaviour unchanged (pass) — No product source changed.
+Checks run:
+- git show --stat HEAD (docs-only)
+- git diff --check
+- dg validate
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUQIPD73QKIZWC6I
