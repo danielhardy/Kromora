@@ -29,7 +29,12 @@ protocol EditedThumbnailDestination: AnyObject {
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String)
     /// Show a persisted frame that has not been confirmed against the current edit. It carries no
     /// revision, so demand still classifies and, if stale, refines it once.
-    func applyStoredEditedThumbnail(_ image: NSImage, for assetID: PhotoAssetID)
+    func applyStoredEditedThumbnail(
+        _ image: NSImage, metadata: PresentationFrameMetadata, for assetID: PhotoAssetID
+    )
+    func confirmStoredEditedThumbnail(
+        revision: String, metadata: PresentationFrameMetadata, for assetID: PhotoAssetID
+    ) -> Bool
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
     )
@@ -328,13 +333,19 @@ final class EditedThumbnailCoordinator {
                     await self.frameLookupLedger.record(surface: surface, outcome: outcome)
                     switch classification.classification {
                     case .exact:
-                        destination.applyEditedThumbnail(
-                            storedImage, for: assetID, revision: frameRevision
-                        )
+                        if !destination.confirmStoredEditedThumbnail(
+                            revision: frameRevision, metadata: hit.frame.metadata, for: assetID
+                        ) {
+                            destination.applyEditedThumbnail(
+                                storedImage, for: assetID, revision: frameRevision
+                            )
+                        }
                         self.materializedThumbnails[assetID] = materialized
                         return
                     case .staleCompatible, .provisionalOnly:
-                        destination.applyStoredEditedThumbnail(storedImage, for: assetID)
+                        destination.applyStoredEditedThumbnail(
+                            storedImage, metadata: hit.frame.metadata, for: assetID
+                        )
                     case .unusable:
                         break
                     }

@@ -12,7 +12,8 @@ enum OriginalThumbnailLoader {
         url: URL?, data: Data?, dataFingerprint: String?,
         identity: PortablePhotoIdentity, store: ThumbnailFrameStore?,
         ledger: FrameLookupLedger = .shared,
-        surface: FrameLookupSurface = .gridOriginal
+        surface: FrameLookupSurface = .gridOriginal,
+        decodeObserver: (@Sendable () async -> Void)? = nil
     ) async -> CGImage? {
         let size = PlatformThumbnailProvider.libraryMaxPixelSize
         if let cached = PlatformThumbnailProvider.memoryCachedImage(
@@ -40,6 +41,7 @@ enum OriginalThumbnailLoader {
             }
         }
 
+        await decodeObserver?()
         let decoded = await Task.detached { () -> (image: CGImage, frame: PresentationFrame?)? in
             let image: CGImage?
             if let url {

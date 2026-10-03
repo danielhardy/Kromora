@@ -666,8 +666,15 @@ private final class FakeDestination: EditedThumbnailDestination {
         item.applyEditedThumbnail(image, revision: revision)
         onApply?(image, revision)
     }
-    func applyStoredEditedThumbnail(_ image: NSImage, for assetID: PhotoAssetID) {
-        item.applyStoredEditedThumbnail(image)
+    func applyStoredEditedThumbnail(
+        _ image: NSImage, metadata: PresentationFrameMetadata, for assetID: PhotoAssetID
+    ) {
+        item.applyStoredEditedThumbnail(image, metadata: metadata)
+    }
+    func confirmStoredEditedThumbnail(
+        revision: String, metadata: PresentationFrameMetadata, for assetID: PhotoAssetID
+    ) -> Bool {
+        item.confirmStoredEditedThumbnail(revision: revision, metadata: metadata)
     }
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID

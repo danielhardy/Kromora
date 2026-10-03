@@ -811,8 +811,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     func applyEditedThumbnail(_ image: NSImage?, for assetID: PhotoAssetID, revision: String) {
         collection.applyEditedThumbnail(image, for: assetID, revision: revision)
     }
-    func applyStoredEditedThumbnail(_ image: NSImage, for assetID: PhotoAssetID) {
-        collection.applyStoredEditedThumbnail(image, for: assetID)
+    func applyStoredEditedThumbnail(
+        _ image: NSImage, metadata: PresentationFrameMetadata, for assetID: PhotoAssetID
+    ) {
+        collection.applyStoredEditedThumbnail(image, metadata: metadata, for: assetID)
+    }
+    func confirmStoredEditedThumbnail(
+        revision: String, metadata: PresentationFrameMetadata, for assetID: PhotoAssetID
+    ) -> Bool {
+        collection.confirmStoredEditedThumbnail(
+            revision: revision, metadata: metadata, for: assetID
+        )
     }
     func setEditedThumbnailPresentedCrop(
         _ crop: CropAdjustments, rotation: ImageRotation, for assetID: PhotoAssetID
