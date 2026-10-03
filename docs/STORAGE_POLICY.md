@@ -66,6 +66,18 @@ Every length is validated against the file size before any buffer is allocated.
   or full-resolution work, and deleting all of `Derived/Previews/` costs render time, never
   correctness.
 
+## Packed thumbnail frames
+
+`Derived/Thumbnails/` stores at most the live original and latest edited frame per asset. Writes
+coalesce by stable asset key and rewrite the packed index once per batch: after 250 ms with no new
+write, at 32 pending records, on an explicit flush, or at the two-second maximum pending age
+measured from the first write in the batch. The age deadline is fixed while the batch receives more
+writes, so continuous activity cannot keep settled frames in memory indefinitely. Under a successful
+cache write, the newest batch has a two-second maximum in-memory loss window; count-triggered writes
+may publish it earlier. A failed append keeps the batch pending for retry and leaves the last
+published index as the readable state. These frames remain disposable cache data and can always be
+regenerated from package originals.
+
 ## Backup and restore semantics
 
 The built-in verified backup copies the manifest, catalog, originals, metadata, edit revisions, and

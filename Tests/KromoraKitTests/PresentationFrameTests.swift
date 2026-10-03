@@ -3,6 +3,66 @@ import CoreImage
 import XCTest
 @testable import KromoraKit
 
+private actor ManualThumbnailFrameStoreClock {
+    private struct Sleeper {
+        let deadline: Duration
+        let continuation: CheckedContinuation<Void, Never>
+    }
+
+    private var now: Duration = .zero
+    private var nextSleeperID: UInt64 = 0
+    private var sleepers: [UInt64: Sleeper] = [:]
+    private var scheduledSleepCount = 0
+    private var scheduleWaiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+    func sleep(for duration: Duration) async throws {
+        nextSleeperID &+= 1
+        let id = nextSleeperID
+        try Task.checkCancellation()
+        await withTaskCancellationHandler(operation: {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                guard !Task.isCancelled else {
+                    continuation.resume()
+                    return
+                }
+                sleepers[id] = Sleeper(deadline: now + duration, continuation: continuation)
+                scheduledSleepCount += 1
+                resumeScheduleWaiters()
+            }
+        }, onCancel: {
+            Task { await self.cancelSleeper(id) }
+        })
+        try Task.checkCancellation()
+    }
+
+    func waitForScheduledSleeps(_ count: Int) async {
+        guard scheduledSleepCount < count else { return }
+        await withCheckedContinuation { continuation in
+            scheduleWaiters.append((count, continuation))
+        }
+    }
+
+    func advance(by duration: Duration) {
+        now += duration
+        let due = sleepers.filter { $0.value.deadline <= now }
+        for (id, sleeper) in due {
+            sleepers.removeValue(forKey: id)
+            sleeper.continuation.resume()
+        }
+    }
+
+    private func cancelSleeper(_ id: UInt64) {
+        guard let sleeper = sleepers.removeValue(forKey: id) else { return }
+        sleeper.continuation.resume()
+    }
+
+    private func resumeScheduleWaiters() {
+        let ready = scheduleWaiters.filter { scheduledSleepCount >= $0.0 }
+        scheduleWaiters.removeAll { scheduledSleepCount >= $0.0 }
+        for (_, continuation) in ready { continuation.resume() }
+    }
+}
+
 /// Builders shared by the frame, envelope, and store tests.
 enum FrameFixtures {
     static let lookID = LUTID(raw: "look")
@@ -203,6 +263,207 @@ final class PresentationFrameClassifierTests: XCTestCase {
 }
 
 final class ThumbnailFrameStoreTests: TempDirectoryTestCase {
+    func testMaximumPendingAgeFlushesDuringContinuousWrites() async throws {
+        let directory = tempDirectory.appendingPathComponent("age-bounded-thumbnails")
+        let clock = ManualThumbnailFrameStoreClock()
+        let store = ThumbnailFrameStore(
+            directory: directory,
+            flushTimer: .init(sleep: { duration in try await clock.sleep(for: duration) })
+        )
+        let raster = try FrameFixtures.jpeg()
+        var identities: [PortablePhotoIdentity] = []
+        var scheduledSleepCount = 0
+
+        for index in 0..<10 {
+            let pendingBefore = await store.pendingWriteCount
+            let identity = FrameFixtures.identity(content: "continuous-\(index)")
+            identities.append(identity)
+            await store.enqueueWrite(thumbnailFrame(identity: identity, rasterData: raster))
+            scheduledSleepCount += pendingBefore == 0 ? 2 : 1
+            await clock.waitForScheduledSleeps(scheduledSleepCount)
+            if index < 9 { await clock.advance(by: .milliseconds(200)) }
+        }
+
+        let queuedBeforeAgeFlush = await store.pendingWriteCount
+        XCTAssertEqual(queuedBeforeAgeFlush, 10)
+        await clock.advance(by: .milliseconds(200))
+        try await waitUntil("the maximum-age thumbnail batch to reach disk") {
+            await store.indexRewriteCount == 1
+        }
+        let ageFlushCount = await store.maxAgeTriggeredFlushCount
+        let queuedAfterAgeFlush = await store.pendingWriteCount
+        XCTAssertEqual(ageFlushCount, 1)
+        XCTAssertEqual(queuedAfterAgeFlush, 0)
+
+        let relaunched = ThumbnailFrameStore(directory: directory)
+        for identity in identities {
+            let hit = await relaunched.read(.edited, for: identity)
+            XCTAssertNotNil(
+                hit,
+                "the fresh store should read every settled frame after the age deadline"
+            )
+        }
+    }
+
+    func testQuietFlushWaitsForTheMostRecentWrite() async throws {
+        let directory = tempDirectory.appendingPathComponent("quiet-thumbnail-flush")
+        let clock = ManualThumbnailFrameStoreClock()
+        let store = ThumbnailFrameStore(
+            directory: directory,
+            flushTimer: .init(sleep: { duration in try await clock.sleep(for: duration) })
+        )
+        let raster = try FrameFixtures.jpeg()
+        let firstIdentity = FrameFixtures.identity(content: "quiet-first")
+        let secondIdentity = FrameFixtures.identity(content: "quiet-second")
+
+        await store.enqueueWrite(thumbnailFrame(identity: firstIdentity, rasterData: raster))
+        await clock.waitForScheduledSleeps(2)
+        await clock.advance(by: .milliseconds(200))
+        await store.enqueueWrite(thumbnailFrame(identity: secondIdentity, rasterData: raster))
+        await clock.waitForScheduledSleeps(3)
+
+        await clock.advance(by: .milliseconds(200))
+        let pendingBeforeQuietDeadline = await store.pendingWriteCount
+        XCTAssertEqual(pendingBeforeQuietDeadline, 2, "the earlier timer must not flush the batch")
+        await clock.advance(by: .milliseconds(249))
+        let pendingJustBeforeQuietDeadline = await store.pendingWriteCount
+        XCTAssertEqual(pendingJustBeforeQuietDeadline, 2)
+        await clock.advance(by: .milliseconds(1))
+        try await waitUntil("the reset quiet timer to flush") {
+            await store.indexRewriteCount == 1
+        }
+
+        let quietFlushCount = await store.quietTriggeredFlushCount
+        let ageFlushCount = await store.maxAgeTriggeredFlushCount
+        XCTAssertEqual(quietFlushCount, 1)
+        XCTAssertEqual(ageFlushCount, 0)
+        let relaunched = ThumbnailFrameStore(directory: directory)
+        let firstHit = await relaunched.read(.edited, for: firstIdentity)
+        let secondHit = await relaunched.read(.edited, for: secondIdentity)
+        XCTAssertNotNil(firstHit)
+        XCTAssertNotNil(secondHit)
+    }
+
+    func testTwoHundredWriteBurstBoundsIndexRewritesByAgeAndCountTriggers() async throws {
+        let directory = tempDirectory.appendingPathComponent("bounded-thumbnail-burst")
+        let clock = ManualThumbnailFrameStoreClock()
+        let store = ThumbnailFrameStore(
+            directory: directory,
+            flushTimer: .init(sleep: { duration in try await clock.sleep(for: duration) })
+        )
+        let raster = try FrameFixtures.jpeg()
+        var scheduledSleepCount = 0
+
+        // A fast opening burst preserves the existing 32-record count trigger.
+        for index in 0..<32 {
+            let pendingBefore = await store.pendingWriteCount
+            let identity = FrameFixtures.identity(content: "burst-\(index)")
+            await store.enqueueWrite(thumbnailFrame(identity: identity, rasterData: raster))
+            let pendingAfter = await store.pendingWriteCount
+            scheduledSleepCount += pendingBefore == 0 ? 2 : (pendingAfter == 0 ? 0 : 1)
+            if pendingAfter > 0 { await clock.waitForScheduledSleeps(scheduledSleepCount) }
+        }
+        let openingCountFlushes = await store.countTriggeredFlushCount
+        XCTAssertEqual(openingCountFlushes, 1)
+
+        // Keep the remainder continuously active at a cadence below the 250 ms quiet delay.
+        // Advancing the injected clock exposes each two-second deadline without a wall-clock wait.
+        var simulatedElapsed: Duration = .zero
+        var nextAgeDeadline = ThumbnailFrameStore.maxPendingWriteAge
+        var expectedAgeFlushCount = 0
+        for index in 32..<200 {
+            let pendingBefore = await store.pendingWriteCount
+            let identity = FrameFixtures.identity(content: "burst-\(index)")
+            await store.enqueueWrite(thumbnailFrame(identity: identity, rasterData: raster))
+            let pendingAfter = await store.pendingWriteCount
+            scheduledSleepCount += pendingBefore == 0 ? 2 : (pendingAfter == 0 ? 0 : 1)
+            if pendingAfter > 0 { await clock.waitForScheduledSleeps(scheduledSleepCount) }
+
+            if index < 199 {
+                await clock.advance(by: .milliseconds(100))
+                simulatedElapsed += .milliseconds(100)
+                if simulatedElapsed >= nextAgeDeadline {
+                    expectedAgeFlushCount += 1
+                    let targetAgeFlushCount = expectedAgeFlushCount
+                    try await waitUntil("age-triggered burst write \(targetAgeFlushCount)") {
+                        await store.maxAgeTriggeredFlushCount >= targetAgeFlushCount
+                    }
+                    nextAgeDeadline += ThumbnailFrameStore.maxPendingWriteAge
+                }
+            }
+        }
+        let ageFlushes = await store.maxAgeTriggeredFlushCount
+        let countFlushes = await store.countTriggeredFlushCount
+        let quietFlushes = await store.quietTriggeredFlushCount
+        let rewrites = await store.indexRewriteCount
+        let pendingAtEnd = await store.pendingWriteCount
+        let writtenRecords = await store.writeCount
+        let ageIntervalSeconds = ThumbnailFrameStore.maxPendingWriteAge.components.seconds
+        let timeTriggerBound = Int(simulatedElapsed.components.seconds / ageIntervalSeconds)
+        XCTAssertEqual(writtenRecords + pendingAtEnd, 200)
+        XCTAssertEqual(countFlushes, 1)
+        XCTAssertEqual(quietFlushes, 0, "the writes stay active through the measured burst")
+        XCTAssertLessThanOrEqual(ageFlushes, timeTriggerBound)
+        XCTAssertLessThanOrEqual(rewrites, timeTriggerBound + countFlushes)
+        XCTAssertEqual(rewrites, ageFlushes + countFlushes)
+        await store.flush()
+    }
+
+    func testFailedPackedAppendKeepsOldIndexReadableAndRetriesPendingBatch() async throws {
+        let directory = tempDirectory.appendingPathComponent("retry-thumbnail-write")
+        let previousIdentity = FrameFixtures.identity(content: "already-indexed")
+        let previousKey = try XCTUnwrap(
+            ThumbnailFrameStore.key(.edited, for: previousIdentity.assetID)
+        )
+        let previousShard = String(previousKey.prefix(2))
+        let targetIdentity = try XCTUnwrap((0..<512).lazy.map { index in
+            FrameFixtures.identity(content: "failed-write-\(index)")
+        }.first { identity in
+            guard let key = ThumbnailFrameStore.key(.edited, for: identity.assetID) else {
+                return false
+            }
+            return String(key.prefix(2)) != previousShard
+        })
+        let targetKey = try XCTUnwrap(
+            ThumbnailFrameStore.key(.edited, for: targetIdentity.assetID)
+        )
+        let store = ThumbnailFrameStore(directory: directory)
+        let previousFrame = try thumbnailFrame(
+            identity: previousIdentity, kind: .editedThumbnail480, red: 0.3
+        )
+        let pendingFrame = try thumbnailFrame(
+            identity: targetIdentity, kind: .editedThumbnail480, red: 0.7
+        )
+        await store.enqueueWrite(previousFrame)
+        await store.flush()
+
+        let blockedPack = directory.appendingPathComponent("\(targetKey.prefix(2)).pack")
+        try FileManager.default.createDirectory(at: blockedPack, withIntermediateDirectories: true)
+        await store.enqueueWrite(pendingFrame)
+        await store.flush()
+
+        let pendingAfterFailure = await store.pendingWriteCount
+        XCTAssertEqual(pendingAfterFailure, 1)
+        let afterFailure = ThumbnailFrameStore(directory: directory)
+        let oldFrameAfterFailure = await afterFailure.read(.edited, for: previousIdentity)
+        XCTAssertEqual(
+            oldFrameAfterFailure?.frame.rasterData,
+            previousFrame.rasterData,
+            "a failed append must leave the previously published index and frame readable"
+        )
+
+        try FileManager.default.removeItem(at: blockedPack)
+        await store.flush()
+        let pendingAfterRetry = await store.pendingWriteCount
+        XCTAssertEqual(pendingAfterRetry, 0)
+        let afterRetry = ThumbnailFrameStore(directory: directory)
+        let recoveredFrame = await afterRetry.read(.edited, for: targetIdentity)
+        XCTAssertEqual(
+            recoveredFrame?.frame.rasterData,
+            pendingFrame.rasterData
+        )
+    }
+
     func testStableKeysReplaceTheLiveEditedRecordAndSurviveRelaunch() async throws {
         let identity = FrameFixtures.identity()
         let directory = tempDirectory.appendingPathComponent("Thumbnails")
@@ -339,6 +600,28 @@ final class ThumbnailFrameStoreTests: TempDirectoryTestCase {
             pixelHeight: baseMetadata.pixelHeight
         )
         return PresentationFrame(metadata: metadata, rasterData: base.rasterData)
+    }
+
+    private func thumbnailFrame(
+        identity: PortablePhotoIdentity, rasterData: Data
+    ) -> PresentationFrame {
+        PresentationFrame(
+            metadata: FrameFixtures.metadata(identity: identity, kind: .editedThumbnail480),
+            rasterData: rasterData
+        )
+    }
+
+    private func waitUntil(
+        _ description: String, condition: () async -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while !(await condition()) {
+            guard ContinuousClock.now < deadline else {
+                XCTFail("Timed out waiting for \(description)")
+                return
+            }
+            await Task.yield()
+        }
     }
 }
 

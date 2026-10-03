@@ -175,7 +175,7 @@ boundary suites so injected failures stay reproducible and do not depend on a sc
 | Exact/stale/missing stored frames, candidate ordering, renderer failure, and obsolete generations | `WarmReopenPresentationTests`, `PreviewPresentationCoordinatorTests`, `EmbeddedFirstFrameTests`, `PreviewCutoverTests` |
 | Same-ID Look replacement and unchanged Look scans | `LUTLibraryTests`, `AppViewModelTests`, `EditedThumbnailCoordinatorTests` |
 | Transactional edit plus presented geometry and rollback | `PortableLibraryPackageTests.testEditRevisionAndPresentedGeometryPublishOrRollbackTogether` |
-| Packed-frame stable keys, read-window bounds, compaction, and interruptions | `ThumbnailFrameStoreTests`, `PortablePackageMaintenanceTests` |
+| Packed-frame stable keys, read-window bounds, compaction, write interruptions, and retry | `ThumbnailFrameStoreTests`, `PortablePackageMaintenanceTests` |
 
 Persisted presentation frame reads are recorded by `FrameLookupLedger` with their surface, outcome,
 and monotonic timestamp; the ledger stores no paths or image data. The one-line `FrameLookupSummary`
@@ -186,6 +186,18 @@ signpost groups outcomes by surface and names the most frequent rejection reason
 Run this matrix with `swift test`, then `scripts/ci-tests.sh fast`, `serial`, and `identity`. These
 assertions establish correctness and bounded work; fake renderer timings remain orchestration data
 and do not count toward the release latency budgets.
+
+### Packed thumbnail write batching
+
+`ThumbnailFrameStore` batches settled thumbnail frames and rewrites `index.json` once per append
+batch. It flushes after 250 ms of quiet, at 32 pending records, on an explicit flush, or when the
+batch reaches its named two-second maximum pending age from the first queued write. The two-second
+age deadline does not move as new records arrive; with successful cache writes, this is the maximum
+in-memory loss window during a sustained write burst. Count-triggered flushes can publish a batch
+earlier and are accounted for separately in the rewrite bound. `ThumbnailFrameStoreTests` drives the
+timers with a manual clock, verifies a continuously active batch is readable from a fresh store after
+its age deadline, bounds index rewrites for a 200-write burst, and checks a failed append preserves
+the previous index and can recover on retry.
 
 ### KRMA-734 release qualification attempt (2026-09-30)
 
