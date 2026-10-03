@@ -2,8 +2,32 @@
 id: KRMA-760
 title: Show the histogram for an exact stored frame without waiting for source preparation
 type: task
-status: backlog
+status: done
 priority: low
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Histogram of an exact stored frame is admitted without waiting for source preparation
+      result: pass
+      notes: Admission is invoked from stored-frame presentation and edit adoption, gated on exact classification.
+    - criterion: Provisional/stale/unresolved frames never feed the histogram
+      result: pass
+      notes: Requires FrameClassifier exact; completion revalidates identity, document, Look, original/crop state.
+    - criterion: No duplicate work against the confirmed-frame tail
+      result: pass
+      notes: Shared HistogramIdentity dedupes in-flight and completed work.
+  checks_run:
+    - swift build (pass)
+    - git diff --check (pass)
+    - swift test filtered to admission/presentation/histogram/warm-reopen suites (39 tests, 0 failures)
+  findings:
+    - "Low, non-blocking: no test directly asserts the histogram starts before source preparation completes; the warm-reopen test covers admit-once only."
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-03T07:32:09.884Z
+  session: 01MUS2PSCHH9PBHHVN
 creation_provenance:
   runner: claude
   model: unknown
@@ -12,9 +36,9 @@ labels:
   - performance
   - design
 created: 2026-10-02T03:33:22.387Z
-updated: 2026-10-02T03:34:17.346Z
+updated: 2026-10-03T07:32:09.886Z
 blockers: []
-order: zzy
+order: a0
 board: product
 ---
 
@@ -35,3 +59,31 @@ Today the histogram needs a prepared `imageSource` and a presented frame whose `
 ## Decide before building
 
 Which of these is worth its complexity once KRMA-757 and KRMA-759 have measured how much of the histogram delay is preparation versus queue. If KRMA-759 closes most of the gap, close this ticket as not needed.
+
+
+### Comment — codex @ 2026-10-03T07:31:23.295Z
+
+KRMA-757/759 measured 0.075 ms p50 queue wait versus 53.3 ms histogram compute, while source preparation remains about 290 ms. Chose early exact classification (option 1): after the stored raster is presented and source identity, edit hash, and resolved Look are known, tally its own pixels before source preparation. The same content identity deduplicates this work with the confirmed-frame tail; stale and unresolved frames remain excluded. Updated the last-known-frame plan. Checks: swift build, git diff --check, dg validate passed; no tests run. Commit: 053e7ae.
+
+## Agent log
+
+- 2026-10-03T07:32:09.884Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Histogram of an exact stored frame is admitted without waiting for source preparation (pass) — Admission is invoked from stored-frame presentation and edit adoption, gated on exact classification.
+- [x] Provisional/stale/unresolved frames never feed the histogram (pass) — Requires FrameClassifier exact; completion revalidates identity, document, Look, original/crop state.
+- [x] No duplicate work against the confirmed-frame tail (pass) — Shared HistogramIdentity dedupes in-flight and completed work.
+Checks run:
+- swift build (pass)
+- git diff --check (pass)
+- swift test filtered to admission/presentation/histogram/warm-reopen suites (39 tests, 0 failures)
+Findings:
+- Low, non-blocking: no test directly asserts the histogram starts before source preparation completes; the warm-reopen test covers admit-once only.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUS2PSCHH9PBHHVN
+Summary: Verified early exact stored-frame histogram admission; build and 39 related tests pass.
