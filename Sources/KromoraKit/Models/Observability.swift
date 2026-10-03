@@ -8,6 +8,7 @@ enum FrameLookupSurface: String, Sendable, CaseIterable {
     case gridEdited
     case filmstrip
     case launchHint
+    case idleWarm
 }
 
 enum FrameLookupOutcome: Sendable, Equatable {

@@ -889,6 +889,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private lazy var previewAdmissionCoordinator = PreviewAdmissionCoordinator(
         workScheduler: workScheduler, engine: engine, destination: self
     )
+    private lazy var idleFrameWarmerCoordinator = IdleFrameWarmerCoordinator(
+        scheduler: workScheduler, engine: engine, editStore: editStore,
+        thumbnailStore: thumbnailFrameStore, previewPresentation: previewPresentation,
+        destination: self
+    )
+    var idleFrameWarmerProgressForDiagnostics: IdleFrameWarmerProgress {
+        idleFrameWarmerCoordinator.progress
+    }
     /// Tracks whether a preview was already admitted after source chrome appeared. A user edit
     /// can arrive while stored edits are still loading; adopting the store result must not submit
     /// a duplicate preview in that case.
@@ -1157,6 +1165,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         collection.onThumbnailDemand = { [weak self] assetID, priority in
             self?.requestEditedThumbnail(for: assetID, priority: priority)
         }
+        libraryBrowsingCoordinator.onViewportPublished = { [weak self] ids in
+            guard let self else { return }
+            self.cancelIdlePreviewBuild()
+            self.updatePinnedFrameAssets(visible: ids)
+            self.scheduleIdlePreviewBuild()
+        }
         // An edit commits its presented geometry to the membership summary in the same package
         // transaction; mirror that committed entry into the disposable index.
         if let session = openedPortableLibrary {
@@ -1214,8 +1228,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         applicationShell.onApplicationActivated = { [weak self] in
             self?.portableLibrary?.renewAfterWake()
+            self?.scheduleIdlePreviewBuild()
         }
         applicationShell.onApplicationDeactivated = { [weak self] in
+            self?.cancelIdlePreviewBuild()
             self?.requestBestEffortFrameStoreFlush()
         }
         applicationShell.start()
@@ -1450,6 +1466,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         export.onStatus = { [weak self] in self?.statusMessage = $0 }
+        export.onActivityChanged = { [weak self] isActive in
+            guard let self else { return }
+            if isActive {
+                self.cancelIdlePreviewBuild()
+            } else {
+                self.scheduleIdlePreviewBuild()
+            }
+        }
         export.onError = { [weak self] message in
             self?.externalEditorHandoffURL = nil
             self?.pendingShareURL = nil
@@ -2066,6 +2090,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewAdmissionCoordinator.scheduleIdlePreviewBuild()
     }
 
+    private func updatePinnedFrameAssets(visible: [PhotoAssetID]) {
+        var pinned = Set(visible.map(PortablePhotoAssetID.compatibility(from:)))
+        if let active = portableLibrary?.portableActiveID { pinned.insert(active) }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.previewPresentation.setPinnedFrameAssets(pinned)
+        }
+    }
+
     /// Stop cache-only work before any user-visible operation gets a chance to enter the editor
     /// lane. The scheduler's background job may already be inside one Core Image call; cancellation
     /// bounds that unavoidable tail to the current item and the generation guards the result.
@@ -2080,6 +2113,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         presentationSelectionUptime: UInt64? = nil
     ) {
         guard !isShuttingDown else { return }
+        cancelIdlePreviewBuild(resetCursor: true)
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
             portableIdentity: portableIdentity, fileChangeSignature: fileChangeSignature,
@@ -2096,6 +2130,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Make the source switch observable and invalidate old pixels immediately. Package state,
         // editor cleanup, and candidate materialization continue after the selection event yields.
         activeAssetID = importPlan.assetID
+        updatePinnedFrameAssets(visible: Array(collection.visibleEditedThumbnailAssetIDs))
         isToolbarPhotoTransitioning = true
         isLoading = true
         isNavigationLoading = true
@@ -3055,6 +3090,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// image. With no selection, Edit opens the first photo only when that Library setting is on.
     @discardableResult
     func navigate(to mode: NavigationState.Mode) -> Bool {
+        cancelIdlePreviewBuild()
         switch mode {
         case .grid:
             if isCropToolActive { cancelCrop() }
@@ -3066,6 +3102,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             inspectorState.isPresented = false
             navigation.move(to: .grid)
             collection.beginThumbnailDemand()
+            scheduleIdlePreviewBuild()
             return true
 
         case .edit:
@@ -3081,12 +3118,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
             navigation.move(to: .edit)
             openActiveCollectionImage(loadMode: false)
+            scheduleIdlePreviewBuild()
             return true
         }
     }
 
     private func setEditMode() -> Bool {
         navigation.move(to: .edit)
+        scheduleIdlePreviewBuild()
         return true
     }
 
@@ -3430,6 +3469,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     ) {
         cancelIdlePreviewBuild(resetCursor: true)
         libraryBrowsingCoordinator.selectLibraryItem(at: index, modifiers: modifiers)
+        updatePinnedFrameAssets(visible: Array(collection.visibleEditedThumbnailAssetIDs))
+        scheduleIdlePreviewBuild()
     }
 
     /// Apply a culling flag to the focused library asset. Pick/reject use the rapid-cull workflow
@@ -4876,6 +4917,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         export.onStatus = nil
         export.onError = nil
         export.onExportCompleted = nil
+        export.onActivityChanged = nil
         derive.onStatus = nil
         derive.onError = nil
         derive.onDerived = nil
@@ -4907,6 +4949,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await collection.shutdown()
 
         await editedThumbnailCoordinator.shutdown()
+        await idleFrameWarmerCoordinator.shutdown()
         await thumbnailFrameStore.shutdown()
         previewAdmissionCoordinator.shutdown()
         cancelIdlePreviewBuild(resetCursor: true)
@@ -5300,6 +5343,10 @@ extension AppViewModel: PreviewAdmissionDestination {
         ) || hadValidOriginal
     }
     func admissionClearOriginalPreview() { originalPreviewSurface.clear() }
+    func admissionScheduleIdleFrameWarmup() { idleFrameWarmerCoordinator.schedule() }
+    func admissionCancelIdleFrameWarmup(resetProgress: Bool) {
+        idleFrameWarmerCoordinator.cancel(resetProgress: resetProgress)
+    }
 }
 
 extension AppViewModel: LibraryBrowsingDestination {
@@ -5321,4 +5368,108 @@ extension AppViewModel: LibraryBrowsingDestination {
     func setLibraryStatusMessage(_ message: String) { statusMessage = message }
 
     func presentLibraryError(_ message: String) { presentError(message) }
+}
+
+extension AppViewModel: IdleFrameWarmerDestination {
+    var idleFrameWarmerIsReady: Bool {
+        guard portableLibrary != nil else { return false }
+        return libraryBrowsingCoordinator.hasPublishedFirstIndexPage
+            && libraryBrowsingCoordinator.hasPublishedVisibleWindow
+    }
+
+    var idleFrameWarmerIsBlocked: Bool {
+        isShuttingDown || !collection.isActive || collection.isScanning
+            || sourceSession.isBusy || isLoading || isNavigationLoading
+            || previewAdmissionCoordinator.isPreviewDebouncing || isPreviewInteractionActive
+            || isExporting || (!navigation.isGrid && !navigation.isEdit)
+    }
+
+    var idleFrameWarmerConditions: IdleFrameWarmerConditions {
+        let thermal = ProcessInfo.processInfo.thermalState
+        return IdleFrameWarmerConditions(
+            isLowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            isThermalStateSeriousOrWorse: thermal == .serious || thermal == .critical,
+            isApplicationActive: NSApplication.shared.isActive
+        )
+    }
+
+    var idleFrameWarmerCandidates: [IdleFrameWarmCandidate] {
+        guard let portableLibrary, idleFrameWarmerIsReady else { return [] }
+        var assets: [PhotoAsset] = []
+        var pageIndex = 0
+        while true {
+            guard let window = try? portableLibrary.browsingWindow(
+                pageIndex: pageIndex, query: .all
+            ) else { return [] }
+            guard !window.assets.isEmpty || assets.count >= window.totalCount else { return [] }
+            assets.append(contentsOf: window.assets)
+            guard assets.count < window.totalCount else { break }
+            pageIndex += 1
+        }
+
+        let visibleIDs = idleFrameWarmerVisiblePortableAssetIDs
+        var anchorIDs = visibleIDs
+        if let active = portableLibrary.portableActiveID { anchorIDs.insert(active) }
+        let positions = Dictionary(uniqueKeysWithValues: assets.enumerated().map {
+            ($0.element.source.portableIdentity.assetID, $0.offset)
+        })
+        let anchorPositions = anchorIDs.compactMap { positions[$0] }
+        let fallbackSelection = min(max(collection.selectedIndex, 0), max(assets.count - 1, 0))
+        let recencyRanks = Dictionary(uniqueKeysWithValues:
+            libraryBrowsingCoordinator.launchHintRecencyOrder.enumerated().map {
+                ($0.element, $0.offset)
+            }
+        )
+
+        return assets.enumerated().compactMap { index, asset in
+            guard let dimensions = asset.dimensions,
+                  dimensions.width > 0, dimensions.height > 0,
+                  let url = asset.url else { return nil }
+            let identity = asset.source.portableIdentity
+            guard !identity.sourceFingerprint.isBrowsingPlaceholder else { return nil }
+            let source = ImageSource(
+                url: url, nativeExtent: CGSize(
+                    width: dimensions.width, height: dimensions.height
+                ), portableIdentity: identity,
+                existingFileChangeSignature: asset.source.fingerprint
+            )
+            let distance = anchorPositions.map { abs(index - $0) }.min()
+                ?? abs(index - fallbackSelection)
+            return IdleFrameWarmCandidate(
+                index: index, assetID: asset.id, source: source,
+                reference: EditSourceReference(
+                    assetID: asset.id, portableIdentity: identity, url: url
+                ),
+                inMemoryDocument: editorDocument.session(for: asset.id)?.document,
+                inMemoryLookSignature: idleFrameWarmerSavedLookSignature(for: asset.id),
+                distanceFromViewport: distance,
+                launchHintRecencyRank: recencyRanks[identity.assetID] ?? Int.max
+            )
+        }
+    }
+
+    var idleFrameWarmerActivePortableAssetID: PortablePhotoAssetID? {
+        portableLibrary?.portableActiveID
+    }
+
+    var idleFrameWarmerVisiblePortableAssetIDs: Set<PortablePhotoAssetID> {
+        Set(collection.visibleEditedThumbnailAssetIDs.map(PortablePhotoAssetID.compatibility(from:)))
+    }
+
+    func idleFrameWarmerSavedLookSignature(for assetID: PhotoAssetID) -> LookSignature? {
+        guard assetID == activeAssetID else { return nil }
+        return admissionStoredLookSignature(for: editorDocument.session(for: assetID)?.document.lut.lutID)
+    }
+
+    func idleFrameWarmerResolvedLUT(_ id: LUTID?) -> CubeLUT? { resolvedLUT(id) }
+
+    func idleFrameWarmerCanonicalRequest(
+        source: ImageSource, assetID: PhotoAssetID, document: EditDocument, lut: CubeLUT?
+    ) -> RenderRequest {
+        let plan = admissionCanonicalPlan(for: document, nativeExtent: source.nativeExtent)
+        return admissionSettledRequest(
+            source: source, assetID: assetID, document: document, lut: lut,
+            plan: plan, canonical: true
+        )
+    }
 }

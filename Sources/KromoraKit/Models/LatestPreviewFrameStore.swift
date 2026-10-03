@@ -17,6 +17,10 @@ import Foundation
 actor LatestPreviewFrameStore {
     static let defaultCapBytes: Int64 = 1_000_000_000
     static let canonicalLongEdge = FrameClassifier.previewLongEdge
+    /// Background warming stops with 10% of the preview budget still free. The margin lets a
+    /// single warm frame finish without driving normal LRU writes into visible records.
+    static let warmingLowWaterFraction: Int64 = 9
+    static let warmingLowWaterDivisor: Int64 = 10
     /// Maximum time a settled canonical preview may wait in the store's write queue.
     static let maxSettleToDiskDelay: Duration = .seconds(2)
 
@@ -154,6 +158,17 @@ actor LatestPreviewFrameStore {
         return totalBytes
     }
 
+    var warmingLowWaterMarkBytes: Int64 {
+        capBytes * Self.warmingLowWaterFraction / Self.warmingLowWaterDivisor
+    }
+
+    /// Include queued writes so a burst of visible frames cannot make a seemingly available
+    /// background slot overcommit the preview budget.
+    func isBelowWarmingLowWaterMark() -> Bool {
+        guard loadIndex() else { return false }
+        return totalBytes + pendingWriteBytes < warmingLowWaterMarkBytes
+    }
+
     // MARK: Writes
 
     /// Queue a serialized write. A later write for the same asset supersedes one that has not
@@ -194,6 +209,25 @@ actor LatestPreviewFrameStore {
             deadlineID: deadlineID, deadline: deadline, frame: frame, token: token,
             task: task, deadlineTask: deadlineTask
         )
+    }
+
+    /// Admit a warmer frame only when its complete envelope fits below the low-water mark. This
+    /// check and admission share the store actor turn, so warming never relies on later eviction.
+    func enqueueWarmWrite(_ frame: PresentationFrame) -> Bool {
+        guard !Self.hasPlaceholderIdentity(frame), frame.kind == .preview2048,
+              let hash = Self.assetHash(frame.identity.assetID),
+              let encoded = try? PresentationFrameEnvelope.encode(frame), loadIndex()
+        else { return false }
+        let replacedBytes = pendingWrites[hash].flatMap {
+            Self.encodedSize(of: $0.frame)
+        } ?? 0
+        let pendingBytes = max(0, pendingWriteBytes - Int64(replacedBytes))
+        let replacedStoredBytes = entries[hash]?.size ?? 0
+        guard totalBytes - replacedStoredBytes + pendingBytes + Int64(encoded.count)
+                <= warmingLowWaterMarkBytes
+        else { return false }
+        enqueueWrite(frame)
+        return true
     }
 
     func cancelPendingWrites() {
@@ -293,6 +327,16 @@ actor LatestPreviewFrameStore {
         write(pending.frame, hash: hash, token: token)
         guard pendingWrites[hash]?.token == token else { return }
         pendingWrites.removeValue(forKey: hash)?.deadlineTask.cancel()
+    }
+
+    private var pendingWriteBytes: Int64 {
+        pendingWrites.values.reduce(into: Int64.zero) { total, pending in
+            total += Int64(Self.encodedSize(of: pending.frame) ?? pending.frame.rasterData.count)
+        }
+    }
+
+    private static func encodedSize(of frame: PresentationFrame) -> Int? {
+        try? PresentationFrameEnvelope.encode(frame).count
     }
 
     private func writeLatestPendingWrite(hash: String, deadlineID: UInt64) {

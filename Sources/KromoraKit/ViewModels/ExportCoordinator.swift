@@ -32,7 +32,11 @@ import AppKit
 @Observable
 final class ExportCoordinator {
 
-    private(set) var isExporting: Bool = false
+    private(set) var isExporting: Bool = false {
+        didSet {
+            if oldValue != isExporting { onActivityChanged?(isExporting) }
+        }
+    }
     /// Progress (0...1) during a multi-image "Export All" run.
     private(set) var batchProgress: Double = 0
     /// Number of items that have reached a terminal state in the current batch.
@@ -51,6 +55,7 @@ final class ExportCoordinator {
     var onStatus: ((String) -> Void)?
     var onError: ((String) -> Void)?
     var onExportCompleted: ((URL) -> Void)?
+    var onActivityChanged: ((Bool) -> Void)?
 
     /// The renderer. `any RenderEngining` rather than the concrete actor for the same reason
     /// `AppViewModel` holds one: a test can then assert *what was asked to be encoded* — which

@@ -420,13 +420,33 @@ final class PreviewPresentationCoordinator {
     /// Whether the persisted frame for this request's photo already matches it exactly. Used by
     /// idle building so it does not re-render what a relaunch would already show.
     func storedFrameIsExact(for request: RenderRequest) async -> Bool {
+        await storedFrameIsExact(for: request, savedLookSignature: nil)
+    }
+
+    /// A saved Look reference can classify a frame before the LUT browser has resolved its file.
+    /// It may suppress work only when it names the same Look ID as the request.
+    func storedFrameIsExact(
+        for request: RenderRequest, savedLookSignature: LookSignature?
+    ) async -> Bool {
         let identity = request.source.portableIdentity
         guard let metadata = await store.metadata(for: identity) else { return false }
+        var look = request.lookSignature
+        if !look.permitsExactReuse, let savedLookSignature,
+            savedLookSignature.permitsExactReuse,
+            savedLookSignature.lutID == look.lutID
+        {
+            look = savedLookSignature
+        }
         let inputs = FrameCurrentInputs(
             source: identity, editHash: request.document.editHash,
-            look: request.lookSignature, workingSpace: request.space
+            look: look, workingSpace: request.space
         )
         return FrameClassifier.classify(metadata, against: inputs) == .exact
+    }
+
+    /// Pin the active photo and visible grid window against LRU eviction.
+    func setPinnedFrameAssets(_ assetIDs: Set<PortablePhotoAssetID>) async {
+        await store.setPinned(assetIDs)
     }
 
     func resetForSource() {
@@ -482,6 +502,59 @@ final class PreviewPresentationCoordinator {
             }
             self.canonicalWriteTasks.removeValue(forKey: identity.assetID)
         }
+    }
+
+    /// Persist one idle-warmed canonical preview without publishing it to a canvas surface. The
+    /// store admission checks the encoded size against its low-water mark before accepting bytes.
+    func writeCanonicalForWarmer(_ image: CIImage, for request: RenderRequest) async -> Bool {
+        let look = request.lookSignature
+        guard acceptsCanonicalWrites, Self.isCanonicalCompleteRequest(request),
+              look.permitsExactReuse,
+              !Task.isCancelled else { return false }
+        let extent = image.extent
+        guard extent.width > 0, extent.height > 0 else { return false }
+        guard let raster = await engine.makeCanonicalPreviewRaster(
+            image, space: request.space, longEdge: LatestPreviewFrameStore.canonicalLongEdge
+        ), !Task.isCancelled else { return false }
+        let identity = request.source.portableIdentity
+        let frame = PresentationFrame(
+            metadata: PresentationFrameMetadata(
+                identity: identity, kind: .preview2048,
+                signature: FrameSignature(
+                    source: identity, editHash: request.document.editHash, look: look,
+                    workingSpace: request.space, pixelEpoch: RenderPipeline.pixelEpoch
+                ),
+                geometry: PresentedGeometry(
+                    crop: request.document.crop, rotation: request.document.rotation,
+                    orientedAspectRatio: Double(extent.width / extent.height)
+                ),
+                rasterColorSpace: raster.rasterColorSpace,
+                perceptualDigest: raster.perceptualDigest, presentedAt: Date(),
+                pixelWidth: raster.pixelWidth, pixelHeight: raster.pixelHeight
+            ),
+            rasterData: raster.jpegData
+        )
+        let admitted = await store.enqueueWarmWrite(frame)
+        guard admitted else { return false }
+        await store.waitForPendingWrites()
+        return !Task.isCancelled
+    }
+
+    private static func isCanonicalCompleteRequest(_ request: RenderRequest) -> Bool {
+        guard request.quality == .preview, request.output == .raster,
+              request.sourceROI == nil, request.presentationROI == nil else { return false }
+        var planner = ResolutionPlanner()
+        let plan = planner.plan(
+            nativeExtent: request.document.rotation.orientedExtent(request.source.nativeExtent),
+            crop: request.document.crop,
+            viewportSize: CGSize(
+                width: LatestPreviewFrameStore.canonicalLongEdge,
+                height: LatestPreviewFrameStore.canonicalLongEdge
+            ),
+            navigation: CanvasNavigation()
+        )
+        return request.targetSize == plan.sourceSize
+            && request.presentationImageExtent == plan.presentationImageExtent
     }
 
     /// Wait for writes already admitted by the preview store. Canonical rasterization that has

@@ -174,6 +174,7 @@ boundary suites so injected failures stay reproducible and do not depend on a sc
 | Truncated/overflow/corrupt preview envelopes, unsupported storage format, per-entry isolation, LRU cap and pinning | `PresentationFrameEnvelopeTests`, `LatestPreviewFrameStoreTests` |
 | Canonical frame reaches a fresh store within the two-second settle-to-disk bound; interrupted atomic replacement preserves the prior complete frame | `LatestPreviewFrameStoreTests` |
 | Exact/stale/missing stored frames, candidate ordering, renderer failure, and obsolete generations | `WarmReopenPresentationTests`, `PreviewPresentationCoordinatorTests`, `EmbeddedFirstFrameTests`, `PreviewCutoverTests` |
+| Idle warming fills all three frame tiers in viewport/LaunchHints order, uses one background editor admission per photo, skips exact source reads, pauses for system conditions, fences cancellation, protects pinned frames at the preview low-water threshold, and survives a package relaunch | `IdleFrameWarmerCoordinatorTests`, `RelaunchParityTests.testIdleWarmFramesRemainExactAcrossPackageRelaunch` |
 | Same-ID Look replacement and unchanged Look scans | `LUTLibraryTests`, `AppViewModelTests`, `EditedThumbnailCoordinatorTests` |
 | Transactional edit plus presented geometry and rollback | `PortableLibraryPackageTests.testEditRevisionAndPresentedGeometryPublishOrRollbackTogether` |
 | Packed-frame stable keys, read-window bounds, compaction, write interruptions, and retry | `ThumbnailFrameStoreTests`, `PortablePackageMaintenanceTests` |
@@ -197,6 +198,17 @@ instances until the frame is readable and never calls `flush()` or `shutdown()`.
 test damages the staged bytes immediately before atomic replacement and verifies that the prior
 complete envelope remains readable. Existing replacement coverage verifies that a successful
 write exposes the new complete frame.
+
+### Idle package frame warming
+
+`IdleFrameWarmerCoordinatorTests` uses a deterministic renderer and a real package fixture to
+verify original thumbnails, edited thumbnails, and canonical previews. It checks viewport distance
+before LaunchHints recency, background editor admission one photo at a time, metadata-only exact
+hits, pause gates for Low Power Mode/serious thermal/inactive app state, unresolved Look blocking,
+late-result cancellation, and preservation of an existing pinned preview at the low-water mark.
+`RelaunchParityTests.testIdleWarmFramesRemainExactAcrossPackageRelaunch` fills the stores through
+the warmer, closes the package, then reopens an `AppViewModel` and verifies the grid and editor use
+those pixels without a source decode or render.
 
 ### Packed thumbnail write batching
 
