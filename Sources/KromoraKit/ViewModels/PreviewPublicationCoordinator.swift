@@ -20,7 +20,8 @@ protocol PreviewPublicationDestination: AnyObject {
         assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
     ) -> Bool
     func confirmPresentationFrame(
-        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64,
+        source: PreviewPresentationCoordinator.CandidateSource
     )
 
     func publishPreviewReady()
@@ -128,7 +129,8 @@ final class PreviewPublicationCoordinator {
     func presentSettledRaster(
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64, surfaceRevision: UInt64? = nil,
-        persistsFrame: Bool = true
+        persistsFrame: Bool = true,
+        confirmationSource: PreviewPresentationCoordinator.CandidateSource = .rendered
     ) -> Bool {
         guard let destination else { return false }
         let presented = destination.presentAdjustedFrame(
@@ -137,7 +139,7 @@ final class PreviewPublicationCoordinator {
                 self?.didPresentVisibleFrame(
                     request, assetID: assetID, sourceRevision: sourceRevision,
                     displayRevision: displayRevision, presentedImage: image,
-                    persistsFrame: persistsFrame
+                    persistsFrame: persistsFrame, confirmationSource: confirmationSource
                 )
             }
         )
@@ -150,6 +152,33 @@ final class PreviewPublicationCoordinator {
             displayRevision: displayRevision
         )
         return false
+    }
+
+    /// A stored frame may already be on the drawable by the time source preparation finishes.
+    /// Promote that same visible raster through the normal confirmation tail without presenting
+    /// it a second time.
+    func confirmExistingStoredFrame(
+        _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, displayRevision: UInt64
+    ) -> Bool {
+        guard let destination,
+            assetID == destination.publicationActiveAssetID,
+            sourceRevision == destination.publicationSourceRevision,
+            displayRevision == destination.publicationDisplayRevision,
+            request.source == destination.publicationImageSource,
+            request.document == destination.publicationDisplayDocument,
+            destination.publicationAcceptsFrame(
+                assetID: assetID, identity: request.source.portableIdentity,
+                generation: sourceRevision
+            )
+        else { return false }
+        lastPublishedVisibleRequest = request
+        didPresentVisibleFrame(
+            request, assetID: assetID, sourceRevision: sourceRevision,
+            displayRevision: displayRevision, presentedImage: image, persistsFrame: false,
+            confirmationSource: .storedFrame
+        )
+        return true
     }
 
     /// A size change after the first library open often asks for a cheaper preview than the frame
@@ -180,7 +209,8 @@ final class PreviewPublicationCoordinator {
 
     private func didPresentVisibleFrame(
         _ request: RenderRequest, assetID: PhotoAssetID?, sourceRevision: UInt64,
-        displayRevision: UInt64, presentedImage: CIImage?, persistsFrame: Bool
+        displayRevision: UInt64, presentedImage: CIImage?, persistsFrame: Bool,
+        confirmationSource: PreviewPresentationCoordinator.CandidateSource = .rendered
     ) {
         guard let destination,
             assetID == destination.publicationActiveAssetID,
@@ -196,7 +226,7 @@ final class PreviewPublicationCoordinator {
 
         destination.confirmPresentationFrame(
             assetID: assetID, identity: request.source.portableIdentity,
-            generation: sourceRevision
+            generation: sourceRevision, source: confirmationSource
         )
 
         destination.publishPreviewReady()

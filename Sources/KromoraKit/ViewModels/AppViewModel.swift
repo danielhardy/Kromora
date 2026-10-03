@@ -877,6 +877,27 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// The adopted revision's own Look identity, from its content-addressed reference. It lets a
     /// stored frame be judged exact before the Look browser has scanned the Look.
     private var storedEditLook: LookSignature?
+    private struct DeferredThumbnailPresentation {
+        let image: CIImage
+        let source: PreviewPresentationCoordinator.CandidateSource
+        let assetID: PhotoAssetID
+        let identity: PortablePhotoIdentity
+        let generation: UInt64
+        let nativeExtent: CGSize
+    }
+    private struct PendingStoredFrameConfirmation {
+        let image: CIImage
+        let request: RenderRequest
+        let assetID: PhotoAssetID?
+        let sourceRevision: UInt64
+        let displayRevision: UInt64
+    }
+    private var deferredThumbnailPresentation: DeferredThumbnailPresentation?
+    private var deferredEmbeddedFirstFrame: SourceSessionCoordinator.FirstFramePublication?
+    private var pendingStoredFrameConfirmation: PendingStoredFrameConfirmation?
+    private var storedFrameLookupFallbackTask: Task<Void, Never>?
+    private var storedFrameLookupFallbackGeneration: UInt64?
+    private static let storedFrameFirstPaintBudget: Duration = .milliseconds(50)
     /// The embedded camera JPEG is a presentation-only first frame. It never enters the render
     /// coordinator or any supporting-work path, and is cancelled when navigation selects another
     /// source.
@@ -2114,6 +2135,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         )
         storedEditsResolvedSourceRevision = nil
         storedEditLook = nil
+        deferredThumbnailPresentation = nil
+        deferredEmbeddedFirstFrame = nil
+        pendingStoredFrameConfirmation = nil
+        storedFrameLookupFallbackTask?.cancel()
+        storedFrameLookupFallbackTask = nil
+        storedFrameLookupFallbackGeneration = nil
         // Keep the last published chart visible while the newly selected source prepares and
         // renders. Histogram admission still checks the active asset and source revision before
         // publishing, so only the current photo can replace it.
@@ -2128,20 +2155,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             if let edited = item.editedThumbnailForPresentation,
                 let cgImage = Self.cgImage(from: edited)
             {
-                presentProvisionalCandidate(
-                    CIImage(cgImage: cgImage), source: .editedThumbnail,
+                deferredThumbnailPresentation = DeferredThumbnailPresentation(
+                    image: CIImage(cgImage: cgImage), source: .editedThumbnail,
                     assetID: assetID, identity: presentationIdentity,
-                    generation: presentationGeneration,
-                    nativeExtent: item.thumbnailNativeExtent
+                    generation: presentationGeneration, nativeExtent: item.thumbnailNativeExtent
                 )
             } else if let original = item.originalThumbnailForPresentation,
                 let cgImage = Self.cgImage(from: original)
             {
-                presentProvisionalCandidate(
-                    CIImage(cgImage: cgImage), source: .originalThumbnail,
+                deferredThumbnailPresentation = DeferredThumbnailPresentation(
+                    image: CIImage(cgImage: cgImage), source: .originalThumbnail,
                     assetID: assetID, identity: presentationIdentity,
-                    generation: presentationGeneration,
-                    nativeExtent: item.thumbnailNativeExtent
+                    generation: presentationGeneration, nativeExtent: item.thumbnailNativeExtent
                 )
             }
         }
@@ -2152,7 +2177,12 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             assetID: assetID, identity: presentationIdentity, generation: presentationGeneration
         ) { [weak self] candidate in
             guard let self, !self.isShuttingDown else { return }
+            self.storedFrameLookupFallbackTask?.cancel()
+            self.storedFrameLookupFallbackTask = nil
+            self.storedFrameLookupFallbackGeneration = nil
             if let candidate {
+                self.deferredThumbnailPresentation = nil
+                self.deferredEmbeddedFirstFrame = nil
                 self.presentProvisionalCandidate(
                     CIImage(cgImage: candidate.image), source: .storedFrame,
                     assetID: assetID, identity: presentationIdentity,
@@ -2163,8 +2193,30 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                         height: candidate.metadata.pixelHeight
                     )
                 )
+            } else {
+                self.presentDeferredThumbnail(for: presentationGeneration)
+                if let embedded = self.deferredEmbeddedFirstFrame {
+                    self.deferredEmbeddedFirstFrame = nil
+                    self.presentEmbeddedFirstFrame(embedded)
+                }
             }
             self.previewAdmissionCoordinator.resumeDeferredSettledPreview()
+        }
+        storedFrameLookupFallbackGeneration = presentationGeneration
+        storedFrameLookupFallbackTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: Self.storedFrameFirstPaintBudget) }
+            catch { return }
+            guard let self, !self.isShuttingDown,
+                self.storedFrameLookupFallbackGeneration == presentationGeneration,
+                self.previewPresentation.isStoredFrameLookupLoading
+            else { return }
+            self.storedFrameLookupFallbackGeneration = nil
+            self.storedFrameLookupFallbackTask = nil
+            self.presentDeferredThumbnail(for: presentationGeneration)
+            if let embedded = self.deferredEmbeddedFirstFrame {
+                self.deferredEmbeddedFirstFrame = nil
+                self.presentEmbeddedFirstFrame(embedded)
+            }
         }
         if canvasState.isCropToolActive {
             canvasWorkflow.discardCropForSourceChange()
@@ -2220,6 +2272,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard previewPresentation.presentProvisional(
             source, assetID: assetID, identity: identity, generation: generation
         ) else { return }
+        if source != .embeddedJPEG { deferredEmbeddedFirstFrame = nil }
         let extent = nativeExtent.width > 0 && nativeExtent.height > 0
             ? CGRect(origin: .zero, size: nativeExtent) : image.extent
         _ = previewSurface.present(
@@ -2236,8 +2289,44 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 self.previewPresentation.confirmProvisionalPresentation(
                     source, assetID: assetID, identity: identity, generation: generation
                 )
+                if source == .storedFrame {
+                    self.completePendingStoredFrameConfirmation(generation: generation)
+                }
                 self.isNavigationLoading = false
             }
+        )
+    }
+
+    private func presentDeferredThumbnail(for generation: UInt64) {
+        guard let deferred = deferredThumbnailPresentation,
+            deferred.generation == generation,
+            previewPresentation.presentationSession?.generation == generation,
+            previewPresentation.presentationSession?.candidateSource == nil
+        else { return }
+        deferredThumbnailPresentation = nil
+        presentProvisionalCandidate(
+            deferred.image, source: deferred.source,
+            assetID: deferred.assetID, identity: deferred.identity,
+            generation: deferred.generation, nativeExtent: deferred.nativeExtent
+        )
+    }
+
+    private func completePendingStoredFrameConfirmation(generation: UInt64) {
+        guard let pending = pendingStoredFrameConfirmation,
+            pending.sourceRevision == generation,
+            previewPresentation.hasPresentedStoredFrame(generation: generation)
+        else { return }
+        guard pending.displayRevision == displayRevision,
+            pending.request.source == imageSource,
+            pending.request.document == displayRequest.document
+        else {
+            pendingStoredFrameConfirmation = nil
+            return
+        }
+        pendingStoredFrameConfirmation = nil
+        _ = previewPublicationCoordinator.confirmExistingStoredFrame(
+            pending.image, request: pending.request, assetID: pending.assetID,
+            sourceRevision: pending.sourceRevision, displayRevision: pending.displayRevision
         )
     }
 
@@ -2278,6 +2367,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func presentEmbeddedFirstFrame(
         _ publication: SourceSessionCoordinator.FirstFramePublication
     ) {
+        if previewPresentation.isStoredFrameLookupLoading,
+            storedFrameLookupFallbackGeneration == publication.request.sourceRevision,
+            previewPresentation.presentationSession?.candidateSource == nil
+        {
+            deferredEmbeddedFirstFrame = publication
+            return
+        }
         guard publication.request.sourceRevision == sourceRevision,
             publication.request.assetID == activeAssetID,
             previewState == .loading,
@@ -2379,6 +2475,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         comparisonBaselineDocument = document.comparisonBaseline
         editorDocument.adoptStoredDocument(document, for: request.assetID)
         collection.setPresentedCrop(document.crop, rotation: document.rotation, for: request.assetID)
+        storedEditsResolvedSourceRevision = request.sourceRevision
+        storedEditLook = stored.lookSignature
         // A first render scheduled before this point used the identity document and needs the
         // corrective render; one scheduled after it already uses the stored document.
         earlyStoredAdoption = (
@@ -4882,10 +4980,11 @@ extension AppViewModel: PreviewPublicationDestination {
         )
     }
     func confirmPresentationFrame(
-        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64
+        assetID: PhotoAssetID?, identity: PortablePhotoIdentity, generation: UInt64,
+        source: PreviewPresentationCoordinator.CandidateSource
     ) {
         previewPresentation.confirmRenderedFrame(
-            assetID: assetID, identity: identity, generation: generation
+            assetID: assetID, identity: identity, generation: generation, as: source
         )
     }
 
@@ -5061,8 +5160,23 @@ extension AppViewModel: PreviewAdmissionDestination {
         _ = previewPublicationCoordinator.presentSettledRaster(
             image, request: request, assetID: assetID,
             sourceRevision: sourceRevision, displayRevision: displayRevision,
-            persistsFrame: false
+            persistsFrame: false,
+            confirmationSource: .storedFrame
         )
+    }
+    func admissionConfirmExistingStoredFrame(
+        _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, displayRevision: UInt64
+    ) -> Bool {
+        guard previewPresentation.hasStoredFrameCandidate(generation: sourceRevision) else {
+            return false
+        }
+        pendingStoredFrameConfirmation = PendingStoredFrameConfirmation(
+            image: image, request: request, assetID: assetID,
+            sourceRevision: sourceRevision, displayRevision: displayRevision
+        )
+        completePendingStoredFrameConfirmation(generation: sourceRevision)
+        return true
     }
 
     func admissionDocument(for assetID: PhotoAssetID) -> EditDocument? {

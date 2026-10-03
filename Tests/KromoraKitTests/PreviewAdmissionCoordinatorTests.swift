@@ -226,6 +226,32 @@ final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
         await destination.scheduler.cancelAllAndWait()
     }
 
+    func testMissedStoredFrameStillWaitsForStoredEditsBeforeOneRender() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionStoredEditsResolved = false
+        let session = destination.beginSession()
+        var finished = false
+        destination.admissionPresentation.beginStoredFrameLookup(
+            assetID: session.assetID, identity: session.identity, generation: session.generation
+        ) { _ in finished = true }
+
+        coordinator.schedulePreview()
+        try await waitUntil("missing stored-frame lookup") { finished }
+        coordinator.resumeDeferredSettledPreview()
+        XCTAssertTrue(coordinator.hasDeferredSettledPreview)
+        let prematureRenders = await engine.previewRequests.count
+        XCTAssertEqual(prematureRenders, 0,
+                       "a cache miss cannot admit an identity-document render")
+
+        destination.admissionStoredEditsResolved = true
+        coordinator.resumeDeferredSettledPreview()
+        try await waitUntil("one saved-edit render") { await engine.previewRequests.count == 1 }
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
     func testStoredLookIdentityMakesAWarmOpenExactBeforeTheLookScanFinishes() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)
@@ -466,6 +492,10 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
         _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
         sourceRevision: UInt64, displayRevision: UInt64
     ) { cachePublicationCount += 1 }
+    func admissionConfirmExistingStoredFrame(
+        _ image: CIImage, request: RenderRequest, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, displayRevision: UInt64
+    ) -> Bool { false }
     func admissionPrepareStaleRefinement(using digest: PerceptualDigest) {
         staleRefinementPreparationCount += 1
     }
