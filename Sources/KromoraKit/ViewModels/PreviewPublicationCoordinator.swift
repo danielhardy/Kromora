@@ -223,7 +223,6 @@ final class PreviewPublicationCoordinator {
                 generation: sourceRevision
             )
         else { return }
-
         destination.confirmPresentationFrame(
             assetID: assetID, identity: request.source.portableIdentity,
             generation: sourceRevision, source: confirmationSource
