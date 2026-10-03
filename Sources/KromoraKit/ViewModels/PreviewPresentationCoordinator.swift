@@ -74,6 +74,9 @@ final class PreviewPresentationCoordinator {
     private var storedFrameSessionGeneration: UInt64?
     private(set) var storedFrameLookup: StoredFrameLookup = .idle
     private var canonicalWriteTasks: [PortablePhotoAssetID: Task<Void, Never>] = [:]
+    private var acceptsCanonicalWrites = true
+    private var canonicalStoreEnqueueCount = 0
+    private var canonicalStoreEnqueueWaiters: [CheckedContinuation<Void, Never>] = []
     let store: LatestPreviewFrameStore
     private let engine: any RenderEngining
     let frameLookupLedger: FrameLookupLedger
@@ -437,7 +440,8 @@ final class PreviewPresentationCoordinator {
     /// frames cannot leave a detached rasterization task per document tick.
     func writeCanonical(_ image: CIImage, for request: RenderRequest) {
         let look = request.lookSignature
-        guard request.quality == .preview, request.sourceROI == nil, look.permitsExactReuse
+        guard acceptsCanonicalWrites, request.quality == .preview,
+              request.sourceROI == nil, look.permitsExactReuse
         else { return }
         let identity = request.source.portableIdentity
         let extent = image.extent
@@ -457,7 +461,8 @@ final class PreviewPresentationCoordinator {
             guard !Task.isCancelled,
                   let raster = await engine.makeCanonicalPreviewRaster(
                       image, space: request.space, longEdge: LatestPreviewFrameStore.canonicalLongEdge
-                  ), !Task.isCancelled else { return }
+                  ), !Task.isCancelled,
+                  let self, self.acceptsCanonicalWrites else { return }
             let frame = PresentationFrame(
                 metadata: PresentationFrameMetadata(
                     identity: identity, kind: .preview2048, signature: signature,
@@ -467,15 +472,36 @@ final class PreviewPresentationCoordinator {
                 ),
                 rasterData: raster.jpegData
             )
+            self.canonicalStoreEnqueueCount += 1
             await store.enqueueWrite(frame)
-            guard let self else { return }
+            self.canonicalStoreEnqueueCount -= 1
+            if self.canonicalStoreEnqueueCount == 0 {
+                let waiters = self.canonicalStoreEnqueueWaiters
+                self.canonicalStoreEnqueueWaiters.removeAll()
+                for waiter in waiters { waiter.resume() }
+            }
             self.canonicalWriteTasks.removeValue(forKey: identity.assetID)
         }
     }
 
-    func shutdown() {
+    /// Wait for writes already admitted by the preview store. Canonical rasterization that has
+    /// not reached the store remains ordinary cancellable renderer work.
+    func flushPendingWrites() async {
+        await store.waitForPendingWrites()
+    }
+
+    func shutdown() async {
+        acceptsCanonicalWrites = false
         cancelStoredFrameLookup()
-        for task in canonicalWriteTasks.values { task.cancel() }
+        let writeTasks = Array(canonicalWriteTasks.values)
+        for task in writeTasks { task.cancel() }
         canonicalWriteTasks.removeAll()
+        // Rasterization that has not entered the store is cancelled and need not delay exit.
+        if canonicalStoreEnqueueCount > 0 {
+            await withCheckedContinuation {
+                canonicalStoreEnqueueWaiters.append($0)
+            }
+        }
+        await store.waitForPendingWrites()
     }
 }

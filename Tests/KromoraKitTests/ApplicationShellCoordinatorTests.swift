@@ -67,6 +67,28 @@ final class ApplicationShellCoordinatorTests: TempDirectoryTestCase {
         await coordinator.shutdown()
     }
 
+    func testDeactivationRequestsBestEffortWork() async throws {
+        let applicationCenter = NotificationCenter()
+        let scheduler = ImageWorkScheduler()
+        let coordinator = ApplicationShellCoordinator(
+            mediaNotificationCenter: NotificationCenter(),
+            applicationNotificationCenter: applicationCenter,
+            scheduler: scheduler,
+            maintenance: PortablePackageMaintenance(scheduler: scheduler),
+            packageURL: nil,
+            packageLease: nil,
+            idleDelay: .milliseconds(10)
+        )
+        var deactivationCount = 0
+        coordinator.onApplicationDeactivated = { deactivationCount += 1 }
+        coordinator.start()
+
+        applicationCenter.post(name: NSApplication.didResignActiveNotification, object: nil)
+
+        try await waitUntil("application deactivation") { deactivationCount == 1 }
+        await coordinator.shutdown()
+    }
+
     func testMaintenanceAdmissionGuardsMissingPackagesAndExistingJobs() async throws {
         let missingScheduler = ImageWorkScheduler()
         let missingMaintenance = PortablePackageMaintenance(scheduler: missingScheduler)

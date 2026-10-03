@@ -1,8 +1,45 @@
+import AppKit
 import CoreImage
 import XCTest
 import simd
 
 @testable import KromoraKit
+
+private actor FrameStoreFlushGate {
+    private var started = Set<String>()
+    private var completed = Set<String>()
+    private var continuations: [String: CheckedContinuation<Void, Never>] = [:]
+
+    func wait(for store: String) async {
+        started.insert(store)
+        await withCheckedContinuation { continuations[store] = $0 }
+        completed.insert(store)
+    }
+
+    func release(_ store: String) {
+        continuations.removeValue(forKey: store)?.resume()
+    }
+
+    func didStart(_ store: String) -> Bool { started.contains(store) }
+    func didComplete(_ store: String) -> Bool { completed.contains(store) }
+}
+
+private actor TerminationFlushResultProbe {
+    private(set) var result: PersistenceFlushResult?
+
+    func record(_ result: PersistenceFlushResult) { self.result = result }
+}
+
+private actor FrameStoreFailureProbe {
+    private var failedStores = Set<String>()
+
+    func recordFailure(_ store: String) { failedStores.insert(store) }
+    func failures() -> Set<String> { failedStores }
+}
+
+private enum FrameStoreFlushTestError: Error {
+    case writeFailed
+}
 
 /// The coordinators report *what* happened; `AppViewModel` decides how it's
 /// shown. That wiring is a set of closures assigned in `init`, and a closure
@@ -99,6 +136,92 @@ final class AppViewModelTests: TempDirectoryTestCase {
 
         XCTAssertEqual(viewModel.statusMessage, summary.status(prefix: "Photo import"))
         XCTAssertTrue(viewModel.statusMessage.contains("1 failed"))
+    }
+
+    func testTerminationFlushWaitsForBothFrameStores() async throws {
+        let viewModel = makeAppViewModel()
+        let gate = FrameStoreFlushGate()
+        let terminationReply = TerminationFlushResultProbe()
+        viewModel.frameStoreFlushOperationsForTesting = FrameStoreFlushOperations(
+            flushThumbnails: { await gate.wait(for: "thumbnails") },
+            flushPreviews: { await gate.wait(for: "previews") }
+        )
+
+        let termination = Task { @MainActor in
+            let result = await viewModel.flushPendingWrites()
+            await terminationReply.record(result)
+        }
+        try await waitUntilAsync("both cache flushes start") {
+            let thumbnailsStarted = await gate.didStart("thumbnails")
+            let previewsStarted = await gate.didStart("previews")
+            return thumbnailsStarted && previewsStarted
+        }
+
+        let beforeEitherStoreFinishes = await terminationReply.result
+        XCTAssertNil(beforeEitherStoreFinishes)
+
+        await gate.release("thumbnails")
+        try await waitUntilAsync("thumbnail cache flush finishes") {
+            await gate.didComplete("thumbnails")
+        }
+        let beforePreviewStoreFinishes = await terminationReply.result
+        XCTAssertNil(beforePreviewStoreFinishes)
+
+        await gate.release("previews")
+        await termination.value
+        let finalResult = await terminationReply.result
+        XCTAssertEqual(finalResult, .success)
+        await viewModel.shutdown()
+    }
+
+    func testFrameStoreFailuresDoNotPreventSuccessfulTerminationFlush() async throws {
+        let viewModel = makeAppViewModel()
+        let failures = FrameStoreFailureProbe()
+        // Cache flush failures become misses; they do not participate in the edit persistence
+        // result returned to the termination decision.
+        viewModel.frameStoreFlushOperationsForTesting = FrameStoreFlushOperations(
+            flushThumbnails: {
+                await failures.recordFailure("thumbnails")
+                throw FrameStoreFlushTestError.writeFailed
+            },
+            flushPreviews: {
+                await failures.recordFailure("previews")
+                throw FrameStoreFlushTestError.writeFailed
+            }
+        )
+
+        let result = await viewModel.flushPendingWrites()
+
+        XCTAssertEqual(result, .success)
+        let failedStores = await failures.failures()
+        XCTAssertEqual(failedStores, ["thumbnails", "previews"])
+        await viewModel.shutdown()
+    }
+
+    func testApplicationDeactivationRequestsBothCacheFlushesAsynchronously() async throws {
+        let applicationCenter = NotificationCenter()
+        let viewModel = makeAppViewModel(applicationNotificationCenter: applicationCenter)
+        let gate = FrameStoreFlushGate()
+        viewModel.frameStoreFlushOperationsForTesting = FrameStoreFlushOperations(
+            flushThumbnails: { await gate.wait(for: "thumbnails") },
+            flushPreviews: { await gate.wait(for: "previews") }
+        )
+
+        applicationCenter.post(name: NSApplication.didResignActiveNotification, object: nil)
+        try await waitUntilAsync("deactivation starts both cache flushes") {
+            let thumbnailsStarted = await gate.didStart("thumbnails")
+            let previewsStarted = await gate.didStart("previews")
+            return thumbnailsStarted && previewsStarted
+        }
+
+        await gate.release("thumbnails")
+        await gate.release("previews")
+        try await waitUntilAsync("deactivation cache flushes finish") {
+            let thumbnailsFinished = await gate.didComplete("thumbnails")
+            let previewsFinished = await gate.didComplete("previews")
+            return thumbnailsFinished && previewsFinished
+        }
+        await viewModel.shutdown()
     }
 
     func testOpeningSourceFolderWithoutLibraryReportsUnavailableErrorWithoutImportSummary() throws {

@@ -48,6 +48,25 @@ struct LibraryDeletionResult: Equatable, Sendable {
     var succeeded: Bool { !deletedIDs.isEmpty && failures.isEmpty }
 }
 
+struct FrameStoreFlushOperations: Sendable {
+    let flushThumbnails: @MainActor @Sendable () async throws -> Void
+    let flushPreviews: @MainActor @Sendable () async throws -> Void
+
+    @MainActor
+    func flush() async {
+        async let thumbnails: Void = flushBestEffort(flushThumbnails)
+        async let previews: Void = flushBestEffort(flushPreviews)
+        await thumbnails
+        await previews
+    }
+
+    private func flushBestEffort(
+        _ operation: @MainActor @Sendable () async throws -> Void
+    ) async {
+        do { try await operation() } catch { }
+    }
+}
+
 /// The outcome of attempting to make all queued edit snapshots durable.
 public enum PersistenceFlushResult: Equatable, Sendable {
     case success
@@ -656,6 +675,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// handoff. Package writes and collection/document ownership remain with their coordinators.
     private let photosImportBatchCoordinator = PhotosImportBatchCoordinator()
     private var droppedPromiseTask: Task<Void, Never>?
+    private var bestEffortFrameStoreFlushTask: Task<Void, Never>?
+    /// Replaces cache flush work in lifecycle tests so they can hold each store independently.
+    var frameStoreFlushOperationsForTesting: FrameStoreFlushOperations?
     /// Every asynchronous import handoff captures this token. A late provider result can never
     /// publish into a newer import operation.
     @Published private(set) var portableImportProgress: PortablePackageImportProgress?
@@ -1192,6 +1214,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         applicationShell.onApplicationActivated = { [weak self] in
             self?.portableLibrary?.renewAfterWake()
+        }
+        applicationShell.onApplicationDeactivated = { [weak self] in
+            self?.requestBestEffortFrameStoreFlush()
         }
         applicationShell.start()
 
@@ -4776,9 +4801,41 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         return barrier
     }
 
-    /// Wait for queued snapshots before clean application termination.
+    /// Wait for queued edit snapshots and settled presentation-frame writes before clean exit.
     public func flushPendingWrites() async -> PersistenceFlushResult {
-        await persistence.flush()
+        async let edits = persistence.flush()
+        async let frameStores: Void = flushPendingFrameStores()
+        let result = await edits
+        await frameStores
+        return result
+    }
+
+    /// Flush both rebuildable frame stores concurrently. Their own write failures are best effort
+    /// and never change the result used by the edit-save prompt.
+    private func flushPendingFrameStores() async {
+        await frameStoreFlushOperations.flush()
+    }
+
+    private var frameStoreFlushOperations: FrameStoreFlushOperations {
+        frameStoreFlushOperationsForTesting ?? FrameStoreFlushOperations(
+            flushThumbnails: { [thumbnailFrameStore] in
+                await thumbnailFrameStore.flush()
+            },
+            flushPreviews: { [previewPresentation] in
+                await previewPresentation.flushPendingWrites()
+            }
+        )
+    }
+
+    /// A resign-active notification is only an opportunity to reduce the loss window. Keep it
+    /// asynchronous so foreground editing never waits for disposable cache I/O.
+    private func requestBestEffortFrameStoreFlush() {
+        guard !isShuttingDown, bestEffortFrameStoreFlushTask == nil else { return }
+        let operations = frameStoreFlushOperations
+        bestEffortFrameStoreFlushTask = Task { @MainActor [weak self] in
+            await operations.flush()
+            self?.bestEffortFrameStoreFlushTask = nil
+        }
     }
 
     /// Explicitly abandon snapshots that could not be written. This is only used after the user
@@ -4839,6 +4896,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryMediaWorkflow.onImportRequest = nil
         applicationShell.onMediaChanged = nil
         applicationShell.onApplicationActivated = nil
+        applicationShell.onApplicationDeactivated = nil
         cancellables.removeAll()
         await applicationShell.shutdown()
 
@@ -4862,6 +4920,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         lutCacheInvalidationTask = nil
         semanticCoordinatorInstallTask = nil
         droppedPromiseTask = nil
+        let frameStoreFlushTask = bestEffortFrameStoreFlushTask
+        bestEffortFrameStoreFlushTask = nil
+        await frameStoreFlushTask?.value
         await maskingWorkflow.shutdown()
         await libraryMediaWorkflow.shutdown()
         await libraryImportCoordinator.shutdown()
@@ -4875,7 +4936,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         await derive.shutdown()
         await lookSave.shutdown()
         await photoAnalysisCoordinator.shutdown()
-        previewPresentation.shutdown()
+        await previewPresentation.shutdown()
         await previewCoordinator.shutdown()
         await lookPreviewCoordinator.shutdown()
         await workScheduler.cancelAllAndWait()
