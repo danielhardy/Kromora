@@ -457,7 +457,7 @@ final class PreviewPresentationCoordinator {
         canonicalWriteTasks[identity.assetID]?.cancel()
         let store = self.store
         let engine = self.engine
-        canonicalWriteTasks[identity.assetID] = Task { [weak self] in
+        canonicalWriteTasks[identity.assetID] = Task(priority: .userInitiated) { [weak self] in
             guard !Task.isCancelled,
                   let raster = await engine.makeCanonicalPreviewRaster(
                       image, space: request.space, longEdge: LatestPreviewFrameStore.canonicalLongEdge
