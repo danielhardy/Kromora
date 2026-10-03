@@ -45,6 +45,23 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         )
     }
 
+    func testSourceFingerprintBackfillRetryGateBoundsFailuresAndResetsOnProgress() {
+        var gate = SourceFingerprintBackfillRetryGate()
+
+        XCTAssertTrue(gate.permitsAttempt)
+        for failure in 1..<SourceFingerprintBackfillRetryGate.maximumConsecutiveFailures {
+            gate.recordFailure()
+            XCTAssertTrue(gate.permitsAttempt, "failure \(failure) should still permit a retry")
+        }
+
+        gate.recordFailure()
+        XCTAssertFalse(gate.permitsAttempt, "repeated failures must stop retries for this session")
+
+        gate.recordProgress()
+        XCTAssertTrue(gate.permitsAttempt, "a committed batch allows retrying a later failure")
+        XCTAssertEqual(gate.consecutiveFailures, 0)
+    }
+
     func testStoragePolicyKeepsProjectionAndCachesOutsidePackage() {
         let packageURL = tempDirectory.appendingPathComponent("Library.kromoralibrary")
         let indexURL = KromoraStorage.indexURL(

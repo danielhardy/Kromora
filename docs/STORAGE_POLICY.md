@@ -116,10 +116,12 @@ replacement changes identity.
 Older packages decode a missing fingerprint as `nil`; the package format version does not change.
 After the library index is published, a background, resumable repair reads missing records with at
 most two concurrent reads and commits fingerprints in small transactions. Each committed batch is
-valid on its own, and a later launch resumes the remaining summaries. The disposable local index
-round-trips this optional field and can always be rebuilt from the membership shards. The summary
-field is rebuildable from `asset.json`, so a missing or stale summary remains safe and is repaired
-without making the package unavailable.
+valid on its own, and a later launch resumes the remaining summaries. Within one package session,
+three consecutive failed attempts stop the repair from retrying the same unreadable record; a
+committed batch resets that failure count. The disposable local index round-trips this optional
+field and can always be rebuilt from the membership shards. The summary field is rebuildable from
+`asset.json`, so a missing or stale summary remains safe and is repaired without making the package
+unavailable.
 
 ## Membership summary presented geometry
 

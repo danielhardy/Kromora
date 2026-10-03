@@ -25,6 +25,26 @@ struct LibraryIndexLoadingState: Sendable {
     let errorMessage: String?
 }
 
+/// Prevents an unreadable legacy record from restarting the background scan indefinitely during
+/// one package session. Committed progress starts a fresh consecutive-failure window.
+struct SourceFingerprintBackfillRetryGate {
+    static let maximumConsecutiveFailures = 3
+
+    private(set) var consecutiveFailures = 0
+
+    var permitsAttempt: Bool {
+        consecutiveFailures < Self.maximumConsecutiveFailures
+    }
+
+    mutating func recordFailure() {
+        consecutiveFailures += 1
+    }
+
+    mutating func recordProgress() {
+        consecutiveFailures = 0
+    }
+}
+
 /// The application boundary for the portable library package.
 ///
 /// Opening the package and acquiring its writer lease are synchronous. Production startup opts
@@ -63,6 +83,7 @@ final class PortableLibrarySession {
     private var presentedAspectRatioRepairShards: [String] = []
     private var nextPresentedAspectRatioRepairShard = 0
     private var didStartSourceFingerprintBackfill = false
+    private var sourceFingerprintBackfillRetryGate = SourceFingerprintBackfillRetryGate()
     private var isShuttingDown = false
     private var lostDuringSession = false
 
@@ -370,17 +391,14 @@ final class PortableLibrarySession {
     /// scheduler keeps repair at background priority. Shutdown is the cancellation boundary.
     private func startSourceFingerprintBackfill() {
         guard !didStartSourceFingerprintBackfill, !isShuttingDown,
+              sourceFingerprintBackfillRetryGate.permitsAttempt,
               queryController.index.entries.contains(where: { $0.summary.sourceFingerprint == nil })
         else { return }
         didStartSourceFingerprintBackfill = true
         let package = self.package
         let lease = self.lease
         let operation: @Sendable () async -> Void = { [weak self] in
-            defer {
-                Task { @MainActor [weak self] in
-                    self?.didStartSourceFingerprintBackfill = false
-                }
-            }
+            var didFail = false
             do {
                 _ = try await package.repairSourceFingerprints(
                     lease: lease,
@@ -388,6 +406,7 @@ final class PortableLibrarySession {
                     onBatch: { [weak self] entries in
                         await MainActor.run {
                             guard let self, !self.isShuttingDown else { return }
+                            self.sourceFingerprintBackfillRetryGate.recordProgress()
                             _ = try? self.applyIndexDelta(.init(upserts: entries))
                         }
                     }
@@ -396,6 +415,16 @@ final class PortableLibrarySession {
                 // Committed batches remain valid and the next library open resumes the scan.
             } catch {
                 // A repair failure is non-fatal; missing identities remain safe placeholders.
+                didFail = true
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if didFail {
+                    self.sourceFingerprintBackfillRetryGate.recordFailure()
+                } else {
+                    self.sourceFingerprintBackfillRetryGate.recordProgress()
+                }
+                self.didStartSourceFingerprintBackfill = false
             }
         }
         if let scheduler {
