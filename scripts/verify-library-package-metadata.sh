@@ -13,6 +13,10 @@ info_path, entitlements_path = map(pathlib.Path, sys.argv[1:])
 info = plistlib.loads(info_path.read_bytes())
 entitlements = plistlib.loads(entitlements_path.read_bytes())
 
+photos_usage_description = info.get("NSPhotoLibraryUsageDescription")
+if not isinstance(photos_usage_description, str) or not photos_usage_description.strip():
+    raise SystemExit("Photos library usage description is missing or empty")
+
 expected_uti = "com.kromora.kromoralibrary"
 expected_extension = "kromoralibrary"
 document_types = info.get("CFBundleDocumentTypes", [])
@@ -38,5 +42,5 @@ if not any(
 if entitlements.get("com.apple.security.assets.pictures.read-write") is not True:
     raise SystemExit("Pictures read-write entitlement is missing")
 
-print("verified Kromora Library package declaration and Pictures entitlement")
+print("verified Photos usage description, Kromora Library package declaration, and Pictures entitlement")
 PY

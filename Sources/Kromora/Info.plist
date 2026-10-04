@@ -41,6 +41,8 @@
 	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Kromora accesses your Photos library so you can choose photos to import into a Kromora library and save exported images back to Photos.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>UTExportedTypeDeclarations</key>
