@@ -16085,3 +16085,4 @@
 {"id":"evt_muss8fd3_8cwcij","type":"issue.moved","ts":"2026-10-03T19:25:55.527Z","actor":"human","issue_id":"KRMA-807","payload":{"before":{"status":"backlog","order":"zzzzzzh"},"after":{"status":"ready","order":"zzzzq"},"fields":["status","order"]}}
 {"id":"evt_mut7k0qg_mok1z9","type":"issue.created","ts":"2026-10-04T02:34:50.680Z","actor":"codex","issue_id":"KRMA-814","payload":{"title":"Add a keyboard shortcut for applying Auto edits"}}
 {"id":"evt_mut7k9w2_v1hw45","type":"issue.updated","ts":"2026-10-04T02:35:02.546Z","actor":"human","issue_id":"KRMA-814","payload":{"before":{"status":"backlog","order":"zzzzzzzq"},"after":{"status":"backlog","order":"zzzzzzzq"},"fields":["body","status"]}}
+{"id":"evt_muu1982i_7lmqg0","type":"issue.created","ts":"2026-10-04T16:26:15.450Z","actor":"codex","issue_id":"KRMA-819","payload":{"title":"Preserve existing derived Look when replacement fails"}}

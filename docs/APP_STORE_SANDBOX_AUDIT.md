@@ -1,9 +1,9 @@
 # App Store Sandbox Audit
 
-This document records a source review of Kromora's App Sandbox access paths. Line references point
-to the code reviewed for KRMA-783. A static review cannot confirm the entitlements embedded in a
-signed app or the sandbox extensions macOS grants at runtime; the required sandboxed checks are
-listed at the end of section 1.
+This document records a source review of Kromora's App Sandbox access paths. Section 1 references
+the code reviewed for KRMA-783; section 2 references the write/output paths reviewed for KRMA-784.
+A static review cannot confirm the entitlements embedded in a signed app or the sandbox extensions
+macOS grants at runtime; the required sandboxed checks are listed at the end of each section.
 
 ## 1. Import, open, and persistent file access
 
@@ -152,3 +152,139 @@ runtime behaviors. Verify them with the packaged/signed app and inspect its effe
 The code review establishes that imported package assets are embedded and external adjacent RAW
 sidecars are not read. If external sidecar preservation becomes a product requirement, audit and
 test that as an explicit import feature.
+
+## 2. Export, Photos, storage, caches
+
+This section audits output destinations, Photos delivery, durable and rebuildable storage, and
+temporary files. Application Support, Caches, and temporary-directory locations resolve to the
+sandbox container in the signed app. The default library and app-owned export/Look folders are in
+Pictures; selected external locations rely on the system panel grant or a persisted
+security-scoped bookmark.
+
+### Export destinations, staging, and collisions
+
+| Path | What the code writes | Sandbox and collision assessment |
+| --- | --- | --- |
+| Single rendered export | An NSSavePanel chooses a file URL, initially in the configured export folder. ExportOptions carries that URL as a file destination. | ExportCoordinator starts access to the selected file URL and stops it when the asynchronous export finishes. It creates a UUID-named .partial sibling in the destination's parent, writes atomically to that sibling, then moves it to the final URL. The parent directory must allow creation of that sibling; code only explicitly starts access on the selected file URL, so verify that the panel grant covers this staging operation. A pre-existing final file is not replaced: moveItem fails and the existing export remains. KRMA-818 tracks selected-output access ownership. [ExportCoordinator.swift:191-225, 267-287](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift), [ExportOptions.swift:55-59, 131-145](../Sources/KromoraKit/Models/ExportOptions.swift), [ExportCoordinator.swift:606-623](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift) |
+| Batch rendered export | An NSOpenPanel chooses the output folder. Outputs use the configured format and the selected folder. | The worker starts access to the folder and defers its stop until the serial batch ends. Existing names receive a numbered suffix, and a reservation set prevents same-batch collisions. Each file is staged as a .partial sibling inside the selected folder and is moved into place without replacing an existing item. [ExportCoordinator.swift:331-366, 475-483, 512-523](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift), [ExportCoordinator.swift:606-623, 872-883](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift) |
+| Original + settings bundle | An NSOpenPanel chooses a parent folder; Kromora creates a named .kromora-original package below it. | Bundle creation runs asynchronously after the panel returns. It writes a .partial directory beside the destination, verifies the original, settings, and manifest, then moves the directory into place. An existing destination causes moveItem to fail rather than overwrite it; the temporary directory is cleaned up on exit. The bundle worker has no explicit security-scope owner for the selected parent, tracked by KRMA-818. [AppViewModel.swift:4631-4659](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [OriginalSettingsBundle.swift:31-46, 73-83](../Sources/KromoraKit/Models/OriginalSettingsBundle.swift) |
+| Saved Looks | Save Look uses an NSSavePanel; the owned Pictures/Kromora Looks folder is its starting location. A user may choose another destination. | LookSaveCoordinator refuses an existing destination and CubeLUT writes the new text atomically. It does not explicitly start or stop selected-URL access; KRMA-818 covers that lifetime. DeriveCoordinator creates its scratch .cube in the system temporary directory, then its save path removes an existing selected destination before copying the replacement. A failed copy can therefore leave no prior file; tracked by KRMA-819. [LookSaveCoordinator.swift:92-140](../Sources/KromoraKit/ViewModels/LookSaveCoordinator.swift), [CubeLUT.swift:507-522](../Sources/KromoraKit/Models/CubeLUT.swift), [DeriveCoordinator.swift:120-150, 175-212](../Sources/KromoraKit/ViewModels/DeriveCoordinator.swift), [KromoraSettings.swift:219-220, 381-389](../Sources/KromoraKit/Models/KromoraSettings.swift) |
+| Share exports | Single and batch Share render TIFFs under unique subdirectories of FileManager.temporaryDirectory. | These are app-owned temporary outputs in the sandbox container; they are not written to a user-selected external location. Photos import similarly stages transferred bytes in the temporary directory and removes the file after package import. [AppViewModel.swift:4487-4519, 4522-4552](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [PortableLibrarySession.swift:950-995](../Sources/KromoraKit/Models/PortableLibrarySession.swift) |
+
+ExportFormat selects an encoding and suffix, while ExportOptions models a file or folder URL;
+neither writes independently of ExportCoordinator. A clean profile's default export folder is Pictures/Kromora
+Exports and is created before the save panel opens. A configured export folder is restored from a
+security-scoped bookmark. Both the default export folder and the default Kromora Looks folder are
+user-visible Pictures locations rather than hidden Application Support output.
+[ExportFormat.swift:12-35](../Sources/KromoraKit/Models/ExportFormat.swift),
+[KromoraSettings.swift:223-245](../Sources/KromoraKit/Models/KromoraSettings.swift),
+[AppViewModel.swift:1503](../Sources/KromoraKit/ViewModels/AppViewModel.swift),
+[KromoraStorage.swift:14-17, 71-78](../Sources/KromoraKit/Models/KromoraStorage.swift)
+
+### Photos import and delivery
+
+Photos import uses SwiftUI PhotosPicker for image selection, then PhotosPickerItem
+loadTransferable(Data.self). Kromora does not enumerate the Photos library or run its own
+read-authorization state machine for this picker path. An empty/cancelled selection starts no
+import; a nil transfer is counted as skipped, and a transfer failure is recorded per item while
+later selections continue. The transferred bytes are staged in the app temporary directory only
+long enough for the package importer to copy them into the library. Info.plist has a Photos usage
+description for the import and add-to-Photos actions.
+[ContentView.swift:57-65, 177-184](../Sources/KromoraKit/Views/ContentView.swift),
+[PhotosImportCoordinator.swift:50-70, 140-186, 269-301](../Sources/KromoraKit/ViewModels/PhotosImportCoordinator.swift),
+[PortableLibrarySession.swift:950-995](../Sources/KromoraKit/Models/PortableLibrarySession.swift),
+[Info.plist:44-45](../Sources/Kromora/Info.plist)
+
+Optional post-export delivery uses PhotoKit read/write authorization. It requests authorization
+only while status is notDetermined, maps authorized, limited, denied, and restricted (plus
+notDetermined) explicitly, and permits asset creation for authorized or limited access. Denied or
+restricted access becomes a PhotosDeliveryError with recovery text; the already-committed export
+file remains safe on disk and the failure is surfaced to the user. A limited grant may still fail
+the optional album update, which is reported as a warning without undoing the saved Photos asset.
+[PhotosDelivery.swift:4-24, 89-130, 185-193](../Sources/KromoraKit/Models/PhotosDelivery.swift),
+[ExportCoordinator.swift:287-303, 547-562](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift)
+
+### Package, index, caches, and persisted paths
+
+| Artifact | Sandbox location and persistence |
+| --- | --- |
+| Portable library package | Production opens the fixed Pictures/Kromora Library.kromoralibrary package. Originals, metadata, edit revisions, and Look blobs are package-owned; current embedded source locators and edit revision pointers use package-relative paths. The schema reserves a bookmark field for a future referenced-source mode, but no production call uses it. No current package record persists an absolute container path. [KromoraStorage.swift:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [PortableLibraryPackage.swift:216-278, 292-354, 528-556](../Sources/KromoraKit/Models/PortableLibraryPackage.swift), [PortablePackageImport.swift:432-446](../Sources/KromoraKit/Models/PortablePackageImport.swift), [PackagePath.swift:11-30](../Sources/KromoraKit/Models/PackagePath.swift) |
+| Library index and launch hints | The rebuildable index and launch hints live below the Application Support location returned by FileManager, in Kromora/Indexes/<library-id>/LibraryIndex.store and Kromora/LaunchHints.json. In the sandboxed app this is container storage. The projection records package-relative recordPath values and summaries, not absolute URLs; the package membership shards rebuild it. [KromoraStorage.swift:19-22, 33-61](../Sources/KromoraKit/Models/KromoraStorage.swift), [LibraryQueryController.swift:43-75, 120-143, 425-435](../Sources/KromoraKit/Models/LibraryQueryController.swift), [PortableLibrarySession.swift:124-143](../Sources/KromoraKit/Models/PortableLibrarySession.swift) |
+| Edit database | There is no separate production edit database. EditDocumentStore is a bounded in-memory cache; canonical edit revisions are committed as package sidecars. Existing standalone EditStore files are not opened as a fallback. [EditDocumentStore.swift:84-92, 180-214](../Sources/KromoraKit/Models/EditDocumentStore.swift), [STORAGE_POLICY.md:25-35, 101-103](STORAGE_POLICY.md) |
+| Presentation frames | Latest previews live under package Derived/Previews. Packed thumbnails live under package Derived/Thumbnails; the packed index stores asset keys, shard numbers, offsets, and lengths. Both are disposable package-derived caches, not absolute filesystem references. Latest-preview staging is beside the cache destination; thumbnail maintenance writes into the package transaction. [LatestPreviewFrameStore.swift:6-16, 73-85, 370-392](../Sources/KromoraKit/Models/LatestPreviewFrameStore.swift), [PortablePackageMaintenance.swift:75-80, 107-117, 332-362, 558-563](../Sources/KromoraKit/Models/PortablePackageMaintenance.swift) |
+| Device caches | Masks, photo analysis, and current-edit measurements use the Caches directory under the Kromora subdirectory. This location is rebuildable and resolves within the sandbox container. [KromoraStorage.swift:25-46](../Sources/KromoraKit/Models/KromoraStorage.swift), [MaskStore.swift:4-6, 195](../Sources/KromoraKit/Models/PhotoAnalysis/MaskStore.swift), [PhotoAnalysisCache.swift:98-111, 189](../Sources/KromoraKit/Models/PhotoAnalysis/PhotoAnalysisCache.swift), [CurrentEditMeasurement.swift:1331-1335, 1382](../Sources/KromoraKit/Models/PhotoAnalysis/CurrentEditMeasurement.swift), [STORAGE_POLICY.md:25-35](STORAGE_POLICY.md) |
+
+Current production data flow does not serialize an absolute path string into package or index
+records. The package schema has a future referenced-source case with opaque bookmark data, but the
+importer writes embedded relative paths and no production call constructs that referenced case.
+The local index stores package-relative recordPath values. UserDefaults does contain operational
+paths for selected default folders and imported external Look files, alongside security-scoped
+bookmark data; these are external-resource preferences, not package or index paths. They can become
+stale if a user moves a selected folder or Look, and the bookmark restore paths report unavailable
+access.
+[KromoraSettings.swift:80-84, 261-280, 302-349](../Sources/KromoraKit/Models/KromoraSettings.swift),
+[LUTLibrary.swift:154-159, 456-493](../Sources/KromoraKit/Models/LUTLibrary.swift)
+
+### Look folders and Settings folder selection
+
+Bundled starter Looks are read from the KromoraKit resource bundle and are not copied out of the
+application. The app-owned writable Look folder defaults to Pictures/Kromora Looks. For an
+external Look folder, Choose Look Folder presents NSOpenPanel and LUTLibrary saves an app-scoped
+bookmark. The panel-selection path begins scanning after setting the URL without a visible explicit
+startAccess call. Restoring the folder on a later launch resolves that bookmark and starts scoped
+access. Imported .cube/.look files also retain bookmark records, with stored paths as a UserDefaults
+fallback. The Settings Choose folder actions use an Open panel and KromoraSettings stores the
+security-scoped bookmark, keeps access while the configured folder is in use, and refreshes stale
+bookmarks after successful resolution. The AppKitSettingsFolderAdapter only creates/reveals the
+app-owned Look folder in Finder; it does not grant access to another folder.
+[BundledLookLibrary.swift:32-37, 57-85, 108-122](../Sources/KromoraKit/Models/BundledLookLibrary.swift),
+[AppViewModel.swift:4797-4829](../Sources/KromoraKit/ViewModels/AppViewModel.swift),
+[LUTLibrary.swift:232-269, 449-493](../Sources/KromoraKit/Models/LUTLibrary.swift),
+[KromoraSettingsView.swift:244-260](../Sources/KromoraKit/Views/KromoraSettingsView.swift),
+[AppKitFileDialogAdapter.swift:55-72](../Sources/KromoraKit/Presentation/AppKitFileDialogAdapter.swift),
+[KromoraSettings.swift:261-350, 381-389, 451-459](../Sources/KromoraKit/Models/KromoraSettings.swift),
+[AppKitSettingsFolderAdapter.swift:22-31](../Sources/KromoraKit/Presentation/AppKitSettingsFolderAdapter.swift)
+
+### Path and entitlement conclusions
+
+The source contains no /Users/ literal and no NSHomeDirectory() call. The only
+homeDirectoryForCurrentUser use is a dynamic fallback to Pictures when FileManager has no Pictures
+URL. All urls(for:in:) calls are centralized in KromoraStorage: Application Support, Caches, and
+Pictures; Application Support and Caches fall back to FileManager.temporaryDirectory if the
+directory lookup returns no URL. There are no hard-coded user-home paths in the reviewed source.
+[KromoraStorage.swift:19-39, 64-78](../Sources/KromoraKit/Models/KromoraStorage.swift)
+
+| Entitlement | Conclusion |
+| --- | --- |
+| com.apple.security.assets.pictures.read-write | YES, required by current filesystem code: production creates/opens the default library package and the default export/Look folders under Pictures. This entitlement grants filesystem access to Pictures. PhotoKit import and delivery do not rely on it; PhotosPicker mediates import and PhotoKit handles delivery authorization. [Kromora.entitlements:5-14](../Sources/Kromora/Kromora.entitlements), [KromoraStorage.swift:64-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [AppViewModel.swift:971-992](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [PortableLibrarySession.swift:106-124](../Sources/KromoraKit/Models/PortableLibrarySession.swift), [PhotosDelivery.swift:89-130](../Sources/KromoraKit/Models/PhotosDelivery.swift) |
+| com.apple.security.files.removable-media.read-only | YES, exercised: MountedMediaVolumeProvider discovers removable/ejectable mounts, enumerates and reads supported images and metadata, and the production provider does not write to the source volume. Imports write their copies into the Pictures package. [Kromora.entitlements:5-14](../Sources/Kromora/Kromora.entitlements), [MediaVolume.swift:141-149, 155-195, 214-259](../Sources/KromoraKit/Models/MediaVolume.swift), [PortableLibrarySession.swift:886-925](../Sources/KromoraKit/Models/PortableLibrarySession.swift) |
+
+### Findings
+
+| Severity | Finding | Evidence | Follow-up |
+| --- | --- | --- | --- |
+| should-fix | Direct Look saves and original-plus-settings bundle creation do not visibly own and release the panel-selected output grant for the complete write. Selecting an external Look folder saves its bookmark, but the immediate scan has no explicit start/stop owner. Single-file export also stages a sibling file in the parent directory while explicitly starting access only on the selected file URL; confirm that the grant covers the parent. | [LookSaveCoordinator.swift:92-140](../Sources/KromoraKit/ViewModels/LookSaveCoordinator.swift), [DeriveCoordinator.swift:183-212](../Sources/KromoraKit/ViewModels/DeriveCoordinator.swift), [AppViewModel.swift:4631-4659, 4799-4808](../Sources/KromoraKit/ViewModels/AppViewModel.swift), [LUTLibrary.swift:232-257](../Sources/KromoraKit/Models/LUTLibrary.swift), [ExportCoordinator.swift:267-272, 606-623](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift) | KRMA-818 (backlog, appstore) |
+| should-fix | Saving a derived Look removes an existing destination before copying its replacement. If the copy fails, the previous user file is already gone. | [DeriveCoordinator.swift:204-213](../Sources/KromoraKit/ViewModels/DeriveCoordinator.swift) | KRMA-819 (backlog, appstore) |
+| note | The default package is deliberately in Pictures and requires the Pictures filesystem entitlement; PhotoKit authorization is a separate access path. Removable-media read-only access is used for normal mounted-volume discovery and image reads. | [Kromora.entitlements:5-14](../Sources/Kromora/Kromora.entitlements), [KromoraStorage.swift:89-96](../Sources/KromoraKit/Models/KromoraStorage.swift), [MediaVolume.swift:170-259](../Sources/KromoraKit/Models/MediaVolume.swift), [PhotosDelivery.swift:89-130](../Sources/KromoraKit/Models/PhotosDelivery.swift) | Verify effective entitlements in the signed app. |
+| note | Package records and the local index use stable identities and package-relative paths. External folder and Look paths are operational preferences with bookmarks, not absolute paths embedded in package/index data. | [PortableLibraryPackage.swift:216-278, 292-354](../Sources/KromoraKit/Models/PortableLibraryPackage.swift), [LibraryQueryController.swift:43-75](../Sources/KromoraKit/Models/LibraryQueryController.swift), [KromoraSettings.swift:80-84](../Sources/KromoraKit/Models/KromoraSettings.swift), [LUTLibrary.swift:472-493](../Sources/KromoraKit/Models/LUTLibrary.swift) | No follow-up required for the current package/index format. |
+| note | Single rendered exports fail rather than replace when the destination exists; batch exports add numeric suffixes. LookSaveCoordinator refuses collisions, original-plus-settings bundles refuse an existing package destination, and derived Look saves replace the destination by deleting it before copying. | [ExportCoordinator.swift:606-623, 875-883](../Sources/KromoraKit/ViewModels/ExportCoordinator.swift), [LookSaveCoordinator.swift:125-139](../Sources/KromoraKit/ViewModels/LookSaveCoordinator.swift), [OriginalSettingsBundle.swift:73-83](../Sources/KromoraKit/Models/OriginalSettingsBundle.swift), [DeriveCoordinator.swift:204-213](../Sources/KromoraKit/ViewModels/DeriveCoordinator.swift) | Replacement data-loss risk is KRMA-819. |
+
+### Behaviors requiring a sandboxed run
+
+No signed sandboxed run was performed for this static section. Verify with the packaged app and
+inspect effective entitlements:
+
+1. Export one rendered file outside Pictures and confirm its sibling .partial staging write works;
+   repeat to an existing file and confirm the prior export is preserved.
+2. Batch export outside Pictures and verify numbered collisions and cancellation cleanup.
+3. Save a generated Look and a derived Look outside Pictures, including an existing derived-Look
+   destination and an injected/real copy failure, then confirm the prior file's behavior.
+4. Export an original-plus-settings bundle outside Pictures; repeat with an existing bundle
+   destination and confirm cleanup on failure.
+5. Exercise PhotosPicker import and optional Photos delivery with denied, restricted, and limited
+   authorization states. Confirm denied Photos delivery leaves the rendered disk export usable.
+6. Reopen configured source/export and external Look folders after relaunch; confirm bundled Looks
+   load without an external folder grant.
+7. Confirm package edits, library index rebuild, frame stores, caches, and temporary files remain
+   usable or safely rebuildable after container recreation/movement, and inspect the signed app's
+   Pictures and removable-media entitlements.
