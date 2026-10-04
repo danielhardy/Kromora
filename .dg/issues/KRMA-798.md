@@ -2,7 +2,7 @@
 id: KRMA-798
 title: Document native macOS required-reason privacy scope
 type: task
-status: review
+status: verification
 priority: high
 verification_agent: claude
 human_review_required: false
@@ -16,7 +16,7 @@ labels:
   - privacy
   - xcode
 created: 2026-10-03T19:24:32.332Z
-updated: 2026-10-04T22:20:18.127Z
+updated: 2026-10-04T23:27:06.673Z
 depends_on:
   - KRMA-785
   - KRMA-796
@@ -40,11 +40,12 @@ blockers:
     reason: The requested documentation changes and checks are complete, but this workspace grants read-only access to .git. Git staging failed to create .git/index.lock with Operation not permitted, so I cannot make the required implementation commit or hand off to review.
     action: Provide a checkout where .git is writable, or have a maintainer commit only the KRMA-798-related files from this working tree; then resume KRMA-798 so it can proceed through review.
     created_at: 2026-10-04T22:20:18.127Z
-order: zzy
+    resolved_at: 2026-10-04T22:24:52.038Z
+    resolved_by: cli
+order: n
 board: product
-blocked_reason: The requested documentation changes and checks are complete, but this workspace grants read-only access to .git. Git staging failed to create .git/index.lock with Operation not permitted, so I cannot make the required implementation commit or hand off to review.
-blocked_action: Provide a checkout where .git is writable, or have a maintainer commit only the KRMA-798-related files from this working tree; then resume KRMA-798 so it can proceed through review.
-blocked_from_status: ready
+commits:
+  - b78b888c
 ---
 
 ## Objective
@@ -85,3 +86,13 @@ The source audit found `UserDefaults`, file-timestamp metadata, and `ProcessInfo
 
 - Creating or bundling `PrivacyInfo.xcprivacy`; changing package/cache locations or timestamp behavior; changing App Store Connect records or uploading a build.
 - Adding fallbacks for earlier macOS releases or Intel hardware, third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-04T22:25:38.402Z
+
+Implementation complete in b78b888c (KRMA-798: clarify native macOS privacy scope). Updated the sandbox audit, release plan, App Store tickets, and packaging checklists to reflect that required-reason declarations do not apply to this macOS-only target, while keeping App Privacy disclosures separate. No app source, privacy manifest, package/cache behavior, or App Store Connect record was changed. Verification reported by the runner: dg validate, git diff --check, project-file lint, and static macOS target checks passed; xcodebuild -showBuildSettings and swift package describe were unavailable because sandbox access to local cache paths was denied. Ready for review.
+
+
+### Comment — codex @ 2026-10-04T23:27:06.672Z
+
+Handoff record repaired: recorded implementation commit b78b888c; removed the stale failed-footprint and resolved Git-blocker fields. DispatchGraph verifier attempts at 23:16Z and 23:20Z were rejected because KRMA-806 held the shared-worktree claim through 00:16Z. KRMA-798 remains in verification pending an available shared workspace.
