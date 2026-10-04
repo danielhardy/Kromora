@@ -2338,15 +2338,16 @@ actor RenderEngine: RenderEngining {
         // Retouch is already composited into the developed image this cache stores. Leaving it
         // out reused the pre-spot bitmap, so a heal or clone stayed invisible until a later
         // navigation missed the entry.
-        return RenderCacheHash.digest(EditDocument(
-            version: document.version, rawDevelop: .neutral, light: document.light,
-            color: document.color,
-            effects: EffectsAdjustments(
-                texture: document.effects.texture, clarity: document.effects.clarity,
-                dehaze: document.effects.dehaze
-            ), crop: .neutral, adjustments: adjustments, lut: .none,
-            retouch: document.retouch
-        ))
+        return RenderCacheHash.digest(
+            EditDocument(
+                version: document.version, rawDevelop: .neutral, light: document.light,
+                color: document.color,
+                effects: EffectsAdjustments(
+                    texture: document.effects.texture, clarity: document.effects.clarity,
+                    dehaze: document.effects.dehaze, detail: document.effects.detail
+                ), crop: .neutral, adjustments: adjustments, lut: .none,
+                retouch: document.retouch
+            ))
     }
 
     // MARK: - The developed-source cache

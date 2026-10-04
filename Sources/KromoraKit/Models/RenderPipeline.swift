@@ -303,7 +303,7 @@ enum RenderPipeline {
         }
         return !document.light.isIdentity || !document.color.isIdentity
             || document.effects.texture != 0 || document.effects.clarity != 0
-            || document.effects.dehaze != 0 || hasAdjustment
+            || document.effects.dehaze != 0 || !document.effects.detail.isIdentity || hasAdjustment
     }
 
     /// Apply a normalized freeform crop without rasterizing. The rectangle is bottom-left based,

@@ -12,6 +12,93 @@ final class RenderCacheTests: TempDirectoryTestCase {
         return ImageSource(url: url, nativeExtent: CGSize(width: 96, height: 64))
     }
 
+    private func makeNoisySource() throws -> ImageSource {
+        let width = 96
+        let height = 64
+        var state: UInt32 = 0x714
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            for x in 0..<width {
+                state = state &* 1_664_525 &+ 1_013_904_223
+                let luminanceNoise = (Float(state >> 8) / Float(0x00FF_FFFF) - 0.5) * 0.20
+                state = state &* 1_664_525 &+ 1_013_904_223
+                let chromaNoise = (Float(state >> 8) / Float(0x00FF_FFFF) - 0.5) * 0.20
+                let base: Float = x < width / 2 ? 0.32 : 0.68
+                let offset = (y * width + x) * 4
+                let channels = [
+                    base + luminanceNoise + chromaNoise,
+                    base + luminanceNoise - chromaNoise * 0.7,
+                    base + luminanceNoise - chromaNoise * 0.3,
+                ]
+                for channel in 0..<3 {
+                    pixels[offset + channel] = UInt8(
+                        min(max(channels[channel] * 255, 0), 255).rounded()
+                    )
+                }
+            }
+        }
+
+        let provider = CGDataProvider(data: Data(pixels) as CFData)!
+        let image = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )!
+        let url = try Fixtures.writePNG(image, named: "noisy-cache.png", in: tempDirectory)
+        return ImageSource(url: url, nativeExtent: CGSize(width: width, height: height))
+    }
+
+    private func assertDetailEditMissesProcessingPrefix(
+        source: ImageSource,
+        baseline: DetailAdjustments,
+        changed: DetailAdjustments,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        let engine = RenderEngine()
+        let baselineDocument = EditDocument(
+            light: LightAdjustments(exposure: 0.4),
+            effects: EffectsAdjustments(detail: baseline)
+        )
+        let changedDocument = EditDocument(
+            light: LightAdjustments(exposure: 0.4),
+            effects: EffectsAdjustments(detail: changed)
+        )
+        let renderRequest = { (document: EditDocument) in
+            self.request(
+                source: source,
+                document: document,
+                targetSize: CGSize(width: 96, height: 64)
+            )
+        }
+
+        let baselineRendered = await engine.makeCGImage(renderRequest(baselineDocument))
+        let baselineImage = try XCTUnwrap(baselineRendered, file: file, line: line)
+        let changedRendered = await engine.makeCGImage(renderRequest(changedDocument))
+        let changedImage = try XCTUnwrap(changedRendered, file: file, line: line)
+        XCTAssertNotEqual(
+            try Pixels.bytes(of: baselineImage), try Pixels.bytes(of: changedImage),
+            "a changed detail control must change preview pixels", file: file, line: line
+        )
+
+        let stats = await engine.cacheStatistics()
+        XCTAssertEqual(stats.processingPrefix.misses, 2, file: file, line: line)
+        XCTAssertEqual(stats.processingPrefix.hits, 0, file: file, line: line)
+
+        _ = await engine.makeCGImage(renderRequest(changedDocument))
+        let reused = await engine.cacheStatistics()
+        XCTAssertEqual(reused.processingPrefix.misses, 2, file: file, line: line)
+        XCTAssertEqual(reused.processingPrefix.hits, 1, file: file, line: line)
+    }
+
     private func request(
         source: ImageSource,
         document: EditDocument = EditDocument(),
@@ -377,6 +464,57 @@ final class RenderCacheTests: TempDirectoryTestCase {
         let reused = await engine.cacheStatistics()
         XCTAssertEqual(reused.processingPrefix.hits, 1,
                        "an unchanged spot can still reuse its prefix")
+    }
+
+    func testDetailEditsMissTheProcessingPrefixAndChangePixels() async throws {
+        let source = try makeNoisySource()
+
+        try await assertDetailEditMissesProcessingPrefix(
+            source: source,
+            baseline: .neutral,
+            changed: DetailAdjustments(luminanceNoise: 100)
+        )
+        try await assertDetailEditMissesProcessingPrefix(
+            source: source,
+            baseline: .neutral,
+            changed: DetailAdjustments(colorNoise: 100)
+        )
+        try await assertDetailEditMissesProcessingPrefix(
+            source: source,
+            baseline: .neutral,
+            changed: DetailAdjustments(sharpeningAmount: 100)
+        )
+    }
+
+    func testDetailOnlyEditUsesTheProcessingPrefixCache() async throws {
+        let source = try makeNoisySource()
+        let engine = RenderEngine()
+        let plainRequest = request(source: source, targetSize: CGSize(width: 96, height: 64))
+        let detailDocument = EditDocument(
+            effects: EffectsAdjustments(
+                detail: DetailAdjustments(luminanceNoise: 100)
+            ))
+        let detailRequest = request(
+            source: source, document: detailDocument, targetSize: CGSize(width: 96, height: 64)
+        )
+
+        let plainRendered = await engine.makeCGImage(plainRequest)
+        let plainImage = try XCTUnwrap(plainRendered)
+        let detailRendered = await engine.makeCGImage(detailRequest)
+        let detailImage = try XCTUnwrap(detailRendered)
+        XCTAssertNotEqual(
+            try Pixels.bytes(of: plainImage), try Pixels.bytes(of: detailImage),
+            "a detail-only edit must run and materialize the processing prefix"
+        )
+
+        let firstStats = await engine.cacheStatistics()
+        XCTAssertEqual(firstStats.processingPrefix.misses, 1)
+        XCTAssertEqual(firstStats.processingPrefix.hits, 0)
+
+        _ = await engine.makeCGImage(detailRequest)
+        let reused = await engine.cacheStatistics()
+        XCTAssertEqual(reused.processingPrefix.misses, 1)
+        XCTAssertEqual(reused.processingPrefix.hits, 1)
     }
 
     func testCachedPrefixPreservesDownstreamCropGrainAndLUTPixels() async throws {
