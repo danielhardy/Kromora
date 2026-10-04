@@ -10,6 +10,20 @@ ARCHS = arm64
 MARKETING_VERSION = 0.1
 CURRENT_PROJECT_VERSION = 1
 
+// Use the shared source plist for document/UTI declarations and the app's usage strings.
+INFOPLIST_FILE = $(SRCROOT)/../App/Info.plist
+
+// Apply the app's declared sandbox capabilities and hardened runtime when signing.
+CODE_SIGN_ENTITLEMENTS = $(SRCROOT)/../App/Kromora.entitlements
+ENABLE_APP_SANDBOX = YES
+ENABLE_HARDENED_RUNTIME = YES
+
+// App Store metadata that Xcode generates into the merged Info.plist.
+INFOPLIST_KEY_CFBundleDisplayName = Kromora
+INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.photography
+INFOPLIST_KEY_NSHumanReadableCopyright = Copyright © 2026 Tim; Copyright © 2026 Daniel Hardy
+INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
+
 // The standalone Xcode launcher uses Swift 6; package compiler settings remain in Package.swift.
 SWIFT_VERSION = 6.0
 

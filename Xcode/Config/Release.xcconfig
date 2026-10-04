@@ -4,3 +4,6 @@
 SWIFT_OPTIMIZATION_LEVEL = -O
 DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
 ENABLE_TESTABILITY = NO
+
+// The explicit entitlement file is the complete Release capability contract.
+CODE_SIGN_INJECT_BASE_ENTITLEMENTS = NO
