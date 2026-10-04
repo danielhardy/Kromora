@@ -42,9 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appearanceController.start()
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-#if KROMORA_DIRECT_DISTRIBUTION
-        viewModel.updateCoordinator.checkAutomaticallyIfDue()
-#endif
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -135,14 +132,7 @@ struct KromoraApp: App {
         }
         .windowResizability(.contentSize)
         .commands {
-#if KROMORA_DIRECT_DISTRIBUTION
-            KromoraCommands(
-                settings: appDelegate.viewModel.settings,
-                updateCoordinator: appDelegate.viewModel.updateCoordinator
-            )
-#else
             KromoraCommands(settings: appDelegate.viewModel.settings)
-#endif
         }
 
         Settings {
@@ -154,26 +144,9 @@ struct KromoraApp: App {
 @MainActor
 private struct KromoraRootView: View {
     let viewModel: AppViewModel
-#if KROMORA_DIRECT_DISTRIBUTION
-    @ObservedObject private var updateCoordinator: UpdateCoordinator
-#endif
-
-    init(viewModel: AppViewModel) {
-        self.viewModel = viewModel
-#if KROMORA_DIRECT_DISTRIBUTION
-        self._updateCoordinator = ObservedObject(wrappedValue: viewModel.updateCoordinator)
-#endif
-    }
 
     var body: some View {
-#if KROMORA_DIRECT_DISTRIBUTION
         ContentView(viewModel: viewModel)
-            .sheet(isPresented: $updateCoordinator.isSheetPresented) {
-                UpdateSheet(coordinator: updateCoordinator)
-            }
-#else
-        ContentView(viewModel: viewModel)
-#endif
     }
 }
 

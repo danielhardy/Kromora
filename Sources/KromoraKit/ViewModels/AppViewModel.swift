@@ -704,10 +704,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     // MARK: - Owned state
 
     public let settings: KromoraSettings
-#if KROMORA_DIRECT_DISTRIBUTION
-    /// The release updater is shared by launch, menu, Settings, and the update sheet.
-    public let updateCoordinator: UpdateCoordinator
-#endif
     let library: LUTLibrary
     let workScheduler: ImageWorkScheduler
     /// Edit-aware collection thumbnail scheduling and cache publication.
@@ -1089,9 +1085,6 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             userLookFolderURL: userLookFolderURL
         )
         self.selectiveCopyCategories = self.settings.lastCopyCategories
-#if KROMORA_DIRECT_DISTRIBUTION
-        self.updateCoordinator = UpdateCoordinator(defaults: preferences)
-#endif
         self.workScheduler = packageIOScheduler
         self.persistence = EditPersistenceCoordinator(store: effectiveEditStore)
         // Look thumbnails have a bounded, independent thumbnail lane. Sharing the editor's lane

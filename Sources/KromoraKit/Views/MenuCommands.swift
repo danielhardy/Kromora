@@ -33,23 +33,10 @@ enum KromoraAutoAdjustmentShortcut {
 public struct KromoraCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @ObservedObject private var settings: KromoraSettings
-#if KROMORA_DIRECT_DISTRIBUTION
-    @ObservedObject private var updateCoordinator: UpdateCoordinator
-#endif
 
-#if KROMORA_DIRECT_DISTRIBUTION
-    public init(
-        settings: KromoraSettings = KromoraSettings(),
-        updateCoordinator: UpdateCoordinator? = nil
-    ) {
-        _settings = ObservedObject(wrappedValue: settings)
-        _updateCoordinator = ObservedObject(wrappedValue: updateCoordinator ?? UpdateCoordinator())
-    }
-#else
     public init(settings: KromoraSettings = KromoraSettings()) {
         _settings = ObservedObject(wrappedValue: settings)
     }
-#endif
 
     public var body: some Commands {
         CommandGroup(replacing: .appInfo) {
@@ -156,12 +143,6 @@ public struct KromoraCommands: Commands {
 
             Button("Export Original + Settings Bundle…") { post(.exportOriginalWithSettings) }
                 .keyboardShortcut("b", modifiers: [.command, .option])
-        }
-
-        CommandGroup(after: .appInfo) {
-#if KROMORA_DIRECT_DISTRIBUTION
-            Button("Check for Updates…") { updateCoordinator.checkNow() }
-#endif
         }
     }
 

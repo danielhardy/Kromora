@@ -58,7 +58,6 @@ final class KromoraAboutTests: XCTestCase {
         XCTAssertTrue(menuCommands.contains("CommandGroup(replacing: .appInfo)"))
         XCTAssertTrue(menuCommands.contains("Button(\"About Kromora\") { openWindow(id: KromoraAboutView.windowID) }"))
         XCTAssertTrue(app.contains("Window(\"About Kromora\", id: KromoraAboutView.windowID)"))
-        XCTAssertTrue(menuCommands.contains("Button(\"Check for Updates…\") { updateCoordinator.checkNow() }"))
     }
 
     func testAboutShowsConciseLUTLicenseDisclosureWithoutInventory() throws {

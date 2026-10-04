@@ -67,9 +67,6 @@ public final class KromoraSettings: ObservableObject {
         static let showPhotoNames = "Kromora.settings.showPhotoNames"
         static let openFirstPhotoWhenEnteringEdit = "Kromora.settings.openFirstPhotoWhenEnteringEdit"
         static let showClippingAlerts = "Kromora.settings.showClippingAlerts"
-#if KROMORA_DIRECT_DISTRIBUTION
-        static let automaticUpdateChecks = "Kromora.settings.automaticUpdateChecks"
-#endif
         static let sourceFolder = "Kromora.settings.defaultSourceFolder"
         static let exportFolder = "Kromora.settings.defaultExportFolder"
         static let lastCopyCategories = "Kromora.settings.lastCopyCategories"
@@ -148,15 +145,6 @@ public final class KromoraSettings: ObservableObject {
         return (try? JSONDecoder().decode(MaskOverlayAppearance.self, from: data)) ?? .standard
     }
 
-#if KROMORA_DIRECT_DISTRIBUTION
-    @Published public var automaticUpdateChecks: Bool {
-        didSet {
-            guard automaticUpdateChecks != oldValue else { return }
-            preferences.set(automaticUpdateChecks, forKey: Key.automaticUpdateChecks)
-        }
-    }
-#endif
-
     @Published public private(set) var sourceFolderStatus: KromoraFolderStatus
     @Published public private(set) var exportFolderStatus: KromoraFolderStatus
 
@@ -190,9 +178,6 @@ public final class KromoraSettings: ObservableObject {
             preferences.object(forKey: Key.openFirstPhotoWhenEnteringEdit) as? Bool ?? false
         self.showClippingAlerts = preferences.object(forKey: Key.showClippingAlerts) as? Bool ?? false
         self.maskOverlayAppearance = Self.storedMaskOverlayAppearance(in: preferences)
-#if KROMORA_DIRECT_DISTRIBUTION
-        self.automaticUpdateChecks = preferences.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true
-#endif
         self.sourceFolderStatus = .notConfigured(.source)
         self.exportFolderStatus = .notConfigured(.export)
 
@@ -203,9 +188,6 @@ public final class KromoraSettings: ObservableObject {
         self.openFirstPhotoWhenEnteringEdit =
             preferences.object(forKey: Key.openFirstPhotoWhenEnteringEdit) as? Bool ?? false
         self.showClippingAlerts = preferences.object(forKey: Key.showClippingAlerts) as? Bool ?? false
-#if KROMORA_DIRECT_DISTRIBUTION
-        self.automaticUpdateChecks = preferences.object(forKey: Key.automaticUpdateChecks) as? Bool ?? true
-#endif
         loadRecords()
         refreshFolderStatus()
     }

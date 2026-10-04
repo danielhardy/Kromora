@@ -97,18 +97,6 @@ public struct KromoraSettingsView: View {
 
             maskOverlaySection
 
-#if KROMORA_DIRECT_DISTRIBUTION
-            Section {
-                Toggle("Check for updates automatically", isOn: $settings.automaticUpdateChecks)
-                    .accessibilityLabel("Check for updates automatically")
-                    .accessibilityHint("Check GitHub Releases at most once every 24 hours")
-            } header: {
-                Text("Updates")
-            } footer: {
-                Text("Kromora checks GitHub Releases at most once every 24 hours. Offline failures stay quiet.")
-            }
-#endif
-
             folderSection(
                 kind: .source,
                 status: settings.sourceFolderStatus,
