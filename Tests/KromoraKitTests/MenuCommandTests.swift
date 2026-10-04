@@ -12,6 +12,12 @@ final class MenuCommandTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
             encoding: .utf8
         )
+        let scene = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Sources/KromoraKit/Presentation/KromoraScene.swift"
+            ),
+            encoding: .utf8
+        )
         let app = try String(
             contentsOf: packageRoot.appendingPathComponent("Sources/Kromora/KromoraApp.swift"),
             encoding: .utf8
@@ -19,7 +25,7 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertTrue(app.contains("@NSApplicationDelegateAdaptor(KromoraAppDelegate.self)"))
 
         XCTAssertFalse(menuCommands.contains("SettingsLink()"))
-        XCTAssertEqual(app.components(separatedBy: "\n        Settings {").count - 1, 1)
+        XCTAssertEqual(scene.components(separatedBy: "\n        Settings {").count - 1, 1)
     }
 
     func testEditTransferShortcutsDoNotClaimStandardTextClipboardKeys() {

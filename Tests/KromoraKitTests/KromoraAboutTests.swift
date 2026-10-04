@@ -50,6 +50,12 @@ final class KromoraAboutTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/MenuCommands.swift"),
             encoding: .utf8
         )
+        let scene = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Sources/KromoraKit/Presentation/KromoraScene.swift"
+            ),
+            encoding: .utf8
+        )
         let app = try String(
             contentsOf: packageRoot.appendingPathComponent("Sources/Kromora/KromoraApp.swift"),
             encoding: .utf8
@@ -61,7 +67,7 @@ final class KromoraAboutTests: XCTestCase {
 
         XCTAssertTrue(menuCommands.contains("CommandGroup(replacing: .appInfo)"))
         XCTAssertTrue(menuCommands.contains("Button(\"About Kromora\") { openWindow(id: KromoraAboutView.windowID) }"))
-        XCTAssertTrue(app.contains("Window(\"About Kromora\", id: KromoraAboutView.windowID)"))
+        XCTAssertTrue(scene.contains("Window(\"About Kromora\", id: KromoraAboutView.windowID)"))
         XCTAssertTrue(app.contains("@NSApplicationDelegateAdaptor(KromoraAppDelegate.self)"))
         XCTAssertTrue(appDelegate.contains("appearanceController.start()"))
     }

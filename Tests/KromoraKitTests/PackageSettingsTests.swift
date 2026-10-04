@@ -14,6 +14,30 @@ import XCTest
 /// true today under a 5.9 manifest too, so it would pass against the very regression this guards.
 final class PackageSettingsTests: XCTestCase {
 
+    func testLauncherRemainsAThinShim() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let launcherURL = packageRoot.appendingPathComponent("Sources/Kromora/KromoraApp.swift")
+        let launcher = try String(contentsOf: launcherURL, encoding: .utf8)
+        let lines = launcher.split(whereSeparator: \.isNewline)
+        let imports = lines.compactMap { line -> String? in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix("import ") else { return nil }
+            return String(trimmed.dropFirst("import ".count))
+        }
+
+        XCTAssertLessThanOrEqual(
+            lines.count,
+            30,
+            "Architecture rule: Sources/Kromora/KromoraApp.swift must remain a thin launcher shim."
+        )
+        XCTAssertEqual(
+            imports,
+            ["SwiftUI", "KromoraKit"],
+            "Architecture rule: the launcher may import only SwiftUI and KromoraKit."
+        )
+    }
+
     private static var manifest: String {
         get throws {
             let url = URL(fileURLWithPath: #filePath)   // Tests/KromoraKitTests/PackageSettingsTests.swift
