@@ -2,7 +2,7 @@
 id: KRMA-478
 title: "Crop inspector: combine Rotate and Flip into one icon-button section"
 type: task
-status: review
+status: done
 priority: medium
 verification_report:
   verdict: blocker
@@ -47,9 +47,10 @@ labels:
   - ui
   - ux
 created: 2026-09-20T12:17:44.999Z
-updated: 2026-09-20T13:50:00.780Z
+updated: 2026-10-03T19:20:52.221Z
 depends_on:
   - KRMA-480
+blockers: []
 order: h
 board: product
 ---
@@ -73,6 +74,7 @@ Current implementation in `Sources/KromoraKit/Views/CropInspectorView.swift`: tw
 - Buttons are equal size and at least a comfortable click target (~28-32 pt); layout holds at the inspector's minimum width.
 - No behaviour change: callbacks (`onRotateCounterClockwise`, `onRotateClockwise`, `onFlipHorizontal`, `onFlipVertical`) and their crop/mask handling stay as they are.
 
+
 ## Acceptance criteria
 
 - [ ] "Rotate" and "Flip" sections are replaced by one "Rotate and Flip" section of four icon-only buttons.
@@ -90,6 +92,10 @@ Current implementation in `Sources/KromoraKit/Views/CropInspectorView.swift`: tw
 ### Comment — codex @ 2026-09-20T13:43:55.195Z
 
 Implemented in 16c10c1. Replaced separate Rotate and Flip sections with one "Rotate and Flip" row of four 32pt icon-only bordered buttons; preserved all callbacks and existing accessibility labels, added degree/direction tooltips, and retained flip On/Off accessibility values with accent tint. Dedicated flip.horizontal is selected only after an NSImage runtime availability probe; vertical rotates that glyph when present, otherwise both controls fall back to the existing macOS-safe arrow symbols. Captured and attached light/dark running-app screenshots: .dg/assets/KRMA-478/crop-light.png and crop-dark.png. Verification: swift build passed; scripts/ci-tests.sh fast passed (1090 tests); scripts/ci-tests.sh serial passed (390 tests, 1 expected skip, 0 failures); packaged app build/signature verification passed; git diff --check passed. The repository-wide swift-format script still reports pre-existing violations in unrelated files and untouched lines in CropInspectorView.swift.
+
+### Comment - human @ 2026-10-03
+
+Closing this ticket without further verification as it was fixed elsewhere. Will reopen if needed.
 
 ## Agent log
 

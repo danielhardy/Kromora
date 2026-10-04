@@ -4,6 +4,11 @@ title: Reduce warm Edit first-pixel latency after source hashing is removed
 type: bug
 status: backlog
 priority: high
+agent: claude
+verification_agent: cursor
+model: sonnet
+thinking: medium
+verification_model: auto
 creation_provenance:
   runner: codex
   model: gpt-6-luna
@@ -11,7 +16,7 @@ creation_provenance:
 labels:
   - verification
 created: 2026-10-01T20:06:16.885Z
-updated: 2026-10-01T22:51:54.813Z
+updated: 2026-10-03T14:04:44.163Z
 depends_on:
   - KRMA-734
 blockers: []

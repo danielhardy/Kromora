@@ -2,7 +2,7 @@
 id: KRMA-715
 title: Smooth out hesitation in slider value animations
 type: bug
-status: review
+status: done
 priority: medium
 creation_provenance:
   runner: codex
@@ -12,7 +12,7 @@ labels:
   - interaction
   - ui
 created: 2026-09-29T16:44:14.772Z
-updated: 2026-10-02T15:49:07.308Z
+updated: 2026-10-03T19:19:25.549Z
 blockers:
   - id: evt_mun4xehs_zc41fz
     type: human
@@ -98,3 +98,6 @@ KRMA-756 implementation update (commit 8b8c59e): the inspector now holds each sl
 ### Comment — codex @ 2026-10-02T15:49:07.307Z
 
 Release visual verification completed in the packaged Release app. Procedure: in Edit, switch from unedited DSC00969.ARW (+0.00 EV, +0 Contrast) to edited DSC01019.ARW (+0.88 EV, +11 Contrast). The Light inspector stayed mounted; sampled Exposure and Contrast knobs moved monotonically through an intermediate position to B, with no default-values frame or backward movement. The Release frame sequence is attached to KRMA-756 at .dg/assets/KRMA-756/krma-756-release-evidence.png. The earlier DSC03843.ARW source was not present in this local package, so DSC00969.ARW was used for A.
+
+### COmment - Human @ 2026-10-03
+Closing ticket as this has mostly be resolved with other performance updates.
