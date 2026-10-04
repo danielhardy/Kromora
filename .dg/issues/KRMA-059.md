@@ -9,7 +9,7 @@ labels:
   - epic:quality
   - phase:10
 created: 2026-08-30T18:30:37.650Z
-updated: 2026-09-26T13:56:42.254Z
+updated: 2026-10-04T23:20:54.696Z
 depends_on:
   - KRMA-058
   - KRMA-056
@@ -48,6 +48,10 @@ Part of **Epic 10 — Image quality, performance, and MVP release gate**. The so
 ## Out of scope
 
 - AI masks, healing, HDR/panorama merge, cloud sync, tethering, mobile, plugins, or catalog import.
+
+### Comment — codex @ 2026-10-04T23:20:54.695Z
+
+Acceptance note for KRMA-059: run the end-to-end acceptance pass against the signed, sandboxed Xcode Release build, not `swift run`. Follow [docs/APP_STORE_ACCEPTANCE.md](../../docs/APP_STORE_ACCEPTANCE.md) for commands, manual cases, expected results, and the results template.
 
 ## Agent log
 
