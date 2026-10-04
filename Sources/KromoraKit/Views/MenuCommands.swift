@@ -15,11 +15,13 @@ enum KromoraEditTransferShortcuts {
 }
 
 /// Shift+A applies Auto. Plain A already toggles the retouch visualization, so the shifted
-/// variant keeps both editor commands available without changing the existing gesture.
+/// variant keeps both editor commands available without changing the existing gesture. The menu
+/// title and shortcut reference share these labels; the menu deliberately has no key equivalent
+/// because AppKit resolves menu key equivalents before the text-input focus policy can defer them.
 enum KromoraAutoAdjustmentShortcut {
-    static let modifiers: EventModifiers = [.shift]
-    static let key: KeyEquivalent = "a"
     static let displayString = "⇧A"
+    static let menuTitle = "Apply Auto Edits (⇧A)"
+    static let referenceAction = "Apply Auto edits"
 }
 
 /// Kromora's File menu, replacing SwiftUI's default "New" group.
@@ -118,11 +120,7 @@ public struct KromoraCommands: Commands {
             Button("Reset Photo") { post(.resetPhoto) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
-            Button("Apply Auto Edits") { post(.applyAutoAdjustment) }
-                .keyboardShortcut(
-                    KromoraAutoAdjustmentShortcut.key,
-                    modifiers: KromoraAutoAdjustmentShortcut.modifiers
-                )
+            Button(KromoraAutoAdjustmentShortcut.menuTitle) { post(.applyAutoAdjustment) }
 
             Divider()
 

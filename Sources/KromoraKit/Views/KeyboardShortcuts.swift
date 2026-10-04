@@ -202,6 +202,17 @@ enum KeyMonitorPolicy {
         isPlainCharacterShortcut(modifiers: modifiers) && characters.lowercased() == "c"
     }
 
+    /// Shift+A applies Auto. Matching the exact modifier set keeps Option, Control, and Command
+    /// combinations available to AppKit and input sources; text responders are gated separately
+    /// by `globalShortcutsOwnKeyboard` before this policy is consulted.
+    static func isAutoAdjustmentShortcut(
+        characters: String, modifiers: NSEvent.ModifierFlags
+    ) -> Bool {
+        let shortcutModifiers = modifiers.intersection([.shift, .command, .option, .control])
+        return characters.lowercased() == "a"
+            && shortcutModifiers == .shift
+    }
+
     static func isArrowKey(_ keyCode: UInt16) -> Bool {
         keyCode == 123 || keyCode == 124 || keyCode == 125 || keyCode == 126
     }
@@ -431,6 +442,11 @@ final class KeyMonitor {
         // Character keys (key-down only)
         guard isDown, let chars = event.charactersIgnoringModifiers?.lowercased() else {
             return event
+        }
+        if KeyMonitorPolicy.isAutoAdjustmentShortcut(characters: chars, modifiers: mods) {
+            guard vm.canRunAutoAdjustment, !vm.isRetouchCanvasActive else { return event }
+            vm.runAutoAdjustment()
+            return nil
         }
         if let command = LibraryCullingCommand.parse(
             characters: chars, hasModifiers: !mods.isEmpty

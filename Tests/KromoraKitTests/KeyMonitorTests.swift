@@ -66,6 +66,18 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         }
     }
 
+    private func waitForAutoAvailability(in viewModel: AppViewModel) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !viewModel.canRunAutoAdjustment {
+            guard Date() < deadline else {
+                throw TestSynchronizationError.timedOut(
+                    "Auto to become available", "previewState=\(viewModel.previewState)"
+                )
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+    }
+
     private func keyEvent(
         _ type: NSEvent.EventType,
         keyCode: UInt16,
@@ -149,6 +161,90 @@ final class KeyMonitorTests: TempDirectoryTestCase {
         XCTAssertTrue(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: []))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .shift))
         XCTAssertFalse(KeyMonitorPolicy.isPlainCharacterShortcut(modifiers: .command))
+
+        XCTAssertTrue(KeyMonitorPolicy.isAutoAdjustmentShortcut(characters: "a", modifiers: .shift))
+        XCTAssertTrue(KeyMonitorPolicy.isAutoAdjustmentShortcut(characters: "A", modifiers: .shift))
+        XCTAssertFalse(KeyMonitorPolicy.isAutoAdjustmentShortcut(characters: "a", modifiers: []))
+        XCTAssertFalse(
+            KeyMonitorPolicy.isAutoAdjustmentShortcut(characters: "a", modifiers: [.shift, .command])
+        )
+        XCTAssertFalse(
+            KeyMonitorPolicy.isAutoAdjustmentShortcut(characters: "a", modifiers: [.shift, .option])
+        )
+    }
+
+    func testShiftAAutoShortcutDoesNothingWithoutAReadyPhoto() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let shiftedA = try keyEvent(
+            .keyDown, keyCode: 0, modifierFlags: .shift,
+            characters: "A", charactersIgnoringModifiers: "a"
+        )
+        let monitor = KeyMonitor(viewModel: viewModel, firstResponderProvider: { _ in nil })
+        defer { monitor.stop() }
+
+        XCTAssertNotNil(monitor.handle(shiftedA))
+        XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
+    }
+
+    func testShiftAAutoShortcutDefersToTextInputAndRunsOnAnEditablePhoto() async throws {
+        let viewModel = makeKeyboardViewModel(libraryName: "keyboard-auto")
+        viewModel.importPhotosData([try importedPhoto(named: "keyboard-auto.png")])
+        try await waitForSource("keyboard-auto.png", in: viewModel)
+        try await waitForAutoAvailability(in: viewModel)
+
+        let shiftedA = try keyEvent(
+            .keyDown, keyCode: 0, modifierFlags: .shift,
+            characters: "A", charactersIgnoringModifiers: "a"
+        )
+        let textView = NSTextView()
+        let textInputMonitor = KeyMonitor(
+            viewModel: viewModel,
+            firstResponderProvider: { _ in textView }
+        )
+        defer { textInputMonitor.stop() }
+
+        XCTAssertNotNil(textInputMonitor.handle(shiftedA))
+        XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
+
+        let textField = NSTextField()
+        let textFieldMonitor = KeyMonitor(
+            viewModel: viewModel,
+            firstResponderProvider: { _ in textField }
+        )
+        defer { textFieldMonitor.stop() }
+
+        XCTAssertNotNil(textFieldMonitor.handle(shiftedA))
+        XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
+
+        let globalMonitor = KeyMonitor(
+            viewModel: viewModel,
+            firstResponderProvider: { _ in nil }
+        )
+        defer { globalMonitor.stop() }
+
+        XCTAssertNil(globalMonitor.handle(shiftedA))
+        XCTAssertTrue(viewModel.isAutoAdjustmentInProgress)
+        await viewModel.waitForAutoAdjustmentCompletion()
+        XCTAssertTrue(viewModel.statusMessage.hasPrefix("Auto applied"))
+    }
+
+    func testShiftAAutoShortcutDoesNotRunInRetouchCanvas() async throws {
+        let viewModel = makeKeyboardViewModel(libraryName: "keyboard-auto-retouch")
+        viewModel.importPhotosData([try importedPhoto(named: "keyboard-auto-retouch.png")])
+        try await waitForSource("keyboard-auto-retouch.png", in: viewModel)
+        try await waitForAutoAvailability(in: viewModel)
+        viewModel.selectInspectorTab(.retouch)
+        XCTAssertTrue(viewModel.isRetouchCanvasActive)
+
+        let shiftedA = try keyEvent(
+            .keyDown, keyCode: 0, modifierFlags: .shift,
+            characters: "A", charactersIgnoringModifiers: "a"
+        )
+        let monitor = KeyMonitor(viewModel: viewModel, firstResponderProvider: { _ in nil })
+        defer { monitor.stop() }
+
+        XCTAssertNotNil(monitor.handle(shiftedA))
+        XCTAssertFalse(viewModel.isAutoAdjustmentInProgress)
     }
 
     func testPlainCommandCopyAndPasteRouteOnlyWhenGlobalSurfaceOwnsKeyboard() async throws {

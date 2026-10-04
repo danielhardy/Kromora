@@ -229,7 +229,7 @@ struct KeyboardShortcutReferenceView: View {
         Entry(action: "Undo / redo edit", keys: "⌘Z / ⇧⌘Z", area: "Edit"),
         Entry(action: "Reset photo", keys: "⇧⌘R", area: "Edit"),
         Entry(
-            action: "Apply Auto edits",
+            action: KromoraAutoAdjustmentShortcut.referenceAction,
             keys: KromoraAutoAdjustmentShortcut.displayString,
             area: "Edit"
         ),
