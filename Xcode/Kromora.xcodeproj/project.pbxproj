@@ -8,6 +8,8 @@
 /* Begin PBXBuildFile section */
 		A79400000000000000000001 /* KromoraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79400000000000000000002 /* KromoraApp.swift */; };
 		A79400000000000000000003 /* KromoraKit in Frameworks */ = {isa = PBXBuildFile; productRef = A79400000000000000000004 /* KromoraKit */; };
+		A79400000000000000000021 /* Kromora.icon in Resources */ = {isa = PBXBuildFile; fileRef = A79400000000000000000019 /* Kromora.icon */; };
+		A79400000000000000000022 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A79400000000000000000020 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -16,6 +18,8 @@
 		A79400000000000000000015 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
 		A79400000000000000000016 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		A79400000000000000000017 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		A79400000000000000000019 /* Kromora.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.icon; path = ../Kromora.icon; sourceTree = "<group>"; };
+		A79400000000000000000020 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -35,6 +39,7 @@
 			children = (
 				A79400000000000000000008 /* App */,
 				A79400000000000000000018 /* Config */,
+				A79400000000000000000019 /* Kromora.icon */,
 				A79400000000000000000009 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -43,6 +48,7 @@
 			isa = PBXGroup;
 			children = (
 				A79400000000000000000002 /* KromoraApp.swift */,
+				A79400000000000000000020 /* Assets.xcassets */,
 			);
 			path = ../App;
 			sourceTree = "<group>";
@@ -129,6 +135,8 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A79400000000000000000021 /* Kromora.icon in Resources */,
+				A79400000000000000000022 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -20,6 +20,7 @@ ENABLE_HARDENED_RUNTIME = YES
 
 // App Store metadata that Xcode generates into the merged Info.plist.
 INFOPLIST_KEY_CFBundleDisplayName = Kromora
+ASSETCATALOG_COMPILER_APPICON_NAME = Kromora
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.photography
 INFOPLIST_KEY_NSHumanReadableCopyright = Copyright © 2026 Tim; Copyright © 2026 Daniel Hardy
 INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
