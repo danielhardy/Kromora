@@ -16,10 +16,7 @@ labels:
   - privacy
   - xcode
 created: 2026-10-03T19:24:32.332Z
-updated: 2026-10-04T23:27:06.673Z
-depends_on:
-  - KRMA-785
-  - KRMA-796
+updated: 2026-10-04T23:31:14.559Z
 blockers:
   - id: evt_muu87p3p_w0fobg
     type: human
@@ -96,3 +93,8 @@ Implementation complete in b78b888c (KRMA-798: clarify native macOS privacy scop
 ### Comment — codex @ 2026-10-04T23:27:06.672Z
 
 Handoff record repaired: recorded implementation commit b78b888c; removed the stale failed-footprint and resolved Git-blocker fields. DispatchGraph verifier attempts at 23:16Z and 23:20Z were rejected because KRMA-806 held the shared-worktree claim through 00:16Z. KRMA-798 remains in verification pending an available shared workspace.
+
+
+### Comment — codex @ 2026-10-04T23:31:14.558Z
+
+Dependency cleanup: KRMA-785 and KRMA-796 are already done; their stale links made DispatchGraph report KRMA-798 as dependency-blocked. Removed those fulfilled links. The issue now reports no blockers; verification still needs the shared-worktree claim held by KRMA-806 to be released.
