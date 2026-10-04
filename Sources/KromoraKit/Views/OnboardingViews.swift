@@ -228,6 +228,11 @@ struct KeyboardShortcutReferenceView: View {
         Entry(action: "Rate photo", keys: "0–5", area: "Library"),
         Entry(action: "Undo / redo edit", keys: "⌘Z / ⇧⌘Z", area: "Edit"),
         Entry(action: "Reset photo", keys: "⇧⌘R", area: "Edit"),
+        Entry(
+            action: "Apply Auto edits",
+            keys: KromoraAutoAdjustmentShortcut.displayString,
+            area: "Edit"
+        ),
         Entry(action: "Show original", keys: "Space or ⌘\\", area: "Edit"),
         Entry(action: "Toggle comparison", keys: "V", area: "Edit"),
         Entry(action: "Export edited photo", keys: "⌘S", area: "Edit")

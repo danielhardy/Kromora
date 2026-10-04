@@ -14,6 +14,14 @@ enum KromoraEditTransferShortcuts {
     static let pasteKey: KeyEquivalent = "v"
 }
 
+/// Shift+A applies Auto. Plain A already toggles the retouch visualization, so the shifted
+/// variant keeps both editor commands available without changing the existing gesture.
+enum KromoraAutoAdjustmentShortcut {
+    static let modifiers: EventModifiers = [.shift]
+    static let key: KeyEquivalent = "a"
+    static let displayString = "⇧A"
+}
+
 /// Kromora's File menu, replacing SwiftUI's default "New" group.
 ///
 /// One of two entry points KromoraKit exposes to the executable (the other is
@@ -110,6 +118,12 @@ public struct KromoraCommands: Commands {
             Button("Reset Photo") { post(.resetPhoto) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
 
+            Button("Apply Auto Edits") { post(.applyAutoAdjustment) }
+                .keyboardShortcut(
+                    KromoraAutoAdjustmentShortcut.key,
+                    modifiers: KromoraAutoAdjustmentShortcut.modifiers
+                )
+
             Divider()
 
             Button("Copy Edits…") { post(.selectiveCopy) }
@@ -166,6 +180,7 @@ struct MenuCommandReceivers: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .modifier(AutoAdjustmentCommandReceiver(viewModel: viewModel))
             .modifier(FileMenuCommandReceiver(viewModel: viewModel))
             .modifier(SelectiveCopyMenuCommandReceiver(viewModel: viewModel))
             .modifier(ViewMenuCommandReceivers(viewModel: viewModel))
@@ -227,6 +242,16 @@ private struct FileMenuCommandReceiver: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .saveLook)) { _ in
                 viewModel.presentSaveLook()
             }
+    }
+}
+
+private struct AutoAdjustmentCommandReceiver: ViewModifier {
+    @ObservedObject var viewModel: AppViewModel
+
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .applyAutoAdjustment)) { _ in
+            viewModel.runAutoAdjustment()
+        }
     }
 }
 
@@ -300,6 +325,7 @@ extension Notification.Name {
     static let undoEdit = Notification.Name("Kromora.undoEdit")
     static let redoEdit = Notification.Name("Kromora.redoEdit")
     static let resetPhoto = Notification.Name("Kromora.resetPhoto")
+    static let applyAutoAdjustment = Notification.Name("Kromora.applyAutoAdjustment")
     /// Notification used by the View menu command to clear a committed rotation.
     static let resetRotation = Notification.Name("Kromora.resetRotation")
     static let toggleInspector = Notification.Name("Kromora.toggleInspector")

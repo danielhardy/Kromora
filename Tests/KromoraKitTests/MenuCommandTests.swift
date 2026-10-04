@@ -32,6 +32,55 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertEqual(KromoraEditTransferShortcuts.pasteKey, "v")
     }
 
+    func testAutoEditCommandUsesShiftAAndRoutesToExistingBehavior() throws {
+        XCTAssertEqual(KromoraAutoAdjustmentShortcut.key, "a")
+        XCTAssertEqual(KromoraAutoAdjustmentShortcut.modifiers, [.shift])
+        XCTAssertEqual(KromoraAutoAdjustmentShortcut.displayString, "⇧A")
+        XCTAssertEqual(
+            Notification.Name.applyAutoAdjustment.rawValue,
+            "Kromora.applyAutoAdjustment"
+        )
+
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // KromoraKitTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // package root
+        let menuCommands = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Sources/KromoraKit/Views/MenuCommands.swift"
+            ),
+            encoding: .utf8
+        )
+        let shortcutReference = try String(
+            contentsOf: packageRoot.appendingPathComponent(
+                "Sources/KromoraKit/Views/OnboardingViews.swift"
+            ),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(
+            menuCommands.contains("Button(\"Apply Auto Edits\") { post(.applyAutoAdjustment) }")
+        )
+        XCTAssertTrue(menuCommands.contains("KromoraAutoAdjustmentShortcut.key"))
+        XCTAssertTrue(menuCommands.contains("KromoraAutoAdjustmentShortcut.modifiers"))
+        XCTAssertTrue(
+            menuCommands.contains(".modifier(AutoAdjustmentCommandReceiver(viewModel: viewModel))")
+        )
+        let autoReceiver = try XCTUnwrap(
+            menuCommands.components(separatedBy: "private struct AutoAdjustmentCommandReceiver")
+                .dropFirst().first?
+                .components(separatedBy: "private struct ExternalExportCommandReceiver")
+                .first
+        )
+        XCTAssertTrue(
+            autoReceiver.contains(".onReceive(NotificationCenter.default.publisher(for: .applyAutoAdjustment))")
+                && autoReceiver.contains("viewModel.runAutoAdjustment()"),
+            "the menu command must route through the existing Auto edit operation"
+        )
+        XCTAssertTrue(shortcutReference.contains("action: \"Apply Auto edits\""))
+        XCTAssertTrue(shortcutReference.contains("keys: KromoraAutoAdjustmentShortcut.displayString"))
+    }
+
     func testLookFolderMenuUsesTheCanonicalLookRoute() {
         XCTAssertEqual(Notification.Name.chooseLookFolder.rawValue, "Kromora.chooseLookFolder")
         XCTAssertEqual(Notification.Name.importLook.rawValue, "Kromora.importLook")
