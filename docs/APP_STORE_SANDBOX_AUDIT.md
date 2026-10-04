@@ -295,22 +295,15 @@ inspect effective entitlements:
 
 | Surface | Current call sites | App Store disposition |
 | --- | --- | --- |
-| GitHub Releases API | `KromoraReleaseFeed.fetchLatest` sends a `URLSession.data(for:)` request to `https://api.github.com/repos/danielhardy/Kromora/releases/latest`. [`ReleaseFeed.swift`:48-60](../Sources/KromoraKit/Models/ReleaseFeed.swift) | Compiled only when `KROMORA_DIRECT_DISTRIBUTION=1`; normal SwiftPM and Xcode builds omit the updater. KRMA-786 removes the updater call sites and flag, and KRMA-787 deletes the implementation. After those tickets there is no app-owned network request. [`Package.swift`:5-10](../Package.swift), KRMA-786, KRMA-787 |
-| Release asset download | `KromoraUpdateInstaller.download` downloads the HTTPS `.dmg` URL returned by the release API with `URLSession.download(for:)`. [`UpdateInstaller.swift`:85-99](../Sources/KromoraKit/Presentation/UpdateInstaller.swift) | Same direct-distribution-only updater path; removed with KRMA-787. |
-| User-opened web links | The About view exposes the LUTzy and Kromora GitHub pages; SwiftUI link handling opens them in the user's browser. [`KromoraAboutView.swift`:94-95](../Sources/KromoraKit/Views/KromoraAboutView.swift) The updater also opens a release page through `NSWorkspace`. [`UpdateCoordinator.swift`:46, 99-101](../Sources/KromoraKit/ViewModels/UpdateCoordinator.swift) | These are explicit browser handoffs, not in-process network calls. The About links remain after updater removal; the updater release-page handoff is removed with KRMA-786/787. Browser navigation does not require the app's network-client entitlement. |
+| App-initiated network requests | No production app-source calls to `URLSession` or other network APIs were found. | No app-owned network request is part of the current product. |
+| User-opened web links | The About view exposes the LUTzy and Kromora GitHub pages; SwiftUI link handling opens them in the user's browser. [`KromoraAboutView.swift`:94-95](../Sources/KromoraKit/Views/KromoraAboutView.swift) | These are explicit browser handoffs, not in-process network calls. Browser navigation does not require the app's network-client entitlement. |
 
-The `Process()` grep in app sources finds two constructions, both in the updater: a `/bin/sh`
-relaunch helper and `/usr/bin/hdiutil` execution. [`UpdateInstaller.swift`:206-212, 249-264](../Sources/KromoraKit/Presentation/UpdateInstaller.swift)
-No `dlopen`, `dlsym`, `Bundle.load`, XPC helper, or other dynamic host-code loader was found in app
-sources. No helper app or embedded third-party framework/executable is declared. `Package.swift`
-links the Apple Accelerate, Photos, PhotosUI, and Vision frameworks. The KromoraKit resources do
-include `KromoraCIKernels.ci.metallib` and `KromoraPresentation.metallib`; these are compiled Metal
-shader libraries consumed by Core Image/Metal, not host executables or helper processes.
-[`Package.swift`:131-140](../Package.swift), [`Sources/KromoraKit/Resources`](../Sources/KromoraKit/Resources)
-
-After KRMA-786 and KRMA-787, the updater is the only source of subprocess launches and app-owned
-network requests, so both inventories become empty. The About browser links remain. The
-`com.apple.security.network.client` entitlement can then be removed.
+No `Process()`, `dlopen`, `dlsym`, `Bundle.load`, XPC helper, or other dynamic host-code loader was
+found in app sources. No helper app or embedded third-party framework/executable is declared.
+`Package.swift` links the Apple Accelerate, Photos, PhotosUI, and Vision frameworks. The KromoraKit
+resources include `KromoraCIKernels.ci.metallib` and `KromoraPresentation.metallib`; these are
+compiled Metal shader libraries consumed by Core Image/Metal, not host executables or helper
+processes. [`Package.swift`:131-140](../Package.swift), [`Sources/KromoraKit/Resources`](../Sources/KromoraKit/Resources)
 
 ### KromoraKit resource bundle resolution
 
@@ -349,7 +342,7 @@ categories and codes](https://developer.apple.com/documentation/bundleresources/
 
 | Category | Exhaustive source evidence | Applicable reason for the privacy-manifest ticket |
 | --- | --- | --- |
-| `NSPrivacyAccessedAPICategoryUserDefaults` | [`KromoraSettings.swift`:89-207, 298, 394-444](../Sources/KromoraKit/Models/KromoraSettings.swift); [`LUTLibrary.swift`:178-181, 227-267, 492-493](../Sources/KromoraKit/Models/LUTLibrary.swift); [`AppViewModel.swift`:426, 873, 998, 1248](../Sources/KromoraKit/ViewModels/AppViewModel.swift); [`ContentView.swift`:17](../Sources/KromoraKit/Views/ContentView.swift) and [`OnboardingViews.swift`:299](../Sources/KromoraKit/Views/OnboardingViews.swift) use SwiftUI `@AppStorage`; updater-only [`UpdateCoordinator.swift`:31, 42, 58-69](../Sources/KromoraKit/ViewModels/UpdateCoordinator.swift). | `CA92.1` — app-private preferences and bookmarks. The updater-only use disappears with KRMA-787; the other app settings remain. |
+| `NSPrivacyAccessedAPICategoryUserDefaults` | [`KromoraSettings.swift`:89-207, 298, 394-444](../Sources/KromoraKit/Models/KromoraSettings.swift); [`LUTLibrary.swift`:178-181, 227-267, 492-493](../Sources/KromoraKit/Models/LUTLibrary.swift); [`AppViewModel.swift`:426, 873, 998, 1248](../Sources/KromoraKit/ViewModels/AppViewModel.swift); [`ContentView.swift`:17](../Sources/KromoraKit/Views/ContentView.swift) and [`OnboardingViews.swift`:299](../Sources/KromoraKit/Views/OnboardingViews.swift) use SwiftUI `@AppStorage`. | `CA92.1` — app-private preferences and bookmarks. |
 | `NSPrivacyAccessedAPICategoryFileTimestamp` | [`PhotoAsset.swift`:101-108](../Sources/KromoraKit/Models/PhotoAsset.swift) reads a source file's size and modification date; [`ImageSource.swift`:258-267](../Sources/KromoraKit/Models/ImageSource.swift) reads size and modification date for a URL-backed source trace; [`PortablePackageMaintenance.swift`:168-170](../Sources/KromoraKit/Models/PortablePackageMaintenance.swift) reads the thumbnail index stamp; [`LatestPreviewFrameStore.swift`:359, 394-401, 473-487](../Sources/KromoraKit/Models/LatestPreviewFrameStore.swift) writes and reads preview-cache modification dates and file sizes. | `3B52.1` is a candidate for metadata of source files specifically granted through a file/folder panel. **Needs review** for URL-backed fingerprint/trace calls that may inspect package-managed files, and for the thumbnail index and preview-cache timestamps: Kromora's library package is in Pictures, outside the app container described by `C617.1`; these call sites are not limited to a document-picker grant. KRMA-798 should confirm the reason fits Apple's permitted scope before adding it. |
 | `NSPrivacyAccessedAPICategorySystemBootTime` | [`NeutralOriginSlider.swift`:210, 220, 271, 280, 291](../Sources/KromoraKit/Views/NeutralOriginSlider.swift) reads `ProcessInfo.systemUptime` for in-app slider animation/timing. | `35F9.1` — measure elapsed time between in-app events and support timers. |
 | `NSPrivacyAccessedAPICategoryDiskSpace` | No current app-source calls to `volumeAvailableCapacity*`, `volumeTotalCapacityKey`, `systemFreeSize`, `systemSize`, `statfs`, or `statvfs` were found. `.fileSizeKey` call sites above read individual file metadata, not free/total volume capacity. | No reason to declare unless a broader dependency/binary audit finds an additional use. |
@@ -370,11 +363,11 @@ describe the app's use and derived data, not merely match a symbol name.
 | `com.apple.security.files.removable-media.read-only` | Keep enabled. | Mounted camera-card discovery and source-image reads are current import paths; imports copy into the Pictures library and do not write to the card. |
 | `com.apple.security.files.bookmarks.app-scope` | Keep enabled. | Settings and the Look library persist app-scoped bookmarks for user-selected external folders and files. |
 | `com.apple.security.assets.pictures.read-write` | Keep enabled. | The default library package, default exports, and app-owned Looks live under Pictures. |
-| `com.apple.security.network.client` | Remove after updater deletion. | Its only in-process use is the direct-distribution GitHub updater; no app-owned network request remains after KRMA-786/787. |
+| `com.apple.security.network.client` | Do not declare. | No app-owned network request is part of the current product; user-opened browser links use the system browser. |
 
-Thus, the minimal final set is the five retained entitlements above. The only current entitlement to
-remove is `com.apple.security.network.client`; no Photos entitlement is needed because PhotosPicker
-and PhotoKit use their system-mediated selection/authorization paths.
+Thus, the minimal final set is the five retained entitlements above; the network-client entitlement
+is not part of that set. No Photos entitlement is needed because PhotosPicker and PhotoKit use their
+system-mediated selection/authorization paths.
 
 ### Usage strings and linked follow-ups
 
@@ -384,7 +377,6 @@ and PhotoKit use their system-mediated selection/authorization paths.
 | Other protected-resource usage strings | Add none. File access is handled through standard panels/bookmarks and entitlements; there are no camera, microphone, location, Contacts, Calendars, or Apple Events APIs. | No new issue. |
 | `PrivacyInfo.xcprivacy` | Declare app-private `UserDefaults` (`CA92.1`) and in-app timing (`35F9.1`); have the manifest implementation ticket resolve file-timestamp scope. Do not declare disk-space or active-keyboard categories absent new evidence. | KRMA-798 |
 | Xcode resource-bundle location | Inspect the archived/signed `.app` and verify KromoraKit resource lookup finds the SwiftPM bundle and required resources. | KRMA-813 |
-| Updater network/process code | Remove the update feature and its direct-distribution compile path, then drop network-client entitlement. | KRMA-786 and KRMA-787 under KRMA-809 |
 
 No new blocker or should-fix was identified beyond these existing linked App Store workstream
 issues. Sections 1 and 2 above are unchanged from the earlier file and sandbox audits.
