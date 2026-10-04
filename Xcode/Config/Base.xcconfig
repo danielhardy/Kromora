@@ -1,0 +1,17 @@
+// App identity used in Finder and by distribution signing.
+PRODUCT_NAME = Kromora
+PRODUCT_BUNDLE_IDENTIFIER = com.last8.kromora.photo
+
+// The supported platform and architecture for the macOS app.
+MACOSX_DEPLOYMENT_TARGET = 26.0
+ARCHS = arm64
+
+// The app's user-facing marketing version and monotonically increasing build number.
+MARKETING_VERSION = 0.1
+CURRENT_PROJECT_VERSION = 1
+
+// The standalone Xcode launcher uses Swift 6; package compiler settings remain in Package.swift.
+SWIFT_VERSION = 6.0
+
+// Generate the target's Info.plist using Xcode's build settings.
+GENERATE_INFOPLIST_FILE = YES

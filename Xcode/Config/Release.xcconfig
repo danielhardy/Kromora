@@ -1,0 +1,6 @@
+#include "Base.xcconfig"
+
+// Optimize Release builds, emit a dSYM, and disable test-only access.
+SWIFT_OPTIMIZATION_LEVEL = -O
+DEBUG_INFORMATION_FORMAT = dwarf-with-dsym
+ENABLE_TESTABILITY = NO

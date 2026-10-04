@@ -13,6 +13,9 @@
 /* Begin PBXFileReference section */
 		A79400000000000000000002 /* KromoraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KromoraApp.swift; sourceTree = "<group>"; };
 		A79400000000000000000005 /* Kromora.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kromora.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A79400000000000000000015 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		A79400000000000000000016 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		A79400000000000000000017 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -31,6 +34,7 @@
 			isa = PBXGroup;
 			children = (
 				A79400000000000000000008 /* App */,
+				A79400000000000000000018 /* Config */,
 				A79400000000000000000009 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -49,6 +53,16 @@
 				A79400000000000000000005 /* Kromora.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A79400000000000000000018 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				A79400000000000000000015 /* Base.xcconfig */,
+				A79400000000000000000016 /* Debug.xcconfig */,
+				A79400000000000000000017 /* Release.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -134,31 +148,19 @@
 /* Begin XCBuildConfiguration section */
 		A79400000000000000000011 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A79400000000000000000016 /* Debug.xcconfig */;
 			buildSettings = {
-				ARCHS = arm64;
-				CODE_SIGNING_ALLOWED = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.kromora.app;
-				PRODUCT_NAME = Kromora;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
-				SWIFT_VERSION = 6.0;
 			};
 			name = Debug;
 		};
 		A79400000000000000000012 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A79400000000000000000017 /* Release.xcconfig */;
 			buildSettings = {
-				ARCHS = arm64;
-				CODE_SIGNING_ALLOWED = NO;
-				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.kromora.app;
-				PRODUCT_NAME = Kromora;
 				SDKROOT = macosx;
 				SUPPORTED_PLATFORMS = macosx;
-				SWIFT_VERSION = 6.0;
 			};
 			name = Release;
 		};
@@ -168,7 +170,6 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				SDKROOT = macosx;
 			};
 			name = Debug;
@@ -179,7 +180,6 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				SDKROOT = macosx;
 			};
 			name = Release;

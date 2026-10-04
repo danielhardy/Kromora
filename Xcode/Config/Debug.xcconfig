@@ -1,0 +1,6 @@
+#include "Base.xcconfig"
+
+// Keep Debug builds unoptimized, with symbols suitable for local debugging and testability.
+SWIFT_OPTIMIZATION_LEVEL = -Onone
+DEBUG_INFORMATION_FORMAT = dwarf
+ENABLE_TESTABILITY = YES
