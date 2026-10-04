@@ -13,6 +13,29 @@ info_path, entitlements_path = map(pathlib.Path, sys.argv[1:])
 info = plistlib.loads(info_path.read_bytes())
 entitlements = plistlib.loads(entitlements_path.read_bytes())
 
+expected_security_entitlements = {
+    "com.apple.security.app-sandbox": True,
+    "com.apple.security.files.user-selected.read-write": True,
+    "com.apple.security.files.removable-media.read-only": True,
+    "com.apple.security.files.bookmarks.app-scope": True,
+    "com.apple.security.assets.pictures.read-write": True,
+}
+security_entitlements = {
+    key: value for key, value in entitlements.items() if key.startswith("com.apple.security.")
+}
+missing = sorted(expected_security_entitlements.keys() - security_entitlements.keys())
+unexpected = sorted(security_entitlements.keys() - expected_security_entitlements.keys())
+incorrect = {
+    key: {"actual": security_entitlements[key], "expected": expected_security_entitlements[key]}
+    for key in expected_security_entitlements.keys() & security_entitlements.keys()
+    if security_entitlements[key] is not expected_security_entitlements[key]
+}
+if missing or unexpected or incorrect:
+    raise SystemExit(
+        "source App Sandbox entitlements do not match the expected set: "
+        f"missing={missing}, unexpected={unexpected}, incorrect={incorrect}"
+    )
+
 photos_usage_description = info.get("NSPhotoLibraryUsageDescription")
 if not isinstance(photos_usage_description, str) or not photos_usage_description.strip():
     raise SystemExit("Photos library usage description is missing or empty")
@@ -39,8 +62,5 @@ if not any(
 ):
     raise SystemExit("Kromora Library UTI declaration is missing package/extension metadata")
 
-if entitlements.get("com.apple.security.assets.pictures.read-write") is not True:
-    raise SystemExit("Pictures read-write entitlement is missing")
-
-print("verified Photos usage description, Kromora Library package declaration, and Pictures entitlement")
+print("verified Photos usage description, Kromora Library package declaration, and exact App Sandbox entitlement set")
 PY

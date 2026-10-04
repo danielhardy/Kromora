@@ -29,11 +29,22 @@ expected = {
     "com.apple.security.files.removable-media.read-only": True,
     "com.apple.security.files.bookmarks.app-scope": True,
     "com.apple.security.assets.pictures.read-write": True,
-    "com.apple.security.network.client": True,
 }
-for key, value in expected.items():
-    if entitlements.get(key) != value:
-        raise SystemExit(f"entitlement {key!r} is {entitlements.get(key)!r}, expected {value!r}")
+security_entitlements = {
+    key: value for key, value in entitlements.items() if key.startswith("com.apple.security.")
+}
+missing = sorted(expected.keys() - security_entitlements.keys())
+unexpected = sorted(security_entitlements.keys() - expected.keys())
+incorrect = {
+    key: {"actual": security_entitlements[key], "expected": expected[key]}
+    for key in expected.keys() & security_entitlements.keys()
+    if security_entitlements[key] is not expected[key]
+}
+if missing or unexpected or incorrect:
+    raise SystemExit(
+        "embedded App Sandbox entitlements do not match the expected set: "
+        f"missing={missing}, unexpected={unexpected}, incorrect={incorrect}"
+    )
 
 print(f"verified strict code signature and {len(expected)} expected entitlements on {app_dir}")
 PY

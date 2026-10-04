@@ -17,77 +17,18 @@ verify the packaged `CFBundleIconName`, resource presence, and rendered outputs 
 ## Signing and entitlements
 
 [`scripts/verify-app-signature.sh`](../scripts/verify-app-signature.sh) checks the packaged
-signature and expected entitlements. Local and CI structural builds may use an ad-hoc signature;
-distribution builds must provide the configured signing identity and provisioning profile through
-the build environment. App Sandbox remains enabled, with user-selected file access, removable-media
-read access, and app-scope bookmarks as declared in
+signature and exact App Sandbox entitlement set. Local and CI structural builds may use an ad-hoc
+signature; distribution builds must provide the configured signing identity and provisioning
+profile through the build environment. The five declared capabilities are app sandbox,
+user-selected file read/write, read-only removable-media access, app-scope bookmarks, and Pictures
+read/write, as declared in
 [`Sources/Kromora/Kromora.entitlements`](../Sources/Kromora/Kromora.entitlements).
 
-The zero-dependency updater contacts only
-`https://api.github.com/repos/danielhardy/Kromora/releases/latest` and the HTTPS URL of the
-selected release DMG. The network client entitlement is required for those outbound requests in a
-sandboxed app; no server-side update service or telemetry endpoint is used. Automatic checks run at
-most once every 24 hours and stay quiet for network failures. Manual checks report failures and can
-open the release page.
-
-Before an in-place install, the updater mounts the DMG read-only and verifies the embedded
-`Kromora.app` against the running app's Developer ID Team ID and bundle identifier with strict
-nested code-signature validation. After copying the app to a sibling staging directory, it repeats
-that verification on the staged copy before moving the running app, so a failed copy is discarded
-without changing the installed app. Unsigned development builds cannot replace themselves.
-
-The updater passes `-noverify` to `hdiutil attach` to skip hdiutil's DMG-level verification. The
-installer independently verifies the app inside the image with `SecStaticCode`, requiring Apple
-Developer ID signing and matching the running app's Team ID and bundle identifier, with strict
-nested-code validation. The DMG container itself is not treated as the trust boundary.
-
-### Sandboxed updater validation
-
-**Result: in-place install does not work under App Sandbox. This is permanent, not a missing
-credential.** `canInstallInPlace` returns `false` unconditionally and must stay that way; the
-update sheet always opens the release page for the user to install manually.
-
-Tested 2026-09-23 on macOS (Team ID `FNB49PXFFU`, bundle identifier `com.last8.kromora.photo`)
-with a real Developer ID Application identity, a matching Developer ID provisioning profile, and
-a notarization credential all configured and working (confirmed by a full, real
-`scripts/release-dmg.sh` run: signed, notarized, stapled, and verified end to end).
-
-Test method: a minimal signed, sandboxed, entitled macOS app (same entitlements as
-`Kromora.entitlements`, same Developer ID identity, embedded provisioning profile, installed at
-`/Applications`, launched normally via `open` so App Sandbox is actually enforced) called the
-production `KromoraUpdateInstaller.mount(_:)` against a real release DMG bundled in its own
-Resources. Result, reproduced twice:
-
-```
-mountFailed("hdiutil: attach failed - Device not configured")
-```
-
-The same DMG mounts successfully with the identical `hdiutil attach` invocation run unsandboxed
-from a normal Terminal session, isolating the cause to App Sandbox itself: `hdiutil attach`
-requires opening a block device node, which Seatbelt denies to sandboxed processes. This is a
-platform-level restriction with no matching entitlement to request — there is no sandbox
-temporary-exception entitlement that grants disk-image attach. Apple's own guidance treats
-disk-image mounting as outside what App Sandbox permits; this is consistent with why sandboxed
-apps distributed via Developer ID direct-download conventionally rely on the user dragging the
-`.app` from the mounted DMG rather than any self-updating in-place install.
-
-Because the failure occurs at `hdiutil attach` — the very first step of `install(_:)`, before the
-staged-copy verification or the `/Applications` writability check are ever reached — those two
-questions (whether App Sandbox would separately permit writing into `/Applications`) are moot:
-the update path cannot get far enough to test them, and no entitlement change can fix the
-`hdiutil` restriction. Shipping behavior is and should remain: the update sheet always routes to
-the release page, and the user drags the new `Kromora.app` from the mounted DMG onto the
-`Applications` shortcut, same as first install.
-
-If a future macOS release changes this restriction, or if the updater is redesigned to avoid
-`hdiutil attach` entirely (for example, verifying and copying the app directly out of a
-downloaded `.zip` instead of a `.dmg`, which needs no block device), re-run this test before
-re-enabling `canInstallInPlace`.
-
-The GitHub updater is compiled only for direct-download releases. `release-dmg.sh` sets
-`KROMORA_DIRECT_DISTRIBUTION=1` before invoking the app build; ordinary SwiftPM/Xcode builds omit
-that flag and therefore omit the updater, its menu/settings UI, and its DMG installer entirely.
-App Store archives should continue to use Xcode's App Store Connect distribution workflow.
+The Pictures entitlement covers the default library package, exports, and app-owned Looks under
+Pictures. Removable-media read access supports mounted camera-card discovery and image imports;
+imported files are copied into the library package. The app makes no direct network requests and
+does not request the network client entitlement. Photos import and delivery use the system Photos
+picker and PhotoKit authorization paths.
 
 For a distributable build, use Xcode 27 or newer with the macOS 27 SDK. The package and app deploy
 to macOS 26 (Tahoe); keep API usage compatible with that deployment floor.
@@ -126,7 +67,7 @@ the DMG itself. It verifies the final mounted DMG, including the executable, pli
 bundle, and expected entitlements. Any failed signing, notarization, stapling, or structure check
 removes the incomplete release output.
 
-For local updater/artifact dry-runs, use `KROMORA_SKIP_NOTARIZE=1`. This skips all Apple notary
+For local artifact dry-runs, use `KROMORA_SKIP_NOTARIZE=1`. This skips all Apple notary
 round-trips, defaults to an ad-hoc signature when no identity is supplied, and still signs and
 verifies both the app and DMG:
 
