@@ -4,7 +4,7 @@ set -euo pipefail
 project_root="${0:A:h}/.."
 cd "$project_root"
 
-python3 - "Sources/Kromora/Info.plist" "Sources/Kromora/Kromora.entitlements" <<'PY'
+python3 - "App/Info.plist" "App/Kromora.entitlements" <<'PY'
 import pathlib
 import plistlib
 import sys

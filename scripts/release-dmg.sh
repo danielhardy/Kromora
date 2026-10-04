@@ -31,8 +31,8 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-info_plist="Sources/Kromora/Info.plist"
-entitlements="Sources/Kromora/Kromora.entitlements"
+info_plist="App/Info.plist"
+entitlements="App/Kromora.entitlements"
 app_bundle=".build/Kromora.app"
 release_dir="${KROMORA_RELEASE_DIR:-.build/releases}"
 skip_notarize="${KROMORA_SKIP_NOTARIZE:-0}"

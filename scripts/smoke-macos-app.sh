@@ -31,7 +31,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-/usr/bin/sips -s format png -z 256 256 Sources/Kromora/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
+/usr/bin/sips -s format png -z 256 256 App/Branding/KromoraIcon.svg --out "$input_png" >/dev/null
 open -n "$app_bundle"
 
 for _ in {1..30}; do

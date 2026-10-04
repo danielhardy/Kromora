@@ -119,7 +119,7 @@ do {
 // Kromora is split into a library plus a thin `@main` executable so the app's own
 // code can be unit-tested: `@testable` cannot import an executable target.
 // Everything of substance lives in KromoraKit; the Kromora target is just the entry
-// point, the app delegate, and the asset catalog.
+// point and app delegate. Production packaging inputs live in App/.
 let package = Package(
     name: "Kromora",
     platforms: [.macOS(.v26)],
@@ -142,11 +142,6 @@ let package = Package(
         .executableTarget(
             name: "Kromora",
             dependencies: ["KromoraKit"],
-            // The asset catalog and entitlements belong to the bundled app
-            // packaging phase. Branding is likewise an input to that phase,
-            // not Swift source; scripts/build-macos-app.sh consumes the
-            // entitlements explicitly when signing the completed bundle.
-            exclude: ["Assets.xcassets", "Branding", "Info.plist", "Kromora.entitlements"],
             swiftSettings: distributionSwiftSettings + [.swiftLanguageMode(.v6)]
         ),
         .testTarget(

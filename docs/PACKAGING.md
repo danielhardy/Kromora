@@ -22,7 +22,7 @@ signature; distribution builds must provide the configured signing identity and 
 profile through the build environment. The five declared capabilities are app sandbox,
 user-selected file read/write, read-only removable-media access, app-scope bookmarks, and Pictures
 read/write, as declared in
-[`Sources/Kromora/Kromora.entitlements`](../Sources/Kromora/Kromora.entitlements).
+[`App/Kromora.entitlements`](../App/Kromora.entitlements).
 
 The Pictures entitlement covers the default library package, exports, and app-owned Looks under
 Pictures. Removable-media read access supports mounted camera-card discovery and image imports;
