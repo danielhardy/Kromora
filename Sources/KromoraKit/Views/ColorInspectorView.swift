@@ -427,6 +427,75 @@ private struct ColorValueRow: View {
     }
 }
 
+/// The rasterized hue field, with each pixel mapped through the persisted wheel convention.
+struct ColorGradingWheelDisc: View {
+    private static let rasterSide = 512
+    private static let rasterImage = makeRasterImage()
+
+    var body: some View {
+        Canvas { context, size in
+            let diameter = min(size.width, size.height)
+            guard diameter > 0 else { return }
+
+            let rect = CGRect(
+                x: (size.width - diameter) / 2,
+                y: (size.height - diameter) / 2,
+                width: diameter,
+                height: diameter
+            )
+            context.draw(Image(decorative: Self.rasterImage, scale: 1), in: rect)
+        }
+        .accessibilityHidden(true)
+    }
+
+    private static func makeRasterImage() -> CGImage {
+        let side = rasterSide
+        let center = Double(side) / 2
+        let radius = center
+        var pixels = [UInt8](repeating: 0, count: side * side * 4)
+
+        for row in 0..<side {
+            for column in 0..<side {
+                let wheel = ColorGradingWheelMapping.wheel(
+                    at: ColorGradingWheelPoint(
+                        x: (Double(column) + 0.5 - center) / radius,
+                        y: (center - Double(row) - 0.5) / radius
+                    )
+                )
+                guard wheel.saturation > 0 else { continue }
+
+                let color = ColorGradingWheelPalette.rgb(forHueDegrees: wheel.hue)
+                let offset = (row * side + column) * 4
+                pixels[offset] = UInt8((color.red * 255).rounded())
+                pixels[offset + 1] = UInt8((color.green * 255).rounded())
+                pixels[offset + 2] = UInt8((color.blue * 255).rounded())
+                pixels[offset + 3] = 255
+            }
+        }
+
+        let data = Data(pixels)
+        guard let provider = CGDataProvider(data: data as CFData),
+            let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+            let image = CGImage(
+                width: side,
+                height: side,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: side * 4,
+                space: colorSpace,
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: true,
+                intent: .defaultIntent
+            )
+        else {
+            preconditionFailure("Could not create the color-grading wheel palette image")
+        }
+        return image
+    }
+}
+
 /// A compact Resolve-inspired hue/saturation wheel. The model owns the polar conversion so the
 /// visual control and numeric fields always round-trip through precisely the same stored values.
 private struct ColorGradingWheelControl: View {
@@ -453,11 +522,7 @@ private struct ColorGradingWheelControl: View {
                 )
 
                 ZStack {
-                    Circle()
-                        .fill(AngularGradient(
-                            colors: [.red, .yellow, .green, .cyan, .blue, .purple, .red],
-                            center: .center
-                        ))
+                    ColorGradingWheelDisc()
                     Circle()
                         .fill(RadialGradient(
                             colors: [.white.opacity(0.94), .white.opacity(0.42), .clear],

@@ -114,6 +114,55 @@ final class ColorGradingTests: XCTestCase {
         )
     }
 
+    func testKernelHueConventionUsesRedGreenAndBlueAtExpectedAngles() throws {
+        let source = try image(levels: [0.35])
+        let expectedDominantChannels: [(hue: Double, channel: String)] = [
+            (0, "red"),
+            (120, "green"),
+            (240, "blue"),
+        ]
+
+        for expected in expectedDominantChannels {
+            let grading = ColorGradingAdjustments(
+                midtones: ColorGradingWheel(hue: expected.hue, saturation: 100)
+            )
+            let graded = pixel(
+                try Pixels.bytes(of: RenderPipeline.applyColorGrading(grading, to: source)),
+                at: 0
+            )
+
+            switch expected.channel {
+            case "red":
+                XCTAssertGreaterThan(graded.r, graded.g)
+                XCTAssertGreaterThan(graded.r, graded.b)
+            case "green":
+                XCTAssertGreaterThan(graded.g, graded.r)
+                XCTAssertGreaterThan(graded.g, graded.b)
+            default:
+                XCTAssertGreaterThan(graded.b, graded.r)
+                XCTAssertGreaterThan(graded.b, graded.g)
+            }
+        }
+    }
+
+    func testWheelPaletteMatchesKernelHuesAtPrimaryAndSecondaryStops() {
+        let expected: [(hue: Double, rgb: ColorGradingWheelRGB)] = [
+            (0, ColorGradingWheelRGB(red: 1, green: 0, blue: 0)),
+            (60, ColorGradingWheelRGB(red: 1, green: 1, blue: 0)),
+            (120, ColorGradingWheelRGB(red: 0, green: 1, blue: 0)),
+            (180, ColorGradingWheelRGB(red: 0, green: 1, blue: 1)),
+            (240, ColorGradingWheelRGB(red: 0, green: 0, blue: 1)),
+            (300, ColorGradingWheelRGB(red: 1, green: 0, blue: 1)),
+        ]
+
+        for stop in expected {
+            let actual = ColorGradingWheelPalette.rgb(forHueDegrees: stop.hue)
+            XCTAssertEqual(actual.red, stop.rgb.red, accuracy: 1e-12, "hue \(stop.hue)")
+            XCTAssertEqual(actual.green, stop.rgb.green, accuracy: 1e-12, "hue \(stop.hue)")
+            XCTAssertEqual(actual.blue, stop.rgb.blue, accuracy: 1e-12, "hue \(stop.hue)")
+        }
+    }
+
     func testZeroSaturationAcrossWheelsIsExactIdentityRegardlessOfHue() throws {
         let source = try image(levels: levels)
         let grading = ColorGradingAdjustments(

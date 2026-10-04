@@ -83,6 +83,42 @@ enum ColorGradingWheelMapping {
     }
 }
 
+/// RGB values for the fully saturated HSL hue painted around the grading wheel.
+struct ColorGradingWheelRGB: Equatable, Sendable {
+    let red: Double
+    let green: Double
+    let blue: Double
+}
+
+/// Mirrors `gradingColor` in the Metal kernel at the requested HSL luminance.
+///
+/// The wheel uses a luminance of 0.5, which puts the full hue on its rim. Keeping this conversion
+/// next to the stored hue mapping makes the painted color use the same counterclockwise convention
+/// as the drag mapping and render kernel.
+enum ColorGradingWheelPalette {
+    static func rgb(forHueDegrees hueDegrees: Double, luminance: Double = 0.5)
+        -> ColorGradingWheelRGB
+    {
+        let hue = hueDegrees / 360
+        let q = luminance < 0.5 ? luminance * 2 : luminance + 1 - luminance
+        let p = 2 * luminance - q
+
+        return ColorGradingWheelRGB(
+            red: hueToRGB(p: p, q: q, t: hue + 1.0 / 3.0),
+            green: hueToRGB(p: p, q: q, t: hue),
+            blue: hueToRGB(p: p, q: q, t: hue - 1.0 / 3.0)
+        )
+    }
+
+    private static func hueToRGB(p: Double, q: Double, t: Double) -> Double {
+        let wrapped = t - floor(t)
+        if wrapped < 1.0 / 6.0 { return p + (q - p) * 6 * wrapped }
+        if wrapped < 1.0 / 2.0 { return q }
+        if wrapped < 2.0 / 3.0 { return p + (q - p) * (2.0 / 3.0 - wrapped) * 6 }
+        return p
+    }
+}
+
 /// Shadows, midtones, and highlights color grading controls.
 ///
 /// Blending widens the smooth overlap between tonal regions. Balance shifts the tonal center

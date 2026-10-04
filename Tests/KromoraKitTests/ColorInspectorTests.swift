@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import KromoraKit
 
@@ -153,6 +155,65 @@ final class ColorInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.gradingWheelValue(.midtones), wheel)
         viewModel.resetGrading(.midtones)
         XCTAssertEqual(viewModel.gradingWheelValue(.midtones), .neutral)
+    }
+
+    func testRenderedGradingWheelDiscMatchesStoredHueDirections() throws {
+        let side = 256
+        let hostingView = NSHostingView(
+            rootView: ColorGradingWheelDisc()
+                .frame(width: CGFloat(side), height: CGFloat(side))
+        )
+        hostingView.frame = CGRect(x: 0, y: 0, width: side, height: side)
+        hostingView.layoutSubtreeIfNeeded()
+        let bitmap = try XCTUnwrap(
+            hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
+        hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+
+        let samples: [(hue: Double, expected: String)] = [
+            (0, "red"),
+            (120, "green"),
+            (180, "cyan"),
+            (240, "blue"),
+        ]
+
+        for sample in samples {
+            let radians = sample.hue * .pi / 180
+            let point = ColorGradingWheelPoint(x: cos(radians), y: sin(radians))
+            let radius = Double(side) * 0.42
+            let x = Int((Double(side) / 2 + point.x * radius).rounded())
+            let topOriginY = Int((Double(side) / 2 - point.y * radius).rounded())
+            let color = try XCTUnwrap(bitmap.colorAt(x: x, y: topOriginY))
+                .usingColorSpace(.deviceRGB)
+            let red = try XCTUnwrap(color?.redComponent)
+            let green = try XCTUnwrap(color?.greenComponent)
+            let blue = try XCTUnwrap(color?.blueComponent)
+
+            switch sample.expected {
+            case "red":
+                XCTAssertGreaterThan(red, green + 0.35)
+                XCTAssertGreaterThan(red, blue + 0.35)
+            case "green":
+                XCTAssertGreaterThan(green, red + 0.35)
+                XCTAssertGreaterThan(green, blue + 0.35)
+            case "blue":
+                XCTAssertGreaterThan(blue, red + 0.35)
+                XCTAssertGreaterThan(blue, green + 0.35)
+            default:
+                XCTAssertLessThan(red, 0.2)
+                XCTAssertGreaterThan(green, 0.8)
+                XCTAssertGreaterThan(blue, 0.8)
+            }
+        }
+
+        let greenHandle = ColorGradingWheelMapping.point(
+            for: ColorGradingWheel(hue: 120, saturation: 100)
+        )
+        let greenSample = ColorGradingWheelPoint(
+            x: cos(120 * .pi / 180),
+            y: sin(120 * .pi / 180)
+        )
+        XCTAssertEqual(greenHandle.x, greenSample.x, accuracy: 1e-12)
+        XCTAssertEqual(greenHandle.y, greenSample.y, accuracy: 1e-12)
     }
 
     func testColorSliderUsesInteractiveRenderAndSettlesLatestValue() async throws {
