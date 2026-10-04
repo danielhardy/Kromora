@@ -1,0 +1,226 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A79400000000000000000001 /* KromoraApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79400000000000000000002 /* KromoraApp.swift */; };
+		A79400000000000000000003 /* KromoraKit in Frameworks */ = {isa = PBXBuildFile; productRef = A79400000000000000000004 /* KromoraKit */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A79400000000000000000002 /* KromoraApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KromoraApp.swift; sourceTree = "<group>"; };
+		A79400000000000000000005 /* Kromora.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kromora.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A79400000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A79400000000000000000003 /* KromoraKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A79400000000000000000007 = {
+			isa = PBXGroup;
+			children = (
+				A79400000000000000000008 /* App */,
+				A79400000000000000000009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A79400000000000000000008 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				A79400000000000000000002 /* KromoraApp.swift */,
+			);
+			path = ../App;
+			sourceTree = "<group>";
+		};
+		A79400000000000000000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A79400000000000000000005 /* Kromora.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A7940000000000000000000A /* Kromora */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A7940000000000000000000B /* Build configuration list for PBXNativeTarget "Kromora" */;
+			buildPhases = (
+				A7940000000000000000000C /* Sources */,
+				A79400000000000000000006 /* Frameworks */,
+				A7940000000000000000000D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Kromora;
+			packageProductDependencies = (
+				A79400000000000000000004 /* KromoraKit */,
+			);
+			productName = Kromora;
+			productReference = A79400000000000000000005 /* Kromora.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A7940000000000000000000E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					A7940000000000000000000A = {
+						CreatedOnToolsVersion = 27.0;
+					};
+				};
+			};
+			buildConfigurationList = A7940000000000000000000F /* Build configuration list for PBXProject "Kromora" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A79400000000000000000007;
+			packageReferences = (
+				A79400000000000000000010 /* XCLocalSwiftPackageReference ".." */,
+			);
+			productRefGroup = A79400000000000000000009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A7940000000000000000000A /* Kromora */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A7940000000000000000000D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A7940000000000000000000C /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A79400000000000000000001 /* KromoraApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A79400000000000000000011 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kromora.app;
+				PRODUCT_NAME = Kromora;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A79400000000000000000012 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = arm64;
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.kromora.app;
+				PRODUCT_NAME = Kromora;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A79400000000000000000013 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		A79400000000000000000014 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A7940000000000000000000B /* Build configuration list for PBXNativeTarget "Kromora" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A79400000000000000000011 /* Debug */,
+				A79400000000000000000012 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A7940000000000000000000F /* Build configuration list for PBXProject "Kromora" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A79400000000000000000013 /* Debug */,
+				A79400000000000000000014 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A79400000000000000000010 /* XCLocalSwiftPackageReference ".." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A79400000000000000000004 /* KromoraKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A79400000000000000000010 /* XCLocalSwiftPackageReference ".." */;
+			productName = KromoraKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A7940000000000000000000E /* Project object */;
+}
