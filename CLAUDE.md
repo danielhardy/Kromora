@@ -72,9 +72,9 @@ The package is split so the app's code is testable (`@testable` can't import an 
 - `Sources/KromoraKit/` — everything of substance (Models, ViewModels, Views). `AppViewModel` remains
   the composition root; `EditorDocumentCoordinator`, `PhotosImportCoordinator`, `PreviewCoordinator`,
   `EditPersistenceCoordinator`, `ExportCoordinator`, `DeriveCoordinator`, Look coordinators, and
-  `PhotoAnalysisCoordinator` own focused workflows. Only `ContentView` and
-  `KromoraCommands` are `public`; keep the rest internal.
-- `Sources/Kromora/` — the `@main` entry point, `AppDelegate`, and the asset catalog. Nothing else belongs here.
+  `PhotoAnalysisCoordinator` own focused workflows. `ContentView`, `KromoraCommands`, and
+  `KromoraAppDelegate` are `public`; keep the rest internal.
+- `Sources/Kromora/` — the `@main` entry point and the asset catalog. Nothing else belongs here.
 - `Tests/KromoraKitTests/` — XCTest. **Most fixtures are generated, never committed** (`Fixtures.swift`
   builds `.cube` files and orientation-tagged JPEGs into a temp dir). Exception (KRMA-459): a small
   set of AI-generated photo-intelligence JPEGs (≤ 5 MB total, each ≤ 500 KB) may be committed under

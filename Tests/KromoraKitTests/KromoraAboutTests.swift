@@ -54,10 +54,16 @@ final class KromoraAboutTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/Kromora/KromoraApp.swift"),
             encoding: .utf8
         )
+        let appDelegate = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Presentation/KromoraAppDelegate.swift"),
+            encoding: .utf8
+        )
 
         XCTAssertTrue(menuCommands.contains("CommandGroup(replacing: .appInfo)"))
         XCTAssertTrue(menuCommands.contains("Button(\"About Kromora\") { openWindow(id: KromoraAboutView.windowID) }"))
         XCTAssertTrue(app.contains("Window(\"About Kromora\", id: KromoraAboutView.windowID)"))
+        XCTAssertTrue(app.contains("@NSApplicationDelegateAdaptor(KromoraAppDelegate.self)"))
+        XCTAssertTrue(appDelegate.contains("appearanceController.start()"))
     }
 
     func testAboutShowsConciseLUTLicenseDisclosureWithoutInventory() throws {
