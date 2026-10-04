@@ -336,21 +336,29 @@ PhotosPicker as requiring broad Photos authorization.
 
 ### Required-reason API inventory
 
-The table covers production app sources. Apple requires a reason for each required-reason API
-category the app uses; the reason must fit the actual data access. See Apple's [required-reason API
-categories and codes](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
+The table covers production app sources. Apple's current [privacy-manifest guidance](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)
+covers data-collection practices on all platforms, while required-reason API declarations apply
+only to iOS, iPadOS, tvOS, visionOS, and watchOS; it does not list macOS. Kromora targets
+native macOS only: SwiftPM declares `.macOS(.v26)` in [`Package.swift`](../Package.swift), and the
+Xcode `Kromora` target declares
+`SUPPORTED_PLATFORMS = macosx` in [`project.pbxproj`](../Xcode/Kromora.xcodeproj/project.pbxproj).
+Therefore, these source calls are not required-reason blockers for the current Mac App Store target.
+The approved codes below remain useful context if a covered platform is added. Apple separately
+requires privacy manifests for certain third-party SDKs. App Store Connect privacy answers are
+based on actual collection practices and remain separate from this required-reason inventory;
+neither requirement makes the current macOS file-timestamp calls a blocker.
 
-| Category | Exhaustive source evidence | Applicable reason for the privacy-manifest ticket |
+| Category | Exhaustive source evidence | Apple reason-code fit if a covered platform is added |
 | --- | --- | --- |
 | `NSPrivacyAccessedAPICategoryUserDefaults` | [`KromoraSettings.swift`:89-207, 298, 394-444](../Sources/KromoraKit/Models/KromoraSettings.swift); [`LUTLibrary.swift`:178-181, 227-267, 492-493](../Sources/KromoraKit/Models/LUTLibrary.swift); [`AppViewModel.swift`:426, 873, 998, 1248](../Sources/KromoraKit/ViewModels/AppViewModel.swift); [`ContentView.swift`:17](../Sources/KromoraKit/Views/ContentView.swift) and [`OnboardingViews.swift`:299](../Sources/KromoraKit/Views/OnboardingViews.swift) use SwiftUI `@AppStorage`. | `CA92.1` — app-private preferences and bookmarks. |
-| `NSPrivacyAccessedAPICategoryFileTimestamp` | [`PhotoAsset.swift`:101-108](../Sources/KromoraKit/Models/PhotoAsset.swift) reads a source file's size and modification date; [`ImageSource.swift`:258-267](../Sources/KromoraKit/Models/ImageSource.swift) reads size and modification date for a URL-backed source trace; [`PortablePackageMaintenance.swift`:168-170](../Sources/KromoraKit/Models/PortablePackageMaintenance.swift) reads the thumbnail index stamp; [`LatestPreviewFrameStore.swift`:359, 394-401, 473-487](../Sources/KromoraKit/Models/LatestPreviewFrameStore.swift) writes and reads preview-cache modification dates and file sizes. | `3B52.1` is a candidate for metadata of source files specifically granted through a file/folder panel. **Needs review** for URL-backed fingerprint/trace calls that may inspect package-managed files, and for the thumbnail index and preview-cache timestamps: Kromora's library package is in Pictures, outside the app container described by `C617.1`; these call sites are not limited to a document-picker grant. KRMA-798 should confirm the reason fits Apple's permitted scope before adding it. |
+| `NSPrivacyAccessedAPICategoryFileTimestamp` | [`PhotoAsset.swift`:101-108](../Sources/KromoraKit/Models/PhotoAsset.swift) reads a source file's size and modification date; [`ImageSource.swift`:258-267](../Sources/KromoraKit/Models/ImageSource.swift) reads size and modification date for a URL-backed source trace; [`PortablePackageMaintenance.swift`:168-170](../Sources/KromoraKit/Models/PortablePackageMaintenance.swift) reads the thumbnail index stamp; [`LatestPreviewFrameStore.swift`:359, 394-401, 473-487](../Sources/KromoraKit/Models/LatestPreviewFrameStore.swift) writes and reads preview-cache modification dates and file sizes. | No required-reason declaration is needed for the native macOS-only target. If Kromora later targets a covered platform, `3B52.1` applies only to files or directories the user specifically granted access to, and `C617.1` only to files inside app, app-group, or CloudKit containers. The automatically created library and its derived caches are in Pictures and do not fit either code as currently implemented. |
 | `NSPrivacyAccessedAPICategorySystemBootTime` | [`NeutralOriginSlider.swift`:210, 220, 271, 280, 291](../Sources/KromoraKit/Views/NeutralOriginSlider.swift) reads `ProcessInfo.systemUptime` for in-app slider animation/timing. | `35F9.1` — measure elapsed time between in-app events and support timers. |
 | `NSPrivacyAccessedAPICategoryDiskSpace` | No current app-source calls to `volumeAvailableCapacity*`, `volumeTotalCapacityKey`, `systemFreeSize`, `systemSize`, `statfs`, or `statvfs` were found. `.fileSizeKey` call sites above read individual file metadata, not free/total volume capacity. | No reason to declare unless a broader dependency/binary audit finds an additional use. |
 | `NSPrivacyAccessedAPICategoryActiveKeyboards` | No `activeInputModes` call was found. App keyboard shortcuts handle key events and do not inventory active keyboards. | No reason to declare. |
 
-The file-timestamp reason is the sole item that still needs an explicit fit check. KRMA-798 consumes
-this evidence when it creates `PrivacyInfo.xcprivacy`; Apple says the chosen reason must accurately
-describe the app's use and derived data, not merely match a symbol name.
+For a future target on one of Apple's listed platforms, every declared reason must accurately
+describe the API use and derived data, not merely match a symbol name. See Apple's [required-reason
+API guidance](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype).
 
 ## 4. Recommendations
 
@@ -375,7 +383,7 @@ system-mediated selection/authorization paths.
 | --- | --- | --- |
 | `NSPhotoLibraryUsageDescription` | Keep the existing string for the PhotoKit `.readWrite` authorization used by export delivery and album placement. The PhotosPicker import flow itself is picker-mediated and does not need library authorization. | No new issue; retain in the app's final `Info.plist`. |
 | Other protected-resource usage strings | Add none. File access is handled through standard panels/bookmarks and entitlements; there are no camera, microphone, location, Contacts, Calendars, or Apple Events APIs. | No new issue. |
-| `PrivacyInfo.xcprivacy` | Declare app-private `UserDefaults` (`CA92.1`) and in-app timing (`35F9.1`); have the manifest implementation ticket resolve file-timestamp scope. Do not declare disk-space or active-keyboard categories absent new evidence. | KRMA-798 |
+| Required-reason privacy manifest | Not required solely for native macOS API use. Revisit if Kromora adds an iOS, iPadOS, tvOS, visionOS, or watchOS target, integrates an SDK subject to a manifest requirement, or otherwise needs a manifest to describe collected data. App Store Connect's data-collection answers are maintained separately from a manifest. | KRMA-798 documents current scope; KRMA-807 prepares App Store Connect answers. |
 | Xcode resource-bundle location | Inspect the archived/signed `.app` and verify KromoraKit resource lookup finds the SwiftPM bundle and required resources. | KRMA-813 |
 
 No new blocker or should-fix was identified beyond these existing linked App Store workstream

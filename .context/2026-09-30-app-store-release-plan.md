@@ -278,6 +278,23 @@ Confirm whether Kromora needs usage strings for any other protected resources.
 
 Do not add permissions that Kromora does not actually use.
 
+### Privacy manifest platform scope
+
+Apple's current [privacy manifest guidance](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files)
+covers data-collection practices on all platforms, while required-reason API declarations apply
+only to iOS, iPadOS, tvOS, visionOS, and watchOS. Kromora currently targets native
+macOS 26 only (`Package.swift` declares `.macOS(.v26)` and the Xcode `Kromora` target supports
+`macosx`). Its file-timestamp, `UserDefaults`, and system-uptime calls therefore do not require
+required-reason entries or a `PrivacyInfo.xcprivacy` file for this target. Do not treat the
+file-timestamp reason-code mismatch as a Mac App Store blocker, and do not move package or cache
+data solely to fit a reason code. Revisit this if Kromora adds a covered platform, adopts an SDK
+subject to a manifest requirement, or needs a manifest for another data-collection disclosure.
+
+App Store Connect's app privacy answers are maintained separately from any privacy manifest and
+must reflect Kromora's data practices, including those of any third-party partners. See [Apple's
+App Store Connect privacy guidance](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy)
+and KRMA-807.
+
 ## Workstream 4 — Entitlements
 
 Create:

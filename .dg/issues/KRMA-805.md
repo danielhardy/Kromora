@@ -16,7 +16,7 @@ labels:
   - docs
   - packaging
 created: 2026-10-03T19:24:44.001Z
-updated: 2026-10-03T19:25:54.429Z
+updated: 2026-10-04T22:15:26.638Z
 depends_on:
   - KRMA-804
   - KRMA-800
@@ -35,7 +35,7 @@ Part of the Mac App Store plan (.context/2026-09-30-app-store-release-plan.md, "
 
 ## Scope
 
-Rewrite `docs/PACKAGING.md` with sections: Distribution model (App Store, TestFlight, source); Layout (what lives in `App/`, `Xcode/`, `Sources/Kromora/`); Local verification (`scripts/app-store-build.sh`, what `verify-xcode-app.sh` checks); Signing and capabilities (the final entitlement set and why each is there, App Sandbox, hardened runtime, privacy manifest, usage strings); Versioning (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `Base.xcconfig`, when to bump); Release procedure (archive in Xcode, Distribute App, App Store Connect, TestFlight first; no automated upload); CI (`xcode-app` job). Update `README.md` and `scripts/README.md` so their build/distribution notes match. State the human prerequisites (Apple Developer Program membership, App ID `com.last8.kromora.photo`, App Store Connect record, distribution certificate and profile) without including any secrets or team IDs.
+Rewrite `docs/PACKAGING.md` with sections: Distribution model (App Store, TestFlight, source); Layout (what lives in `App/`, `Xcode/`, `Sources/Kromora/`); Local verification (`scripts/app-store-build.sh`, what `verify-xcode-app.sh` checks); Signing and capabilities (the final entitlement set and why each is there, App Sandbox, hardened runtime, privacy posture, platform-applicable manifest requirements, usage strings); Versioning (`MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` in `Base.xcconfig`, when to bump); Release procedure (archive in Xcode, Distribute App, App Store Connect, TestFlight first; no automated upload); CI (`xcode-app` job). State the human prerequisites (Apple Developer Program membership, App ID `com.last8.kromora.photo`, App Store Connect record, distribution certificate and profile) without including any secrets or team IDs. For Kromora's native macOS-only target, do not describe a required-reason API manifest as a current signing or packaging prerequisite; refer to `docs/APP_STORE_SANDBOX_AUDIT.md` for the current platform scope and revisit if target platforms or SDK requirements change.
 
 ## Acceptance criteria
 

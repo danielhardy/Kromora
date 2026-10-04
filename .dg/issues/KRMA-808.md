@@ -13,7 +13,7 @@ labels:
   - epic
   - appstore
 created: 2026-10-03T19:25:12.534Z
-updated: 2026-10-03T19:25:15.819Z
+updated: 2026-10-04T22:10:10.066Z
 depends_on:
   - KRMA-782
   - KRMA-783
@@ -41,7 +41,8 @@ Source plan: `.context/2026-09-30-app-store-release-plan.md` (Plan Workstreams 0
 - [ ] The sandbox audit document is complete and every blocker has a ticket.
 - [ ] The Photos usage string is present; no unneeded permission strings exist.
 - [ ] Entitlements are the minimal audited set and are asserted by verification scripts.
-- [ ] A privacy manifest declares required-reason API use and no tracking.
+- [ ] The App Store Connect privacy posture is documented from the app's and partners' actual data practices.
+- [ ] The required-reason manifest scope is documented accurately: Kromora's native macOS target does not need required-reason entries solely for its API calls; mandatory third-party SDK manifests or future covered platforms are handled separately.
 
 ## Child tickets (in execution order)
 
@@ -50,4 +51,4 @@ Source plan: `.context/2026-09-30-app-store-release-plan.md` (Plan Workstreams 0
 - KRMA-784 — App Sandbox audit 2/3: export, Photos, storage, caches, and temp files
 - KRMA-785 — App Sandbox audit 3/3: network, subprocesses, resources, and protected-API inventory
 - KRMA-790 — Trim entitlements to the capabilities Kromora actually uses
-- KRMA-798 — Add a PrivacyInfo.xcprivacy manifest declaring required-reason API use
+- KRMA-798 — Document native macOS required-reason privacy scope
