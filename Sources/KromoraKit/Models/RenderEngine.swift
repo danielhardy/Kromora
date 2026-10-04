@@ -1773,11 +1773,15 @@ actor RenderEngine: RenderEngining {
             }
             for try await (key, payload) in group {
                 try Task.checkCancellation()
+                // The payload is keyed by source, definition, size and quality, never by request
+                // revision, so it stays valid for the next tick even when this request has been
+                // superseded. Caching it before the currency check keeps a fast slider drag from
+                // discarding every resolution and re-paying it on each tick until release.
+                localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
                 guard isCurrentMaskRequest(
                     source: source, revision: requestRevision,
                     maskIdentity: maskIdentity, documentIdentity: documentIdentity
                 ) else { throw LocalMaskResolutionError.cancelled }
-                localMaskCache.insert(payload, for: key, cost: payload.estimatedCostBytes)
                 payloads[key] = payload
             }
         }
