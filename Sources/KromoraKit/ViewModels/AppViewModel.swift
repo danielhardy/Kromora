@@ -1261,6 +1261,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 "Could not display \(self.sourceName). Try Fit or reload the photo."
             self.presentPendingImportOutcome()
         }
+        previewSurface.onPresentationHistogramSampleChange = { [weak self] sample in
+            self?.previewAdmissionCoordinator.presentationHistogramSampleDidChange(sample)
+        }
         originalPreviewSurface.onPresentationFailure = { [weak self] in
             guard let self, !self.isShuttingDown, self.sourceImage != nil else { return }
             self.statusMessage =
@@ -2360,6 +2363,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             perceptualDigest: perceptualDigest,
             presentationAssetID: assetID,
             rasterSource: rasterSource,
+            materializesPresentationTexture: engine.materializesPresentationTextures,
             onPresented: { [weak self] in
                 guard let self,
                     self.previewPresentation.presentationSession?.generation == generation,
@@ -2495,6 +2499,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 coversPresentationExtent: true,
                 presentationAssetID: publication.request.assetID,
                 rasterSource: .embedded,
+                materializesPresentationTexture: engine.materializesPresentationTextures,
                 onPresented: { [weak self] in
                     guard let self, !self.isShuttingDown,
                         publication.request.sourceRevision == self.sourceRevision,
@@ -5172,6 +5177,7 @@ extension AppViewModel: PreviewPublicationDestination {
             perceptualDigest: digest,
             presentationAssetID: request.assetID,
             rasterSource: rasterSource,
+            materializesPresentationTexture: self.engine.materializesPresentationTextures,
             onPresented: onPresented
             )
         }
@@ -5226,6 +5232,13 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionInspectorPresented: Bool { isInspectorPresented }
     var admissionHistogramLoading: Bool { isHistogramLoading }
     var admissionHistogram: HistogramData? { histogram }
+    var admissionPresentationHistogramSample: HistogramData.PresentationSample? {
+        previewSurface.presentationHistogramSample
+    }
+    var admissionPresentationSurfaceRevision: UInt64? { previewSurface.revision }
+    func admissionRetryPresentationHistogramSample(surfaceRevision: UInt64) -> Bool {
+        previewSurface.retryPresentationHistogramSample(surfaceRevision: surfaceRevision)
+    }
     var admissionOriginalPreviewImage: CIImage? { originalPreviewSurface.image }
     var admissionHistogramErrorMessage: String? { histogramErrorMessage }
     var admissionSourceName: String { sourceName }

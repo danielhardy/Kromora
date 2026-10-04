@@ -76,6 +76,28 @@ final class HistogramTests: TempDirectoryTestCase {
         XCTAssertEqual(histogram.red.reduce(0, +), 4)
     }
 
+    func testBGRATallySwapsChannelsAndKeepsSpatialSamplesInRGBOrder() throws {
+        let histogram = try XCTUnwrap(
+            HistogramData(bgra8: [12, 34, 240, 255], width: 1, height: 1)
+        )
+
+        XCTAssertEqual(histogram.red[240], 1)
+        XCTAssertEqual(histogram.green[34], 1)
+        XCTAssertEqual(histogram.blue[12], 1)
+        XCTAssertEqual(Array(histogram.samples), [240, 34, 12])
+    }
+
+    func testPresentationSampleSizePreservesAspectRatioAndCapsLongEdgeAt512() throws {
+        let size = try XCTUnwrap(
+            HistogramData.presentationSampleSize(width: 4096, height: 2048)
+        )
+
+        XCTAssertEqual(size.width, 512)
+        XCTAssertEqual(size.height, 256)
+        XCTAssertLessThanOrEqual(max(size.width, size.height), 512)
+        XCTAssertNil(HistogramData.presentationSampleSize(width: 0, height: 10))
+    }
+
     func testTallyRejectsABufferTooSmallForItsGeometry() {
         let bytes = [UInt8](repeating: 0, count: 4 * 4)  // enough for 4 pixels
         XCTAssertNil(HistogramData(rgba8: bytes, width: 4, height: 4),

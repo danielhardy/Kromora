@@ -358,6 +358,29 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertEqual(surface.space, .displayP3)
     }
 
+    func testPresentationTextureCarriesABoundedRGBHistogramSample() async throws {
+        let surface = PreviewSurface()
+        let image = CIImage(
+            color: CIColor(red: 0.8, green: 0.25, blue: 0.1, alpha: 1)
+        ).cropped(to: CGRect(x: 0, y: 0, width: 1200, height: 600))
+
+        XCTAssertTrue(surface.present(image, space: .sRGB))
+        _ = try await waitForPresentationTexture(surface)
+
+        let presentationSample = try XCTUnwrap(surface.presentationHistogramSample)
+        guard case .sample(let histogram) = presentationSample.state else {
+            return XCTFail("a successfully materialized presentation texture must carry a sample")
+        }
+        XCTAssertEqual(presentationSample.surfaceRevision, surface.revision)
+        XCTAssertEqual(histogram.sampleWidth, 512)
+        XCTAssertEqual(histogram.sampleHeight, 256)
+        XCTAssertGreaterThan(
+            histogram.samples[0], histogram.samples[2],
+            "BGRA readback must be binned and retained in RGB order")
+        XCTAssertGreaterThan(histogram.red.reduce(0, +), 0)
+        XCTAssertLessThanOrEqual(histogram.red.reduce(0, +), 512 * 256)
+    }
+
     func testClearResetsTheWorkingSpace() {
         let surface = PreviewSurface()
         surface.present(CIImage(color: .red), space: .displayP3)

@@ -53,6 +53,7 @@ extension RAWCapabilities {
 /// An `actor` for the same reason the real one is: the protocol is `Sendable`, and recording calls is
 /// mutable state.
 actor FakeRenderEngine: RenderEngining {
+    nonisolated let materializesPresentationTextures = false
 
     /// Lifecycle signals emitted at the same actor-isolated points as the recorded calls. Tests
     /// consume these through `FakeRenderEventReader` instead of polling the arrays with sleeps.

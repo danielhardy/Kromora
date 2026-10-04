@@ -17,6 +17,10 @@ import UniformTypeIdentifiers
 /// for free; a fake has to earn it.
 protocol RenderEngining: EditedThumbnailRendering, Sendable {
 
+    /// Lightweight renderers used by lifecycle tests can keep the Metal presentation seam
+    /// disabled so their histogram assertions exercise the engine fallback.
+    var materializesPresentationTextures: Bool { get }
+
     /// Prepare source value state without requesting source pixels. The production renderer owns
     /// RAW preparation so the same decoder session can answer geometry/capability questions and
     /// later develop the visible image.
@@ -149,6 +153,8 @@ protocol RenderEngining: EditedThumbnailRendering, Sendable {
 }
 
 extension RenderEngining {
+    var materializesPresentationTextures: Bool { true }
+
     /// Compatibility default for lightweight render test doubles and integrations.
     func invalidateRenderCaches() async {}
 

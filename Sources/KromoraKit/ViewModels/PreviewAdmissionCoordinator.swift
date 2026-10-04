@@ -23,6 +23,9 @@ protocol PreviewAdmissionDestination: AnyObject {
     var admissionInspectorPresented: Bool { get }
     var admissionHistogramLoading: Bool { get }
     var admissionHistogram: HistogramData? { get }
+    var admissionPresentationHistogramSample: HistogramData.PresentationSample? { get }
+    var admissionPresentationSurfaceRevision: UInt64? { get }
+    func admissionRetryPresentationHistogramSample(surfaceRevision: UInt64) -> Bool
     var admissionOriginalPreviewImage: CIImage? { get }
     var admissionHistogramErrorMessage: String? { get }
     var admissionSourceName: String { get }
@@ -87,6 +90,11 @@ protocol PreviewAdmissionDestination: AnyObject {
 }
 
 extension PreviewAdmissionDestination {
+    var admissionPresentationHistogramSample: HistogramData.PresentationSample? { nil }
+    var admissionPresentationSurfaceRevision: UInt64? {
+        admissionPresentationHistogramSample?.surfaceRevision
+    }
+    func admissionRetryPresentationHistogramSample(surfaceRevision: UInt64) -> Bool { false }
     func admissionScheduleIdleFrameWarmup() {}
     func admissionCancelIdleFrameWarmup(resetProgress: Bool) {}
 }
@@ -112,8 +120,18 @@ final class PreviewAdmissionCoordinator {
     }
 
     private enum HistogramValidation: Sendable {
-        case prepared(RenderRequest)
+        case prepared(RenderRequest, surfaceRevision: UInt64?)
         case exactStoredFrame(PortablePhotoIdentity)
+    }
+
+    private struct PendingPresentationHistogram {
+        let image: CIImage
+        let identity: HistogramIdentity
+        let assetID: PhotoAssetID?
+        let sourceRevision: UInt64
+        let request: RenderRequest
+        let surfaceRevision: UInt64
+        var retryAttempted = false
     }
 
     private var histogramTaskIdentity: HistogramIdentity?
@@ -122,6 +140,7 @@ final class PreviewAdmissionCoordinator {
     private var completedHistogramIdentity: HistogramIdentity?
     private var completedHistogramAssetID: PhotoAssetID?
     private var completedHistogramSourceRevision: UInt64?
+    private var pendingPresentationHistogram: PendingPresentationHistogram?
     private let histogramJobID = ImageWorkScheduler.JobID("histogram")
     private struct AdjacentPreviewCandidate: Sendable {
         let source: ImageSource
@@ -193,13 +212,133 @@ final class PreviewAdmissionCoordinator {
         }
         guard let image = presentedImage ?? destination.admissionLastPresentedImage else { return }
 
-        scheduleHistogram(
-            from: image,
-            identity: Self.histogramIdentity(for: request, destination: destination),
-            assetID: destination.admissionActiveAssetID,
-            sourceRevision: destination.admissionSourceRevision,
-            validation: .prepared(request)
+        let identity = Self.histogramIdentity(for: request, destination: destination)
+        let assetID = destination.admissionActiveAssetID
+        let sourceRevision = destination.admissionSourceRevision
+        if let presentationSample = destination.admissionPresentationHistogramSample,
+            presentationSample.surfaceRevision == destination.admissionPresentationSurfaceRevision
+        {
+            switch presentationSample.state {
+            case .sample(let histogram):
+                pendingPresentationHistogram = nil
+                publishPresentationHistogram(
+                    histogram, identity: identity, assetID: assetID,
+                    sourceRevision: sourceRevision, request: request,
+                    surfaceRevision: presentationSample.surfaceRevision,
+                    destination: destination
+                )
+            case .pending:
+                cancelHistogram(clear: false)
+                pendingPresentationHistogram = PendingPresentationHistogram(
+                    image: image, identity: identity, assetID: assetID,
+                    sourceRevision: sourceRevision, request: request,
+                    surfaceRevision: presentationSample.surfaceRevision
+                )
+                destination.publishAdmissionHistogramLoading(true)
+                destination.publishAdmissionHistogramError(nil)
+            case .unavailable:
+                pendingPresentationHistogram = nil
+                scheduleHistogram(
+                    from: image, identity: identity, assetID: assetID,
+                    sourceRevision: sourceRevision,
+                    validation: .prepared(
+                        request, surfaceRevision: presentationSample.surfaceRevision)
+                )
+            case .failed:
+                retryPresentationHistogramSample(
+                    PendingPresentationHistogram(
+                        image: image, identity: identity, assetID: assetID,
+                        sourceRevision: sourceRevision, request: request,
+                        surfaceRevision: presentationSample.surfaceRevision
+                    ), destination: destination
+                )
+            }
+        } else {
+            // Headless tests and hosts without a presentation texture retain the original path.
+            pendingPresentationHistogram = nil
+            scheduleHistogram(
+                from: image, identity: identity, assetID: assetID,
+                sourceRevision: sourceRevision,
+                validation: .prepared(request, surfaceRevision: nil)
+            )
+        }
+    }
+
+    func presentationHistogramSampleDidChange(_ sample: HistogramData.PresentationSample) {
+        guard let destination,
+            let pending = pendingPresentationHistogram,
+            pending.surfaceRevision == sample.surfaceRevision,
+            destination.admissionPresentationHistogramSample?.surfaceRevision
+                == sample.surfaceRevision,
+            destination.admissionPresentationSurfaceRevision == sample.surfaceRevision
+        else { return }
+        switch sample.state {
+        case .pending:
+            return
+        case .sample(let histogram):
+            pendingPresentationHistogram = nil
+            publishPresentationHistogram(
+                histogram, identity: pending.identity, assetID: pending.assetID,
+                sourceRevision: pending.sourceRevision, request: pending.request,
+                surfaceRevision: pending.surfaceRevision, destination: destination
+            )
+        case .unavailable:
+            pendingPresentationHistogram = nil
+            scheduleHistogram(
+                from: pending.image, identity: pending.identity, assetID: pending.assetID,
+                sourceRevision: pending.sourceRevision,
+                validation: .prepared(pending.request, surfaceRevision: pending.surfaceRevision)
+            )
+        case .failed:
+            if pending.retryAttempted {
+                pendingPresentationHistogram = nil
+                publishPresentationHistogramFailure(pending, destination: destination)
+            } else {
+                retryPresentationHistogramSample(pending, destination: destination)
+            }
+        }
+    }
+
+    private func retryPresentationHistogramSample(
+        _ pending: PendingPresentationHistogram,
+        destination: any PreviewAdmissionDestination
+    ) {
+        pendingPresentationHistogram = pending
+        destination.publishAdmissionHistogramLoading(true)
+        destination.publishAdmissionHistogramError(nil)
+        guard
+            destination.admissionRetryPresentationHistogramSample(
+                surfaceRevision: pending.surfaceRevision
+            )
+        else {
+            pendingPresentationHistogram = nil
+            publishPresentationHistogramFailure(pending, destination: destination)
+            return
+        }
+        var retry = pending
+        retry.retryAttempted = true
+        pendingPresentationHistogram = retry
+    }
+
+    private func publishPresentationHistogramFailure(
+        _ pending: PendingPresentationHistogram,
+        destination: any PreviewAdmissionDestination
+    ) {
+        let validation = HistogramValidation.prepared(
+            pending.request, surfaceRevision: pending.surfaceRevision
         )
+        guard
+            isCurrentHistogram(
+                pending.identity, assetID: pending.assetID,
+                sourceRevision: pending.sourceRevision, validation: validation,
+                destination: destination
+            )
+        else { return }
+        destination.publishAdmissionHistogram(nil)
+        destination.publishAdmissionHistogramLoading(false)
+        let message = "Histogram unavailable for \(destination.admissionSourceName)."
+        destination.publishAdmissionHistogramError(message)
+        destination.publishAdmissionStatus(message)
     }
 
     /// Start the histogram from a cached raster only after source, edit, and Look identities prove
@@ -252,10 +391,32 @@ final class PreviewAdmissionCoordinator {
             destination.publishAdmissionHistogram(nil)
         }
         if clear {
+            pendingPresentationHistogram = nil
             completedHistogramIdentity = nil
             completedHistogramAssetID = nil
             completedHistogramSourceRevision = nil
         }
+    }
+
+    private func publishPresentationHistogram(
+        _ result: HistogramData, identity: HistogramIdentity, assetID: PhotoAssetID?,
+        sourceRevision: UInt64, request: RenderRequest, surfaceRevision: UInt64,
+        destination: any PreviewAdmissionDestination
+    ) {
+        cancelHistogram(clear: false)
+        let validation = HistogramValidation.prepared(request, surfaceRevision: surfaceRevision)
+        guard
+            isCurrentHistogram(
+                identity, assetID: assetID, sourceRevision: sourceRevision,
+                validation: validation, destination: destination
+            )
+        else { return }
+        completedHistogramIdentity = identity
+        completedHistogramAssetID = assetID
+        completedHistogramSourceRevision = sourceRevision
+        destination.publishAdmissionHistogram(result)
+        destination.publishAdmissionHistogramLoading(false)
+        destination.publishAdmissionHistogramError(nil)
     }
 
     private func scheduleHistogram(
@@ -327,7 +488,13 @@ final class PreviewAdmissionCoordinator {
         else { return false }
 
         switch validation {
-        case .prepared(let request):
+        case .prepared(let request, let surfaceRevision):
+            guard
+                surfaceRevision == nil
+                    || (destination.admissionPresentationHistogramSample?.surfaceRevision
+                        == surfaceRevision
+                        && destination.admissionPresentationSurfaceRevision == surfaceRevision)
+            else { return false }
             return destination.admissionImageSource == request.source
                 && destination.admissionDisplayLUT == request.lut
                 && request.source.portableIdentity.sourceFingerprint.matches(

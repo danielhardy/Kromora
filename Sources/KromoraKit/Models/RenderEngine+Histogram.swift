@@ -45,7 +45,9 @@ extension RenderEngine {
         return tallyHistogram(from: image, space: space, maxDimension: maxDimension)
     }
 
-    /// Tally the completed preview texture without rebuilding the render graph.
+    /// Compatibility tally for a presented image when the presentation surface could not produce
+    /// a readable texture sample. Production texture-backed presentations bin their texture on
+    /// the presentation queue and do not call this overload.
     func histogram(
         presentedImage: sending CIImage,
         space: WorkingSpace = .current,

@@ -5,6 +5,160 @@ import XCTest
 
 @MainActor
 final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
+    func testPresentedTextureSamplePublishesWithoutAnEngineHistogram() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let request = makeRequest(source: destination.source)
+        let sample = try makeHistogram(red: 220, green: 90, blue: 30)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionInspectorPresented = true
+        destination.admissionLastPresentedRequest = request
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 8, state: .sample(sample)
+        )
+
+        coordinator.updateHistogram(for: request, presentedImage: CIImage(color: .black))
+
+        XCTAssertEqual(destination.admissionHistogram, sample)
+        XCTAssertEqual(destination.histogramPublicationCount, 1)
+        XCTAssertFalse(destination.admissionHistogramLoading)
+        let histogramRequests = await engine.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 0)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testNewerInteractiveTextureSampleWinsAndOlderCompletionIsIgnored() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let firstRequest = makeRequest(source: destination.source)
+        let secondDocument = EditDocument(adjustments: [.exposure(ev: 1)])
+        let secondRequest = RenderRequest(
+            source: destination.source, document: secondDocument, quality: .interactive
+        )
+        let firstSample = try makeHistogram(red: 70, green: 20, blue: 10)
+        let secondSample = try makeHistogram(red: 180, green: 120, blue: 40)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionInspectorPresented = true
+        destination.admissionLastPresentedRequest = firstRequest
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 1, state: .pending
+        )
+        coordinator.updateHistogram(for: firstRequest, presentedImage: CIImage(color: .black))
+        XCTAssertTrue(destination.admissionHistogramLoading)
+        let requestsWhilePending = await engine.histogramRequests
+        XCTAssertEqual(requestsWhilePending.count, 0)
+
+        destination.admissionLastPresentedRequest = secondRequest
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 2, state: .pending
+        )
+        coordinator.updateHistogram(for: secondRequest, presentedImage: CIImage(color: .white))
+        coordinator.presentationHistogramSampleDidChange(
+            .init(
+                surfaceRevision: 2, state: .sample(secondSample)
+            ))
+        coordinator.presentationHistogramSampleDidChange(
+            .init(
+                surfaceRevision: 1, state: .sample(firstSample)
+            ))
+
+        XCTAssertEqual(destination.admissionHistogram, secondSample)
+        XCTAssertEqual(destination.histogramPublicationCount, 1)
+        XCTAssertFalse(destination.admissionHistogramLoading)
+        let histogramRequests = await engine.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 0)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testOpeningInspectorUsesRetainedMatchingTextureSample() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let request = makeRequest(source: destination.source)
+        let sample = try makeHistogram(red: 140, green: 90, blue: 45)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionLastPresentedRequest = request
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 11, state: .sample(sample)
+        )
+        destination.admissionLastPresentedImage = CIImage(color: .black)
+        destination.admissionInspectorPresented = true
+
+        coordinator.updateHistogram()
+
+        XCTAssertEqual(destination.admissionHistogram, sample)
+        let histogramRequests = await engine.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 0)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testFailedTextureSampleRetriesWithoutUsingTheSourceHistogramFallback() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let request = makeRequest(source: destination.source)
+        let sample = try makeHistogram(red: 200, green: 100, blue: 50)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionInspectorPresented = true
+        destination.admissionLastPresentedRequest = request
+        destination.admissionLastPresentedImage = CIImage(color: .black)
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 12, state: .failed
+        )
+
+        coordinator.updateHistogram(
+            for: request, presentedImage: destination.admissionLastPresentedImage)
+
+        XCTAssertEqual(destination.presentationHistogramRetryCount, 1)
+        XCTAssertTrue(destination.admissionHistogramLoading)
+        var histogramRequests = await engine.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 0)
+
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 12, state: .sample(sample)
+        )
+        coordinator.presentationHistogramSampleDidChange(
+            .init(
+                surfaceRevision: 12, state: .sample(sample)
+            ))
+
+        XCTAssertEqual(destination.admissionHistogram, sample)
+        XCTAssertFalse(destination.admissionHistogramLoading)
+        histogramRequests = await engine.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 0)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    func testUnavailablePresentationTextureUsesEngineHistogramFallbackOnce() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let request = makeRequest(source: destination.source)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        destination.admissionInspectorPresented = true
+        destination.admissionLastPresentedRequest = request
+        destination.admissionPresentationHistogramSample = .init(
+            surfaceRevision: 13, state: .unavailable
+        )
+        _ = try await engine.render(request)
+
+        coordinator.updateHistogram(for: request, presentedImage: CIImage(color: .black))
+        try await waitUntil("the engine fallback histogram") {
+            await engine.histogramRequests.count == 1
+        }
+        coordinator.updateHistogram(for: request, presentedImage: CIImage(color: .black))
+
+        let histogramRequests = await engine.histogramRequests
+        XCTAssertEqual(histogramRequests.count, 1)
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
+    private func makeHistogram(red: UInt8, green: UInt8, blue: UInt8) throws -> HistogramData {
+        try XCTUnwrap(HistogramData(rgba8: [red, green, blue, 255], width: 1, height: 1))
+    }
+
     func testIdleAndAdjacentPrefetchJobsHaveIndependentCancellationIDs() async {
         let scheduler = ImageWorkScheduler()
         let coordinator = PreviewAdmissionCoordinator(
@@ -397,6 +551,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var admissionInspectorPresented = false
     var admissionHistogramLoading = false
     var admissionHistogram: HistogramData?
+    var admissionPresentationHistogramSample: HistogramData.PresentationSample?
     var admissionOriginalPreviewImage: CIImage?
     var admissionHistogramErrorMessage: String?
     var admissionSourceName = "test"
@@ -432,6 +587,7 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
     var cachePublicationCount = 0
     var staleRefinementPreparationCount = 0
     var histogramPublicationCount = 0
+    var presentationHistogramRetryCount = 0
     var statusMessage: String?
 
     init(
@@ -520,7 +676,14 @@ private final class FakePreviewAdmissionDestination: PreviewAdmissionDestination
         histogramPublicationCount += 1
         self.admissionHistogram = histogram
     }
-    func publishAdmissionHistogramLoading(_ isLoading: Bool) { admissionHistogramLoading = isLoading }
+    func admissionRetryPresentationHistogramSample(surfaceRevision: UInt64) -> Bool {
+        _ = surfaceRevision
+        presentationHistogramRetryCount += 1
+        return true
+    }
+    func publishAdmissionHistogramLoading(_ isLoading: Bool) {
+        admissionHistogramLoading = isLoading
+    }
     func publishAdmissionHistogramError(_ message: String?) { admissionHistogramErrorMessage = message }
     func publishAdmissionStatus(_ message: String) { statusMessage = message }
     func admissionPresentOriginalPreview(_ image: CIImage, request: RenderRequest) -> Bool { true }

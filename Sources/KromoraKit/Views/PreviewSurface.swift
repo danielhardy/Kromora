@@ -12,8 +12,8 @@ struct PreviewFrameIdentity: Equatable, Sendable {
 
 @MainActor
 final class PreviewSurface: ObservableObject {
-    /// Diagnostic count used by the presentation acceptance tests. A publication is expected to
-    /// perform one Core Image materialization; retained-texture redraws must not increment it.
+    /// Diagnostic count used by the presentation acceptance tests. A publication evaluates the
+    /// source image once; retained-texture redraws must not evaluate it again.
     @Published private(set) var revision: UInt64 = 0
     private(set) var image: CIImage?
     private(set) var presentationImageExtent: CGRect?
@@ -39,6 +39,10 @@ final class PreviewSurface: ObservableObject {
     private(set) var presentationTexture: MTLTexture?
     private(set) var presentationTextureExtent: CGRect?
     private(set) var presentationTextureGeneration: UInt64 = 0
+    /// A bounded sample read from the same presentation texture and command buffer. It stays
+    /// attached to its surface revision even while the Info inspector is hidden.
+    private(set) var presentationHistogramSample: HistogramData.PresentationSample?
+    var onPresentationHistogramSampleChange: ((HistogramData.PresentationSample) -> Void)?
     private var presentedDigest: PerceptualDigest?
     private var staleRefinementPending = false
     private var transitionTexture: MTLTexture?
@@ -79,7 +83,12 @@ final class PreviewSurface: ObservableObject {
     private var currentDetail: PublishedDetail?
     private var pendingPresentationMaterializationRevision: UInt64?
     private var pendingPresentationMaterialization: (texture: MTLTexture, extent: CGRect)?
-    private var presentationMaterializations: [UInt64: (texture: MTLTexture, extent: CGRect)] = [:]
+    private var presentationMaterializations:
+        [UInt64: (
+            texture: MTLTexture, extent: CGRect, histogramReadbackBuffer: MTLBuffer
+        )] = [:]
+    private var histogramRetryReadbackBuffers: [UInt64: MTLBuffer] = [:]
+    private var histogramRetryRevisions: Set<UInt64> = []
     private var pendingDisplayID: UInt64?
     private var pendingGPURevision: UInt64?
     /// The paused MTKView does not continuously redraw. Keep the active destination weakly so a
@@ -164,6 +173,7 @@ final class PreviewSurface: ObservableObject {
         perceptualDigest: PerceptualDigest? = nil,
         presentationAssetID: PhotoAssetID? = nil,
         rasterSource: PresentationRasterSource = .settled,
+        materializesPresentationTexture: Bool = true,
         onPresented: (() -> Void)? = nil
     ) -> Bool {
         guard let image,
@@ -277,12 +287,25 @@ final class PreviewSurface: ObservableObject {
             pendingGPURevision = nil
         }
         let surfaceRevision = self.revision
-        pendingPresentationMaterializationRevision = surfaceRevision
-        beginPresentationTextureMaterialization(
-            image: image, space: space, surfaceRevision: surfaceRevision,
-            telemetryRevision: revision, completeFrameIdentity: currentDetail?.identity,
-            isCompleteFrame: coversPresentationExtent
+        pendingPresentationMaterializationRevision =
+            materializesPresentationTexture
+            ? surfaceRevision : nil
+        presentationHistogramSample = HistogramData.PresentationSample(
+            surfaceRevision: surfaceRevision,
+            state: materializesPresentationTexture ? .pending : .unavailable
         )
+        if materializesPresentationTexture {
+            beginPresentationTextureMaterialization(
+                image: image, space: space, surfaceRevision: surfaceRevision,
+                telemetryRevision: revision, completeFrameIdentity: currentDetail?.identity,
+                isCompleteFrame: coversPresentationExtent
+            )
+        } else {
+            onPresentationHistogramSampleChange?(
+                HistogramData.PresentationSample(
+                    surfaceRevision: surfaceRevision, state: .unavailable
+                ))
+        }
         if let revision, let onPresented, !hasManagedPresentationLifecycle {
             presentationConfirmations.removeValue(forKey: revision)
             onPresented()
@@ -471,6 +494,7 @@ final class PreviewSurface: ObservableObject {
         pendingPresentationMaterializationRevision = nil
         pendingPresentationMaterialization = nil
         revision &+= 1
+        presentationHistogramSample = nil
         requestDisplay()
         onPresentationFailure?()
     }
@@ -518,12 +542,27 @@ final class PreviewSurface: ObservableObject {
         let started = LiveEditTelemetryClock.now
         guard let submission = Self.makePresentationTexture(image: image, space: space) else {
             pendingPresentationMaterializationRevision = nil
+            updatePresentationHistogramSample(
+                revision: surfaceRevision, state: .unavailable
+            )
             return
         }
         pendingPresentationMaterialization = (submission.texture, submission.extent)
-        presentationMaterializations[surfaceRevision] = (submission.texture, submission.extent)
+        presentationMaterializations[surfaceRevision] = (
+            submission.texture, submission.extent, submission.histogramReadbackBuffer
+        )
 
-        submission.commandBuffer.addCompletedHandler { [weak self] commandBuffer in
+        // Keep the MTLBuffer in `presentationMaterializations` through this handler, and capture
+        // only its numeric address. MTLBuffer and UnsafeMutableRawPointer are intentionally not
+        // transferred across Swift's concurrent closure boundary.
+        let histogramBytesAddress = UInt(
+            bitPattern: submission.histogramReadbackBuffer.contents()
+        )
+        let histogramWidth = submission.histogramWidth
+        let histogramHeight = submission.histogramHeight
+        let histogramBytesPerRow = submission.histogramBytesPerRow
+        let histogramByteCount = submission.histogramByteCount
+        submission.commandBuffer.addCompletedHandler { [self] commandBuffer in
             let gpuMS: Double?
             if commandBuffer.gpuStartTime > 0, commandBuffer.gpuEndTime > 0 {
                 gpuMS = max(0, (commandBuffer.gpuEndTime - commandBuffer.gpuStartTime) * 1_000)
@@ -531,12 +570,33 @@ final class PreviewSurface: ObservableObject {
                 gpuMS = nil
             }
             let succeeded = commandBuffer.status == .completed
+            let histogram: HistogramData?
+            if succeeded {
+                histogram = Self.histogramData(
+                    address: histogramBytesAddress, width: histogramWidth,
+                    height: histogramHeight, bytesPerRow: histogramBytesPerRow,
+                    byteCount: histogramByteCount
+                )
+            } else {
+                histogram = nil
+            }
+            let histogramState: HistogramData.PresentationSampleState
+            if succeeded {
+                histogramState =
+                    histogram.map(HistogramData.PresentationSampleState.sample)
+                    ?? .failed
+            } else {
+                histogramState = .unavailable
+            }
             Task { @MainActor in
-                self?.presentationTextureMaterializationCompleted(
+                self.presentationTextureMaterializationCompleted(
                     surfaceRevision: surfaceRevision, telemetryRevision: telemetryRevision,
                     succeeded: succeeded, gpuMS: gpuMS,
                     completeFrameIdentity: completeFrameIdentity,
                     isCompleteFrame: isCompleteFrame
+                )
+                self.updatePresentationHistogramSample(
+                    revision: surfaceRevision, state: histogramState
                 )
             }
         }
@@ -546,6 +606,71 @@ final class PreviewSurface: ObservableObject {
             telemetryByRevision[telemetryRevision]?.telemetry
                 .markPresentationMaterializationSubmitted(telemetryRevision, submitMS: submitMS)
         }
+    }
+
+    private func updatePresentationHistogramSample(
+        revision: UInt64, state: HistogramData.PresentationSampleState
+    ) {
+        guard self.revision == revision else { return }
+        let sample = HistogramData.PresentationSample(surfaceRevision: revision, state: state)
+        presentationHistogramSample = sample
+        onPresentationHistogramSampleChange?(sample)
+    }
+
+    /// Retry a failed sample by downsampling the retained presentation texture again. The source
+    /// CIImage graph is never re-evaluated for this recovery path.
+    @discardableResult
+    func retryPresentationHistogramSample(surfaceRevision: UInt64) -> Bool {
+        guard revision == surfaceRevision, let presentationTexture,
+            !histogramRetryRevisions.contains(surfaceRevision),
+            let commandBuffer = RenderEngine.presentationQueue.makeCommandBuffer(),
+            let sample = Self.encodeHistogramSample(
+                from: presentationTexture, space: space, commandBuffer: commandBuffer
+            )
+        else { return false }
+        histogramRetryRevisions.insert(surfaceRevision)
+        histogramRetryReadbackBuffers[surfaceRevision] = sample.readbackBuffer
+        updatePresentationHistogramSample(revision: surfaceRevision, state: .pending)
+        let address = UInt(bitPattern: sample.readbackBuffer.contents())
+        let sampleWidth = sample.width
+        let sampleHeight = sample.height
+        let sampleBytesPerRow = sample.bytesPerRow
+        let sampleByteCount = sample.byteCount
+        commandBuffer.addCompletedHandler { [self] commandBuffer in
+            let histogram: HistogramData?
+            if commandBuffer.status == .completed {
+                histogram = Self.histogramData(
+                    address: address, width: sampleWidth, height: sampleHeight,
+                    bytesPerRow: sampleBytesPerRow, byteCount: sampleByteCount
+                )
+            } else {
+                histogram = nil
+            }
+            let state: HistogramData.PresentationSampleState =
+                histogram.map(
+                    HistogramData.PresentationSampleState.sample
+                ) ?? .failed
+            Task { @MainActor in
+                self.histogramRetryReadbackBuffers.removeValue(forKey: surfaceRevision)
+                self.histogramRetryRevisions.remove(surfaceRevision)
+                self.updatePresentationHistogramSample(revision: surfaceRevision, state: state)
+            }
+        }
+        commandBuffer.commit()
+        return true
+    }
+
+    nonisolated private static func histogramData(
+        address: UInt, width: Int, height: Int, bytesPerRow: Int, byteCount: Int
+    ) -> HistogramData? {
+        guard let pointer = UnsafeMutableRawPointer(bitPattern: address) else { return nil }
+        let bytes = Array(
+            UnsafeBufferPointer(
+                start: pointer.assumingMemoryBound(to: UInt8.self), count: byteCount
+            ))
+        return HistogramData(
+            bgra8: bytes, width: width, height: height, bytesPerRow: bytesPerRow
+        )
     }
 
     private func presentationTextureMaterializationCompleted(
@@ -699,6 +824,7 @@ final class PreviewSurface: ObservableObject {
         lastValidImage = nil
         presentationTexture = nil
         presentationTextureExtent = nil
+        presentationHistogramSample = nil
         presentationTextureGeneration &+= 1
         lastValidPresentationTexture = nil
         lastValidPresentationTextureExtent = nil
@@ -833,11 +959,25 @@ final class PreviewSurface: ObservableObject {
 
     private struct MaterializationSubmission {
         let texture: MTLTexture
+        let histogramReadbackBuffer: MTLBuffer
+        let histogramWidth: Int
+        let histogramHeight: Int
+        let histogramBytesPerRow: Int
+        let histogramByteCount: Int
         let extent: CGRect
         let commandBuffer: MTLCommandBuffer
     }
 
-    /// Convert a completed preview image to the drawable's display format once per publication.
+    private struct HistogramReadbackSubmission {
+        let readbackBuffer: MTLBuffer
+        let width: Int
+        let height: Int
+        let bytesPerRow: Int
+        let byteCount: Int
+    }
+
+    /// Convert a completed preview image to the drawable's display format once per publication,
+    /// then sample that texture into a small CPU-readable buffer in the same command buffer.
     /// The returned texture is deliberately separate from the source CIImage: the latter may
     /// retain a private render texture, while this copy owns the exact color-space conversion
     /// needed at the presentation boundary and can be sampled without Core Image evaluation.
@@ -861,7 +1001,6 @@ final class PreviewSurface: ObservableObject {
         else {
             return nil
         }
-
         let translated = image.transformed(
             by: CGAffineTransform(
                 translationX: -extent.minX, y: -extent.minY
@@ -874,10 +1013,75 @@ final class PreviewSurface: ObservableObject {
             bounds: CGRect(origin: .zero, size: extent.size),
             colorSpace: space.cgColorSpace
         )
+        guard
+            let sample = encodeHistogramSample(
+                from: texture, space: space, commandBuffer: commandBuffer
+            )
+        else { return nil }
         RenderDiagnostics.notePresentationCoreImageEvaluation()
         return MaterializationSubmission(
-            texture: texture, extent: extent,
+            texture: texture, histogramReadbackBuffer: sample.readbackBuffer,
+            histogramWidth: sample.width, histogramHeight: sample.height,
+            histogramBytesPerRow: sample.bytesPerRow,
+            histogramByteCount: sample.byteCount, extent: extent,
             commandBuffer: commandBuffer)
+    }
+
+    private static func encodeHistogramSample(
+        from texture: MTLTexture, space: WorkingSpace, commandBuffer: MTLCommandBuffer
+    ) -> HistogramReadbackSubmission? {
+        guard
+            let sampleSize = HistogramData.presentationSampleSize(
+                width: texture.width, height: texture.height
+            )
+        else { return nil }
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm, width: sampleSize.width, height: sampleSize.height,
+            mipmapped: false
+        )
+        descriptor.usage = [.renderTarget, .shaderWrite]
+        descriptor.storageMode = .shared
+        guard
+            let sampleTexture = RenderEngine.presentationDevice.makeTexture(
+                descriptor: descriptor
+            ),
+            let textureImage = CIImage(
+                mtlTexture: texture, options: [.colorSpace: space.cgColorSpace]
+            )
+        else { return nil }
+        let scaleX = CGFloat(sampleSize.width) / CGFloat(texture.width)
+        let scaleY = CGFloat(sampleSize.height) / CGFloat(texture.height)
+        let scaledTextureImage = textureImage.transformed(
+            by: CGAffineTransform(scaleX: scaleX, y: scaleY)
+        )
+        RenderEngine.presentationContext.render(
+            scaledTextureImage, to: sampleTexture, commandBuffer: commandBuffer,
+            bounds: CGRect(
+                origin: .zero,
+                size: CGSize(
+                    width: sampleSize.width, height: sampleSize.height
+                )), colorSpace: space.cgColorSpace
+        )
+
+        let bytesPerRow = ((sampleSize.width * 4 + 255) / 256) * 256
+        let byteCount = bytesPerRow * sampleSize.height
+        guard
+            let readbackBuffer = RenderEngine.presentationDevice.makeBuffer(
+                length: byteCount, options: .storageModeShared
+            ), let blit = commandBuffer.makeBlitCommandEncoder()
+        else { return nil }
+        blit.copy(
+            from: sampleTexture, sourceSlice: 0, sourceLevel: 0,
+            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: MTLSize(width: sampleSize.width, height: sampleSize.height, depth: 1),
+            to: readbackBuffer, destinationOffset: 0,
+            destinationBytesPerRow: bytesPerRow, destinationBytesPerImage: byteCount
+        )
+        blit.endEncoding()
+        return HistogramReadbackSubmission(
+            readbackBuffer: readbackBuffer, width: sampleSize.width,
+            height: sampleSize.height, bytesPerRow: bytesPerRow, byteCount: byteCount
+        )
     }
 }
 

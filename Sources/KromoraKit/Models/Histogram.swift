@@ -2,12 +2,33 @@ import CoreGraphics
 import Foundation
 
 /// Per-channel tonal distribution of an image, in 256 bins (one per 8-bit
-/// level). Computed from a downscaled RGBA8 render — see
-/// `RenderEngine.histogram(source:document:lut:scale:space:maxDimension:)`.
+/// level). Computed from a bounded RGBA8 sample of the presented pixels.
 ///
-/// `Sendable` because the tally happens inside `actor RenderEngine`, where the `CIContext` lives,
-/// and the result crosses back to the main actor to be published.
+/// `Sendable` because the tally result crosses from a presentation-queue completion to the main
+/// actor for publication.
 struct HistogramData: Equatable, Sendable {
+
+    struct PixelSize: Equatable, Sendable {
+        let width: Int
+        let height: Int
+    }
+
+    /// The current preview UI may consume a retained sample when the Info inspector opens.
+    /// `unavailable` means the presentation texture path could not be built and the engine
+    /// histogram fallback should be used.
+    enum PresentationSampleState: Equatable, Sendable {
+        case pending
+        case sample(HistogramData)
+        case unavailable
+        /// Texture materialization succeeded, but its first byte tally failed; retry from that
+        /// retained texture instead of asking the render engine to evaluate the source graph.
+        case failed
+    }
+
+    struct PresentationSample: Equatable, Sendable {
+        let surfaceRevision: UInt64
+        let state: PresentationSampleState
+    }
 
     /// Bounded row-major RGB samples from the exact rendered preview represented by this
     /// histogram. Keeping these samples lets the inspector draw spatial scopes without asking the
@@ -114,6 +135,39 @@ struct HistogramData: Equatable, Sendable {
                   samples: samples, sampleWidth: width, sampleHeight: height,
                   clippedHighlights: clippedHighlights, clippedShadows: clippedShadows,
                   clippedRed: clippedRed, clippedGreen: clippedGreen, clippedBlue: clippedBlue)
+    }
+
+    /// Tally bytes read from the BGRA presentation texture. The histogram and spatial samples
+    /// retain RGBA ordering so all consumers share the same channel contract.
+    init?(bgra8 bytes: [UInt8], width: Int, height: Int, bytesPerRow: Int? = nil) {
+        let stride = bytesPerRow ?? width * 4
+        guard width > 0, height > 0, stride >= width * 4, bytes.count >= height * stride else {
+            return nil
+        }
+        var rgba = [UInt8](repeating: 0, count: bytes.count)
+        for y in 0..<height {
+            let row = y * stride
+            for x in 0..<width {
+                let offset = row + x * 4
+                rgba[offset] = bytes[offset + 2]
+                rgba[offset + 1] = bytes[offset + 1]
+                rgba[offset + 2] = bytes[offset]
+                rgba[offset + 3] = bytes[offset + 3]
+            }
+        }
+        self.init(rgba8: rgba, width: width, height: height, bytesPerRow: stride)
+    }
+
+    /// Preserve aspect ratio while bounding both dimensions by the histogram's sampling limit.
+    static func presentationSampleSize(
+        width: Int, height: Int, maxDimension: Int = 512
+    ) -> PixelSize? {
+        guard width > 0, height > 0, maxDimension > 0 else { return nil }
+        let factor = min(1, Double(maxDimension) / Double(max(width, height)))
+        return PixelSize(
+            width: max(1, Int((Double(width) * factor).rounded(.down))),
+            height: max(1, Int((Double(height) * factor).rounded(.down)))
+        )
     }
 
     func bins(for channel: Channel) -> [Int] {
