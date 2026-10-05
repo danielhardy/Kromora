@@ -7,15 +7,14 @@ measurements. Current requirements and verification limits are summarized in
 | Lifecycle | Script | Purpose | Requirements / inputs |
 | --- | --- | --- | --- |
 | Active | `agent-worktree.sh` | Create or remove an isolated agent worktree | Git checkout; used by agent workflow documentation |
-| Active | `app-store-build.sh` | Build and verify the production Xcode app, or create an Organizer archive | Xcode 27+ / macOS 27 SDK; archive requires `DEVELOPMENT_TEAM` and Apple Development signing |
-| Active | `build-macos-app.sh` | Build and sign the distributable macOS app bundle | Xcode 27+ / macOS 27 SDK, SwiftPM, `xcrun actool`, signing identity or ad-hoc signing |
+| Active | `app-store-build.sh` | Build and verify the production Xcode app, or create an Organizer archive at `.build/xcode/Build/Products/Release/Kromora.app` | Xcode 27+ / macOS 27 SDK; archive requires `DEVELOPMENT_TEAM` and Apple Development signing |
 | Active | `check-swift-format.sh` | Check changed Swift files against `.swift-format` | macOS Swift toolchain; optional `SWIFT_FORMAT_BASE` |
 | Active | `ci-tests.sh` | Enforce the zero-warning build and run the deterministic, serial render/UI, or optional test lane | Xcode 27+ / macOS 27 SDK; optional lane needs the documented `KROMORA_*` fixtures/settings |
 | Opt-in | `photo-intelligence-report.sh` | Generate the photo-intelligence corpus report | Photo-intelligence test fixtures; optional `KROMORA_PHOTO_INTELLIGENCE_REPORT_PATH` |
 | Opt-in | `run-kromora-capture.sh` | Run a Release `xctrace` capture for `metal-presentation`, `concurrent-export-editing`, or `last-known-frame` | macOS, logged-in display, `xctrace`/`xctest`, and a licensed RAW fixture; use `--benchmark` and optionally `--source` |
-| Active | `smoke-macos-app.sh` | Exercise launch, Open, Settings, and Export through the packaged app | Built `.build/Kromora.app`, macOS UI session, accessible WindowServer; exits 2 when hosted UI is unavailable |
-| Active | `verify-app-icon.sh` | Verify Icon Composer inputs and packaged icon/resource outputs | Built `.build/Kromora.app`, Icon Composer asset, Python 3 |
-| Active | `verify-app-signature.sh` | Verify the app signature and expected entitlements | Built `.build/Kromora.app`, `codesign`, Python 3 |
+| Active | `smoke-macos-app.sh` | Exercise launch, Open, Settings, and Export through the packaged app | Xcode-built `.build/xcode/Build/Products/Release/Kromora.app`, macOS UI session, accessible WindowServer; exits 2 when hosted UI is unavailable |
+| Active | `verify-app-icon.sh` | Verify Icon Composer inputs and packaged icon/resource outputs | Xcode-built `.build/xcode/Build/Products/Release/Kromora.app`, Icon Composer asset, Python 3 |
+| Active | `verify-app-signature.sh` | Verify the app signature and expected entitlements | Xcode-built `.build/xcode/Build/Products/Release/Kromora.app`, `codesign`, Python 3 |
 | Active | `verify-library-package-metadata.sh` | Verify the `.kromoralibrary` document/UTI declaration and Pictures entitlement | Source plist files, Python 3 |
 
 The capture wrapper replaces the former issue-specific wrappers. Use explicit benchmark modes so the

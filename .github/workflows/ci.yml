@@ -92,12 +92,14 @@ jobs:
           echo "SDK: $(xcrun --sdk macosx --show-sdk-version) at $(xcrun --sdk macosx --show-sdk-path)"
 
       - name: Build app bundle
-        run: scripts/build-macos-app.sh
+        run: scripts/app-store-build.sh
 
       - name: Verify packaged assets and signature
         run: |
-          scripts/verify-app-icon.sh
-          scripts/verify-app-signature.sh
+          app_bundle=.build/xcode/Build/Products/Release/Kromora.app
+          scripts/verify-app-icon.sh "$app_bundle"
+          scripts/verify-app-signature.sh "$app_bundle"
+          scripts/verify-xcode-app.sh "$app_bundle"
 
       - name: Assert packaging did not modify tracked source files
         run: |
@@ -114,13 +116,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build app bundle
-        run: scripts/build-macos-app.sh
+        run: scripts/app-store-build.sh
 
       - name: Launch, open, Settings/menu, and export smoke path
         shell: bash
         run: |
           set +e
-          scripts/smoke-macos-app.sh
+          scripts/smoke-macos-app.sh .build/xcode/Build/Products/Release/Kromora.app
           status=$?
           set -e
           if [[ "$status" == 2 ]]; then

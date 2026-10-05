@@ -16,7 +16,10 @@ else
   app_bundle="$project_root/.build/xcode/Build/Products/Release/Kromora.app"
 fi
 
-[[ -d "$app_bundle" ]] || { print -u2 "missing app bundle: $app_bundle"; exit 1; }
+[[ -d "$app_bundle" ]] || {
+  print -u2 "missing app bundle: $app_bundle; run scripts/app-store-build.sh first"
+  exit 1
+}
 
 info_plist="$app_bundle/Contents/Info.plist"
 executable="$app_bundle/Contents/MacOS/Kromora"

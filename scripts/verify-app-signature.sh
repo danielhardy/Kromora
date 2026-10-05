@@ -4,8 +4,11 @@ set -euo pipefail
 project_root="${0:A:h}/.."
 cd "$project_root"
 
-app_bundle="${1:-.build/Kromora.app}"
-[[ -d "$app_bundle" ]] || { print -u2 "missing $app_bundle; run scripts/build-macos-app.sh first"; exit 1; }
+app_bundle="${1:-.build/xcode/Build/Products/Release/Kromora.app}"
+[[ -d "$app_bundle" ]] || {
+  print -u2 "missing $app_bundle; run scripts/app-store-build.sh first"
+  exit 1
+}
 
 /usr/bin/codesign --verify --deep --strict "$app_bundle"
 dump="$(mktemp -t kromora-entitlements).plist"

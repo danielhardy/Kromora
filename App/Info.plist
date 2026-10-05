@@ -16,6 +16,8 @@
 	<string>0.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>KromoraGitCommit</key>
+	<string>$(KROMORA_GIT_COMMIT)</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

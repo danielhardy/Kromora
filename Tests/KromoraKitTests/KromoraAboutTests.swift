@@ -81,8 +81,20 @@ final class KromoraAboutTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/KromoraAboutView.swift"),
             encoding: .utf8
         )
-        let buildScript = try String(
-            contentsOf: packageRoot.appendingPathComponent("scripts/build-macos-app.sh"),
+        let xcodeProject = try String(
+            contentsOf: packageRoot.appendingPathComponent("Xcode/Kromora.xcodeproj/project.pbxproj"),
+            encoding: .utf8
+        )
+        let xcodeConfig = try String(
+            contentsOf: packageRoot.appendingPathComponent("Xcode/Config/Base.xcconfig"),
+            encoding: .utf8
+        )
+        let appInfoPlist = try String(
+            contentsOf: packageRoot.appendingPathComponent("App/Info.plist"),
+            encoding: .utf8
+        )
+        let buildLauncher = try String(
+            contentsOf: packageRoot.appendingPathComponent("scripts/app-store-build.sh"),
             encoding: .utf8
         )
 
@@ -92,7 +104,11 @@ final class KromoraAboutTests: XCTestCase {
         XCTAssertFalse(aboutView.contains("Bundled Starter Looks"))
         XCTAssertFalse(aboutView.contains("look.attribution"))
         XCTAssertFalse(aboutView.contains("textSelection(.enabled)"))
-        XCTAssertTrue(buildScript.contains("git rev-parse --short=12 HEAD"))
-        XCTAssertTrue(buildScript.contains("KromoraGitCommit"))
+        XCTAssertTrue(xcodeProject.contains("Kromora.icon in Resources"))
+        XCTAssertTrue(xcodeConfig.contains("ASSETCATALOG_COMPILER_APPICON_NAME = Kromora"))
+        XCTAssertTrue(xcodeConfig.contains("KROMORA_GIT_COMMIT ="))
+        XCTAssertTrue(appInfoPlist.contains("<string>$(KROMORA_GIT_COMMIT)</string>"))
+        XCTAssertTrue(buildLauncher.contains("git rev-parse --short=12 HEAD"))
+        XCTAssertTrue(buildLauncher.contains("KROMORA_GIT_COMMIT=$git_commit"))
     }
 }

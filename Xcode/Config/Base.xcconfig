@@ -24,6 +24,7 @@ ASSETCATALOG_COMPILER_APPICON_NAME = Kromora
 INFOPLIST_KEY_LSApplicationCategoryType = public.app-category.photography
 INFOPLIST_KEY_NSHumanReadableCopyright = Copyright © 2026 Tim; Copyright © 2026 Daniel Hardy
 INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO
+KROMORA_GIT_COMMIT =
 
 // The standalone Xcode launcher uses Swift 6; package compiler settings remain in Package.swift.
 SWIFT_VERSION = 6.0

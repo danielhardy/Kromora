@@ -55,12 +55,20 @@ xcodebuild_args=(
   -derivedDataPath "$derived_data_path"
 )
 
+# Preserve the short revision shown in About for distributable builds while letting
+# direct Xcode development builds use the existing "Development build" fallback.
+git_commit="$(git rev-parse --short=12 HEAD 2>/dev/null || true)"
+build_metadata_args=()
+if [[ -n "$git_commit" ]]; then
+  build_metadata_args+=("KROMORA_GIT_COMMIT=$git_commit")
+fi
+
 if [[ "$mode" == "verify" ]]; then
-  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" build
+  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" build
   "$project_root/scripts/verify-xcode-app.sh"
 else
   archive_path="$derived_data_path/Kromora.xcarchive"
-  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" -archivePath "$archive_path" archive
+  xcodebuild "${xcodebuild_args[@]}" "${signing_args[@]}" "${build_metadata_args[@]}" -archivePath "$archive_path" archive
   print "Archive created at $archive_path"
   print "Open Xcode Organizer (Window > Organizer), select the Kromora archive, then choose Distribute App > App Store Connect."
 fi

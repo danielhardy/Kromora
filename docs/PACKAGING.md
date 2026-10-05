@@ -3,20 +3,23 @@
 Packaging is part of the MVP release bar in [`PRODUCT_SCOPE.md`](PRODUCT_SCOPE.md). This guide owns
 the current bundle, signing, and entitlement procedure.
 
-The distributable app is built by [`scripts/build-macos-app.sh`](../scripts/build-macos-app.sh).
-The script stages the SwiftPM release product, asset catalog, entitlements, and icon into the
-disposable `.build/Kromora.app` bundle. It does not modify tracked source assets.
+The distributable app is built by the `Kromora` target in
+[`Xcode/Kromora.xcodeproj`](../Xcode/Kromora.xcodeproj), with
+[`scripts/app-store-build.sh`](../scripts/app-store-build.sh) as the supported build and archive
+entry point. The Release app is produced at
+`.build/xcode/Build/Products/Release/Kromora.app`; Xcode compiles the icon, embeds the package
+resources, and signs the app from the project configuration.
 
 ## Icon
 
-The product icon is authored in `Kromora.icon`, composed into the app bundle by the build script,
-and checked by [`scripts/verify-app-icon.sh`](../scripts/verify-app-icon.sh). Keep the source icon's
+The product icon is authored in `Kromora.icon`, composed into the app bundle by Xcode, and checked
+by [`scripts/verify-app-icon.sh`](../scripts/verify-app-icon.sh). Keep the source icon's
 safe area, corner treatment, and monochrome/colored variants consistent with the Kromora identity;
 verify the packaged `CFBundleIconName`, resource presence, and rendered outputs after changes.
 
 ## Signing and entitlements
 
-[`scripts/verify-app-signature.sh`](../scripts/verify-app-signature.sh) checks the packaged
+[`scripts/verify-app-signature.sh`](../scripts/verify-app-signature.sh) checks the Xcode-built
 signature and exact App Sandbox entitlement set. Local and CI structural builds may use an ad-hoc
 signature; distribution builds must provide the configured signing identity and provisioning
 profile through the build environment. The five declared capabilities are app sandbox,
@@ -34,4 +37,4 @@ For a distributable build, use Xcode 27 or newer with the macOS 27 SDK. The pack
 to macOS 26 (Tahoe); keep API usage compatible with that deployment floor.
 
 Kromora is distributed only through the Mac App Store and TestFlight. Direct-download distribution
-was retired; a later documentation pass will fully rewrite this guide.
+was retired; this guide describes the current Xcode app build.
