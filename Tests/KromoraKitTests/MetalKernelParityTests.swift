@@ -165,8 +165,15 @@ final class MetalKernelParityTests: XCTestCase {
         _ image: CIImage, named name: String, tolerance: Int = 1,
         file: StaticString = #filePath, line: UInt = #line
     ) throws {
-        let golden = try golden(named: name)
         let fresh = try Pixels.bytes(of: image)
+        if ProcessInfo.processInfo.environment["UPDATE_METAL_GOLDENS"] == "1" {
+            let root = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent()
+                .appendingPathComponent("Resources/MetalKernelGoldens")
+            try Data(fresh).write(to: root.appendingPathComponent("\(name).rgba"))
+            return
+        }
+        let golden = try golden(named: name)
         XCTAssertEqual(
             fresh.count, golden.bytes.count,
             "\(name): byte count changed (\(fresh.count) vs \(golden.bytes.count))",

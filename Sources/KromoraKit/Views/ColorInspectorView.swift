@@ -13,7 +13,7 @@ struct ColorInspectorView: View {
     @State private var colorExpanded = true
     @State private var mixerExpanded = false
     @State private var gradingExpanded = false
-    @State private var expandedMixerChannels = Set(ColorMixerChannelName.allCases)
+    @State private var selectedMixerChannel: ColorMixerChannelName = .red
 
     var body: some View {
         InspectorScrollingContent {
@@ -166,43 +166,27 @@ struct ColorInspectorView: View {
             "Color Mixer / HSL",
             isExpanded: $mixerExpanded
         ) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
                 InspectorSectionResetButton(
                     title: "Reset Mixer",
                     disabled: !viewModel.hasMixerAdjustments,
                     action: viewModel.resetAllMixer
                 )
-                ForEach(ColorMixerChannelName.allCases, id: \.self) { channel in
-                    InspectorDisclosure(
-                        channel.title,
-                        isExpanded: mixerExpansion(for: channel),
-                        titleFont: InspectorStyle.nestedSectionTitle
-                    ) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(ColorMixerControl.allCases, id: \.self) { control in
-                                valueRow(
-                                    title: "\(channel.title) \(control.title)",
-                                    value: viewModel.mixerBinding(for: channel, control: control),
-                                    range: control.range,
-                                    neutral: control.neutral,
-                                    trackStyle: control.trackStyle,
-                                    readout: signedWholeReadout,
-                                    fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
-                                    reset: {
-                                        viewModel.resetMixer(channel, control)
-                                    }
-                                )
-                            }
-                            InspectorSectionResetButton(
-                                title: "Reset \(channel.title)",
-                                disabled: viewModel.mixerChannelValue(channel).isIdentity,
-                                action: { viewModel.resetMixer(channel) }
-                            )
-                        }
-                        .padding(.top, 8)
-                    }
-                    .accessibilityLabel("\(channel.title) mixer channel")
-                }
+                ColorMixerChannelStrip(
+                    selected: $selectedMixerChannel,
+                    isEdited: { !viewModel.mixerChannelValue($0).isIdentity }
+                )
+                ColorMixerChannelPanel(
+                    channel: selectedMixerChannel,
+                    hue: viewModel.mixerBinding(for: selectedMixerChannel, control: .hue),
+                    saturation: viewModel.mixerBinding(for: selectedMixerChannel, control: .saturation),
+                    luminance: viewModel.mixerBinding(for: selectedMixerChannel, control: .luminance),
+                    isIdentity: viewModel.mixerChannelValue(selectedMixerChannel).isIdentity,
+                    resetChannel: { viewModel.resetMixer(selectedMixerChannel) },
+                    resetControl: { viewModel.resetMixer(selectedMixerChannel, $0) },
+                    beginInteraction: viewModel.beginPreviewInteraction,
+                    endInteraction: viewModel.endPreviewInteraction
+                )
             }
             .padding(.top, 10)
         }
@@ -308,14 +292,153 @@ struct ColorInspectorView: View {
             : ColorSettingFormatting.wholeNumberFormat
     }
 
-    private func mixerExpansion(for channel: ColorMixerChannelName) -> Binding<Bool> {
-        Binding(
-            get: { expandedMixerChannels.contains(channel) },
-            set: { expanded in
-                if expanded { expandedMixerChannels.insert(channel) }
-                else { expandedMixerChannels.remove(channel) }
+}
+
+/// Eight hue-neighborhood chips. Selection is view-local; an edit dot marks non-identity channels.
+private struct ColorMixerChannelStrip: View {
+    @Binding var selected: ColorMixerChannelName
+    let isEdited: (ColorMixerChannelName) -> Bool
+
+    private let chipDiameter: CGFloat = 22
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(ColorMixerChannelName.allCases, id: \.self) { channel in
+                Button {
+                    selected = channel
+                } label: {
+                    ZStack(alignment: .bottomTrailing) {
+                        Circle()
+                            .fill(channel.swatchColor)
+                            .frame(width: chipDiameter, height: chipDiameter)
+                            .overlay(
+                                Circle()
+                                    .strokeBorder(
+                                        selected == channel
+                                            ? KromoraTheme.primaryAccent
+                                            : Color.primary.opacity(0.18),
+                                        lineWidth: selected == channel ? 2 : 1
+                                    )
+                            )
+                            .shadow(
+                                color: selected == channel
+                                    ? KromoraTheme.primaryAccent.opacity(0.35)
+                                    : .clear,
+                                radius: 2
+                            )
+
+                        if isEdited(channel) {
+                            Circle()
+                                .fill(KromoraTheme.primaryAccent)
+                                .frame(width: 6, height: 6)
+                                .overlay(
+                                    Circle().stroke(Color.black.opacity(0.35), lineWidth: 0.5)
+                                )
+                                .offset(x: 2, y: 2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(channel.title)
+                .accessibilityLabel("\(channel.title) mixer channel")
+                .accessibilityValue(selected == channel ? "Selected" : "Not selected")
+                .accessibilityAddTraits(selected == channel ? .isSelected : [])
+                .accessibilityHint(
+                    isEdited(channel)
+                        ? "Edited. Shows Hue, Saturation, and Luminance for this color."
+                        : "Shows Hue, Saturation, and Luminance for this color."
+                )
             }
-        )
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Color mixer channels")
+    }
+}
+
+/// Focused Hue / Saturation / Luminance controls for one mixer channel.
+private struct ColorMixerChannelPanel: View {
+    let channel: ColorMixerChannelName
+    @Binding var hue: Double
+    @Binding var saturation: Double
+    @Binding var luminance: Double
+    let isIdentity: Bool
+    let resetChannel: () -> Void
+    let resetControl: (ColorMixerControl) -> Void
+    let beginInteraction: () -> Void
+    let endInteraction: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(channel.swatchColor)
+                    .frame(width: 10, height: 10)
+                    .overlay(Circle().stroke(Color.primary.opacity(0.2), lineWidth: 0.75))
+                Text(channel.title)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 0)
+                Button(action: resetChannel) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isIdentity)
+                .help("Reset \(channel.title)")
+                .accessibilityLabel("Reset \(channel.title) mixer channel")
+                .accessibilityHint("Restore Hue, Saturation, and Luminance for this color to neutral.")
+            }
+
+            ColorValueRow(
+                title: "\(channel.title) Hue",
+                value: $hue,
+                range: ColorMixerControl.hue.range,
+                neutral: ColorMixerControl.hue.neutral,
+                trackStyle: ColorMixerControl.hue.trackStyle(for: channel),
+                readout: { String(format: "%+.0f", $0) },
+                fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
+                reset: { resetControl(.hue) },
+                resetActionTitle: "Reset to neutral",
+                beginInteraction: beginInteraction,
+                endInteraction: endInteraction,
+                usesTemperatureSlider: false
+            )
+            ColorValueRow(
+                title: "\(channel.title) Saturation",
+                value: $saturation,
+                range: ColorMixerControl.saturation.range,
+                neutral: ColorMixerControl.saturation.neutral,
+                trackStyle: ColorMixerControl.saturation.trackStyle(for: channel),
+                readout: { String(format: "%+.0f", $0) },
+                fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
+                reset: { resetControl(.saturation) },
+                resetActionTitle: "Reset to neutral",
+                beginInteraction: beginInteraction,
+                endInteraction: endInteraction,
+                usesTemperatureSlider: false
+            )
+            ColorValueRow(
+                title: "\(channel.title) Luminance",
+                value: $luminance,
+                range: ColorMixerControl.luminance.range,
+                neutral: ColorMixerControl.luminance.neutral,
+                trackStyle: ColorMixerControl.luminance.trackStyle(for: channel),
+                readout: { String(format: "%+.0f", $0) },
+                fieldFormat: ColorSettingFormatting.signedWholeNumberFormat,
+                reset: { resetControl(.luminance) },
+                resetActionTitle: "Reset to neutral",
+                beginInteraction: beginInteraction,
+                endInteraction: endInteraction,
+                usesTemperatureSlider: false
+            )
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(channel.title) color mixer")
     }
 }
 
@@ -488,7 +611,12 @@ private struct ColorGradingZoneUnit: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            ZStack(alignment: .topTrailing) {
+            // Balance a trailing reset so the wheel unit stays centered and the
+            // control sits outside the arcs (Photos Color Balance placement).
+            HStack(alignment: .top, spacing: 4) {
+                Color.clear
+                    .frame(width: 24, height: 24)
+
                 HStack(spacing: 7) {
                     ColorGradingArcSlider(
                         title: title,
@@ -522,7 +650,7 @@ private struct ColorGradingZoneUnit: View {
 
                 Button(action: reset) {
                     Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 12, weight: .medium))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.secondary)
                         .frame(width: 24, height: 24)
                         .contentShape(Circle())
@@ -606,6 +734,26 @@ private enum ColorGradingArcControl {
     }
 }
 
+/// Shared bronze thumb — same accent family as `NeutralOriginSlider`'s knob.
+private struct ColorGradingControlThumb: View {
+    var diameter: CGFloat = 10
+
+    var body: some View {
+        Circle()
+            .fill(KromoraTheme.primaryAccent)
+            .frame(width: diameter, height: diameter)
+            .overlay(
+                Circle()
+                    .stroke(
+                        Color.black.opacity(0.35),
+                        lineWidth: max(0.75, diameter * 0.045)
+                    )
+            )
+            .shadow(color: .black.opacity(0.28), radius: 1)
+            .allowsHitTesting(false)
+    }
+}
+
 /// The curved side controls map directly to the existing per-zone hue and saturation values.
 private struct ColorGradingArcSlider: View {
     let title: String
@@ -614,6 +762,9 @@ private struct ColorGradingArcSlider: View {
     @Binding var wheel: ColorGradingWheel
     let beginInteraction: () -> Void
     let endInteraction: () -> Void
+
+    /// Matches `NeutralOriginSliderCell.barThickness`.
+    private static let trackThickness: CGFloat = 4
 
     @State private var isDragging = false
 
@@ -645,14 +796,18 @@ private struct ColorGradingArcSlider: View {
             )
 
             ZStack {
+                // Match NeutralOriginSlider's 4pt track so arc and linear rows read as one family.
                 ColorGradingArcShape(bowsOutwardLeft: side.bowsOutwardLeft)
-                    .stroke(.primary.opacity(0.19), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .stroke(
+                        .primary.opacity(0.22),
+                        style: StrokeStyle(lineWidth: Self.trackThickness, lineCap: .round)
+                    )
 
                 ColorGradingArcShape(bowsOutwardLeft: side.bowsOutwardLeft)
                     .trim(from: 1 - normalizedValue, to: 1)
                     .stroke(
                         selectedHueColor.opacity(control == .saturation ? 0.95 : 0.65),
-                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+                        style: StrokeStyle(lineWidth: Self.trackThickness, lineCap: .round)
                     )
 
                 Rectangle()
@@ -660,11 +815,7 @@ private struct ColorGradingArcSlider: View {
                     .frame(width: 5, height: 1)
                     .position(neutralPosition)
 
-                Circle()
-                    .fill(selectedHueColor)
-                    .frame(width: 9, height: 9)
-                    .overlay(Circle().stroke(.white.opacity(0.92), lineWidth: 1.25))
-                    .shadow(color: .black.opacity(0.25), radius: 1)
+                ColorGradingControlThumb()
                     .position(thumbPosition)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -764,9 +915,6 @@ private struct ColorGradingWheelControl: View {
                 width: indicatorPoint.x * diameter / 2,
                 height: -indicatorPoint.y * diameter / 2
             )
-            let rgb = ColorGradingWheelPalette.rgb(forHueDegrees: wheel.hue)
-            let indicatorColor = Color(red: rgb.red, green: rgb.green, blue: rgb.blue)
-
             ZStack {
                 ColorGradingWheelDisc()
                     .clipShape(Circle())
@@ -779,11 +927,7 @@ private struct ColorGradingWheelControl: View {
                     path.addLine(to: CGPoint(x: diameter / 2, y: diameter / 2 + 5))
                 }
                 .stroke(.white.opacity(0.35), lineWidth: 0.8)
-                Circle()
-                    .fill(indicatorColor.opacity(wheel.saturation > 0 ? 0.95 : 0.72))
-                    .frame(width: 13, height: 13)
-                    .overlay(Circle().stroke(.white.opacity(0.96), lineWidth: 1.35))
-                    .shadow(color: .black.opacity(0.38), radius: 1)
+                ColorGradingControlThumb(diameter: 12)
                     .offset(indicatorOffset)
             }
             .frame(width: diameter, height: diameter)

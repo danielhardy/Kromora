@@ -56,13 +56,29 @@ enum ColorMixerControl: String, CaseIterable, Hashable, Sendable {
     /// Every mixer row is signed about an untouched channel.
     var neutral: Double { 0 }
 
-    /// Hue is an absolute hue wheel and saturation has a useful chroma ramp. Luminance stays
-    /// neutral because a colour gradient would misrepresent a lightness-only change.
+    /// Default semantic tracks when no channel context is available (tests / shared rows).
+    /// The mixer panel uses ``trackStyle(for:)`` so Hue/Saturation match the selected neighborhood.
     var trackStyle: SliderTrackStyle {
         switch self {
         case .hue: return .hue
         case .saturation: return .saturation
         case .luminance: return .neutral
+        }
+    }
+
+    /// Channel-aware tracks: local ±``ColorMixerChannel.hueEndpointDegrees`` hue ramp, and
+    /// gray → fully saturated chip colour for saturation.
+    func trackStyle(for channel: ColorMixerChannelName) -> SliderTrackStyle {
+        switch self {
+        case .hue:
+            return .localizedHue(
+                center: channel.hueCenter,
+                halfSpan: ColorMixerChannel.hueEndpointDegrees / 360.0
+            )
+        case .saturation:
+            return .channelSaturation(hue: channel.hueCenter)
+        case .luminance:
+            return .neutral
         }
     }
 }
@@ -71,6 +87,26 @@ enum ColorMixerChannelName: String, CaseIterable, Hashable, Sendable {
     case red, orange, yellow, green, aqua, blue, purple, magenta
 
     var title: String { rawValue.capitalized }
+
+    /// Fractional hue centers matching `hueWeight` in the HSL mixer kernel
+    /// (R/O/Y/G/A/B/P/M at 0°, 30°, 60°, 120°, 180°, 240°, 270°, 300°).
+    var hueCenter: Double {
+        switch self {
+        case .red: return 0
+        case .orange: return 1.0 / 12.0
+        case .yellow: return 1.0 / 6.0
+        case .green: return 1.0 / 3.0
+        case .aqua: return 0.5
+        case .blue: return 2.0 / 3.0
+        case .purple: return 0.75
+        case .magenta: return 5.0 / 6.0
+        }
+    }
+
+    /// Saturated chip fill for the mixer channel strip.
+    var swatchColor: Color {
+        Color(hue: hueCenter, saturation: 0.88, brightness: 0.92)
+    }
 }
 
 enum ColorGradingZone: String, CaseIterable, Hashable, Sendable {

@@ -2,14 +2,18 @@ import Foundation
 
 /// The three photographer-facing controls for one HSL colour neighborhood.
 ///
-/// Values use the familiar -100...100 scale. Hue is converted to a small angular move by the
-/// renderer; Saturation and Luminance are fractional changes to the pixel's HSL components. The
-/// model deliberately contains no Core Image types, so it is safe to persist, hash, undo, and
-/// send across the render boundary.
+/// Values use the familiar -100...100 scale. Hue maps to a local angular move of
+/// ``hueEndpointDegrees`` at the endpoints; Saturation and Luminance are fractional changes to
+/// the pixel's HSL components. The model deliberately contains no Core Image types, so it is safe
+/// to persist, hash, undo, and send across the render boundary.
 struct ColorMixerChannel: Codable, Equatable, Sendable {
     static let hueRange = -100.0...100.0
     static let saturationRange = -100.0...100.0
     static let luminanceRange = -100.0...100.0
+
+    /// Degrees of HSL hue shift at mixer hue ±100. Kept in the model so the inspector tracks and
+    /// the render mapping stay honest about the same photographic range.
+    static let hueEndpointDegrees = 60.0
 
     var hue: Double {
         didSet { hue = hue.clamped(to: Self.hueRange, default: 0) }

@@ -363,12 +363,26 @@ enum SliderTrackStyle: Equatable, Sendable {
     case saturation
     case vibrance
     case hue
+    /// Local hue ramp around a channel centre. `center` and `halfSpan` are fractions of the hue
+    /// wheel (0…1), matching the mixer kernel's photographic endpoint range.
+    case localizedHue(center: Double, halfSpan: Double)
+    /// Gray through a soft channel colour to a fully saturated swatch at `hue` (0…1).
+    case channelSaturation(hue: Double)
 
     fileprivate var usesGradient: Bool { self != .neutral }
 
     fileprivate func gradient(neutralFraction: CGFloat) -> NSGradient? {
         func color(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> NSColor {
             NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
+        }
+        func hueColor(_ hue: Double, saturation: CGFloat, brightness: CGFloat) -> NSColor {
+            let wrapped = hue - floor(hue)
+            return NSColor(
+                calibratedHue: CGFloat(wrapped),
+                saturation: saturation,
+                brightness: brightness,
+                alpha: 1
+            )
         }
         let neutral = min(max(neutralFraction, 0), 1)
         func threePart(_ lower: NSColor, _ middle: NSColor, _ upper: NSColor) -> NSGradient {
@@ -420,6 +434,24 @@ enum SliderTrackStyle: Equatable, Sendable {
             return NSGradient(
                 colors: [.systemRed, .systemYellow, .systemGreen, .systemCyan, .systemBlue, .systemPurple, .systemRed],
                 atLocations: [0, 1.0 / 6, 2.0 / 6, 3.0 / 6, 4.0 / 6, 5.0 / 6, 1], colorSpace: .deviceRGB
+            )
+        case .localizedHue(let center, let halfSpan):
+            let span = max(halfSpan, 0.001)
+            let stops: [(Double, CGFloat)] = [
+                (center - span, 0),
+                (center - span * 0.5, 0.25),
+                (center, 0.5),
+                (center + span * 0.5, 0.75),
+                (center + span, 1),
+            ]
+            let colors = stops.map { hueColor($0.0, saturation: 0.9, brightness: 0.92) }
+            let locations = stops.map(\.1)
+            return NSGradient(colors: colors, atLocations: locations, colorSpace: .deviceRGB)
+        case .channelSaturation(let hue):
+            return threePart(
+                color(0.40, 0.40, 0.42),
+                hueColor(hue, saturation: 0.38, brightness: 0.78),
+                hueColor(hue, saturation: 0.95, brightness: 0.92)
             )
         }
     }

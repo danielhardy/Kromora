@@ -55,7 +55,9 @@ enum RenderPipeline {
     /// standard-image Tint sign with the green-to-magenta UI track; previously positive values
     /// rendered greener while RAW positive values rendered magenta. v34 gives luminance and colour
     /// noise reduction independent filter passes; the previous max-based mapping made them aliases.
-    static let pixelEpoch = 34
+    /// v35 widens HSL mixer hue endpoints from ±30° to ±60° so channel Hue travel matches a
+    /// more visible photographic shift (tracks share ``ColorMixerChannel.hueEndpointDegrees``).
+    static let pixelEpoch = 35
 
     /// Build the graph for `document` over `source`.
     ///
@@ -1410,10 +1412,10 @@ enum RenderPipeline {
     /// weights from the original pixel hue, then applies one combined HSL adjustment; there are no
     /// CPU per-pixel operations and no sequence of hard channel masks that could leave seams.
     ///
-    /// Hue is limited to ±30° at the UI endpoints, while Saturation is a ±1 HSL delta and
-    /// Luminance is a ±0.5 lightness delta. HSL is used only as the local mixer coordinate system;
-    /// the surrounding image remains in the request's working color space and alpha is copied
-    /// through unchanged.
+    /// Hue is limited to ±``ColorMixerChannel.hueEndpointDegrees`` at the UI endpoints, while
+    /// Saturation is a ±1 HSL delta and Luminance is a ±0.5 lightness delta. HSL is used only as
+    /// the local mixer coordinate system; the surrounding image remains in the request's working
+    /// color space and alpha is copied through unchanged.
     static func applyColorMixer(_ mixer: ColorMixerAdjustments, to image: CIImage) -> CIImage {
         guard !mixer.isIdentity,
               let kernel = hslMixerKernel
@@ -1433,9 +1435,9 @@ enum RenderPipeline {
     }
 
     private static func mixerKernelVector(_ channel: ColorMixerChannel) -> CIVector {
-        // 100 mixer hue units represent a useful photographic ±30° move.
+        // 100 mixer hue units map to ±hueEndpointDegrees so the inspector track and pixels agree.
         CIVector(
-            x: channel.hue / 100 * (30.0 / 360.0),
+            x: channel.hue / 100 * (ColorMixerChannel.hueEndpointDegrees / 360.0),
             y: channel.saturation / 100,
             z: channel.luminance / 100,
             w: 0
