@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -127,3 +128,27 @@ jobs:
             exit 0
           fi
           exit "$status"
+
+  xcode-app:
+    name: Build and verify Xcode app
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: xcode-27
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+          echo "SDK: $(xcrun --sdk macosx --show-sdk-version) at $(xcrun --sdk macosx --show-sdk-path)"
+
+      - name: Build and verify Xcode app
+        run: scripts/app-store-build.sh
+
+      - name: Assert Xcode build did not modify tracked source files
+        run: |
+          if [[ -n "$(git status --porcelain --untracked-files=all)" ]]; then
+            echo "Xcode build changed or created repository files:"
+            git status --short --untracked-files=all
+            exit 1
+          fi

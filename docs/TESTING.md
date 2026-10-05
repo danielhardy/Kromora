@@ -7,6 +7,11 @@ and lane requirements.
 The required checks are deterministic build/test lanes. Hardware, AppKit, RAW, and Instruments
 work is opt-in because it needs a logged-in display or licensed local fixtures.
 
+The `xcode-app` CI job runs `scripts/app-store-build.sh` in verify mode to build the Release app
+through the Xcode project and verify the resulting app bundle, catching project-reference, asset,
+entitlement, Info.plist, and SwiftPM-versus-Xcode issues. It runs on pushes to `main` and manual
+workflow dispatches, not on pull requests.
+
 ## Required lanes
 
 ```sh
