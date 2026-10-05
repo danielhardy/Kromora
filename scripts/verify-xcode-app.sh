@@ -12,12 +12,8 @@ fi
 if (( $# == 1 )); then
   app_bundle="$1"
   [[ "$app_bundle" == /* ]] || app_bundle="$caller_directory/$app_bundle"
-elif [[ -f "$project_root/scripts/app-store-build.sh" ]]; then
-  app_bundle="$project_root/.build/xcode/Build/Products/Release/Kromora.app"
 else
-  print -u2 "usage: scripts/verify-xcode-app.sh [path/to/Kromora.app]"
-  print -u2 "pass the Xcode-built app path; scripts/app-store-build.sh is not present to supply its default DerivedData path"
-  exit 2
+  app_bundle="$project_root/.build/xcode/Build/Products/Release/Kromora.app"
 fi
 
 [[ -d "$app_bundle" ]] || { print -u2 "missing app bundle: $app_bundle"; exit 1; }
