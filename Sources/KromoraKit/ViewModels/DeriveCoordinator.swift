@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import UniformTypeIdentifiers
+import Darwin
 
 /// Owns the "Derive Look from JPG" flow: the sheet's presentation, the
 /// long-running extraction, and the scratch-until-saved lifecycle of the
@@ -203,15 +204,35 @@ final class DeriveCoordinator: ObservableObject {
         }
     }
 
-    /// Copy the scratch cube to `destination`, replacing anything already
-    /// there. Panel-free, so tests can drive it directly.
+    /// Copy the scratch cube beside `destination`, then atomically publish it
+    /// in place of anything already there. Panel-free, so tests can drive it
+    /// directly.
     func performSave(to destination: URL) throws {
         guard let scratch = scratchURL else { throw SaveError.nothingToSave }
         let fm = FileManager.default
-        if fm.fileExists(atPath: destination.path) {
-            try fm.removeItem(at: destination)
+
+        // Keep the staged copy in the destination directory so rename stays
+        // on one filesystem and readers see either the old file or the whole
+        // new cube. The non-cube extension also keeps library scans from
+        // treating an in-progress save as a Look.
+        let staging = destination.deletingLastPathComponent()
+            .appendingPathComponent(".\(destination.lastPathComponent).\(UUID().uuidString).tmp")
+        defer { try? fm.removeItem(at: staging) }
+
+        try fm.copyItem(at: scratch, to: staging)
+
+        let result = staging.path.withCString { stagingPath in
+            destination.path.withCString { destinationPath in
+                Darwin.rename(stagingPath, destinationPath)
+            }
         }
-        try fm.copyItem(at: scratch, to: destination)
+        guard result == 0 else {
+            throw NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(errno),
+                userInfo: [NSFilePathErrorKey: destination.path]
+            )
+        }
     }
 
     enum SaveError: LocalizedError {

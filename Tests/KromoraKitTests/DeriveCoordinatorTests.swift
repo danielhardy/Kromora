@@ -132,6 +132,25 @@ final class DeriveCoordinatorTests: TempDirectoryTestCase {
         XCTAssertNoThrow(try CubeLUT(url: destination))
     }
 
+    func testFailedReplacementPreservesAnExistingFile() throws {
+        let coordinator = DeriveCoordinator()
+        let scratch = try installScratchResult(on: coordinator)
+
+        let destination = tempDirectory.appendingPathComponent("Saved.cube")
+        let original = Data("existing Look".utf8)
+        try original.write(to: destination)
+        try FileManager.default.removeItem(at: scratch)
+
+        XCTAssertThrowsError(try coordinator.performSave(to: destination))
+        XCTAssertEqual(try Data(contentsOf: destination), original)
+
+        let remainingFiles = try FileManager.default.contentsOfDirectory(atPath: tempDirectory.path)
+        XCTAssertFalse(
+            remainingFiles.contains { $0.hasPrefix(".Saved.cube.") && $0.hasSuffix(".tmp") },
+            "a failed replacement should clean up its staging file"
+        )
+    }
+
     func testPerformSaveThrowsWhenThereIsNothingToSave() {
         let coordinator = DeriveCoordinator()
         XCTAssertThrowsError(
