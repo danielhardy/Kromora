@@ -191,6 +191,8 @@ final class DeriveCoordinator: ObservableObject {
         }
 
         guard panel.runModal() == .OK, let destination = panel.url else { return }
+        let access = SecurityScopedResourceAccess.systemGranted(for: destination)
+        defer { access.release() }
 
         do {
             try performSave(to: destination)

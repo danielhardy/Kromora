@@ -97,6 +97,8 @@ final class LookSaveCoordinator: ObservableObject {
             panel.allowedContentTypes = [cubeType]
         }
         guard panel.runModal() == .OK, let destination = panel.url else { return }
+        let access = SecurityScopedResourceAccess.systemGranted(for: destination)
+        defer { access.release() }
 
         do {
             try performSave(name: validName, to: destination)

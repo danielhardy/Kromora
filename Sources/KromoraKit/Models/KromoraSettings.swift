@@ -156,7 +156,7 @@ public final class KromoraSettings: ObservableObject {
     private let preferences: UserDefaults
     private let fileManager: FileManager
     private var records: [KromoraFolderKind: PersistedFolder] = [:]
-    private var retainedURLs: [KromoraFolderKind: URL] = [:]
+    private var retainedAccess: [KromoraFolderKind: SecurityScopedResourceAccess] = [:]
 
     public convenience init() {
         self.init(preferences: .standard)
@@ -193,8 +193,8 @@ public final class KromoraSettings: ObservableObject {
     }
 
     deinit {
-        for url in retainedURLs.values {
-            url.stopAccessingSecurityScopedResource()
+        for access in retainedAccess.values {
+            access.release()
         }
     }
 
@@ -244,6 +244,17 @@ public final class KromoraSettings: ObservableObject {
     /// used by Settings tests; the Settings view owns the AppKit folder panel itself.
     @discardableResult
     public func setDefaultFolder(_ url: URL, for kind: KromoraFolderKind) -> Bool {
+        setDefaultFolder(url, for: kind, access: nil)
+    }
+
+    /// Internal handoff for an Open-panel selection whose access is already active. The Settings
+    /// owner retains that grant for the selected default instead of starting a second scope.
+    @discardableResult
+    func setDefaultFolder(
+        _ url: URL,
+        for kind: KromoraFolderKind,
+        access: SecurityScopedResourceAccess?
+    ) -> Bool {
         var isDirectory: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return false
@@ -260,7 +271,7 @@ public final class KromoraSettings: ObservableObject {
                 pathHint: url.path
             )
             persist(record: records[kind], for: kind)
-            let retained = retainAccess(to: url, for: kind)
+            let retained = retainAccess(to: url, for: kind, access: access)
             let usable = retained
                 && (kind == .source
                     ? fileManager.isReadableFile(atPath: url.path)
@@ -273,9 +284,7 @@ public final class KromoraSettings: ObservableObject {
     }
 
     public func resetDefaultFolder(_ kind: KromoraFolderKind) {
-        if let url = retainedURLs.removeValue(forKey: kind) {
-            url.stopAccessingSecurityScopedResource()
-        }
+        retainedAccess.removeValue(forKey: kind)?.release()
         records.removeValue(forKey: kind)
         preferences.removeObject(forKey: key(for: kind))
         updateStatus(for: kind, availability: .notConfigured, url: nil)
@@ -431,13 +440,20 @@ public final class KromoraSettings: ObservableObject {
     }
 
     @discardableResult
-    private func retainAccess(to url: URL, for kind: KromoraFolderKind) -> Bool {
-        if retainedURLs[kind] == url { return true }
-        if let old = retainedURLs.removeValue(forKey: kind) {
-            old.stopAccessingSecurityScopedResource()
+    private func retainAccess(
+        to url: URL,
+        for kind: KromoraFolderKind,
+        access: SecurityScopedResourceAccess? = nil
+    ) -> Bool {
+        if retainedAccess[kind]?.url == url {
+            access?.release()
+            return true
         }
-        guard url.startAccessingSecurityScopedResource() else { return false }
-        retainedURLs[kind] = url
+        retainedAccess.removeValue(forKey: kind)?.release()
+        guard let newAccess = access ?? SecurityScopedResourceAccess.startAccessing(url) else {
+            return false
+        }
+        retainedAccess[kind] = newAccess
         return true
     }
 

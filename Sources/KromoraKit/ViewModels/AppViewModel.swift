@@ -1210,14 +1210,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryMediaWorkflow.onError = { [weak self] message in
             self?.presentError(message)
         }
-        libraryMediaWorkflow.onSourceFolder = { [weak self] url in
-            self?.openSourceFolder(url: url)
+        libraryMediaWorkflow.onSourceFolder = { [weak self] url, access in
+            self?.openSourceFolder(url: url, access: access)
         }
-        libraryMediaWorkflow.onImageURL = { [weak self] url in
-            self?.openImage(url: url)
+        libraryMediaWorkflow.onImageURL = { [weak self] url, access in
+            self?.openImage(url: url, access: access)
         }
-        libraryMediaWorkflow.onImageURLs = { [weak self] urls in
-            self?.openImages(urls: urls)
+        libraryMediaWorkflow.onImageURLs = { [weak self] urls, accesses in
+            self?.openImages(urls: urls, access: accesses)
         }
         libraryMediaWorkflow.onImportRequest = { [weak self] request in
             self?.importRemovableMedia(request)
@@ -1882,7 +1882,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryBrowsingCoordinator.openPortableAsset(assetID)
     }
 
-    func openImage(url: URL, operationID: UUID? = nil) {
+    func openImage(
+        url: URL,
+        operationID: UUID? = nil,
+        access: SecurityScopedResourceAccess? = nil
+    ) {
+        var transferredAccess = false
+        defer {
+            if !transferredAccess { access?.release() }
+        }
         // A browsed collection already owns a stable source identity. Re-importing the URL here
         // would route it through package duplicate detection, which intentionally hashes bytes and
         // can therefore collapse two distinct files with identical contents onto one edit record.
@@ -1918,8 +1926,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // path above handles reopening an already admitted source, while a new URL must remain
             // distinct even when its bytes match another referenced photo.
             let handle = try libraryImportCoordinator.startImportURLs(
-                [url], duplicatePolicy: .importAnyway
+                [url], duplicatePolicy: .importAnyway, access: access.map { [$0] } ?? []
             )
+            transferredAccess = access != nil
             observePortableImport(
                 handle, operationID: operationID, total: 1, prefix: "Photo import",
                 onSuccess: { [weak self] result in
@@ -2654,14 +2663,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         guard let urls = fileDialog.chooseImages(startingAt: settings.defaultSourceFolderURL) else {
             return
         }
-        openImages(urls: urls)
+        openImages(
+            urls: urls,
+            access: urls.map { .systemGranted(for: $0) }
+        )
     }
 
     /// Replace the one-off library with the selected files and open the first item. Keeping this
     /// separate from the AppKit panel makes the selection behavior deterministic to test and
     /// ensures an empty/cancelled result does not disturb the current edit.
     @discardableResult
-    func openImages(urls: [URL], operationID: UUID? = nil) -> ImportOutcomeSummary? {
+    func openImages(
+        urls: [URL],
+        operationID: UUID? = nil,
+        access: [SecurityScopedResourceAccess] = []
+    ) -> ImportOutcomeSummary? {
+        defer { access.forEach { $0.release() } }
         guard !urls.isEmpty else { return nil }
         let operationID = operationID ?? beginImportOperation()
         guard portableLibrary != nil else {
@@ -2673,7 +2690,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             // able to inspect the newly admitted, sorted collection as soon as this method
             // returns. The worker-backed import API is appropriate for streamed Photos/folder
             // workflows, but deferring this boundary leaves the dialog with an empty collection.
-            let result = try libraryImportCoordinator.importURLs(urls)
+            let result = try libraryImportCoordinator.importURLs(urls, access: access)
             guard isCurrentImport(operationID) else { return nil }
             try reloadPortableCollection()
 
@@ -2911,7 +2928,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return
         }
         do {
-            let handle = try libraryImportCoordinator.startImportURLs(files.map(\.url))
+            let handle = try libraryImportCoordinator.startImportURLs(
+                files.map(\.url), access: request.access.map { [$0] } ?? []
+            )
             observePortableImport(
                 handle, operationID: operationID, total: files.count,
                 prefix: "Removable media import",
@@ -3039,7 +3058,14 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Import supported images from `url` into the package and open the first imported image.
     /// Shared by the menu/toolbar action and folder drops; the source folder is never persisted.
     @discardableResult
-    func openSourceFolder(url: URL) -> ImportOutcomeSummary? {
+    func openSourceFolder(
+        url: URL,
+        access: SecurityScopedResourceAccess? = nil
+    ) -> ImportOutcomeSummary? {
+        var transferredAccess = false
+        defer {
+            if !transferredAccess { access?.release() }
+        }
         let operationID = beginImportOperation()
         cancelIdlePreviewBuild(resetCursor: true)
         guard portableLibrary != nil else {
@@ -3052,7 +3078,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             return nil
         }
         do {
-            let handle = try libraryImportCoordinator.startImportURLs(files)
+            let handle = try libraryImportCoordinator.startImportURLs(
+                files, access: access.map { [$0] } ?? []
+            )
+            transferredAccess = access != nil
             observePortableImport(
                 handle, operationID: operationID, total: files.count, prefix: "Folder import",
                 onSuccess: { [weak self] result in
@@ -4605,7 +4634,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 metadata: .preserve,
                 location: .exclude
             ),
-            to: url
+            to: url,
+            access: .systemGranted(for: url)
         )
     }
 
@@ -4630,13 +4660,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         panel.allowsMultipleSelection = false
         panel.directoryURL = export.defaultFolderURL?()
         guard panel.runModal() == .OK, let parent = panel.url else { return }
+        let access = SecurityScopedResourceAccess.systemGranted(for: parent)
         let stem = URL(fileURLWithPath: sourceName).deletingPathExtension().lastPathComponent
         let name = stem.isEmpty ? "Photo" : stem
         let destination = parent.appendingPathComponent(
             "\(name).\(OriginalSettingsBundle.fileExtension)", isDirectory: true
         )
         statusMessage = "Preparing original + settings bundle…"
-        Task { @MainActor [weak self] in
+        Task { @MainActor [weak self, access] in
+            defer { access.release() }
             guard let self else { return }
             do {
                 try await OriginalSettingsBundle.create(
@@ -4797,7 +4829,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         panel.allowsMultipleSelection = false
 
         if panel.runModal() == .OK, let url = panel.url {
-            library.setFolder(url)
+            library.setFolder(url, access: .systemGranted(for: url))
         }
     }
 
@@ -4817,7 +4849,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
 
         if panel.runModal() == .OK {
             for url in panel.urls {
-                library.importLUT(from: url)
+                library.importLUT(from: url, access: .systemGranted(for: url))
             }
         }
     }

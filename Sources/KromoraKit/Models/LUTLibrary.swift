@@ -4,6 +4,11 @@ import Combine
 /// Manages discovered and explicitly imported LUT files, scanning and grouping by subfolder.
 @MainActor
 final class LUTLibrary: ObservableObject {
+    private struct ImportedAccess {
+        let url: URL
+        let access: SecurityScopedResourceAccess
+    }
+
 
     enum LookCollectionID: String, CaseIterable, Identifiable, Sendable {
         case starter
@@ -161,14 +166,14 @@ final class LUTLibrary: ObservableObject {
 
     /// Folder whose security scope we hold open, so it can be released when we
     /// move to a different folder or the library goes away.
-    private var scopedURL: URL?
+    private var scopedAccess: SecurityScopedResourceAccess?
     private var scanTask: Task<Void, Never>?
     private var importTask: Task<Void, Never>?
     private var scannedCategories: [Category] = []
     private let bundledCategories: [Category]
     private var importedSourceURLs: [URL] = []
     private var importedLUTs: [CubeLUT] = []
-    private var importedScopedURLs: [URL] = []
+    private var importedAccesses: [ImportedAccess] = []
 
     /// The app-owned home for user-created/imported Looks. A user-selected folder may still be
     /// browsed through `setFolder`, but saved Looks have one stable destination supplied here.
@@ -194,10 +199,8 @@ final class LUTLibrary: ObservableObject {
     }
 
     deinit {
-        scopedURL?.stopAccessingSecurityScopedResource()
-        for url in importedScopedURLs {
-            url.stopAccessingSecurityScopedResource()
-        }
+        scopedAccess?.release()
+        for item in importedAccesses { item.access.release() }
     }
 
     /// Cancel folder and imported-file parsing and wait for their detached readers to finish.
@@ -213,12 +216,10 @@ final class LUTLibrary: ObservableObject {
         importTask = nil
         isScanning = false
         isImporting = false
-        scopedURL?.stopAccessingSecurityScopedResource()
-        scopedURL = nil
-        for url in importedScopedURLs {
-            url.stopAccessingSecurityScopedResource()
-        }
-        importedScopedURLs.removeAll()
+        scopedAccess?.release()
+        scopedAccess = nil
+        for item in importedAccesses { item.access.release() }
+        importedAccesses.removeAll()
     }
 
     // MARK: - Folder management
@@ -229,9 +230,14 @@ final class LUTLibrary: ObservableObject {
         preferences.set(value, forKey: Self.importedBookmarksKey)
     }
 
-    func setFolder(_ url: URL) {
+    func setFolder(_ url: URL, access: SecurityScopedResourceAccess? = nil) {
         saveBookmark(for: url)
         self.folderURL = url
+        if let access {
+            scopedAccess = access
+        } else if scopedAccess?.url != url {
+            scopedAccess = SecurityScopedResourceAccess.startAccessing(url)
+        }
         scan(url)
     }
 
@@ -245,9 +251,8 @@ final class LUTLibrary: ObservableObject {
             bookmarkDataIsStale: &isStale
         ) else { return }
 
-        guard url.startAccessingSecurityScopedResource() else { return }
-        scopedURL?.stopAccessingSecurityScopedResource()
-        scopedURL = url
+        guard let access = SecurityScopedResourceAccess.startAccessing(url) else { return }
+        scopedAccess = access
 
         // A stale bookmark still resolves once, but won't next launch unless we
         // mint a fresh one now that we hold access.
@@ -279,16 +284,20 @@ final class LUTLibrary: ObservableObject {
         scanTask?.cancel()
         scanError = nil
         isScanning = true
+        let access = scopedAccess
 
-        scanTask = Task {
+        scanTask = Task { [weak self, access] in
             var interval = KromoraSignpostInterval(
                 .scan,
                 context: KromoraTraceContext(sourceFingerprint: folder.standardizedFileURL.path, quality: "background")
             )
             defer { interval.end() }
-            let outcome = await Task.detached { Self.scanSync(folder) }.value
+            let outcome = await Task.detached { [access] in
+                withExtendedLifetime(access) { Self.scanSync(folder) }
+            }.value
             guard !Task.isCancelled else { return }
 
+            guard let self else { return }
             self.isScanning = false
             switch outcome {
             case .failure(let message):
@@ -311,8 +320,13 @@ final class LUTLibrary: ObservableObject {
     /// Look browser. The original path is retained, rather than copying the table into an app-owned
     /// file, so a persisted `LUTID` continues to identify the same resource and an explicit refresh
     /// can observe a file replacement.
-    func importLUT(from url: URL, audition: Bool = true) {
+    func importLUT(
+        from url: URL,
+        audition: Bool = true,
+        access: SecurityScopedResourceAccess? = nil
+    ) {
         guard CubeLUT.supportedFileExtensions.contains(url.pathExtension.lowercased()) else {
+            access?.release()
             reportImportError("Unsupported LUT file type “\(url.pathExtension)”")
             return
         }
@@ -321,7 +335,7 @@ final class LUTLibrary: ObservableObject {
             importedSourceURLs.append(url)
             persistImportedBookmarks()
         }
-        retainSecurityScope(for: url)
+        retainSecurityScope(for: url, access: access)
 
         importTask?.cancel()
         isImporting = true
@@ -446,11 +460,20 @@ final class LUTLibrary: ObservableObject {
         }
     }
 
-    private func retainSecurityScope(for url: URL) {
-        guard !importedScopedURLs.contains(where: { Self.canonicalPath($0) == Self.canonicalPath(url) }),
-              url.startAccessingSecurityScopedResource()
-        else { return }
-        importedScopedURLs.append(url)
+    private func retainSecurityScope(
+        for url: URL,
+        access: SecurityScopedResourceAccess? = nil
+    ) {
+        guard !importedAccesses.contains(where: {
+            Self.canonicalPath($0.url) == Self.canonicalPath(url)
+        }) else {
+            access?.release()
+            return
+        }
+        guard let retained = access ?? SecurityScopedResourceAccess.startAccessing(url) else {
+            return
+        }
+        importedAccesses.append(ImportedAccess(url: url, access: retained))
     }
 
     private func restoreImportedLUTs() {

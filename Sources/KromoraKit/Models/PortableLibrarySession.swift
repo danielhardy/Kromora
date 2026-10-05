@@ -698,12 +698,14 @@ final class PortableLibrarySession {
     /// the worker owns all source copies, hashes, fsyncs, commits, and rollback.
     func startImportURLs(
         _ urls: [URL],
-        duplicatePolicy: PortablePackageDuplicatePolicy = .skip
+        duplicatePolicy: PortablePackageDuplicatePolicy = .skip,
+        access: [SecurityScopedResourceAccess] = []
     ) throws -> PortablePackageImportHandle {
         try startImport(
             sources: urls.map { .init(url: $0) },
             duplicatePolicy: duplicatePolicy,
-            catalogState: nil
+            catalogState: nil,
+            access: access
         )
     }
 
@@ -731,7 +733,8 @@ final class PortableLibrarySession {
         return try startImport(
             sources: sources,
             duplicatePolicy: duplicatePolicy,
-            catalogState: state
+            catalogState: state,
+            access: []
         )
     }
 
@@ -767,8 +770,13 @@ final class PortableLibrarySession {
     private func startImport(
         sources: [PortablePackageImportSource],
         duplicatePolicy: PortablePackageDuplicatePolicy,
-        catalogState: ImportCatalogState?
+        catalogState: ImportCatalogState?,
+        access: [SecurityScopedResourceAccess]
     ) throws -> PortablePackageImportHandle {
+        var transferredAccess = false
+        defer {
+            if !transferredAccess { access.forEach { $0.release() } }
+        }
         guard !isShuttingDown else { throw PortablePackageLeaseError.notOwner }
         guard !lostDuringSession else { throw PortablePackageLeaseError.lostDuringSession }
         guard let scheduler else { throw PortablePackageImportWorkerError.schedulerUnavailable }
@@ -796,7 +804,8 @@ final class PortableLibrarySession {
         let admitted = scheduler.enqueuePackageIO(
             id: jobID,
             lane: .importCopyHash,
-            onTerminal: { [weak self, weak handle, progressSink] outcome in
+            onTerminal: { [weak self, weak handle, progressSink, access] outcome in
+                access.forEach { $0.release() }
                 guard let self else { return }
                 self.activeImportJobIDs.remove(jobID)
                 // A queued job cancelled before its operation runs never reaches the defer
@@ -869,6 +878,7 @@ final class PortableLibrarySession {
             handle.finish(.failure(PortablePackageImportWorkerError.notAdmitted))
             throw PortablePackageImportWorkerError.notAdmitted
         }
+        transferredAccess = true
         return handle
     }
 
@@ -886,10 +896,12 @@ final class PortableLibrarySession {
     func importURLs(
         _ urls: [URL],
         duplicatePolicy: PortablePackageDuplicatePolicy = .skip,
+        access: [SecurityScopedResourceAccess] = [],
         isCancelled: @Sendable () -> Bool = { false },
         progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in }
     ) throws -> PortablePackageImportResult {
-        try importPackageSources(
+        defer { access.forEach { $0.release() } }
+        return try importPackageSources(
             urls.map { PortablePackageImportSource(url: $0) },
             duplicatePolicy: duplicatePolicy,
             isCancelled: isCancelled,

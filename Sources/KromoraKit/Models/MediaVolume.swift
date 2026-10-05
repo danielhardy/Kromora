@@ -146,10 +146,21 @@ protocol MediaVolumeProviding: Sendable {
     var supportsInteractiveAccessGrant: Bool { get }
     func discover() async -> [MediaVolume]
     func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult
+    func scan(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) async throws -> MediaVolumeScanResult
 }
 
 extension MediaVolumeProviding {
     var supportsInteractiveAccessGrant: Bool { false }
+
+    func scan(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) async throws -> MediaVolumeScanResult {
+        try await scan(volume)
+    }
 }
 
 struct MountedMediaVolumeProvider: MediaVolumeProviding {
@@ -162,8 +173,15 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
     }
 
     func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
+        try await scan(volume, access: nil)
+    }
+
+    func scan(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) async throws -> MediaVolumeScanResult {
         try await Task.detached(priority: .utility) {
-            try Self.scanMountedVolume(volume)
+            try Self.scanMountedVolume(volume, access: access)
         }.value
     }
 
@@ -211,12 +229,15 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
         return false
     }
 
-    private static func scanMountedVolume(_ volume: MediaVolume) throws -> MediaVolumeScanResult {
-        let accessURL = volume.resolvedAccessURL()
+    private static func scanMountedVolume(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) throws -> MediaVolumeScanResult {
+        let accessURL = access?.url ?? volume.resolvedAccessURL()
         guard FileManager.default.fileExists(atPath: accessURL.path) else {
             throw MediaVolumeError.volumeRemoved(volume.name)
         }
-        let hasScope = accessURL.startAccessingSecurityScopedResource()
+        let hasScope = access == nil && accessURL.startAccessingSecurityScopedResource()
         guard hasScope || FileManager.default.isReadableFile(atPath: accessURL.path) else {
             throw MediaVolumeError.permissionDenied(volume.name)
         }

@@ -652,7 +652,11 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             at: packageURL, indexURL: indexURL, scheduler: scheduler
         )
 
-        let handle = try session.startImportURLs([sourceURL])
+        let stoppedScopes = OSAllocatedUnfairLock(initialState: 0)
+        let access = SecurityScopedResourceAccess.systemGranted(for: sourceURL) { _ in
+            stoppedScopes.withLock { $0 += 1 }
+        }
+        let handle = try session.startImportURLs([sourceURL], access: [access])
         var progress: [PortablePackageImportProgress] = []
         for await value in handle.progress { progress.append(value) }
         let result = try await handle.value()
@@ -661,6 +665,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertEqual(result.indexDelta.upserts.count, 1)
         XCTAssertEqual(progress.first?.phase, .preparing)
         XCTAssertEqual(progress.last?.phase, .finished)
+        XCTAssertEqual(stoppedScopes.withLock { $0 }, 1)
         XCTAssertEqual(session.assetCount, 1)
         for _ in 0..<5_000 {
             if !scheduler.contains(.init("portable-package-index-write-\(session.lease.ownerID.uuidString)")) {
@@ -725,15 +730,21 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertTrue(blockerStarted.withLock { $0 })
         XCTAssertEqual(scheduler.runningPackageIOCount, 1)
 
-        let handle = try session.startImportData(
-            Data(repeating: 0xA5, count: 1024), name: "queued.raw"
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 24, height: 16, orientation: 1, named: "queued.jpg", in: tempDirectory
         )
+        let stoppedScopes = OSAllocatedUnfairLock(initialState: 0)
+        let access = SecurityScopedResourceAccess.systemGranted(for: sourceURL) { _ in
+            stoppedScopes.withLock { $0 += 1 }
+        }
+        let handle = try session.startImportURLs([sourceURL], access: [access])
         for _ in 0..<1_000 {
             if scheduler.pendingPackageIOCount > 0 { break }
             await Task.yield()
         }
         XCTAssertEqual(scheduler.runningPackageIOCount, 1)
         XCTAssertGreaterThanOrEqual(scheduler.pendingPackageIOCount, 1)
+        XCTAssertEqual(stoppedScopes.withLock { $0 }, 0)
 
         handle.cancel()
 
@@ -749,6 +760,9 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
             XCTAssertTrue(error is CancellationError)
         }
         XCTAssertEqual(session.assetCount, 0)
+        XCTAssertEqual(stoppedScopes.withLock { $0 }, 1)
+        access.release()
+        XCTAssertEqual(stoppedScopes.withLock { $0 }, 1)
 
         blockerRelease.withLock { $0 = true }
         await scheduler.cancelAllAndWait()

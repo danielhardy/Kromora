@@ -1,6 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
 import XCTest
+import os.lock
 @testable import KromoraKit
 
 @MainActor
@@ -49,8 +50,8 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
         )
         var selectedFolder: URL?
         var selectedImage: URL?
-        coordinator.onSourceFolder = { selectedFolder = $0 }
-        coordinator.onImageURL = { selectedImage = $0 }
+        coordinator.onSourceFolder = { url, _ in selectedFolder = url }
+        coordinator.onImageURL = { url, _ in selectedImage = url }
 
         coordinator.chooseSourceFolder(startingAt: nil)
         coordinator.handleDroppedURL(folder)
@@ -58,6 +59,39 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(selectedFolder, folder)
         XCTAssertEqual(selectedImage, image)
+    }
+
+    func testRemovableMediaPanelGrantSurvivesPreflightAndMovesToImportRequest() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kromora-removable-grant-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let image = directory.appendingPathComponent("card-shot.jpg")
+        try Data([0xFF, 0xD8, 0xFF, 0xD9]).write(to: image)
+        let rawVolume = MediaVolume(name: "Card", url: directory, requiresAccessGrant: true)
+        let file = MediaVolumeFile(url: image)
+        let provider = AccessGrantWorkflowMediaProvider(
+            result: .init(files: [file], warnings: [])
+        )
+        let coordinator = LibraryMediaWorkflowCoordinator(
+            provider: provider, fileDialog: WorkflowFileDialog(folder: directory)
+        )
+        var request: RemovableMediaImportRequest?
+        coordinator.onImportRequest = { request = $0 }
+
+        coordinator.openRemovableMedia(rawVolume)
+        try await waitUntil { !coordinator.isRemovableMediaScanning }
+        XCTAssertEqual(coordinator.removableMediaFiles, [file])
+        XCTAssertEqual(provider.accessObservations.withLock { $0 }, [false, true])
+
+        coordinator.importSelectedRemovableMedia()
+        try await waitUntil { request != nil }
+        XCTAssertNotNil(request?.access)
+        XCTAssertEqual(request?.files, [file])
+
+        await coordinator.shutdown()
+        request?.access?.release()
     }
 
     private func waitUntil(
@@ -79,6 +113,27 @@ private struct WorkflowMediaProvider: MediaVolumeProviding {
 
     func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
         try result.get()
+    }
+}
+
+private struct AccessGrantWorkflowMediaProvider: MediaVolumeProviding {
+    let supportsInteractiveAccessGrant = true
+    let result: MediaVolumeScanResult
+    let accessObservations = OSAllocatedUnfairLock(initialState: [Bool]())
+
+    func discover() async -> [MediaVolume] { [] }
+
+    func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
+        throw MediaVolumeError.permissionDenied(volume.name)
+    }
+
+    func scan(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) async throws -> MediaVolumeScanResult {
+        accessObservations.withLock { $0.append(access != nil) }
+        guard access != nil else { throw MediaVolumeError.permissionDenied(volume.name) }
+        return result
     }
 }
 

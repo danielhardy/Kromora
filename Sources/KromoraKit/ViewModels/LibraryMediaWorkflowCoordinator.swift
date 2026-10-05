@@ -6,22 +6,25 @@ import UniformTypeIdentifiers
 /// The value handed to the composition root after a removable-media selection has been
 /// validated.  The coordinator deliberately does not know whether the destination is the
 /// portable package or the legacy presentation projection.
-struct RemovableMediaImportRequest: Sendable, Equatable {
+struct RemovableMediaImportRequest: Sendable {
     let volume: MediaVolume
     let files: [MediaVolumeFile]
     let totalSelected: Int
     let operationID: UUID
+    let access: SecurityScopedResourceAccess?
 
     init(
         volume: MediaVolume,
         files: [MediaVolumeFile],
         totalSelected: Int? = nil,
-        operationID: UUID = UUID()
+        operationID: UUID = UUID(),
+        access: SecurityScopedResourceAccess? = nil
     ) {
         self.volume = volume
         self.files = files
         self.totalSelected = totalSelected ?? files.count
         self.operationID = operationID
+        self.access = access
     }
 }
 /// Owns library-adjacent presentation work that can outlive a menu action: mounted-volume
@@ -32,6 +35,16 @@ struct RemovableMediaImportRequest: Sendable, Equatable {
 /// provider tasks and security-scoped access from becoming another AppViewModel concern.
 @MainActor
 final class LibraryMediaWorkflowCoordinator: ObservableObject {
+    private enum DropAccess {
+        case scoped(SecurityScopedResourceAccess)
+        case unscoped
+    }
+
+    private struct MediaAccessGrant {
+        let volume: MediaVolume
+        let access: SecurityScopedResourceAccess
+    }
+
     @Published private(set) var removableMediaVolumes: [MediaVolume] = []
     @Published var isRemovableMediaSelectorPresented = false
     @Published private(set) var removableMediaVolume: MediaVolume?
@@ -47,14 +60,15 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     private var discoveryTask: Task<Void, Never>?
     private var scanTask: Task<Void, Never>?
     private var importValidationTask: Task<Void, Never>?
+    private var removableMediaAccess: SecurityScopedResourceAccess?
     private var isShuttingDown = false
     private var importOperationID = UUID()
 
     var onStatus: (@MainActor (String) -> Void)?
     var onError: (@MainActor (String) -> Void)?
-    var onSourceFolder: (@MainActor (URL) -> Void)?
-    var onImageURL: (@MainActor (URL) -> Void)?
-    var onImageURLs: (@MainActor ([URL]) -> Void)?
+    var onSourceFolder: (@MainActor (URL, SecurityScopedResourceAccess?) -> Void)?
+    var onImageURL: (@MainActor (URL, SecurityScopedResourceAccess?) -> Void)?
+    var onImageURLs: (@MainActor ([URL], [SecurityScopedResourceAccess]) -> Void)?
     var onImportRequest: (@MainActor (RemovableMediaImportRequest) -> Void)?
 
     init(
@@ -76,13 +90,17 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             title: "Choose Source Folder", prompt: "Use Folder", startingAt: directoryURL,
             canCreateDirectories: false
         ) else { return }
-        onSourceFolder?(url)
+        onSourceFolder?(url, .systemGranted(for: url))
     }
 
     func handleDroppedURL(_ url: URL) {
         switch fileDropActionPolicy.action(for: url) {
-        case .openImage(let imageURL): onImageURL?(imageURL)
-        case .openFolder(let folderURL): onSourceFolder?(folderURL)
+        case .openImage(let imageURL):
+            guard let dropAccess = accessForDrop(imageURL) else { return }
+            onImageURL?(imageURL, scope(from: dropAccess))
+        case .openFolder(let folderURL):
+            guard let dropAccess = accessForDrop(folderURL) else { return }
+            onSourceFolder?(folderURL, scope(from: dropAccess))
         case .invalid: break
         }
     }
@@ -97,16 +115,38 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         }
 
         var imageURLs: [URL] = []
+        var accesses: [SecurityScopedResourceAccess] = []
         for url in urls {
             switch fileDropActionPolicy.action(for: url) {
-            case .openImage(let imageURL): imageURLs.append(imageURL)
-            case .openFolder(let folderURL): onSourceFolder?(folderURL)
+            case .openImage(let imageURL):
+                guard let dropAccess = accessForDrop(imageURL) else { continue }
+                imageURLs.append(imageURL)
+                if let access = scope(from: dropAccess) { accesses.append(access) }
+            case .openFolder(let folderURL):
+                guard let dropAccess = accessForDrop(folderURL) else { continue }
+                onSourceFolder?(folderURL, scope(from: dropAccess))
             case .invalid: break
             }
         }
         if !imageURLs.isEmpty {
-            onImageURLs?(imageURLs)
+            onImageURLs?(imageURLs, accesses)
         }
+    }
+
+    private func accessForDrop(_ url: URL) -> DropAccess? {
+        if let access = SecurityScopedResourceAccess.startAccessing(url) {
+            return .scoped(access)
+        }
+        guard FileManager.default.isReadableFile(atPath: url.path) else {
+            onError?("Kromora can't access the dropped item. Drop it again or use an Open panel to grant access.")
+            return nil
+        }
+        return .unscoped
+    }
+
+    private func scope(from access: DropAccess) -> SecurityScopedResourceAccess? {
+        guard case .scoped(let scope) = access else { return nil }
+        return scope
     }
 
     func refreshRemovableMedia() {
@@ -149,39 +189,47 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         isRemovableMediaSelectorPresented = true
 
         let provider = self.provider
+        let access = removableMediaAccess
         scanTask = Task { [weak self] in
             do {
-                let result = try await provider.scan(volume)
+                let result = try await provider.scan(volume, access: access)
                 guard let self, self.isCurrentImport(operationID), !Task.isCancelled else {
                     return
                 }
+                self.scanTask = nil
                 self.publishScan(result)
             } catch is CancellationError {
                 // Closing the selector is a normal cancellation.
             } catch {
                 guard let self, self.isCurrentImport(operationID) else { return }
-                if case .permissionDenied = error as? MediaVolumeError,
-                    provider.supportsInteractiveAccessGrant,
-                    let granted = self.requestAccess(for: volume)
-                {
-                    self.removableMediaVolume = granted
-                    self.removableMediaVolumes = self.removableMediaVolumes.map { candidate in
-                        candidate.id == volume.id ? granted : candidate
-                    }
-                    do {
-                        let result = try await provider.scan(granted)
-                        guard self.isCurrentImport(operationID), !Task.isCancelled else {
-                            return
-                        }
-                        self.publishScan(result)
-                    } catch is CancellationError {
-                    } catch {
-                        guard self.isCurrentImport(operationID) else { return }
-                        self.isRemovableMediaScanning = false
-                        self.removableMediaWarnings = [error.localizedDescription]
-                    }
-                } else {
+                guard case .permissionDenied = error as? MediaVolumeError,
+                      provider.supportsInteractiveAccessGrant else {
                     guard self.isCurrentImport(operationID) else { return }
+                    self.isRemovableMediaScanning = false
+                    self.removableMediaWarnings = [error.localizedDescription]
+                    return
+                }
+                guard let grant = self.requestAccess(for: volume) else {
+                    self.isRemovableMediaScanning = false
+                    self.removableMediaWarnings = ["Access to \(volume.name) was not granted."]
+                    return
+                }
+                self.removableMediaAccess = grant.access
+                self.removableMediaVolume = grant.volume
+                self.removableMediaVolumes = self.removableMediaVolumes.map { candidate in
+                    candidate.id == volume.id ? grant.volume : candidate
+                }
+                do {
+                    let result = try await provider.scan(grant.volume, access: grant.access)
+                    guard self.isCurrentImport(operationID), !Task.isCancelled else { return }
+                    self.scanTask = nil
+                    self.publishScan(result)
+                } catch is CancellationError {
+                    // A replacement operation drops the coordinator owner; this scan keeps its
+                    // local grant alive until the provider has finished its read.
+                } catch {
+                    guard self.isCurrentImport(operationID) else { return }
+                    self.removableMediaAccess = nil
                     self.isRemovableMediaScanning = false
                     self.removableMediaWarnings = [error.localizedDescription]
                 }
@@ -220,17 +268,20 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             return
         }
 
+        let access = removableMediaAccess
+        removableMediaAccess = nil
         let operationID = beginImportOperation()
         importValidationTask?.cancel()
         removableMediaImportProgress = MediaVolumeImportProgress(
             total: selected.count, processed: 0, imported: 0, skipped: 0,
             currentName: nil, cancelled: false
         )
-        importValidationTask = Task { [weak self] in
+        importValidationTask = Task { [weak self, access] in
+            var transferredAccess = false
+            defer {
+                if !transferredAccess { access?.release() }
+            }
             guard let self, !self.isShuttingDown else { return }
-            let accessURL = volume.resolvedAccessURL()
-            let hasScope = accessURL.startAccessingSecurityScopedResource()
-            defer { if hasScope { accessURL.stopAccessingSecurityScopedResource() } }
             var usable: [MediaVolumeFile] = []
             for file in selected {
                 guard self.isCurrentImport(operationID), !Task.isCancelled else {
@@ -276,12 +327,17 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
                 self.isRemovableMediaSelectorPresented = false
                 return
             }
-            self.onImportRequest?(
+            guard let onImportRequest = self.onImportRequest else {
+                self.onError?("Removable media import could not start.")
+                return
+            }
+            onImportRequest(
                 RemovableMediaImportRequest(
                     volume: volume, files: usable, totalSelected: selected.count,
-                    operationID: operationID
+                    operationID: operationID, access: access
                 )
             )
+            transferredAccess = true
         }
     }
 
@@ -319,16 +375,16 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         }
     }
 
-    private func requestAccess(for volume: MediaVolume) -> MediaVolume? {
+    private func requestAccess(for volume: MediaVolume) -> MediaAccessGrant? {
         guard let url = fileDialog.chooseFolder(
             title: "Grant Access to \(volume.name)",
             prompt: "Grant Access",
             startingAt: volume.url,
             canCreateDirectories: false
         ) else { return nil }
-        return MediaVolume(
-            id: volume.id, name: volume.name, url: url,
-            bookmarkData: PhotoAssetSource.bookmarkData(for: url)
+        return MediaAccessGrant(
+            volume: MediaVolume(id: volume.id, name: volume.name, url: url),
+            access: .systemGranted(for: url)
         )
     }
 
@@ -347,6 +403,9 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     }
 
     private func beginImportOperation() -> UUID {
+        // A running scan keeps its own strong reference until the provider finishes. Clearing this
+        // owner releases a completed selector grant immediately when another operation replaces it.
+        removableMediaAccess = nil
         let id = UUID()
         importOperationID = id
         return id

@@ -33,16 +33,22 @@ final class LibraryImportCoordinator {
     /// package boundary and one cancellation/progress lifecycle.
     func importURLs(
         _ urls: [URL],
-        duplicatePolicy: PortablePackageDuplicatePolicy = .skip
+        duplicatePolicy: PortablePackageDuplicatePolicy = .skip,
+        access: [SecurityScopedResourceAccess] = []
     ) throws -> PortablePackageImportResult {
-        try requirePackage().importURLs(urls, duplicatePolicy: duplicatePolicy)
+        try requirePackage().importURLs(
+            urls, duplicatePolicy: duplicatePolicy, access: access
+        )
     }
 
     func startImportURLs(
         _ urls: [URL],
-        duplicatePolicy: PortablePackageDuplicatePolicy = .skip
+        duplicatePolicy: PortablePackageDuplicatePolicy = .skip,
+        access: [SecurityScopedResourceAccess] = []
     ) throws -> PortablePackageImportHandle {
-        try requirePackage().startImportURLs(urls, duplicatePolicy: duplicatePolicy)
+        try requirePackage().startImportURLs(
+            urls, duplicatePolicy: duplicatePolicy, access: access
+        )
     }
 
     func startImportData(

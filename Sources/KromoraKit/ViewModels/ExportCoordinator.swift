@@ -1,6 +1,7 @@
 import Foundation
 import CoreImage
 import AppKit
+import Darwin
 
 /// Owns everything about writing images to disk: the single export, the batch
 /// run, and the naming rules both share.
@@ -221,7 +222,8 @@ final class ExportCoordinator {
                 photos: formatPicker.photosOptions,
                 outputSharpening: formatPicker.outputSharpening
             ),
-            to: url
+            to: url,
+            access: .systemGranted(for: url)
         )
     }
 
@@ -252,11 +254,13 @@ final class ExportCoordinator {
         document: EditDocument,
         lut: CubeLUT?,
         options: ExportOptions,
-        to url: URL
+        to url: URL,
+        access: SecurityScopedResourceAccess? = nil
     ) {
         do {
             try options.validate()
         } catch {
+            access?.release()
             onError?("Export failed: \(error.localizedDescription)")
             return
         }
@@ -264,12 +268,10 @@ final class ExportCoordinator {
         isExporting = true
         onStatus?("Exporting...")
 
-        singleTask = Task { [weak self, exportEngine, options] in
+        singleTask = Task { [weak self, exportEngine, options, access] in
             defer { self?.singleTask = nil }
-            let hasDestinationScope = url.startAccessingSecurityScopedResource()
-            defer {
-                if hasDestinationScope { url.stopAccessingSecurityScopedResource() }
-            }
+            let destinationAccess = access ?? SecurityScopedResourceAccess.startAccessing(url)
+            defer { destinationAccess?.release() }
             var interval = KromoraObservability.begin(.export, source: source, quality: .export)
             defer { interval.end() }
             do {
@@ -284,7 +286,7 @@ final class ExportCoordinator {
                     exportOptions: options
                 )).data
                 try Task.checkCancellation()
-                try await Self.write(data, to: url)
+                try await Self.write(data, to: url, scopedFileURL: destinationAccess != nil)
                 self?.onExportCompleted?(url)
                 if let photos = options.photos, let delivery = self?.photosDelivery {
                     do {
@@ -356,12 +358,14 @@ final class ExportCoordinator {
             location: formatPicker.locationPolicy,
             photos: formatPicker.photosOptions
         )
-        batchTask = Task { [weak self] in
+        let access = SecurityScopedResourceAccess.systemGranted(for: folder)
+        batchTask = Task { [weak self, access] in
             guard let self else {
                 return BatchOutcome(exported: 0, failed: items.count, total: items.count)
             }
             return await self.performBatchExport(
-                items, document: document, lut: lut, options: options, to: folder
+                items, document: document, lut: lut, options: options, to: folder,
+                access: access
             )
         }
     }
@@ -444,8 +448,10 @@ final class ExportCoordinator {
         document: EditDocument,
         lut: CubeLUT?,
         options: ExportOptions,
-        to folder: URL
+        to folder: URL,
+        access: SecurityScopedResourceAccess? = nil
     ) async -> BatchOutcome {
+        defer { access?.release() }
         do {
             try options.validate()
         } catch {
@@ -477,7 +483,7 @@ final class ExportCoordinator {
         // reservation set makes duplicate names deterministic and collision-free.
         var reservedPaths = Set<String>()
 
-        let hasDestinationScope = folder.startAccessingSecurityScopedResource()
+        let hasDestinationScope = access == nil && folder.startAccessingSecurityScopedResource()
         defer {
             if hasDestinationScope { folder.stopAccessingSecurityScopedResource() }
         }
@@ -603,7 +609,22 @@ final class ExportCoordinator {
     /// detached task — but a full-resolution 16-bit TIFF is hundreds of megabytes, and handing that
     /// to the main thread would stutter the window for exactly as long as the disk takes. `Data` and
     /// `URL` are `Sendable`, so getting it off costs nothing.
-    private static func write(_ data: Data, to url: URL) async throws {
+    private static func write(
+        _ data: Data,
+        to url: URL,
+        scopedFileURL: Bool = false
+    ) async throws {
+        if scopedFileURL {
+            // NSSavePanel grants access to the selected file. Staging a sibling and moving it
+            // over the selection needs directory access that the file grant doesn't provide.
+            try Task.checkCancellation()
+            try await Task.detached(priority: .userInitiated) {
+                try Self.writeSelectedFile(data, to: url)
+            }.value
+            try Task.checkCancellation()
+            return
+        }
+
         let temporaryURL = url.deletingLastPathComponent().appendingPathComponent(
             ".\(url.lastPathComponent).\(UUID().uuidString).partial"
         )
@@ -621,6 +642,29 @@ final class ExportCoordinator {
         // already-exported file even if another process creates the same name after reservation.
         try FileManager.default.moveItem(at: temporaryURL, to: url)
         committed = true
+    }
+
+    /// Create a panel-selected file without touching its parent directory. The save-panel grant
+    /// authorizes this exact URL; the exclusive create also preserves the export path's
+    /// no-overwrite behavior while ensuring a failed write removes only the file we created.
+    nonisolated private static func writeSelectedFile(_ data: Data, to url: URL) throws {
+        let descriptor = url.path.withCString {
+            Darwin.open($0, O_WRONLY | O_CREAT | O_EXCL, mode_t(0o666))
+        }
+        guard descriptor >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        do {
+            try handle.write(contentsOf: data)
+            try handle.synchronize()
+            try handle.close()
+        } catch {
+            try? handle.close()
+            try? FileManager.default.removeItem(at: url)
+            throw error
+        }
     }
 
     /// A resolved source plus the URL that may need a temporary security scope. The source itself

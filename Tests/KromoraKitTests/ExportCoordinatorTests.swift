@@ -1,5 +1,6 @@
 import CoreImage
 import XCTest
+import os.lock
 
 @testable import KromoraKit
 
@@ -105,6 +106,48 @@ final class ExportCoordinatorTests: TempDirectoryTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
         XCTAssertEqual(Fixtures.storedSize(of: destination), CGSize(width: 16, height: 16))
         XCTAssertEqual(statuses.last, "Exported: out.jpg")
+    }
+
+    func testScopedSingleExportWritesBeforeReleasingPanelAccess() async throws {
+        let coordinator = ExportCoordinator()
+        coordinator.onError = { XCTFail("unexpected error: \($0)") }
+        let destination = tempDirectory.appendingPathComponent("scoped.jpg")
+        let stops = OSAllocatedUnfairLock(initialState: 0)
+        let access = SecurityScopedResourceAccess.systemGranted(for: destination) { _ in
+            stops.withLock { $0 += 1 }
+        }
+
+        coordinator.performExport(
+            source: try makeSource(), document: EditDocument(), lut: nil,
+            options: ExportOptions(format: .jpeg, destination: .file(destination)),
+            to: destination,
+            access: access
+        )
+
+        XCTAssertEqual(stops.withLock { $0 }, 0, "panel access must survive the queued render and write")
+        try await waitUntil { !coordinator.isExporting }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.path))
+        XCTAssertEqual(stops.withLock { $0 }, 1, "panel access must be released after the write")
+    }
+
+    func testScopedSingleExportDoesNotReplaceAnExistingFile() async throws {
+        let coordinator = ExportCoordinator()
+        var errors: [String] = []
+        coordinator.onError = { errors.append($0) }
+        let destination = tempDirectory.appendingPathComponent("existing.jpg")
+        try Data("keep this file".utf8).write(to: destination)
+        let access = SecurityScopedResourceAccess.systemGranted(for: destination) { _ in }
+
+        coordinator.performExport(
+            source: try makeSource(), document: EditDocument(), lut: nil,
+            options: ExportOptions(format: .jpeg, destination: .file(destination)),
+            to: destination,
+            access: access
+        )
+
+        try await waitUntil { !coordinator.isExporting }
+        XCTAssertEqual(try Data(contentsOf: destination), Data("keep this file".utf8))
+        XCTAssertEqual(errors.count, 1, "an existing selected destination must remain protected")
     }
 
     func testPerformExportReportsAFailedWriteThroughOnError() async throws {

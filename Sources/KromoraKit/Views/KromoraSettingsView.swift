@@ -238,7 +238,8 @@ public struct KromoraSettingsView: View {
             canCreateDirectories: kind == .export
         )
         guard let url else { return }
-        guard settings.setDefaultFolder(url, for: kind) else {
+        let access = SecurityScopedResourceAccess.systemGranted(for: url)
+        guard settings.setDefaultFolder(url, for: kind, access: access) else {
             let message = "Kromora could not save access to " + url.lastPathComponent
                 + ". Choose the folder again to grant permission."
             if kind == .source { sourceTestMessage = message } else { exportTestMessage = message }

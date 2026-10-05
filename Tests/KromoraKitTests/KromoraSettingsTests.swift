@@ -1,4 +1,5 @@
 import XCTest
+import os.lock
 @testable import KromoraKit
 
 @MainActor
@@ -34,6 +35,23 @@ final class KromoraSettingsTests: TempDirectoryTestCase {
 
         let relaunched = KromoraSettings(preferences: defaults, userLookFolderURL: tempDirectory)
         XCTAssertTrue(relaunched.showClippingAlerts)
+    }
+
+    func testPanelFolderGrantIsRetainedAndReleasedBySettings() throws {
+        let folder = tempDirectory.appendingPathComponent("Selected Default", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let stops = OSAllocatedUnfairLock(initialState: 0)
+        let access = SecurityScopedResourceAccess.systemGranted(for: folder) { _ in
+            stops.withLock { $0 += 1 }
+        }
+        let settings = KromoraSettings(
+            preferences: makeDefaults(), userLookFolderURL: tempDirectory
+        )
+
+        XCTAssertTrue(settings.setDefaultFolder(folder, for: .source, access: access))
+        XCTAssertEqual(stops.withLock { $0 }, 0)
+        settings.resetDefaultFolder(.source)
+        XCTAssertEqual(stops.withLock { $0 }, 1)
     }
 
     func testOpenFirstPhotoPreferencePersistsAcrossRelaunch() {
