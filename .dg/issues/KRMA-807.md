@@ -2,11 +2,36 @@
 id: KRMA-807
 title: "Prepare App Store Connect submission material: privacy answers, review notes, metadata"
 type: task
-status: ready
+status: done
 priority: medium
 verification_agent: claude
 human_review_required: false
 verification_model: sonnet
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Document contains every section; claims cite repo files or are marked Human to provide/confirm
+      result: pass
+      notes: All scoped sections present; citations checked against Base.xcconfig, Info.plist, entitlements, sample manifest, sandbox audit, LOOKS.md, ONBOARDING.md, APP_STORE_ACCEPTANCE.md, LICENSE.
+    - criterion: Privacy answer supported by code/partner audit without relying on PrivacyInfo.xcprivacy; encryption answer matches ITSAppUsesNonExemptEncryption
+      result: pass
+      notes: No URLSession/network calls in Sources; only SHA256 hashing via CryptoKit, no AES/SecKey/etc. ITSAppUsesNonExemptEncryption=NO is generated from Base.xcconfig (not source Info.plist), and the doc states this accurately; scripts/verify-xcode-app.sh asserts it.
+    - criterion: No source or script changes, no secrets/team IDs/account details
+      result: pass
+      notes: Commit d770d7d1 touches only the new doc; git diff --check clean.
+  checks_run:
+    - Read docs/APP_STORE_SUBMISSION.md in full
+    - Spot-checked 10+ citations against repo files
+    - grep Sources for URLSession/NWConnection and non-hash crypto APIs
+    - git diff --check HEAD~1 HEAD
+    - git show --stat confirms docs-only commit
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-05T00:18:32.593Z
+  session: 01MUUI42ATVGO0K9ZG
 creation_provenance:
   runner: claude
   model: unknown
@@ -16,12 +41,19 @@ labels:
   - docs
   - submission
 created: 2026-10-03T19:24:48.096Z
-updated: 2026-10-04T22:10:09.677Z
+updated: 2026-10-05T00:18:32.598Z
 depends_on:
   - KRMA-806
 blockers: []
-order: zzzzq
+order: y
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-05T00:12:44.343Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -57,3 +89,33 @@ Create `docs/APP_STORE_SUBMISSION.md` containing:
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-05T00:12:41.003Z
+
+Prepared docs/APP_STORE_SUBMISSION.md with sourced App Store information, a code- and partner-audit-backed Data Not Collected recommendation, export-compliance evidence including SHA-256 usage and the generated Info.plist setting, confirm-marked age-rating answers, review notes and entitlement purposes, RAW support caveat, metadata drafts, CC0 screenshot plan, and human-only release steps. Spot-checked repository and Apple citations, validated local links, and passed git diff --check. No source or script changes; no tests run for this documentation task. Commit: d770d7d1.
+
+## Agent log
+
+- 2026-10-05T00:18:32.593Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Document contains every section; claims cite repo files or are marked Human to provide/confirm (pass) — All scoped sections present; citations checked against Base.xcconfig, Info.plist, entitlements, sample manifest, sandbox audit, LOOKS.md, ONBOARDING.md, APP_STORE_ACCEPTANCE.md, LICENSE.
+- [x] Privacy answer supported by code/partner audit without relying on PrivacyInfo.xcprivacy; encryption answer matches ITSAppUsesNonExemptEncryption (pass) — No URLSession/network calls in Sources; only SHA256 hashing via CryptoKit, no AES/SecKey/etc. ITSAppUsesNonExemptEncryption=NO is generated from Base.xcconfig (not source Info.plist), and the doc states this accurately; scripts/verify-xcode-app.sh asserts it.
+- [x] No source or script changes, no secrets/team IDs/account details (pass) — Commit d770d7d1 touches only the new doc; git diff --check clean.
+Checks run:
+- Read docs/APP_STORE_SUBMISSION.md in full
+- Spot-checked 10+ citations against repo files
+- grep Sources for URLSession/NWConnection and non-hash crypto APIs
+- git diff --check HEAD~1 HEAD
+- git show --stat confirms docs-only commit
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUUI42ATVGO0K9ZG
+Summary: Verified docs/APP_STORE_SUBMISSION.md: all sections present, citations spot-checked, privacy and encryption answers supported by repo evidence.

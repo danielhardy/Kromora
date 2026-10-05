@@ -2,9 +2,33 @@
 id: KRMA-782
 title: Add the Photos library usage description to the app Info.plist
 type: task
-status: ready
+status: done
 priority: high
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Info.plist contains non-empty NSPhotoLibraryUsageDescription naming import and export
+      result: pass
+    - criterion: plutil -lint passes
+      result: pass
+    - criterion: verify script passes with key and fails when missing or blank
+      result: pass
+      notes: Tested by removing and blanking the key; plist restored, tree clean.
+    - criterion: build-macos-app.sh succeeds and plutil extract prints string
+      result: pass
+  checks_run:
+    - plutil -lint Sources/Kromora/Info.plist
+    - scripts/verify-library-package-metadata.sh (positive, missing, blank)
+    - scripts/build-macos-app.sh
+    - plutil -extract on built Info.plist
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-04T15:58:49.854Z
+  session: 01MUU0803FZF19B95G
 creation_provenance:
   runner: claude
   model: unknown
@@ -14,10 +38,17 @@ labels:
   - privacy
   - packaging
 created: 2026-10-03T19:24:04.202Z
-updated: 2026-10-03T19:25:41.451Z
+updated: 2026-10-04T15:58:49.858Z
 blockers: []
 order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-04T15:57:10.898Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -50,3 +81,33 @@ Part of the Mac App Store plan (.context/2026-09-30-app-store-release-plan.md, W
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-04T15:57:07.994Z
+
+Added the Photos library purpose string for importing photos into a Kromora library and saving exports to Photos. The metadata verifier rejects missing and blank strings. Verified plutil lint, positive and negative verifier cases, the release app build, and the packaged plist extract. Commit: 4d7ae86d.
+
+## Agent log
+
+- 2026-10-04T15:58:49.854Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Info.plist contains non-empty NSPhotoLibraryUsageDescription naming import and export (pass)
+- [x] plutil -lint passes (pass)
+- [x] verify script passes with key and fails when missing or blank (pass) — Tested by removing and blanking the key; plist restored, tree clean.
+- [x] build-macos-app.sh succeeds and plutil extract prints string (pass)
+Checks run:
+- plutil -lint Sources/Kromora/Info.plist
+- scripts/verify-library-package-metadata.sh (positive, missing, blank)
+- scripts/build-macos-app.sh
+- plutil -extract on built Info.plist
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUU0803FZF19B95G
+Summary: Verified: Photos usage description present, verifier fails on missing/blank, app build embeds string.

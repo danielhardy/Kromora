@@ -2,7 +2,7 @@
 id: KRMA-819
 title: Preserve existing derived Look when replacement fails
 type: task
-status: backlog
+status: ready
 priority: medium
 human_review_required: false
 creation_provenance:
@@ -12,9 +12,9 @@ creation_provenance:
 labels:
   - appstore
 created: 2026-10-04T16:26:15.413Z
-updated: 2026-10-04T16:26:15.413Z
+updated: 2026-10-05T13:11:02.026Z
 blockers: []
-order: zzzzzzzv
+order: y8
 board: product
 ---
 

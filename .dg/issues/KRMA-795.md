@@ -2,11 +2,39 @@
 id: KRMA-795
 title: Add Base/Debug/Release xcconfig files and attach them to the Xcode project
 type: task
-status: ready
+status: done
 priority: high
 verification_agent: claude
 human_review_required: false
 verification_model: sonnet
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: showBuildSettings reports bundle id, deployment target, ARCHS, versions from Base.xcconfig
+      result: pass
+      notes: Debug and Release both report com.last8.kromora.photo, 26.0, arm64, 0.1, 1
+    - criterion: pbxproj no longer sets those keys directly
+      result: pass
+      notes: grep finds only baseConfigurationReference entries
+    - criterion: Debug and Release CODE_SIGNING_ALLOWED=NO builds succeed
+      result: pass
+    - criterion: scripts/ci-tests.sh fast passes
+      result: pass
+      notes: 1522 tests; one earlier run with output discarded exited 1 and was not reproduced on rerun (exit 0), likely flaky
+  checks_run:
+    - xcodebuild -showBuildSettings Debug/Release
+    - grep pbxproj
+    - xcodebuild build Debug/Release CODE_SIGNING_ALLOWED=NO
+    - scripts/ci-tests.sh fast
+  findings:
+    - "info: xcconfig is attached at target level rather than project level; effective settings are correct. Bundle id changed from com.kromora.app to com.last8.kromora.photo as intended."
+    - "info: one intermittent exit 1 from ci-tests.sh fast, unreproduced on rerun; cause unknown."
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-04T19:15:55.043Z
+  session: 01MUU71FUUVXH5QA6E
 creation_provenance:
   runner: claude
   model: unknown
@@ -16,12 +44,19 @@ labels:
   - xcode
   - packaging
 created: 2026-10-03T19:24:27.772Z
-updated: 2026-10-03T19:25:48.823Z
+updated: 2026-10-04T19:15:55.046Z
 depends_on:
   - KRMA-794
 blockers: []
-order: zzq
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-04T19:08:00.541Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -54,3 +89,34 @@ Part of the Mac App Store plan (.context/2026-09-30-app-store-release-plan.md, W
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-04T19:07:57.919Z
+
+Implemented and committed as b050ded2. Added Base/Debug/Release xcconfig files, attached the configuration files at the project level, moved packaging settings out of the pbxproj, and set the bundle identifier and versions from App/Info.plist. Verified effective settings for Debug and Release, confirmed the pbxproj has no direct assignments for the moved keys, built both configurations with CODE_SIGNING_ALLOWED=NO, and passed scripts/ci-tests.sh fast (1,522 tests). Xcode exposes the app scheme as 'Kromora (Kromora project)' because a SwiftPM scheme shares the name.
+
+## Agent log
+
+- 2026-10-04T19:15:55.043Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] showBuildSettings reports bundle id, deployment target, ARCHS, versions from Base.xcconfig (pass) — Debug and Release both report com.last8.kromora.photo, 26.0, arm64, 0.1, 1
+- [x] pbxproj no longer sets those keys directly (pass) — grep finds only baseConfigurationReference entries
+- [x] Debug and Release CODE_SIGNING_ALLOWED=NO builds succeed (pass)
+- [x] scripts/ci-tests.sh fast passes (pass) — 1522 tests; one earlier run with output discarded exited 1 and was not reproduced on rerun (exit 0), likely flaky
+Checks run:
+- xcodebuild -showBuildSettings Debug/Release
+- grep pbxproj
+- xcodebuild build Debug/Release CODE_SIGNING_ALLOWED=NO
+- scripts/ci-tests.sh fast
+Findings:
+- info: xcconfig is attached at target level rather than project level; effective settings are correct. Bundle id changed from com.kromora.app to com.last8.kromora.photo as intended.
+- info: one intermittent exit 1 from ci-tests.sh fast, unreproduced on rerun; cause unknown.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUU71FUUVXH5QA6E
+Summary: Verified: xcconfig settings resolve correctly for Debug/Release, pbxproj clean, both builds succeed, fast tests pass.

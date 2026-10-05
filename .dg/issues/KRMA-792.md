@@ -2,11 +2,37 @@
 id: KRMA-792
 title: Add a public KromoraScene and reduce the SwiftPM launcher to a tiny shim
 type: task
-status: ready
+status: done
 priority: high
 verification_agent: claude
 human_review_required: false
 verification_model: sonnet
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Launcher at most 25 lines, only adaptor and KromoraScene
+      result: pass
+      notes: 11 lines
+    - criterion: Structural launcher-size test exists and passes
+      result: pass
+      notes: PackageSettingsTests.testLauncherRemainsAThinShim
+    - criterion: Behavior unchanged (window sizes, About, Settings, commands)
+      result: pass
+      notes: Scene body is a verbatim move; source-scan tests retargeted
+    - criterion: swift build, fast and serial lanes pass; no escape hatches
+      result: pass
+      notes: fast 1522 tests, serial 490 tests, 0 failures
+  checks_run:
+    - swift build
+    - scripts/ci-tests.sh fast
+    - scripts/ci-tests.sh serial
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-04T18:34:38.489Z
+  session: 01MUU5JFF3736PLEKG
 creation_provenance:
   runner: claude
   model: unknown
@@ -16,12 +42,19 @@ labels:
   - architecture
   - launcher
 created: 2026-10-03T19:24:22.895Z
-updated: 2026-10-03T19:25:47.070Z
+updated: 2026-10-04T18:34:38.493Z
 depends_on:
   - KRMA-791
 blockers: []
-order: zy
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-04T18:25:54.760Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -63,3 +96,31 @@ Part of the Mac App Store plan (.context/2026-09-30-app-store-release-plan.md, "
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-04T18:25:54.303Z
+
+Implemented KromoraScene in KromoraKit, reduced the launcher to 11 lines, updated source scans and the architecture guide, and added the launcher structure guard. Checks passed: swift build, fast lane (1522 tests), serial lane (490 tests), packaged app build, swift run, and About/Settings UI smoke check. Commit: 5aeb69ec.
+
+## Agent log
+
+- 2026-10-04T18:34:38.489Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Launcher at most 25 lines, only adaptor and KromoraScene (pass) — 11 lines
+- [x] Structural launcher-size test exists and passes (pass) — PackageSettingsTests.testLauncherRemainsAThinShim
+- [x] Behavior unchanged (window sizes, About, Settings, commands) (pass) — Scene body is a verbatim move; source-scan tests retargeted
+- [x] swift build, fast and serial lanes pass; no escape hatches (pass) — fast 1522 tests, serial 490 tests, 0 failures
+Checks run:
+- swift build
+- scripts/ci-tests.sh fast
+- scripts/ci-tests.sh serial
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUU5JFF3736PLEKG

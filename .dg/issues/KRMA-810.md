@@ -13,7 +13,7 @@ labels:
   - epic
   - appstore
 created: 2026-10-03T19:25:19.249Z
-updated: 2026-10-03T19:25:24.161Z
+updated: 2026-10-05T13:27:02.376Z
 depends_on:
   - KRMA-791
   - KRMA-792
@@ -24,7 +24,7 @@ depends_on:
   - KRMA-797
   - KRMA-799
 blockers: []
-order: zzzzzzx
+order: zzzzzzzx
 board: product
 ---
 
@@ -54,3 +54,8 @@ Source plan: `.context/2026-09-30-app-store-release-plan.md` (Plan Workstreams 1
 - KRMA-796 — Wire Info.plist, App Sandbox, hardened runtime, and entitlements into the Xcode target
 - KRMA-797 — Wire the app icon and asset catalog into the Xcode target
 - KRMA-799 — Add scripts/verify-xcode-app.sh and prove the SwiftPM resource bundle is embedded
+
+
+### Comment — codex @ 2026-10-05T13:14:53.779Z
+
+KRMA-810 is a tracking parent. Its listed dependencies KRMA-791, KRMA-792, KRMA-793, KRMA-794, KRMA-795, KRMA-796, KRMA-797, and KRMA-799 are all done, and the aggregate launcher/Xcode packaging outcome is already present. Per the issue's Current disposition, no child implementation is being repeated here and the parent should remain in backlog. Releasing this claim.

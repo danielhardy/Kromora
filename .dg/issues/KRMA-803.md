@@ -2,9 +2,34 @@
 id: KRMA-803
 title: Add a structural test that the Xcode project stays a thin packaging layer
 type: task
-status: ready
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: New test passes and runs in the fast lane
+      result: pass
+      notes: 5 tests pass; scripts/ci-tests.sh fast exits 0 (lane skips only serial/optional filters, so the new suite is included).
+    - criterion: Temporary violation makes the test fail; reverted
+      result: pass
+      notes: Extra App/Extra.swift failed the App-files test; duplicated Sources build entry in project.pbxproj failed the Sources-phase test. Both reverted; tree clean.
+    - criterion: No concurrency escape hatches; warning-gate passes
+      result: pass
+      notes: warning-gate exits 0; test file has no opt-outs.
+  checks_run:
+    - swift test --filter XcodeProjectInvariantTests
+    - temporary violation checks (App/ extra swift file; pbxproj extra Sources entry)
+    - scripts/ci-tests.sh fast
+    - scripts/ci-tests.sh warning-gate
+  findings:
+    - "Non-blocking: objectBody regex stops at the first '};' so nested-brace objects could be truncated; works for the current pbxproj objects used."
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-05T02:20:15.436Z
+  session: 01MUUM9IPTHHU892JQ
 creation_provenance:
   runner: claude
   model: unknown
@@ -15,12 +40,19 @@ labels:
   - architecture
   - tests
 created: 2026-10-03T19:24:40.808Z
-updated: 2026-10-03T19:25:53.290Z
+updated: 2026-10-05T02:20:15.439Z
 depends_on:
   - KRMA-802
 blockers: []
-order: zzzx
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-05T02:14:11.576Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -57,3 +89,32 @@ Failure messages must name the invariant ("All application functionality belongs
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-05T02:14:07.642Z
+
+Added structural Xcode packaging tests for the Sources phase, KromoraKit-only package dependency, launcher line limits, App/Xcode Swift-file boundaries, and macOS 26 arm64 xcconfig settings. Focused suite, scripts/ci-tests.sh fast, and scripts/ci-tests.sh warning-gate passed; a temporary extra App Swift file correctly failed the invariant and was removed. Commit: 60e0331e.
+
+## Agent log
+
+- 2026-10-05T02:20:15.436Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] New test passes and runs in the fast lane (pass) — 5 tests pass; scripts/ci-tests.sh fast exits 0 (lane skips only serial/optional filters, so the new suite is included).
+- [x] Temporary violation makes the test fail; reverted (pass) — Extra App/Extra.swift failed the App-files test; duplicated Sources build entry in project.pbxproj failed the Sources-phase test. Both reverted; tree clean.
+- [x] No concurrency escape hatches; warning-gate passes (pass) — warning-gate exits 0; test file has no opt-outs.
+Checks run:
+- swift test --filter XcodeProjectInvariantTests
+- temporary violation checks (App/ extra swift file; pbxproj extra Sources entry)
+- scripts/ci-tests.sh fast
+- scripts/ci-tests.sh warning-gate
+Findings:
+- Non-blocking: objectBody regex stops at the first '};' so nested-brace objects could be truncated; works for the current pbxproj objects used.
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUUM9IPTHHU892JQ
+Summary: Verified: invariant tests pass, violations detected, fast lane and warning gate green.

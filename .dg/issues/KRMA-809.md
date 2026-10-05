@@ -13,14 +13,14 @@ labels:
   - epic
   - appstore
 created: 2026-10-03T19:25:16.328Z
-updated: 2026-10-03T19:25:18.726Z
+updated: 2026-10-05T13:27:01.774Z
 depends_on:
   - KRMA-786
   - KRMA-787
   - KRMA-788
   - KRMA-789
 blockers: []
-order: zzzzzzv
+order: zzzzzzzv
 board: product
 ---
 
@@ -46,3 +46,8 @@ Source plan: `.context/2026-09-30-app-store-release-plan.md` (Plan Workstream 5)
 - KRMA-787 — Delete the updater implementation files and their tests
 - KRMA-788 — Remove the KROMORA_DIRECT_DISTRIBUTION build flag from Package.swift
 - KRMA-789 — Delete the DMG release script and prune direct-distribution docs
+
+
+### Comment — codex @ 2026-10-05T04:13:15.219Z
+
+KRMA-809 is an aggregate tracking parent; implementation is split across KRMA-786–789, all already marked done with verification recorded. No parent-level code changes are scoped. Releasing this claim and restoring backlog per the issue's current disposition.

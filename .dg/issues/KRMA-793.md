@@ -2,9 +2,36 @@
 id: KRMA-793
 title: Move Info.plist, entitlements, assets, and branding into a top-level App/ folder
 type: task
-status: ready
+status: done
 priority: high
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Sources/Kromora contains only KromoraApp.swift; App/ has the four moved items
+      result: pass
+    - criterion: Old packaging path grep returns nothing
+      result: pass
+    - criterion: swift build has no unhandled resource warning; warning-gate passes
+      result: pass
+    - criterion: build-macos-app, verify-app-icon, verify-app-signature, verify-library-package-metadata, and ci-tests fast pass
+      result: pass
+  checks_run:
+    - grep old paths
+    - swift build
+    - scripts/ci-tests.sh warning-gate
+    - scripts/build-macos-app.sh
+    - scripts/verify-app-icon.sh
+    - scripts/verify-app-signature.sh
+    - scripts/verify-library-package-metadata.sh
+    - scripts/ci-tests.sh fast (1522/1522 reached)
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-04T18:47:19.758Z
+  session: 01MUU64QA2ATT0PXWA
 creation_provenance:
   runner: claude
   model: unknown
@@ -14,13 +41,20 @@ labels:
   - packaging
   - layout
 created: 2026-10-03T19:24:24.419Z
-updated: 2026-10-03T19:25:47.623Z
+updated: 2026-10-04T18:47:19.762Z
 depends_on:
   - KRMA-790
   - KRMA-792
 blockers: []
-order: zz
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-04T18:42:35.832Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -53,3 +87,36 @@ Part of the Mac App Store plan (.context/2026-09-30-app-store-release-plan.md, "
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-04T18:42:32.827Z
+
+Moved Info.plist, entitlements, asset catalog, and branding into App/; removed the executable target excludes and updated packaging scripts and documentation. Verified with swift build, warning-gate, build-macos-app, verify-app-icon, verify-app-signature, verify-library-package-metadata, and fast CI (1,522 required-fast tests). The old Sources/Kromora packaging-path grep is clean. Commit: b3b46111.
+
+## Agent log
+
+- 2026-10-04T18:47:19.758Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Sources/Kromora contains only KromoraApp.swift; App/ has the four moved items (pass)
+- [x] Old packaging path grep returns nothing (pass)
+- [x] swift build has no unhandled resource warning; warning-gate passes (pass)
+- [x] build-macos-app, verify-app-icon, verify-app-signature, verify-library-package-metadata, and ci-tests fast pass (pass)
+Checks run:
+- grep old paths
+- swift build
+- scripts/ci-tests.sh warning-gate
+- scripts/build-macos-app.sh
+- scripts/verify-app-icon.sh
+- scripts/verify-app-signature.sh
+- scripts/verify-library-package-metadata.sh
+- scripts/ci-tests.sh fast (1522/1522 reached)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUU64QA2ATT0PXWA

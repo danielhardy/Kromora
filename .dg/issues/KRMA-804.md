@@ -2,9 +2,34 @@
 id: KRMA-804
 title: Document the build architecture invariant for agents in CLAUDE.md and AGENTS.md
 type: task
-status: ready
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: CLAUDE.md contains the new section with invariant and correct commands; no stale references
+      result: pass
+      notes: Build architecture section added; Package.swift-in-Xcode line replaced; grep finds no stale DMG/updater/Package.swift-sandbox guidance beyond the intentional no-DMG statement.
+    - criterion: Every command and path mentioned exists
+      result: pass
+      notes: scripts/app-store-build.sh, Xcode/Kromora.xcodeproj, Kromora scheme, XcodeProjectInvariantTests all exist.
+    - criterion: No source or script changes
+      result: pass
+      notes: Commit 247598c6 touches only CLAUDE.md.
+  checks_run:
+    - git show 247598c6 (diff review)
+    - xcodebuild -list -project Xcode/Kromora.xcodeproj
+    - path existence checks
+    - grep for stale DMG/updater/Package.swift references
+    - AGENTS.md still points to CLAUDE.md
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-05T02:25:07.343Z
+  session: 01MUUMN5A9U9MMQBDG
 creation_provenance:
   runner: claude
   model: unknown
@@ -14,13 +39,20 @@ labels:
   - docs
   - agents
 created: 2026-10-03T19:24:42.131Z
-updated: 2026-10-03T19:25:53.852Z
+updated: 2026-10-05T02:25:07.346Z
 depends_on:
   - KRMA-802
   - KRMA-803
 blockers: []
-order: zzzy
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-05T02:24:43.519Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -52,3 +84,32 @@ Part of the Mac App Store plan (.context/2026-09-30-app-store-release-plan.md, W
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-05T02:24:43.079Z
+
+Documented the SwiftPM/Xcode launcher invariant, production build verification script, and distribution model in CLAUDE.md. Confirmed referenced paths, ran xcodebuild -list -project Xcode/Kromora.xcodeproj successfully, and passed git diff --check. Commit: 247598c6.
+
+## Agent log
+
+- 2026-10-05T02:25:07.343Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] CLAUDE.md contains the new section with invariant and correct commands; no stale references (pass) — Build architecture section added; Package.swift-in-Xcode line replaced; grep finds no stale DMG/updater/Package.swift-sandbox guidance beyond the intentional no-DMG statement.
+- [x] Every command and path mentioned exists (pass) — scripts/app-store-build.sh, Xcode/Kromora.xcodeproj, Kromora scheme, XcodeProjectInvariantTests all exist.
+- [x] No source or script changes (pass) — Commit 247598c6 touches only CLAUDE.md.
+Checks run:
+- git show 247598c6 (diff review)
+- xcodebuild -list -project Xcode/Kromora.xcodeproj
+- path existence checks
+- grep for stale DMG/updater/Package.swift references
+- AGENTS.md still points to CLAUDE.md
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUUMN5A9U9MMQBDG

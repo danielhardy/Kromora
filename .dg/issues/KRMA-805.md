@@ -2,11 +2,38 @@
 id: KRMA-805
 title: Rewrite docs/PACKAGING.md and README distribution notes for App Store, TestFlight, and source
 type: task
-status: ready
+status: done
 priority: medium
 verification_agent: claude
 human_review_required: false
 verification_model: sonnet
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: docs/PACKAGING.md covers every section; every named script/file/setting exists
+      result: pass
+      notes: All paths, xcconfig settings, entitlements, script modes, CI job and verifier checks confirmed against the repo.
+    - criterion: No DMG/notarization/Developer ID/updater mention beyond one retirement sentence
+      result: pass
+      notes: Required grep returns no matches; retirement stated as "Direct-download distribution was retired."
+    - criterion: README.md and scripts/README.md agree
+      result: pass
+      notes: Archive path, verify-xcode-app.sh entry, and distribution notes are consistent.
+    - criterion: No source or script changes
+      result: pass
+      notes: Commit 14a490b4 touches only README.md, docs/PACKAGING.md, scripts/README.md.
+  checks_run:
+    - grep -rniE "dmg|notariz|developer id|updater" README.md docs/PACKAGING.md scripts/README.md (no matches)
+    - path existence check for all referenced files/scripts/docs
+    - cross-check of entitlements, xcconfig settings, app-store-build.sh signing/archive logic, verify-xcode-app.sh checks, ci.yml xcode-app job
+    - git diff --check (clean)
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-05T02:31:59.019Z
+  session: 01MUUMVR6GAA3BMFAI
 creation_provenance:
   runner: claude
   model: unknown
@@ -16,13 +43,20 @@ labels:
   - docs
   - packaging
 created: 2026-10-03T19:24:44.001Z
-updated: 2026-10-04T22:15:26.638Z
+updated: 2026-10-05T02:31:59.023Z
 depends_on:
   - KRMA-804
   - KRMA-800
 blockers: []
-order: zzzz
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-05T02:31:26.083Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -52,3 +86,33 @@ Rewrite `docs/PACKAGING.md` with sections: Distribution model (App Store, TestFl
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-05T02:31:20.608Z
+
+Rewrote the packaging guide for App Store, TestFlight, and source workflows; documented build/archive signing, entitlements, privacy requirements, versioning, human prerequisites, and CI. Aligned README distribution notes and scripts/README archive details. Verification: required grep had no matches; local links, scripts, and named settings resolve; git diff --check passed. No source or script implementation changes.
+
+## Agent log
+
+- 2026-10-05T02:31:59.019Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] docs/PACKAGING.md covers every section; every named script/file/setting exists (pass) — All paths, xcconfig settings, entitlements, script modes, CI job and verifier checks confirmed against the repo.
+- [x] No DMG/notarization/Developer ID/updater mention beyond one retirement sentence (pass) — Required grep returns no matches; retirement stated as "Direct-download distribution was retired."
+- [x] README.md and scripts/README.md agree (pass) — Archive path, verify-xcode-app.sh entry, and distribution notes are consistent.
+- [x] No source or script changes (pass) — Commit 14a490b4 touches only README.md, docs/PACKAGING.md, scripts/README.md.
+Checks run:
+- grep -rniE "dmg|notariz|developer id|updater" README.md docs/PACKAGING.md scripts/README.md (no matches)
+- path existence check for all referenced files/scripts/docs
+- cross-check of entitlements, xcconfig settings, app-store-build.sh signing/archive logic, verify-xcode-app.sh checks, ci.yml xcode-app job
+- git diff --check (clean)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUUMVR6GAA3BMFAI
+Summary: Verified PACKAGING.md rewrite; all named files, settings, scripts and CI job exist and match; docs agree.

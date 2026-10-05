@@ -2,11 +2,46 @@
 id: KRMA-798
 title: Document native macOS required-reason privacy scope
 type: task
-status: verification
+status: done
 priority: high
 verification_agent: claude
 human_review_required: false
 verification_model: sonnet
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Sandbox audit says native macOS timestamp calls are not a required-reason blocker and retains source locations plus reason-code scope
+      result: pass
+      notes: docs/APP_STORE_SANDBOX_AUDIT.md inventory retains file:line sources and 3B52.1/C617.1 scope for future covered platforms.
+    - criterion: Release plan and epic no longer require PrivacyInfo.xcprivacy solely for macOS required-reason APIs
+      result: pass
+      notes: Release plan and KRMA-808 updated.
+    - criterion: KRMA-807 privacy answer relies on code/partner evidence and has no KRMA-798 dependency
+      result: pass
+      notes: depends_on only KRMA-806.
+    - criterion: KRMA-799 and KRMA-805 drop manifest requirement; KRMA-799 drops KRMA-798 dependency
+      result: pass
+      notes: KRMA-799 depends only on KRMA-797.
+    - criterion: Package and Xcode settings confirm macOS-only; Apple guidance cited
+      result: pass
+      notes: Package.swift .macOS(.v26); pbxproj SUPPORTED_PLATFORMS=macosx; Base.xcconfig MACOSX_DEPLOYMENT_TARGET=26.0.
+    - criterion: No privacy manifest, package/cache code change, or upload
+      result: pass
+      notes: No PrivacyInfo.xcprivacy exists; commit b78b888c touches no Sources/App/Package files.
+  checks_run:
+    - dg validate (only pre-existing unknown-model warnings, no errors)
+    - git diff --check b78b888c~1 b78b888c (clean)
+    - grep for stale PrivacyInfo/required-reason claims across audit, plan, KRMA-799/805/807/808
+    - inspected Package.swift, project.pbxproj, Base.xcconfig for macOS-only target
+    - find PrivacyInfo.xcprivacy (none)
+  findings: []
+  fixes: []
+  verification_commits:
+    - b78b888c
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-04T23:53:07.049Z
+  session: 01MUUH6ZJ2RZPN5YA1
 creation_provenance:
   runner: claude
   model: unknown
@@ -16,7 +51,7 @@ labels:
   - privacy
   - xcode
 created: 2026-10-03T19:24:32.332Z
-updated: 2026-10-04T23:31:14.559Z
+updated: 2026-10-04T23:53:07.053Z
 blockers:
   - id: evt_muu87p3p_w0fobg
     type: human
@@ -42,6 +77,7 @@ blockers:
 order: n
 board: product
 commits:
+  - b78b888c
   - b78b888c
 ---
 
@@ -98,3 +134,31 @@ Handoff record repaired: recorded implementation commit b78b888c; removed the st
 ### Comment — codex @ 2026-10-04T23:31:14.558Z
 
 Dependency cleanup: KRMA-785 and KRMA-796 are already done; their stale links made DispatchGraph report KRMA-798 as dependency-blocked. Removed those fulfilled links. The issue now reports no blockers; verification still needs the shared-worktree claim held by KRMA-806 to be released.
+
+## Agent log
+
+- 2026-10-04T23:53:07.049Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Sandbox audit says native macOS timestamp calls are not a required-reason blocker and retains source locations plus reason-code scope (pass) — docs/APP_STORE_SANDBOX_AUDIT.md inventory retains file:line sources and 3B52.1/C617.1 scope for future covered platforms.
+- [x] Release plan and epic no longer require PrivacyInfo.xcprivacy solely for macOS required-reason APIs (pass) — Release plan and KRMA-808 updated.
+- [x] KRMA-807 privacy answer relies on code/partner evidence and has no KRMA-798 dependency (pass) — depends_on only KRMA-806.
+- [x] KRMA-799 and KRMA-805 drop manifest requirement; KRMA-799 drops KRMA-798 dependency (pass) — KRMA-799 depends only on KRMA-797.
+- [x] Package and Xcode settings confirm macOS-only; Apple guidance cited (pass) — Package.swift .macOS(.v26); pbxproj SUPPORTED_PLATFORMS=macosx; Base.xcconfig MACOSX_DEPLOYMENT_TARGET=26.0.
+- [x] No privacy manifest, package/cache code change, or upload (pass) — No PrivacyInfo.xcprivacy exists; commit b78b888c touches no Sources/App/Package files.
+Checks run:
+- dg validate (only pre-existing unknown-model warnings, no errors)
+- git diff --check b78b888c~1 b78b888c (clean)
+- grep for stale PrivacyInfo/required-reason claims across audit, plan, KRMA-799/805/807/808
+- inspected Package.swift, project.pbxproj, Base.xcconfig for macOS-only target
+- find PrivacyInfo.xcprivacy (none)
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- b78b888c
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUUH6ZJ2RZPN5YA1
+Summary: Verified: docs and ticket updates match scope; no code or manifest changes.

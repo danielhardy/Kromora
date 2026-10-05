@@ -2,11 +2,39 @@
 id: KRMA-785
 title: "App Sandbox audit 3/3: network, subprocesses, resources, and protected-API inventory"
 type: task
-status: ready
+status: done
 priority: high
 verification_agent: claude
 human_review_required: false
 verification_model: sonnet
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: Sections 3 and 4 exist; sections 1 and 2 unchanged
+      result: pass
+      notes: Commit diff is 100 insertions, 0 deletions, docs only.
+    - criterion: Required-reason API table cites file:line for every use with reason code or needs review
+      result: pass
+      notes: Re-ran greps; UserDefaults, timestamp, systemUptime uses covered. Extra attributesOfItem uses read only size or inode, so are outside the category. No disk-space or keyboard uses.
+    - criterion: Recommendation table lists final entitlement set with justification and entitlements to remove
+      result: pass
+      notes: Five kept entitlements, network.client removed; matches Kromora.entitlements.
+    - criterion: Every blocker/should-fix has linked backlog ID; no source/test/script modified
+      result: pass
+      notes: Follow-ups link KRMA-786/787/798/813; no code changed.
+  checks_run:
+    - grep for required-reason APIs, Process, URLSession, dlopen in Sources
+    - git diff --check HEAD~1 HEAD
+    - entitlements file compared to recommendations
+    - Package.swift updater flag verified
+  findings: []
+  fixes: []
+  verification_commits:
+    - 5d7e4eb0
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-04T17:00:19.184Z
+  session: 01MUU2GIUC7DTW3H2G
 creation_provenance:
   runner: claude
   model: unknown
@@ -17,12 +45,21 @@ labels:
   - sandbox
   - privacy
 created: 2026-10-03T19:24:13.029Z
-updated: 2026-10-03T19:25:43.154Z
+updated: 2026-10-04T17:00:19.188Z
 depends_on:
   - KRMA-784
 blockers: []
-order: w
+order: a0
 board: product
+footprint:
+  source: observed
+  paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-04T16:59:30.969Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
+commits:
+  - 5d7e4eb0
 ---
 
 ## Objective
@@ -61,3 +98,33 @@ File backlog issues for any blocker or should-fix (label `appstore`); do not cha
 
 - Anything outside the stated scope. If you find a separate defect, file a new backlog issue with the `appstore` label instead of fixing it here.
 - Adding fallbacks for earlier macOS releases or Intel hardware (project rule), third-party dependencies, `@unchecked Sendable`, `nonisolated(unsafe)`, or `@preconcurrency`.
+
+
+### Comment — codex @ 2026-10-04T16:59:26.099Z
+
+Appended sections 3–4 to docs/APP_STORE_SANDBOX_AUDIT.md; sections 1–2 are unchanged and no source, test, or script files were modified. Recorded that current in-process network and Process() calls belong to the direct-distribution updater (removed by KRMA-786/787), and documented PhotosPicker/PhotoKit usage, resource-bundle packaging risk for KRMA-813, required-reason API evidence, entitlement recommendations, and usage strings. UserDefaults maps to CA92.1, systemUptime to 35F9.1, file-timestamp reason needs scope review in KRMA-798; no disk-space or active-keyboard API calls found. Recommended keeping five sandbox entitlements and removing network.client after updater deletion. Checks: targeted required-reason grep, git diff --check, dg validate (OK; existing model-name warnings). Commit: 5d7e4eb0.
+
+## Agent log
+
+- 2026-10-04T17:00:19.184Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Sections 3 and 4 exist; sections 1 and 2 unchanged (pass) — Commit diff is 100 insertions, 0 deletions, docs only.
+- [x] Required-reason API table cites file:line for every use with reason code or needs review (pass) — Re-ran greps; UserDefaults, timestamp, systemUptime uses covered. Extra attributesOfItem uses read only size or inode, so are outside the category. No disk-space or keyboard uses.
+- [x] Recommendation table lists final entitlement set with justification and entitlements to remove (pass) — Five kept entitlements, network.client removed; matches Kromora.entitlements.
+- [x] Every blocker/should-fix has linked backlog ID; no source/test/script modified (pass) — Follow-ups link KRMA-786/787/798/813; no code changed.
+Checks run:
+- grep for required-reason APIs, Process, URLSession, dlopen in Sources
+- git diff --check HEAD~1 HEAD
+- entitlements file compared to recommendations
+- Package.swift updater flag verified
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- 5d7e4eb0
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUU2GIUC7DTW3H2G
+Summary: Verified sections 3-4 of APP_STORE_SANDBOX_AUDIT.md: accurate, complete, docs-only.

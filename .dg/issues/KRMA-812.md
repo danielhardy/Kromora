@@ -13,12 +13,12 @@ labels:
   - epic
   - appstore
 created: 2026-10-03T19:25:31.498Z
-updated: 2026-10-03T19:25:33.706Z
+updated: 2026-10-05T13:27:03.544Z
 depends_on:
   - KRMA-806
   - KRMA-807
 blockers: []
-order: zzzzzzz
+order: zzzzzzzz
 board: product
 ---
 
