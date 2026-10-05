@@ -4,11 +4,24 @@ Kromora targets **macOS 26 (Tahoe) and later on Apple Silicon only**. Prefer cur
 
 Kromora is a native RAW photo editor (**Swift 6 language mode**, SwiftUI + Core Image, **zero third-party dependencies**) with a package-backed Library/Edit/Export workflow. The open package owns library membership, originals, metadata, and edit revisions; folder, Photos, and removable-volume choices are import sources. Local indexes and caches are projections. Existing `EditStore*.store` files remain untouched and are not read as a library fallback. See [`docs/PRODUCT_SCOPE.md`](docs/PRODUCT_SCOPE.md) for MVP intent and boundaries, [`docs/APP_ARCHITECTURE.md`](docs/APP_ARCHITECTURE.md) for current coordinator ownership, [`docs/STORAGE_POLICY.md`](docs/STORAGE_POLICY.md) for durable storage, and [`docs/LIBRARY_PACKAGE_PLAN.md`](docs/LIBRARY_PACKAGE_PLAN.md) for format history.
 
+## Build architecture
+
+SwiftPM is the primary development build system. All application functionality belongs in
+`KromoraKit`. The SwiftPM `Kromora` executable is the development launcher, and the Xcode
+`Kromora` target is the production launcher. The Xcode project exists only to package `KromoraKit`
+as the signed, sandboxed Mac App Store app. Do not add implementation files to the Xcode target;
+`XcodeProjectInvariantTests` enforces this boundary. Verify the production app with
+`scripts/app-store-build.sh`.
+
+Binary distribution is through the Mac App Store, with TestFlight for prereleases; developers can
+build from source using SwiftPM. We do not distribute DMGs or maintain an updater.
+
 ## Build / run / test
 
 - Build: `swift build`
 - Run (fast iteration; no sandbox/icon): `swift run`
-- Full app (icon + App Sandbox): open `Package.swift` in Xcode and Run.
+- Production app (icon + App Sandbox): run `open Xcode/Kromora.xcodeproj`, then run the
+  `Kromora` scheme in Xcode.
 - Tests: `swift test`. CI runs `scripts/ci-tests.sh fast` for deterministic/model/fake-engine tests
   in parallel and `scripts/ci-tests.sh serial` for Core Image/render and AppKit/UI tests serially.
   RAW-fixture and benchmark methods are opt-in through `scripts/ci-tests.sh optional`, then CI
