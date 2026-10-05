@@ -100,15 +100,23 @@ swift test
 ```
 
 Requirements: macOS 26 (Tahoe) or newer on Apple Silicon to run, Xcode 27 or newer with the macOS 27
-SDK to build, and Swift 6 language mode. `swift run` is useful for iteration but does not include the packaged app's asset
-catalog or App Sandbox entitlements. Open `Package.swift` in Xcode and run the **Kromora** scheme to
-exercise bundled-app behavior.
+SDK to build, and Swift 6 language mode. `swift run` is useful for iteration but does not include
+the production app's asset catalog or App Sandbox entitlements. Open
+[`Xcode/Kromora.xcodeproj`](Xcode/Kromora.xcodeproj) in Xcode and run the **Kromora** scheme to
+exercise the packaged app.
 
 CI's required verification lanes are `scripts/ci-tests.sh fast` and
 `scripts/ci-tests.sh serial`. `scripts/ci-tests.sh optional` includes licensed-RAW, hardware, and
 benchmark checks that require local inputs or a logged-in display. See
 [`docs/TESTING.md`](docs/TESTING.md) for lane definitions and limits, and
 [`docs/PACKAGING.md`](docs/PACKAGING.md) for the signed app workflow.
+
+## Distribution
+
+The Mac app is distributed through the App Store, with prerelease builds tested through TestFlight.
+Developers can build from source with SwiftPM; Xcode creates the signed production app and archive.
+See [`docs/PACKAGING.md`](docs/PACKAGING.md) for the release workflow, signing requirements, and
+App Store Connect preparation.
 
 ## Architecture and storage
 
