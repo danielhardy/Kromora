@@ -76,6 +76,8 @@ enum ColorMixerChannelName: String, CaseIterable, Hashable, Sendable {
 enum ColorGradingZone: String, CaseIterable, Hashable, Sendable {
     case shadows, midtones, highlights
 
+    static let displayOrder: [Self] = [.highlights, .midtones, .shadows]
+
     var title: String { rawValue.capitalized }
 }
 
