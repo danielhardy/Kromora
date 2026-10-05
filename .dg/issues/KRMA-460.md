@@ -12,7 +12,7 @@ labels:
   - architecture
   - maintainability
 created: 2026-09-19T15:31:38.265Z
-updated: 2026-09-26T13:56:42.293Z
+updated: 2026-10-05T14:36:58.374Z
 depends_on:
   - KRMA-465
   - KRMA-466
@@ -22,7 +22,7 @@ depends_on:
   - KRMA-564
   - KRMA-565
 blockers: []
-order: "55555550"
+order: d9h1w7kr
 board: product
 ---
 

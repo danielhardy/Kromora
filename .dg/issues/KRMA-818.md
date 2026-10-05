@@ -2,7 +2,7 @@
 id: KRMA-818
 title: Balance sandbox access lifetimes for panel-selected and dropped URLs
 type: task
-status: claimed
+status: review
 priority: high
 human_review_required: false
 creation_provenance:
@@ -12,17 +12,18 @@ creation_provenance:
 labels:
   - appstore
 created: 2026-10-04T16:06:19.487Z
-updated: 2026-10-05T13:19:00.499Z
-blockers: []
+updated: 2026-10-05T14:31:08.842Z
+blockers:
+  - id: evt_muvcl1ka_1z9ujn
+    type: human
+    reason: Final signed UI checks are incomplete because CUA could not access a Kromora window for the final output save or Finder drops.
+    action: On the signed Release build, save a TIFF into an external folder and verify it; drag one image and one folder from Finder onto the preview and confirm each import or a clear access error; remove the test-only removable.png from Library using Delete to Trash.
+    created_at: 2026-10-05T14:31:08.842Z
 order: yh
 board: product
-claim:
-  actor: codex
-  session: 01MUVA09SJ68TKRKKP
-  claimed_at: 2026-10-05T13:19:00.499Z
-  expires_at: 2026-10-05T14:19:00.499Z
-  model: gpt-6-luna
-  stage: implementation
+blocked_reason: Final signed UI checks are incomplete because CUA could not access a Kromora window for the final output save or Finder drops.
+blocked_action: On the signed Release build, save a TIFF into an external folder and verify it; drag one image and one folder from Finder onto the preview and confirm each import or a clear access error; remove the test-only removable.png from Library using Delete to Trash.
+blocked_from_status: ready
 ---
 
 ## Objective
@@ -54,3 +55,8 @@ Direct `NSSavePanel` writes in `DeriveCoordinator` and `LookSaveCoordinator` hav
 ## Verification
 
 Run focused import/workflow tests, the deterministic project verification lane required by the implementation ticket, and the sandboxed manual cases above.
+
+
+### Comment — codex @ 2026-10-05T14:31:08.581Z
+
+Implemented balanced scope ownership for panel/drop imports, removable media, selected outputs, Look saves, LUT scans, and settings. Added deterministic tests and signed sandbox run notes in docs/KRMA-818-SANDBOX-RUN.md. Verification passed: focused ExportCoordinatorTests (21), fast lane (1,534), serial lane (490), final signed app-store-build verify, and diff check. Commit cfb81be8. Signed runs passed panel multi-file import, folder recursion, and read-only removable-media import; an earlier signed build exported a TIFF. Final-build output save and Finder file/folder drops remain unverified because CUA could not find a Kromora window. One generated removable.png test import remains in the Library.

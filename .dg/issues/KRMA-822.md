@@ -2,9 +2,43 @@
 id: KRMA-822
 title: Effects inspector simple vs advanced for Vignette, Grain, and Sharpening
 type: task
-status: ready
+status: done
 priority: medium
 human_review_required: false
+verification_report:
+  verdict: pass
+  acceptance_criteria:
+    - criterion: "Vignette: Amount primary, other four under collapsed-by-default Advanced"
+      result: pass
+    - criterion: "Grain: Amount primary, Size/Roughness under Advanced"
+      result: pass
+    - criterion: "Sharpening: Amount primary, Radius/Detail/Masking + caption under Advanced; section collapsed by default"
+      result: pass
+    - criterion: Auto-expand Advanced on non-neutral values (load and section open)
+      result: pass
+      notes: onChange initial:true plus section-expand hook; expand-only, never auto-collapses
+    - criterion: Resets unchanged
+      result: pass
+    - criterion: Bindings unchanged
+      result: pass
+      notes: Same vignetteBinding/grainBinding/detailBinding via shared row helpers
+    - criterion: Accessibility labels and reset reachability
+      result: pass
+      notes: Rows reuse existing valueRow; not exercised with VoiceOver
+    - criterion: swift build and EffectsInspectorTests pass
+      result: pass
+      notes: 10 tests, 0 failures; no RenderPipeline/model/schema diffs
+  checks_run:
+    - swift build (pass)
+    - swift test --filter EffectsInspectorTests (10 tests, 0 failures)
+    - Code review of commit 4e45e125
+  findings: []
+  fixes: []
+  verification_commits: []
+  actor: claude
+  resolved_model: sonnet
+  completed_at: 2026-10-05T14:41:33.224Z
+  session: 01MUVCXW6J2IDM3AJJ
 creation_provenance:
   runner: cursor
   model: unknown
@@ -15,9 +49,9 @@ labels:
   - effects
   - ui
 created: 2026-10-05T13:10:27.529Z
-updated: 2026-10-05T13:10:48.042Z
+updated: 2026-10-05T14:41:33.228Z
 blockers: []
-order: z
+order: a0
 board: product
 context:
   files:
@@ -38,6 +72,10 @@ context:
 footprint:
   source: observed
   paths: []
+  observed:
+    paths: []
+    captured_at: 2026-10-05T14:40:57.718Z
+    unavailable_reason: "missing_commits: no implementation commits are recorded"
 ---
 
 ## Objective
@@ -83,6 +121,36 @@ Today `EffectsInspectorView` lists all `VignetteControl` and `GrainControl` case
 - Golden images, Metal kernel parity, and render tests should **not** change.
 - If a verifier sees diffs in `RenderPipeline.swift`, `EffectsAdjustments.swift` clamping, or edit JSON schema, treat as scope creep and return to review.
 
+### Comment — codex @ 2026-10-05T14:40:55.044Z
+
+Restructured Vignette, Grain, and Sharpening so Amount stays primary and subordinate controls sit under Advanced. Non-neutral shape values auto-expand Advanced; bindings, reset callbacks, and preview hooks are preserved. Verification: swift build; swift test --filter EffectsInspectorTests (10 passed); git diff --check. Manual UI smoke was unavailable because the development app reported the library package was locked by another process. Commit: 4e45e125.
+
 ## Agent log
 
 <!-- Generated summaries only. Detailed activity lives in events.jsonl. -->
+
+- 2026-10-05T14:41:33.224Z: Verification report
+Verdict: PASS
+Acceptance criteria:
+- [x] Vignette: Amount primary, other four under collapsed-by-default Advanced (pass)
+- [x] Grain: Amount primary, Size/Roughness under Advanced (pass)
+- [x] Sharpening: Amount primary, Radius/Detail/Masking + caption under Advanced; section collapsed by default (pass)
+- [x] Auto-expand Advanced on non-neutral values (load and section open) (pass) — onChange initial:true plus section-expand hook; expand-only, never auto-collapses
+- [x] Resets unchanged (pass)
+- [x] Bindings unchanged (pass) — Same vignetteBinding/grainBinding/detailBinding via shared row helpers
+- [x] Accessibility labels and reset reachability (pass) — Rows reuse existing valueRow; not exercised with VoiceOver
+- [x] swift build and EffectsInspectorTests pass (pass) — 10 tests, 0 failures; no RenderPipeline/model/schema diffs
+Checks run:
+- swift build (pass)
+- swift test --filter EffectsInspectorTests (10 tests, 0 failures)
+- Code review of commit 4e45e125
+Findings:
+- None
+Fixes:
+- None
+Verification commits:
+- None
+Actor: claude
+Resolved model: sonnet
+Pickup session: 01MUVCXW6J2IDM3AJJ
+Summary: Verified: build and EffectsInspectorTests pass; code review found no blocking issues. Manual UI smoke not performed.

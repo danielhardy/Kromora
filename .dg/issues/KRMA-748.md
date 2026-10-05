@@ -16,11 +16,11 @@ creation_provenance:
 labels:
   - verification
 created: 2026-10-01T20:06:16.885Z
-updated: 2026-10-03T14:04:44.163Z
+updated: 2026-10-05T14:36:58.458Z
 depends_on:
   - KRMA-734
 blockers: []
-order: zv
+order: h1w7kub9
 board: product
 ---
 

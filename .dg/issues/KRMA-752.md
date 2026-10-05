@@ -12,10 +12,10 @@ labels:
   - verification
   - testing
 created: 2026-10-01T21:07:01.163Z
-updated: 2026-10-01T22:46:50.693Z
+updated: 2026-10-05T14:36:58.332Z
 parent: KRMA-734
 blockers: []
-order: 4n
+order: bd9h1w7i
 board: product
 ---
 

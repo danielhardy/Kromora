@@ -12,12 +12,12 @@ labels:
   - verification
   - performance
 created: 2026-10-01T20:18:29.922Z
-updated: 2026-10-01T22:51:55.864Z
+updated: 2026-10-05T14:36:58.416Z
 parent: KRMA-750
 depends_on:
   - KRMA-734
 blockers: []
-order: zq
+order: f5omqiy0
 board: product
 ---
 
