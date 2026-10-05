@@ -9,10 +9,13 @@ struct EffectsInspectorView: View {
     @ObservedObject var viewModel: AppViewModel
 
     @State private var detailExpanded = true
-    @State private var sharpeningExpanded = true
+    @State private var sharpeningExpanded = false
+    @State private var sharpeningAdvancedExpanded = false
     @State private var noiseExpanded = false
     @State private var vignetteExpanded = false
+    @State private var vignetteAdvancedExpanded = false
     @State private var grainExpanded = false
+    @State private var grainAdvancedExpanded = false
 
     var body: some View {
         InspectorScrollingContent {
@@ -46,13 +49,25 @@ struct EffectsInspectorView: View {
     private var sharpeningSection: some View {
         InspectorDisclosure("Sharpening", isExpanded: $sharpeningExpanded) {
             VStack(alignment: .leading, spacing: 12) {
-                ForEach([DetailControl.sharpeningAmount, .sharpeningRadius, .sharpeningDetail, .sharpeningMasking], id: \.self) { control in
-                    detailRow(control)
+                detailRow(.sharpeningAmount)
+                InspectorDisclosure("Advanced", isExpanded: $sharpeningAdvancedExpanded, titleFont: InspectorStyle.nestedSectionTitle) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach([DetailControl.sharpeningRadius, .sharpeningDetail, .sharpeningMasking], id: \.self) { control in
+                            detailRow(control)
+                        }
+                        Text("Masking protects smooth areas; higher values restrict sharpening to stronger edges.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 6)
                 }
-                Text("Masking protects smooth areas; higher values restrict sharpening to stronger edges.")
-                    .font(.caption2).foregroundStyle(.secondary)
             }
             .padding(.top, 10)
+        }
+        .onChange(of: viewModel.document.effects.detail, initial: true) { _, _ in
+            expandSharpeningAdvancedIfNeeded()
+        }
+        .onChange(of: sharpeningExpanded) { _, isExpanded in
+            if isExpanded { expandSharpeningAdvancedIfNeeded() }
         }
     }
 
@@ -104,23 +119,39 @@ struct EffectsInspectorView: View {
                     disabled: !viewModel.hasVignetteAdjustments,
                     action: viewModel.resetAllVignette
                 )
-                ForEach(VignetteControl.allCases, id: \.self) { control in
-                    valueRow(
-                        title: control.title,
-                        value: viewModel.vignetteBinding(for: control),
-                        range: control.range,
-                        // Midpoint and Feather default to 50 in 0…100, so their fill is centred
-                        // even though their ranges are unsigned. `VignetteControl.neutral` is the
-                        // authority — the same value `resetVignette(_:)` writes.
-                        neutral: control.neutral,
-                        readout: control == .amount || control == .roundness
-                            ? signedWholeReadout : unsignedWholeReadout,
-                        reset: { viewModel.resetVignette(control) }
-                    )
+                vignetteRow(.amount)
+                InspectorDisclosure("Advanced", isExpanded: $vignetteAdvancedExpanded, titleFont: InspectorStyle.nestedSectionTitle) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach([VignetteControl.midpoint, .roundness, .feather, .highlights], id: \.self) { control in
+                            vignetteRow(control)
+                        }
+                    }
+                    .padding(.top, 6)
                 }
             }
             .padding(.top, 10)
         }
+        .onChange(of: viewModel.document.effects.vignette, initial: true) { _, _ in
+            expandVignetteAdvancedIfNeeded()
+        }
+        .onChange(of: vignetteExpanded) { _, isExpanded in
+            if isExpanded { expandVignetteAdvancedIfNeeded() }
+        }
+    }
+
+    private func vignetteRow(_ control: VignetteControl) -> some View {
+        valueRow(
+            title: control.title,
+            value: viewModel.vignetteBinding(for: control),
+            range: control.range,
+            // Midpoint and Feather default to 50 in 0…100, so their fill is centred
+            // even though their ranges are unsigned. `VignetteControl.neutral` is the
+            // authority — the same value `resetVignette(_:)` writes.
+            neutral: control.neutral,
+            readout: control == .amount || control == .roundness
+                ? signedWholeReadout : unsignedWholeReadout,
+            reset: { viewModel.resetVignette(control) }
+        )
     }
 
     private var grainSection: some View {
@@ -131,19 +162,62 @@ struct EffectsInspectorView: View {
                     disabled: !viewModel.hasGrainAdjustments,
                     action: viewModel.resetAllGrain
                 )
-                ForEach(GrainControl.allCases, id: \.self) { control in
-                    valueRow(
-                        title: control.title,
-                        value: viewModel.grainBinding(for: control),
-                        range: control.range,
-                        neutral: control.neutral,
-                        readout: unsignedWholeReadout,
-                        reset: { viewModel.resetGrain(control) }
-                    )
+                grainRow(.amount)
+                InspectorDisclosure("Advanced", isExpanded: $grainAdvancedExpanded, titleFont: InspectorStyle.nestedSectionTitle) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach([GrainControl.size, .roughness], id: \.self) { control in
+                            grainRow(control)
+                        }
+                    }
+                    .padding(.top, 6)
                 }
             }
             .padding(.top, 10)
         }
+        .onChange(of: viewModel.document.effects.grain, initial: true) { _, _ in
+            expandGrainAdvancedIfNeeded()
+        }
+        .onChange(of: grainExpanded) { _, isExpanded in
+            if isExpanded { expandGrainAdvancedIfNeeded() }
+        }
+    }
+
+    private func grainRow(_ control: GrainControl) -> some View {
+        valueRow(
+            title: control.title,
+            value: viewModel.grainBinding(for: control),
+            range: control.range,
+            neutral: control.neutral,
+            readout: unsignedWholeReadout,
+            reset: { viewModel.resetGrain(control) }
+        )
+    }
+
+    private var sharpeningHasAdvancedAdjustments: Bool {
+        [DetailControl.sharpeningRadius, .sharpeningDetail, .sharpeningMasking]
+            .contains { $0.value(in: viewModel.document.effects.detail) != $0.neutral }
+    }
+
+    private var vignetteHasAdvancedAdjustments: Bool {
+        [VignetteControl.midpoint, .roundness, .feather, .highlights]
+            .contains { $0.value(in: viewModel.document.effects.vignette) != $0.neutral }
+    }
+
+    private var grainHasAdvancedAdjustments: Bool {
+        [GrainControl.size, .roughness]
+            .contains { $0.value(in: viewModel.document.effects.grain) != $0.neutral }
+    }
+
+    private func expandSharpeningAdvancedIfNeeded() {
+        if sharpeningHasAdvancedAdjustments { sharpeningAdvancedExpanded = true }
+    }
+
+    private func expandVignetteAdvancedIfNeeded() {
+        if vignetteHasAdvancedAdjustments { vignetteAdvancedExpanded = true }
+    }
+
+    private func expandGrainAdvancedIfNeeded() {
+        if grainHasAdvancedAdjustments { grainAdvancedExpanded = true }
     }
 
     private func valueRow(
