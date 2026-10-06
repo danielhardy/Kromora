@@ -216,6 +216,36 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
                 atPath: packageURL.appendingPathComponent("State/value.txt").path))
     }
 
+    /// Staging can fail when the destination path is already a directory. The thrown CocoaError
+    /// must keep `NSURLErrorKey` as a URL so `localizedDescription` can be read without aborting
+    /// inside Foundation's Cocoa error formatter.
+    func testStageFailureSurfacesReadableCocoaErrorDescription() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, ownerID: UUID(), now: now)
+        var transaction = try PortablePackageTransaction.begin(
+            at: packageURL, lease: lease, now: now)
+
+        let blockingDirectory = packageURL
+            .appendingPathComponent("Recovery/Staging")
+            .appendingPathComponent(transaction.transactionID.uuidString)
+            .appendingPathComponent("State/value.txt")
+        try FileManager.default.createDirectory(
+            at: blockingDirectory, withIntermediateDirectories: true)
+
+        XCTAssertThrowsError(try transaction.stage(data: Data("new".utf8), at: "State/value.txt")) {
+            error in
+            let cocoa = error as? CocoaError
+            XCTAssertEqual(cocoa?.code, .fileWriteUnknown)
+            let reportedURL = cocoa?.userInfo[NSURLErrorKey] as? URL
+            XCTAssertNotNil(reportedURL, "NSURLErrorKey must be a URL, not a path String")
+            XCTAssertEqual(
+                reportedURL?.standardizedFileURL.path, blockingDirectory.standardizedFileURL.path)
+            // Accessing this used to abort when NSURLErrorKey held a path String.
+            XCTAssertFalse(error.localizedDescription.isEmpty)
+        }
+        try lease.release()
+    }
+
     private func makePackage() throws -> URL {
         let url = tempDirectory.appendingPathComponent(
             "Library-\(UUID().uuidString).kromoralibrary")

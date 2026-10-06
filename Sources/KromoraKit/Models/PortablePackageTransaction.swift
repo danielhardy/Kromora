@@ -650,7 +650,9 @@ struct PortablePackageTransaction {
 
     private func destinationURLCreatingIfNeeded(_ url: URL) throws -> URL {
         if !FileManager.default.createFile(atPath: url.path, contents: nil) {
-            throw CocoaError(.fileWriteUnknown, userInfo: [NSURLErrorKey: url.path])
+            // NSURLErrorKey must be a URL. A path String makes Foundation's Cocoa error
+            // formatter call URLByDeletingLastPathComponent on a non-URL and abort.
+            throw CocoaError(.fileWriteUnknown, userInfo: [NSURLErrorKey: url])
         }
         return url
     }
