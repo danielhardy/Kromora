@@ -449,6 +449,84 @@ final class LightInspectorTests: TempDirectoryTestCase {
         }
     }
 
+    func testEndpointHandlesStayHitTestableAfterReturningToTheCorner() {
+        let size = CGSize(width: 120, height: 120)
+        let curve = LightToneCurve(points: [
+            LightCurvePoint(input: 0, output: 0),
+            LightCurvePoint(input: 0.02, output: 0.02),
+            LightCurvePoint(input: 0.98, output: 0.98),
+            LightCurvePoint(input: 1, output: 1),
+        ], preserveEndpointPositions: true)
+
+        XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: 0, y: size.height), in: size), curve.points.first)
+        XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: size.width, y: 0), in: size), curve.points.last)
+    }
+
+    func testToneCurveEndHandlesDrawAboveInteriorHandles() throws {
+        let source = try lightInspectorSource()
+        XCTAssertTrue(source.contains(".zIndex(index == 0 || index == editablePoints.count - 1 ? 1 : 0)"))
+    }
+
+    func testVisibleEndpointsWinOverCloserInteriorHandles() {
+        let size = CGSize(width: 102, height: 102)
+        let curve = LightToneCurve(points: [
+            LightCurvePoint(input: 0, output: 0),
+            LightCurvePoint(input: 0.02, output: 0.02),
+            LightCurvePoint(input: 0.98, output: 0.98),
+            LightCurvePoint(input: 1, output: 1),
+        ], preserveEndpointPositions: true)
+
+        // These presses are inside the visible 6 pt endpoint radius, but nearer the interior
+        // handles beneath them. Selection must agree with the endpoint's higher drawing order.
+        XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: 3, y: 99), in: size), curve.points.first)
+        XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: 99, y: 3), in: size), curve.points.last)
+
+        // The endpoint's expanded target must not swallow an exposed neighboring handle, and
+        // callers requesting a smaller hit radius must still get that smaller radius.
+        XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: 7, y: 95), in: size), curve.points[1])
+        XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: 95, y: 7), in: size), curve.points[2])
+        XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: 3, y: 99), in: size, hitRadius: 2), curve.points[1])
+
+        // When the two endpoints themselves overlap, the last slot draws above the first.
+        let overlappingEndpoints = LightToneCurve(points: [
+            LightCurvePoint(input: 0.49, output: 0.5),
+            LightCurvePoint(input: 0.51, output: 0.5),
+        ], preserveEndpointPositions: true)
+        XCTAssertEqual(overlappingEndpoints.nearestHandle(to: CGPoint(x: 50, y: 51), in: size),
+                       overlappingEndpoints.points.last)
+    }
+
+    func testBothEndpointHandlesCanBeDraggedAwayAndBackRepeatedlyOnEveryChannel() throws {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        let size = CGSize(width: 162, height: 162)
+        for channel in ToneCurveChannel.allCases {
+            for _ in 0..<3 {
+                for (corner, moved) in [
+                    (LightCurvePoint(input: 0, output: 0), LightCurvePoint(input: 0.12, output: 0.15)),
+                    (LightCurvePoint(input: 1, output: 1), LightCurvePoint(input: 0.88, output: 0.85)),
+                ] {
+                    let curve = viewModel.document.light.toneCurve(for: channel)
+                    let press = CGPoint(x: corner.input * size.width, y: (1 - corner.output) * size.height)
+                    let selected = try XCTUnwrap(curve.nearestHandle(to: press, in: size))
+                    XCTAssertEqual(selected, corner)
+                    viewModel.beginPreviewInteraction()
+                    let movedInput = try XCTUnwrap(viewModel.moveToneCurvePoint(
+                        fromInput: selected.input, input: moved.input, output: moved.output, channel: channel
+                    ))
+                    XCTAssertEqual(movedInput, moved.input, accuracy: 0.000_001)
+                    XCTAssertTrue(viewModel.document.light.toneCurve(for: channel).points.contains(moved))
+                    viewModel.moveToneCurvePoint(
+                        fromInput: movedInput, input: corner.input, output: corner.output, channel: channel
+                    )
+                    viewModel.endPreviewInteraction()
+                    XCTAssertEqual(viewModel.document.light.toneCurve(for: channel).nearestHandle(
+                        to: press, in: size
+                    ), corner)
+                }
+            }
+        }
+    }
+
     func testDoubleClickEndpointResetPreservesInteriorPointsAndGroupsUndo() throws {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         let redCurve = LightToneCurve(points: [

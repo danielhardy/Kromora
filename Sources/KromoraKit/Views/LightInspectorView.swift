@@ -150,8 +150,11 @@ private struct ToneCurveEditor: View {
                         // Keep the handle view's identity tied to its slot, not its changing input.
                         // Re-keying by input while a drag is in flight can tear down the gesture as
                         // soon as the handle follows the pointer.
-                        ForEach(Array(editablePoints.enumerated()), id: \.offset) { _, point in
+                        ForEach(Array(editablePoints.enumerated()), id: \.offset) { index, point in
+                            // End handles draw above every interior handle so a crowded corner
+                            // never hides the thumb that anchors the curve.
                             pointHandle(point, size: size)
+                                .zIndex(index == 0 || index == editablePoints.count - 1 ? 1 : 0)
                         }
                     }
                     .frame(maxWidth: .infinity)
@@ -172,9 +175,6 @@ private struct ToneCurveEditor: View {
                 .aspectRatio(1, contentMode: .fit)
                 .frame(maxWidth: .infinity)
                 .fixedSize(horizontal: false, vertical: true)
-                // Corner handles overhang the graph by half their size. Keep the graph above the
-                // tabs so the bottom-left handle's lower half still wins the hit test.
-                .zIndex(1)
                 .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { _ in
                     finishCurveDrag()
                 }
@@ -253,29 +253,41 @@ private struct ToneCurveEditor: View {
         .accessibilityLabel("Tone curve channel")
     }
 
+    /// Space between the graph edge and the 0...1 plot area; at least the handle radius so the
+    /// corner handles never overhang the draggable graph into the channel tabs.
+    private static let plotInset: CGFloat = 9
+
+    private func plotSize(_ size: CGSize) -> CGSize {
+        CGSize(width: max(size.width - 2 * Self.plotInset, 1), height: max(size.height - 2 * Self.plotInset, 1))
+    }
+
     private var editablePoints: [LightCurvePoint] {
         viewModel.document.light.toneCurve(for: channel).points
     }
 
     private func curveGraph(size: CGSize) -> some View {
         Canvas { context, canvasSize in
-            let rect = CGRect(origin: .zero, size: canvasSize)
             // Tone-curve analysis is intentionally dark for consistent grid/curve contrast;
             // this fill is limited to the graph and is not an inspector-wide appearance choice.
-            context.fill(Path(rect), with: .color(KromoraTheme.analysisBackground))
+            context.fill(Path(CGRect(origin: .zero, size: canvasSize)), with: .color(KromoraTheme.analysisBackground))
+
+            // The plot is inset so the end handles sit fully inside the graph, away from the tabs.
+            let plot = CGRect(origin: .zero, size: canvasSize).insetBy(dx: Self.plotInset, dy: Self.plotInset)
 
             var grid = Path()
             for fraction in stride(from: 0.25, through: 0.75, by: 0.25) {
-                grid.move(to: CGPoint(x: fraction * canvasSize.width, y: 0))
-                grid.addLine(to: CGPoint(x: fraction * canvasSize.width, y: canvasSize.height))
-                grid.move(to: CGPoint(x: 0, y: (1 - fraction) * canvasSize.height))
-                grid.addLine(to: CGPoint(x: canvasSize.width, y: (1 - fraction) * canvasSize.height))
+                let x = plot.minX + fraction * plot.width
+                let y = plot.minY + (1 - fraction) * plot.height
+                grid.move(to: CGPoint(x: x, y: plot.minY))
+                grid.addLine(to: CGPoint(x: x, y: plot.maxY))
+                grid.move(to: CGPoint(x: plot.minX, y: y))
+                grid.addLine(to: CGPoint(x: plot.maxX, y: y))
             }
             context.stroke(grid, with: .color(KromoraTheme.analysisGrid), lineWidth: 1)
 
             var identity = Path()
-            identity.move(to: CGPoint(x: 0, y: canvasSize.height))
-            identity.addLine(to: CGPoint(x: canvasSize.width, y: 0))
+            identity.move(to: CGPoint(x: plot.minX, y: plot.maxY))
+            identity.addLine(to: CGPoint(x: plot.maxX, y: plot.minY))
             context.stroke(identity, with: .color(KromoraTheme.analysisReference), style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
 
             let curve = viewModel.document.light.toneCurve(for: channel)
@@ -283,8 +295,8 @@ private struct ToneCurveEditor: View {
             for index in 0...64 {
                 let input = Double(index) / 64
                 let point = CGPoint(
-                    x: input * canvasSize.width,
-                    y: (1 - curve.value(at: input)) * canvasSize.height
+                    x: plot.minX + input * plot.width,
+                    y: plot.minY + (1 - curve.value(at: input)) * plot.height
                 )
                 if index == 0 { path.move(to: point) }
                 else { path.addLine(to: point) }
@@ -301,7 +313,7 @@ private struct ToneCurveEditor: View {
         Circle()
             .fill(curveColor(for: channel))
             .overlay(Circle().stroke(.white, lineWidth: 1))
-            .frame(width: 12, height: 12)
+            .frame(width: 2 * LightToneCurve.handleRadius, height: 2 * LightToneCurve.handleRadius)
             .shadow(radius: 1)
             .contentShape(Circle())
             .position(position(for: point, in: size))
@@ -338,6 +350,8 @@ private struct ToneCurveEditor: View {
 
     private func updateCurveDrag(at location: CGPoint, translation: CGSize, in size: CGSize) {
         guard curveDrag == nil || curveDrag?.isPoint == true else { return }
+        let size = plotSize(size)
+        let location = CGPoint(x: location.x - Self.plotInset, y: location.y - Self.plotInset)
         let coordinate = coordinate(for: location, in: size)
         let hasMoved = translation.width != 0 || translation.height != 0
 
@@ -392,7 +406,11 @@ private struct ToneCurveEditor: View {
     }
 
     private func position(for point: LightCurvePoint, in size: CGSize) -> CGPoint {
-        CGPoint(x: point.input * size.width, y: (1 - point.output) * size.height)
+        let plot = plotSize(size)
+        return CGPoint(
+            x: Self.plotInset + point.input * plot.width,
+            y: Self.plotInset + (1 - point.output) * plot.height
+        )
     }
 
     private func removePoint(_ point: LightCurvePoint) {

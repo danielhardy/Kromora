@@ -39,6 +39,9 @@ struct LightCurvePoint: Codable, Equatable, Sendable {
 /// always present. Version 1 adds fixed controls at inputs 0 and 1; version 2 persists the first
 /// and last controls as movable endpoints. This gives interpolation a well-defined domain.
 struct LightToneCurve: Codable, Equatable, Sendable {
+    /// Visible thumb radius shared by graph drawing and endpoint hit-test precedence.
+    static let handleRadius: CGFloat = 6
+
     // Version 1 implicitly fixed endpoint inputs at 0 and 1. Version 2 stores their positions
     // explicitly so existing documents keep their original transfer function.
     static let currentVersion = 2
@@ -207,7 +210,7 @@ struct LightToneCurve: Codable, Equatable, Sendable {
         return points[index]
     }
 
-    /// Return the handle whose rendered center is nearest to a pointer location.
+    /// Return a visible endpoint under the pointer, otherwise the nearest handle center.
     ///
     /// The editor draws handles in two-dimensional graph coordinates, so hit testing in normalized
     /// input alone can select a different point when curves have nearby inputs or handles are
@@ -220,6 +223,17 @@ struct LightToneCurve: Codable, Equatable, Sendable {
               size.width.isFinite, size.height.isFinite,
               size.width > 0, size.height > 0,
               hitRadius >= 0, !points.isEmpty else { return nil }
+
+        // Endpoints draw above interior handles. Within their visible circles, select the
+        // uppermost endpoint even when an underlying interior center is nearer. Outside those
+        // circles, retain nearest-center selection so exposed neighboring handles stay usable.
+        let endpointRadius = min(Self.handleRadius, hitRadius)
+        for index in [points.count - 1, 0] {
+            if distanceSquared(to: points[index], location: location, size: size)
+                <= endpointRadius * endpointRadius {
+                return points[index]
+            }
+        }
 
         let nearest = points.min { lhs, rhs in
             distanceSquared(to: lhs, location: location, size: size)
