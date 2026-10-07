@@ -17,10 +17,14 @@ enum ThumbnailFrameKind: Sendable, Equatable, CaseIterable {
         }
     }
 
+    /// Embeds the raster size so a size change retires older records as plain cache misses
+    /// instead of serving soft pixels. The `*Thumbnail480` kind names predate the size bump and
+    /// stay as persisted identifiers.
     fileprivate var keySuffix: String {
+        let size = PlatformThumbnailProvider.libraryMaxPixelSize
         switch self {
-        case .original: return "o"
-        case .edited: return "e"
+        case .original: return "o\(size)"
+        case .edited: return "e\(size)"
         }
     }
 }

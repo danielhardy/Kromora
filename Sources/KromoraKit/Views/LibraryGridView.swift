@@ -101,7 +101,13 @@ struct LibraryGridView: View {
                             minHeight: geometry.size.height,
                             alignment: .top
                         )
-                        .onAppear { admitVisibleThumbnails(visibleIDs) }
+                        .onAppear {
+                            collection.libraryGridColumns = metrics.columns
+                            admitVisibleThumbnails(visibleIDs)
+                        }
+                        .onChange(of: metrics.columns) { _, columns in
+                            collection.libraryGridColumns = columns
+                        }
                         .onChange(of: visibleIDs) { _, ids in
                             admitVisibleThumbnails(ids)
                         }

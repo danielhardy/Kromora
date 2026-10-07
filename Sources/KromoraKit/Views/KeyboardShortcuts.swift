@@ -158,7 +158,7 @@ enum KeyMonitorPolicy {
         return !valueEditingControlOwnsArrows(responder)
     }
 
-    /// Up/Down audition Looks, including the explicit None slot. Same consumption contract as
+    /// Up/Down audition Looks in the editor (and step grid rows in the Library), including the explicit None slot. Same consumption contract as
     /// image navigation: a focused list or button must not fall through to AppKit's error beep.
     static func lookNavigationOwnsKeyboard(
         keyCode: UInt16,
@@ -615,7 +615,11 @@ final class KeyMonitor {
                 vm.nudgeSelectedMask(dx: 0, dy: -1, accelerated: mods.contains(.shift)) {
                 return nil
             }
-            if isDown { vm.selectPreviousLook() }
+            if isDown, vm.navigation.isGrid, vm.collection.isActive {
+                vm.selectPortableRowAboveInGrid()
+            } else if isDown, !vm.navigation.isGrid {
+                vm.selectPreviousLook()
+            }
             return nil
         case 125: // Down arrow — next Look
             guard KeyMonitorPolicy.lookNavigationOwnsKeyboard(
@@ -625,7 +629,11 @@ final class KeyMonitor {
                 vm.nudgeSelectedMask(dx: 0, dy: 1, accelerated: mods.contains(.shift)) {
                 return nil
             }
-            if isDown { vm.selectNextLook() }
+            if isDown, vm.navigation.isGrid, vm.collection.isActive {
+                vm.selectPortableRowBelowInGrid()
+            } else if isDown, !vm.navigation.isGrid {
+                vm.selectNextLook()
+            }
             return nil
         case 123: // Left arrow — previous image
             guard KeyMonitorPolicy.imageNavigationOwnsKeyboard(

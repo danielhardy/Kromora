@@ -1878,6 +1878,15 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryBrowsingCoordinator.selectPreviousPortableInGrid()
     }
 
+    /// Down/Up in the grid move by one row of the current column count.
+    func selectPortableRowBelowInGrid() {
+        libraryBrowsingCoordinator.selectPortableRowBelowInGrid()
+    }
+
+    func selectPortableRowAboveInGrid() {
+        libraryBrowsingCoordinator.selectPortableRowAboveInGrid()
+    }
+
     private func openPortableAsset(_ assetID: PortablePhotoAssetID) {
         libraryBrowsingCoordinator.openPortableAsset(assetID)
     }

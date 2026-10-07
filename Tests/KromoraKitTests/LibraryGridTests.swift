@@ -4,18 +4,32 @@ import XCTest
 
 @MainActor
 final class LibraryGridTests: TempDirectoryTestCase {
-    func testCellsAreUniformSquaresWithinTheTargetRangeAtRepresentativeWidths() {
+    func testCellsStayWithinRangeAtEveryWidthAndAcrossColumnTransitions() {
         let layout = LibraryGridLayout()
 
-        for width in [480.0, 768.0, 1_024.0, 1_280.0, 1_920.0, 2_560.0] {
+        // Sweep every width from one minimum cell up to a very wide window.
+        var previousColumns = 1
+        for width in stride(from: 200.0, through: 4_000.0, by: 1.0) {
             let metrics = layout.metrics(for: width)
-            XCTAssertGreaterThanOrEqual(metrics.columns, 2)
-            XCTAssertGreaterThanOrEqual(metrics.cellEdge, 190, "width \(width)")
+            XCTAssertGreaterThanOrEqual(metrics.cellEdge, 200 - 0.001, "width \(width)")
             XCTAssertLessThanOrEqual(metrics.cellEdge, 300, "width \(width)")
+            XCTAssertGreaterThanOrEqual(metrics.columns, previousColumns, "width \(width)")
+            previousColumns = metrics.columns
             let used = metrics.cellEdge * Double(metrics.columns)
                 + layout.spacing * Double(metrics.columns - 1)
             XCTAssertLessThanOrEqual(used, width + 0.001, "cells must not overflow the row")
         }
+
+        // Both sides of the first transitions: the old rounding gave 171 pt at 354 and 192 at 600.
+        XCTAssertEqual(layout.metrics(for: 354).columns, 1)
+        XCTAssertEqual(layout.metrics(for: 354).cellEdge, 300)
+        XCTAssertEqual(layout.metrics(for: 411).columns, 1)
+        XCTAssertEqual(layout.metrics(for: 412).columns, 2)
+        XCTAssertEqual(layout.metrics(for: 412).cellEdge, 200)
+        XCTAssertEqual(layout.metrics(for: 600).columns, 2)
+        XCTAssertEqual(layout.metrics(for: 623).columns, 2)
+        XCTAssertEqual(layout.metrics(for: 624).columns, 3)
+        XCTAssertEqual(layout.metrics(for: 624).cellEdge, 200)
     }
 
     func testNarrowAndDegenerateWidthsKeepOneColumn() {
@@ -25,6 +39,19 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertEqual(layout.metrics(for: 120).cellEdge, 120)
         XCTAssertEqual(layout.metrics(for: 900).columns, 4)
         XCTAssertLessThanOrEqual(layout.metrics(for: 100_000).cellEdge, layout.maximumCellEdge)
+    }
+
+    func testLibraryThumbnailPixelsCoverTheLargestRetinaSquareFillOfA3x2Frame() {
+        let layout = LibraryGridLayout()
+        let shortSide = Double(PlatformThumbnailProvider.libraryMaxPixelSize) * 2.0 / 3.0
+        XCTAssertGreaterThanOrEqual(shortSide, layout.maximumCellEdge * 2)
+    }
+
+    func testPackedThumbnailKeysEmbedTheRasterSize() throws {
+        let assetID = PortablePhotoAssetID()
+        let size = PlatformThumbnailProvider.libraryMaxPixelSize
+        XCTAssertTrue(try XCTUnwrap(ThumbnailFrameStore.key(.original, for: assetID)).hasSuffix("-o\(size)"))
+        XCTAssertTrue(try XCTUnwrap(ThumbnailFrameStore.key(.edited, for: assetID)).hasSuffix("-e\(size)"))
     }
 
     func testRowHeightIsIndependentOfItemContent() {

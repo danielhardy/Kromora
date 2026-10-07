@@ -194,4 +194,45 @@ final class LibraryWindowedBrowsingTests: TempDirectoryTestCase {
         activeID = try XCTUnwrap(viewModel.portableLibrary?.portableActiveID)
         XCTAssertEqual(viewModel.collection.items[1].id.raw, "portable:\(activeID.raw)")
     }
+
+    func testGridVerticalKeyboardStepsByColumnCountAndStopsAtRowEdges() throws {
+        let packageURL = tempDirectory.appendingPathComponent(
+            "GridVertical-\(UUID().uuidString).kromoralibrary"
+        )
+        let seed = try PortableLibrarySession(at: packageURL)
+        var sources: [URL] = []
+        for ordinal in 0..<5 {
+            sources.append(try Fixtures.writeJPEG(
+                width: 20 + ordinal * 2, height: 14, orientation: 1,
+                named: "gridvert-\(ordinal).jpg", in: tempDirectory
+            ))
+        }
+        XCTAssertEqual(try seed.importURLs(sources).imported.count, 5)
+        try seed.lease.release()
+
+        let viewModel = makeAppViewModel(portablePackageURL: packageURL)
+        XCTAssertEqual(viewModel.collection.items.count, 5)
+        viewModel.collection.libraryGridColumns = 2
+
+        // Up from the first row stays put.
+        viewModel.selectPortableRowAboveInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 0)
+
+        viewModel.selectPortableRowBelowInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 2)
+        viewModel.selectPortableRowBelowInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 4)
+        // The last row is the bottom edge.
+        viewModel.selectPortableRowBelowInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 4)
+        viewModel.selectPortableRowAboveInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 2)
+
+        // A short last row clamps to its final item when a row exists below.
+        viewModel.selectNextPortableInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 3)
+        viewModel.selectPortableRowBelowInGrid()
+        XCTAssertEqual(viewModel.collection.selectedIndex, 4)
+        XCTAssertTrue(viewModel.navigation.isGrid)
+    }
 }

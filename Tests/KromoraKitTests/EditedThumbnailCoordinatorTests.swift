@@ -522,8 +522,11 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         let cgThumbnail = try XCTUnwrap(thumbnail.cgImage(
             forProposedRect: &proposedRect, context: nil, hints: nil
         ))
-        XCTAssertGreaterThanOrEqual(cgThumbnail.width, 240)
-        XCTAssertLessThanOrEqual(cgThumbnail.width, 241)
+        // The saved crop is 0.5 wide against the rotated height, so the short side is half the
+        // long edge.
+        let expectedWidth = Thumbnails.libraryMaxPixelSize / 2
+        XCTAssertGreaterThanOrEqual(cgThumbnail.width, expectedWidth)
+        XCTAssertLessThanOrEqual(cgThumbnail.width, expectedWidth + 1)
         XCTAssertGreaterThanOrEqual(cgThumbnail.height, Thumbnails.libraryMaxPixelSize)
         XCTAssertLessThanOrEqual(
             cgThumbnail.height, Thumbnails.libraryMaxPixelSize + 1,

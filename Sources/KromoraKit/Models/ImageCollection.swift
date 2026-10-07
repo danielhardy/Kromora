@@ -340,6 +340,9 @@ final class ImageCollectionPresentationModel {
     /// The package's persisted thumbnail frames. Nil for collections that are not package-backed
     /// (and most unit tests); thumbnails then decode from source exactly as before.
     var thumbnailFrameStore: ThumbnailFrameStore?
+    /// Column count of the mounted Library grid, published by the view so Up/Down can step by
+    /// rows. Not observed: it changes with window width and nothing renders from it.
+    @ObservationIgnored var libraryGridColumns = 1
     var onVisibleIDsPublished: (@MainActor @Sendable ([PhotoAssetID]) -> Void)?
     private var frameReadJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var pendingFrameReadIDs: Set<PhotoAssetID> = []

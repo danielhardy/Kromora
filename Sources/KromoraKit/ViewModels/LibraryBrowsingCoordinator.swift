@@ -319,17 +319,36 @@ final class LibraryBrowsingCoordinator {
     }
 
     func selectNextPortableInGrid() {
-        if collection.portableHasMorePages, collection.selectedIndex >= collection.items.count - 1 {
-            loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
-        }
-        let target = min(collection.selectedIndex + 1, collection.items.count - 1)
-        guard collection.items.indices.contains(target), target != collection.selectedIndex else { return }
-        selectPortableItem(at: target)
+        selectPortableInGrid(rowDelta: 0, columnDelta: 1)
     }
 
     func selectPreviousPortableInGrid() {
-        let target = max(collection.selectedIndex - 1, 0)
-        guard collection.items.indices.contains(target), target != collection.selectedIndex else { return }
+        selectPortableInGrid(rowDelta: 0, columnDelta: -1)
+    }
+
+    func selectPortableRowBelowInGrid() {
+        selectPortableInGrid(rowDelta: 1, columnDelta: 0)
+    }
+
+    func selectPortableRowAboveInGrid() {
+        selectPortableInGrid(rowDelta: -1, columnDelta: 0)
+    }
+
+    /// Moves the grid selection by whole rows (`collection.libraryGridColumns` items) or single
+    /// items. A downward step that would land past the tail faults in the next page first; if the
+    /// target row is still short, it lands on the last item, but only when a later row exists.
+    private func selectPortableInGrid(rowDelta: Int, columnDelta: Int) {
+        let columns = max(1, collection.libraryGridColumns)
+        let current = collection.selectedIndex
+        var target = current + rowDelta * columns + columnDelta
+        if target > collection.items.count - 1, collection.portableHasMorePages {
+            loadMorePortableIfNeeded(currentIndex: collection.items.count - 1)
+        }
+        let last = collection.items.count - 1
+        if rowDelta > 0, target > last, current / columns < last / columns {
+            target = last
+        }
+        guard collection.items.indices.contains(target), target != current else { return }
         selectPortableItem(at: target)
     }
 

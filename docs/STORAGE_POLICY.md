@@ -84,6 +84,13 @@ may publish it earlier. A failed append keeps the batch pending for retry and le
 published index as the readable state. These frames remain disposable cache data and can always be
 regenerated from package originals.
 
+Packed thumbnail keys embed the raster long edge (`<asset hash>-o900` / `-e900`). The Library
+grid's square `.fill` cells of up to 300 pt need 600 px on the short side at 2×, so the long edge
+moved from 480 to 900 px. Records written under the old `-o` / `-e` keys are never read: they
+behave as cache misses, regenerate under the new keys, and their bytes may linger until
+the pack is rebuilt. The `originalThumbnail480` / `editedThumbnail480` kind names are
+retained as persisted identifiers; no package format version changes.
+
 ## Backup and restore semantics
 
 The built-in verified backup copies the manifest, catalog, originals, metadata, edit revisions, and

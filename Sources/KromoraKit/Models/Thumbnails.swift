@@ -31,10 +31,11 @@ enum PlatformThumbnailProvider {
     /// The filmstrip's thumbnail size, in pixels on the long edge.
     static let defaultMaxPixelSize = 240
 
-    /// Library grid thumbnails are displayed in substantially larger cells than filmstrip
-    /// thumbnails. Reserve a 2× pixel budget for the ~240-point grid cell so Retina displays
-    /// do not enlarge a low-resolution source or settled edit.
-    static let libraryMaxPixelSize = 480
+    /// Library grid cells are squares of up to 300 pt that `.fill`-crop the thumbnail, so a 2×
+    /// display needs 600 px on the short side. A 3:2 frame has a short side of two thirds of its
+    /// long edge, hence 900 px on the long edge. Packed-frame keys embed this value; changing it
+    /// retires existing records as cache misses (see `ThumbnailFrameKind.keySuffix`).
+    static let libraryMaxPixelSize = 900
 
     /// Long-edge cap for the RAW-open first frame. Large enough to fill a Retina editor
     /// canvas at Fit, small enough that it is not a native 24–60MP GPU upload. ImageIO

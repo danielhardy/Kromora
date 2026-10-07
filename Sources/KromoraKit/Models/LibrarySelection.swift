@@ -148,29 +148,30 @@ struct LibraryGridLayout: Sendable, Equatable {
     /// Space under a thumbnail: the cell's 6pt stack spacing plus one caption line.
     static let captionBlock = 22.0
 
-    let targetCellEdge: Double
+    let minimumCellEdge: Double
     let maximumCellEdge: Double
     let spacing: Double
     let prefetchRows: Int
 
     init(
-        targetCellEdge: Double = 232,
+        minimumCellEdge: Double = 200,
         maximumCellEdge: Double = 300,
         spacing: Double = 12,
         prefetchRows: Int = 2
     ) {
-        self.targetCellEdge = max(1, targetCellEdge)
-        self.maximumCellEdge = max(self.targetCellEdge, maximumCellEdge)
+        self.minimumCellEdge = max(1, minimumCellEdge)
+        self.maximumCellEdge = max(self.minimumCellEdge, maximumCellEdge)
         self.spacing = max(0, spacing)
         self.prefetchRows = max(0, prefetchRows)
     }
 
-    /// Pick the column count whose stretched cell edge lies nearest the target, then divide the
-    /// row evenly. Edges therefore stay within roughly 200-270 pt for any window wide enough to
-    /// hold two columns, and every row has the same height.
+    /// Fit as many columns as keep every cell at least `minimumCellEdge`, then divide the row
+    /// evenly and clamp to `maximumCellEdge`. Edges therefore stay within 200-300 pt at every
+    /// width wide enough for one minimum cell, and every row has the same height. Below that
+    /// width the single column shrinks to fit.
     func metrics(for width: Double) -> Metrics {
         let available = max(0, width)
-        let columns = max(1, Int(((available + spacing) / (targetCellEdge + spacing)).rounded()))
+        let columns = max(1, Int(((available + spacing) / (minimumCellEdge + spacing)).rounded(.down)))
         let stretched = (available - spacing * Double(columns - 1)) / Double(columns)
         return Metrics(columns: columns, cellEdge: min(maximumCellEdge, max(1, stretched)))
     }
