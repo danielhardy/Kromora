@@ -81,17 +81,11 @@ struct InspectorDisclosure<Content: View>: View {
                 .accessibilityRemoveTraits(.isButton)
 
                 if let trailingActionTitle, let trailingAction {
-                    Button(action: trailingAction) {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 11, weight: .medium))
-                            .frame(width: 22, height: 22)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .disabled(!trailingActionEnabled)
-                    .help(trailingActionTitle)
-                    .accessibilityLabel(trailingActionTitle)
+                    ResetIconButton(
+                        trailingActionTitle,
+                        disabled: !trailingActionEnabled,
+                        action: trailingAction
+                    )
                 }
             }
 

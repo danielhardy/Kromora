@@ -8,9 +8,7 @@ struct InspectorSectionResetButton: View {
     var body: some View {
         HStack {
             Spacer()
-            Button(title, action: action)
-                .buttonStyle(.link)
-                .disabled(disabled)
+            ResetIconButton(title, disabled: disabled, action: action)
         }
     }
 }

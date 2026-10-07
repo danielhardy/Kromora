@@ -380,18 +380,13 @@ private struct ColorMixerChannelPanel: View {
                     .font(.subheadline.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 0)
-                Button(action: resetChannel) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(isIdentity)
-                .help("Reset \(channel.title)")
-                .accessibilityLabel("Reset \(channel.title) mixer channel")
-                .accessibilityHint("Restore Hue, Saturation, and Luminance for this color to neutral.")
+                ResetIconButton(
+                    "Reset \(channel.title)",
+                    accessibilityLabel: "Reset \(channel.title) mixer channel",
+                    accessibilityHint: "Restore Hue, Saturation, and Luminance for this color to neutral.",
+                    disabled: isIdentity,
+                    action: resetChannel
+                )
             }
 
             ColorValueRow(
@@ -648,18 +643,12 @@ private struct ColorGradingZoneUnit: View {
                     .frame(width: arcWidth, height: arcHeight)
                 }
 
-                Button(action: reset) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 24, height: 24)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .disabled(wheel.isIdentity)
-                .help("Reset \(title) color grading")
-                .accessibilityLabel("Reset \(title) color grading")
-                .accessibilityHint("Restore this color grading wheel to neutral.")
+                ResetIconButton(
+                    "Reset \(title) color grading",
+                    accessibilityHint: "Restore this color grading wheel to neutral.",
+                    disabled: wheel.isIdentity,
+                    action: reset
+                )
             }
 
             Text(title)

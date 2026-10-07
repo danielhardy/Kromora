@@ -23,12 +23,10 @@ struct RetouchInspectorView: View {
                 HStack {
                     Text("Heal").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
                     Spacer()
-                    Button("Reset All") {
+                    ResetIconButton("Reset All Heal controls", disabled: viewModel.document.retouch.isIdentity) {
                         viewModel.updateDocument { $0.retouch = .neutral }
                         interaction.select(nil)
                     }
-                        .buttonStyle(.link)
-                        .disabled(viewModel.document.retouch.isIdentity)
                 }
                 InspectorDisclosure("Spots", isExpanded: $spotsExpanded) {
                     VStack(alignment: .leading, spacing: 10) {

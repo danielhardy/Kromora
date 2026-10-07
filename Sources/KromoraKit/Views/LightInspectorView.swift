@@ -63,10 +63,12 @@ struct LightInspectorView: View {
             HStack {
                 Text("Light").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
                 Spacer()
-                Button("Reset Light") { viewModel.resetAllLight() }
-                    .buttonStyle(.link)
-                    .disabled(!viewModel.hasLightAdjustments)
-                    .accessibilityHint("Reset all Light controls, including the tone curve")
+                ResetIconButton(
+                    "Reset Light",
+                    accessibilityHint: "Reset all Light controls, including the tone curve",
+                    disabled: !viewModel.hasLightAdjustments,
+                    action: viewModel.resetAllLight
+                )
             }
             Text("Auto replaces global Light and Color values; other edits stay unchanged.")
                 .font(InspectorStyle.secondaryHelperText)

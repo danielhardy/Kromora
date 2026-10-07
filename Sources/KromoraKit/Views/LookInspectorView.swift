@@ -208,12 +208,11 @@ struct LookInspectorView: View {
             .buttonStyle(.borderless)
             .help("Choose Look folder")
 
-            Button("Reset") {
-                viewModel.resetLook()
-            }
-            .buttonStyle(.link)
-            .disabled(!viewModel.hasLookAdjustments)
-            .help("Reset the Look stage")
+            ResetIconButton(
+                "Reset the Look stage",
+                disabled: !viewModel.hasLookAdjustments,
+                action: viewModel.resetLook
+            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)

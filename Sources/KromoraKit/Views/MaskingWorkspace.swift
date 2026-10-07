@@ -374,9 +374,11 @@ struct MaskingWorkspace: View {
                         .lineLimit(1)
                         .accessibilityAddTraits(.isHeader)
                     Spacer()
-                    Button("Reset Mask") { viewModel.resetMask(id) }
-                        .buttonStyle(.link)
-                        .accessibilityHint("Restore this mask's saved controls to their defaults")
+                    ResetIconButton(
+                        "Reset Mask",
+                        accessibilityHint: "Restore this mask's saved controls to their defaults",
+                        action: { viewModel.resetMask(id) }
+                    )
                 }
 
                 InspectorDisclosure("Adjustments", isExpanded: $adjustmentsExpanded) {
@@ -432,14 +434,12 @@ struct MaskingWorkspace: View {
                         .font(.caption.weight(.semibold))
                     Spacer()
                     if component.source.brushDefinition == nil {
-                        Button {
+                        ResetIconButton(
+                            "Reset this shape",
+                            accessibilityLabel: "Reset \(component.displayName) shape"
+                        ) {
                             viewModel.resetMaskComponent(component.id, in: layer.id)
-                        } label: {
-                            Image(systemName: "arrow.counterclockwise")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Reset this shape")
-                        .accessibilityLabel("Reset \(component.displayName)")
                     }
                 }
                 componentControls(component, layerID: layer.id)

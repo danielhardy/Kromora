@@ -50,9 +50,11 @@ struct DevelopInspectorView: View {
         HStack {
             Text("RAW Develop").font(InspectorStyle.panelTitle).accessibilityAddTraits(.isHeader)
             Spacer()
-            Button("Reset") { viewModel.resetAllDevelop() }
-                .buttonStyle(.link)
-                .disabled(viewModel.document.rawDevelop.isNeutral)
+            ResetIconButton(
+                "Reset RAW Develop",
+                disabled: viewModel.document.rawDevelop.isNeutral,
+                action: viewModel.resetAllDevelop
+            )
         }
     }
 

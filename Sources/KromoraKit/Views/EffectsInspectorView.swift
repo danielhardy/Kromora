@@ -39,10 +39,12 @@ struct EffectsInspectorView: View {
                 .font(InspectorStyle.panelTitle)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
-            Button("Reset Effects") { viewModel.resetAllEffects() }
-                .buttonStyle(.link)
-                .disabled(!viewModel.hasEffects)
-                .accessibilityHint("Reset detail, noise, sharpening, Vignette, and Grain")
+            ResetIconButton(
+                "Reset Effects",
+                accessibilityHint: "Reset detail, noise, sharpening, Vignette, and Grain",
+                disabled: !viewModel.hasEffects,
+                action: viewModel.resetAllEffects
+            )
         }
     }
 
@@ -50,15 +52,17 @@ struct EffectsInspectorView: View {
         InspectorDisclosure("Sharpening", isExpanded: $sharpeningExpanded) {
             VStack(alignment: .leading, spacing: 12) {
                 detailRow(.sharpeningAmount)
-                InspectorDisclosure("Advanced", isExpanded: $sharpeningAdvancedExpanded, titleFont: InspectorStyle.nestedSectionTitle) {
-                    VStack(alignment: .leading, spacing: 12) {
+                advancedButton("Sharpening", isExpanded: $sharpeningAdvancedExpanded)
+                if sharpeningAdvancedExpanded {
+                    advancedPanel {
+                        VStack(alignment: .leading, spacing: 12) {
                         ForEach([DetailControl.sharpeningRadius, .sharpeningDetail, .sharpeningMasking], id: \.self) { control in
                             detailRow(control)
                         }
                         Text("Masking protects smooth areas; higher values restrict sharpening to stronger edges.")
                             .font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
-                    .padding(.top, 6)
                 }
             }
             .padding(.top, 10)
@@ -120,13 +124,15 @@ struct EffectsInspectorView: View {
                     action: viewModel.resetAllVignette
                 )
                 vignetteRow(.amount)
-                InspectorDisclosure("Advanced", isExpanded: $vignetteAdvancedExpanded, titleFont: InspectorStyle.nestedSectionTitle) {
-                    VStack(alignment: .leading, spacing: 12) {
+                advancedButton("Vignette", isExpanded: $vignetteAdvancedExpanded)
+                if vignetteAdvancedExpanded {
+                    advancedPanel {
+                        VStack(alignment: .leading, spacing: 12) {
                         ForEach([VignetteControl.midpoint, .roundness, .feather, .highlights], id: \.self) { control in
                             vignetteRow(control)
                         }
+                        }
                     }
-                    .padding(.top, 6)
                 }
             }
             .padding(.top, 10)
@@ -163,13 +169,15 @@ struct EffectsInspectorView: View {
                     action: viewModel.resetAllGrain
                 )
                 grainRow(.amount)
-                InspectorDisclosure("Advanced", isExpanded: $grainAdvancedExpanded, titleFont: InspectorStyle.nestedSectionTitle) {
-                    VStack(alignment: .leading, spacing: 12) {
+                advancedButton("Grain", isExpanded: $grainAdvancedExpanded)
+                if grainAdvancedExpanded {
+                    advancedPanel {
+                        VStack(alignment: .leading, spacing: 12) {
                         ForEach([GrainControl.size, .roughness], id: \.self) { control in
                             grainRow(control)
                         }
+                        }
                     }
-                    .padding(.top, 6)
                 }
             }
             .padding(.top, 10)
@@ -206,6 +214,37 @@ struct EffectsInspectorView: View {
     private var grainHasAdvancedAdjustments: Bool {
         [GrainControl.size, .roughness]
             .contains { $0.value(in: viewModel.document.effects.grain) != $0.neutral }
+    }
+
+    private func advancedButton(_ section: String, isExpanded: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isExpanded.wrappedValue.toggle()
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Text("Advanced")
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+            }
+            .font(.caption.weight(.medium))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .accessibilityLabel("Advanced \(section) controls")
+        .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
+        .accessibilityHint("Show or hide advanced \(section) controls")
+        .accessibilityAddTraits(.isToggle)
+    }
+
+    private func advancedPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        content()
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
+            .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     private func expandSharpeningAdvancedIfNeeded() {

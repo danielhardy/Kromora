@@ -36,12 +36,11 @@ struct CropInspectorView: View {
                     .font(.title3.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
-                Button("Reset", action: onReset)
-                    .font(.callout)
-                    .buttonStyle(.link)
-                    .tint(KromoraTheme.primaryAccent)
-                    .accessibilityLabel("Reset crop")
-                    .accessibilityHint("Return the crop frame to the full image")
+                ResetIconButton(
+                    "Reset crop",
+                    accessibilityHint: "Return the crop frame to the full image",
+                    action: onReset
+                )
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)

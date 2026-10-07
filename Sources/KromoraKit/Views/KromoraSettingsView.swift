@@ -200,9 +200,8 @@ public struct KromoraSettingsView: View {
                 }
                 .disabled(!status.isConfigured)
                 .accessibilityLabel("Test " + kind.title)
-                Button("Reset") { settings.resetDefaultFolder(kind) }
+                ResetIconButton("Reset \(kind.title) folder") { settings.resetDefaultFolder(kind) }
                     .disabled(!status.isConfigured)
-                    .accessibilityLabel("Reset " + kind.title)
                 Spacer()
             }
             if !testMessage.wrappedValue.isEmpty {
