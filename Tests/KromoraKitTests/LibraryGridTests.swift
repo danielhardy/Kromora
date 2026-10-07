@@ -373,4 +373,44 @@ final class LibraryGridTests: TempDirectoryTestCase {
             "photos outside the visible window stay unloaded"
         )
     }
+
+    func testPortableWindowReloadReRequestsPreviouslyVisibleThumbnails() async throws {
+        for index in 0..<8 {
+            try Fixtures.writeJPEG(
+                width: 64, height: 48, orientation: 1,
+                named: String(format: "photo-%03d.jpg", index), in: tempDirectory
+            )
+        }
+
+        let collection = makeTestCollection()
+        collection.beginThumbnailDemand()
+        collection.loadFromFolder(tempDirectory)
+        await collection.scanCompletion()
+        let assets = collection.items.map(\.asset)
+        XCTAssertEqual(assets.count, 8)
+
+        let visible = Array(assets.prefix(6).map(\.id))
+        collection.requestVisibleThumbnails(for: visible)
+        try await waitForThumbnails(in: collection, ids: visible)
+
+        // Reload with the same ids (fresh Items, no thumbnails) and no new request from the view.
+        collection.loadPortableWindow(
+            assets: assets, totalCount: assets.count, pageIndex: 0,
+            pageSize: assets.count, query: .all
+        )
+        try await waitForThumbnails(in: collection, ids: visible)
+    }
+
+    private func waitForThumbnails(
+        in collection: ImageCollection, ids: [PhotoAssetID]
+    ) async throws {
+        let wanted = Set(ids)
+        let deadline = Date().addingTimeInterval(5)
+        while collection.items.contains(where: { wanted.contains($0.id) && $0.thumbnail == nil }) {
+            if Date() > deadline {
+                return XCTFail("previously visible thumbnails did not reach ready")
+            }
+            await Task.yield()
+        }
+    }
 }

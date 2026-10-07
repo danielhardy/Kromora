@@ -513,6 +513,11 @@ final class ImageCollectionPresentationModel {
         pageSize: Int, query: LibraryQuery
     ) {
         scanGeneration &+= 1
+        // Cells keep their identity across a reload, so SwiftUI never re-fires `onAppear`; carry
+        // the demand over for ids that survive instead of leaving those cells on a spinner.
+        let prepared = preparedThumbnailIDs
+        let priorDemand = thumbnailDemandPriorities.filter { !prepared.contains($0.key) }
+        let priorVisible = visibleEditedThumbnailIDs
         cancelThumbnailWork()
         stopMetadataLoading()
         items = assets.map { Item(asset: $0) }
@@ -532,6 +537,20 @@ final class ImageCollectionPresentationModel {
         startMetadataLoading()
         for item in items { enqueueMetadata(for: item, generation: scanGeneration) }
         enqueueThumbnails()
+        restoreThumbnailDemand(priorities: priorDemand, visible: priorVisible)
+    }
+
+    private func restoreThumbnailDemand(
+        priorities: [PhotoAssetID: ImageWorkScheduler.Priority], visible: [PhotoAssetID]
+    ) {
+        guard isThumbnailDemandDriven else { return }
+        let present = Set(items.map(\.id))
+        let survivingVisible = visible.filter { present.contains($0) }
+        if !survivingVisible.isEmpty { requestVisibleThumbnails(for: survivingVisible) }
+        let visibleSet = Set(survivingVisible)
+        for (id, priority) in priorities where present.contains(id) && !visibleSet.contains(id) {
+            requestThumbnail(for: id, priority: priority)
+        }
     }
 
     @discardableResult
