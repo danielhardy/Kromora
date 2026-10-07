@@ -143,8 +143,9 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
     /// The filmstrip and library grid both render `ThumbnailEntry`'s resolved Item. Exercise that
     /// shared projection with the real renderer so a committed crop is checked at the publication
     /// boundary, not only in RenderRequest/RenderEngine unit tests. The long edge is the displayed
-    /// budget for both crop shapes; the old fixed full-image decode produced a shorter raster that
-    /// the browsing surface had to enlarge.
+    /// budget when source pixels permit it; a small crop stays at its native pixel size rather
+    /// than being upscaled. The old fixed full-image decode produced a shorter raster that the
+    /// browsing surface had to enlarge.
     func testFilmstripAndGridPublishCropAwareSettledThumbnails() async throws {
         let source = try Fixtures.writeClarityPNG(
             width: 2_400, height: 1_600, named: "crop-aware-source.png", in: tempDirectory
@@ -170,21 +171,21 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let originalImage = try cgImage(from: original)
         let originalLongEdge = max(originalImage.width, originalImage.height)
 
-        let crops: [(String, CGRect, CGSize)] = [
+        let crops: [(String, CGRect, CGSize, Int)] = [
             (
                 "small",
                 CGRect(x: 0.25, y: 0.25, width: 0.25, height: 0.25),
-                CGSize(width: 480, height: 320)
+                CGSize(width: 600, height: 400), 600
             ),
             (
                 "aspect-ratio-changing",
                 CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.3),
-                CGSize(width: 480, height: 120)
+                CGSize(width: 900, height: 225), originalLongEdge
             ),
         ]
 
         var previousRevision: String?
-        for (name, rect, expectedSize) in crops {
+        for (name, rect, expectedSize, expectedLongEdge) in crops {
             viewModel.updateDocument {
                 $0.crop = CropAdjustments(normalizedRect: rect)
             }
@@ -198,13 +199,13 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             let settled = try publishedThumbnail(for: assetID, in: viewModel)
             let settledImage = try cgImage(from: settled)
 
-            XCTAssertEqual(
-                CGSize(width: settledImage.width, height: settledImage.height), expectedSize,
-                "the \(name) crop should retain the requested pixel budget"
-            )
-            XCTAssertEqual(
-                max(settledImage.width, settledImage.height), originalLongEdge,
-                "the \(name) crop must not be softer than the original at the displayed long edge"
+            XCTAssertEqual(Double(settledImage.width), expectedSize.width, accuracy: 1,
+                           "the \(name) crop should retain the available pixel budget")
+            XCTAssertEqual(Double(settledImage.height), expectedSize.height, accuracy: 1,
+                           "the \(name) crop should retain the available pixel budget")
+            XCTAssertGreaterThanOrEqual(
+                max(settledImage.width, settledImage.height), expectedLongEdge,
+                "the \(name) crop must not lose available source pixels"
             )
             XCTAssertEqual(
                 viewModel.collection.items[sourceIndex].libraryAspectRatio,

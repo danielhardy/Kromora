@@ -905,7 +905,7 @@ actor RenderEngine: RenderEngining {
 
     /// The edited-thumbnail path uses the actor-local rasterizer directly. Keeping this separate
     /// from the encoded `renderThumbnail` API avoids a PNG encode/decode round trip for every
-    /// 256px browsing badge.
+    /// browsing thumbnail.
     func makeThumbnailCGImage(_ request: RenderRequest) async -> sending CGImage? {
         await makeCGImage(request)
     }

@@ -69,7 +69,7 @@ enum ThumbnailFrameEncoder {
     }
 
     /// ImageIO thumbnails keep the source's own profile. The frame model knows sRGB and Display P3,
-    /// so anything else is converted to sRGB — a 480 px thumbnail loses nothing it could show.
+    /// so anything else is converted to sRGB — the display thumbnail loses nothing it could show.
     private static func normalizedRaster(_ image: CGImage) -> (image: CGImage, space: RasterColorSpace)? {
         let name = image.colorSpace?.name
         if name == CGColorSpace.displayP3 { return (image, .displayP3) }
