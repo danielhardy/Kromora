@@ -160,7 +160,8 @@ struct FilmstripThumbnail: View {
                 if let thumbnail = item.thumbnail {
                     Image(nsImage: thumbnail)
                         .resizable()
-                        .aspectRatio(contentMode: item.shouldFillLibraryThumbnail ? .fill : .fit)
+                        // The filmstrip is always square, regardless of which raster has arrived.
+                        .aspectRatio(contentMode: .fill)
                         .frame(
                             width: FilmstripLayout.thumbnailSize,
                             height: FilmstripLayout.thumbnailSize
