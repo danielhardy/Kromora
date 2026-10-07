@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import KromoraKit
 
@@ -375,30 +376,87 @@ final class LibraryGridTests: TempDirectoryTestCase {
     }
 
     func testPortableWindowReloadReRequestsPreviouslyVisibleThumbnails() async throws {
-        for index in 0..<8 {
-            try Fixtures.writeJPEG(
-                width: 64, height: 48, orientation: 1,
-                named: String(format: "photo-%03d.jpg", index), in: tempDirectory
-            )
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let assets = (0..<11).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("photo-\($0).jpg"))
         }
-
-        let collection = makeTestCollection()
         collection.beginThumbnailDemand()
-        collection.loadFromFolder(tempDirectory)
-        await collection.scanCompletion()
-        let assets = collection.items.map(\.asset)
-        XCTAssertEqual(assets.count, 8)
+        collection.loadPortableWindow(
+            assets: Array(assets.prefix(8)), totalCount: 8, pageIndex: 0,
+            pageSize: 8, query: .all
+        )
 
         let visible = Array(assets.prefix(6).map(\.id))
         collection.requestVisibleThumbnails(for: visible)
         try await waitForThumbnails(in: collection, ids: visible)
 
-        // Reload with the same ids (fresh Items, no thumbnails) and no new request from the view.
+        // Simulate import: surviving cells keep their ids and three new assets join the window.
         collection.loadPortableWindow(
             assets: assets, totalCount: assets.count, pageIndex: 0,
             pageSize: assets.count, query: .all
         )
         try await waitForThumbnails(in: collection, ids: visible)
+        XCTAssertTrue(collection.items.dropFirst(6).allSatisfy { $0.thumbnail == nil })
+        await collection.shutdown()
+    }
+
+    func testPortableWindowReloadPreservesFilmstripDemandIncludingPreparedAndCachedCells() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let assets = (0..<11).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("photo-\($0).jpg"))
+        }
+        collection.loadPortableWindow(
+            assets: Array(assets.prefix(8)), totalCount: 8, pageIndex: 0,
+            pageSize: 8, query: .all
+        )
+        collection.beginThumbnailDemand() // Prepares indices 0...2 without explicit cell demand.
+        try await waitForThumbnails(in: collection, ids: Array(assets.prefix(3).map(\.id)))
+        // A packed or edited frame may already have painted before a cell's onAppear.
+        collection.items[5].setOriginalThumbnail(NSImage(cgImage: image, size: NSSize(width: 64, height: 48)))
+        collection.items[5].asset.thumbnailState = .ready
+        let visible = Array(assets.prefix(6).map(\.id))
+        for id in visible { collection.requestThumbnail(for: id, priority: .adjacentFilmstrip) }
+        try await waitForThumbnails(in: collection, ids: visible)
+
+        collection.loadPortableWindow(
+            assets: assets, totalCount: assets.count, pageIndex: 0,
+            pageSize: assets.count, query: .all
+        )
+        try await waitForThumbnails(in: collection, ids: visible)
+        XCTAssertTrue(collection.items.dropFirst(6).allSatisfy { $0.thumbnail == nil })
+        await collection.shutdown()
+    }
+
+    func testPortableAppendRetainsDemandAndReloadDropsReleasedRemovedAndSpeculativeIDs() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let assets = (0..<11).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("photo-\($0).jpg"))
+        }
+        collection.loadPortableWindow(
+            assets: Array(assets.prefix(8)), totalCount: 11, pageIndex: 0,
+            pageSize: 8, query: .all
+        )
+        collection.beginThumbnailDemand()
+        for index in 3...5 { collection.requestThumbnail(for: assets[index].id) }
+        try await waitForThumbnails(in: collection, ids: Array(assets.prefix(6).map(\.id)))
+        let retainedItem = collection.items[3]
+        XCTAssertTrue(collection.appendPortableWindow(assets: Array(assets.suffix(3)), pageIndex: 1))
+        XCTAssertTrue(collection.items[3] === retainedItem)
+        XCTAssertNotNil(retainedItem.thumbnail)
+        XCTAssertTrue(collection.items.suffix(3).allSatisfy { $0.thumbnail == nil })
+
+        collection.releaseThumbnail(for: assets[4].id)
+        let survivors = assets.filter { $0.id != assets[5].id }
+        collection.loadPortableWindow(
+            assets: survivors, totalCount: survivors.count, pageIndex: 0,
+            pageSize: survivors.count, query: .all
+        )
+        try await waitForThumbnails(in: collection, ids: [assets[3].id])
+        XCTAssertTrue(collection.items.filter { $0.id != assets[3].id }.allSatisfy { $0.thumbnail == nil })
+        await collection.shutdown()
     }
 
     private func waitForThumbnails(
@@ -406,11 +464,15 @@ final class LibraryGridTests: TempDirectoryTestCase {
     ) async throws {
         let wanted = Set(ids)
         let deadline = Date().addingTimeInterval(5)
+        XCTAssertEqual(collection.items.filter { wanted.contains($0.id) }.count, wanted.count)
         while collection.items.contains(where: { wanted.contains($0.id) && $0.thumbnail == nil }) {
             if Date() > deadline {
                 return XCTFail("previously visible thumbnails did not reach ready")
             }
-            await Task.yield()
+            try await Task.sleep(for: .milliseconds(5))
         }
+        XCTAssertTrue(collection.items.filter { wanted.contains($0.id) }.allSatisfy {
+            $0.asset.thumbnailState == .ready
+        })
     }
 }

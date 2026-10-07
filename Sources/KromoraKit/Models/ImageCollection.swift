@@ -515,8 +515,9 @@ final class ImageCollectionPresentationModel {
         scanGeneration &+= 1
         // Cells keep their identity across a reload, so SwiftUI never re-fires `onAppear`; carry
         // the demand over for ids that survive instead of leaving those cells on a spinner.
-        let prepared = preparedThumbnailIDs
-        let priorDemand = thumbnailDemandPriorities.filter { !prepared.contains($0.key) }
+        // Prepared neighbors alone are speculative, but an explicit cell request can overlap
+        // that set. Preserve actual demand rather than excluding every prepared neighbor.
+        let priorDemand = thumbnailDemandPriorities.filter { thumbnailDemandIDs.contains($0.key) }
         let priorVisible = visibleEditedThumbnailIDs
         cancelThumbnailWork()
         stopMetadataLoading()
@@ -663,12 +664,19 @@ final class ImageCollectionPresentationModel {
         requestsEditedThumbnail: Bool = true
     ) {
         guard isThumbnailDemandDriven, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        // Record the cell's demand even if a cached frame already painted it or its packed
+        // read is still pending. A reload replaces that raster without another onAppear.
+        thumbnailDemandIDs.insert(id)
+        thumbnailDemandPriorities[id] = priority
         admitFrameReads(visible: [id], indexByID: [id: index], prefetch: false)
         if pendingFrameReadIDs.contains(id) {
+            let generation = thumbnailGeneration
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 await self.waitForFrameReads(of: [id])
-                guard let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
+                guard generation == self.thumbnailGeneration,
+                      self.thumbnailDemandIDs.contains(id),
+                      let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
                 self.requestOriginalThumbnail(for: id, at: currentIndex, priority: priority)
                 if requestsEditedThumbnail { self.onThumbnailDemand?(id, priority) }
             }
