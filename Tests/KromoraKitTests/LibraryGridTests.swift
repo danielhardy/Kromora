@@ -4,38 +4,36 @@ import XCTest
 
 @MainActor
 final class LibraryGridTests: TempDirectoryTestCase {
-    func testMosaicRowsPreserveMixedOrientationWithoutOverlapAtRepresentativeWidths() {
+    func testCellsAreUniformSquaresWithinTheTargetRangeAtRepresentativeWidths() {
         let layout = LibraryGridLayout()
-        let aspects = [1.5, 0.75, 1.0, 1.5, 0.75, 1.0, 1.5, 0.75]
 
-        for width in [320.0, 768.0, 1_280.0] {
-            let rows = layout.mosaicRows(aspectRatios: aspects, width: width)
-            XCTAssertEqual(rows.flatMap(\.itemIndices), Array(aspects.indices))
-
-            for row in rows {
-                XCTAssertEqual(row.itemIndices.count, row.itemWidths.count)
-                XCTAssertGreaterThan(row.imageHeight, 0)
-                XCTAssertLessThanOrEqual(
-                    row.itemWidths.reduce(0, +) + layout.spacing * Double(max(0, row.itemWidths.count - 1)),
-                    max(width, layout.minimumCellWidth) + 0.001
-                )
-                XCTAssertTrue(row.itemWidths.allSatisfy { $0 > 0 })
-            }
+        for width in [480.0, 768.0, 1_024.0, 1_280.0, 1_920.0, 2_560.0] {
+            let metrics = layout.metrics(for: width)
+            XCTAssertGreaterThanOrEqual(metrics.columns, 2)
+            XCTAssertGreaterThanOrEqual(metrics.cellEdge, 190, "width \(width)")
+            XCTAssertLessThanOrEqual(metrics.cellEdge, 300, "width \(width)")
+            let used = metrics.cellEdge * Double(metrics.columns)
+                + layout.spacing * Double(metrics.columns - 1)
+            XCTAssertLessThanOrEqual(used, width + 0.001, "cells must not overflow the row")
         }
     }
 
-    func testMosaicRowsKeepCellIdentityAndAspectRatioAttachedToSourceOrder() {
+    func testNarrowAndDegenerateWidthsKeepOneColumn() {
         let layout = LibraryGridLayout()
-        let aspects = [3.0 / 2.0, 3.0 / 4.0, 1.0]
-        let rows = layout.mosaicRows(aspectRatios: aspects, width: 900)
-        let positions = rows.flatMap { row in
-            zip(row.itemIndices, row.itemWidths).map { ($0, $1 / row.imageHeight) }
-        }
+        XCTAssertEqual(layout.metrics(for: 0).columns, 1)
+        XCTAssertEqual(layout.metrics(for: 120).columns, 1)
+        XCTAssertEqual(layout.metrics(for: 120).cellEdge, 120)
+        XCTAssertEqual(layout.metrics(for: 900).columns, 4)
+        XCTAssertLessThanOrEqual(layout.metrics(for: 100_000).cellEdge, layout.maximumCellEdge)
+    }
 
-        XCTAssertEqual(positions.map(\.0), [0, 1, 2])
-        for (index, ratio) in positions {
-            XCTAssertEqual(ratio, aspects[index], accuracy: 0.000_001)
-        }
+    func testRowHeightIsIndependentOfItemContent() {
+        let layout = LibraryGridLayout()
+        let metrics = layout.metrics(for: 1_000)
+        XCTAssertEqual(layout.rowHeight(for: metrics), metrics.cellEdge + LibraryGridLayout.captionBlock)
+        XCTAssertEqual(layout.rowCount(itemCount: 0, columns: metrics.columns), 0)
+        XCTAssertEqual(layout.rowCount(itemCount: metrics.columns, columns: metrics.columns), 1)
+        XCTAssertEqual(layout.rowCount(itemCount: metrics.columns + 1, columns: metrics.columns), 2)
     }
 
     func testInvalidAspectRatiosUseStablePhotographicFallback() {
@@ -86,114 +84,6 @@ final class LibraryGridTests: TempDirectoryTestCase {
             2.0 / 3.0,
             accuracy: 0.000_001
         )
-    }
-
-    func testMosaicCacheRebuildsWhenPlaceholderAspectBecomesResolved() {
-        let cache = LibraryMosaicLayoutCache()
-        let layout = LibraryGridLayout()
-        let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
-        let itemIDs = fallback.indices.map { _ in PhotoAssetID.imported(UUID()) }
-
-        let initial = cache.rows(
-            itemIDs: itemIDs,
-            width: 900,
-            cropGeneration: 0,
-            layout: layout,
-            aspectRatioAt: { fallback[$0] },
-            aspectResolvedAt: { _ in false }
-        )
-        let resolved = cache.rows(
-            itemIDs: itemIDs,
-            width: 900,
-            cropGeneration: 0,
-            layout: layout,
-            aspectRatioAt: { $0 == 0 ? 0.75 : fallback[$0] },
-            aspectResolvedAt: { $0 == 0 }
-        )
-
-        XCTAssertNotEqual(
-            resolved, initial,
-            "the first pixel dimensions must replace the 4:3 placeholder mosaic"
-        )
-        XCTAssertEqual(cache.recomputeCount, 2)
-        let placed = resolved[0]
-        XCTAssertEqual(placed.itemWidths[0] / placed.imageHeight, 0.75, accuracy: 0.000_001)
-    }
-
-    func testMosaicCacheKeepsPlacedRowsWhenResolvedAspectIsRewritten() {
-        let cache = LibraryMosaicLayoutCache()
-        let layout = LibraryGridLayout()
-        let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
-        let itemIDs = fallback.indices.map { _ in PhotoAssetID.imported(UUID()) }
-
-        let initial = cache.rows(
-            itemIDs: itemIDs,
-            width: 900,
-            cropGeneration: 0,
-            layout: layout,
-            aspectRatioAt: { fallback[$0] },
-            aspectResolvedAt: { _ in true }
-        )
-        let rewritten = cache.rows(
-            itemIDs: itemIDs,
-            width: 900,
-            cropGeneration: 0,
-            layout: layout,
-            aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] },
-            aspectResolvedAt: { _ in true }
-        )
-
-        XCTAssertEqual(rewritten, initial, "a later metadata rewrite must not move placed rows")
-        XCTAssertEqual(cache.recomputeCount, 1, "a resolved-aspect rewrite must not redo row math")
-    }
-
-    func testMosaicCacheRebuildsWhenCropGenerationChanges() {
-        let cache = LibraryMosaicLayoutCache()
-        let layout = LibraryGridLayout()
-        let fallback = [4.0 / 3.0, 4.0 / 3.0, 4.0 / 3.0]
-        let itemIDs = fallback.indices.map { _ in PhotoAssetID.imported(UUID()) }
-
-        let initial = cache.rows(
-            itemIDs: itemIDs,
-            width: 900,
-            cropGeneration: 0,
-            layout: layout,
-            aspectRatioAt: { fallback[$0] }
-        )
-        let resolved = cache.rows(
-            itemIDs: itemIDs,
-            width: 900,
-            cropGeneration: 1,
-            layout: layout,
-            aspectRatioAt: { $0 == 0 ? 1.0 / 3.0 : fallback[$0] }
-        )
-
-        XCTAssertNotEqual(resolved, initial, "a crop must update the placed cell geometry")
-        XCTAssertEqual(cache.recomputeCount, 2, "a crop generation bump must rebuild the mosaic")
-    }
-
-    func testMosaicCacheRecomputesWhenOrderedItemIdentitiesChange() {
-        let cache = LibraryMosaicLayoutCache()
-        let layout = LibraryGridLayout()
-        let firstIDs = [PhotoAssetID.imported(UUID()), PhotoAssetID.imported(UUID())]
-        let secondIDs = [firstIDs[1], firstIDs[0]]
-
-        _ = cache.rows(
-            itemIDs: firstIDs,
-            width: 900,
-            cropGeneration: 0,
-            layout: layout,
-            aspectRatioAt: { _ in 4.0 / 3.0 }
-        )
-        _ = cache.rows(
-            itemIDs: secondIDs,
-            width: 900,
-            cropGeneration: 0,
-            layout: layout,
-            aspectRatioAt: { _ in 4.0 / 3.0 }
-        )
-
-        XCTAssertEqual(cache.recomputeCount, 2, "a changed item order must invalidate the mosaic")
     }
 
     func testProjectedEntryResolvesByStableIDWhenItsIndexIsStale() async throws {
@@ -306,37 +196,32 @@ final class LibraryGridTests: TempDirectoryTestCase {
         )
     }
 
-    func testVisibleMosaicIndicesCoverTheViewportAndPrefetchWithoutTheWholeLibrary() {
+    func testVisibleIndicesCoverTheViewportAndPrefetchWithoutTheWholeLibrary() {
         let layout = LibraryGridLayout(prefetchRows: 1)
-        let rows = (0..<8).map { index in
-            LibraryGridLayout.MosaicRow(
-                id: index * 2,
-                itemIndices: [index * 2, index * 2 + 1],
-                imageHeight: 100,
-                itemWidths: [120, 120]
-            )
-        }
+        let width = 900.0
+        let columns = layout.metrics(for: width).columns
+        let pitch = layout.rowHeight(for: layout.metrics(for: width)) + layout.spacing
 
-        let firstScreen = layout.visibleMosaicIndices(
-            rows: rows, viewportHeight: 200, scrollOffset: 0
+        let firstScreen = layout.visibleIndices(
+            itemCount: 1_000, width: width, viewportHeight: pitch * 2, scrollOffset: 0
         )
+        XCTAssertEqual(firstScreen.lowerBound, 0)
         XCTAssertEqual(
-            firstScreen, [0, 1, 2, 3, 4, 5],
+            firstScreen.upperBound, columns * 4,
             "the first screen admits the intersecting rows plus one prefetch row"
         )
 
-        let scrolled = layout.visibleMosaicIndices(
-            rows: rows, viewportHeight: 200, scrollOffset: 300
+        let scrolled = layout.visibleIndices(
+            itemCount: 1_000, width: width, viewportHeight: pitch * 2, scrollOffset: pitch * 10
         )
-        XCTAssertEqual(scrolled, Array(2...9))
-        XCTAssertFalse(scrolled.contains(0))
-        XCTAssertLessThan(scrolled.count, 16)
+        XCTAssertEqual(scrolled.lowerBound, columns * 9)
+        XCTAssertLessThan(scrolled.count, 1_000 / 10)
 
-        let padded = layout.visibleMosaicIndices(
-            rows: rows, viewportHeight: 100, scrollOffset: 0, contentOrigin: 16
+        let tail = layout.visibleIndices(
+            itemCount: 10, width: width, viewportHeight: pitch, scrollOffset: pitch * 100
         )
-        XCTAssertEqual(padded.prefix(2), [0, 1])
-        XCTAssertTrue(padded.contains(2))
+        XCTAssertEqual(tail.upperBound, 10, "scrolling past the end clamps to the last row")
+        XCTAssertFalse(tail.isEmpty)
     }
 
     func testVisibleWindowLoadsEveryRequestedPhotoWithoutASelectionChange() async throws {

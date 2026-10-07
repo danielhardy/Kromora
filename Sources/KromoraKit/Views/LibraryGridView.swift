@@ -7,7 +7,7 @@ import SwiftUI
 /// SwiftUI only hosts the rows around the viewport. Hosted cells still request a fast preview from
 /// `onAppear`, and release in-flight work from `onDisappear`. That callback is not the admission
 /// signal for the first screen — SwiftUI can leave visible cells unannounced until a click — so
-/// the grid also admits every photo in the visible mosaic, originals first and edited renders
+/// the grid also admits every photo in the visible grid, originals first and edited renders
 /// immediately after.
 struct LibraryGridView: View {
     @Bindable var collection: ImageCollection
@@ -15,8 +15,7 @@ struct LibraryGridView: View {
     let onOpen: () -> Void
 
     private let layout = LibraryGridLayout()
-    private let contentPadding: CGFloat = 16
-    @State private var mosaicCache = LibraryMosaicLayoutCache()
+    private let contentPadding: Double = 16
     @State private var scrollOffset: Double = 0
     @State private var admittedThumbnailIDs: [PhotoAssetID] = []
 
@@ -61,25 +60,25 @@ struct LibraryGridView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
-                        let itemIDs = entries.map(\.id)
-                        let rows = mosaicCache.rows(
-                            itemIDs: itemIDs,
-                            width: max(1, geometry.size.width - 32),
-                            cropGeneration: collection.cropGeneration,
-                            layout: layout,
-                            aspectRatioAt: { entries[$0].aspectRatio },
-                            aspectResolvedAt: { entries[$0].aspectResolved }
+                        let contentWidth = max(1, geometry.size.width - contentPadding * 2)
+                        let metrics = layout.metrics(for: contentWidth)
+                        let rowCount = layout.rowCount(
+                            itemCount: entries.count, columns: metrics.columns
                         )
                         let visibleIDs = visibleThumbnailIDs(
-                            rows: rows, entries: entries, viewportHeight: geometry.size.height
+                            entries: entries,
+                            width: contentWidth,
+                            viewportHeight: geometry.size.height
                         )
                         LazyVStack(alignment: .leading, spacing: CGFloat(layout.spacing)) {
-                            ForEach(rows) { row in
-                                LibraryMosaicRow(
-                                    row: row,
+                            ForEach(0..<rowCount, id: \.self) { row in
+                                LibraryGridRow(
+                                    indices: row * metrics.columns
+                                        ..< min(entries.count, (row + 1) * metrics.columns),
                                     entries: entries,
                                     collection: collection,
                                     settings: viewModel.settings,
+                                    cellEdge: metrics.cellEdge,
                                     spacing: layout.spacing,
                                     admittedThumbnailIDs: admittedThumbnailIDs,
                                     onSelect: select(index:),
@@ -88,7 +87,7 @@ struct LibraryGridView: View {
                                 )
                             }
                         }
-                        .padding(contentPadding)
+                        .padding(CGFloat(contentPadding))
                         .background {
                             GeometryReader { proxy in
                                 Color.clear.preference(
@@ -137,19 +136,17 @@ struct LibraryGridView: View {
     }
 
     private func visibleThumbnailIDs(
-        rows: [LibraryGridLayout.MosaicRow],
         entries: [ImageCollection.ThumbnailEntry],
+        width: Double,
         viewportHeight: Double
     ) -> [PhotoAssetID] {
-        layout.visibleMosaicIndices(
-            rows: rows,
+        layout.visibleIndices(
+            itemCount: entries.count,
+            width: width,
             viewportHeight: viewportHeight,
             scrollOffset: scrollOffset,
-            contentOrigin: Double(contentPadding)
-        ).compactMap { index in
-            guard entries.indices.contains(index) else { return nil }
-            return entries[index].id
-        }
+            contentOrigin: contentPadding
+        ).map { entries[$0].id }
     }
 
     private func admitVisibleThumbnails(_ ids: [PhotoAssetID]) {
@@ -179,32 +176,22 @@ struct LibraryGridView: View {
     }
 }
 
-private struct LibraryMosaicRow: View {
-    let row: LibraryGridLayout.MosaicRow
+private struct LibraryGridRow: View {
+    let indices: Range<Int>
     let entries: [ImageCollection.ThumbnailEntry]
     @Bindable var collection: ImageCollection
     @ObservedObject var settings: KromoraSettings
+    let cellEdge: Double
     let spacing: Double
     let admittedThumbnailIDs: [PhotoAssetID]
     let onSelect: (Int) -> Void
     let onOpen: () -> Void
     var onAppearIndex: ((Int) -> Void)? = nil
 
-    private var cells: [LibraryMosaicCellLayout] {
-        zip(row.itemIndices, row.itemWidths).compactMap { offset, width in
-            guard entries.indices.contains(offset) else { return nil }
-            return LibraryMosaicCellLayout(
-                offset: offset,
-                width: width,
-                id: entries[offset].id
-            )
-        }
-    }
-
     var body: some View {
         HStack(alignment: .top, spacing: CGFloat(spacing)) {
-            ForEach(cells) { cell in
-                let entry = entries[cell.offset]
+            ForEach(indices, id: \.self) { offset in
+                let entry = entries[offset]
                 if let resolved = collection.resolvedItem(for: entry) {
                     let item = resolved.item
                     LibraryGridCell(
@@ -212,10 +199,9 @@ private struct LibraryMosaicRow: View {
                         settings: settings,
                         isSelected: collection.selection.selectedIDs.contains(item.id),
                         isActive: collection.selection.activeID == item.id,
-                        imageWidth: cell.width,
-                        imageHeight: row.imageHeight
+                        edge: cellEdge
                     )
-                    .frame(width: CGFloat(cell.width))
+                    .frame(width: CGFloat(cellEdge))
                     .onAppear {
                         item.markLibraryLayoutPresented()
                         // Make the cell callback order-independent: SwiftUI may deliver a child's
@@ -248,12 +234,6 @@ private struct LibraryMosaicRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-}
-
-private struct LibraryMosaicCellLayout: Identifiable {
-    let offset: Int
-    let width: Double
-    let id: PhotoAssetID
 }
 
 private struct LibraryEmptyState: View {
@@ -297,14 +277,13 @@ private struct LibraryGridCell: View {
     @ObservedObject var settings: KromoraSettings
     let isSelected: Bool
     let isActive: Bool
-    let imageWidth: Double
-    let imageHeight: Double
+    let edge: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             thumbnail
-                .frame(width: CGFloat(imageWidth), height: CGFloat(imageHeight))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: CGFloat(edge), height: CGFloat(edge))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
                 .opacity(item.asset.flag == .reject ? 0.35 : 1)
                 .overlay(alignment: .topLeading) {
                     if item.asset.flag == .reject {
@@ -319,7 +298,7 @@ private struct LibraryGridCell: View {
                 }
             .overlay {
                 if isActive || isSelected {
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 6)
                         .strokeBorder(
                             isActive ? KromoraTheme.primaryAccent : KromoraTheme.primaryAccent.opacity(0.7),
                             lineWidth: isActive ? 3 : 2
@@ -348,10 +327,11 @@ private struct LibraryGridCell: View {
         if let thumbnail = item.thumbnail {
             Image(nsImage: thumbnail)
                 .resizable()
-                // The cell reserves the package's final presented geometry before pixels arrive.
-                // Original fallback pixels fit inside that frame; edited pixels already carry the
-                // crop and rotation and therefore fill it without changing row geometry.
-                .aspectRatio(contentMode: item.shouldFillLibraryThumbnail ? .fill : .fit)
+                // Cells are uniform squares like the filmstrip's: every raster fills and clips,
+                // so the arrival of original or edited pixels never changes the layout.
+                .aspectRatio(contentMode: .fill)
+                .frame(width: CGFloat(edge), height: CGFloat(edge))
+                .clipped()
         } else if item.asset.thumbnailState == .failed {
             Rectangle()
                 .fill(Color.secondary.opacity(0.12))

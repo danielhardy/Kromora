@@ -61,7 +61,7 @@ final class LibrarySelectionTests: XCTestCase {
 
         XCTAssertLessThan(visible.count, 1_000)
         XCTAssertEqual(visible.lowerBound, 0)
-        XCTAssertEqual(visible.upperBound, 40, "a viewport should admit only a small prefetch window")
+        XCTAssertEqual(visible.upperBound, 20, "a viewport should admit only a small prefetch window")
 
         measure {
             for offset in stride(from: 0.0, through: 120_000.0, by: 600.0) {

@@ -133,112 +133,88 @@ struct LibrarySelectionModel: Equatable, Sendable {
     }
 }
 
-/// Geometry shared by the library mosaic and its performance test. The view uses a `LazyVStack`
-/// of justified rows for virtualization; this value type keeps the row grouping deterministic and
-/// makes a synthetic 1,000-item profile independent of SwiftUI's view-hosting machinery.
+/// Geometry shared by the library grid and its performance test. Cells are uniform squares, so
+/// the position of every item depends only on its index and the viewport width — never on aspect
+/// ratios, crops, or thumbnails that arrive later. The view uses a `LazyVStack` of fixed-height
+/// rows for virtualization; this value type keeps the arithmetic deterministic and makes a
+/// synthetic 1,000-item profile independent of SwiftUI's view-hosting machinery.
 struct LibraryGridLayout: Sendable, Equatable {
-    struct MosaicRow: Sendable, Equatable, Identifiable {
-        let id: Int
-        let itemIndices: [Int]
-        let imageHeight: Double
-        let itemWidths: [Double]
+    struct Metrics: Sendable, Equatable {
+        let columns: Int
+        /// Edge of each square thumbnail, in points.
+        let cellEdge: Double
     }
 
-    /// Space under a mosaic image: the cell's 6pt stack spacing plus one caption line.
-    /// Shared by the grid and `visibleMosaicIndices` so a viewport admission matches the
-    /// rows the user can actually see.
-    static let mosaicCaptionBlock = 22.0
+    /// Space under a thumbnail: the cell's 6pt stack spacing plus one caption line.
+    static let captionBlock = 22.0
 
-    let minimumCellWidth: Double
-    let cellHeight: Double
+    let targetCellEdge: Double
+    let maximumCellEdge: Double
     let spacing: Double
     let prefetchRows: Int
 
     init(
-        minimumCellWidth: Double = 156,
-        cellHeight: Double = 174,
+        targetCellEdge: Double = 232,
+        maximumCellEdge: Double = 300,
         spacing: Double = 12,
         prefetchRows: Int = 2
     ) {
-        self.minimumCellWidth = max(1, minimumCellWidth)
-        self.cellHeight = max(1, cellHeight)
+        self.targetCellEdge = max(1, targetCellEdge)
+        self.maximumCellEdge = max(self.targetCellEdge, maximumCellEdge)
         self.spacing = max(0, spacing)
         self.prefetchRows = max(0, prefetchRows)
     }
 
-    func columnCount(for width: Double) -> Int {
-        max(1, Int((max(0, width) + spacing) / (minimumCellWidth + spacing)))
+    /// Pick the column count whose stretched cell edge lies nearest the target, then divide the
+    /// row evenly. Edges therefore stay within roughly 200-270 pt for any window wide enough to
+    /// hold two columns, and every row has the same height.
+    func metrics(for width: Double) -> Metrics {
+        let available = max(0, width)
+        let columns = max(1, Int(((available + spacing) / (targetCellEdge + spacing)).rounded()))
+        let stretched = (available - spacing * Double(columns - 1)) / Double(columns)
+        return Metrics(columns: columns, cellEdge: min(maximumCellEdge, max(1, stretched)))
     }
 
-    /// Build a justified photo mosaic. Items are grouped in source order, with each row sharing
-    /// one image height and each cell's width derived from its source aspect ratio. A candidate
-    /// row is closed before it becomes too dense or would make a cell uncomfortably narrow. The
-    /// final row is intentionally left-aligned; forcing it to fill the viewport would make a
-    /// short tail row unexpectedly tall and would cause a visible scroll jump while scanning.
+    func rowHeight(for metrics: Metrics) -> Double {
+        metrics.cellEdge + Self.captionBlock
+    }
+
+    func rowCount(itemCount: Int, columns: Int) -> Int {
+        guard itemCount > 0 else { return 0 }
+        return (itemCount + columns - 1) / columns
+    }
+
+    /// Item indices whose rows intersect the viewport, expanded by `prefetchRows`.
     ///
-    /// The returned geometry is pure value data. It can therefore be tested without constructing
-    /// SwiftUI views, and the same result is used for every cell in a row so no overlap can be
-    /// introduced by independent child measurements.
-    func mosaicRows(aspectRatios: [Double], width: Double) -> [MosaicRow] {
-        guard !aspectRatios.isEmpty, width > 0 else { return [] }
+    /// `contentOrigin` is the first row's y position inside the scroll content. Results stay in
+    /// source order so the scheduler paints the top of the window first. A zero-height first
+    /// layout still admits the leading prefetch window, because that is the frame the user is
+    /// about to see.
+    func visibleIndices(
+        itemCount: Int,
+        width: Double,
+        viewportHeight: Double,
+        scrollOffset: Double,
+        contentOrigin: Double = 0
+    ) -> Range<Int> {
+        guard itemCount > 0 else { return 0..<0 }
+        let metrics = metrics(for: width)
+        let rows = rowCount(itemCount: itemCount, columns: metrics.columns)
+        let pitch = rowHeight(for: metrics) + spacing
 
-        let contentWidth = max(width, minimumCellWidth)
-        let targetHeight = cellHeight
-        let minimumMosaicWidth = max(96, minimumCellWidth * 0.72)
-        let usableRatios = aspectRatios.map { Self.normalizedAspectRatio($0) }
-        var rows: [MosaicRow] = []
-        var currentIndices: [Int] = []
-        var currentRatios: [Double] = []
-
-        func candidateHeight(for ratios: [Double]) -> Double {
-            guard !ratios.isEmpty else { return 0 }
-            let gaps = spacing * Double(max(0, ratios.count - 1))
-            return max(1, (contentWidth - gaps) / ratios.reduce(0, +))
-        }
-
-        func canFit(_ ratios: [Double]) -> Bool {
-            let height = candidateHeight(for: ratios)
-            return ratios.allSatisfy { $0 * height >= minimumMosaicWidth }
-        }
-
-        func appendRow(isLast: Bool) {
-            guard !currentIndices.isEmpty else { return }
-            let idealHeight = candidateHeight(for: currentRatios)
-            // Keep single-item and tail rows from becoming enormous. Full rows are allowed to be
-            // a little taller than the target when that is what preserves useful cell widths.
-            let upperBound = targetHeight * 1.45
-            let height = isLast
-                ? min(targetHeight, idealHeight)
-                : min(upperBound, idealHeight)
-            let widths = currentRatios.map { $0 * height }
-            rows.append(MosaicRow(
-                id: currentIndices[0],
-                itemIndices: currentIndices,
-                imageHeight: height,
-                itemWidths: widths
-            ))
-            currentIndices.removeAll(keepingCapacity: true)
-            currentRatios.removeAll(keepingCapacity: true)
-        }
-
-        for (index, ratio) in usableRatios.enumerated() {
-            let candidate = currentRatios + [ratio]
-            let shouldClose = !currentRatios.isEmpty && (
-                !canFit(candidate)
-                || (candidate.count > 1 && candidateHeight(for: candidate) < targetHeight)
-            )
-            if shouldClose {
-                appendRow(isLast: false)
-            }
-            currentIndices.append(index)
-            currentRatios.append(ratio)
-        }
-        appendRow(isLast: true)
-        return rows
+        let top = max(0, scrollOffset) - contentOrigin
+        let bottom = top + max(0, viewportHeight)
+        let firstVisible = min(rows - 1, max(0, Int(floor(top / pitch))))
+        let lastVisible = min(rows - 1, max(firstVisible, Int(floor(bottom / pitch))))
+        let first = max(0, firstVisible - prefetchRows)
+        let last = min(rows - 1, lastVisible + prefetchRows)
+        let start = min(itemCount, first * metrics.columns)
+        let end = min(itemCount, (last + 1) * metrics.columns)
+        return start..<max(start, end)
     }
 
     /// Normalize malformed or extreme source geometry to a useful bounded display ratio. The
-    /// source dimensions remain untouched; this only protects row math from corrupt metadata.
+    /// source dimensions remain untouched; this only protects persisted ratios from corrupt metadata.
     static func normalizedAspectRatio(_ ratio: Double) -> Double {
         guard ratio.isFinite, ratio > 0 else { return 4.0 / 3.0 }
         return min(max(ratio, 0.35), 3.0)
@@ -246,7 +222,7 @@ struct LibraryGridLayout: Sendable, Equatable {
 
     /// Return the aspect ratio of the pixels presented by the library thumbnail. A crop rectangle
     /// is normalized to the oriented source image, so its width/height must be multiplied by the
-    /// source pixel ratio before it can drive the mosaic geometry.
+    /// source pixel ratio before it can be published as the asset's presented ratio.
     static func presentedAspectRatio(
         sourceAspectRatio: Double,
         crop: CropAdjustments,
@@ -263,126 +239,5 @@ struct LibraryGridLayout: Sendable, Equatable {
         }
 
         return normalizedAspectRatio(sourceRatio * Double(rect.width / rect.height))
-    }
-
-    func visibleIndices(
-        itemCount: Int,
-        width: Double,
-        viewportHeight: Double,
-        scrollOffset: Double
-    ) -> Range<Int> {
-        guard itemCount > 0 else { return 0..<0 }
-        let columns = columnCount(for: width)
-        let rowHeight = cellHeight + spacing
-        let firstRow = max(0, Int(max(0, scrollOffset) / rowHeight) - prefetchRows)
-        let visibleRows = max(1, Int(ceil(max(0, viewportHeight) / rowHeight))) + prefetchRows * 2
-        let start = min(itemCount, firstRow * columns)
-        let end = min(itemCount, (firstRow + visibleRows) * columns)
-        return start..<max(start, end)
-    }
-
-    /// Item indices whose mosaic rows intersect the viewport, expanded by `prefetchRows`.
-    ///
-    /// `contentOrigin` is the first row's y position inside the scroll content. Row height
-    /// includes the caption under the image; `spacing` is the gap between rows. Results stay
-    /// in source order so the scheduler paints the top of the window first. A zero-height
-    /// first layout still admits the leading prefetch window, because that is the frame the
-    /// user is about to see.
-    func visibleMosaicIndices(
-        rows: [MosaicRow],
-        viewportHeight: Double,
-        scrollOffset: Double,
-        contentOrigin: Double = 0
-    ) -> [Int] {
-        guard !rows.isEmpty else { return [] }
-        let caption = Self.mosaicCaptionBlock
-        var origins: [Double] = []
-        origins.reserveCapacity(rows.count)
-        var y = contentOrigin
-        for row in rows {
-            origins.append(y)
-            y += row.imageHeight + caption + spacing
-        }
-
-        let top = max(0, scrollOffset)
-        let bottom = top + max(0, viewportHeight)
-        var first = rows.count
-        var last = -1
-        for index in rows.indices {
-            let rowTop = origins[index]
-            let rowBottom = rowTop + rows[index].imageHeight + caption
-            guard rowBottom >= top, rowTop <= bottom else { continue }
-            if first == rows.count { first = index }
-            last = index
-        }
-        if last < first {
-            if top > contentOrigin {
-                let start = max(0, rows.count - 1 - prefetchRows)
-                return rows[start...].flatMap(\.itemIndices)
-            }
-            return rows.prefix(min(rows.count, 1 + prefetchRows)).flatMap(\.itemIndices)
-        }
-        let start = max(0, first - prefetchRows)
-        let end = min(rows.count - 1, last + prefetchRows)
-        return rows[start...end].flatMap(\.itemIndices)
-    }
-}
-
-/// Retains mosaic geometry across item mutations that do not change the placed photos.
-///
-/// Discovery publishes items before ImageIO dimensions arrive, and the grid would otherwise
-/// lock those photos into the 4:3 fallback. The first time an item's pixel dimensions resolve,
-/// the cache rebuilds so the initial mosaic matches the photos. Later metadata rewrites of an
-/// already-resolved aspect do not move rows; a scan must not reshuffle the library on every
-/// header. Crop edits are the exception: they invalidate through `cropGeneration`, bumped only
-/// by `ImageCollectionPresentationModel.setPresentedCrop`. The row snapshot is still value
-/// data, so the lazy stack keeps virtualizing the hosted cells as before.
-@MainActor
-final class LibraryMosaicLayoutCache {
-    private var cachedItemIDs: [PhotoAssetID]?
-    private var cachedWidth: Double?
-    private var cachedCropGeneration: Int?
-    private var cachedAspects: [Double]?
-    private var cachedResolved: [Bool]?
-    private var cachedRows: [LibraryGridLayout.MosaicRow] = []
-
-    /// Exposed for regression tests and performance instrumentation.
-    private(set) var recomputeCount = 0
-
-    func rows(
-        itemIDs: [PhotoAssetID],
-        width: Double,
-        cropGeneration: Int,
-        layout: LibraryGridLayout,
-        aspectRatioAt: (Int) -> Double,
-        aspectResolvedAt: (Int) -> Bool = { _ in true }
-    ) -> [LibraryGridLayout.MosaicRow] {
-        let aspectRatios = itemIDs.indices.map(aspectRatioAt)
-        let resolved = itemIDs.indices.map(aspectResolvedAt)
-        let samePlacement = cachedItemIDs == itemIDs
-            && cachedWidth == width
-            && cachedCropGeneration == cropGeneration
-        if samePlacement, cachedAspects == aspectRatios, cachedResolved == resolved {
-            return cachedRows
-        }
-        if samePlacement,
-           let cachedResolved,
-           cachedResolved.count == resolved.count,
-           !zip(cachedResolved, resolved).contains(where: { wasResolved, isResolved in
-               !wasResolved && isResolved
-           }) {
-            // Pixel dimensions were already committed. Ignore a later metadata rewrite so a
-            // scan cannot move every following row. Crop changes miss `samePlacement`.
-            return cachedRows
-        }
-
-        cachedRows = layout.mosaicRows(aspectRatios: aspectRatios, width: width)
-        cachedItemIDs = itemIDs
-        cachedWidth = width
-        cachedCropGeneration = cropGeneration
-        cachedAspects = aspectRatios
-        cachedResolved = resolved
-        recomputeCount += 1
-        return cachedRows
     }
 }

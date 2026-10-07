@@ -31,8 +31,8 @@ enum PlatformThumbnailProvider {
     /// The filmstrip's thumbnail size, in pixels on the long edge.
     static let defaultMaxPixelSize = 240
 
-    /// Library mosaic thumbnails are displayed in substantially larger cells than filmstrip
-    /// thumbnails. Reserve a 2× pixel budget for the 240-point mosaic target so Retina displays
+    /// Library grid thumbnails are displayed in substantially larger cells than filmstrip
+    /// thumbnails. Reserve a 2× pixel budget for the ~240-point grid cell so Retina displays
     /// do not enlarge a low-resolution source or settled edit.
     static let libraryMaxPixelSize = 480
 
