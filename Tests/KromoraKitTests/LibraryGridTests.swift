@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 @testable import KromoraKit
 
@@ -41,10 +42,39 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertLessThanOrEqual(layout.metrics(for: 100_000).cellEdge, layout.maximumCellEdge)
     }
 
-    func testLibraryThumbnailPixelsCoverTheLargestRetinaSquareFillOfA3x2Frame() {
+    func testLibraryThumbnailPixelsCoverRetinaSquareFillAcrossCommonAspectRatios() {
         let layout = LibraryGridLayout()
-        let shortSide = Double(PlatformThumbnailProvider.libraryMaxPixelSize) * 2.0 / 3.0
-        XCTAssertGreaterThanOrEqual(shortSide, layout.maximumCellEdge * 2)
+        for ratio in [16.0 / 9.0, 2.0, 9.0 / 16.0, 0.5] {
+            let shortSide = Double(PlatformThumbnailProvider.libraryMaxPixelSize)
+                / max(ratio, 1.0 / ratio)
+            XCTAssertGreaterThanOrEqual(
+                shortSide, layout.maximumCellEdge * 2, "aspect ratio \(ratio)"
+            )
+        }
+    }
+
+    func testLibraryGridRendersInLightAndDarkAppearances() async throws {
+        let source = try Fixtures.writeGradientPNG(
+            width: 1_200, height: 600, named: "grid-render.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        _ = viewModel.openImages(urls: [source])
+        let deadline = Date().addingTimeInterval(5)
+        while viewModel.collection.items.first?.thumbnail == nil {
+            if Date() > deadline { XCTFail("the visible grid thumbnail did not arrive"); break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        for appearance in [ColorScheme.light, .dark] {
+            let renderer = ImageRenderer(content: LibraryGridView(
+                collection: viewModel.collection, viewModel: viewModel, onOpen: {}
+            ).environment(\.colorScheme, appearance))
+            renderer.proposedSize = ProposedViewSize(width: 720, height: 560)
+            let image = try XCTUnwrap(renderer.cgImage, "appearance \(appearance)")
+            XCTAssertGreaterThan(image.width, 0)
+            XCTAssertGreaterThan(image.height, 0)
+        }
+        await viewModel.shutdown()
     }
 
     func testPackedThumbnailKeysEmbedTheRasterSize() throws {

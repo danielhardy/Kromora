@@ -148,7 +148,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
     /// browsing surface had to enlarge.
     func testFilmstripAndGridPublishCropAwareSettledThumbnails() async throws {
         let source = try Fixtures.writeClarityPNG(
-            width: 2_400, height: 1_600, named: "crop-aware-source.png", in: tempDirectory
+            width: 2_400, height: 1_200, named: "crop-aware-source.png", in: tempDirectory
         )
         let peer = try Fixtures.writeGradientPNG(
             width: 32, height: 24, named: "crop-aware-peer.png", in: tempDirectory
@@ -171,23 +171,34 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         let originalImage = try cgImage(from: original)
         let originalLongEdge = max(originalImage.width, originalImage.height)
 
-        let crops: [(String, CGRect, CGSize, Int)] = [
+        let crops: [(String, CGRect, ImageRotation, CGSize, Int)] = [
             (
                 "small",
                 CGRect(x: 0.25, y: 0.25, width: 0.25, height: 0.25),
-                CGSize(width: 600, height: 400), 600
+                .zero, CGSize(width: 600, height: 300), 600
             ),
             (
                 "aspect-ratio-changing",
                 CGRect(x: 0.1, y: 0.1, width: 0.8, height: 0.3),
-                CGSize(width: 900, height: 225), originalLongEdge
+                .zero, CGSize(width: 1_200, height: 225), originalLongEdge
+            ),
+            (
+                "wide-16x9",
+                CGRect(x: 0, y: 0, width: 8.0 / 9.0, height: 1),
+                .zero, CGSize(width: 1_200, height: 675), 1_200
+            ),
+            (
+                "rotated-portrait",
+                CGRect(x: 0, y: 0, width: 1, height: 1),
+                .clockwise90, CGSize(width: 600, height: 1_200), 1_200
             ),
         ]
 
         var previousRevision: String?
-        for (name, rect, expectedSize, expectedLongEdge) in crops {
+        for (name, rect, rotation, expectedSize, expectedLongEdge) in crops {
             viewModel.updateDocument {
                 $0.crop = CropAdjustments(normalizedRect: rect)
+                $0.rotation = rotation
             }
 
             try await waitUntil("the settled \(name) crop thumbnail") {
@@ -209,7 +220,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             )
             XCTAssertEqual(
                 viewModel.collection.items[sourceIndex].libraryAspectRatio,
-                min(3.0, (2_400.0 / 1_600.0) * Double(rect.width / rect.height)),
+                min(
+                    3.0,
+                    (rotation.swapsDimensions ? 0.5 : 2.0) * Double(rect.width / rect.height)
+                ),
                 accuracy: 0.000_001,
                 "the \(name) cell geometry must match the rendered crop"
             )
@@ -217,7 +231,7 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             let currentRenderCandidate = await engine.makeThumbnailCGImage(RenderRequest(
                 source: ImageSource(
                     url: source,
-                    nativeExtent: CGSize(width: 2_400, height: 1_600),
+                    nativeExtent: CGSize(width: 2_400, height: 1_200),
                     portableIdentity: viewModel.collection.items[sourceIndex].asset.source.portableIdentity
                 ),
                 assetID: assetID,

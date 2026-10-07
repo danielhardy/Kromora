@@ -84,12 +84,15 @@ may publish it earlier. A failed append keeps the batch pending for retry and le
 published index as the readable state. These frames remain disposable cache data and can always be
 regenerated from package originals.
 
-Packed thumbnail keys embed the raster long edge (`<asset hash>-o900` / `-e900`). The Library
-grid's square `.fill` cells of up to 300 pt need 600 px on the short side at 2×, so the long edge
-moved from 480 to 900 px. Records written under the old `-o` / `-e` keys are never read: they
-behave as cache misses, regenerate under the new keys, and their bytes may linger until
-the pack is rebuilt. The `originalThumbnail480` / `editedThumbnail480` kind names are
-retained as persisted identifiers; no package format version changes.
+Packed thumbnail keys embed the raster long edge (`<asset hash>-o1200` / `-e1200`). The Library
+grid's square `.fill` cells of up to 300 pt need 600 px on the short side at 2×; supporting a 2:1
+frame therefore requires a 1200 px long edge. This retains the whole frame for fitted/editor first
+frames while providing enough pixels across the square crop for wide and tall source ratios. Small
+sources and crops remain at their available dimensions and are never enlarged by thumbnail decode or
+rendering. Records under older `-o900` / `-e900` keys are never read under the new keys: they behave
+as cache misses and regenerate from package originals. Their bytes may linger until the pack is
+rebuilt. The `originalThumbnail480` / `editedThumbnail480` kind names remain persisted identifiers;
+no package format version changes.
 
 ## Backup and restore semantics
 

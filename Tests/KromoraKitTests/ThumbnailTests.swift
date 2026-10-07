@@ -78,6 +78,45 @@ final class ThumbnailTests: TempDirectoryTestCase {
                           CGFloat(Thumbnails.defaultMaxPixelSize))
     }
 
+    func testLibraryOriginalThumbnailsRetainRetinaSquareCropPixelsWithoutUpscaling() async throws {
+        let cases: [(String, Int, Int, Int)] = [
+            ("wide-16x9", 2_400, 1_350, 675),
+            ("wide-2x1", 2_400, 1_200, 600),
+            ("tall-9x16", 1_350, 2_400, 675),
+            ("tall-1x2", 1_200, 2_400, 600),
+            ("small-2x1", 320, 160, 160),
+        ]
+
+        for (name, width, height, expectedShortEdge) in cases {
+            let url = try Fixtures.writeJPEG(
+                width: width, height: height, orientation: 1, named: "\(name).jpg",
+                in: tempDirectory
+            )
+            let loadedImage = await OriginalThumbnailLoader.load(
+                url: url, data: nil, dataFingerprint: nil, identity: FrameFixtures.identity(),
+                store: nil
+            )
+            let image = try XCTUnwrap(loadedImage, "the original path should decode \(name)")
+
+            XCTAssertEqual(min(image.width, image.height), expectedShortEdge, name)
+            XCTAssertLessThanOrEqual(max(image.width, image.height), Thumbnails.libraryMaxPixelSize)
+            XCTAssertEqual(
+                Double(image.width) / Double(image.height), Double(width) / Double(height),
+                accuracy: 0.002, "the uncropped source geometry must remain intact for \(name)"
+            )
+        }
+    }
+
+    func testPackedThumbnailKeysRetireInsufficient900PixelFrames() throws {
+        let assetID = PortablePhotoAssetID()
+        XCTAssertTrue(
+            try XCTUnwrap(ThumbnailFrameStore.key(.original, for: assetID)).hasSuffix("-o1200")
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(ThumbnailFrameStore.key(.edited, for: assetID)).hasSuffix("-e1200")
+        )
+    }
+
     /// B1's regression, on the thumbnail side. A portrait JPEG must come back portrait, or the
     /// filmstrip contradicts the canvas — which is exactly what shipped before the orientation fix.
     func testGenerateBakesEXIFOrientation() throws {
