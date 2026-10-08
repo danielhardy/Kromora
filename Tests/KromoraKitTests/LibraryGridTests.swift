@@ -66,13 +66,33 @@ final class LibraryGridTests: TempDirectoryTestCase {
         }
 
         for appearance in [ColorScheme.light, .dark] {
-            let renderer = ImageRenderer(content: LibraryGridView(
+            let hosting = NSHostingView(rootView: LibraryGridView(
                 collection: viewModel.collection, viewModel: viewModel, onOpen: {}
             ).environment(\.colorScheme, appearance))
-            renderer.proposedSize = ProposedViewSize(width: 720, height: 560)
-            let image = try XCTUnwrap(renderer.cgImage, "appearance \(appearance)")
-            XCTAssertGreaterThan(image.width, 0)
-            XCTAssertGreaterThan(image.height, 0)
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
+                styleMask: [.titled], backing: .buffered, defer: false
+            )
+            window.appearance = NSAppearance(named: appearance == .light ? .aqua : .darkAqua)
+            window.contentView = hosting
+            hosting.frame = window.contentView?.bounds ?? .zero
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            Self.pumpRunLoop()
+            window.layoutIfNeeded()
+            window.displayIfNeeded()
+            let bitmap = try XCTUnwrap(hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds))
+            hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
+            // ImageRenderer only paints this ScrollView's chrome without hosting its lazy rows.
+            // Check real pixels inside the tile and outside it for both appearances.
+            let tile = try XCTUnwrap(bitmap.colorAt(x: 100, y: 280)?.usingColorSpace(.deviceRGB))
+            let background = try XCTUnwrap(bitmap.colorAt(x: 300, y: 280)?.usingColorSpace(.deviceRGB))
+            XCTAssertGreaterThan(tile.redComponent - tile.greenComponent, 0.2)
+            if appearance == .light {
+                XCTAssertGreaterThan(background.redComponent, 0.7)
+            } else {
+                XCTAssertLessThan(background.redComponent, 0.3)
+            }
         }
         await viewModel.shutdown()
     }
@@ -416,5 +436,9 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertTrue(collection.items.filter { wanted.contains($0.id) }.allSatisfy {
             $0.asset.thumbnailState == .ready
         })
+    }
+
+    private static func pumpRunLoop() {
+        RunLoop.current.run(until: Date().addingTimeInterval(0.4))
     }
 }
