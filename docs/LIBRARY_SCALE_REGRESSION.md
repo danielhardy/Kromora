@@ -119,3 +119,28 @@ committed, the editor starting while package I/O is active, and a positive packa
 The existing `LibraryDeletionTests/testReferencedDeletionRemovesEditsAndDoesNotReturnAfterRescan`
 and `LibraryQueryControllerTests/testIndexProjectionExcludesTombstonesAndKeepsSelectionUUIDBased`
 remain the KRMA-371 deletion regressions.
+
+## KRMA-829 three-sample probe (2026-10-08)
+
+Presented-aspect-ratio repair no longer scans the shard once per missing asset (it was
+O(entries²) per shard under the writer mutation lock), shard validation does one symlink-escape
+check per shard instead of one per entry, nested JSON members are skipped rather than materialised
+in the unknown-field scan, and repair sleeps briefly between shard transactions so a waiting
+library-state edit can take the unfair writer lock. The documented 1k/10k/100k probe, three samples
+in a debug build on Mac16,11 / macOS 27.2, now completes (482 s) and passes every gate; the
+full JSON is [`evidence/library-scale-krma-829.json`](evidence/library-scale-krma-829.json).
+Before the change the 100k run produced no report after 12 minutes.
+
+| Scale | Production launch p95 | Production mutation reload p95 | Production reload p95 | Record reads |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 309.37 ms | 141.56 ms | 156.21 ms | 0 |
+| 10,000 | 1,726.63 ms | 165.12 ms | 173.22 ms | 0 |
+| 100,000 | 15,935.45 ms | 406.51 ms | 430.77 ms | 0 |
+
+At 100,000 assets the in-memory rows are comparable to the dated KRMA-410 capture above (warm launch
+995.97 ms vs 1,746.79 ms, filter 33.56 ms vs 52.15 ms, scroll 284.13 ms vs 506.19 ms, memory
+32,161,792 bytes, 60 decoded thumbnails, interactive preview submission 0.43 ms vs 0.51 ms); these
+are different runs on different hardware (Mac16,11 vs MacBookPro18,3), not a controlled
+before/after. The 100k concurrency gate held: 32 of 32 revisions committed with one concurrent
+package writer. The benchmark now renews its lease before each commit and allows 300 s to drain,
+because serialized debug-build commits at 100k assets outlast the lease TTL and the old 30 s wait.

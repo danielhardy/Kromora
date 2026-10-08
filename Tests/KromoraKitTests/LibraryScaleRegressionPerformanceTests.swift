@@ -527,6 +527,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
                     if index == 0 { await gate.wait() }
                     let committed: Bool
                     do {
+                        // Stands in for the session heartbeat: serialized 100k-asset commits
+                        // outlast the lease TTL in a debug build.
+                        try lease.renew()
                         _ = try package.appendEditRevision(
                             for: targetID,
                             document: EditDocument(light: .init(exposure: Double(index) / 100)),
@@ -551,7 +554,9 @@ final class LibraryScaleRegressionPerformanceTests: TempDirectoryTestCase {
         XCTAssertGreaterThan(scheduler.yieldedPackageIOCount, 0)
 
         await gate.releaseAll()
-        try await waitUntil("package writers to drain") { scheduler.isIdle }
+        // 32 serialized edit commits each decode and re-encode the target's ~400-entry membership
+        // shard; a debug build needs more than the default 30 s for that at 100,000 assets.
+        try await waitUntil("package writers to drain", timeout: .seconds(300)) { scheduler.isIdle }
         let maxConcurrentWriters = await probe.maximum
         let committed = await probe.committed
         let finalRecord = try package.readAssetRecord(for: targetID)

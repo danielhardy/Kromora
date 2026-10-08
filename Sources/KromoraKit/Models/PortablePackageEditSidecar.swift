@@ -586,7 +586,10 @@ extension PortableLibraryPackage {
             guard !entries.isEmpty else { continue }
             repaired.append(contentsOf: entries.map(\.assetID))
             await onBatch?(entries)
-            await Task.yield()
+            // The writer mutation lock is unfair: a plain yield lets this loop re-take it before
+            // a waiting library-state edit is scheduled, starving that edit until every shard is
+            // repaired. A short sleep hands the lock to any waiter between shard transactions.
+            try await Task.sleep(for: .milliseconds(1))
         }
         return repaired
     }
@@ -608,14 +611,15 @@ extension PortableLibraryPackage {
             }
             if isCancelled() { throw CancellationError() }
             let scannedShard = try readMembershipShard(shardName)
-            let missingIDs = scannedShard.entries
+            let missing = scannedShard.entries
                 .filter { !$0.isTombstone && $0.summary.presentedAspectRatio == nil }
-                .map(\.assetID)
-            guard !missingIDs.isEmpty else { return [] }
+            guard !missing.isEmpty else { return [] }
 
             var presentedRatios: [PortablePhotoAssetID: Double] = [:]
-            for assetID in missingIDs {
+            presentedRatios.reserveCapacity(missing.count)
+            for entry in missing {
                 if isCancelled() { throw CancellationError() }
+                let assetID = entry.assetID
                 let document: EditDocument
                 if let record = try? readAssetRecord(for: assetID), record.currentRevision > 0,
                    let revision = try? readEditRevision(for: assetID) {
@@ -623,8 +627,7 @@ extension PortableLibraryPackage {
                 } else {
                     document = EditDocument()
                 }
-                if let ratio = scannedShard.entries.first(where: { $0.assetID == assetID })?
-                    .summary.presentedAspectRatio(for: document) {
+                if let ratio = entry.summary.presentedAspectRatio(for: document) {
                     presentedRatios[assetID] = ratio
                 }
             }

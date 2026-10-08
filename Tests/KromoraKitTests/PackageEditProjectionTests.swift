@@ -190,6 +190,42 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         }
     }
 
+    func testPresentedAspectRatioRepairHandlesDenseShardWithoutRecords() async throws {
+        let (package, lease, assets) = try makeLegacyGeometryPackage(
+            name: "LegacyGeometryDense", assetCount: 1
+        )
+        defer { try? lease.release() }
+        let asset = try XCTUnwrap(assets.first)
+        var shard = try package.readMembershipShard(asset.shardName)
+        let template = try XCTUnwrap(shard.entries.first)
+        let denseCount = 4_000
+        for ordinal in 0..<denseCount {
+            let uuidString = asset.shardName.uppercased()
+                + String(format: "%06X-0000-4000-8000-%012X", ordinal, ordinal)
+            let id = PortablePhotoAssetID(uuid: try XCTUnwrap(UUID(uuidString: uuidString)))
+            XCTAssertEqual(PortableLibraryPackage.shard(for: id), asset.shardName)
+            var summary = template.summary
+            summary.presentedAspectRatio = nil
+            shard.entries.append(PortablePackageMembershipEntry(
+                assetID: id,
+                recordPath: "Assets/\(asset.shardName)/\(id.raw)/asset.json", summary: summary
+            ))
+        }
+        try package.writeMembershipShard(shard)
+
+        let repaired = try package.repairPresentedAspectRatioShard(
+            asset.shardName, lease: lease
+        )
+        XCTAssertEqual(repaired.count, denseCount + 1)
+        let reread = try package.readMembershipShard(asset.shardName)
+        XCTAssertTrue(reread.entries.allSatisfy { $0.summary.presentedAspectRatio != nil })
+        XCTAssertEqual(
+            reread.entries.first { $0.assetID == asset.assetID }?.summary.presentedAspectRatio
+                ?? 0,
+            asset.expectedRatio, accuracy: 1e-9
+        )
+    }
+
     func testEditCommitDuringPresentedAspectRatioRepairWins() async throws {
         let (package, lease, assets) = try makeLegacyGeometryPackage(
             name: "LegacyGeometryEditRace", assetCount: 1

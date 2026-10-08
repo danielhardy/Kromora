@@ -635,6 +635,14 @@ struct PortableLibraryPackage: Sendable {
     }
 
     private func validate(_ shard: PortablePackageMembershipShard) throws {
+        // Entry paths are pinned to `Assets/<shard>/<uuid>/asset.json` below, so lexical safety
+        // is implied and the symlink-escape check needs to run once for the shard directory
+        // rather than once per entry (an lstat walk per entry made every dense-shard read,
+        // write and repair pay O(entries) filesystem calls). Each asset directory is still
+        // resolved through `packageURL(for:)` whenever its record is actually opened.
+        guard (try? packageURL(for: "Assets/\(shard.shard)")) != nil else {
+            throw PortablePackageError.invalidRelativePath("Assets/\(shard.shard)")
+        }
         var ids = Set<PortablePhotoAssetID>()
         for entry in shard.entries {
             guard Self.shard(for: entry.assetID) == shard.shard else {
@@ -645,9 +653,6 @@ struct PortableLibraryPackage: Sendable {
             }
             let expectedPath = "Assets/\(shard.shard)/\(entry.assetID.raw)/asset.json"
             guard entry.recordPath == expectedPath else {
-                throw PortablePackageError.recordPathMismatch(entry.recordPath)
-            }
-            guard (try? packageURL(for: entry.recordPath)) != nil else {
                 throw PortablePackageError.recordPathMismatch(entry.recordPath)
             }
         }
@@ -788,6 +793,38 @@ private struct JSONMemberParser {
         }
     }
 
+    /// Validates a nested object without materialising its members. Only the top-level members
+    /// are kept as raw data, so building (and copying) fields for every nested level would make
+    /// the cost grow with nesting depth for no benefit.
+    private mutating func skipObject() throws {
+        guard consume(123) else { throw ParseError.invalidJSON }
+        skipWhitespace()
+        if consume(125) { return }
+        while true {
+            skipWhitespace()
+            try skipString()
+            skipWhitespace()
+            guard consume(58) else { throw ParseError.invalidJSON }
+            skipWhitespace()
+            try parseValue()
+            skipWhitespace()
+            if consume(125) { return }
+            guard consume(44) else { throw ParseError.invalidJSON }
+        }
+    }
+
+    private mutating func skipString() throws {
+        guard consume(34) else { throw ParseError.invalidJSON }
+        while index < bytes.count {
+            let byte = bytes[index]
+            index += 1
+            if byte == 92 { guard index < bytes.count else { throw ParseError.invalidJSON }; index += 1 }
+            else if byte == 34 { return }
+            else if byte < 32 { throw ParseError.invalidJSON }
+        }
+        throw ParseError.invalidJSON
+    }
+
     private mutating func parseString() throws -> Data {
         let start = index
         guard consume(34) else { throw ParseError.invalidJSON }
@@ -804,8 +841,8 @@ private struct JSONMemberParser {
     private mutating func parseValue() throws -> Void {
         guard index < bytes.count else { throw ParseError.invalidJSON }
         switch bytes[index] {
-        case 34: _ = try parseString()
-        case 123: _ = try parseObject()
+        case 34: try skipString()
+        case 123: try skipObject()
         case 91:
             index += 1
             skipWhitespace()
