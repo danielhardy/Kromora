@@ -197,6 +197,8 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         defer { try? lease.release() }
         let asset = try XCTUnwrap(assets.first)
         var shard = try package.readMembershipShard(asset.shardName)
+        shard.entries[0].summary.rating = 4
+        shard.entries[0].summary.flag = PhotoFlag.pick.rawValue
         let template = try XCTUnwrap(shard.entries.first)
         let denseCount = 4_000
         for ordinal in 0..<denseCount {
@@ -208,7 +210,10 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
             summary.presentedAspectRatio = nil
             shard.entries.append(PortablePackageMembershipEntry(
                 assetID: id,
-                recordPath: "Assets/\(asset.shardName)/\(id.raw)/asset.json", summary: summary
+                recordPath: "Assets/\(asset.shardName)/\(id.raw)/asset.json",
+                deletedRevision: ordinal == denseCount - 1 ? 2 : nil,
+                isTombstone: ordinal == denseCount - 1,
+                summary: summary
             ))
         }
         try package.writeMembershipShard(shard)
@@ -216,9 +221,16 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         let repaired = try package.repairPresentedAspectRatioShard(
             asset.shardName, lease: lease
         )
-        XCTAssertEqual(repaired.count, denseCount + 1)
+        XCTAssertEqual(repaired.count, denseCount)
         let reread = try package.readMembershipShard(asset.shardName)
-        XCTAssertTrue(reread.entries.allSatisfy { $0.summary.presentedAspectRatio != nil })
+        XCTAssertTrue(reread.entries.filter { !$0.isTombstone }.allSatisfy {
+            $0.summary.presentedAspectRatio != nil
+                && $0.summary.rating == 4 && $0.summary.flag == PhotoFlag.pick.rawValue
+        })
+        let tombstone = try XCTUnwrap(reread.entries.last)
+        XCTAssertTrue(tombstone.isTombstone)
+        XCTAssertEqual(tombstone.deletedRevision, 2)
+        XCTAssertNil(tombstone.summary.presentedAspectRatio)
         XCTAssertEqual(
             reread.entries.first { $0.assetID == asset.assetID }?.summary.presentedAspectRatio
                 ?? 0,
@@ -226,7 +238,32 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
         )
     }
 
-    func testEditCommitDuringPresentedAspectRatioRepairWins() async throws {
+    func testPresentedAspectRatioRepairCancellationLeavesShardUnchanged() throws {
+        let (package, lease, assets) = try makeLegacyGeometryPackage(
+            name: "LegacyGeometryCancel", assetCount: 1
+        )
+        defer { try? lease.release() }
+        let asset = try XCTUnwrap(assets.first)
+        let before = try package.readMembershipShard(asset.shardName)
+        let cancellationChecks = OSAllocatedUnfairLock(initialState: 0)
+
+        XCTAssertThrowsError(try package.repairPresentedAspectRatioShard(
+            asset.shardName, lease: lease,
+            isCancelled: {
+                cancellationChecks.withLock {
+                    $0 += 1
+                    return $0 >= 3
+                }
+            }
+        )) { error in
+            XCTAssertTrue(error is CancellationError)
+        }
+
+        XCTAssertEqual(try package.readMembershipShard(asset.shardName), before)
+        XCTAssertNoThrow(try PortableLibraryPackage.open(at: package.rootURL))
+    }
+
+    func testEditAndCatalogMutationsDuringPresentedAspectRatioRepairWin() async throws {
         let (package, lease, assets) = try makeLegacyGeometryPackage(
             name: "LegacyGeometryEditRace", assetCount: 1
         )
@@ -258,9 +295,19 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
             }
             let editTask = Task.detached {
                 bothStarted.withLock { $0 += 1 }
-                return try package.commitEditRevision(
+                let commit = try package.commitEditRevision(
                     for: asset.assetID, document: userDocument, lease: lease
                 )
+                try lease.withWriterMutationLock {
+                    var shard = try package.readMembershipShard(asset.shardName)
+                    let index = try XCTUnwrap(shard.entries.firstIndex {
+                        $0.assetID == asset.assetID
+                    })
+                    shard.entries[index].summary.rating = 5
+                    shard.entries[index].summary.flag = PhotoFlag.reject.rawValue
+                    try package.writeMembershipShard(shard)
+                }
+                return commit
             }
             tasks.withLock { $0 = (repairTask, editTask) }
             while bothStarted.withLock({ $0 < 2 }) {
@@ -282,6 +329,10 @@ final class PackageEditProjectionTests: TempDirectoryTestCase {
                 .first { $0.assetID == asset.assetID }?.summary.presentedAspectRatio,
             expectedRatio
         )
+        let summary = try XCTUnwrap(package.readMembershipShard(asset.shardName).entries
+            .first { $0.assetID == asset.assetID }?.summary)
+        XCTAssertEqual(summary.rating, 5)
+        XCTAssertEqual(summary.flag, PhotoFlag.reject.rawValue)
         XCTAssertNoThrow(try PortableLibraryPackage.open(at: package.rootURL))
     }
 

@@ -75,5 +75,39 @@ final class PackagePathTests: TempDirectoryTestCase {
             report.criticalFailures.map(\.message).joined(separator: "\n")
         )
     }
-}
 
+    func testMembershipValidationAndLazyRecordReadRejectSymlinkEscapes() throws {
+        let packageURL = tempDirectory.appendingPathComponent("LazyPaths.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let assetID = PortablePhotoAssetID(uuid: try XCTUnwrap(
+            UUID(uuidString: "ab000000-0000-4000-8000-000000000001")
+        ))
+        let recordPath = "Assets/ab/\(assetID.raw)/asset.json"
+        var shard = try package.readMembershipShard("ab")
+        shard.entries = [.init(
+            assetID: assetID, recordPath: recordPath,
+            summary: .init(displayName: "source.jpg")
+        )]
+        try package.writeMembershipShard(shard)
+
+        let outside = tempDirectory.appendingPathComponent("OutsideRecord")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        let shardDirectory = packageURL.appendingPathComponent("Assets/ab")
+        try FileManager.default.createDirectory(at: shardDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: shardDirectory.appendingPathComponent(assetID.raw), withDestinationURL: outside
+        )
+        // Membership is a summary-only read; record containment is checked at its I/O boundary.
+        XCTAssertNoThrow(try package.readMembershipShard("ab"))
+        XCTAssertThrowsError(try package.readAssetRecord(for: assetID)) { error in
+            XCTAssertEqual(error as? PortablePackageError, .invalidRelativePath(recordPath))
+        }
+
+        try FileManager.default.removeItem(at: shardDirectory)
+        try FileManager.default.createSymbolicLink(at: shardDirectory, withDestinationURL: outside)
+        XCTAssertThrowsError(try package.readMembershipShard("ab")) { error in
+            XCTAssertEqual(error as? PortablePackageError, .invalidRelativePath("Assets/ab"))
+        }
+        XCTAssertThrowsError(try package.writeMembershipShard(shard))
+    }
+}

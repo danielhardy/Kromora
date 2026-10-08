@@ -137,6 +137,11 @@ Before the change the 100k run produced no report after 12 minutes.
 | 10,000 | 1,726.63 ms | 165.12 ms | 173.22 ms | 0 |
 | 100,000 | 15,935.45 ms | 406.51 ms | 430.77 ms | 0 |
 
+The existing `production-mutation-reload` timer starts **after** `updateLibraryState` returns,
+so this column measures the subsequent browsing reload, excluding the package write and writer-lock
+wait. The completed probe checks that each mutation finishes and its rating/flag is visible, but
+these timings do not quantify the full mutation latency. KRMA-831 tracks that instrumentation gap.
+
 At 100,000 assets the in-memory rows are comparable to the dated KRMA-410 capture above (warm launch
 995.97 ms vs 1,746.79 ms, filter 33.56 ms vs 52.15 ms, scroll 284.13 ms vs 506.19 ms, memory
 32,161,792 bytes, 60 decoded thumbnails, interactive preview submission 0.43 ms vs 0.51 ms); these
@@ -144,3 +149,13 @@ are different runs on different hardware (Mac16,11 vs MacBookPro18,3), not a con
 before/after. The 100k concurrency gate held: 32 of 32 revisions committed with one concurrent
 package writer. The benchmark now renews its lease before each commit and allows 300 s to drain,
 because serialized debug-build commits at 100k assets outlast the lease TTL and the old 30 s wait.
+
+Counterpoint verification independently repeated the documented three-sample probe on 2026-10-08
+on the same Mac16,11 / macOS 27.2 / Swift 6.4 environment. It passed in 483.74 s; the full JSON is
+[`evidence/library-scale-krma-829-verification.json`](evidence/library-scale-krma-829-verification.json).
+Production launch p95 was 315.26 / 1,726.74 / 16,012.04 ms at 1k / 10k / 100k assets, respectively.
+Post-mutation browsing reload p95 was 143.33 / 164.60 / 403.64 ms, and browsing record reads were
+zero at every scale. At 100k, launch and post-mutation reload differ by approximately +0.5% and
+−0.7% from the implementation capture above; the latter remains above the dated KRMA-519 reload
+capture of 323.02 ms (a different run and macOS version, not a controlled before/after).
+The concurrency gate again committed all 32 revisions with one concurrent package writer.

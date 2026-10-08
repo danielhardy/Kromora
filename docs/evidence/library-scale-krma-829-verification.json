@@ -1,0 +1,275 @@
+{
+  "baseline" : "docs\/LIBRARY_PACKAGE_BASELINE.md (KRMA-389)",
+  "benchmark" : "package-backed-library-scale-regression",
+  "concurrency" : {
+    "committedRevisionCount" : 32,
+    "editorStartedWhilePackageIOWasActive" : true,
+    "maxConcurrentPackageWriters" : 1,
+    "packageIOYieldCount" : 1,
+    "packageOperations" : 32,
+    "scale" : 100000
+  },
+  "environment" : {
+    "disk" : "unavailable",
+    "macOS" : "27.2",
+    "machineClass" : "Mac16,11",
+    "swift" : "Apple Swift version 6.4 (swiftlang-6.4.0.33.1 clang-2100.3.33.1)\nTarget: arm64-apple-macosx27.2.0"
+  },
+  "firstPageSize" : 60,
+  "sampleCount" : 3,
+  "scales" : {
+    "1000" : {
+      "assetCount" : 1000,
+      "method" : "package-membership-and-index-projection",
+      "metrics" : {
+        "decoded-thumbnail-count" : {
+          "p95" : 60,
+          "p999" : 60,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "filter" : {
+          "p95" : 0.328959,
+          "p999" : 0.328959,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "first-page-delivery" : {
+          "p95" : 11.443542,
+          "p999" : 11.443542,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "interactive-preview-submission" : {
+          "p95" : 1.055166,
+          "p999" : 1.055166,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "memory-footprint" : {
+          "p95" : 327680,
+          "p999" : 327680,
+          "samples" : 3,
+          "unit" : "bytes"
+        },
+        "observable-object-count" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-first-grid" : {
+          "p95" : 2.5435,
+          "p999" : 2.5435,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-launch" : {
+          "p95" : 315.2645,
+          "p999" : 315.2645,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-reload" : {
+          "p95" : 143.328375,
+          "p999" : 143.328375,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-record-reads" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-reload" : {
+          "p95" : 156.896542,
+          "p999" : 156.896542,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "scroll" : {
+          "p95" : 2.917042,
+          "p999" : 2.917042,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "warm-launch" : {
+          "p95" : 11.443542,
+          "p999" : 11.443542,
+          "samples" : 3,
+          "unit" : "ms"
+        }
+      }
+    },
+    "10000" : {
+      "assetCount" : 10000,
+      "method" : "package-membership-and-index-projection",
+      "metrics" : {
+        "decoded-thumbnail-count" : {
+          "p95" : 60,
+          "p999" : 60,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "filter" : {
+          "p95" : 3.009583,
+          "p999" : 3.009583,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "first-page-delivery" : {
+          "p95" : 101.850125,
+          "p999" : 101.850125,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "interactive-preview-submission" : {
+          "p95" : 0.451625,
+          "p999" : 0.451625,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "memory-footprint" : {
+          "p95" : 3211264,
+          "p999" : 3211264,
+          "samples" : 3,
+          "unit" : "bytes"
+        },
+        "observable-object-count" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-first-grid" : {
+          "p95" : 2.047333,
+          "p999" : 2.047333,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-launch" : {
+          "p95" : 1726.738958,
+          "p999" : 1726.738958,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-reload" : {
+          "p95" : 164.601458,
+          "p999" : 164.601458,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-record-reads" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-reload" : {
+          "p95" : 174.064125,
+          "p999" : 174.064125,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "scroll" : {
+          "p95" : 28.758792,
+          "p999" : 28.758792,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "warm-launch" : {
+          "p95" : 101.850125,
+          "p999" : 101.850125,
+          "samples" : 3,
+          "unit" : "ms"
+        }
+      }
+    },
+    "100000" : {
+      "assetCount" : 100000,
+      "method" : "package-membership-and-index-projection",
+      "metrics" : {
+        "decoded-thumbnail-count" : {
+          "p95" : 60,
+          "p999" : 60,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "filter" : {
+          "p95" : 31.040209,
+          "p999" : 31.040209,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "first-page-delivery" : {
+          "p95" : 997.128292,
+          "p999" : 997.128292,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "interactive-preview-submission" : {
+          "p95" : 0.467084,
+          "p999" : 0.467084,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "memory-footprint" : {
+          "p95" : 32161792,
+          "p999" : 32161792,
+          "samples" : 3,
+          "unit" : "bytes"
+        },
+        "observable-object-count" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-first-grid" : {
+          "p95" : 1.97575,
+          "p999" : 1.97575,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-launch" : {
+          "p95" : 16012.042542,
+          "p999" : 16012.042542,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-mutation-reload" : {
+          "p95" : 403.644958,
+          "p999" : 403.644958,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "production-record-reads" : {
+          "p95" : 0,
+          "p999" : 0,
+          "samples" : 3,
+          "unit" : "count"
+        },
+        "production-reload" : {
+          "p95" : 435.370583,
+          "p999" : 435.370583,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "scroll" : {
+          "p95" : 278.524125,
+          "p999" : 278.524125,
+          "samples" : 3,
+          "unit" : "ms"
+        },
+        "warm-launch" : {
+          "p95" : 997.128292,
+          "p999" : 997.128292,
+          "samples" : 3,
+          "unit" : "ms"
+        }
+      }
+    }
+  },
+  "schemaVersion" : 1
+}
