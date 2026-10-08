@@ -49,18 +49,27 @@ struct EffectsInspectorView: View {
     }
 
     private var sharpeningSection: some View {
-        InspectorDisclosure("Sharpening", isExpanded: $sharpeningExpanded) {
+        InspectorDisclosure(
+            "Sharpening",
+            isExpanded: $sharpeningExpanded,
+            trailingActionTitle: "Reset Sharpening",
+            trailingActionEnabled: viewModel.hasSharpeningAdjustments,
+            trailingAction: viewModel.resetAllSharpening,
+            trailingAccessory: AnyView(advancedToggle(
+                "Sharpening", isExpanded: $sharpeningAdvancedExpanded,
+                isModified: sharpeningHasAdvancedAdjustments
+            ))
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 detailRow(.sharpeningAmount)
-                advancedButton("Sharpening", isExpanded: $sharpeningAdvancedExpanded)
                 if sharpeningAdvancedExpanded {
-                    advancedPanel {
+                    InspectorAdvancedGroup(title: "Sharpening") {
                         VStack(alignment: .leading, spacing: 12) {
-                        ForEach([DetailControl.sharpeningRadius, .sharpeningDetail, .sharpeningMasking], id: \.self) { control in
-                            detailRow(control)
-                        }
-                        Text("Masking protects smooth areas; higher values restrict sharpening to stronger edges.")
-                            .font(.caption2).foregroundStyle(.secondary)
+                            ForEach([DetailControl.sharpeningRadius, .sharpeningDetail, .sharpeningMasking], id: \.self) { control in
+                                detailRow(control)
+                            }
+                            Text("Masking protects smooth areas; higher values restrict sharpening to stronger edges.")
+                                .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -76,7 +85,13 @@ struct EffectsInspectorView: View {
     }
 
     private var noiseSection: some View {
-        InspectorDisclosure("Noise Reduction", isExpanded: $noiseExpanded) {
+        InspectorDisclosure(
+            "Noise Reduction",
+            isExpanded: $noiseExpanded,
+            trailingActionTitle: "Reset Noise Reduction",
+            trailingActionEnabled: viewModel.hasNoiseAdjustments,
+            trailingAction: viewModel.resetAllNoiseReduction
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach([DetailControl.luminanceNoise, .luminanceDetail, .luminanceContrast, .colorNoise, .colorDetail, .colorContrast], id: \.self) { control in
                     detailRow(control)
@@ -98,7 +113,13 @@ struct EffectsInspectorView: View {
     }
 
     private var detailSection: some View {
-        InspectorDisclosure("Texture / Clarity / Dehaze", isExpanded: $detailExpanded) {
+        InspectorDisclosure(
+            "Texture / Clarity / Dehaze",
+            isExpanded: $detailExpanded,
+            trailingActionTitle: "Reset Texture, Clarity, and Dehaze",
+            trailingActionEnabled: viewModel.hasTextureClarityDehazeAdjustments,
+            trailingAction: viewModel.resetAllTextureClarityDehaze
+        ) {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(EffectsControl.allCases, id: \.self) { control in
                     valueRow(
@@ -116,21 +137,25 @@ struct EffectsInspectorView: View {
     }
 
     private var vignetteSection: some View {
-        InspectorDisclosure("Vignette", isExpanded: $vignetteExpanded) {
+        InspectorDisclosure(
+            "Vignette",
+            isExpanded: $vignetteExpanded,
+            trailingActionTitle: "Reset Vignette",
+            trailingActionEnabled: viewModel.hasVignetteAdjustments,
+            trailingAction: viewModel.resetAllVignette,
+            trailingAccessory: AnyView(advancedToggle(
+                "Vignette", isExpanded: $vignetteAdvancedExpanded,
+                isModified: vignetteHasAdvancedAdjustments
+            ))
+        ) {
             VStack(alignment: .leading, spacing: 12) {
-                InspectorSectionResetButton(
-                    title: "Reset Vignette",
-                    disabled: !viewModel.hasVignetteAdjustments,
-                    action: viewModel.resetAllVignette
-                )
                 vignetteRow(.amount)
-                advancedButton("Vignette", isExpanded: $vignetteAdvancedExpanded)
                 if vignetteAdvancedExpanded {
-                    advancedPanel {
+                    InspectorAdvancedGroup(title: "Vignette") {
                         VStack(alignment: .leading, spacing: 12) {
-                        ForEach([VignetteControl.midpoint, .roundness, .feather, .highlights], id: \.self) { control in
-                            vignetteRow(control)
-                        }
+                            ForEach([VignetteControl.midpoint, .roundness, .feather, .highlights], id: \.self) { control in
+                                vignetteRow(control)
+                            }
                         }
                     }
                 }
@@ -161,21 +186,25 @@ struct EffectsInspectorView: View {
     }
 
     private var grainSection: some View {
-        InspectorDisclosure("Grain", isExpanded: $grainExpanded) {
+        InspectorDisclosure(
+            "Grain",
+            isExpanded: $grainExpanded,
+            trailingActionTitle: "Reset Grain",
+            trailingActionEnabled: viewModel.hasGrainAdjustments,
+            trailingAction: viewModel.resetAllGrain,
+            trailingAccessory: AnyView(advancedToggle(
+                "Grain", isExpanded: $grainAdvancedExpanded,
+                isModified: grainHasAdvancedAdjustments
+            ))
+        ) {
             VStack(alignment: .leading, spacing: 12) {
-                InspectorSectionResetButton(
-                    title: "Reset Grain",
-                    disabled: !viewModel.hasGrainAdjustments,
-                    action: viewModel.resetAllGrain
-                )
                 grainRow(.amount)
-                advancedButton("Grain", isExpanded: $grainAdvancedExpanded)
                 if grainAdvancedExpanded {
-                    advancedPanel {
+                    InspectorAdvancedGroup(title: "Grain") {
                         VStack(alignment: .leading, spacing: 12) {
-                        ForEach([GrainControl.size, .roughness], id: \.self) { control in
-                            grainRow(control)
-                        }
+                            ForEach([GrainControl.size, .roughness], id: \.self) { control in
+                                grainRow(control)
+                            }
                         }
                     }
                 }
@@ -216,35 +245,35 @@ struct EffectsInspectorView: View {
             .contains { $0.value(in: viewModel.document.effects.grain) != $0.neutral }
     }
 
-    private func advancedButton(_ section: String, isExpanded: Binding<Bool>) -> some View {
+    private func advancedToggle(
+        _ section: String,
+        isExpanded: Binding<Bool>,
+        isModified: Bool
+    ) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) {
                 isExpanded.wrappedValue.toggle()
             }
         } label: {
-            HStack(spacing: 5) {
+            HStack(spacing: 4) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 10, weight: .medium))
                 Text("Advanced")
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9, weight: .semibold))
-                    .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
+                if isModified && !isExpanded.wrappedValue {
+                    Circle().fill(Color.accentColor).frame(width: 5, height: 5)
+                        .accessibilityHidden(true)
+                }
             }
-            .font(.caption.weight(.medium))
+            .font(.caption.weight(.semibold))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(Color.accentColor)
+        .help("Show or hide advanced \(section) controls")
         .accessibilityLabel("Advanced \(section) controls")
         .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
         .accessibilityHint("Show or hide advanced \(section) controls")
         .accessibilityAddTraits(.isToggle)
-    }
-
-    private func advancedPanel<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        content()
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
-            .transition(.opacity.combined(with: .move(edge: .top)))
     }
 
     private func expandSharpeningAdvancedIfNeeded() {
@@ -285,6 +314,34 @@ struct EffectsInspectorView: View {
 
     private var unsignedWholeReadout: (Double) -> String {
         { value in String(format: "%.0f", value) }
+    }
+}
+
+/// A subordinate, keyboard-accessible group for controls that refine a section's primary value.
+private struct InspectorAdvancedGroup<Content: View>: View {
+    let title: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(title) · Advanced")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            content()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.primary.opacity(0.1))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.accentColor.opacity(0.32), lineWidth: 1)
+                }
+        }
+        .padding(.leading, 12)
+        .transition(.opacity.combined(with: .move(edge: .top)))
     }
 }
 

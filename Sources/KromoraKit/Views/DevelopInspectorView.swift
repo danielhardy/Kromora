@@ -206,9 +206,7 @@ struct DevelopInspectorView: View {
                 }
                 if control == .whiteBalance {
                     HStack {
-                        Button("As Shot") { viewModel.resetWhiteBalance() }
-                            .buttonStyle(.link)
-                            .help("Restore this file's decoder white balance")
+                        ResetIconButton("Reset to As Shot") { viewModel.resetWhiteBalance() }
                         ResettableAdjustmentLabel(
                             title: "Tint",
                             reset: { viewModel.resetWhiteBalance(.tint) },

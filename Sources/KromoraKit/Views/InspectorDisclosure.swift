@@ -39,6 +39,7 @@ struct InspectorDisclosure<Content: View>: View {
     var trailingActionTitle: String?
     var trailingActionEnabled: Bool
     var trailingAction: (() -> Void)?
+    var trailingAccessory: AnyView?
     @ViewBuilder let content: () -> Content
 
     init(
@@ -48,6 +49,7 @@ struct InspectorDisclosure<Content: View>: View {
         trailingActionTitle: String? = nil,
         trailingActionEnabled: Bool = true,
         trailingAction: (() -> Void)? = nil,
+        trailingAccessory: AnyView? = nil,
         @ViewBuilder content: @escaping () -> Content
     ) {
         self.title = title
@@ -56,6 +58,7 @@ struct InspectorDisclosure<Content: View>: View {
         self.trailingActionTitle = trailingActionTitle
         self.trailingActionEnabled = trailingActionEnabled
         self.trailingAction = trailingAction
+        self.trailingAccessory = trailingAccessory
         self.content = content
     }
 
@@ -79,6 +82,10 @@ struct InspectorDisclosure<Content: View>: View {
                 .accessibilityHint("Double-tap to \(isExpanded ? "collapse" : "expand")")
                 .accessibilityAddTraits(.isToggle)
                 .accessibilityRemoveTraits(.isButton)
+
+                if let trailingAccessory {
+                    trailingAccessory
+                }
 
                 if let trailingActionTitle, let trailingAction {
                     ResetIconButton(

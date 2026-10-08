@@ -108,6 +108,52 @@ final class ResettableInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.light.exposure, 1)
     }
 
+    func testSharpeningAndNoiseReductionSectionResetsAreIsolatedAndUndoable() {
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.updateDocument {
+            $0.effects.texture = 24
+            $0.effects.detail = DetailAdjustments(
+                sharpeningRadius: 2.4,
+                sharpeningAmount: 35,
+                sharpeningDetail: 70,
+                sharpeningMasking: 18,
+                luminanceNoise: 42,
+                luminanceDetail: 65,
+                luminanceContrast: 28,
+                colorNoise: 20,
+                colorDetail: 35,
+                colorContrast: 16
+            )
+        }
+
+        XCTAssertTrue(viewModel.hasSharpeningAdjustments)
+        XCTAssertTrue(viewModel.hasNoiseAdjustments)
+
+        viewModel.resetAllSharpening()
+
+        XCTAssertFalse(viewModel.hasSharpeningAdjustments)
+        XCTAssertTrue(viewModel.hasNoiseAdjustments)
+        XCTAssertEqual(viewModel.document.effects.detail.sharpeningRadius, DetailControl.sharpeningRadius.neutral)
+        XCTAssertEqual(viewModel.document.effects.detail.sharpeningAmount, DetailControl.sharpeningAmount.neutral)
+        XCTAssertEqual(viewModel.document.effects.detail.luminanceNoise, 42)
+        XCTAssertEqual(viewModel.document.effects.texture, 24)
+
+        viewModel.undo()
+        XCTAssertTrue(viewModel.hasSharpeningAdjustments)
+        XCTAssertTrue(viewModel.hasNoiseAdjustments)
+
+        viewModel.resetAllNoiseReduction()
+
+        XCTAssertTrue(viewModel.hasSharpeningAdjustments)
+        XCTAssertFalse(viewModel.hasNoiseAdjustments)
+        XCTAssertEqual(viewModel.document.effects.detail.colorNoise, DetailControl.colorNoise.neutral)
+        XCTAssertEqual(viewModel.document.effects.detail.sharpeningAmount, 35)
+
+        viewModel.undo()
+        XCTAssertTrue(viewModel.hasNoiseAdjustments)
+        XCTAssertEqual(viewModel.document.effects.detail.colorNoise, 20)
+    }
+
     func testResetPhotoClearsEveryStageAsOneUndoableOperation() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         viewModel.updateDocument {

@@ -23,6 +23,33 @@ extension AppViewModel {
         updateDocument { $0.effects.detail = .neutral }
     }
 
+    func resetAllSharpening() {
+        endUndoGrouping()
+        updateDocument { document in
+            for control in [DetailControl.sharpeningRadius, .sharpeningAmount, .sharpeningDetail, .sharpeningMasking] {
+                control.setting(control.neutral, in: &document.effects.detail)
+            }
+        }
+    }
+
+    func resetAllNoiseReduction() {
+        endUndoGrouping()
+        updateDocument { document in
+            for control in [DetailControl.luminanceNoise, .luminanceDetail, .luminanceContrast, .colorNoise, .colorDetail, .colorContrast] {
+                control.setting(control.neutral, in: &document.effects.detail)
+            }
+        }
+    }
+
+    func resetAllTextureClarityDehaze() {
+        endUndoGrouping()
+        updateDocument { document in
+            for control in EffectsControl.allCases {
+                document.effects = control.setting(control.neutral, in: document.effects)
+            }
+        }
+    }
+
     func effectsValue(for control: EffectsControl) -> Double {
         control.value(in: document.effects)
     }
@@ -106,9 +133,22 @@ extension AppViewModel {
 
     /// Includes retained subordinate values even while Vignette/Grain Amount is zero. Those values
     /// are intentionally persisted so turning a group back on restores its previous shape.
+    var hasTextureClarityDehazeAdjustments: Bool {
+        EffectsControl.allCases.contains { $0.value(in: document.effects) != $0.neutral }
+    }
+
+    var hasSharpeningAdjustments: Bool {
+        [DetailControl.sharpeningRadius, .sharpeningAmount, .sharpeningDetail, .sharpeningMasking]
+            .contains { $0.value(in: document.effects.detail) != $0.neutral }
+    }
+
+    var hasNoiseAdjustments: Bool {
+        [DetailControl.luminanceNoise, .luminanceDetail, .luminanceContrast, .colorNoise, .colorDetail, .colorContrast]
+            .contains { $0.value(in: document.effects.detail) != $0.neutral }
+    }
+
     var hasDetailEffects: Bool {
-        document.effects.texture != 0 || document.effects.clarity != 0 || document.effects.dehaze != 0 ||
-            !document.effects.detail.isIdentity
+        hasTextureClarityDehazeAdjustments || hasSharpeningAdjustments || hasNoiseAdjustments
     }
 
     var hasVignetteAdjustments: Bool { document.effects.vignette != .neutral }
