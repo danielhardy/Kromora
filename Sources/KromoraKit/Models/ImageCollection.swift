@@ -781,7 +781,14 @@ final class ImageCollectionPresentationModel {
     }
 
     func applyEditedThumbnail(_ thumbnail: NSImage?, for id: PhotoAssetID, revision: String) {
-        items.first { $0.id == id }?.applyEditedThumbnail(thumbnail, revision: revision)
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].applyEditedThumbnail(thumbnail, revision: revision)
+        // Reverting to the original falls back to the original raster. A cell that only ever
+        // painted a stored edited frame never loaded one, and original loads are otherwise driven
+        // by viewport demand, so request it here or the cell would spin indefinitely.
+        if thumbnail == nil, items[index].thumbnail == nil {
+            requestOriginalThumbnail(for: id, at: index, priority: priority(for: index))
+        }
     }
     func applyStoredEditedThumbnail(
         _ thumbnail: NSImage, metadata: PresentationFrameMetadata, for id: PhotoAssetID

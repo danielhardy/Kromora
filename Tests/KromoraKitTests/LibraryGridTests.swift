@@ -337,6 +337,29 @@ final class LibraryGridTests: TempDirectoryTestCase {
         )
     }
 
+    /// KRMA-835: a cell that only ever showed an edited frame has no original raster. Reverting it
+    /// to the original must load one instead of leaving the cell on a spinner.
+    func testRevertingToOriginalLoadsTheOriginalRasterForACellThatNeverHadOne() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
+        let asset = PhotoAsset(url: tempDirectory.appendingPathComponent("edited.jpg"))
+        collection.loadPortableWindow(
+            assets: [asset], totalCount: 1, pageIndex: 0, pageSize: 1, query: .all
+        )
+        let item = try XCTUnwrap(collection.items.first)
+        collection.applyEditedThumbnail(
+            NSImage(cgImage: image, size: NSSize(width: 64, height: 48)),
+            for: asset.id, revision: "edited")
+        XCTAssertNotNil(item.thumbnail)
+        XCTAssertNil(item.originalThumbnailForPresentation)
+
+        collection.applyEditedThumbnail(nil, for: asset.id, revision: "identity")
+
+        try await waitForThumbnails(in: collection, ids: [asset.id])
+        XCTAssertNotNil(item.originalThumbnailForPresentation)
+        await collection.shutdown()
+    }
+
     func testPortableWindowReloadReRequestsPreviouslyVisibleThumbnails() async throws {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
         let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })
