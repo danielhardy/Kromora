@@ -17,7 +17,69 @@ struct InfoInspectorView: View {
     var body: some View {
         let _ = RenderDiagnostics.noteInspectorBody()
         return FitsProposedWidth {
-            VStack(spacing: 0) {
+            // Crop slides over the editor panels rather than pushing them: the editor stays put
+            // underneath (histogram included) and is only removed once the crop panel has
+            // covered it, and on leaving crop it is already in place as the panel slides away.
+            ZStack(alignment: .top) {
+                if !canvasState.isCropToolActive {
+                    VStack(spacing: 0) {
+                        if Self.shouldShowEmptyState(
+                            sourceImageAvailable: viewModel.sourceImage != nil,
+                            histogramAvailable: viewModel.histogram != nil,
+                            isNavigationLoading: viewModel.isNavigationLoading
+                        ) {
+                            // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
+                            // offers a trip to Develop to be told "this image is already rendered" about an image
+                            // that does not exist. The empty state alone is the honest answer.
+                            emptyState
+                                .transition(.opacity)
+                        } else {
+                            histogramSection
+
+                            tabSwitcher
+
+                            Divider()
+
+                            Group {
+                                switch inspectorState.tab.content {
+                                case .info:
+                                    infoContent
+                                case .light:
+                                    LightInspectorView(viewModel: viewModel)
+                                case .develop:
+                                    DevelopInspectorView(viewModel: viewModel)
+                                case .color:
+                                    ColorInspectorView(viewModel: viewModel)
+                                case .effects:
+                                    EffectsInspectorView(viewModel: viewModel)
+                                case .look:
+                                    LookInspectorView(viewModel: viewModel)
+                                case .masking:
+                                    MaskingWorkspace(viewModel: viewModel)
+                                case .retouch:
+                                    RetouchInspectorView(viewModel: viewModel)
+                                }
+                            }
+                            .frame(maxHeight: .infinity, alignment: .top)
+                            .transition(inspectorTransition(edge: .leading))
+                            // A source switch can briefly leave neither pixels nor a histogram to show.
+                            // Keep the editor controls mounted until the replacement frame is presented,
+                            // and let their values settle onto the new document.
+                            .environment(
+                                \.sliderSourceAnimation,
+                                SliderSourceAnimation(
+                                    assetID: viewModel.maskingAssetID,
+                                    isEnabled: !accessibilityReduceMotion,
+                                    isAwaitingDocument: viewModel.isInspectorSourceDocumentPending
+                                )
+                            )
+                            .animation(inspectorAnimation, value: viewModel.maskingAssetID)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .transition(editorUnderCropTransition)
+                }
+
                 if canvasState.isCropToolActive {
                     CropInspectorView(
                         aspectRatio: canvasState.cropAspectRatio,
@@ -45,60 +107,13 @@ struct InfoInspectorView: View {
                         onCancel: viewModel.cancelCrop,
                         onDone: viewModel.commitCrop
                     )
-                    .transition(inspectorTransition(edge: .trailing))
-                } else if Self.shouldShowEmptyState(
-                    sourceImageAvailable: viewModel.sourceImage != nil,
-                    histogramAvailable: viewModel.histogram != nil,
-                    isNavigationLoading: viewModel.isNavigationLoading
-                ) {
-                    // No image, no tabs. Both halves describe *a picture*: with nothing open, the switcher
-                    // offers a trip to Develop to be told "this image is already rendered" about an image
-                    // that does not exist. The empty state alone is the honest answer.
-                    emptyState
-                        .transition(.opacity)
-                } else {
-                    histogramSection
-
-                    tabSwitcher
-
-                    Divider()
-
-                    Group {
-                        switch inspectorState.tab.content {
-                        case .info:
-                            infoContent
-                        case .light:
-                            LightInspectorView(viewModel: viewModel)
-                        case .develop:
-                            DevelopInspectorView(viewModel: viewModel)
-                        case .color:
-                            ColorInspectorView(viewModel: viewModel)
-                        case .effects:
-                            EffectsInspectorView(viewModel: viewModel)
-                        case .look:
-                            LookInspectorView(viewModel: viewModel)
-                        case .masking:
-                            MaskingWorkspace(viewModel: viewModel)
-                        case .retouch:
-                            RetouchInspectorView(viewModel: viewModel)
-                        }
-                    }
-                    .frame(maxHeight: .infinity, alignment: .top)
-                    .transition(inspectorTransition(edge: .leading))
-                    // A source switch can briefly leave neither pixels nor a histogram to show.
-                    // Keep the editor controls mounted until the replacement frame is presented,
-                    // and let their values settle onto the new document.
-                    .environment(
-                        \.sliderSourceAnimation,
-                        SliderSourceAnimation(
-                            assetID: viewModel.maskingAssetID,
-                            isEnabled: !accessibilityReduceMotion,
-                            isAwaitingDocument: viewModel.isInspectorSourceDocumentPending
-                        )
-                    )
-                    .animation(inspectorAnimation, value: viewModel.maskingAssetID)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .background(KromoraTheme.inspectorChrome)
+                    .transition(cropPanelTransition)
+                    .zIndex(1)
                 }
             }
+            .clipped()
         }
         .frame(minWidth: 240, idealWidth: 280, maxWidth: 360, alignment: .topLeading)
         // Light matches the toolbar. Dark stays the sidebar step. Follows the window
@@ -137,6 +152,21 @@ struct InfoInspectorView: View {
 
     private var inspectorAnimation: Animation? {
         accessibilityReduceMotion ? nil : .easeInOut(duration: 0.3)
+    }
+
+    /// The crop panel covers the editor; it carries no fade so it reads as a solid sheet.
+    private var cropPanelTransition: AnyTransition {
+        accessibilityReduceMotion ? .opacity : .move(edge: .trailing)
+    }
+
+    /// The editor appears instantly (it sits under the leaving crop panel) and, when crop begins,
+    /// stays mounted for the slide so nothing is revealed or pushed before the panel covers it.
+    private var editorUnderCropTransition: AnyTransition {
+        guard !accessibilityReduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .identity,
+            removal: .opacity.animation(.linear(duration: 0.01).delay(0.3))
+        )
     }
 
     private func inspectorTransition(edge: Edge) -> AnyTransition {
