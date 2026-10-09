@@ -75,14 +75,17 @@ struct PreviewView: View {
                 // A small, unobtrusive indicator: the departing photo stays visible, so the
                 // spinner only needs to say "loading", not take over the canvas.
                 VStack {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(7)
-                        .background(.regularMaterial, in: Circle())
-                        .padding(.top, 14)
-                        .accessibilityLabel("Loading selected photo preview")
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                            .controlSize(.small)
+                            .padding(7)
+                            .background(.regularMaterial, in: Circle())
+                            .accessibilityLabel("Loading selected photo preview")
+                    }
                     Spacer()
                 }
+                .padding(14)
                 .allowsHitTesting(false)
             }
 
