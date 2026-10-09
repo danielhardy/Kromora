@@ -262,6 +262,9 @@ public struct ContentView: View {
                                 )
                             }
                             .transition(bottomChromeTransition)
+                            // Keep the strip above the canvas while it slides away or back, so the
+                            // photo area's resize happens behind it rather than in front of it.
+                            .zIndex(1)
                         }
 
                         StatusBar(

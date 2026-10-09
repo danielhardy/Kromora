@@ -17,9 +17,10 @@ struct InfoInspectorView: View {
     var body: some View {
         let _ = RenderDiagnostics.noteInspectorBody()
         return FitsProposedWidth {
-            // Crop slides over the editor panels rather than pushing them: the editor stays put
-            // underneath (histogram included) and is only removed once the crop panel has
-            // covered it, and on leaving crop it is already in place as the panel slides away.
+            // The editor inspector is a sheet over the crop panel: entering crop slides it off to
+            // the trailing edge to reveal the crop controls, and leaving slides it back over them.
+            // Nothing is pushed. The crop panel stays mounted underneath until the editor has
+            // covered it again, so the reveal never exposes an empty column.
             ZStack(alignment: .top) {
                 if !canvasState.isCropToolActive {
                     VStack(spacing: 0) {
@@ -77,7 +78,9 @@ struct InfoInspectorView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .transition(editorUnderCropTransition)
+                    .background(KromoraTheme.inspectorChrome)
+                    .transition(editorSheetTransition)
+                    .zIndex(1)
                 }
 
                 if canvasState.isCropToolActive {
@@ -109,8 +112,7 @@ struct InfoInspectorView: View {
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .background(KromoraTheme.inspectorChrome)
-                    .transition(cropPanelTransition)
-                    .zIndex(1)
+                    .transition(cropPanelUnderEditorTransition)
                 }
             }
             .clipped()
@@ -154,14 +156,15 @@ struct InfoInspectorView: View {
         accessibilityReduceMotion ? nil : .easeInOut(duration: 0.3)
     }
 
-    /// The crop panel covers the editor; it carries no fade so it reads as a solid sheet.
-    private var cropPanelTransition: AnyTransition {
+    /// The editor inspector slides off and back as a solid sheet, with no fade.
+    private var editorSheetTransition: AnyTransition {
         accessibilityReduceMotion ? .opacity : .move(edge: .trailing)
     }
 
-    /// The editor appears instantly (it sits under the leaving crop panel) and, when crop begins,
-    /// stays mounted for the slide so nothing is revealed or pushed before the panel covers it.
-    private var editorUnderCropTransition: AnyTransition {
+    /// The crop panel appears instantly (it is revealed by the editor sliding away) and, when
+    /// crop ends, stays mounted for the slide so the returning editor covers it rather than an
+    /// empty column.
+    private var cropPanelUnderEditorTransition: AnyTransition {
         guard !accessibilityReduceMotion else { return .opacity }
         return .asymmetric(
             insertion: .identity,
