@@ -309,19 +309,24 @@ struct InfoInspectorView: View {
             HStack {
                 Text("Histogram")
                     .font(InspectorStyle.sectionTitle)
+                    .lineLimit(1)
+                    .fixedSize()
                     .accessibilityAddTraits(.isHeader)
-                Spacer()
+                Spacer(minLength: 4)
                 if let histogram = viewModel.histogram {
-                    Label("\(histogram.clippedHighlights)", systemImage: "sun.max.fill")
-                        .foregroundStyle(histogram.clippedHighlights > 0 ? .orange : .secondary)
-                        .help("\(histogram.clippedHighlights) sampled highlight pixels")
-                    Label("\(histogram.clippedShadows)", systemImage: "moon.fill")
-                        .foregroundStyle(histogram.clippedShadows > 0 ? .cyan : .secondary)
-                        .help("\(histogram.clippedShadows) sampled shadow pixels")
+                    clippingCount(
+                        histogram.clippedHighlights, systemImage: "sun.max.fill", tint: .orange,
+                        meaning: "sampled pixels at pure white (clipped highlights)")
+                    clippingCount(
+                        histogram.clippedShadows, systemImage: "moon.fill", tint: .cyan,
+                        meaning: "sampled pixels at pure black (crushed shadows)")
                 }
+                // The counts above matter more than this label, so it is what gives way when the
+                // inspector is narrow.
                 Text(histogramSourceLabel)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(Color.primary.opacity(0.08), in: Capsule())
@@ -340,6 +345,22 @@ struct InfoInspectorView: View {
             .background(KromoraTheme.analysisBackground)
             .overlay(Rectangle().stroke(KromoraTheme.analysisBorder, lineWidth: 1))
         }
+    }
+
+    /// A compact count ("50.8K") that never wraps; the exact number and its meaning are in the
+    /// tooltip and the accessibility label.
+    private func clippingCount(
+        _ count: Int, systemImage: String, tint: Color, meaning: String
+    ) -> some View {
+        let exact = "\(count.formatted()) \(meaning)"
+        return Label(count.formatted(.number.notation(.compactName)), systemImage: systemImage)
+            .lineLimit(1)
+            .fixedSize()
+            .layoutPriority(1)
+            .foregroundStyle(count > 0 ? tint : .secondary)
+            .help(exact)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(exact)
     }
 
     @ViewBuilder
