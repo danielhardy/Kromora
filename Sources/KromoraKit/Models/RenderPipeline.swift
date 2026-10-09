@@ -324,7 +324,21 @@ enum RenderPipeline {
             width: normalizedRect.width * extent.width,
             height: normalizedRect.height * extent.height
         )
-        return image.cropped(to: cropRect)
+        return image.cropped(to: wholePixelCropRect(cropRect, within: extent))
+    }
+
+    /// Snap a fractional crop rectangle inward to whole pixels. Core Image reports a cropped
+    /// extent rounded outward but keeps the fractional edge in the pixels, so the outermost
+    /// row/column on the top and right of a fractional crop was only partially covered. That
+    /// partial alpha presented as a thin light stroke on those edges (KRMA-689). Whole-pixel
+    /// edges cost at most one source pixel per side and keep every output pixel fully covered.
+    static func wholePixelCropRect(_ rect: CGRect, within extent: CGRect) -> CGRect {
+        let minX = max(extent.minX, rect.minX.rounded(.up))
+        let minY = max(extent.minY, rect.minY.rounded(.up))
+        let maxX = min(extent.maxX, rect.maxX.rounded(.down))
+        let maxY = min(extent.maxY, rect.maxY.rounded(.down))
+        guard maxX - minX >= 1, maxY - minY >= 1 else { return rect }
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
     /// Apply a canonical quarter-turn while keeping the result in Core Image's finite image
