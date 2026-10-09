@@ -2019,7 +2019,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             imageSource = nil
             sourceImage = nil
             previewPresentation.resetForSource()
-            previewSurface.clear()
+            previewSurface.clearForSourceSwitch()
             statusMessage = "Loading \(item.displayName)..."
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -2162,7 +2162,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         sourceImage = nil
         statusMessage = "Loading \(importPlan.name)..."
         previewPresentation.resetForSource()
-        previewSurface.clear()
+        previewSurface.clearForSourceSwitch()
 
         Task { @MainActor [weak self] in
             await Task.yield()

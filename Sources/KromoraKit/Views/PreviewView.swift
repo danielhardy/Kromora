@@ -39,12 +39,19 @@ struct PreviewView: View {
         viewModel.isLoading || viewModel.previewState == .loading
     }
 
+    /// The canvas stays mounted while a source switch is loading so the departing photo remains
+    /// on the drawable behind the spinner. Once loading ends without a new frame (failure, empty)
+    /// the held frame is dropped from view.
+    private var showsCanvas: Bool {
+        previewSurface.image != nil || (previewSurface.holdsDepartingFrame && isPreviewLoading)
+    }
+
     var body: some View {
         ZStack {
             bgColor
 
             Group {
-                if previewSurface.image != nil {
+                if showsCanvas {
                     if canvasState.isCropToolActive {
                         singleView
                     } else if viewModel.isSideBySideVisible {
@@ -64,7 +71,7 @@ struct PreviewView: View {
             }
             .allowsHitTesting(!isPreviewLoading)
 
-            if previewSurface.image != nil && viewModel.isNavigationLoading {
+            if showsCanvas && (viewModel.isNavigationLoading || previewSurface.image == nil) {
                 ProgressView()
                     .controlSize(.large)
                     .scaleEffect(1.35)
@@ -240,7 +247,7 @@ struct PreviewView: View {
     private var singleView: some View {
         GeometryReader { geometry in
             ZStack {
-                    if previewSurface.image != nil {
+                    if showsCanvas {
                         canvasSurface(previewSurface, showsMaskOverlay: true)
                             .padding(8)
                     }

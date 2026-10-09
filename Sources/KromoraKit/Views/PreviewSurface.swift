@@ -16,6 +16,12 @@ final class PreviewSurface: ObservableObject {
     /// source image once; retained-texture redraws must not evaluate it again.
     @Published private(set) var revision: UInt64 = 0
     private(set) var image: CIImage?
+    /// True after a source switch cleared `image` while the departing photo is still on the
+    /// drawable. `draw` returns before presenting when `image` is nil, so the layer keeps its last
+    /// confirmed frame; this only tells the view to keep the canvas mounted behind the loading
+    /// spinner instead of unmounting it. It is display-only: every consumer of `image` still sees
+    /// no pixels for the active source. Cleared by the next publication or any full `clear()`.
+    private(set) var holdsDepartingFrame = false
     private(set) var presentationImageExtent: CGRect?
     /// When true, a smaller texture is a stand-in for the whole `presentationImageExtent`
     /// (a camera JPEG first frame, or a cropped fit preview whose ROI is the committed crop).
@@ -227,6 +233,7 @@ final class PreviewSurface: ObservableObject {
             finishCrossfade()
         }
         self.image = image
+        holdsDepartingFrame = false
         presentedDigest = perceptualDigest
         staleRefinementPending = false
         self.presentationImageExtent = nextPresentationImageExtent
@@ -811,7 +818,16 @@ final class PreviewSurface: ObservableObject {
         confirmation?()
         return false
     }
+    /// Invalidate the active source's pixels for a photo switch while leaving the departing frame
+    /// visible on the drawable until the new source presents (or the view stops showing it).
+    func clearForSourceSwitch() {
+        let departingFrameIsOnScreen = image != nil || holdsDepartingFrame
+        clear()
+        holdsDepartingFrame = departingFrameIsOnScreen
+    }
+
     func clear() {
+        holdsDepartingFrame = false
         finishCrossfade()
         presentedDigest = nil
         staleRefinementPending = false

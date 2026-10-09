@@ -391,6 +391,48 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertEqual(surface.space, .current)
     }
 
+    private static func solid(_ color: CIColor) -> CIImage {
+        CIImage(color: color).cropped(to: CGRect(x: 0, y: 0, width: 4, height: 4))
+    }
+
+    /// KRMA-833: a photo switch keeps the departing frame on the drawable, but only as a
+    /// display hint. The surface must still report no pixels for the active source.
+    func testSourceSwitchHoldsTheDepartingFrameWithoutExposingItsPixels() {
+        let surface = PreviewSurface()
+        XCTAssertTrue(surface.present(Self.solid(.red), space: .displayP3))
+
+        surface.clearForSourceSwitch()
+
+        XCTAssertNil(surface.image, "the previous photo's pixels must not be readable")
+        XCTAssertNil(surface.presentationTexture)
+        XCTAssertNil(surface.presentationHistogramSample)
+        XCTAssertTrue(surface.holdsDepartingFrame)
+
+        // A second switch before the new photo presents keeps the same on-screen frame.
+        surface.clearForSourceSwitch()
+        XCTAssertTrue(surface.holdsDepartingFrame)
+    }
+
+    func testDepartingFrameIsReleasedByThePublicationOrAFullClear() {
+        let surface = PreviewSurface()
+        XCTAssertTrue(surface.present(Self.solid(.red)))
+        surface.clearForSourceSwitch()
+        XCTAssertTrue(surface.holdsDepartingFrame)
+
+        XCTAssertTrue(surface.present(Self.solid(.blue)))
+        XCTAssertFalse(surface.holdsDepartingFrame)
+
+        surface.clearForSourceSwitch()
+        surface.clear()
+        XCTAssertFalse(surface.holdsDepartingFrame)
+    }
+
+    func testSourceSwitchWithNothingOnScreenHoldsNothing() {
+        let surface = PreviewSurface()
+        surface.clearForSourceSwitch()
+        XCTAssertFalse(surface.holdsDepartingFrame)
+    }
+
     func testHeadlessSurfaceConfirmsACompletedPresentationImmediately() {
         let surface = PreviewSurface()
         let telemetry = LiveEditTelemetry()
