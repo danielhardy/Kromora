@@ -72,13 +72,18 @@ struct PreviewView: View {
             .allowsHitTesting(!isPreviewLoading)
 
             if showsCanvas && (viewModel.isNavigationLoading || previewSurface.image == nil) {
-                ProgressView()
-                    .controlSize(.large)
-                    .scaleEffect(1.35)
-                    .padding(18)
-                    .background(.regularMaterial, in: Circle())
-                    .accessibilityLabel("Loading selected photo preview")
-                    .allowsHitTesting(false)
+                // A small, unobtrusive indicator: the departing photo stays visible, so the
+                // spinner only needs to say "loading", not take over the canvas.
+                VStack {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(7)
+                        .background(.regularMaterial, in: Circle())
+                        .padding(.top, 14)
+                        .accessibilityLabel("Loading selected photo preview")
+                    Spacer()
+                }
+                .allowsHitTesting(false)
             }
 
             if previewSurface.image != nil,
