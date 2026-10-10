@@ -1,5 +1,6 @@
 import Foundation
 import XCTest
+import os.lock
 
 @testable import KromoraKit
 
@@ -214,6 +215,59 @@ final class PortablePackageTransactionTests: TempDirectoryTestCase {
         XCTAssertFalse(
             FileManager.default.fileExists(
                 atPath: packageURL.appendingPathComponent("State/value.txt").path))
+    }
+
+    func testRecoveryDiscardsUnflushedStagingAndPreservesExistingTarget() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now)
+        defer { try? lease.release() }
+        let target = packageURL.appendingPathComponent("State/value.txt")
+        try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: target)
+        var transaction = try PortablePackageTransaction.begin(at: packageURL, lease: lease, now: now)
+        try transaction.stage(data: Data("new".utf8), at: "State/value.txt")
+        // Simulate restart before commit, using only the durable begin journal.
+        let recovery = try PortablePackageTransaction.recover(at: packageURL)
+        XCTAssertEqual(recovery.recoveredTransactionIDs, [transaction.transactionID])
+        XCTAssertEqual(try Data(contentsOf: target), Data("old".utf8))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: packageURL
+            .appendingPathComponent("Recovery/Staging/\(transaction.transactionID.uuidString)").path))
+    }
+
+    func testCommitStillDetectsStagedCorruptionBeforePublishing() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now)
+        defer { try? lease.release() }
+        var transaction = try PortablePackageTransaction.begin(at: packageURL, lease: lease, now: now)
+        let path = "State/value.txt"
+        try transaction.stage(data: Data("good".utf8), at: path)
+        try Data("evil".utf8).write(to: transaction.stagedURL(for: path))
+        XCTAssertThrowsError(try transaction.commit(now: now)) { error in
+            guard case .checksumMismatch = error as? PortablePackageTransactionError else {
+                return XCTFail("expected checksum mismatch, got \(error)")
+            }
+        }
+        try transaction.abort()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent(path).path))
+    }
+
+    func testCancellationDuringCommitChecksumIsBoundedAndRollsBack() throws {
+        let packageURL = try makePackage()
+        let lease = try PortablePackageLease.acquire(at: packageURL, now: now)
+        defer { try? lease.release() }
+        var transaction = try PortablePackageTransaction.begin(at: packageURL, lease: lease, now: now)
+        let path = "State/large.raw"
+        try transaction.stage(data: Data(repeating: 0x52, count: 8 << 20), at: path)
+        let cancellation = PortablePackageImportCancellation()
+        let checks = OSAllocatedUnfairLock(initialState: 0)
+        XCTAssertThrowsError(try transaction.commit(now: now, isCancelled: {
+            let count = checks.withLock { $0 += 1; return $0 }
+            if count == 6 { cancellation.cancel() }
+            return cancellation.isCancelled
+        })) { XCTAssertTrue($0 is CancellationError) }
+        XCTAssertEqual(checks.withLock { $0 }, 6)
+        try transaction.abort()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: packageURL.appendingPathComponent(path).path))
     }
 
     /// Staging can fail when the destination path is already a directory. The thrown CocoaError

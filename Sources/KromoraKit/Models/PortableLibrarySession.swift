@@ -834,7 +834,7 @@ final class PortableLibrarySession {
         guard let scheduler else { throw PortablePackageImportWorkerError.schedulerUnavailable }
 
         let progressSink = PortablePackageImportProgressSink()
-        let progress = AsyncStream<PortablePackageImportProgress> { continuation in
+        let progress = AsyncStream<PortablePackageImportProgress>(bufferingPolicy: .bufferingNewest(1)) { continuation in
             progressSink.install(continuation)
         }
         let resultBox = PortablePackageImportResultBox()

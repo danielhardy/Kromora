@@ -612,3 +612,108 @@ histogram call took 53.3 ms. This is compute-bound; the histogram's bounded Core
 accounts for essentially all of the roughly 55 ms after-ready delay. The probe was removed, and no
 product change was retained. The previous chart remains visible while this computation runs by
 design, which adds to the perceived delay after a photo switch.
+
+## Package import throughput measured state (KRMA-840, 2026-10-09)
+
+Use the window-independent package transport harness in **Release**. Debug builds inflate Swift
+loop, JSON, path-validation, and observation costs and are not throughput evidence. The harness
+creates fresh temporary packages and deterministic camera-sized byte payloads (not decoded images):
+200 small files totaling 64 MiB (192 × 256 KiB plus 8 × 2 MiB), and 12 large files totaling
+512 MiB (8 × 32 MiB plus 4 × 64 MiB). Source generation and package creation are outside the timer;
+SHA-256, duplicate-catalog construction, lease renewal, staging, and each source's durable commit
+are inside it. The disposable index delta/write is reported separately. No window is created.
+
+```sh
+KROMORA_IMPORT_BENCHMARK=1 swift test -c release \
+  --filter PortablePackageImportPerformanceTests
+
+# Optional read-only camera source; defaults to twelve non-hidden files in filename order.
+KROMORA_IMPORT_BENCHMARK=1 \
+KROMORA_IMPORT_SOURCE_DIR=/Volumes/Card/DCIM/100MSDCF \
+swift test -c release --filter PortablePackageImportPerformanceTests
+```
+
+`KROMORA_IMPORT_SAMPLES` defaults to three. `KROMORA_IMPORT_SOURCE_COUNT` and
+`KROMORA_IMPORT_SOURCE_OFFSET` select a bounded card sample; `KROMORA_IMPORT_CHUNK_SIZE` allows
+chunk-size experiments. The optional suite is excluded from the required fast/serial lanes.
+`IMPORT_THROUGHPUT` prints decimal MB/s, wall time, index time, and opt-in per-phase totals.
+`read`, `hash`, and `write` are nested within `staging`; staging also includes record/membership
+encoding and path work. `begin` includes lease renewal and the initial journal. `commit` includes
+flushes, destination SHA-256 verification, durable publication journals, renames, and cleanup.
+
+`F_NOCACHE` on the sequential reference prevents that pass from intentionally filling the cache;
+it does **not** evict pages cached by an earlier import. Generated files start in the write cache,
+so their read reference measures cache throughput, not physical SSD speed. For card evidence, use
+files not previously imported/read in the session and report cold and warm results separately.
+Do not interpret a subsequent multi-GB/s card result as reader throughput or purge global caches
+to hide this distinction. The optional camera originals are only read and are never copied into
+the repository.
+
+Measurements used an Apple M4 Pro, 48 GB RAM, macOS 27.2 (26B5101f), Xcode 27.0 beta
+(27A5252f), a temporary destination on the internal APFS SSD, and a 128 GB USB/ExFAT removable
+card. The baseline was `32e3f688` plus timing-only instrumentation; all timed runs used streamed
+copying (no APFS clone shortcut), 1 MiB chunks, and fresh empty packages. Generated results are
+medians of three runs. A separate 4 MiB baseline experiment produced 2.68 MB/s small and
+297.73 MB/s large, giving no reason to increase the default chunk or cancellation bound.
+
+| Mix | Baseline MB/s | After MB/s | Change | Baseline / after wall time |
+| --- | ---: | ---: | ---: | ---: |
+| Generated small, cache resident | 2.74 | 4.23 | +54% | 24.52 / 15.85 s |
+| Generated large, cache resident | 301.87 | 394.77 | +31% | 1.779 / 1.360 s |
+| Camera RAWs, first cold pass | 84.51 | 87.12 | +3.1% indicative | 17.97 / 17.57 s |
+
+The cold card baseline used twelve RAWs totaling 1,518,751,744 bytes; after used twelve different,
+previously unread RAWs totaling 1,530,351,616 bytes (`KROMORA_IMPORT_SOURCE_OFFSET=24`). Their
+sequential references were 93.77 and 94.86 MB/s. These are single cold observations of different
+file groups, not a statistically established 3.1% card improvement. After import achieved **92%**
+of its sequential reference. Subsequent cached card samples reached 561–565 MB/s before and
+614–655 MB/s after; their 9.7–11.1 GB/s reference rates identify them as cached, and they are
+excluded from cold-reader evidence.
+
+Representative phase totals in seconds (the generated rows are the median-throughput runs):
+
+| Mix / version | Catalog | Begin | Read | Hash | Write | Staging, inclusive | Commit | Index |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Small before | 0.0527 | 2.4118 | 0.0205 | 0.0385 | 0.0178 | 7.4853 | 14.5361 | 0.0049 |
+| Small after | 0.0517 | 2.3815 | 0.0184 | 0.0366 | 0.0168 | 1.3842 | 12.0023 | 0.0055 |
+| Large before | 0.0514 | 0.1245 | 0.0532 | 0.1873 | 0.0399 | 0.6838 | 0.9179 | 0.0003 |
+| Large after | 0.0515 | 0.1245 | 0.0491 | 0.1794 | 0.0404 | 0.3076 | 0.8755 | 0.0003 |
+| Cold card before | 0.0536 | 0.1240 | 15.4283 | 0.4910 | 0.1816 | 16.5022 | 1.2895 | 0.0004 |
+| Cold card after | 0.0547 | 0.1208 | 15.3697 | 0.4965 | 0.1804 | 16.0927 | 1.2970 | 0.0003 |
+
+The measured small-file bottleneck was fixed transaction overhead, not read chunking or SHA-256.
+Staging no longer repeats durable file flushes and file-list journal writes that commit already
+performs. Recovery discards all preparation under the durable initial journal; commit still
+persists the complete list, flushes every file, verifies the destination hash/length in bounded
+1 MiB chunks, and durably journals every publication boundary. One transaction per source,
+lease renewal, duplicate policy, and already-committed successes survive cancellation unchanged.
+Small files still pay approximately 60 ms/source in commit plus 12 ms/source to begin/renew: that
+integrity floor explains why their throughput remains far below a reader's sequential bulk rate.
+
+For cold RAWs, reading takes 15.37 of 17.57 seconds. Source SHA-256 (0.50 s), writes (0.18 s), and
+commit/verification/publication (1.30 s) explain most of the remaining gap; the reference pass also
+warms filesystem metadata and read timing varies. Overlapping hashes or adding parallel card reads
+would address a small fraction of this workload and was not justified by these measurements.
+The duplicate catalog is built once (about 53 ms for an empty library); this harness does not
+establish its cost in a populated library. The asynchronous app path applies the final index delta
+once and coalesces its disposable write rather than synchronously rewriting it per source.
+
+The redundant per-selection readability/yield loop was removed: scanned selections go directly
+to the worker, which isolates source-open failures if media disappears. The progress sink publishes
+at most ten work snapshots/second plus preparation/final totals, starts staging immediately, and
+buffers only the newest snapshot when the main actor is busy. Streamed sources report bytes each
+chunk and retain partial byte totals through cancellation or a source failure. Recovery, corruption,
+known SHA-256, duplicate policies, per-source failure isolation,
+cancellation during copy/checksum, and bounded progress tests cover these contracts.
+
+This harness excludes the selector's decode/EXIF scan and the post-import grid/thumbnail work;
+it does not establish end-to-end UI import latency. Those remain KRMA-839/KRMA-841 work. No
+display-bound capture was run.
+
+Final verification passed the warnings-as-errors build, 1,572 fast tests, 500 serial tests, the
+44-test focused Release run including the benchmark, packaged app build/verification, and
+`git diff --check`. `dg validate` passed with existing model-registry warnings. The first fast run
+hit two assertions in the unrelated
+`ThumbnailSwitchLifecycleTests.testFilmstripSelectionSchedulesOriginalBeforeAdjustedDrawableConfirmation`;
+its focused rerun and both subsequent full fast runs passed without changing that test or product
+path. This is a synchronization caveat, not evidence of an import regression.

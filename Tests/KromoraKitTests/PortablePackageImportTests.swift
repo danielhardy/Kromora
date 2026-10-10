@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 import os.lock
 
@@ -35,10 +36,15 @@ final class PortablePackageImportTests: TempDirectoryTestCase {
         XCTAssertTrue(result.failures.isEmpty)
         XCTAssertEqual(result.imported.map { $0.byteCount }, [4097, 6])
         XCTAssertEqual(result.imported.map { $0.usedClonefile }, [false, false])
+        XCTAssertEqual(result.imported.map { $0.contentHash }, [firstBefore, secondBefore].map {
+            SHA256.hash(data: $0).map { String(format: "%02x", $0) }.joined()
+        })
         XCTAssertEqual(progress.first?.phase, .preparing)
         XCTAssertGreaterThanOrEqual(progress.filter { $0.phase == .committing }.count, 2)
         XCTAssertEqual(progress.last?.processed, 2)
         XCTAssertEqual(progress.last?.imported, 2)
+        XCTAssertTrue(progress.contains { $0.phase == .staging && $0.bytesRead > 0 && $0.bytesRead < 4097 })
+        XCTAssertEqual(progress.map(\.bytesRead), progress.map(\.bytesRead).sorted())
         XCTAssertEqual(sourceReads.withLock { $0 }, [firstURL, secondURL])
         XCTAssertEqual(try Data(contentsOf: firstURL), firstBefore)
         XCTAssertEqual(try Data(contentsOf: secondURL), secondBefore)
@@ -102,6 +108,114 @@ final class PortablePackageImportTests: TempDirectoryTestCase {
         }
         let recovery = try PortablePackageTransaction.recover(at: packageURL)
         XCTAssertTrue(recovery.recoveredTransactionIDs.isEmpty)
+    }
+
+    func testFailureIsIsolatedAndImportAnywayRetainsDuplicateIdentity() throws {
+        let package = try PortableLibraryPackage.create(at: tempDirectory.appendingPathComponent("Isolation.kromoralibrary"))
+        let lease = try PortablePackageLease.acquire(at: package.rootURL)
+        defer { try? lease.release() }
+        let source = try makeSource(named: "same.raw", contents: Data(repeating: 0x3a, count: 4097))
+        let result = try package.importSources([
+            .init(url: source), .init(url: tempDirectory.appendingPathComponent("missing.raw")),
+            .init(url: source, name: "copy.raw"),
+        ], lease: lease, options: .init(duplicatePolicy: .importAnyway, chunkSize: 1024, copyMode: .streamed))
+        XCTAssertEqual(result.imported.count, 2)
+        XCTAssertEqual(result.failures.count, 1)
+        XCTAssertEqual(result.duplicates.count, 1)
+        XCTAssertEqual(result.duplicates.first?.existingAssetID, result.imported.first?.assetID)
+        XCTAssertEqual(result.duplicates.first?.importedAssetID, result.imported.last?.assetID)
+        XCTAssertEqual(result.imported.first?.contentHash, result.imported.last?.contentHash)
+    }
+
+    func testCancellationPreservesPreviouslyCommittedSource() throws {
+        let package = try PortableLibraryPackage.create(at: tempDirectory.appendingPathComponent("Partial.kromoralibrary"))
+        let lease = try PortablePackageLease.acquire(at: package.rootURL)
+        defer { try? lease.release() }
+        let first = try makeSource(named: "first.raw", contents: Data("first".utf8))
+        let second = try makeSource(named: "second.raw", contents: Data("second".utf8))
+        let cancellation = PortablePackageImportCancellation()
+        let result = try package.importSources(
+            [.init(url: first), .init(url: second)], lease: lease,
+            options: .init(copyMode: .streamed), isCancelled: { cancellation.isCancelled },
+            progress: { if $0.processed == 1 { cancellation.cancel() } })
+        XCTAssertTrue(result.cancelled)
+        XCTAssertEqual(result.imported.count, 1)
+        let imported = try XCTUnwrap(result.imported.first)
+        let record = try package.readAssetRecord(for: imported.assetID)
+        XCTAssertEqual(try Data(contentsOf: package.embeddedSourceURL(for: record)), Data("first".utf8))
+        XCTAssertEqual(result.indexDelta.upserts.count, 1)
+        XCTAssertTrue(try PortablePackageTransaction.recover(at: package.rootURL).recoveredTransactionIDs.isEmpty)
+    }
+
+    func testCancelledCopyRetainsItsPartialByteProgress() throws {
+        let package = try PortableLibraryPackage.create(at: tempDirectory.appendingPathComponent("Bytes.kromoralibrary"))
+        let lease = try PortablePackageLease.acquire(at: package.rootURL)
+        defer { try? lease.release() }
+        let source = try makeSource(named: "cancelled.raw", contents: Data(repeating: 0x5a, count: 4096))
+        let cancellation = PortablePackageImportCancellation()
+        let snapshots = OSAllocatedUnfairLock<[PortablePackageImportProgress]>(initialState: [])
+        let result = try package.importSources(
+            [.init(url: source)], lease: lease,
+            options: .init(chunkSize: 1024, copyMode: .streamed), isCancelled: { cancellation.isCancelled },
+            progress: { value in
+                snapshots.withLock { $0.append(value) }
+                if value.bytesRead == 1024 { cancellation.cancel() }
+            })
+        XCTAssertTrue(result.cancelled)
+        XCTAssertTrue(result.imported.isEmpty)
+        let values = snapshots.withLock { $0 }
+        XCTAssertEqual(values.last?.phase, .finished)
+        XCTAssertEqual(values.last?.bytesRead, 1024)
+        XCTAssertEqual(values.map(\.bytesRead), values.map(\.bytesRead).sorted())
+    }
+
+    @MainActor
+    func testProgressSinkLimitsPublicationAndAlwaysDeliversFinalTotals() async {
+        let sink = PortablePackageImportProgressSink()
+        let stream = AsyncStream<PortablePackageImportProgress> { sink.install($0) }
+        let start = ContinuousClock.now
+        var value = PortablePackageImportProgress(
+            total: 1000, processed: 0, imported: 0, duplicates: 0, failed: 0,
+            bytesRead: 0, totalBytes: 1000, currentName: nil, phase: .preparing)
+        sink.yield(value, now: start)
+        for ordinal in 1...1000 {
+            value.phase = .staging
+            value.processed = ordinal
+            value.bytesRead = UInt64(ordinal)
+            sink.yield(value, now: start.advanced(by: .milliseconds(ordinal)))
+        }
+        value.phase = .finished
+        sink.yield(value, now: start.advanced(by: .seconds(1)))
+        sink.finish()
+        var snapshots: [PortablePackageImportProgress] = []
+        for await snapshot in stream { snapshots.append(snapshot) }
+        XCTAssertEqual(snapshots.count, 12)
+        XCTAssertEqual(snapshots.first?.phase, .preparing)
+        XCTAssertEqual(snapshots.last?.phase, .finished)
+        XCTAssertEqual(snapshots.last?.processed, 1000)
+        XCTAssertEqual(snapshots.last?.bytesRead, 1000)
+    }
+
+    @MainActor
+    func testBusyProgressConsumerRetainsOnlyTheLatestSnapshot() async {
+        let sink = PortablePackageImportProgressSink()
+        let stream = AsyncStream<PortablePackageImportProgress>(bufferingPolicy: .bufferingNewest(1)) {
+            sink.install($0)
+        }
+        let start = ContinuousClock.now
+        var value = PortablePackageImportProgress(
+            total: 1000, processed: 0, imported: 0, duplicates: 0, failed: 0,
+            bytesRead: 0, totalBytes: 1000, currentName: nil, phase: .staging)
+        for ordinal in 1...1000 {
+            value.processed = ordinal
+            sink.yield(value, now: start.advanced(by: .milliseconds(ordinal * 100)))
+        }
+        value.phase = .finished
+        sink.yield(value, now: start.advanced(by: .seconds(101)))
+        sink.finish()
+        var snapshots: [PortablePackageImportProgress] = []
+        for await snapshot in stream { snapshots.append(snapshot) }
+        XCTAssertEqual(snapshots, [value])
     }
 
     private func makeSource(named name: String, contents: Data) throws -> URL {

@@ -427,11 +427,19 @@ Every mutation uses same-volume staging:
 
 1. Write a transaction journal entry to `Recovery/Transactions/`.
 2. Stream new files into staging.
-3. Flush (`F_FULLFSYNC`) and checksum staged files.
+3. Persist the complete file list, then flush (`F_FULLFSYNC`) and checksum staged files.
 4. Move immutable components into their final paths.
 5. Atomically replace `asset.json`.
 6. Mark the transaction committed.
-7. Clean staging asynchronously.
+7. Clean staging and the committed journal.
+
+Staging writes are buffered, and additions to the file list remain in memory until commit. The
+durable initial journal names the entire staging directory, which recovery discards for an
+interrupted preparation.
+Commit persists the complete list before flushing and verifies each file in bounded chunks before
+publication. The flushing journal also suffices during checksumming; publication start/completion
+and the final committed journal retain their durable writes. Each imported source still owns its
+own transaction and becomes durable independently.
 
 **A valid original is never replaced or deleted during ordinary editing.**
 

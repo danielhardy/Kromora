@@ -628,8 +628,6 @@ struct PortablePackageTransaction {
                 offset = end
             }
             if isCancelled() { throw CancellationError() }
-            try output.synchronize()
-            try fullSync(output.fileDescriptor)
             try output.close()
         } catch {
             try? output.close()
@@ -641,7 +639,6 @@ struct PortablePackageTransaction {
             byteCount: UInt64(data.count), stagedChecksum: stagedChecksum, publicationState: .staged
         )
         journal.files.append(file)
-        try persistJournal()
         try faultInjector?.check(.stage)
         return PortablePackageStagedFile(
             byteCount: UInt64(data.count), checksum: stagedChecksum, usedClonefile: false
@@ -705,6 +702,9 @@ struct PortablePackageTransaction {
     }
 
     /// Streams a source file once into same-volume staging while computing its expected checksum.
+    /// Staging is disposable: the durable begin journal owns its entire directory. Commit persists
+    /// the complete file list and flushes/checksums every file before the first publication rename.
+    /// The non-escaping byte observer runs synchronously on the caller's worker.
     @discardableResult
     mutating func stage(
         fileAt sourceURL: URL,
@@ -712,7 +712,9 @@ struct PortablePackageTransaction {
         chunkSize: Int = 1 << 20,
         copyMode: PortablePackageFileCopyMode = .automatic,
         isCancelled: @Sendable () -> Bool = { false },
-        sourceReadObserver: @Sendable () -> Void = {}
+        sourceReadObserver: @Sendable () -> Void = {},
+        timingObserver: (@Sendable (PortablePackageImportPhase, Duration) -> Void)? = nil,
+        bytesReadObserver: (UInt64) -> Void = { _ in }
     ) throws -> PortablePackageStagedFile {
         try validateRelativePath(relativePath)
         let chunkSize = max(1, chunkSize)
@@ -744,7 +746,6 @@ struct PortablePackageTransaction {
                 publicationState: .staged
             )
             journal.files.append(file)
-            try persistJournal()
             try faultInjector?.check(.stage)
             return PortablePackageStagedFile(
                 byteCount: digest.byteCount, checksum: digest.checksum, usedClonefile: true)
@@ -759,14 +760,19 @@ struct PortablePackageTransaction {
         do {
             while true {
                 if isCancelled() { throw CancellationError() }
-                let chunk = try input.read(upToCount: chunkSize) ?? Data()
+                let chunk = try PortablePackageImportPhase.measure(.read, observer: timingObserver) {
+                    try input.read(upToCount: chunkSize) ?? Data()
+                }
                 if chunk.isEmpty { break }
-                try output.write(contentsOf: chunk)
-                hasher.update(data: chunk)
+                try PortablePackageImportPhase.measure(.write, observer: timingObserver) {
+                    try output.write(contentsOf: chunk)
+                }
+                PortablePackageImportPhase.measure(.hash, observer: timingObserver) {
+                    hasher.update(data: chunk)
+                }
                 byteCount += UInt64(chunk.count)
+                bytesReadObserver(byteCount)
             }
-            try output.synchronize()
-            try fullSync(output.fileDescriptor)
             try input.close()
             try output.close()
         } catch {
@@ -780,7 +786,6 @@ struct PortablePackageTransaction {
             publicationState: .staged
         )
         journal.files.append(file)
-        try persistJournal()
         try faultInjector?.check(.stage)
         return PortablePackageStagedFile(
             byteCount: byteCount, checksum: file.stagedChecksum, usedClonefile: false)
@@ -815,13 +820,13 @@ struct PortablePackageTransaction {
         }
 
         journal.state = .checksumming
-        try persistJournal()
         for file in journal.files {
             if isCancelled() { throw CancellationError() }
             let url = try packageURL(for: file.stagingPath)
-            let data = try Data(contentsOf: url)
-            let actual = Self.sha256(data)
-            guard UInt64(data.count) == file.byteCount else {
+            let digest = try Self.hashFile(
+                at: url, chunkSize: 1 << 20, isCancelled: isCancelled)
+            let actual = digest.checksum
+            guard digest.byteCount == file.byteCount else {
                 throw PortablePackageTransactionError.stagedFileChanged(path: file.relativePath)
             }
             guard actual == file.stagedChecksum else {
@@ -1103,8 +1108,6 @@ struct PortablePackageTransaction {
         if path == "manifest.json" { return 3 }
         return 1
     }
-
-    private static func sha256(_ data: Data) -> String { SHA256.hash(data: data).hexString }
 
     private static func isRegularFile(at url: URL) -> Bool {
         var isDirectory: ObjCBool = false

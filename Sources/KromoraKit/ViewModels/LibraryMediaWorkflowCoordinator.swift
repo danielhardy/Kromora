@@ -4,7 +4,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// The value handed to the composition root after a removable-media selection has been
-/// validated.  The coordinator deliberately does not know whether the destination is the
+/// scanned and selected. The coordinator deliberately does not know whether the destination is the
 /// portable package or the legacy presentation projection.
 struct RemovableMediaImportRequest: Sendable {
     let volume: MediaVolume
@@ -59,7 +59,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     private let fileDropActionPolicy: FileDropActionPolicy
     private var discoveryTask: Task<Void, Never>?
     private var scanTask: Task<Void, Never>?
-    private var importValidationTask: Task<Void, Never>?
+    private var importRequestTask: Task<Void, Never>?
     private var removableMediaAccess: SecurityScopedResourceAccess?
     private var isShuttingDown = false
     private var importOperationID = UUID()
@@ -179,7 +179,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     func openRemovableMedia(_ volume: MediaVolume) {
         let operationID = beginImportOperation()
         scanTask?.cancel()
-        importValidationTask?.cancel()
+        importRequestTask?.cancel()
         removableMediaVolume = volume
         removableMediaFiles = []
         removableMediaWarnings = []
@@ -256,7 +256,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     func cancelRemovableMediaImport() {
         _ = beginImportOperation()
         scanTask?.cancel()
-        importValidationTask?.cancel()
+        importRequestTask?.cancel()
         isRemovableMediaScanning = false
         isRemovableMediaSelectorPresented = false
         removableMediaImportProgress = nil
@@ -275,62 +275,21 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         let access = removableMediaAccess
         removableMediaAccess = nil
         let operationID = beginImportOperation()
-        importValidationTask?.cancel()
+        importRequestTask?.cancel()
         removableMediaImportProgress = MediaVolumeImportProgress(
             total: selected.count, processed: 0, imported: 0, skipped: 0,
             currentName: nil, cancelled: false
         )
-        importValidationTask = Task { [weak self, access] in
+        importRequestTask = Task { [weak self, access] in
             var transferredAccess = false
             defer {
                 if !transferredAccess { access?.release() }
             }
             guard let self, !self.isShuttingDown else { return }
-            var usable: [MediaVolumeFile] = []
-            for file in selected {
-                guard self.isCurrentImport(operationID), !Task.isCancelled else {
-                    if self.isCurrentImport(operationID) {
-                        self.finishImport(
-                            summary: ImportOutcomeSummary(
-                                total: selected.count,
-                                imported: usable.count,
-                                skipped: selected.count - usable.count,
-                                cancelled: true
-                            ),
-                            operationID: operationID
-                        )
-                    }
-                    return
-                }
-                var progress = self.removableMediaImportProgress ?? .init(
-                    total: selected.count, processed: 0, imported: 0, skipped: 0,
-                    currentName: nil, cancelled: false
-                )
-                progress.currentName = file.filename
-                if FileManager.default.isReadableFile(atPath: file.url.path) {
-                    usable.append(file)
-                    progress.imported += 1
-                } else {
-                    progress.skipped += 1
-                    self.removableMediaWarnings.append(
-                        "Skipped \(file.filename): the volume was removed or became unreadable."
-                    )
-                }
-                progress.processed += 1
-                self.removableMediaImportProgress = progress
-                await Task.yield()
-            }
             guard self.isCurrentImport(operationID), !Task.isCancelled else { return }
-            guard !usable.isEmpty else {
-                self.finishImport(
-                    summary: ImportOutcomeSummary(
-                        total: selected.count, skipped: selected.count
-                    ),
-                    operationID: operationID
-                )
-                self.isRemovableMediaSelectorPresented = false
-                return
-            }
+            // Scan already established readability. Open each source only in the package worker;
+            // a removal or permission change is then an isolated import failure, without a second
+            // metadata pass or one main-actor observation update/yield per selected file.
             guard let onImportRequest = self.onImportRequest else {
                 self.onError?("Removable media import could not start.")
                 self.removableMediaImportProgress = nil
@@ -338,7 +297,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             }
             onImportRequest(
                 RemovableMediaImportRequest(
-                    volume: volume, files: usable, totalSelected: selected.count,
+                    volume: volume, files: selected, totalSelected: selected.count,
                     operationID: operationID, access: access
                 )
             )
@@ -399,11 +358,11 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         _ = beginImportOperation()
         discoveryTask?.cancel()
         scanTask?.cancel()
-        importValidationTask?.cancel()
-        let tasks = [discoveryTask, scanTask, importValidationTask]
+        importRequestTask?.cancel()
+        let tasks = [discoveryTask, scanTask, importRequestTask]
         discoveryTask = nil
         scanTask = nil
-        importValidationTask = nil
+        importRequestTask = nil
         for task in tasks { await task?.value }
     }
 

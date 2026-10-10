@@ -32,15 +32,18 @@ struct PortablePackageImportOptions: Sendable {
     var duplicatePolicy: PortablePackageDuplicatePolicy
     var chunkSize: Int
     var copyMode: PortablePackageFileCopyMode
+    var timingObserver: (@Sendable (PortablePackageImportPhase, Duration) -> Void)?
 
     init(
         duplicatePolicy: PortablePackageDuplicatePolicy = .skip,
         chunkSize: Int = 1 << 20,
-        copyMode: PortablePackageFileCopyMode = .automatic
+        copyMode: PortablePackageFileCopyMode = .automatic,
+        timingObserver: (@Sendable (PortablePackageImportPhase, Duration) -> Void)? = nil
     ) {
         self.duplicatePolicy = duplicatePolicy
         self.chunkSize = max(1, chunkSize)
         self.copyMode = copyMode
+        self.timingObserver = timingObserver
     }
 }
 
@@ -186,6 +189,7 @@ final class PortablePackageImportProgressSink: Sendable {
     private struct State: Sendable {
         var continuation: AsyncStream<PortablePackageImportProgress>.Continuation?
         var finished = false
+        var lastYield: ContinuousClock.Instant?
     }
     private let state = OSAllocatedUnfairLock(initialState: State())
 
@@ -196,8 +200,19 @@ final class PortablePackageImportProgressSink: Sendable {
         }
     }
 
-    func yield(_ value: PortablePackageImportProgress) {
-        _ = state.withLock { $0.continuation?.yield(value) }
+    /// Ten work updates per second, plus preparation and the final snapshot. Preparation does
+    /// not delay the first staging update, so cancellation is available as copying starts. The
+    /// stream retains only its newest value when the main actor is busy; events are cumulative.
+    func yield(_ value: PortablePackageImportProgress, now: ContinuousClock.Instant = .now) {
+        state.withLock {
+            guard !$0.finished else { return }
+            if value.phase != .preparing, value.phase != .finished,
+               let last = $0.lastYield, last.duration(to: now) < .milliseconds(100) {
+                return
+            }
+            if value.phase != .preparing { $0.lastYield = now }
+            $0.continuation?.yield(value)
+        }
     }
 
     func finish() {
@@ -303,7 +318,9 @@ struct PortablePackageImporter: Sendable {
         faultInjector: PortablePackageFaultInjector? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) throws -> PortablePackageImportResult {
-        let catalog = try PortablePackageImportCatalog(package: package)
+        let catalog = try PortablePackageImportPhase.measure(.catalog, observer: options.timingObserver) {
+            try PortablePackageImportCatalog(package: package)
+        }
         return try self.`import`(
             sources: sources,
             options: options,
@@ -366,10 +383,12 @@ struct PortablePackageImporter: Sendable {
             do {
                 // A batch can outlive one lease duration. Refresh immediately before each
                 // transaction so a later item does not inherit the first item's expiry window.
-                try lease.renew(now: now())
-                transaction = try package.beginTransaction(
-                    lease: lease, now: now(), faultInjector: faultInjector
-                )
+                transaction = try PortablePackageImportPhase.measure(.begin, observer: options.timingObserver) {
+                    try lease.renew(now: now())
+                    return try package.beginTransaction(
+                        lease: lease, now: now(), faultInjector: faultInjector
+                    )
+                }
             } catch {
                 if error is CancellationError || isCancelled() {
                     cancelled = true
@@ -386,6 +405,8 @@ struct PortablePackageImporter: Sendable {
             }
 
             do {
+                let stageStart = options.timingObserver == nil ? nil : ContinuousClock.now
+                let bytesBeforeSource = progressValue.bytesRead
                 let staged: PortablePackageStagedFile
                 if let inlineData = source.inlineData {
                     staged = try transaction.stage(
@@ -402,10 +423,15 @@ struct PortablePackageImporter: Sendable {
                         chunkSize: options.chunkSize,
                         copyMode: options.copyMode,
                         isCancelled: isCancelled,
-                        sourceReadObserver: { sourceReadObserver(source) }
+                        sourceReadObserver: { sourceReadObserver(source) },
+                        timingObserver: options.timingObserver,
+                        bytesReadObserver: { byteCount in
+                            progressValue.bytesRead = bytesBeforeSource + byteCount
+                            progress(progressValue)
+                        }
                     )
                 }
-                progressValue.bytesRead += staged.byteCount
+                progressValue.bytesRead = bytesBeforeSource + staged.byteCount
 
                 let duplicateAssetID = catalog.existingHashes[staged.checksum]
                     ?? hashesSeenThisImport[staged.checksum]
@@ -459,9 +485,14 @@ struct PortablePackageImporter: Sendable {
                     at: "Catalog/Membership/\(shardName).json"
                 )
 
+                if let stageStart {
+                    options.timingObserver?(.staging, stageStart.duration(to: .now))
+                }
                 progressValue.phase = .committing
                 progress(progressValue)
-                try transaction.commit(now: now(), isCancelled: isCancelled)
+                try PortablePackageImportPhase.measure(.commit, observer: options.timingObserver) {
+                    try transaction.commit(now: now(), isCancelled: isCancelled)
+                }
 
                 catalog.shards[shardName] = shard
                 catalog.existingHashes[staged.checksum] = assetID

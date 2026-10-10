@@ -6,7 +6,7 @@ import os.lock
 
 @MainActor
 final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
-    func testValidatedRemovableSelectionIsPublishedAsAValueRequest() async throws {
+    func testScannedRemovableSelectionIsPublishedAsAValueRequest() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("kromora-library-media-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -27,12 +27,14 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
 
         coordinator.openRemovableMedia(volume)
         try await waitUntil { !coordinator.isRemovableMediaScanning }
+        try FileManager.default.removeItem(at: image)
         coordinator.importSelectedRemovableMedia()
         try await waitUntil { request != nil }
 
         XCTAssertEqual(request?.volume, volume)
         XCTAssertEqual(request?.files, [file])
-        XCTAssertEqual(coordinator.removableMediaImportProgress?.imported, 1)
+        XCTAssertEqual(coordinator.removableMediaImportProgress?.imported, 0)
+        XCTAssertEqual(coordinator.removableMediaImportProgress?.processed, 0)
         await coordinator.shutdown()
     }
 
