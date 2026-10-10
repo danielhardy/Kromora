@@ -212,7 +212,9 @@ struct ImageSource: Sendable, Equatable {
                 ?? "imageio-\(kind)-v1"
             if let existing, let existingFileChangeSignature,
                let currentFileChangeSignature,
-               existingFileChangeSignature == currentFileChangeSignature {
+               // A signature that came from the package has whole-second dates, so exact equality
+               // never matched a real file and every open hashed the whole file on the main actor.
+               existingFileChangeSignature.isSameFileSnapshot(as: currentFileChangeSignature) {
                 fingerprint = existing.sourceFingerprint.with(geometry: geometry)
             } else {
                 fingerprint = (try? PortablePhotoSourceFingerprint.file(
