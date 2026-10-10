@@ -1803,10 +1803,10 @@ struct MaskCanvasOverlay: View {
         )
     }
 
-    private struct OverlayTaskID: Equatable {
     /// The overlay shows mask coverage, which a layer's look (exposure, contrast, ...) never
     /// changes. Keying the task on the look would cancel and restart mask resolution, and flash
     /// "Analyzing mask…", on every adjustment-slider tick.
+    private struct OverlayTaskID: Equatable {
         let layers: [LocalAdjustmentLayer]
         let selectedLayerID: UUID?
         let soloLayerID: UUID?
