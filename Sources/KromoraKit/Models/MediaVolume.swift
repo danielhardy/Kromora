@@ -61,14 +61,17 @@ struct MediaVolumeFile: Identifiable, Sendable, Equatable {
     let filename: String
     let orientation: Int
     let metadata: ImageMetadata
+    /// EXIF capture time, falling back to the file's creation date; nil only when neither is known.
+    let captureDate: Date?
 
     init(url: URL, filename: String? = nil, orientation: Int = 1,
-         metadata: ImageMetadata = ImageMetadata()) {
+         metadata: ImageMetadata = ImageMetadata(), captureDate: Date? = nil) {
         self.url = url.standardizedFileURL
         self.id = self.url.path
         self.filename = filename ?? url.lastPathComponent
         self.orientation = orientation
         self.metadata = metadata
+        self.captureDate = captureDate
     }
 
     var orientationLabel: String {
@@ -93,6 +96,27 @@ struct MediaVolumeFile: Identifiable, Sendable, Equatable {
     }
 }
 
+/// Files taken on one calendar day, in display order. `day` is nil for files with no known date.
+struct MediaVolumeDayGroup: Identifiable, Equatable {
+    let day: Date?
+    let files: [MediaVolumeFile]
+    var id: Date { day ?? .distantPast }
+
+    /// Groups already-sorted files by calendar day, preserving their order.
+    static func groups(for files: [MediaVolumeFile], calendar: Calendar = .current) -> [MediaVolumeDayGroup] {
+        var result: [MediaVolumeDayGroup] = []
+        for file in files {
+            let day = file.captureDate.map { calendar.startOfDay(for: $0) }
+            if let last = result.last, last.day == day {
+                result[result.count - 1] = MediaVolumeDayGroup(day: day, files: last.files + [file])
+            } else {
+                result.append(MediaVolumeDayGroup(day: day, files: [file]))
+            }
+        }
+        return result
+    }
+}
+
 struct MediaVolumeScanResult: Sendable, Equatable {
     let files: [MediaVolumeFile]
     let warnings: [String]
@@ -102,6 +126,8 @@ struct MediaVolumeScanResult: Sendable, Equatable {
 /// select-all/none, toggle, and cancellation behavior deterministic in tests.
 struct MediaVolumeSelectionModel: Sendable, Equatable {
     private(set) var selectedIDs: Set<String> = []
+    /// The last plain click; a shift-click selects everything between it and the clicked file.
+    private(set) var anchorID: String?
 
     var count: Int { selectedIDs.count }
 
@@ -111,11 +137,27 @@ struct MediaVolumeSelectionModel: Sendable, Equatable {
 
     mutating func clear() {
         selectedIDs.removeAll()
+        anchorID = nil
     }
 
     mutating func toggle(_ file: MediaVolumeFile) {
         if !selectedIDs.insert(file.id).inserted {
             selectedIDs.remove(file.id)
+        }
+        anchorID = file.id
+    }
+
+    /// Adds every file between the anchor and `file` (inclusive, in `files` order). Without a
+    /// usable anchor this behaves like a plain click.
+    mutating func selectRange(to file: MediaVolumeFile, in files: [MediaVolumeFile]) {
+        guard let anchorID,
+              let from = files.firstIndex(where: { $0.id == anchorID }),
+              let to = files.firstIndex(where: { $0.id == file.id }) else {
+            toggle(file)
+            return
+        }
+        for item in files[min(from, to)...max(from, to)] {
+            selectedIDs.insert(item.id)
         }
     }
 
@@ -273,11 +315,30 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
             files.append(MediaVolumeFile(
                 url: candidate,
                 orientation: orientation,
-                metadata: ImageMetadata.read(from: candidate)
+                metadata: ImageMetadata.read(from: candidate),
+                captureDate: captureDate(properties: properties, url: candidate)
             ))
         }
-        files.sort { $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending }
+        files.sort {
+            switch ($0.captureDate, $1.captureDate) {
+            case let (a?, b?) where a != b: return a < b
+            case (nil, _?): return false
+            case (_?, nil): return true
+            default: return $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending
+            }
+        }
         return MediaVolumeScanResult(files: files, warnings: warnings)
+    }
+
+    private static func captureDate(properties: [CFString: Any]?, url: URL) -> Date? {
+        if let exif = properties?[kCGImagePropertyExifDictionary] as? [CFString: Any],
+           let raw = exif[kCGImagePropertyExifDateTimeOriginal] as? String {
+            let parser = DateFormatter()
+            parser.dateFormat = "yyyy:MM:dd HH:mm:ss"
+            parser.locale = Locale(identifier: "en_US_POSIX")
+            if let date = parser.date(from: raw) { return date }
+        }
+        return (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
     }
 
     /// The same UTI-derived admission rule is used for discovery and scan. The extension fallback

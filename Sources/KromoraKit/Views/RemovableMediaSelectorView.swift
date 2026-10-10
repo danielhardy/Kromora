@@ -31,7 +31,8 @@ struct RemovableMediaSelectorView: View {
             Divider()
             footer
         }
-        .frame(minWidth: 680, minHeight: 500)
+        .frame(minWidth: 720, minHeight: 540)
+        .tint(KromoraTheme.primaryAccent)
     }
 
     private var header: some View {
@@ -61,7 +62,7 @@ struct RemovableMediaSelectorView: View {
                 Button("Select All") { viewModel.selectAllRemovableMedia() }
                 Button("Select None") { viewModel.selectNoRemovableMedia() }
                 Spacer()
-                Text("Images are added from the card; source files are not changed.")
+                Text("Shift-click to select a range. Source files are not changed.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -80,40 +81,73 @@ struct RemovableMediaSelectorView: View {
                 .padding(.bottom, 8)
             }
 
-            List(viewModel.removableMediaFiles) { file in
-                Button {
-                    viewModel.toggleRemovableMediaSelection(file)
-                } label: {
-                    HStack(spacing: 12) {
-                        Image(systemName: viewModel.removableMediaSelection.contains(file)
-                              ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(viewModel.removableMediaSelection.contains(file)
-                                             ? KromoraTheme.primaryAccent : Color.secondary)
-                        RemovableMediaThumbnail(url: file.url)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(file.filename)
-                                .lineLimit(1)
-                            HStack(spacing: 8) {
-                                if !file.orientationLabel.isEmpty {
-                                    Label(file.orientationLabel, systemImage: "rotate.right")
-                                }
-                                if let summary = file.metadataSummary {
-                                    Text(summary)
-                                        .lineLimit(1)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
+                    ForEach(MediaVolumeDayGroup.groups(for: viewModel.removableMediaFiles)) { group in
+                        Section {
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: Self.cellWidth), spacing: 10)],
+                                alignment: .leading,
+                                spacing: 10
+                            ) {
+                                ForEach(group.files) { file in
+                                    cell(for: file)
                                 }
                             }
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        } header: {
+                            dayHeader(for: group)
                         }
-                        Spacer()
                     }
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel(file.filename)
-                .accessibilityValue(viewModel.removableMediaSelection.contains(file) ? "Selected" : "Not selected")
+                .padding(.horizontal, 16)
+                .padding(.bottom, 16)
             }
         }
+    }
+
+    private static let cellWidth: CGFloat = 128
+
+    private func dayHeader(for group: MediaVolumeDayGroup) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(group.day.map { $0.formatted(.dateTime.weekday(.wide).month(.wide).day().year()) } ?? "Unknown Date")
+                .font(.headline)
+            Text("\(group.files.count)")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.vertical, 6)
+        .background(.bar)
+    }
+
+    private func cell(for file: MediaVolumeFile) -> some View {
+        let isSelected = viewModel.removableMediaSelection.contains(file)
+        return Button {
+            if NSEvent.modifierFlags.contains(.shift) {
+                viewModel.selectRemovableMediaRange(to: file)
+            } else {
+                viewModel.toggleRemovableMediaSelection(file)
+            }
+        } label: {
+            RemovableMediaThumbnail(url: file.url)
+                .overlay(alignment: .topTrailing) {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.85),
+                                         isSelected ? KromoraTheme.primaryAccent : Color.black.opacity(0.35))
+                        .padding(6)
+                }
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(isSelected ? KromoraTheme.primaryAccent : Color.clear, lineWidth: 3)
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(file.filename)
+        .accessibilityLabel(file.filename)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
     }
 
     private var footer: some View {
@@ -154,11 +188,11 @@ private struct RemovableMediaThumbnail: View {
                     .overlay { ProgressView().scaleEffect(0.55) }
             }
         }
-        .frame(width: 64, height: 48)
-        .clipShape(RoundedRectangle(cornerRadius: 5))
+        .frame(width: 128, height: 96)
+        .clipShape(RoundedRectangle(cornerRadius: 6))
         .task(id: url) {
             image = await Task.detached(priority: .utility) {
-                Thumbnails.generate(from: url, maxPixelSize: 128)
+                Thumbnails.generate(from: url, maxPixelSize: 256)
             }.value
         }
     }

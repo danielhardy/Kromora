@@ -16,6 +16,45 @@ final class MediaVolumeSelectionTests: XCTestCase {
         selection.clear()
         XCTAssertEqual(selection.count, 0)
     }
+
+    func testShiftRangeSelectsEverythingBetweenAnchorAndClickInEitherDirection() {
+        let files = (0..<6).map {
+            MediaVolumeFile(url: URL(fileURLWithPath: "/fixture/shot\($0).jpg"))
+        }
+        var selection = MediaVolumeSelectionModel()
+
+        selection.toggle(files[1])
+        selection.selectRange(to: files[3], in: files)
+        XCTAssertEqual(selection.selectedIDs, Set(files[1...3].map(\.id)))
+
+        selection.selectRange(to: files[0], in: files)
+        XCTAssertEqual(selection.selectedIDs, Set(files[0...3].map(\.id)))
+    }
+
+    func testShiftRangeWithoutAnchorActsLikePlainClick() {
+        let files = (0..<3).map {
+            MediaVolumeFile(url: URL(fileURLWithPath: "/fixture/shot\($0).jpg"))
+        }
+        var selection = MediaVolumeSelectionModel()
+        selection.selectRange(to: files[2], in: files)
+        XCTAssertEqual(selection.selectedIDs, [files[2].id])
+    }
+
+    func testDayGroupsSplitByCalendarDayAndKeepUndatedLast() {
+        let calendar = Calendar(identifier: .gregorian)
+        let day1 = calendar.date(from: DateComponents(year: 2026, month: 5, day: 1, hour: 9))!
+        let day1Late = calendar.date(from: DateComponents(year: 2026, month: 5, day: 1, hour: 18))!
+        let day2 = calendar.date(from: DateComponents(year: 2026, month: 5, day: 2, hour: 8))!
+        let files = [
+            MediaVolumeFile(url: URL(fileURLWithPath: "/f/a.jpg"), captureDate: day1),
+            MediaVolumeFile(url: URL(fileURLWithPath: "/f/b.jpg"), captureDate: day1Late),
+            MediaVolumeFile(url: URL(fileURLWithPath: "/f/c.jpg"), captureDate: day2),
+            MediaVolumeFile(url: URL(fileURLWithPath: "/f/d.jpg")),
+        ]
+        let groups = MediaVolumeDayGroup.groups(for: files, calendar: calendar)
+        XCTAssertEqual(groups.map(\.files.count), [2, 1, 1])
+        XCTAssertNil(groups.last?.day)
+    }
 }
 
 @MainActor

@@ -241,6 +241,10 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         removableMediaSelection.toggle(file)
     }
 
+    func selectRemovableMediaRange(to file: MediaVolumeFile) {
+        removableMediaSelection.selectRange(to: file, in: removableMediaFiles)
+    }
+
     func selectAllRemovableMedia() {
         removableMediaSelection.selectAll(in: removableMediaFiles)
     }

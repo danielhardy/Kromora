@@ -2906,6 +2906,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryMediaWorkflow.toggleRemovableMediaSelection(file)
     }
 
+    func selectRemovableMediaRange(to file: MediaVolumeFile) {
+        libraryMediaWorkflow.selectRemovableMediaRange(to: file)
+    }
+
     func selectAllRemovableMedia() {
         libraryMediaWorkflow.selectAllRemovableMedia()
     }
