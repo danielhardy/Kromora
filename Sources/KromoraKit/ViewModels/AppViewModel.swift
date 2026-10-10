@@ -1269,15 +1269,22 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             guard let self, !self.isShuttingDown,
                 publication.request.sourceRevision == self.sourceRevision,
                 publication.request.assetID == self.activeAssetID else { return }
+            let switchUptime = self.previewPresentation.presentationSession?.selectionUptime
+            KromoraObservability.photoSwitchPhase("sourcePrepared", since: switchUptime)
             self.install(preparation: publication.preparation, request: publication.request)
+            KromoraObservability.photoSwitchPhase("sourceInstalled", since: switchUptime)
             if self.previewAdmissionCoordinator.scheduledSourceRevision != self.sourceRevision {
                 self.schedulePreview()
             }
+            KromoraObservability.photoSwitchPhase("previewScheduled", since: switchUptime)
         }
         sourceSession.onStoredDocumentLoaded = { [weak self] publication in
             guard let self, !self.isShuttingDown,
                 publication.request.sourceRevision == self.sourceRevision,
                 publication.request.assetID == self.activeAssetID else { return }
+            KromoraObservability.photoSwitchPhase(
+                "storedDocumentLoaded", since: self.previewPresentation.presentationSession?.selectionUptime
+            )
             self.adoptStoredDocumentValues(publication.result, for: publication.request)
         }
         sourceSession.onStoredDocument = { [weak self] publication in
@@ -1290,6 +1297,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 publication.request.assetID == self.activeAssetID
             else { return }
             self.metadata = publication.metadata
+            KromoraObservability.photoSwitchPhase(
+                "metadataPublished", since: self.previewPresentation.presentationSession?.selectionUptime
+            )
         }
         sourceSession.onCapabilities = { [weak self] publication in
             guard let self, !self.isShuttingDown,
@@ -1299,6 +1309,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self.rawCapabilities = publication.capabilities
             self.capabilitiesProbeCompleted = true
             self.keepInspectorTabValid()
+            KromoraObservability.photoSwitchPhase(
+                "capabilitiesPublished", since: self.previewPresentation.presentationSession?.selectionUptime
+            )
         }
         sourceSession.onFirstFrame = { [weak self] publication in
             guard let self, !self.isShuttingDown else { return }
@@ -2193,11 +2206,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewPresentation.resetForSource()
         previewSurface.clearForSourceSwitch()
         originalPreviewSurface.clear()
+        KromoraObservability.photoSwitchPhase("loadSyncPrefix", since: presentationSelectionUptime)
 
         Task { @MainActor [weak self] in
             await Task.yield()
             guard let self, !self.isShuttingDown,
                 self.loadRequestGeneration == requestGeneration else { return }
+            KromoraObservability.photoSwitchPhase("beginLoadScheduled", since: presentationSelectionUptime)
             self.beginLoad(
                 importPlan, previousActiveAssetID: previousActiveAssetID,
                 presentationSelectionUptime: presentationSelectionUptime
@@ -2222,6 +2237,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Discrete edits are queued normally; switching sources is a durability boundary for them.
         // Do not rewrite an unchanged document merely because navigation occurred.
         let persistenceBarrier = requestPersistenceFlush()
+        KromoraObservability.photoSwitchPhase("persistenceFlushRequested", since: presentationSelectionUptime)
         // `sourceImage` is cleared below to fence edit operations while decoding. Keep the
         // toolbar's settled enabled appearance until this selected photo publishes or fails.
         isToolbarPhotoTransitioning = true
@@ -2236,10 +2252,13 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             collection.setPresentedCrop(
                 session.document.crop, rotation: session.document.rotation, for: assetID)
         }
+        KromoraObservability.photoSwitchPhase("documentActivated", since: presentationSelectionUptime)
         refreshDurableEditHistory()
+        KromoraObservability.photoSwitchPhase("editHistoryRefreshed", since: presentationSelectionUptime)
         lastReportedMissingLUT = nil
         lutResolutionStatus = nil
         refreshLUTResolutionStatus()
+        KromoraObservability.photoSwitchPhase("lutStatusRefreshed", since: presentationSelectionUptime)
 
         previewPresentation.resetForSource()
         let presentationGeneration = sourceSession.sourceRevision &+ 1
@@ -2290,6 +2309,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 )
             }
         }
+        KromoraObservability.photoSwitchPhase(
+            "thumbnailCandidateBuilt", since: presentationSelectionUptime,
+            detail: "candidate=\(deferredThumbnailPresentation.map { "\($0.source)" } ?? "none")"
+        )
         previewAdmissionCoordinator.resetDeferredSettledPreview()
         // The latest persisted frame is read while the source prepares. It needs only the
         // identity the collection already holds, so it can paint before any decode.
@@ -2375,6 +2398,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         isNavigationLoading = true
         statusMessage = "Loading \(importPlan.name)..."
 
+        KromoraObservability.photoSwitchPhase("beginLoadSyncEnd", since: presentationSelectionUptime)
         sourceSession.begin(
             plan: importPlan,
             editSessionRevision: editorDocument.revision(for: assetID),
@@ -3402,6 +3426,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         let selectionUptime = DispatchTime.now().uptimeNanoseconds
         if isCropToolActive { cancelCrop() }
         selectPortableItem(at: index, modifiers: modifiers)
+        KromoraObservability.photoSwitchPhase("selectPortableItem", since: selectionUptime)
         let item = collection.items[index]
 
         if let url = item.url {
@@ -3419,6 +3444,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 presentationSelectionUptime: selectionUptime
             )
         }
+        KromoraObservability.photoSwitchPhase("selectionSyncReturned", since: selectionUptime)
         // The active editor should receive this request, but constructing its persistence and
         // Look snapshot can be expensive. It is supporting work, so let the photo switch enqueue
         // source preparation first and admit the thumbnail after the selection event returns.

@@ -182,6 +182,7 @@ enum KromoraWorkflowEvent: CaseIterable {
     case maskResolveTiming
     case thumbnailFrameRead
     case thumbnailOriginalLoad
+    case photoSwitchPhase
 
     var name: StaticString {
         switch self {
@@ -216,6 +217,7 @@ enum KromoraWorkflowEvent: CaseIterable {
         case .maskResolveTiming: return "MaskResolveTiming"
         case .thumbnailFrameRead: return "ThumbnailFrameRead"
         case .thumbnailOriginalLoad: return "ThumbnailOriginalLoad"
+        case .photoSwitchPhase: return "PhotoSwitchPhase"
         }
     }
 }
@@ -314,6 +316,20 @@ enum KromoraObservability {
     static func thumbnailDiagnostic(_ event: KromoraWorkflowEvent, detail: String) {
         thumbnailLog.notice("\(event.name.description, privacy: .public) \(detail, privacy: .public)")
         Self.event(event, detail: detail)
+    }
+
+    private static let photoSwitchLog = Logger(subsystem: "com.kromora.app", category: "photo-switch")
+
+    /// One line per phase of a Library to Edit (or photo to photo) switch, timed from the moment
+    /// the selection began. `since` is the `DispatchTime` uptime the presentation session already
+    /// uses as its clock, so these numbers line up with `PresentationFirstPixel` / `Confirmed`.
+    static func photoSwitchPhase(_ phase: String, since uptime: UInt64?, detail: String = "") {
+        let elapsed = uptime.map { Double(DispatchTime.now().uptimeNanoseconds &- $0) / 1_000_000 }
+        let ms = elapsed.map { String(format: "%.1f", $0) } ?? "?"
+        photoSwitchLog.notice(
+            "PhotoSwitchPhase phase=\(phase, privacy: .public) ms=\(ms, privacy: .public) \(detail, privacy: .public)"
+        )
+        event(.photoSwitchPhase, detail: "phase=\(phase) ms=\(ms) \(detail)")
     }
 
     static func maskDiagnostic(_ event: KromoraWorkflowEvent, source: ImageSource? = nil,

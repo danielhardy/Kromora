@@ -194,6 +194,9 @@ final class PreviewPresentationCoordinator {
         }
         presentationSession = session
         Self.emitPresentationMetric("PresentationFirstPixel", session: session, source: source.rawValue)
+        KromoraObservability.photoSwitchPhase(
+            "firstPixel", since: session.selectionUptime, detail: "source=\(source.rawValue)"
+        )
     }
 
     func admitsPublication(
@@ -239,6 +242,10 @@ final class PreviewPresentationCoordinator {
         presentationSession = session
         Self.emitPresentationMetric(
             "PresentationConfirmed", session: session, source: CandidateSource.rendered.rawValue
+        )
+        KromoraObservability.photoSwitchPhase(
+            "confirmed", since: session.selectionUptime,
+            detail: "source=\(source.rawValue) frames=\(session.distinctFrameCount)"
         )
     }
 
