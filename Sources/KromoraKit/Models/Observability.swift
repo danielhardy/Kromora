@@ -309,6 +309,15 @@ enum KromoraObservability {
         Self.event(event, source: source, quality: quality, detail: detail)
     }
 
+    static func maskOverlayError(_ error: any Error, source: ImageSource) {
+        let underlying = error as NSError
+        maskLog.error("MaskResolutionState overlayError code=\(underlying.code) domain=\(underlying.domain, privacy: .private) description=\(String(describing: error), privacy: .private)")
+        Self.event(
+            .maskResolutionState, source: source,
+            detail: "overlayError code=\(underlying.code)"
+        )
+    }
+
     static func event(
         _ event: KromoraWorkflowEvent,
         source: ImageSource? = nil,

@@ -1029,10 +1029,7 @@ actor RenderEngine: RenderEngining {
         } catch is CancellationError {
             return nil
         } catch {
-            KromoraObservability.maskDiagnostic(
-                .maskResolutionState, source: request.source,
-                detail: "overlayError=\(String(describing: error))"
-            )
+            KromoraObservability.maskOverlayError(error, source: request.source)
             return nil
         }
     }
