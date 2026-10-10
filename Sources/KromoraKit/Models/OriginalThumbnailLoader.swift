@@ -18,10 +18,20 @@ enum OriginalThumbnailLoader {
         let size = PlatformThumbnailProvider.libraryMaxPixelSize
         if let cached = PlatformThumbnailProvider.memoryCachedImage(
             identity: identity, maxPixelSize: size
-        ) { return cached }
+        ) {
+            KromoraObservability.thumbnailDiagnostic(.thumbnailOriginalLoad, detail: "tier=memory")
+            return cached
+        }
 
+        // Why a decode happened is the question the library-launch diagnostics have to answer, so
+        // the miss reason travels with the decode line below.
+        var packOutcome = store == nil ? "noStore" : "unread"
+        let clock = ContinuousClock()
+        let lookupStart = clock.now
+        var lookupMs = 0
         if let store {
             let result = await store.readWithOutcome(.original, for: identity)
+            lookupMs = Self.milliseconds(clock.now - lookupStart)
             if let hit = result.hit {
                 let classification = FrameClassifier.classifyWithReason(
                     hit.frame.metadata, against: OriginalThumbnailSignature.currentInputs(for: identity)
@@ -31,9 +41,14 @@ enum OriginalThumbnailLoader {
                     PlatformThumbnailProvider.primeMemoryCache(
                         hit.image, identity: identity, maxPixelSize: size
                     )
+                    KromoraObservability.thumbnailDiagnostic(
+                        .thumbnailOriginalLoad, detail: "tier=pack lookupMs=\(lookupMs)"
+                    )
                     return hit.image
                 }
+                packOutcome = "rejected.\(classification.reason?.rawValue ?? "\(classification.classification)")"
             } else {
+                packOutcome = result.corrupt ? "corrupt" : "missing"
                 await ledger.record(
                     surface: surface,
                     outcome: result.corrupt ? .corrupt : .missingFile
@@ -62,9 +77,20 @@ enum OriginalThumbnailLoader {
             return (image, frame)
         }.value
         guard !Task.isCancelled else { return nil }
+        KromoraObservability.thumbnailDiagnostic(
+            .thumbnailOriginalLoad,
+            detail: "tier=decode packOutcome=\(packOutcome) lookupMs=\(lookupMs) "
+                + "decodeMs=\(Self.milliseconds(clock.now - lookupStart) - lookupMs) "
+                + "decoded=\(decoded != nil)"
+        )
         guard let decoded else { return nil }
         if let store, let frame = decoded.frame { await store.enqueueWrite(frame) }
         return decoded.image
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Int {
+        let parts = duration.components
+        return Int(parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000)
     }
 
     private static func outcome(
