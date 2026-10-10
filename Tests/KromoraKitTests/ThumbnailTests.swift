@@ -107,6 +107,37 @@ final class ThumbnailTests: TempDirectoryTestCase {
         }
     }
 
+    /// ImageIO returns library thumbnails in Display P3, but the working space is sRGB and a P3
+    /// raster is never lossless there, so every stored original used to be classified unusable.
+    /// Each launch then re-decoded every unedited photo from its source file. A stored original
+    /// must be acceptable to the classifier that will read it back.
+    func testOriginalFramesFromDisplayP3RastersAreStoredInTheWorkingSpaceAndClassifyExact() throws {
+        let p3 = try XCTUnwrap(CGColorSpace(name: CGColorSpace.displayP3))
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 120, height: 80, bitsPerComponent: 8, bytesPerRow: 0, space: p3,
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ))
+        context.setFillColor(red: 0.9, green: 0.2, blue: 0.1, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 120, height: 80))
+        let image = try XCTUnwrap(context.makeImage())
+        XCTAssertEqual(image.colorSpace?.name, CGColorSpace.displayP3)
+
+        let identity = FrameFixtures.identity()
+        let frame = try XCTUnwrap(ThumbnailFrameEncoder.originalFrame(image: image, identity: identity))
+
+        XCTAssertEqual(frame.metadata.rasterColorSpace, RasterColorSpace(WorkingSpace.current))
+        let result = FrameClassifier.classifyWithReason(
+            frame.metadata, against: OriginalThumbnailSignature.currentInputs(for: identity)
+        )
+        XCTAssertEqual(result.classification, .exact, "reason: \(String(describing: result.reason))")
+
+        // The loader shows these same pixels, so a cold decode and a warm read agree.
+        let shown = try XCTUnwrap(ThumbnailFrameEncoder.normalizedRaster(image)).image
+        XCTAssertEqual(shown.colorSpace?.name, WorkingSpace.current.cgColorSpace.name)
+        XCTAssertEqual(shown.width, 120)
+        XCTAssertEqual(shown.height, 80)
+    }
+
     func testPackedThumbnailKeysRetireInsufficient900PixelFrames() throws {
         let assetID = PortablePhotoAssetID()
         XCTAssertTrue(

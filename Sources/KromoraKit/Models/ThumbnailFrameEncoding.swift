@@ -70,21 +70,29 @@ enum ThumbnailFrameEncoder {
 
     /// ImageIO thumbnails keep the source's own profile. The frame model knows sRGB and Display P3,
     /// so anything else is converted to sRGB — the display thumbnail loses nothing it could show.
-    private static func normalizedRaster(_ image: CGImage) -> (image: CGImage, space: RasterColorSpace)? {
+    /// The raster an original thumbnail is stored and shown as.
+    ///
+    /// ImageIO hands back library thumbnails in Display P3 even though the app's working space is
+    /// sRGB. A P3 frame can never be presented losslessly in an sRGB working space, so
+    /// `FrameClassifier` refused every stored original and each launch re-decoded every unedited
+    /// photo from its source file. Normalizing to the working space makes a stored original
+    /// acceptable, and the loader shows these same pixels so a cold decode and a warm read agree.
+    /// An sRGB raster stays as is: it is presentable in any working space.
+    static func normalizedRaster(_ image: CGImage) -> (image: CGImage, space: RasterColorSpace)? {
+        let target = WorkingSpace.current
         let name = image.colorSpace?.name
-        if name == CGColorSpace.displayP3 { return (image, .displayP3) }
         if name == CGColorSpace.sRGB { return (image, .sRGB) }
-        guard let srgb = CGColorSpace(name: CGColorSpace.sRGB),
-              let context = CGContext(
+        if name == target.cgColorSpace.name { return (image, RasterColorSpace(target)) }
+        guard let context = CGContext(
                   data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
-                  bytesPerRow: 0, space: srgb,
+                  bytesPerRow: 0, space: target.cgColorSpace,
                   bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
               )
         else { return nil }
         context.interpolationQuality = .high
         context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
         guard let converted = context.makeImage() else { return nil }
-        return (converted, .sRGB)
+        return (converted, RasterColorSpace(target))
     }
 
     /// The 8×8 block-mean fingerprint, computed from one 64×64 draw of the raster.

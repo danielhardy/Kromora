@@ -71,10 +71,12 @@ enum OriginalThumbnailLoader {
             } else {
                 image = nil
             }
-            guard let image else { return nil }
+            guard let decodedImage = image else { return nil }
+            // Show exactly what will be stored, so a cold decode and a later packed read agree.
+            let shown = ThumbnailFrameEncoder.normalizedRaster(decodedImage)?.image ?? decodedImage
             let frame = store == nil
-                ? nil : ThumbnailFrameEncoder.originalFrame(image: image, identity: identity)
-            return (image, frame)
+                ? nil : ThumbnailFrameEncoder.originalFrame(image: shown, identity: identity)
+            return (shown, frame)
         }.value
         guard !Task.isCancelled else { return nil }
         KromoraObservability.thumbnailDiagnostic(
