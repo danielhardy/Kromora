@@ -1523,8 +1523,11 @@ struct MaskCanvasOverlay: View {
                     selectedComponentID: overlaySelection.componentID,
                     soloComponentID: overlaySelection.soloComponentID
                 )
+                var overlayInterval = KromoraObservability.begin(.maskOverlayResolve)
+                defer { overlayInterval.end() }
                 if semanticTarget != nil {
                     maskingState.beginMaskResolution()
+                    KromoraObservability.maskDiagnostic(.maskResolutionState, detail: "loading")
                 }
                 // Explicit person requests establish the provider gate signals first: cached
                 // hits when warm, Vision-backed computation when cold. Without this a cold
@@ -1541,13 +1544,18 @@ struct MaskCanvasOverlay: View {
                     selectedComponentID: overlaySelection.componentID,
                     soloComponentID: overlaySelection.soloComponentID
                 )
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else {
+                    KromoraObservability.maskDiagnostic(.maskResolutionState, detail: "cancelled")
+                    return
+                }
                 maskImage = resolved
                 if maskingState.overlayPreviewTarget == nil {
                     settledOverlayImage = resolved
                 }
                 settlingStroke = nil
                 if semanticTarget != nil {
+                    KromoraObservability.maskDiagnostic(
+                        .maskResolutionState, detail: resolved == nil ? "unavailable" : "ready")
                     if resolved == nil {
                         maskingState.markMaskUnavailable(
                             "The selected semantic mask could not be resolved for this photo."

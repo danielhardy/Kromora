@@ -181,7 +181,13 @@ Requirements and behavior of the capture host:
 
 Record hardware, OS, commit, source format/dimensions, viewport/backing pixels, decoder, and
 cold/warm state. Points of Interest under `com.kromora.app` / `workflow` distinguish input, render,
-GPU completion, and actual drawable presentation. Fake-renderer timings are orchestration checks,
+GPU completion, and actual drawable presentation.
+Mask editing adds `MaskOverlayResolve`, `MaskSemanticResolve` and `MaskSemanticApply` intervals plus
+`MaskResolutionState` (loading/ready/unavailable/cancelled) and `MaskResolveTiming` events (lookup,
+resize and apply milliseconds with source/target sizes). To triage a stuck "Analyzing mask…", stream
+them with `log stream --predicate 'subsystem == "com.kromora.app"' --level debug`: a `loading` with no
+following `ready`/`unavailable`/`cancelled` is a hung or torn-down task; large `resizeMs`/`applyMs`
+points at the CPU passes. Fake-renderer timings are orchestration checks,
 not product latency claims.
 
 ## Manual UI checks

@@ -110,6 +110,9 @@ enum KromoraWorkflowStage: CaseIterable {
     case autoTotal
     case autoAnalysis
     case autoCandidateRender
+    case maskOverlayResolve
+    case maskSemanticResolve
+    case maskSemanticApply
 
     var name: StaticString {
         switch self {
@@ -140,6 +143,9 @@ enum KromoraWorkflowStage: CaseIterable {
         case .autoTotal: return "AutoTotal"
         case .autoAnalysis: return "AutoAnalysis"
         case .autoCandidateRender: return "AutoCandidateRender"
+        case .maskOverlayResolve: return "MaskOverlayResolve"
+        case .maskSemanticResolve: return "MaskSemanticResolve"
+        case .maskSemanticApply: return "MaskSemanticApply"
         }
     }
 }
@@ -172,6 +178,8 @@ enum KromoraWorkflowEvent: CaseIterable {
     case frameLookupSummary
     case frameWriteSkippedPlaceholder
     case cellGeometryReflow
+    case maskResolutionState
+    case maskResolveTiming
 
     var name: StaticString {
         switch self {
@@ -202,6 +210,8 @@ enum KromoraWorkflowEvent: CaseIterable {
         case .frameLookupSummary: return "FrameLookupSummary"
         case .frameWriteSkippedPlaceholder: return "FrameWriteSkippedPlaceholder"
         case .cellGeometryReflow: return "CellGeometryReflow"
+        case .maskResolutionState: return "MaskResolutionState"
+        case .maskResolveTiming: return "MaskResolveTiming"
         }
     }
 }
@@ -287,6 +297,16 @@ enum KromoraObservability {
             stage,
             context: KromoraTraceContext(sourceToken: source.traceToken, quality: maskQuality.rawValue)
         )
+    }
+
+    /// Mask-resolution diagnostics also go to the regular log: signposts are invisible to a plain
+    /// `log stream` (they need `--signpost`), and these are the events used to triage a hang.
+    private static let maskLog = Logger(subsystem: "com.kromora.app", category: "mask-resolution")
+
+    static func maskDiagnostic(_ event: KromoraWorkflowEvent, source: ImageSource? = nil,
+                               quality: RenderQuality? = nil, detail: String) {
+        maskLog.notice("\(event.name.description, privacy: .public) \(detail, privacy: .public)")
+        Self.event(event, source: source, quality: quality, detail: detail)
     }
 
     static func event(

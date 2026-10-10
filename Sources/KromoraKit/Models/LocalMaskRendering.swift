@@ -458,6 +458,12 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
 
         let kind = definition.semanticMaskKind
         let requestedQuality = request.quality.maskQuality
+        let clock = ContinuousClock()
+        let started = clock.now
+        var resolveInterval = KromoraObservability.begin(
+            .maskSemanticResolve, source: request.source, quality: request.quality
+        )
+        defer { resolveInterval.end() }
         let mask: RegionMask
         do {
             mask = try await resolveMask(
@@ -489,8 +495,25 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
                 target: definition.target, quality: requestedQuality
             )
         }
+        let loaded = clock.now
+        resolveInterval.end()
+        var applyInterval = KromoraObservability.begin(
+            .maskSemanticApply, source: request.source, quality: request.quality
+        )
+        defer { applyInterval.end() }
         let resized = try MaskOperations.resized(pixels, to: request.targetSize)
+        let resizedAt = clock.now
         let adjusted = try Self.apply(definition, to: resized)
+        let finished = clock.now
+        KromoraObservability.maskDiagnostic(
+            .maskResolveTiming, source: request.source, quality: request.quality,
+            detail: "target=\(definition.target) src=\(pixels.size.width)x\(pixels.size.height) "
+                + "dst=\(request.targetSize.width)x\(request.targetSize.height) "
+                + "feather=\(definition.edgeFeather) "
+                + "lookupMs=\((loaded - started).milliseconds) "
+                + "resizeMs=\((resizedAt - loaded).milliseconds) "
+                + "applyMs=\((finished - resizedAt).milliseconds)"
+        )
         return LocalMaskPayload(
             sourceFingerprint: request.source.cacheFingerprint,
             definitionHash: RenderCacheHash.digest(request.component.source),
@@ -575,5 +598,12 @@ extension RenderQuality {
         case .thumbnail, .interactive, .preview: return .preview
         case .fullResolution, .export: return .render
         }
+    }
+}
+
+private extension Duration {
+    var milliseconds: Int {
+        let parts = components
+        return Int(parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000)
     }
 }

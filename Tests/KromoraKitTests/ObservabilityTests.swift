@@ -13,13 +13,14 @@ final class ObservabilityTests: XCTestCase {
             "PhotoAnalysisForegroundMask", "PhotoAnalysisBackgroundMask", "PhotoAnalysisPersonMask",
             "PhotoAnalysisMaskedStatistics", "PhotoAnalysisAssembly", "PhotoAnalysisTotal",
             "AutoTotal", "AutoAnalysis", "AutoCandidateRender",
+            "MaskOverlayResolve", "MaskSemanticResolve", "MaskSemanticApply",
         ])
     }
 
     func testWorkflowEventsCoverCacheAndSupersededWork() {
         let names = KromoraWorkflowEvent.allCases.map { String(describing: $0.name) }
 
-        XCTAssertEqual(names, ["CacheHit", "CacheMiss", "Cancellation", "Coalesced", "PointerInput", "RenderStart", "RenderEnd", "GPUComplete", "PresentationMaterialized", "PresentationEncoded", "DrawablePresented", "StaleRevision", "MaskOverlayPointerInput", "MaskOverlayPresentationEncoded", "MaskOverlayGPUComplete", "MaskOverlayDrawablePresented", "LibraryIndexWarm", "LibraryIndexRebuild", "LibraryIndexRepaired", "LibraryIndexWriteFailed", "LaunchHintsValidation", "LaunchFirstIndexPage", "LaunchHintsSuperseded", "LaunchHydrationComplete", "FrameLookupSummary", "FrameWriteSkippedPlaceholder", "CellGeometryReflow"])
+        XCTAssertEqual(names, ["CacheHit", "CacheMiss", "Cancellation", "Coalesced", "PointerInput", "RenderStart", "RenderEnd", "GPUComplete", "PresentationMaterialized", "PresentationEncoded", "DrawablePresented", "StaleRevision", "MaskOverlayPointerInput", "MaskOverlayPresentationEncoded", "MaskOverlayGPUComplete", "MaskOverlayDrawablePresented", "LibraryIndexWarm", "LibraryIndexRebuild", "LibraryIndexRepaired", "LibraryIndexWriteFailed", "LaunchHintsValidation", "LaunchFirstIndexPage", "LaunchHintsSuperseded", "LaunchHydrationComplete", "FrameLookupSummary", "FrameWriteSkippedPlaceholder", "CellGeometryReflow", "MaskResolutionState", "MaskResolveTiming"])
     }
 
     func testSourceTokensAreStablePrivateSafeAndDistinct() {

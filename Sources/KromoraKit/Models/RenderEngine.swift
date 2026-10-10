@@ -985,7 +985,16 @@ actor RenderEngine: RenderEngining {
                 requestRevision: request.requestRevision, includeIdentity: true,
                 onlyComponentID: onlyComponentID
             )
-            guard let mask = masks.images[layer.id], !Task.isCancelled else { return nil }
+            guard let mask = masks.images[layer.id], !Task.isCancelled else {
+                if !Task.isCancelled {
+                    KromoraObservability.maskDiagnostic(
+                        .maskResolutionState, source: request.source,
+                        detail: "overlayNoMask layers=\(masks.images.count) "
+                            + "only=\(onlyComponentID != nil)"
+                    )
+                }
+                return nil
+            }
             let output: CIImage
             switch request.style.inspection {
             case .colorWash:
@@ -1020,6 +1029,10 @@ actor RenderEngine: RenderEngining {
         } catch is CancellationError {
             return nil
         } catch {
+            KromoraObservability.maskDiagnostic(
+                .maskResolutionState, source: request.source,
+                detail: "overlayError=\(String(describing: error))"
+            )
             return nil
         }
     }
