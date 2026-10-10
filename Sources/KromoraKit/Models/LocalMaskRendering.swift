@@ -501,9 +501,14 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
             .maskSemanticApply, source: request.source, quality: request.quality
         )
         defer { applyInterval.end() }
-        let resized = try MaskOperations.resized(pixels, to: request.targetSize)
-        let resizedAt = clock.now
-        let adjusted = try Self.apply(definition, to: resized)
+        // Soften, shift and strength run on the matte at its own (small) resolution, then it is
+        // resized once. The feather radius is a fraction of the mask's shorter side, so the result
+        // is resolution-independent, and these passes cost a few hundred thousand pixels instead
+        // of every pixel of the zoomed target. A refined render-quality matte is already at the
+        // target size, where the order makes no difference.
+        let adjustedSource = try Self.apply(definition, to: pixels)
+        let appliedAt = clock.now
+        let adjusted = try MaskOperations.resized(adjustedSource, to: request.targetSize)
         let finished = clock.now
         KromoraObservability.maskDiagnostic(
             .maskResolveTiming, source: request.source, quality: request.quality,
@@ -511,8 +516,8 @@ actor CoordinatorLocalMaskResolver: LocalMaskResolving {
                 + "dst=\(request.targetSize.width)x\(request.targetSize.height) "
                 + "feather=\(definition.edgeFeather) "
                 + "lookupMs=\((loaded - started).milliseconds) "
-                + "resizeMs=\((resizedAt - loaded).milliseconds) "
-                + "applyMs=\((finished - resizedAt).milliseconds)"
+                + "applyMs=\((appliedAt - loaded).milliseconds) "
+                + "resizeMs=\((finished - appliedAt).milliseconds)"
         )
         return LocalMaskPayload(
             sourceFingerprint: request.source.cacheFingerprint,
