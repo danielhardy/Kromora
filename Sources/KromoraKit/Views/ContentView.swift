@@ -464,7 +464,7 @@ public struct ContentView: View {
                 }
                 .disabled(!viewModel.canImportIntoPortableLibrary)
                 if !collection.items.isEmpty {
-                    Button("Refresh Source Folder") {
+                    Button("Refresh Library") {
                         viewModel.refreshSource()
                     }
                 }

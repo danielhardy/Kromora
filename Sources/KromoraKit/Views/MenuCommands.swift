@@ -92,7 +92,7 @@ public struct KromoraCommands: Commands {
 
             Button("Import from Removable Media...") { post(.importFromRemovableMedia) }
 
-            Button("Refresh Source Folder") { post(.refreshSourceFolder) }
+            Button("Refresh Library") { post(.refreshSourceFolder) }
                 .keyboardShortcut("r", modifiers: [.command])
 
             Button("Delete Selected Photos") { post(.deleteSelectedPhotos) }

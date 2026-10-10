@@ -19,10 +19,13 @@ protocol LibraryBrowsingProviding: AnyObject {
     func resolveEmbeddedSourceURL(for assetID: PortablePhotoAssetID) throws -> URL
     func materializedAsset(for assetID: PortablePhotoAssetID) async throws -> PhotoAsset
     func updateLibraryState(for assetID: PortablePhotoAssetID, rating: Int, flag: PhotoFlag) throws
+    /// Rebuild the disposable index from package membership (the package is canonical).
+    func rebuildIndex() throws
 }
 
 extension PortableLibrarySession: LibraryBrowsingProviding {
     var queryPageSize: Int { queryController.pageSize }
+    func rebuildIndex() throws { _ = try refreshIndex() }
 }
 
 protocol LaunchHintFrameReading: Sendable {
@@ -102,6 +105,13 @@ final class LibraryBrowsingCoordinator {
 
     func reloadPortableCollection() throws { try reloadPortableWindow(pageIndex: 0) }
 
+    /// Rebuild the disposable index from package membership, then republish the first page. This
+    /// is the recovery path for an index that disagrees with the package.
+    func rebuildPortableIndex() throws {
+        try library?.rebuildIndex()
+        try reloadPortableWindow(pageIndex: 0)
+    }
+
     /// Propagate a package ratio-only repair into retained cells without rebuilding their assets
     /// or admitting any new thumbnail work.
     func applyPresentedAspectRatioUpdates(_ updates: [PortablePhotoAssetID: Double]) {
@@ -160,9 +170,9 @@ final class LibraryBrowsingCoordinator {
         let assets = library.launchHintAssets(
             for: Array(hints.visibleAssetIDs.prefix(LaunchHintReadPolicy.maximumHintedIDs))
         )
-        hintedAssets = Dictionary(uniqueKeysWithValues: assets.map { asset in
+        hintedAssets = Dictionary(assets.map { asset in
             (PortablePhotoAssetID.compatibility(from: asset.id), asset)
-        })
+        }, uniquingKeysWith: { first, _ in first })
         hintQueue = assets.map { PortablePhotoAssetID.compatibility(from: $0.id) }
         admitNextHintReads()
     }
@@ -356,7 +366,7 @@ final class LibraryBrowsingCoordinator {
         collection.select(at: index, modifiers: modifiers)
     }
 
-    func openPortableAsset(_ assetID: PortablePhotoAssetID) {
+    func openPortableAsset(_ assetID: PortablePhotoAssetID, allowIndexRebuild: Bool = true) {
         guard let destination else { return }
         guard let library else {
             destination.setLibraryStatusMessage("The library package is not open.")
@@ -402,6 +412,13 @@ final class LibraryBrowsingCoordinator {
             guard page.hasNextPage else { break }
             pageIndex += 1
             if pageIndex * pageSize > 200_000 { break }
+        }
+        // The package committed this asset (the importer returned its id), so a miss means the
+        // disposable index is stale. Rebuild it from membership once before reporting failure.
+        if allowIndexRebuild, (try? library.rebuildIndex()) != nil {
+            try? reloadPortableWindow(pageIndex: 0)
+            openPortableAsset(assetID, allowIndexRebuild: false)
+            return
         }
         destination.setLibraryStatusMessage("The imported photo is not available in the package index.")
     }

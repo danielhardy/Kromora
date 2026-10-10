@@ -400,7 +400,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertEqual(updated.summary.sourceFingerprint, replacement)
         XCTAssertNotEqual(updated.summary.sourceFingerprint, prior.sourceFingerprint)
         let repairedIndex = try session.queryController.index
-            .reconcilingSourceFingerprints(with: session.package)
+            .reconcilingMembership(with: session.package)
         XCTAssertEqual(
             repairedIndex.entry(for: id)?.summary.sourceFingerprint,
             replacement,
@@ -448,6 +448,43 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         ))
         XCTAssertEqual(loaded.document.adjustments, [.exposure(ev: 0.5)])
         XCTAssertTrue(loaded.found)
+        try reopened.lease.release()
+    }
+
+    /// KRMA-842: an index that is missing photos the package committed (a lost or interrupted
+    /// index write) must be repaired from membership on open, not trusted because the library ID
+    /// matches. A persisted index that still lists a removed photo must drop it too.
+    func testReopenRepairsPersistedIndexMissingCommittedAssetsAndListingRemovedOnes() throws {
+        let packageURL = tempDirectory.appendingPathComponent("Stale.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("Index/LibraryIndex.store")
+        let sources = try (0..<4).map {
+            try Fixtures.writeJPEG(
+                width: 16 + $0, height: 12, orientation: 1, named: "photo\($0).jpg", in: tempDirectory)
+        }
+        let session = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let imported = try session.importURLs(sources).imported.map(\.assetID)
+        XCTAssertEqual(imported.count, 4)
+        let removedID = imported[3]
+        _ = try session.removeFromLibrary(removedID)
+
+        // Persist an index that predates the last two imports and still lists the removed photo.
+        let stale = try LibraryIndexProjection(
+            libraryID: session.package.manifest.libraryID,
+            entries: session.queryController.index.entries.filter { imported[0...1].contains($0.assetID) }
+                + [LibraryIndexEntry(from: try XCTUnwrap(
+                    try session.package.readMembershipShard(
+                        PortableLibraryPackage.shard(for: removedID)
+                    ).entries.first { $0.assetID == removedID }))]
+        )
+        try stale.write(to: indexURL)
+        try session.lease.release()
+
+        let reopened = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let ids = Set(reopened.queryController.index.entries.map(\.assetID))
+        XCTAssertEqual(ids, Set(imported[0...2]), "index matches live package membership")
+        XCTAssertFalse(ids.contains(removedID))
+        let persisted = try LibraryIndexProjection.load(from: indexURL)
+        XCTAssertEqual(Set(persisted.entries.map(\.assetID)), ids, "repair is persisted")
         try reopened.lease.release()
     }
 

@@ -134,8 +134,11 @@ final class PortableLibrarySession {
                     libraryID: package.manifest.libraryID, entries: [])
             } else if let loaded = try? LibraryIndexProjection.load(from: self.indexURL),
                       let valid = try? loaded.validated(for: package) {
-                let reconciled = try valid.reconcilingSourceFingerprints(with: package)
-                if reconciled != valid { try reconciled.write(to: self.indexURL) }
+                let reconciled = try valid.reconcilingMembership(with: package)
+                if reconciled != valid {
+                    Self.noteIndexRepaired(from: valid, to: reconciled)
+                    try reconciled.write(to: self.indexURL)
+                }
                 projection = reconciled
             } else {
                 projection = try LibraryIndexProjection(package: package)
@@ -192,6 +195,17 @@ final class PortableLibrarySession {
         try? lease.release()
     }
 
+    /// A persisted index that disagreed with package membership was repaired on open. The package
+    /// is canonical, so this is recoverable, but it means an earlier index write was lost.
+    nonisolated private static func noteIndexRepaired(
+        from stale: LibraryIndexProjection, to repaired: LibraryIndexProjection
+    ) {
+        KromoraObservability.event(
+            .libraryIndexRepaired,
+            detail: "indexed=\(stale.entries.count) members=\(repaired.entries.count)"
+        )
+    }
+
     private func startIndexLoading(package: PortableLibraryPackage) {
         let indexURL = self.indexURL
         let pageSize = queryController.pageSize
@@ -228,10 +242,13 @@ final class PortableLibrarySession {
             do {
                 if let loaded = try? LibraryIndexProjection.load(from: indexURL),
                    let valid = try? loaded.validated(for: package) {
-                    let reconciled = try valid.reconcilingSourceFingerprints(with: package)
+                    let reconciled = try valid.reconcilingMembership(with: package)
                     KromoraObservability.event(.libraryIndexWarm)
                     let controller = LibraryQueryController(index: reconciled, pageSize: pageSize)
-                    if reconciled != valid { try reconciled.write(to: indexURL) }
+                    if reconciled != valid {
+                        Self.noteIndexRepaired(from: valid, to: reconciled)
+                        try reconciled.write(to: indexURL)
+                    }
                     await publish(reconciled, controller.page(at: 0), 0, 0, true, nil)
                     return
                 }
@@ -679,7 +696,7 @@ final class PortableLibrarySession {
         guard let scheduler else {
             // Headless/session tests without a scheduler still get a durable projection. The
             // production composition root always supplies the shared package-I/O lane.
-            try? projection.write(to: indexURL)
+            Self.writeIndex(projection, to: indexURL)
             return
         }
         let generation = indexWriteGeneration.publish()
@@ -688,9 +705,19 @@ final class PortableLibrarySession {
             lane: .indexRebuild,
             operation: { [indexWriteGeneration, projection, indexURL] in
                 guard indexWriteGeneration.isCurrent(generation), !Task.isCancelled else { return }
-                try? projection.write(to: indexURL)
+                Self.writeIndex(projection, to: indexURL)
             }
         )
+    }
+
+    /// The index is disposable and repaired from membership on the next open, so a failed write is
+    /// not fatal, but it must not disappear silently.
+    nonisolated private static func writeIndex(_ projection: LibraryIndexProjection, to url: URL) {
+        do {
+            try projection.write(to: url)
+        } catch {
+            KromoraObservability.event(.libraryIndexWriteFailed, detail: error.localizedDescription)
+        }
     }
 
     /// Starts an import without performing package I/O on the main actor. The returned handle is
@@ -826,9 +853,14 @@ final class PortableLibrarySession {
                                 self.appendPendingImportDelta(result.indexDelta)
                             }
                         } catch {
-                            // The package remains canonical; a disposable index can be rebuilt
-                            // at next launch if an unexpected projection validation error occurs.
-                            _ = try? self.refreshIndex()
+                            // The package remains canonical; rebuild the disposable index now so the
+                            // grid cannot go stale, and record the failure if that fails too.
+                            KromoraObservability.event(
+                                .libraryIndexWriteFailed, detail: error.localizedDescription)
+                            do { _ = try self.refreshIndex() } catch {
+                                KromoraObservability.event(
+                                    .libraryIndexWriteFailed, detail: error.localizedDescription)
+                            }
                         }
                     }
                     handle?.finish(outcome)

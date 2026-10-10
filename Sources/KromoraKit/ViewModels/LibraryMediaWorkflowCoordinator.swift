@@ -333,6 +333,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             }
             guard let onImportRequest = self.onImportRequest else {
                 self.onError?("Removable media import could not start.")
+                self.removableMediaImportProgress = nil
                 return
             }
             onImportRequest(

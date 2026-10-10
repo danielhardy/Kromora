@@ -163,6 +163,8 @@ enum KromoraWorkflowEvent: CaseIterable {
     case maskOverlayDrawablePresented
     case libraryIndexWarm
     case libraryIndexRebuild
+    case libraryIndexRepaired
+    case libraryIndexWriteFailed
     case launchHintsValidation
     case launchFirstIndexPage
     case launchHintsSuperseded
@@ -191,6 +193,8 @@ enum KromoraWorkflowEvent: CaseIterable {
         case .maskOverlayDrawablePresented: return "MaskOverlayDrawablePresented"
         case .libraryIndexWarm: return "LibraryIndexWarm"
         case .libraryIndexRebuild: return "LibraryIndexRebuild"
+        case .libraryIndexRepaired: return "LibraryIndexRepaired"
+        case .libraryIndexWriteFailed: return "LibraryIndexWriteFailed"
         case .launchHintsValidation: return "LaunchHintsValidation"
         case .launchFirstIndexPage: return "LaunchFirstIndexPage"
         case .launchHintsSuperseded: return "LaunchHintsSuperseded"

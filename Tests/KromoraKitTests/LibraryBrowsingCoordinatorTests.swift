@@ -23,6 +23,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         private(set) var selectedIDs = Set<PortablePhotoAssetID>()
         private(set) var activeID: PortablePhotoAssetID?
         private(set) var requestedPages: [Int] = []
+        private(set) var rebuildCount = 0
         private(set) var persistedStates: [(PortablePhotoAssetID, Int, PhotoFlag)] = []
 
         init(count: Int, pageSize: Int, presentedAspectRatio: Double? = nil) {
@@ -111,6 +112,8 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         func updateLibraryState(for assetID: PortablePhotoAssetID, rating: Int, flag: PhotoFlag) throws {
             persistedStates.append((assetID, rating, flag))
         }
+
+        func rebuildIndex() throws { rebuildCount += 1 }
     }
 
     @MainActor
@@ -276,6 +279,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         coordinator.openPortableAsset(PortablePhotoAssetID())
         XCTAssertEqual(destination.opened.count, 1)
         XCTAssertEqual(destination.status.last, "The imported photo is not available in the package index.")
+        XCTAssertEqual(library.rebuildCount, 1, "a miss rebuilds the disposable index exactly once")
     }
 
     func testVisibleViewportWritesHintsWithoutRestoringSelection() async throws {

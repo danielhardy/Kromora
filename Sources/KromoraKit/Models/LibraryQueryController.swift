@@ -96,7 +96,7 @@ struct LibraryIndexDelta: Equatable, Sendable {
     }
 
     func merging(_ other: Self) -> Self {
-        var upsertsByID = Dictionary(uniqueKeysWithValues: upserts.map { ($0.assetID, $0) })
+        var upsertsByID = Dictionary(upserts.map { ($0.assetID, $0) }, uniquingKeysWith: { _, newest in newest })
         var removalsByID = Set(removals)
         for assetID in other.removals {
             upsertsByID.removeValue(forKey: assetID)
@@ -253,33 +253,40 @@ struct LibraryIndexProjection: Codable, Equatable, Sendable {
         return try Self(libraryID: libraryID, entries: entries)
     }
 
-    /// Reconcile the denormalized source identity against the canonical membership summaries.
-    /// This is a cheap shard-only repair for an index write lost after a package transaction
-    /// committed; it never opens asset records and leaves all other disposable index fields alone.
-    func reconcilingSourceFingerprints(with package: PortableLibraryPackage) throws -> Self {
+    /// Reconcile the projection against the canonical membership summaries. The package is
+    /// authoritative: live members missing from the index are added (an index write lost after a
+    /// committed import), indexed assets that are tombstoned or absent from membership are
+    /// dropped, and the denormalized source identity is repaired. It is a shard-only pass that
+    /// never opens asset records, and it leaves all other disposable index fields alone.
+    func reconcilingMembership(with package: PortableLibraryPackage) throws -> Self {
         guard libraryID == package.manifest.libraryID else {
             throw LibraryQueryError.invalidIndex("library ID does not match the package")
         }
-        var byID = Dictionary(uniqueKeysWithValues: entries.map { ($0.assetID, $0) })
-        var changed = false
+        let indexed = Dictionary(entries.map { ($0.assetID, $0) }, uniquingKeysWith: { first, _ in first })
+        var reconciled: [LibraryIndexEntry] = []
+        reconciled.reserveCapacity(entries.count)
         for shardName in PortableLibraryPackage.allShards {
             let shard = try package.readMembershipShard(shardName)
             for membership in shard.entries where !membership.isTombstone {
-                guard let indexed = byID[membership.assetID],
-                      indexed.summary.sourceFingerprint != membership.summary.sourceFingerprint
-                else { continue }
-                var updated = indexed.summary
+                guard let existing = indexed[membership.assetID] else {
+                    reconciled.append(LibraryIndexEntry(from: membership))
+                    continue
+                }
+                guard existing.summary.sourceFingerprint != membership.summary.sourceFingerprint else {
+                    reconciled.append(existing)
+                    continue
+                }
+                var updated = existing.summary
                 updated.sourceFingerprint = membership.summary.sourceFingerprint
-                byID[membership.assetID] = LibraryIndexEntry(
-                    assetID: indexed.assetID, recordPath: indexed.recordPath,
-                    addedRevision: indexed.addedRevision, deletedRevision: indexed.deletedRevision,
+                reconciled.append(LibraryIndexEntry(
+                    assetID: existing.assetID, recordPath: existing.recordPath,
+                    addedRevision: existing.addedRevision, deletedRevision: existing.deletedRevision,
                     summary: updated
-                )
-                changed = true
+                ))
             }
         }
-        guard changed else { return self }
-        return try Self(libraryID: libraryID, entries: Array(byID.values))
+        let candidate = try Self(libraryID: libraryID, entries: reconciled)
+        return candidate.entries == entries ? self : candidate
     }
 
     private static func readEntries(from package: PortableLibraryPackage) throws

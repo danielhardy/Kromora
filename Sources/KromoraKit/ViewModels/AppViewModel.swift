@@ -3192,11 +3192,18 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         return true
     }
 
-    /// Refresh the package-backed library query after an external package change.
+    /// Refresh the package-backed library query after an external package change. The package is
+    /// canonical, so this rebuilds the disposable index from membership first; it is also the
+    /// manual recovery for a grid that disagrees with the package.
     func refreshSource() {
         previewAdmissionCoordinator.cancelAdjacentPreviewPrefetch()
         cancelIdlePreviewBuild(resetCursor: true)
-        try? reloadPortableCollection()
+        do {
+            try libraryBrowsingCoordinator.rebuildPortableIndex()
+            logFrameLookupSummaries([.gridOriginal, .gridEdited, .filmstrip, .launchHint])
+        } catch {
+            presentLibraryError("The library index could not be refreshed: \(error.localizedDescription)")
+        }
     }
 
     /// Capture the current Library selection for a destructive confirmation. The focused item is
@@ -5492,15 +5499,18 @@ extension AppViewModel: IdleFrameWarmerDestination {
         let visibleIDs = idleFrameWarmerVisiblePortableAssetIDs
         var anchorIDs = visibleIDs
         if let active = portableLibrary.portableActiveID { anchorIDs.insert(active) }
-        let positions = Dictionary(uniqueKeysWithValues: assets.enumerated().map {
+        // Pages are read one at a time, so an asset can appear twice if membership shifts
+        // between reads; keep the first position instead of trapping on a duplicate key.
+        let positions = Dictionary(assets.enumerated().map {
             ($0.element.source.portableIdentity.assetID, $0.offset)
-        })
+        }, uniquingKeysWith: { first, _ in first })
         let anchorPositions = anchorIDs.compactMap { positions[$0] }
         let fallbackSelection = min(max(collection.selectedIndex, 0), max(assets.count - 1, 0))
-        let recencyRanks = Dictionary(uniqueKeysWithValues:
+        let recencyRanks = Dictionary(
             libraryBrowsingCoordinator.launchHintRecencyOrder.enumerated().map {
                 ($0.element, $0.offset)
-            }
+            },
+            uniquingKeysWith: { first, _ in first }
         )
 
         return assets.enumerated().compactMap { index, asset in
