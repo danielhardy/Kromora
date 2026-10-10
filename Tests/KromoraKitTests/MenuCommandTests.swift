@@ -184,8 +184,10 @@ final class MenuCommandTests: XCTestCase {
             contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/CropInspectorView.swift"),
             encoding: .utf8
         )
-        XCTAssertTrue(cropInspector.contains("Button(\"Save\", action: onDone)"))
-        XCTAssertFalse(cropInspector.contains("Button(\"Done\", action: onDone)"))
+        XCTAssertFalse(
+            cropInspector.contains("onDone"),
+            "Save lives only in the window toolbar; the inspector must not duplicate it"
+        )
     }
 
     func testRelocatedViewActionsHaveStableNotificationNames() {
@@ -223,8 +225,8 @@ final class MenuCommandTests: XCTestCase {
         XCTAssertFalse(appViewModel.contains("runCropAuto"))
         XCTAssertFalse(infoInspector.contains("runCropAuto"))
         XCTAssertFalse(infoInspector.contains("onAuto:"))
-        XCTAssertTrue(cropInspector.contains("Button(\"Cancel\", action: onCancel)"))
-        XCTAssertTrue(cropInspector.contains("Button(\"Save\", action: onDone)"))
+        XCTAssertFalse(cropInspector.contains("Button(\"Cancel\""))
+        XCTAssertFalse(cropInspector.contains("Button(\"Save\""))
         XCTAssertTrue(cropInspector.contains("ResettableAdjustmentLabel(title: \"Straighten\""))
     }
 

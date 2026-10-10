@@ -26,8 +26,9 @@ struct CropInspectorView: View {
     let onResetHorizontalPerspective: () -> Void
     let onAspectRatioChange: (CropAspectRatio, CropAspectRatioOrientation) -> Void
     let onReset: () -> Void
+    /// Escape inside the inspector. Save and Cancel live in the window toolbar (`ContentView`),
+    /// so the inspector carries only adjustments.
     let onCancel: () -> Void
-    let onDone: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -54,18 +55,6 @@ struct CropInspectorView: View {
                 }
                 .padding(16)
             }
-
-            Divider()
-
-            HStack(spacing: 8) {
-                Button("Cancel", action: onCancel)
-                    .keyboardShortcut(.cancelAction)
-                Button("Save", action: onDone)
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-            }
-            .frame(maxWidth: .infinity, alignment: .trailing)
-            .padding(16)
         }
         // The enclosing SwiftUI inspector supplies the chrome material. A forced window fill here
         // would extend the crop pane into the toolbar's top edge.
@@ -377,6 +366,9 @@ struct CropInspectorView: View {
                 .labelStyle(.iconOnly)
         }
         .buttonStyle(.bordered)
+        // One-shot actions carry no state, so they stay neutral like an idle flip toggle; accent
+        // colour is reserved for a flip that is on.
+        .tint(nil)
         .frame(width: 32, height: 32)
         .contentShape(Rectangle())
         .help(help)

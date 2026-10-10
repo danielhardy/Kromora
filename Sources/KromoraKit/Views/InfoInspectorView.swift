@@ -107,8 +107,7 @@ struct InfoInspectorView: View {
                         onResetHorizontalPerspective: { viewModel.setCropHorizontalPerspective(0) },
                         onAspectRatioChange: viewModel.selectCropAspectRatio,
                         onReset: viewModel.resetCrop,
-                        onCancel: viewModel.cancelCrop,
-                        onDone: viewModel.commitCrop
+                        onCancel: viewModel.cancelCrop
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     .background(KromoraTheme.inspectorChrome)
