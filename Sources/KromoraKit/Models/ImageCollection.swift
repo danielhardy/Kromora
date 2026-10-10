@@ -753,7 +753,10 @@ final class ImageCollectionPresentationModel {
         guard isActive, items.indices.contains(index),
               filter.matches(flag: items[index].asset.flag, rating: items[index].asset.rating) else { return }
         var next = selection
-        next.click(items[index].id, in: filteredItems.map(\.id), modifiers: modifiers)
+        // Only range selection needs the whole ordering. The guard already established that
+        // this item is visible; ordinary and Command clicks should not map the entire library.
+        let orderedIDs = modifiers.contains(.shift) ? filteredItems.map(\.id) : [items[index].id]
+        next.click(items[index].id, in: orderedIDs, modifiers: modifiers)
         selection = next
         syncSelectedIndex()
         prepareAdjacentThumbnails(around: selectedIndex)

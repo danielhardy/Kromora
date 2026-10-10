@@ -302,4 +302,121 @@ final class WorkspaceNavigationTests: TempDirectoryTestCase {
             viewModel.sourceURL == viewModel.collection.items[0].url
         }
     }
+
+    func testDoubleClickTargetsTheAssetAfterCommandClickDeselectsIt() async throws {
+        try Fixtures.writeGradientPNG(width: 16, height: 12, named: "photo.png", in: tempDirectory)
+        let viewModel = makeAppViewModel(engine: FakeRenderEngine())
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let item = try XCTUnwrap(viewModel.collection.selectedItem)
+        viewModel.collection.select(at: 0, modifiers: [.command])
+        XCTAssertNil(viewModel.collection.selectedItem)
+
+        viewModel.openLibraryImageForEditing(assetID: item.id)
+
+        XCTAssertTrue(viewModel.navigation.isEdit)
+        XCTAssertEqual(viewModel.collection.selection.activeID, item.id)
+        try await waitUntil("the explicitly double-clicked asset") { viewModel.sourceURL == item.url }
+    }
+
+    func testRepeatedLibraryOpenWhilePreparingKeepsLoadingAndCompletesOnce() async throws {
+        let photo = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "pending.png", in: tempDirectory
+        )
+        let engine = FakeRenderEngine()
+        await engine.gateSourcePreparation()
+        let viewModel = makeAppViewModel(engine: engine)
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        viewModel.openLibraryImageForEditing()
+        try await waitUntil("the gated preparation") { await engine.sourcePreparationCount == 1 }
+        XCTAssertTrue(viewModel.navigate(to: .grid))
+
+        viewModel.openLibraryImageForEditing()
+
+        XCTAssertTrue(viewModel.navigation.isEdit)
+        XCTAssertEqual(viewModel.previewState, .loading)
+        XCTAssertEqual(viewModel.statusMessage, "Loading \(viewModel.collection.items[0].displayName)...")
+        await engine.releaseSourcePreparation()
+        try await waitUntil("the repeated open to finish") {
+            viewModel.sourceURL == photo && viewModel.previewSurface.image != nil
+        }
+        let preparationCount = await engine.sourcePreparationCount
+        XCTAssertEqual(preparationCount, 1)
+    }
+
+    func testDoubleClickReportsATargetThatBecameFilteredInsteadOfOpeningAnotherPhoto() async throws {
+        _ = try Fixtures.writeGradientPNG(width: 16, height: 12, named: "first.png", in: tempDirectory)
+        _ = try Fixtures.writeGradientPNG(width: 18, height: 12, named: "second.png", in: tempDirectory)
+        let viewModel = makeAppViewModel()
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let firstID = viewModel.collection.items[0].id
+        viewModel.collection.items[1].asset.flag = .pick
+        viewModel.collection.setFilter(LibraryFilter(flag: .picks))
+        viewModel.collection.select(at: 1)
+
+        viewModel.openLibraryImageForEditing(assetID: firstID)
+
+        XCTAssertTrue(viewModel.navigation.isGrid)
+        XCTAssertEqual(viewModel.collection.selection.activeID, viewModel.collection.items[1].id)
+        XCTAssertTrue(try XCTUnwrap(viewModel.errorMessage).contains("no longer in the Library"))
+    }
+
+    func testLibraryOpenResolvesAnAssetWithoutABrowsingURLFromThePackage() async throws {
+        let photo = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "embedded.png", in: tempDirectory
+        )
+        let packageURL = tempDirectory.appendingPathComponent("Embedded.kromoralibrary")
+        let library = try PortableLibrarySession(at: packageURL)
+        let result = try library.importURLs([photo])
+        let assetID = try XCTUnwrap(result.imported.first?.assetID)
+        let embeddedURL = try library.resolveEmbeddedSourceURL(for: assetID)
+        let viewModel = makeAppViewModel(portableLibrarySession: library)
+        let item = try XCTUnwrap(viewModel.collection.items.first)
+        item.asset = try removingSourceLocator(from: item.asset)
+        XCTAssertNil(item.url)
+        XCTAssertNil(item.imageData)
+
+        viewModel.openLibraryImageForEditing(assetID: item.id)
+
+        XCTAssertTrue(viewModel.navigation.isEdit)
+        try await waitUntil("the package-resolved source") { viewModel.sourceURL == embeddedURL }
+        XCTAssertNil(viewModel.errorMessage)
+    }
+
+    func testLibraryOpenReportsAnUnavailableSourceAndStaleClickedAsset() async throws {
+        _ = try Fixtures.writeGradientPNG(
+            width: 16, height: 12, named: "missing.png", in: tempDirectory
+        )
+        let viewModel = makeAppViewModel()
+        viewModel.collection.loadFromFolder(tempDirectory)
+        await viewModel.collection.scanCompletion()
+        let item = try XCTUnwrap(viewModel.collection.selectedItem)
+        item.asset = try removingSourceLocator(from: item.asset)
+
+        viewModel.openLibraryImageForEditing()
+
+        XCTAssertTrue(try XCTUnwrap(viewModel.errorMessage).contains("Could not open \(item.displayName):"))
+        viewModel.errorMessage = nil
+        viewModel.openLibraryImageForEditing(assetID: PhotoAssetID(rawValue: "removed"))
+        XCTAssertTrue(try XCTUnwrap(viewModel.errorMessage).contains("no longer in the Library"))
+        viewModel.errorMessage = nil
+        viewModel.collection.select(at: 0, modifiers: [.command])
+        viewModel.openLibraryImageForEditing()
+        XCTAssertEqual(viewModel.errorMessage, "Select a photo to open in Edit.")
+    }
+
+    /// Model an unresolved portable projection without adding a production initializer for an
+    /// unavailable source. Codable permits a source record with neither a URL nor cached bytes.
+    private func removingSourceLocator(from asset: PhotoAsset) throws -> PhotoAsset {
+        var encoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(asset)) as? [String: Any]
+        )
+        var source = try XCTUnwrap(encoded["source"] as? [String: Any])
+        source.removeValue(forKey: "url")
+        source.removeValue(forKey: "data")
+        encoded["source"] = source
+        return try JSONDecoder().decode(PhotoAsset.self, from: JSONSerialization.data(withJSONObject: encoded))
+    }
 }

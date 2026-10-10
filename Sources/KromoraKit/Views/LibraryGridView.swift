@@ -12,7 +12,7 @@ import SwiftUI
 struct LibraryGridView: View {
     @Bindable var collection: ImageCollection
     let viewModel: AppViewModel
-    let onOpen: () -> Void
+    let onOpen: (PhotoAssetID) -> Void
 
     private let layout = LibraryGridLayout()
     private let contentPadding: Double = 16
@@ -81,7 +81,7 @@ struct LibraryGridView: View {
                                     cellEdge: metrics.cellEdge,
                                     spacing: layout.spacing,
                                     admittedThumbnailIDs: admittedThumbnailIDs,
-                                    onSelect: select(index:),
+                                    onSelect: select(id:flags:),
                                     onOpen: onOpen,
                                     onAppearIndex: { viewModel.loadMorePortableIfNeeded(currentIndex: $0) }
                                 )
@@ -166,8 +166,9 @@ struct LibraryGridView: View {
         }
     }
 
-    private func select(index: Int) {
-        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    private func select(id: PhotoAssetID, flags: NSEvent.ModifierFlags) {
+        // Resolve at delivery time: an import can replace the browsing window between clicks.
+        guard let index = collection.items.firstIndex(where: { $0.id == id }) else { return }
         var modifiers: LibrarySelectionModel.Modifiers = []
         if flags.contains(.command) { modifiers.insert(.command) }
         if flags.contains(.shift) { modifiers.insert(.shift) }
@@ -190,14 +191,13 @@ private struct LibraryGridRow: View {
     let cellEdge: Double
     let spacing: Double
     let admittedThumbnailIDs: [PhotoAssetID]
-    let onSelect: (Int) -> Void
-    let onOpen: () -> Void
+    let onSelect: (PhotoAssetID, NSEvent.ModifierFlags) -> Void
+    let onOpen: (PhotoAssetID) -> Void
     var onAppearIndex: ((Int) -> Void)? = nil
 
     var body: some View {
         HStack(alignment: .top, spacing: CGFloat(spacing)) {
-            ForEach(indices, id: \.self) { offset in
-                let entry = entries[offset]
+            ForEach(Array(entries[indices])) { entry in
                 if let resolved = collection.resolvedItem(for: entry) {
                     let item = resolved.item
                     LibraryGridCell(
@@ -222,15 +222,14 @@ private struct LibraryGridRow: View {
                         guard !admittedThumbnailIDs.contains(item.id) else { return }
                         collection.releaseThumbnail(for: item.id)
                     }
-                    .onTapGesture {
-                        onSelect(resolved.index)
+                    .overlay {
+                        LibraryCellClickSurface(
+                            onSelect: { onSelect(item.id, $0) },
+                            onOpen: { onOpen(item.id) }
+                        )
+                        .accessibilityHidden(true)
                     }
-                    .simultaneousGesture(
-                        TapGesture(count: 2).onEnded {
-                            onSelect(resolved.index)
-                            onOpen()
-                        }
-                    )
+                    .accessibilityAction { onOpen(item.id) }
                     .accessibilityAddTraits(
                         collection.selection.selectedIDs.contains(item.id) ? .isSelected : []
                     )

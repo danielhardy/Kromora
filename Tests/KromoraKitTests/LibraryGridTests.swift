@@ -67,7 +67,7 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
         for appearance in [ColorScheme.light, .dark] {
             let hosting = NSHostingView(rootView: LibraryGridView(
-                collection: viewModel.collection, viewModel: viewModel, onOpen: {}
+                collection: viewModel.collection, viewModel: viewModel, onOpen: { _ in }
             ).environment(\.colorScheme, appearance))
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),

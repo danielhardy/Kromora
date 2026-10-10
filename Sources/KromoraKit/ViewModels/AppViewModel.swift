@@ -3582,14 +3582,40 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// transition from the library browser; the inspector is the actionable editor surface
     /// for the newly opened photo.
     func openLibraryImageForEditing() {
-        guard collection.selectedItem != nil else { return }
+        guard collection.selectedItem != nil else {
+            presentError("Select a photo to open in Edit.")
+            return
+        }
         isSourceBrowserPresented = false
         inspectorState.isPresented = true
         openActiveCollectionImage()
     }
 
+    /// A pointer open targets the clicked asset, even if selection changed during an import or
+    /// the first click toggled it out of a Command-click batch.
+    func openLibraryImageForEditing(assetID: PhotoAssetID) {
+        guard let index = collection.items.firstIndex(where: { $0.id == assetID }),
+            collection.filter.matches(
+                flag: collection.items[index].asset.flag, rating: collection.items[index].asset.rating
+            )
+        else {
+            presentError("This photo is no longer in the Library view. Select it again to open it.")
+            return
+        }
+        if collection.isPortableWindowed {
+            selectPortableItem(at: index)
+        }
+        if collection.selection.activeID != assetID {
+            collection.select(at: index)
+        }
+        openLibraryImageForEditing()
+    }
+
     private func openActiveCollectionImage(loadMode: Bool) {
-        guard let item = collection.selectedItem else { return }
+        guard let item = collection.selectedItem else {
+            presentError("Select a photo to open in Edit.")
+            return
+        }
         if loadMode { navigation.move(to: .edit) }
 
         // The library selection is the source of truth for the edit handoff. When returning from
@@ -3616,7 +3642,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             }
             // A source preparation can be non-cancellable. Let the in-flight, revision-checked
             // request finish instead of enqueueing a duplicate while the user is navigating.
-            if sourceSession.isBusy { return }
+            if sourceSession.isBusy {
+                previewState = .loading
+                statusMessage = "Loading \(item.displayName)..."
+                return
+            }
         }
 
         if let url = item.url {
@@ -3628,6 +3658,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 dataFingerprint: item.dataFingerprint,
                 portableIdentity: item.asset.source.portableIdentity
             )
+        } else if let portableLibrary {
+            do {
+                let url = try portableLibrary.resolveEmbeddedSourceURL(
+                    for: item.asset.source.portableIdentity.assetID
+                )
+                openImage(url: url, assetID: item.id)
+            } catch {
+                presentError("Could not open \(item.displayName): \(error.localizedDescription)")
+            }
+        } else {
+            presentError("Could not open \(item.displayName): the original photo is unavailable.")
         }
     }
 
