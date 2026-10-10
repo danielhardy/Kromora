@@ -1000,6 +1000,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         photoAnalysisCoordinator: PhotoAnalysisCoordinator? = nil,
         previewFrameStoreDirectory: URL? = nil,
         previewFrameStoreCapBytes: Int64 = LatestPreviewFrameStore.defaultCapBytes,
+        previewFrameReader: @escaping PreviewPresentationCoordinator.StoredFrameReader = PreviewPresentationCoordinator.readStoredFrame,
         thumbnailFrameStoreDirectory: URL? = nil,
         portablePackageURL: URL,
         portableMaintenanceIdleDelay: Duration = .seconds(2),
@@ -1115,7 +1116,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             workScheduler: workScheduler
         )
         self.previewPresentation = PreviewPresentationCoordinator(
-            store: previewFrameStore, engine: engine, frameLookupLedger: frameLookupLedger)
+            store: previewFrameStore, engine: engine, frameLookupLedger: frameLookupLedger,
+            storedFrameReader: previewFrameReader)
         self.thumbnailFrameStore = ThumbnailFrameStore(
             directory: thumbnailFrameStoreDirectory
                 ?? ThumbnailFrameStore.packageDirectory(for: normalizedPortablePackageURL),
@@ -2228,7 +2230,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         document = session?.document ?? EditDocument()
         comparisonBaselineDocument = document.comparisonBaseline
         editorDocument.activate(session: session)
-        collection.setPresentedCrop(document.crop, rotation: document.rotation, for: assetID)
+        if let session {
+            collection.setPresentedCrop(
+                session.document.crop, rotation: session.document.rotation, for: assetID)
+        }
         refreshDurableEditHistory()
         lastReportedMissingLUT = nil
         lutResolutionStatus = nil
@@ -2240,6 +2245,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         previewPresentation.beginPresentationSession(
             assetID: assetID, identity: presentationIdentity,
             generation: presentationGeneration,
+            allowsSourceGeometry: session.map {
+                $0.document.crop.isIdentity && $0.document.rotation == .zero
+            } ?? false,
             selectionUptime: presentationSelectionUptime ?? DispatchTime.now().uptimeNanoseconds
         )
         storedEditsResolvedSourceRevision = nil
@@ -2267,7 +2275,8 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                 deferredThumbnailPresentation = DeferredThumbnailPresentation(
                     image: CIImage(cgImage: cgImage), source: .editedThumbnail,
                     assetID: assetID, identity: presentationIdentity,
-                    generation: presentationGeneration, nativeExtent: item.thumbnailNativeExtent
+                    generation: presentationGeneration,
+                    nativeExtent: CGSize(width: cgImage.width, height: cgImage.height)
                 )
             } else if let original = item.originalThumbnailForPresentation,
                 let cgImage = Self.cgImage(from: original)
@@ -2423,6 +2432,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             previewPresentation.presentationSession?.generation == generation,
             previewPresentation.presentationSession?.candidateSource == nil
         else { return }
+        if deferred.source == .originalThumbnail,
+            previewPresentation.presentationSession?.allowsSourceGeometry != true
+        { return }
         deferredThumbnailPresentation = nil
         presentProvisionalCandidate(
             deferred.image, source: deferred.source,
@@ -2487,6 +2499,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func presentEmbeddedFirstFrame(
         _ publication: SourceSessionCoordinator.FirstFramePublication
     ) {
+        guard publication.request.sourceRevision == sourceRevision,
+            publication.request.assetID == activeAssetID else { return }
+        if previewPresentation.presentationSession?.allowsSourceGeometry != true {
+            // The document read may still be pending. Retry after it resolves; a cropped or
+            // rotated document will discard this source-only frame rather than flash it.
+            if storedEditsResolvedSourceRevision != sourceRevision {
+                deferredEmbeddedFirstFrame = publication
+            }
+            return
+        }
         if previewPresentation.isStoredFrameLookupLoading,
             storedFrameLookupFallbackGeneration == publication.request.sourceRevision,
             previewPresentation.presentationSession?.candidateSource == nil
@@ -2600,6 +2622,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         collection.setPresentedCrop(document.crop, rotation: document.rotation, for: request.assetID)
         storedEditsResolvedSourceRevision = request.sourceRevision
         storedEditLook = stored.lookSignature
+        resolveProvisionalSourceGeometry(for: request.sourceRevision)
         // A first render scheduled before this point used the identity document and needs the
         // corrective render; one scheduled after it already uses the stored document.
         earlyStoredAdoption = (
@@ -2646,6 +2669,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         storedEditsResolvedSourceRevision = sourceRevision
         storedEditLook = stored.lookSignature
+        resolveProvisionalSourceGeometry(for: request.sourceRevision)
         previewAdmissionCoordinator.admitExactStoredFrameHistogramIfAvailable()
         // A cold open already rendered the identity document speculatively. Only an adopted disk
         // document that differs from that first request needs a corrective render. In-memory
@@ -2676,6 +2700,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         scheduleEditedThumbnailAfterSettle(for: request.assetID, priority: .activeEditor)
         applyStoredLoadStatus(stored.status)
+    }
+
+    private func resolveProvisionalSourceGeometry(for generation: UInt64) {
+        previewPresentation.resolveSourceGeometry(document: document, generation: generation)
+        if previewPresentation.presentationSession?.allowsSourceGeometry != true {
+            if deferredThumbnailPresentation?.source == .originalThumbnail {
+                deferredThumbnailPresentation = nil
+            }
+            deferredEmbeddedFirstFrame = nil
+            return
+        }
+        // Preserve the stored-frame head start even if edit adoption wins the I/O race.
+        guard storedFrameLookupFallbackGeneration != generation else { return }
+        presentDeferredThumbnail(for: generation)
+        if let embedded = deferredEmbeddedFirstFrame {
+            deferredEmbeddedFirstFrame = nil
+            presentEmbeddedFirstFrame(embedded)
+        }
     }
 
     private func applyStoredLoadStatus(_ status: EditDocumentStore.Status) {

@@ -13,6 +13,17 @@ import os.log
 /// behavior, and revision fencing can be tested with a fake renderer and a temporary directory.
 @MainActor
 final class PreviewPresentationCoordinator {
+    /// The read boundary is injectable so package I/O can be suspended independently of source
+    /// preparation when verifying first-paint policy. Production always uses the durable store.
+    typealias StoredFrameReader = @Sendable (LatestPreviewFrameStore, PortablePhotoIdentity) async
+        -> (hit: LatestPreviewFrameStore.Hit?, corrupt: Bool)
+
+    nonisolated static func readStoredFrame(
+        store: LatestPreviewFrameStore, identity: PortablePhotoIdentity
+    ) async -> (hit: LatestPreviewFrameStore.Hit?, corrupt: Bool) {
+        await store.readWithOutcome(for: identity)
+    }
+
     enum CandidateSource: String, Sendable, Equatable {
         case storedFrame
         case editedThumbnail
@@ -49,6 +60,7 @@ final class PreviewPresentationCoordinator {
         let identity: PortablePhotoIdentity
         let generation: UInt64
         let selectionUptime: UInt64
+        fileprivate(set) var allowsSourceGeometry: Bool
         fileprivate(set) var state: SessionState
         fileprivate(set) var candidateSource: CandidateSource?
         /// Preserves pre-confirmation provenance after a settled frame replaces the candidate.
@@ -81,14 +93,17 @@ final class PreviewPresentationCoordinator {
     private var canonicalStoreEnqueueWaiters: [CheckedContinuation<Void, Never>] = []
     let store: LatestPreviewFrameStore
     private let engine: any RenderEngining
+    private let storedFrameReader: StoredFrameReader
     let frameLookupLedger: FrameLookupLedger
 
     init(
         store: LatestPreviewFrameStore, engine: any RenderEngining = RenderEngine.shared,
-        frameLookupLedger: FrameLookupLedger = .shared
+        frameLookupLedger: FrameLookupLedger = .shared,
+        storedFrameReader: @escaping StoredFrameReader = PreviewPresentationCoordinator.readStoredFrame
     ) {
         self.store = store
         self.engine = engine
+        self.storedFrameReader = storedFrameReader
         self.frameLookupLedger = frameLookupLedger
     }
 
@@ -97,12 +112,14 @@ final class PreviewPresentationCoordinator {
 
     func beginPresentationSession(
         assetID: PhotoAssetID, identity: PortablePhotoIdentity, generation: UInt64,
+        allowsSourceGeometry: Bool = false,
         selectionUptime: UInt64 = DispatchTime.now().uptimeNanoseconds
     ) {
         cancelStoredFrameLookup()
         presentationSession = PresentationSession(
             assetID: assetID, identity: identity, generation: generation,
             selectionUptime: selectionUptime,
+            allowsSourceGeometry: allowsSourceGeometry,
             state: .provisional, candidateSource: nil,
             provisionalCandidateSources: [],
             firstPixelLatencyMilliseconds: nil, confirmedLatencyMilliseconds: nil,
@@ -113,6 +130,14 @@ final class PreviewPresentationCoordinator {
         Self.presentationSignposter.emitEvent(
             "PresentationSelection", "asset=\(token, privacy: .public) generation=\(generation)"
         )
+    }
+
+    /// Source thumbnails and camera JPEGs contain no edits. Until the selected document is
+    /// known, retaining the departing drawable is safer than painting speculative geometry.
+    func resolveSourceGeometry(document: EditDocument, generation: UInt64) {
+        guard presentationSession?.generation == generation else { return }
+        presentationSession?.allowsSourceGeometry = document.crop.isIdentity
+            && document.rotation == .zero
     }
 
     /// The single admission point for inert same-asset frames. Candidate admission immediately
@@ -127,6 +152,9 @@ final class PreviewPresentationCoordinator {
         else {
             recordStaleGenerationDrop(identity: identity)
             return false
+        }
+        if source == .originalThumbnail || source == .embeddedJPEG {
+            guard session.allowsSourceGeometry else { return false }
         }
         let mayReplaceCurrent: Bool
         switch (session.candidateSource, source) {
@@ -312,9 +340,10 @@ final class PreviewPresentationCoordinator {
         storedFrameSessionGeneration = generation
         storedFrameLookup = .loading
         let store = self.store
+        let reader = storedFrameReader
         storedFrameTask = Task { [weak self] in
             async let pin: Void = store.setPinned([identity.assetID])
-            let result = await store.readWithOutcome(for: identity)
+            let result = await reader(store, identity)
             let hit = result.hit
             await pin
             guard !Task.isCancelled, let self else { return }

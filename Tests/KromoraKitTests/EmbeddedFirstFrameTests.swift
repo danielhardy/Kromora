@@ -170,12 +170,15 @@ final class EmbeddedFirstFrameTests: TempDirectoryTestCase {
             width: 16, height: 12, orientation: 1, named: "thumbnail-failure.ARW",
             in: tempDirectory
         )
-        let image = try embeddedImage(width: 3, height: 2, red: 0.8, green: 0.2, blue: 0.1)
+        let pixels = try Fixtures.makeCGImage(width: 3, height: 2, red: 0.8, green: 0.2, blue: 0.1)
+        let image = NSImage(cgImage: pixels, size: NSSize(width: 3, height: 2))
         let fake = FakeRenderEngine()
         await fake.failPreviews()
         let viewModel = makeAppViewModel(
             engine: fake,
-            originalThumbnailProvider: { _, _, _, _, _, _, _ in nil }
+            // Source-switch setup yields before capturing the thumbnail. A late provider
+            // completion must preserve the seeded fixture rather than clear it to nil.
+            originalThumbnailProvider: { _, _, _, _, _, _, _ in pixels }
         )
         viewModel.collection.loadFromFolder(tempDirectory)
         await viewModel.collection.scanCompletion()

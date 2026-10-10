@@ -225,6 +225,12 @@ Rules that keep this safe:
   The hit enters `PreviewPresentationCoordinator` as the provisional `.storedFrame` candidate. It is
   inert: it cannot drive tools, histogram, scopes, comparison, `lastPublishedVisibleRequest`, or a
   write.
+- Stored previews get a 50 ms head start over thumbnails and camera JPEGs. Edited thumbnail
+  candidates use their own raster dimensions because their crop and rotation are already baked
+  into the pixels. Original thumbnails and embedded JPEGs are admitted only when the selected
+  document is known to have identity crop and zero rotation; unresolved or edited geometry keeps
+  the departing drawable under the loading spinner until edited pixels are available. Selection
+  must preserve the collection's published geometry until the actual document is adopted.
 - Until stored edits have been adopted the current inputs are unresolved, so the classification is
   `provisionalOnly` and the first settled submission is *deferred* rather than rendered against the
   speculative identity document. `adoptStoredEdits` and the end of the lookup release it.

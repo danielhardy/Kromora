@@ -579,14 +579,16 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         viewModel.isSideBySide = true
         try await loadCollection(viewModel, first: first, second: second)
 
+        // A provisional thumbnail is already an image, but only the publication boundary
+        // proves the adjusted render arrived before we switch or inspect comparison requests.
         viewModel.selectCollectionImage(at: 0)
         try await waitUntil("the first adjusted publication") {
-            viewModel.sourceURL == first && viewModel.previewSurface.image != nil
+            viewModel.sourceURL == first && viewModel.admissionHasComparisonPreviewCandidate
         }
         viewModel.selectCollectionImage(at: 1)
         try await waitUntil("the second original publication") {
             viewModel.sourceURL == second
-                && viewModel.previewSurface.image != nil
+                && viewModel.admissionHasComparisonPreviewCandidate
                 && viewModel.originalPreviewSurface.image != nil
         }
 

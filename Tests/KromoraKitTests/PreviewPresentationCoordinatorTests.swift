@@ -105,6 +105,31 @@ final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
         XCTAssertEqual(session.staleGenerationDrops, 1)
     }
 
+    func testSourceOnlyCandidatesWaitForResolvedIdentityGeometry() throws {
+        let coordinator = makeCoordinator()
+        let identity = FrameFixtures.identity()
+        let assetID = PhotoAssetID(rawValue: "source-geometry-policy")
+        var cropped = EditDocument()
+        // A square crop can preserve the source aspect; gating must use geometry, not its ratio.
+        cropped.crop = CropAdjustments(normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.5))
+        var rotated = EditDocument()
+        rotated.rotation = .half
+        for source in [PreviewPresentationCoordinator.CandidateSource.originalThumbnail, .embeddedJPEG] {
+            for document in [cropped, rotated] {
+                coordinator.beginPresentationSession(assetID: assetID, identity: identity, generation: 1)
+                XCTAssertFalse(coordinator.presentProvisional(source, assetID: assetID, identity: identity, generation: 1),
+                               "unresolved edits cannot authorize a source-only frame")
+                coordinator.resolveSourceGeometry(document: document, generation: 1)
+                XCTAssertFalse(coordinator.presentProvisional(source, assetID: assetID, identity: identity, generation: 1))
+                coordinator.resolveSourceGeometry(document: EditDocument(), generation: 0)
+                XCTAssertFalse(coordinator.presentProvisional(source, assetID: assetID, identity: identity, generation: 1),
+                               "a stale edit read cannot unblock this selection")
+                coordinator.resolveSourceGeometry(document: EditDocument(), generation: 1)
+                XCTAssertTrue(coordinator.presentProvisional(source, assetID: assetID, identity: identity, generation: 1))
+            }
+        }
+    }
+
     func testResolutionPlannerStateIsIndependentAndResettable() throws {
         let coordinator = makeCoordinator()
         let document = EditDocument()
@@ -306,7 +331,7 @@ final class PreviewPresentationCoordinatorTests: TempDirectoryTestCase {
         let coordinator = makeCoordinator()
         let identity = FrameFixtures.identity()
         let assetID = PhotoAssetID.imported(UUID())
-        coordinator.beginPresentationSession(assetID: assetID, identity: identity, generation: 1)
+        coordinator.beginPresentationSession(assetID: assetID, identity: identity, generation: 1, allowsSourceGeometry: true)
         XCTAssertTrue(coordinator.presentProvisional(
             .originalThumbnail, assetID: assetID, identity: identity, generation: 1))
         XCTAssertTrue(coordinator.presentProvisional(

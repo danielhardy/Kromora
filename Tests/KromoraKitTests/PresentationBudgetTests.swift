@@ -20,6 +20,7 @@ final class PresentationBudgetTests: TempDirectoryTestCase {
         let name: String
         let exposure: Double
         var crop = CropAdjustments.neutral
+        var rotation = ImageRotation.zero
         var lookID: LUTID?
     }
 
@@ -82,6 +83,7 @@ final class PresentationBudgetTests: TempDirectoryTestCase {
             var document = EditDocument()
             document.adjustments = [.exposure(ev: photo.exposure)]
             document.crop = photo.crop
+            document.rotation = photo.rotation
             if let lookID = photo.lookID {
                 document.lut = LUTSettings(lutID: lookID, intensity: 1)
             }
@@ -109,6 +111,10 @@ final class PresentationBudgetTests: TempDirectoryTestCase {
     private func makeViewModel(
         _ fixture: Fixture, engine: any RenderEngining,
         ledger: PresentationChangeLedger? = nil,
+        previewFrameReader: @escaping PreviewPresentationCoordinator.StoredFrameReader = PreviewPresentationCoordinator.readStoredFrame,
+        embeddedFirstFrameProvider: @escaping @Sendable (URL) async -> NSImage? = { url in
+            Thumbnails.generate(from: url, maxPixelSize: Thumbnails.firstFrameMaxPixelSize)
+        },
         sourceAssets: (PortableLibrarySession) throws -> [PhotoAsset] = { try $0.browsingAssets() }
     ) async throws -> (AppViewModel, PortableLibrarySession) {
         let session = try PortableLibrarySession(at: fixture.packageURL)
@@ -116,7 +122,10 @@ final class PresentationBudgetTests: TempDirectoryTestCase {
             engine: engine, userLookFolderURL: fixture.looksDirectory,
             previewFrameStoreDirectory: fixture.previewDirectory,
             thumbnailFrameStoreDirectory: fixture.thumbnailDirectory,
-            portablePackageURL: fixture.packageURL, portableLibrarySession: session
+            previewFrameReader: previewFrameReader,
+            portablePackageURL: fixture.packageURL,
+            portableLibrarySession: session,
+            embeddedFirstFrameProvider: embeddedFirstFrameProvider
         )
         viewModel.previewSurface.presentationChangeLedger = ledger
         viewModel.collection.loadPortableAssets(try sourceAssets(session))
@@ -229,6 +238,223 @@ final class PresentationBudgetTests: TempDirectoryTestCase {
             "\(surface.description) geometry budget failed. Ordered changes:\n\(ledger.diagnostic(for: surface))",
             file: file, line: line
         )
+    }
+
+    func testEditedThumbnailFirstFrameKeepsSameOrientationCropFitRect() async throws {
+        try await assertCroppedThumbnailFirstFrame(rotation: .zero)
+    }
+
+    func testEditedThumbnailFirstFrameKeepsRotatedCropFitRect() async throws {
+        try await assertCroppedThumbnailFirstFrame(rotation: .clockwise90)
+    }
+
+    private func assertCroppedThumbnailFirstFrame(rotation: ImageRotation) async throws {
+        let crop = CropAdjustments(normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: rotation == .zero ? 0.375 : 0.75))
+        let fixture = try await makeFixture(
+            [PhotoSeed(name: "crop.png", exposure: 0, crop: crop, rotation: rotation)],
+            name: "crop-\(rotation.rawValue)"
+        )
+        let size = rotation == .zero ? CGSize(width: 32, height: 18) : CGSize(width: 24, height: 48)
+        let pixels = try Fixtures.makeCGImage(width: Int(size.width), height: Int(size.height))
+        let fake = FakeRenderEngine(previewResult: pixels)
+        await fake.gateSourcePreparation()
+        addTeardownBlock { await fake.releaseSourcePreparation() }
+        let (viewModel, _) = try await makeViewModel(fixture, engine: fake)
+        let item = try XCTUnwrap(viewModel.collection.items.first)
+        item.applyEditedThumbnail(NSImage(cgImage: pixels, size: size), revision: "saved-crop")
+        viewModel.collection.setSelection(at: 0)
+        viewModel.openActiveCollectionImage()
+        do {
+            try await waitUntil("edited thumbnail first frame") {
+                viewModel.presentationSessionForDiagnostics?.candidateSource == .editedThumbnail
+            }
+            let firstExtent = try XCTUnwrap(viewModel.previewSurface.presentationImageExtent)
+            let viewport = CGSize(width: 800, height: 600)
+            let firstFit = CanvasNavigation().transform(imageExtent: firstExtent, viewportSize: viewport)
+            XCTAssertEqual(firstExtent.size, size, "edited pixels must use their own aspect, never source dimensions")
+            await fake.releaseSourcePreparation()
+            try await waitUntil("cropped settled frame") { viewModel.previewState == .ready }
+            let settledExtent = try XCTUnwrap(viewModel.previewSurface.presentationImageExtent)
+            let settledFit = CanvasNavigation().transform(imageExtent: settledExtent, viewportSize: viewport)
+            XCTAssertEqual(firstFit.origin, settledFit.origin)
+            XCTAssertEqual(firstFit.imageSize, settledFit.imageSize)
+            XCTAssertEqual(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources, [.editedThumbnail])
+            print("KRMA-838 thumbnail rotation=\(rotation.rawValue) candidates=\(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources ?? []) first=\(firstExtent) settled=\(settledExtent)")
+        } catch {
+            await fake.releaseSourcePreparation()
+            throw error
+        }
+    }
+
+    func testCroppedFirstOpenNeverPresentsOriginalThumbnail() async throws {
+        let fixture = try await makeFixture(
+            [PhotoSeed(name: "crop.png", exposure: 0,
+                       crop: CropAdjustments(normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.375)))],
+            name: "original-crop"
+        )
+        let fake = FakeRenderEngine(previewResult: try Fixtures.makeCGImage(width: 32, height: 18))
+        await fake.gateSourcePreparation()
+        addTeardownBlock { await fake.releaseSourcePreparation() }
+        let (viewModel, _) = try await makeViewModel(fixture, engine: fake)
+        let item = try XCTUnwrap(viewModel.collection.items.first)
+        item.setOriginalThumbnail(NSImage(cgImage: try Fixtures.makeCGImage(width: 64, height: 48), size: NSSize(width: 64, height: 48)))
+        _ = item.adoptPublishedPresentedAspectRatio(16.0 / 9.0)
+        let publishedRatio = item.libraryAspectRatio
+        viewModel.collection.setSelection(at: 0)
+        viewModel.openActiveCollectionImage()
+        do {
+            try await waitUntil("stored crop adoption") { !viewModel.document.crop.isIdentity }
+            // Let both the stored-frame miss and the 50 ms fallback budget finish with source preparation held.
+            try await Task.sleep(for: .milliseconds(100))
+            print("KRMA-838 original fallback candidates=\(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources ?? [])")
+            XCTAssertNil(viewModel.previewSurface.image)
+            XCTAssertEqual(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources, [])
+            XCTAssertEqual(item.libraryAspectRatio, publishedRatio)
+            await fake.releaseSourcePreparation()
+            try await waitUntil("cropped render") { viewModel.previewState == .ready }
+            XCTAssertEqual(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources, [])
+        } catch {
+            await fake.releaseSourcePreparation()
+            throw error
+        }
+    }
+
+    func testCroppedRAWSwitchNeverPresentsEmbeddedJPEGAfterStoreMiss() async throws {
+        let crop = CropAdjustments(normalizedRect: CGRect(x: 0.25, y: 0.25, width: 0.5, height: 0.375))
+        let fixture = try await makeFixture(
+            [PhotoSeed(name: "crop.ARW", exposure: 0, crop: crop),
+             PhotoSeed(name: "peer.png", exposure: 0)], name: "embedded-crop"
+        )
+        let fake = FakeRenderEngine(previewResult: try Fixtures.makeCGImage(width: 32, height: 18))
+        let embedded = NSImage(cgImage: try Fixtures.makeCGImage(width: 64, height: 48),
+                               size: NSSize(width: 64, height: 48))
+        let probe = CroppedEmbeddedFrameProbe(image: embedded)
+        let (viewModel, _) = try await makeViewModel(
+            fixture, engine: fake,
+            embeddedFirstFrameProvider: { _ in await probe.extract() }
+        )
+        try await open("peer.png", in: viewModel)
+        await fake.gatePreviews()
+        addTeardownBlock { await fake.releasePreviews() }
+        let index = try XCTUnwrap(viewModel.collection.items.firstIndex { $0.displayName == "crop.ARW" })
+        viewModel.collection.setSelection(at: index)
+        viewModel.openActiveCollectionImage()
+        do {
+            try await waitUntil("embedded JPEG extraction") { await probe.extractions == 1 }
+            try await waitUntil("cropped render admitted") {
+                await fake.previewRequests.last?.document.crop == crop
+            }
+            try await Task.sleep(for: .milliseconds(100))
+            let provisionalSources = try XCTUnwrap(
+                viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources)
+            XCTAssertTrue(provisionalSources.allSatisfy { $0 == .editedThumbnail },
+                          "only already cropped thumbnail pixels may precede the cropped render")
+            await fake.releasePreviews()
+            try await waitUntil("cropped RAW settled") { viewModel.previewState == .ready }
+            XCTAssertEqual(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources, provisionalSources)
+        } catch {
+            await fake.releasePreviews()
+            throw error
+        }
+    }
+
+    func testCroppedStoredFirstFrameKeepsFitRectOnWarmSwitch() async throws {
+        try await assertCroppedStoredFirstFrame(delayed: false, rotation: .zero)
+    }
+
+    func testCroppedStoredFirstFrameHoldsDepartingFramePastFallbackBudget() async throws {
+        try await assertCroppedStoredFirstFrame(delayed: true, rotation: .zero)
+    }
+
+    func testRotatedStoredFirstFrameHoldsDepartingFramePastFallbackBudget() async throws {
+        try await assertCroppedStoredFirstFrame(delayed: true, rotation: .clockwise90)
+    }
+
+    private func assertCroppedStoredFirstFrame(delayed: Bool, rotation: ImageRotation) async throws {
+        let crop = CropAdjustments(normalizedRect: CGRect(
+            x: 0.25, y: 0.125, width: 0.5, height: rotation == .zero ? 0.375 : 0.75
+        ))
+        let fixture = try await makeFixture(
+            [PhotoSeed(name: "crop.png", exposure: 0, crop: crop, rotation: rotation),
+             PhotoSeed(name: "peer.png", exposure: 0)],
+            name: "stored-crop-\(delayed)-\(rotation.rawValue)"
+        )
+        let asset = try fixture.asset(named: "crop.png")
+        let document = try fixture.document(named: "crop.png")
+        let size = rotation == .zero ? CGSize(width: 32, height: 18) : CGSize(width: 24, height: 48)
+        let store = LatestPreviewFrameStore(directory: fixture.previewDirectory)
+        // A stale pixel epoch requires a settled replacement, while preserving the saved crop.
+        let signature = FrameFixtures.metadata(
+            identity: asset.source.portableIdentity, edit: document.editHash,
+            space: .current, epoch: RenderPipeline.pixelEpoch - 1
+        ).signature
+        await store.enqueueWrite(PresentationFrame(
+            metadata: PresentationFrameMetadata(
+                identity: asset.source.portableIdentity, kind: .preview2048, signature: signature,
+                geometry: PresentedGeometry(crop: crop, rotation: rotation,
+                                            orientedAspectRatio: size.width / size.height),
+                rasterColorSpace: RasterColorSpace(.current), perceptualDigest: FrameFixtures.digest(),
+                presentedAt: Date(), pixelWidth: Int(size.width), pixelHeight: Int(size.height)
+            ),
+            rasterData: try FrameFixtures.jpeg(width: Int(size.width), height: Int(size.height))
+        ))
+        await store.waitForPendingWrites()
+        let gate = CroppedPreviewReadGate(identity: asset.source.portableIdentity, blocked: delayed)
+        let fake = FakeRenderEngine(previewResult: try Fixtures.makeCGImage(width: Int(size.width), height: Int(size.height)))
+        let ledger = PresentationChangeLedger()
+        let (viewModel, _) = try await makeViewModel(
+            fixture, engine: fake, ledger: ledger,
+            previewFrameReader: { store, identity in await gate.read(store, identity: identity) },
+            sourceAssets: { try $0.materializedAssets() }
+        )
+        try await open("peer.png", in: viewModel)
+        await fake.gatePreviews()
+        addTeardownBlock {
+            await gate.release()
+            await fake.releasePreviews()
+        }
+        let item = try XCTUnwrap(viewModel.collection.items.first { $0.id == asset.id })
+        item.applyEditedThumbnail(nil, revision: "no-edited-cache")
+        item.setOriginalThumbnail(NSImage(cgImage: try Fixtures.makeCGImage(width: 64, height: 48),
+                                         size: NSSize(width: 64, height: 48)))
+        _ = item.adoptPublishedPresentedAspectRatio(size.width / size.height)
+        item.markLibraryLayoutPresented()
+        ledger.reset()
+        viewModel.collection.setSelection(at: try XCTUnwrap(viewModel.collection.items.firstIndex { $0.id == asset.id }))
+        viewModel.openActiveCollectionImage()
+        do {
+            try await waitUntil("stored frame read started") { await gate.started }
+            if delayed {
+                try await Task.sleep(for: .milliseconds(100))
+                XCTAssertNil(viewModel.previewSurface.image)
+                XCTAssertTrue(viewModel.previewSurface.holdsDepartingFrame)
+                XCTAssertTrue(viewModel.isNavigationLoading)
+                XCTAssertEqual(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources, [])
+                await gate.release()
+            }
+            try await waitUntil("stored cropped first frame") {
+                viewModel.presentationSessionForDiagnostics?.candidateSource == .storedFrame
+            }
+            let firstExtent = try XCTUnwrap(viewModel.previewSurface.presentationImageExtent)
+            let viewport = CGSize(width: 800, height: 600)
+            let firstFit = CanvasNavigation().transform(imageExtent: firstExtent, viewportSize: viewport)
+            XCTAssertEqual(firstExtent.size, size)
+            XCTAssertFalse(viewModel.previewSurface.holdsDepartingFrame)
+            await fake.releasePreviews()
+            try await waitUntil("cropped settled replacement") { viewModel.previewState == .ready }
+            let settledExtent = try XCTUnwrap(viewModel.previewSurface.presentationImageExtent)
+            let settledFit = CanvasNavigation().transform(imageExtent: settledExtent, viewportSize: viewport)
+            XCTAssertEqual(firstFit.origin, settledFit.origin)
+            XCTAssertEqual(firstFit.imageSize, settledFit.imageSize)
+            XCTAssertEqual(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources, [.storedFrame])
+            assertRasterSources([.stored, .settled], on: .editCanvas(asset.id), in: ledger)
+            assertGeometryChangeCount(0, on: .filmstripCell(asset.id), in: ledger)
+            print("KRMA-838 stored delayed=\(delayed) rotation=\(rotation.rawValue) read_ms=\(await gate.elapsedMilliseconds) candidates=\(viewModel.presentationSessionForDiagnostics?.provisionalCandidateSources ?? []) first=\(firstExtent) settled=\(settledExtent)")
+        } catch {
+            await gate.release()
+            await fake.releasePreviews()
+            throw error
+        }
     }
 
     func testExactStoredEditUsesOneCanvasRasterInSessionAndAfterRelaunch() async throws {
@@ -687,5 +913,51 @@ private extension FrameSignature {
             presentedAt: Date(timeIntervalSince1970: 1_700_000_000),
             pixelWidth: width, pixelHeight: height
         )
+    }
+}
+
+/// Holds package-frame I/O beyond the first-paint budget without holding the edit read or decoder.
+private actor CroppedPreviewReadGate {
+    private let identity: PortablePhotoIdentity
+    private var blocked: Bool
+    private var waiter: CheckedContinuation<Void, Never>?
+    private(set) var started = false
+    private(set) var elapsedMilliseconds: Double = 0
+
+    init(identity: PortablePhotoIdentity, blocked: Bool) {
+        self.identity = identity
+        self.blocked = blocked
+    }
+
+    func read(_ store: LatestPreviewFrameStore, identity: PortablePhotoIdentity) async
+        -> (hit: LatestPreviewFrameStore.Hit?, corrupt: Bool)
+    {
+        guard identity.assetID == self.identity.assetID else {
+            return await store.readWithOutcome(for: identity)
+        }
+        let start = DispatchTime.now().uptimeNanoseconds
+        started = true
+        if blocked { await withCheckedContinuation { waiter = $0 } }
+        let result = await store.readWithOutcome(for: identity)
+        elapsedMilliseconds = Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+        return result
+    }
+
+    func release() {
+        blocked = false
+        waiter?.resume()
+        waiter = nil
+    }
+}
+
+private actor CroppedEmbeddedFrameProbe {
+    let image: NSImage
+    private(set) var extractions = 0
+
+    init(image: NSImage) { self.image = image }
+
+    func extract() -> NSImage {
+        extractions += 1
+        return image
     }
 }
