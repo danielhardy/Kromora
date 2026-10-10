@@ -121,6 +121,62 @@ final class RegionMaskTests: XCTestCase {
         ))
     }
 
+    func testFeatherMatchesClippedWindowReference() throws {
+        let size = PixelDimensions(width: 5, height: 3)
+        let values: [Float] = [
+            0, 0.25, 0.5, 0.75, 1,
+            1, 0.8, 0.6, 0.4, 0.2,
+            0.1, 0.3, 0.5, 0.7, 0.9,
+        ]
+        let mask = try NormalizedMask(size: size, values: values)
+
+        for radius in [1, 2, 7] {
+            let actual = try MaskOperations.feather(mask, radius: radius)
+            let expected = clippedBoxBlur(values, width: size.width, height: size.height, radius: radius)
+
+            XCTAssertEqual(actual.values.count, expected.count)
+            for (actualValue, expectedValue) in zip(actual.values, expected) {
+                XCTAssertEqual(actualValue, expectedValue, accuracy: 0.000_001)
+            }
+            XCTAssertEqual(actual.coverage, expected.reduce(0, +) / Float(expected.count), accuracy: 0.000_001)
+            XCTAssertFalse(actual.isBinary)
+        }
+    }
+
+    func testFeatherChecksCancellation() async throws {
+        let size = PixelDimensions(width: 128, height: 128)
+        let mask = try NormalizedMask(size: size, values: Array(repeating: 0.5, count: size.width * size.height))
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try MaskOperations.feather(mask, radius: 8)
+        }
+
+        do {
+            _ = try await task.value
+            XCTFail("cancelled feathering should throw")
+        } catch is CancellationError {
+            // Expected.
+        }
+    }
+
+    private func clippedBoxBlur(_ values: [Float], width: Int, height: Int, radius: Int) -> [Float] {
+        var result = [Float](repeating: 0, count: values.count)
+        for y in 0..<height {
+            for x in 0..<width {
+                var total = 0.0
+                var count = 0
+                for sampleY in max(0, y - radius)...min(height - 1, y + radius) {
+                    for sampleX in max(0, x - radius)...min(width - 1, x + radius) {
+                        total += Double(values[sampleY * width + sampleX])
+                        count += 1
+                    }
+                }
+                result[y * width + x] = Float(total / Double(count))
+            }
+        }
+        return result
+    }
+
     func testResizeInterpolatesAcrossSizesAndPreservesIdentity() throws {
         let source = try NormalizedMask(size: PixelDimensions(width: 2, height: 2), values: [0, 1, 0, 0])
 
