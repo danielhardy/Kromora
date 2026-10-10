@@ -586,6 +586,10 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
             viewModel.sourceURL == first && viewModel.admissionHasComparisonPreviewCandidate
         }
         viewModel.selectCollectionImage(at: 1)
+        XCTAssertNil(
+            viewModel.originalPreviewSurface.image,
+            "switching photos must clear the previous photo's comparison baseline"
+        )
         try await waitUntil("the second original publication") {
             viewModel.sourceURL == second
                 && viewModel.admissionHasComparisonPreviewCandidate
@@ -593,9 +597,12 @@ final class ThumbnailSwitchLifecycleTests: TempDirectoryTestCase {
         }
 
         let requests = await engine.previewRequests
+        let textureRequests = await engine.textureRequests
         XCTAssertGreaterThanOrEqual(
             requests.filter { $0.source?.backing == .url(second) }.count, 2,
-            "the selected thumbnail needs both an Adjusted and Original request"
+            "the selected thumbnail needs both an Adjusted and Original request; "
+                + "raster=\(requests.filter { $0.source?.backing == .url(second) }), "
+                + "textures=\(textureRequests.filter { $0.source?.backing == .url(second) })"
         )
         XCTAssertTrue(requests.contains {
             $0.source?.backing == .url(second) && $0.document.isIdentity
