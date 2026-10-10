@@ -157,13 +157,15 @@ struct CropInspectorView: View {
         onAspectRatioChange(ratio, nextOrientation)
     }
 
-    private var landscapeOrientationSystemImage: String {
-        "rectangle.landscape"
-    }
+    /// SF Symbols has `rectangle.portrait` but no `rectangle.landscape`; the landscape frame is
+    /// plain `rectangle`. A name that does not exist draws nothing, which left the Landscape
+    /// button blank. `CropInspectorTests` checks both resolve.
+    static let landscapeOrientationSymbol = "rectangle"
+    static let portraitOrientationSymbol = "rectangle.portrait"
 
-    private var portraitOrientationSystemImage: String {
-        "rectangle.portrait"
-    }
+    private var landscapeOrientationSystemImage: String { Self.landscapeOrientationSymbol }
+
+    private var portraitOrientationSystemImage: String { Self.portraitOrientationSymbol }
 
     private var portraitOrientationSymbolRotation: Angle {
         .zero

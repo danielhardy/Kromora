@@ -24,4 +24,18 @@ final class CropInspectorTests: XCTestCase {
         XCTAssertEqual(button.resolvedAccessibilityLabel, "Reset test")
         XCTAssertEqual(button.resolvedAccessibilityHint, "")
     }
+
+    /// A missing SF Symbol draws nothing, so the button looks blank. `rectangle.landscape` was one.
+    @MainActor
+    func testOrientationButtonsUseSymbolsThatExist() {
+        for name in [
+            CropInspectorView.landscapeOrientationSymbol,
+            CropInspectorView.portraitOrientationSymbol,
+        ] {
+            XCTAssertNotNil(
+                NSImage(systemSymbolName: name, accessibilityDescription: nil),
+                "\(name) is not an SF Symbol"
+            )
+        }
+    }
 }
