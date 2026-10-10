@@ -590,6 +590,16 @@ private struct CropToolbarControls: View {
     let glassNamespace: Namespace.ID
 
     var body: some View {
+        // An explicit row: the three glass buttons are unioned into one capsule, and without a
+        // stack of their own the toolbar and GlassEffectContainer are free to lay them out
+        // vertically, which draws one tall pill that hides Save and Cancel.
+        HStack(spacing: 10) {
+            buttons
+        }
+    }
+
+    @ViewBuilder
+    private var buttons: some View {
         Button {
             viewModel.commitCrop()
         } label: {
