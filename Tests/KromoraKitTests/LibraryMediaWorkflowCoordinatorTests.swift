@@ -38,6 +38,116 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
         await coordinator.shutdown()
     }
 
+    func testStreamedScanFillsSelectorProgressivelyAndKeepsSelectionAndOrder() async throws {
+        let volume = MediaVolume(name: "Card", url: FileManager.default.temporaryDirectory)
+        func file(_ name: String, _ seconds: TimeInterval) -> MediaVolumeFile {
+            MediaVolumeFile(
+                url: URL(fileURLWithPath: "/Volumes/Card/\(name)"),
+                captureDate: Date(timeIntervalSince1970: seconds)
+            )
+        }
+        let first = [file("c.jpg", 300), file("a.jpg", 100)]
+        let second = [file("b.jpg", 200), file("d.jpg", 400)]
+        let provider = StreamingWorkflowMediaProvider()
+        let coordinator = LibraryMediaWorkflowCoordinator(
+            provider: provider, fileDialog: WorkflowFileDialog()
+        )
+
+        coordinator.openRemovableMedia(volume)
+        provider.send(.init(files: first, warnings: ["first warning"]))
+        try await waitUntil { coordinator.removableMediaFiles.count == 2 }
+
+        // Images are visible and selectable while the card is still being read.
+        XCTAssertTrue(coordinator.isRemovableMediaScanning)
+        XCTAssertEqual(coordinator.removableMediaFiles.map(\.filename), ["a.jpg", "c.jpg"])
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles.count, 2)
+        let c = first[0], a = first[1]
+        coordinator.toggleRemovableMediaSelection(a)        // deselect a.jpg; anchor a
+        coordinator.selectRemovableMediaRange(to: c)        // reselect a…c
+        coordinator.toggleRemovableMediaSelection(a)        // deselect a.jpg again
+
+        provider.send(.init(files: second, warnings: []))
+        try await waitUntil { coordinator.removableMediaFiles.count == 4 }
+
+        // Arrivals merge into capture-time order; the user's choices are not overridden.
+        XCTAssertEqual(
+            coordinator.removableMediaFiles.map(\.filename), ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+        )
+        XCTAssertTrue(coordinator.isRemovableMediaScanning)
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles.map(\.filename), ["c.jpg"])
+        XCTAssertEqual(coordinator.removableMediaWarnings, ["first warning"])
+
+        provider.finish()
+        try await waitUntil { !coordinator.isRemovableMediaScanning }
+        XCTAssertEqual(
+            coordinator.removableMediaFiles.map(\.filename), ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]
+        )
+        await coordinator.shutdown()
+    }
+
+    func testStreamedScanSelectsArrivalsUntilTheUserTakesOverSelection() async throws {
+        let volume = MediaVolume(name: "Card", url: FileManager.default.temporaryDirectory)
+        let a = MediaVolumeFile(url: URL(fileURLWithPath: "/Volumes/Card/a.jpg"))
+        let b = MediaVolumeFile(url: URL(fileURLWithPath: "/Volumes/Card/b.jpg"))
+        let provider = StreamingWorkflowMediaProvider()
+        let coordinator = LibraryMediaWorkflowCoordinator(
+            provider: provider, fileDialog: WorkflowFileDialog()
+        )
+
+        coordinator.openRemovableMedia(volume)
+        provider.send(.init(files: [a], warnings: []))
+        try await waitUntil { coordinator.removableMediaFiles.count == 1 }
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles, [a])
+        provider.send(.init(files: [b], warnings: []))
+        try await waitUntil { coordinator.removableMediaFiles.count == 2 }
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles.count, 2)
+
+        provider.finish()
+        try await waitUntil { !coordinator.isRemovableMediaScanning }
+        await coordinator.shutdown()
+    }
+
+    func testClosingSelectorMidScanCancelsTheStreamAndKeepsPartialListFromGrowing() async throws {
+        let volume = MediaVolume(name: "Card", url: FileManager.default.temporaryDirectory)
+        let a = MediaVolumeFile(url: URL(fileURLWithPath: "/Volumes/Card/a.jpg"))
+        let provider = StreamingWorkflowMediaProvider()
+        let coordinator = LibraryMediaWorkflowCoordinator(
+            provider: provider, fileDialog: WorkflowFileDialog()
+        )
+
+        coordinator.openRemovableMedia(volume)
+        provider.send(.init(files: [a], warnings: []))
+        try await waitUntil { coordinator.removableMediaFiles.count == 1 }
+        coordinator.cancelRemovableMediaImport()
+        try await waitUntil { provider.wasTerminated }
+
+        provider.send(.init(files: [MediaVolumeFile(url: URL(fileURLWithPath: "/Volumes/Card/late.jpg"))], warnings: []))
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(coordinator.removableMediaFiles.count, 1)
+        XCTAssertFalse(coordinator.isRemovableMediaScanning)
+        XCTAssertFalse(coordinator.isRemovableMediaSelectorPresented)
+        await coordinator.shutdown()
+    }
+
+    func testScanErrorAfterPartialResultsKeepsFoundImagesAndReportsTheError() async throws {
+        let volume = MediaVolume(name: "Card", url: FileManager.default.temporaryDirectory)
+        let a = MediaVolumeFile(url: URL(fileURLWithPath: "/Volumes/Card/a.jpg"))
+        let provider = StreamingWorkflowMediaProvider()
+        let coordinator = LibraryMediaWorkflowCoordinator(
+            provider: provider, fileDialog: WorkflowFileDialog()
+        )
+
+        coordinator.openRemovableMedia(volume)
+        provider.send(.init(files: [a], warnings: []))
+        try await waitUntil { coordinator.removableMediaFiles.count == 1 }
+        provider.finish(throwing: MediaVolumeError.volumeRemoved("Card"))
+        try await waitUntil { !coordinator.isRemovableMediaScanning }
+
+        XCTAssertEqual(coordinator.removableMediaFiles, [a])
+        XCTAssertTrue(coordinator.removableMediaWarnings.contains("Card is no longer available."))
+        await coordinator.shutdown()
+    }
+
     func testDialogAndDropRouteOutsideTheDestinationPolicy() throws {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("kromora-source-folder-\(UUID().uuidString)", isDirectory: true)
@@ -116,6 +226,39 @@ private struct WorkflowMediaProvider: MediaVolumeProviding {
     func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
         try result.get()
     }
+}
+
+/// A provider whose scan stays open until the test sends batches, so progressive arrival is
+/// observable between them. The stream exists from construction, so a batch sent before the
+/// coordinator starts iterating is buffered rather than lost.
+private final class StreamingWorkflowMediaProvider: MediaVolumeProviding {
+    private let stream: AsyncThrowingStream<MediaVolumeScanBatch, Error>
+    private let continuation: AsyncThrowingStream<MediaVolumeScanBatch, Error>.Continuation
+    private let terminated = OSAllocatedUnfairLock(initialState: false)
+
+    init() {
+        (stream, continuation) = AsyncThrowingStream.makeStream()
+        continuation.onTermination = { [terminated] _ in terminated.withLock { $0 = true } }
+    }
+
+    var wasTerminated: Bool { terminated.withLock { $0 } }
+
+    func discover() async -> [MediaVolume] { [] }
+
+    func scan(_ volume: MediaVolume) async throws -> MediaVolumeScanResult {
+        MediaVolumeScanResult(files: [], warnings: [])
+    }
+
+    func scanBatches(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) -> AsyncThrowingStream<MediaVolumeScanBatch, Error> {
+        stream
+    }
+
+    func send(_ batch: MediaVolumeScanBatch) { continuation.yield(batch) }
+
+    func finish(throwing error: Error? = nil) { continuation.finish(throwing: error) }
 }
 
 private struct AccessGrantWorkflowMediaProvider: MediaVolumeProviding {

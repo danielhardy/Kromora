@@ -74,6 +74,28 @@ struct MediaVolumeFile: Identifiable, Sendable, Equatable {
         self.captureDate = captureDate
     }
 
+    /// Display order for a scanned volume: capture time ascending, undated files last, ties broken
+    /// by path. Shared by the final scan result and the streaming merge, so a list built from
+    /// batches is identical to the fully scanned one.
+    static func displayOrder(_ lhs: MediaVolumeFile, _ rhs: MediaVolumeFile) -> Bool {
+        switch (lhs.captureDate, rhs.captureDate) {
+        case let (a?, b?) where a != b: return a < b
+        case (nil, _?): return false
+        case (_?, nil): return true
+        default: return lhs.url.path.localizedStandardCompare(rhs.url.path) == .orderedAscending
+        }
+    }
+
+    /// Folds a streamed batch into an already ordered list, keeping display order and skipping
+    /// files the list already holds.
+    static func merging(_ ordered: [MediaVolumeFile], _ batch: [MediaVolumeFile]) -> [MediaVolumeFile] {
+        let known = Set(ordered.map(\.id))
+        var seen = known
+        let fresh = batch.filter { seen.insert($0.id).inserted }
+        guard !fresh.isEmpty else { return ordered }
+        return (ordered + fresh).sorted(by: displayOrder)
+    }
+
     var orientationLabel: String {
         switch orientation {
         case 3: return "180°"
@@ -122,6 +144,13 @@ struct MediaVolumeScanResult: Sendable, Equatable {
     let warnings: [String]
 }
 
+/// Files and warnings found since the previous batch, in discovery order. A scan is finished when
+/// its stream ends; folding every batch with `MediaVolumeFile.merging` yields the scan result.
+struct MediaVolumeScanBatch: Sendable, Equatable {
+    let files: [MediaVolumeFile]
+    let warnings: [String]
+}
+
 /// Selection state for the image-first volume sheet. Keeping this independent of SwiftUI makes
 /// select-all/none, toggle, and cancellation behavior deterministic in tests.
 struct MediaVolumeSelectionModel: Sendable, Equatable {
@@ -138,6 +167,12 @@ struct MediaVolumeSelectionModel: Sendable, Equatable {
     mutating func clear() {
         selectedIDs.removeAll()
         anchorID = nil
+    }
+
+    /// Adds files without touching the rest of the selection or the shift-click anchor, so a
+    /// streamed batch never disturbs choices already made.
+    mutating func select(_ files: [MediaVolumeFile]) {
+        selectedIDs.formUnion(files.map(\.id))
     }
 
     mutating func toggle(_ file: MediaVolumeFile) {
@@ -192,10 +227,35 @@ protocol MediaVolumeProviding: Sendable {
         _ volume: MediaVolume,
         access: SecurityScopedResourceAccess?
     ) async throws -> MediaVolumeScanResult
+    /// Streams the scan as batches so the selector can show images while the card is still being
+    /// read. The stream ends when the scan is complete and throws the scan's error.
+    func scanBatches(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) -> AsyncThrowingStream<MediaVolumeScanBatch, Error>
 }
 
 extension MediaVolumeProviding {
     var supportsInteractiveAccessGrant: Bool { false }
+
+    /// Providers without incremental discovery deliver their whole result as one batch.
+    func scanBatches(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) -> AsyncThrowingStream<MediaVolumeScanBatch, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    let result = try await scan(volume, access: access)
+                    continuation.yield(MediaVolumeScanBatch(files: result.files, warnings: result.warnings))
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
 
     func scan(
         _ volume: MediaVolume,
@@ -226,6 +286,30 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
             try Self.scanMountedVolume(volume, access: access)
         }.value
     }
+
+    func scanBatches(
+        _ volume: MediaVolume,
+        access: SecurityScopedResourceAccess?
+    ) -> AsyncThrowingStream<MediaVolumeScanBatch, Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task.detached(priority: .utility) {
+                do {
+                    _ = try Self.scanMountedVolume(volume, access: access) { batch in
+                        continuation.yield(batch)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// A batch is flushed after this many files or this long, whichever comes first, so a slow
+    /// card shows progress and a fast one is not drowned in main-actor updates.
+    static let scanBatchFileLimit = 32
+    static let scanBatchInterval: Duration = .milliseconds(250)
 
     private static func discoverMountedVolumes() -> [MediaVolume] {
         let keys: Set<URLResourceKey> = [
@@ -273,7 +357,8 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
 
     private static func scanMountedVolume(
         _ volume: MediaVolume,
-        access: SecurityScopedResourceAccess?
+        access: SecurityScopedResourceAccess?,
+        onBatch: (@Sendable (MediaVolumeScanBatch) -> Void)? = nil
     ) throws -> MediaVolumeScanResult {
         let accessURL = access?.url ?? volume.resolvedAccessURL()
         guard FileManager.default.fileExists(atPath: accessURL.path) else {
@@ -292,8 +377,26 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
 
         var files: [MediaVolumeFile] = []
         var warnings: [String] = []
+        var flushedFiles = 0
+        var flushedWarnings = 0
+        var lastFlush = ContinuousClock.now
+        func flush(force: Bool) {
+            guard let onBatch else { return }
+            let pending = files.count - flushedFiles + warnings.count - flushedWarnings
+            guard pending > 0 else { return }
+            let now = ContinuousClock.now
+            guard force || files.count - flushedFiles >= scanBatchFileLimit
+                || lastFlush.duration(to: now) >= scanBatchInterval else { return }
+            onBatch(MediaVolumeScanBatch(
+                files: Array(files[flushedFiles...]), warnings: Array(warnings[flushedWarnings...])
+            ))
+            flushedFiles = files.count
+            flushedWarnings = warnings.count
+            lastFlush = now
+        }
         while let candidate = enumerator.nextObject() as? URL {
             guard !Task.isCancelled else { break }
+            flush(force: false)
             guard let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey]),
                   values.isRegularFile == true, supports(candidate) else { continue }
             guard FileManager.default.isReadableFile(atPath: candidate.path) else {
@@ -319,14 +422,8 @@ struct MountedMediaVolumeProvider: MediaVolumeProviding {
                 captureDate: captureDate(properties: properties, url: candidate)
             ))
         }
-        files.sort {
-            switch ($0.captureDate, $1.captureDate) {
-            case let (a?, b?) where a != b: return a < b
-            case (nil, _?): return false
-            case (_?, nil): return true
-            default: return $0.url.path.localizedStandardCompare($1.url.path) == .orderedAscending
-            }
-        }
+        flush(force: true)
+        files.sort(by: MediaVolumeFile.displayOrder)
         return MediaVolumeScanResult(files: files, warnings: warnings)
     }
 

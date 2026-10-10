@@ -16,6 +16,9 @@ final class LibraryImportCoordinator {
     private var operationID = UUID()
     private var handle: PortablePackageImportHandle?
     private var observation: Task<Void, Never>?
+    /// Minimum spacing between live window merges. Merging re-queries the loaded pages, so a
+    /// fast import is folded into the grid a few times per second instead of once per photo.
+    static let liveMergeInterval: Duration = .milliseconds(250)
 
     init(
         package: PortableLibrarySession?,
@@ -108,30 +111,52 @@ final class LibraryImportCoordinator {
         operationID == id && !isShuttingDown()
     }
 
+    /// Stops the running import. Sources already committed stay in the package and the grid; the
+    /// observation then completes through its normal success or failure path.
+    func cancelCurrent() {
+        handle?.cancel()
+    }
+
     func observe(
         _ newHandle: PortablePackageImportHandle,
         operationID id: UUID,
         prefix: String,
+        onCommitted: @escaping @MainActor () -> Void = {},
         onSuccess: @escaping @MainActor (PortablePackageImportResult) -> Void,
         onFailure: @escaping @MainActor (Error) -> Void
     ) {
         handle = newHandle
         observation = Task { @MainActor [weak self] in
             guard let self else { return }
+            var lastMerge: ContinuousClock.Instant?
+            var importedSoFar = 0
             for await progress in newHandle.progress {
                 guard self.isCurrent(id) else { return }
                 self.publishProgress(progress)
                 self.publishStatus("\(prefix) \(progress.processed)/\(progress.total)…")
+                importedSoFar = progress.imported
+                let now = ContinuousClock.now
+                if lastMerge.map({ $0.duration(to: now) >= Self.liveMergeInterval }) ?? true,
+                   newHandle.publishCommitted() > 0 {
+                    lastMerge = now
+                    onCommitted()
+                }
             }
             do {
                 let result = try await newHandle.value()
                 guard self.isCurrent(id) else { return }
+                // The success handler reloads the window, which supersedes any live merge.
+                newHandle.publishCommitted()
                 self.handle = nil
                 self.observation = nil
                 self.publishProgress(nil)
                 onSuccess(result)
             } catch {
                 guard self.isCurrent(id) else { return }
+                // A cancelled or failed import may still have committed sources first; the session
+                // already published them to the index, so only the grid needs to catch up.
+                newHandle.publishCommitted()
+                if importedSoFar > 0 { onCommitted() }
                 self.handle = nil
                 self.observation = nil
                 self.publishProgress(nil)

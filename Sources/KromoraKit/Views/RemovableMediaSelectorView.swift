@@ -11,7 +11,7 @@ struct RemovableMediaSelectorView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
-            if viewModel.isRemovableMediaScanning {
+            if viewModel.isRemovableMediaScanning && viewModel.removableMediaFiles.isEmpty {
                 VStack(spacing: 12) {
                     ProgressView()
                     Text("Scanning \(viewModel.removableMediaVolume?.name ?? "volume")…")
@@ -47,6 +47,13 @@ struct RemovableMediaSelectorView: View {
                 }
             }
             Spacer()
+            if viewModel.isRemovableMediaScanning && !viewModel.removableMediaFiles.isEmpty {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Scanning…")
+                    .foregroundStyle(.secondary)
+                    .font(.callout)
+            }
             if !viewModel.removableMediaFiles.isEmpty {
                 Text("\(viewModel.removableMediaSelection.count) of \(viewModel.removableMediaFiles.count) selected")
                     .foregroundStyle(.secondary)

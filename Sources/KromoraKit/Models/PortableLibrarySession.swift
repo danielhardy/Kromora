@@ -815,6 +815,21 @@ final class PortableLibrarySession {
         }
     }
 
+    /// Makes sources committed by a running import visible to queries. Upserts are idempotent, so
+    /// the final result delta re-applying the same entries is harmless.
+    @discardableResult
+    private func publishCommittedImportEntries(from buffer: PortablePackageCommitBuffer) -> Int {
+        let entries = buffer.drain()
+        guard !entries.isEmpty else { return 0 }
+        do {
+            _ = try applyIndexDelta(LibraryIndexDelta(upserts: entries))
+        } catch {
+            reportIndexWriteFailure(error)
+            return 0
+        }
+        return entries.count
+    }
+
     private func appendPendingImportDelta(_ delta: LibraryIndexDelta) {
         pendingImportIndexDelta = pendingImportIndexDelta.merging(delta)
     }
@@ -843,11 +858,19 @@ final class PortableLibrarySession {
         let jobID = ImageWorkScheduler.JobID(
             "portable-package-import-\(lease.ownerID.uuidString)-\(UUID().uuidString)"
         )
+        // Deferred-catalog batches (Photos) publish one index delta per batch, so they leave live
+        // publication off. Every other import makes each committed source queryable immediately.
+        let commitBuffer = PortablePackageCommitBuffer()
+        let publishesLive = catalogState == nil
         let handle = PortablePackageImportHandle(
             progress: progress,
             resultBox: resultBox,
             cancellation: cancellation,
-            cancelAction: { scheduler.cancel(id: jobID) }
+            cancelAction: { scheduler.cancel(id: jobID) },
+            commitPublisher: { [weak self] in
+                guard publishesLive else { return 0 }
+                return self?.publishCommittedImportEntries(from: commitBuffer) ?? 0
+            }
         )
         activeImportJobIDs.insert(jobID)
         let package = self.package
@@ -856,10 +879,13 @@ final class PortableLibrarySession {
         let admitted = scheduler.enqueuePackageIO(
             id: jobID,
             lane: .importCopyHash,
-            onTerminal: { [weak self, weak handle, progressSink, access] outcome in
+            onTerminal: { [weak self, weak handle, progressSink, access, commitBuffer] outcome in
                 access.forEach { $0.release() }
                 guard let self else { return }
                 self.activeImportJobIDs.remove(jobID)
+                // Anything committed but not yet published must reach the index even when the
+                // import failed or was cancelled; the package already holds those assets.
+                if publishesLive { self.publishCommittedImportEntries(from: commitBuffer) }
                 // A queued job cancelled before its operation runs never reaches the defer
                 // below, so end the progress stream on every terminal outcome. Otherwise a
                 // `for await` consumer would wait forever; finishing twice is a no-op.
@@ -918,6 +944,7 @@ final class PortableLibrarySession {
                             options: .init(duplicatePolicy: duplicatePolicy),
                             isCancelled: { cancellation.isCancelled || Task.isCancelled },
                             progress: { progressSink.yield($0) },
+                            committed: { commitBuffer.append($0) },
                             now: now
                         )
                     }
@@ -1103,6 +1130,12 @@ final class PortableLibrarySession {
     /// every page to the existing collection UI until that UI consumes pages directly (KRMA-519
     /// scope item 2). The per-item cost is pure value construction, so launch and reload stay
     /// bounded by the index rather than by record or original I/O.
+    /// Browsing assets for query items the caller does not already hold, so an incremental window
+    /// merge materializes only what is new.
+    func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset] {
+        try items.map { try browsingAsset(for: $0) }
+    }
+
     func browsingAssets(query: LibraryQuery = .all) throws -> [PhotoAsset] {
         var assets: [PhotoAsset] = []
         var pageIndex = 0

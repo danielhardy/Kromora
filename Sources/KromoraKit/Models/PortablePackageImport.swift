@@ -223,6 +223,24 @@ final class PortablePackageImportProgressSink: Sendable {
     }
 }
 
+/// Lock-backed queue of index entries for sources whose package transaction has committed. The
+/// detached worker appends as each source commits; the main actor drains on its own cadence, so
+/// the worker never waits on UI work and the UI never sees an uncommitted asset.
+final class PortablePackageCommitBuffer: Sendable {
+    private let entries = OSAllocatedUnfairLock(initialState: [LibraryIndexEntry]())
+
+    func append(_ entry: LibraryIndexEntry) {
+        entries.withLock { $0.append(entry) }
+    }
+
+    func drain() -> [LibraryIndexEntry] {
+        entries.withLock { entries in
+            defer { entries.removeAll(keepingCapacity: true) }
+            return entries
+        }
+    }
+}
+
 /// Main-actor-facing handle returned when an import is admitted to the package-I/O lane.
 /// Progress is streamed independently of the final result so folder and removable-media UI can
 /// remain responsive while a large source is copied or hashed.
@@ -232,18 +250,27 @@ final class PortablePackageImportHandle {
     private let resultBox: PortablePackageImportResultBox
     private let cancellation: PortablePackageImportCancellation
     private let cancelAction: () -> Void
+    private let commitPublisher: @MainActor () -> Int
 
+    /// `commitPublisher` makes sources committed so far visible to library queries and returns how
+    /// many it published. Handles that defer index publication to the end of a batch leave the
+    /// default, which publishes nothing.
     init(
         progress: AsyncStream<PortablePackageImportProgress>,
         resultBox: PortablePackageImportResultBox,
         cancellation: PortablePackageImportCancellation,
-        cancelAction: @escaping () -> Void
+        cancelAction: @escaping () -> Void,
+        commitPublisher: @escaping @MainActor () -> Int = { 0 }
     ) {
         self.progress = progress
         self.resultBox = resultBox
         self.cancellation = cancellation
         self.cancelAction = cancelAction
+        self.commitPublisher = commitPublisher
     }
+
+    @discardableResult
+    func publishCommitted() -> Int { commitPublisher() }
 
     func cancel() {
         cancellation.cancel()
@@ -315,6 +342,7 @@ struct PortablePackageImporter: Sendable {
         isCancelled: @Sendable () -> Bool = { false },
         progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in },
         sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
+        committed: @Sendable (LibraryIndexEntry) -> Void = { _ in },
         faultInjector: PortablePackageFaultInjector? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) throws -> PortablePackageImportResult {
@@ -327,6 +355,7 @@ struct PortablePackageImporter: Sendable {
             isCancelled: isCancelled,
             progress: progress,
             sourceReadObserver: sourceReadObserver,
+            committed: committed,
             faultInjector: faultInjector,
             catalog: catalog,
             now: now
@@ -339,6 +368,7 @@ struct PortablePackageImporter: Sendable {
         isCancelled: @Sendable () -> Bool = { false },
         progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in },
         sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
+        committed: @Sendable (LibraryIndexEntry) -> Void = { _ in },
         faultInjector: PortablePackageFaultInjector? = nil,
         catalog: PortablePackageImportCatalog,
         now: @escaping @Sendable () -> Date = { Date() }
@@ -497,13 +527,15 @@ struct PortablePackageImporter: Sendable {
                 catalog.shards[shardName] = shard
                 catalog.existingHashes[staged.checksum] = assetID
                 hashesSeenThisImport[staged.checksum] = assetID
-                indexUpserts.append(.init(
+                let indexEntry = LibraryIndexEntry(
                     assetID: assetID, recordPath: recordPath,
                     summary: .init(
                         sourceFingerprint: identity.sourceFingerprint,
                         displayName: source.name
                     )
-                ))
+                )
+                indexUpserts.append(indexEntry)
+                committed(indexEntry)
                 imported.append(.init(
                     source: source,
                     assetID: assetID,
@@ -616,6 +648,7 @@ extension PortableLibraryPackage {
         isCancelled: @Sendable () -> Bool = { false },
         progress: @Sendable (PortablePackageImportProgress) -> Void = { _ in },
         sourceReadObserver: @Sendable (PortablePackageImportSource) -> Void = { _ in },
+        committed: @Sendable (LibraryIndexEntry) -> Void = { _ in },
         faultInjector: PortablePackageFaultInjector? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) throws -> PortablePackageImportResult {
@@ -625,6 +658,7 @@ extension PortableLibraryPackage {
             isCancelled: isCancelled,
             progress: progress,
             sourceReadObserver: sourceReadObserver,
+            committed: committed,
             faultInjector: faultInjector,
             now: now
         )

@@ -57,6 +57,36 @@ final class PortablePackageImportTests: TempDirectoryTestCase {
         }
     }
 
+    func testCommittedCallbackFiresPerSourceAndCancellationKeepsCommittedAssets() throws {
+        let packageURL = tempDirectory.appendingPathComponent("Committed.kromoralibrary")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let urls = try (0..<4).map {
+            try makeSource(named: "c\($0).raw", contents: Data(repeating: UInt8($0 + 1), count: 64))
+        }
+        let lease = try PortablePackageLease.acquire(at: packageURL)
+        defer { try? lease.release() }
+
+        let committed = OSAllocatedUnfairLock<[LibraryIndexEntry]>(initialState: [])
+        let result = try package.importSources(
+            urls.map { .init(url: $0) }, lease: lease,
+            isCancelled: { committed.withLock { $0.count } >= 2 },
+            committed: { entry in committed.withLock { $0.append(entry) } }
+        )
+
+        // The callback fires after each source's transaction commits, so cancelling after the
+        // second leaves exactly those two in the package and in the delta.
+        XCTAssertTrue(result.cancelled)
+        let entries = committed.withLock { $0 }
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries.map(\.assetID), result.imported.map(\.assetID))
+        XCTAssertEqual(Set(entries.map(\.assetID)), Set(result.indexDelta.upserts.map(\.assetID)))
+        var members = 0
+        for shard in PortableLibraryPackage.allShards {
+            members += try package.readMembershipShard(shard).entries.filter { !$0.isTombstone }.count
+        }
+        XCTAssertEqual(members, 2)
+    }
+
     func testDuplicateContentIsReportedAndSkippedWithoutSecondAsset() throws {
         let packageURL = tempDirectory.appendingPathComponent("Duplicate.kromoralibrary")
         let package = try PortableLibraryPackage.create(at: packageURL)

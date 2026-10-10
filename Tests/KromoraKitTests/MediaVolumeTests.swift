@@ -57,6 +57,39 @@ final class MediaVolumeSelectionTests: XCTestCase {
     }
 }
 
+final class MediaVolumeStreamingModelTests: XCTestCase {
+    private func file(_ name: String, at seconds: TimeInterval?) -> MediaVolumeFile {
+        MediaVolumeFile(
+            url: URL(fileURLWithPath: "/Volumes/Card/\(name)"),
+            captureDate: seconds.map { Date(timeIntervalSince1970: $0) }
+        )
+    }
+
+    func testMergingKeepsDisplayOrderAcrossBatchesAndSkipsKnownFiles() {
+        let a = file("a.jpg", at: 100), b = file("b.jpg", at: 200)
+        let c = file("c.jpg", at: 300), undated = file("z.jpg", at: nil)
+        var list = MediaVolumeFile.merging([], [c, undated])
+        list = MediaVolumeFile.merging(list, [a, c])
+        list = MediaVolumeFile.merging(list, [b])
+
+        XCTAssertEqual(list.map(\.filename), ["a.jpg", "b.jpg", "c.jpg", "z.jpg"])
+        XCTAssertEqual(list, [c, undated, a, b].sorted(by: MediaVolumeFile.displayOrder))
+    }
+
+    func testSelectingArrivalsKeepsEarlierChoicesAndAnchor() {
+        let a = file("a.jpg", at: 1), b = file("b.jpg", at: 2), c = file("c.jpg", at: 3)
+        var selection = MediaVolumeSelectionModel()
+        selection.select([a, b])
+        selection.toggle(b)
+        selection.select([c])
+
+        XCTAssertTrue(selection.contains(a))
+        XCTAssertFalse(selection.contains(b))
+        XCTAssertTrue(selection.contains(c))
+        XCTAssertEqual(selection.anchorID, b.id)
+    }
+}
+
 @MainActor
 final class MediaVolumeImportTests: TempDirectoryTestCase {
     func testMountedScannerAdmitsSupportedImagesWithOrientationAndWarnings() async throws {
@@ -74,6 +107,45 @@ final class MediaVolumeImportTests: TempDirectoryTestCase {
         XCTAssertTrue(result.warnings.contains { $0.contains("broken.jpg") })
         XCTAssertFalse(result.files.contains { $0.filename == "notes.txt" })
         XCTAssertEqual(try Data(contentsOf: good), try Data(contentsOf: good), "source is untouched")
+    }
+
+    func testMountedScannerStreamsBatchesThatMergeToTheFullyScannedResult() async throws {
+        let count = MountedMediaVolumeProvider.scanBatchFileLimit * 2 + 5
+        for index in 0..<count {
+            _ = try Fixtures.writeJPEG(
+                width: 16, height: 8, orientation: 1,
+                named: String(format: "img-%03d.jpg", index), in: tempDirectory
+            )
+        }
+        try Data("not an image".utf8).write(to: tempDirectory.appendingPathComponent("broken.jpg"))
+        let volume = MediaVolume(name: "Streamed Card", url: tempDirectory)
+        let provider = MountedMediaVolumeProvider()
+
+        var batches: [MediaVolumeScanBatch] = []
+        var merged: [MediaVolumeFile] = []
+        var warnings: [String] = []
+        for try await batch in provider.scanBatches(volume, access: nil) {
+            batches.append(batch)
+            merged = MediaVolumeFile.merging(merged, batch.files)
+            warnings += batch.warnings
+        }
+        let full = try await provider.scan(volume)
+
+        XCTAssertGreaterThan(batches.count, 1, "a large card arrives in more than one batch")
+        XCTAssertTrue(batches.allSatisfy { $0.files.count <= MountedMediaVolumeProvider.scanBatchFileLimit })
+        XCTAssertEqual(merged, full.files, "streamed order matches the fully scanned order")
+        XCTAssertEqual(Set(warnings), Set(full.warnings))
+    }
+
+    func testMountedScannerBatchStreamThrowsTheScanError() async throws {
+        let gone = tempDirectory.appendingPathComponent("not-mounted")
+        let volume = MediaVolume(name: "Gone", url: gone)
+        do {
+            for try await _ in MountedMediaVolumeProvider().scanBatches(volume, access: nil) {}
+            XCTFail("expected volumeRemoved")
+        } catch {
+            XCTAssertEqual(error as? MediaVolumeError, .volumeRemoved("Gone"))
+        }
     }
 
     func testMountedScannerResolvesAUserGrantedBookmarkBeforeScanning() async throws {

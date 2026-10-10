@@ -20,6 +20,10 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         let assets: [PhotoAsset]
         let pageSize: Int
         var indexedAssetCount: Int
+        /// How many of `assets` the index currently holds; raising it simulates an import
+        /// committing more photos. `newestFirst` orders the newest at the head of the window.
+        var committedCount: Int
+        var newestFirst = false
         private(set) var selectedIDs = Set<PortablePhotoAssetID>()
         private(set) var activeID: PortablePhotoAssetID?
         private(set) var requestedPages: [Int] = []
@@ -29,6 +33,7 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         init(count: Int, pageSize: Int, presentedAspectRatio: Double? = nil) {
             self.pageSize = pageSize
             self.indexedAssetCount = count
+            self.committedCount = count
             self.assets = (0..<count).map { index in
                 let id = PortablePhotoAssetID(uuid: UUID())
                 let identity = PortablePhotoIdentity(
@@ -59,17 +64,24 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             assets.prefix(indexedAssetCount).filter { ids.contains($0.source.portableIdentity.assetID) }
         }
 
+        private var committedAssets: [PhotoAsset] {
+            let committed = Array(assets.prefix(committedCount))
+            return newestFirst ? committed.reversed() : committed
+        }
+
         func browsingWindow(pageIndex: Int, query: LibraryQuery) throws
             -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int) {
             requestedPages.append(pageIndex)
+            let visible = committedAssets
             let start = pageIndex * pageSize
-            let end = min(start + pageSize, assets.count)
-            return (start < assets.count ? Array(assets[start..<end]) : [], assets.count, pageSize)
+            let end = min(start + pageSize, visible.count)
+            return (start < visible.count ? Array(visible[start..<end]) : [], visible.count, pageSize)
         }
 
         func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage {
+            let visible = committedAssets
             let start = pageIndex * pageSize
-            let selected = start < assets.count ? Array(assets[start..<min(start + pageSize, assets.count)]) : []
+            let selected = start < visible.count ? Array(visible[start..<min(start + pageSize, visible.count)]) : []
             let items = selected.map { asset in
                 let id = asset.source.portableIdentity.assetID
                 return LibraryQueryItem(
@@ -79,8 +91,14 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
                 )
             }
             return LibraryQueryPage(
-                pageIndex: pageIndex, pageSize: pageSize, totalCount: assets.count, items: items
+                pageIndex: pageIndex, pageSize: pageSize, totalCount: visible.count, items: items
             )
+        }
+
+        func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset] {
+            items.compactMap { item in
+                assets.first { $0.source.portableIdentity.assetID == item.assetID }
+            }
         }
 
         func select(_ assetID: PortablePhotoAssetID, additive: Bool = false) {
@@ -175,6 +193,74 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
             collection: collection, library: library, destination: destination
         )
         return (coordinator, collection, library, destination)
+    }
+
+    func testMergeCommittedImportsInsertsInOrderAndKeepsSelectionAndCells() throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 6, pageSize: 4)
+        defer { withExtendedLifetime(destination) {} }
+        library.committedCount = 2
+        library.newestFirst = true
+        try coordinator.reloadPortableWindow()
+        let originalIDs = collection.items.map(\.id)
+        XCTAssertEqual(originalIDs.count, 2)
+        coordinator.selectPortableItem(at: 1)
+        let selectedID = try XCTUnwrap(collection.selectedItem?.id)
+        let survivor = collection.items[1]
+
+        // Two more photos commit; being newest-first they land at the head of the window.
+        library.committedCount = 4
+        try coordinator.mergeCommittedImports()
+
+        XCTAssertEqual(collection.items.count, 4)
+        XCTAssertEqual(collection.portableTotalCount, 4)
+        XCTAssertEqual(
+            collection.items.map(\.displayName),
+            ["photo-3.jpg", "photo-2.jpg", "photo-1.jpg", "photo-0.jpg"]
+        )
+        // Existing cells are reused rather than rebuilt, and the selection follows its photo.
+        XCTAssertTrue(collection.items[3] === survivor)
+        XCTAssertEqual(collection.selectedItem?.id, selectedID)
+        XCTAssertEqual(collection.selectedIndex, 3)
+        // Arriving cells show the spinner state until their thumbnail lands.
+        XCTAssertEqual(collection.items[0].asset.thumbnailState, .loading)
+        XCTAssertEqual(collection.items[1].asset.thumbnailState, .loading)
+        // The merge never reloads page zero.
+        XCTAssertEqual(library.requestedPages, [0])
+    }
+
+    func testMergeCommittedImportsKeepsLoadedPagesAndBoundsWindowToThem() throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 6, pageSize: 2)
+        defer { withExtendedLifetime(destination) {} }
+        library.committedCount = 4
+        library.newestFirst = true
+        try coordinator.reloadPortableWindow()
+        collection.appendPortableWindow(
+            assets: try library.browsingWindow(pageIndex: 1, query: .all).assets, pageIndex: 1
+        )
+        XCTAssertEqual(collection.items.count, 4)
+
+        library.committedCount = 6
+        try coordinator.mergeCommittedImports()
+
+        // Two loaded pages stay two loaded pages; the total reflects the whole import so far
+        // and the tail pages in through the usual scroll path.
+        XCTAssertEqual(collection.items.count, 4)
+        XCTAssertEqual(collection.portableTotalCount, 6)
+        XCTAssertTrue(collection.portableHasMorePages)
+        XCTAssertEqual(
+            collection.items.map(\.displayName),
+            ["photo-5.jpg", "photo-4.jpg", "photo-3.jpg", "photo-2.jpg"]
+        )
+    }
+
+    func testMergeCommittedImportsWithNoWindowLoadsPageZero() throws {
+        let (coordinator, collection, library, destination) = makeCoordinator(count: 3, pageSize: 2)
+        defer { withExtendedLifetime(destination) {} }
+        XCTAssertFalse(collection.isPortableWindowed)
+        try coordinator.mergeCommittedImports()
+        XCTAssertEqual(library.requestedPages, [0])
+        XCTAssertEqual(collection.items.count, 2)
+        XCTAssertEqual(collection.portableTotalCount, 3)
     }
 
     func testFilterSortAndSearchReloadPageZeroAndSkipNoOp() throws {

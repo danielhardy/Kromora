@@ -63,6 +63,9 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     private var removableMediaAccess: SecurityScopedResourceAccess?
     private var isShuttingDown = false
     private var importOperationID = UUID()
+    /// Streamed files are selected on arrival until the user takes over the selection, which
+    /// matches the select-everything default of a finished scan.
+    private var selectsScanArrivals = true
 
     var onStatus: (@MainActor (String) -> Void)?
     var onError: (@MainActor (String) -> Void)?
@@ -184,6 +187,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         removableMediaFiles = []
         removableMediaWarnings = []
         removableMediaSelection.clear()
+        selectsScanArrivals = true
         removableMediaImportProgress = nil
         isRemovableMediaScanning = true
         isRemovableMediaSelectorPresented = true
@@ -192,12 +196,10 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         let access = removableMediaAccess
         scanTask = Task { [weak self] in
             do {
-                let result = try await provider.scan(volume, access: access)
-                guard let self, self.isCurrentImport(operationID), !Task.isCancelled else {
-                    return
-                }
-                self.scanTask = nil
-                self.publishScan(result)
+                guard let self else { return }
+                try await self.consumeScan(
+                    of: volume, access: access, operationID: operationID
+                )
             } catch is CancellationError {
                 // Closing the selector is a normal cancellation.
             } catch {
@@ -205,8 +207,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
                 guard case .permissionDenied = error as? MediaVolumeError,
                       provider.supportsInteractiveAccessGrant else {
                     guard self.isCurrentImport(operationID) else { return }
-                    self.isRemovableMediaScanning = false
-                    self.removableMediaWarnings = [error.localizedDescription]
+                    self.finishFailedScan(error)
                     return
                 }
                 guard let grant = self.requestAccess(for: volume) else {
@@ -220,36 +221,38 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
                     candidate.id == volume.id ? grant.volume : candidate
                 }
                 do {
-                    let result = try await provider.scan(grant.volume, access: grant.access)
-                    guard self.isCurrentImport(operationID), !Task.isCancelled else { return }
-                    self.scanTask = nil
-                    self.publishScan(result)
+                    try await self.consumeScan(
+                        of: grant.volume, access: grant.access, operationID: operationID
+                    )
                 } catch is CancellationError {
                     // A replacement operation drops the coordinator owner; this scan keeps its
                     // local grant alive until the provider has finished its read.
                 } catch {
                     guard self.isCurrentImport(operationID) else { return }
                     self.removableMediaAccess = nil
-                    self.isRemovableMediaScanning = false
-                    self.removableMediaWarnings = [error.localizedDescription]
+                    self.finishFailedScan(error)
                 }
             }
         }
     }
 
     func toggleRemovableMediaSelection(_ file: MediaVolumeFile) {
+        selectsScanArrivals = false
         removableMediaSelection.toggle(file)
     }
 
     func selectRemovableMediaRange(to file: MediaVolumeFile) {
+        selectsScanArrivals = false
         removableMediaSelection.selectRange(to: file, in: removableMediaFiles)
     }
 
     func selectAllRemovableMedia() {
+        selectsScanArrivals = true
         removableMediaSelection.selectAll(in: removableMediaFiles)
     }
 
     func selectNoRemovableMedia() {
+        selectsScanArrivals = false
         removableMediaSelection.clear()
     }
 
@@ -329,14 +332,39 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         )
     }
 
-    private func publishScan(_ result: MediaVolumeScanResult) {
-        removableMediaFiles = result.files
-        removableMediaWarnings = result.warnings
-        removableMediaSelection.selectAll(in: result.files)
+    /// Publishes each scan batch into the selector as it arrives. The list stays in final display
+    /// order throughout, and selection and the shift-click anchor are keyed by file id, so both
+    /// remain valid while the list grows. Import stays disabled until the stream ends.
+    private func consumeScan(
+        of volume: MediaVolume,
+        access: SecurityScopedResourceAccess?,
+        operationID: UUID
+    ) async throws {
+        for try await batch in provider.scanBatches(volume, access: access) {
+            guard isCurrentImport(operationID), !Task.isCancelled else { return }
+            publishScanBatch(batch)
+        }
+        guard isCurrentImport(operationID), !Task.isCancelled else { return }
+        scanTask = nil
         isRemovableMediaScanning = false
-        if result.files.isEmpty {
+        if removableMediaFiles.isEmpty {
             removableMediaWarnings.append("No supported images were found on this volume.")
         }
+    }
+
+    private func publishScanBatch(_ batch: MediaVolumeScanBatch) {
+        let previousCount = removableMediaFiles.count
+        removableMediaFiles = MediaVolumeFile.merging(removableMediaFiles, batch.files)
+        removableMediaWarnings.append(contentsOf: batch.warnings)
+        if selectsScanArrivals, removableMediaFiles.count > previousCount {
+            removableMediaSelection.select(batch.files)
+        }
+    }
+
+    /// An error part-way through a scan keeps the images already found, and says why it stopped.
+    private func finishFailedScan(_ error: Error) {
+        isRemovableMediaScanning = false
+        removableMediaWarnings.append(error.localizedDescription)
     }
 
     private func requestAccess(for volume: MediaVolume) -> MediaAccessGrant? {

@@ -715,6 +715,43 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         await session.shutdown()
     }
 
+    func testCommittedSourcesBecomeQueryableMidImportAndSurviveCancellation() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("LiveImport.kromoralibrary")
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(at: packageURL, scheduler: scheduler)
+        let urls = try (0..<6).map { index in
+            let url = tempDirectory.appendingPathComponent("live-\(index).raw")
+            try Data(repeating: UInt8(index + 1), count: 256 * 1024).write(to: url)
+            return url
+        }
+        let handle = try session.startImportURLs(urls)
+
+        // Publish what has committed so far each time progress arrives; cancel once at least
+        // one source is queryable while others remain.
+        var publishedMidImport = 0
+        for await value in handle.progress where value.phase != .preparing {
+            publishedMidImport += handle.publishCommitted()
+            if publishedMidImport > 0 {
+                XCTAssertEqual(session.assetCount, publishedMidImport)
+                handle.cancel()
+                break
+            }
+        }
+        _ = try? await handle.value()
+        await scheduler.cancelAllAndWait()
+
+        // Everything the package committed is in the index, with no duplicates, whether or not
+        // the final result reached the caller.
+        var committed = 0
+        for shard in PortableLibraryPackage.allShards {
+            committed += try session.package.readMembershipShard(shard).entries
+                .filter { !$0.isTombstone }.count
+        }
+        XCTAssertGreaterThan(committed, 0)
+        XCTAssertEqual(session.assetCount, committed)
+        await session.shutdown()
+    }
+
     func testAsyncImportCancellationLeavesNoPublishedAsset() async throws {
         let packageURL = tempDirectory.appendingPathComponent("AsyncCancelled.kromoralibrary")
         let scheduler = ImageWorkScheduler()

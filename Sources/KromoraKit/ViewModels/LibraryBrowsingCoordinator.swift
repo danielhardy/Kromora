@@ -13,6 +13,7 @@ protocol LibraryBrowsingProviding: AnyObject {
     func browsingWindow(pageIndex: Int, query: LibraryQuery) throws
         -> (assets: [PhotoAsset], totalCount: Int, pageSize: Int)
     func page(at pageIndex: Int, query: LibraryQuery) -> LibraryQueryPage
+    func browsingAssets(for items: [LibraryQueryItem]) throws -> [PhotoAsset]
     func select(_ assetID: PortablePhotoAssetID, additive: Bool)
     func setPortableSelection(_ assetIDs: [PortablePhotoAssetID], activeID: PortablePhotoAssetID?)
     func togglePortableSelection(_ assetID: PortablePhotoAssetID)
@@ -136,6 +137,34 @@ final class LibraryBrowsingCoordinator {
         destination.showLibraryGridIfActive()
         collection.beginThumbnailDemand()
         if pageIndex == 0 { admitHintsAgainstPublishedIndex() }
+    }
+
+    /// Fold assets committed by a running import into the loaded window. Unlike
+    /// `reloadPortableWindow`, this keeps every loaded page, the existing cells and their
+    /// thumbnails, the selection, and the scroll position: only new cells are created.
+    func mergeCommittedImports() throws {
+        guard let library, let destination else { return }
+        guard collection.isPortableWindowed else {
+            try reloadPortableWindow(pageIndex: 0)
+            return
+        }
+        let query = destination.portableQuery
+        var ordered: [LibraryQueryItem] = []
+        var totalCount = collection.portableTotalCount ?? 0
+        for pageIndex in 0...collection.portablePageIndex {
+            let page = library.page(at: pageIndex, query: query)
+            ordered.append(contentsOf: page.items)
+            totalCount = page.totalCount
+        }
+        let orderedIDs = ordered.map { PhotoAssetID(rawValue: "portable:\($0.assetID.raw)") }
+        let known = Set(collection.items.map(\.id))
+        let fresh = zip(ordered, orderedIDs).filter { !known.contains($0.1) }.map(\.0)
+        let assets = try library.browsingAssets(for: fresh)
+        collection.mergePortableWindow(
+            orderedIDs: orderedIDs, newAssets: assets, totalCount: totalCount
+        )
+        syncPortableSelection()
+        destination.showLibraryGridIfActive()
     }
 
     func prepareLaunchHints() { loadLaunchHints() }

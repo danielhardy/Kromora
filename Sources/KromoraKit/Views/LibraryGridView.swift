@@ -45,6 +45,7 @@ struct LibraryGridView: View {
             }
             .background(KromoraTheme.secondaryChrome)
             Divider()
+            LibraryImportProgressBar(viewModel: viewModel)
             if collection.isPortableWindowed, let total = collection.portableTotalCount {
                 Text("Showing \(collection.items.count) of \(total) — scroll for more")
                     .font(.caption)
@@ -179,6 +180,45 @@ struct LibraryGridView: View {
             viewModel.loadMorePortableIfNeeded(currentIndex: index)
         } else {
             collection.select(at: index, modifiers: modifiers)
+        }
+    }
+}
+
+/// Non-blocking progress for a multi-photo package import, shown above the grid while photos
+/// arrive. The status bar keeps its text; this makes the running import hard to miss.
+private struct LibraryImportProgressBar: View {
+    @ObservedObject var viewModel: AppViewModel
+
+    var body: some View {
+        if let progress = viewModel.portableImportProgress, progress.total > 1 {
+            HStack(spacing: 10) {
+                ProgressView(value: progress.fraction)
+                    .frame(width: 160)
+                    .controlSize(.small)
+                Text("Importing \(progress.processed) of \(progress.total)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                if let name = progress.currentName {
+                    Text(name)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                Button("Cancel") { viewModel.cancelLibraryImport() }
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+                    .help("Stop importing. Photos already imported stay in the Library.")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(KromoraTheme.secondaryChrome)
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(
+                "Importing \(progress.processed) of \(progress.total) photos"
+            )
+            Divider()
         }
     }
 }

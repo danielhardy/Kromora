@@ -547,6 +547,44 @@ final class ImageCollectionPresentationModel {
         restoreThumbnailDemand(priorities: priorDemand, visible: priorVisible)
     }
 
+    /// Incrementally fold newly committed assets into the loaded window. `orderedIDs` is the full
+    /// query order of the loaded pages; existing cells (with their thumbnails, demand, and
+    /// selection) are reused, so nothing is cancelled or reset and scroll position is unaffected.
+    /// Cells pushed past the loaded pages by an earlier insertion are dropped and fault back in
+    /// through the normal next-page path.
+    func mergePortableWindow(
+        orderedIDs: [PhotoAssetID], newAssets: [PhotoAsset], totalCount: Int
+    ) {
+        guard portableTotalCount != nil else { return }
+        var byID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var fresh: [Item] = []
+        for asset in newAssets where byID[asset.id] == nil {
+            let item = Item(asset: asset)
+            if let presentationChangeLedger { item.presentationChangeLedger = presentationChangeLedger }
+            // An arriving photo shows the cell spinner until its thumbnail lands.
+            item.asset.thumbnailState = .loading
+            byID[asset.id] = item
+            fresh.append(item)
+        }
+        let merged = orderedIDs.compactMap { byID[$0] }
+        let retained = Set(merged.map(\.id))
+        for item in items where !retained.contains(item.id) {
+            let jobID = thumbnailJobID(for: item)
+            scheduler.cancel(id: jobID)
+            thumbnailJobIDs.remove(jobID)
+            thumbnailDemandIDs.remove(item.id)
+            thumbnailDemandPriorities.removeValue(forKey: item.id)
+            preparedThumbnailIDs.remove(item.id)
+        }
+        items = merged
+        portableTotalCount = totalCount
+        isActive = !items.isEmpty
+        invalidateCollectionProjection()
+        syncSelectedIndex()
+        for item in fresh { enqueueMetadata(for: item, generation: scanGeneration) }
+        enqueueThumbnails()
+    }
+
     private func restoreThumbnailDemand(
         priorities: [PhotoAssetID: ImageWorkScheduler.Priority], visible: [PhotoAssetID]
     ) {

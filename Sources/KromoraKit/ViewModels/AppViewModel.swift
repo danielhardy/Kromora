@@ -1827,11 +1827,24 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         onSuccess: @escaping @MainActor (PortablePackageImportResult) -> Void,
         onFailure: @escaping @MainActor (Error) -> Void
     ) {
-        _ = total
+        // Multi-photo imports fold each committed batch into the Library grid as it lands; a
+        // single photo has nothing to stream and is published by its completion handler.
+        let streamsToGrid = total > 1
         libraryImportCoordinator.observe(
             handle, operationID: operationID, prefix: prefix,
+            onCommitted: { [weak self] in
+                guard streamsToGrid else { return }
+                try? self?.libraryBrowsingCoordinator.mergeCommittedImports()
+            },
             onSuccess: onSuccess, onFailure: onFailure
         )
+    }
+
+    /// Cancels the running package import. Photos committed so far stay in the Library.
+    func cancelLibraryImport() {
+        guard portableImportProgress != nil else { return }
+        libraryImportCoordinator.cancelCurrent()
+        statusMessage = "Cancelling import…"
     }
 
     private func reloadPortableCollection() throws {

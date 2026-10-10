@@ -134,6 +134,18 @@ collection/editor presentation boundaries. Worker cancellation is cooperative an
 and awaits the library progress observer; the package session's shared scheduler continues to bound
 actual I/O admission.
 
+Multi-photo imports stream into the Library grid while they run. The worker appends each committed
+source's index entry to a lock-backed `PortablePackageCommitBuffer`; the progress observer drains it
+through `PortablePackageImportHandle.publishCommitted()` at most every 250 ms, which applies an
+idempotent index delta, and then asks `LibraryBrowsingCoordinator.mergeCommittedImports()` to fold
+the new assets into the loaded window. The merge reuses existing cells (thumbnails, demand,
+selection, scroll position), inserts new ones in query order with a loading thumbnail state, and
+leaves unloaded pages to the normal scroll path. Cancellation or failure drains what was already
+committed, so those photos stay in the index and grid. Photos' deferred-catalog batches keep their
+single end-of-batch index publication. `MediaVolumeProviding.scanBatches` streams the removable-media
+scan in the same way; `LibraryMediaWorkflowCoordinator` merges batches into the selector in final
+display order and keeps selection and the shift-click anchor keyed by file id.
+
 ## Masking-workflow ownership
 
 `MaskingWorkflowCoordinator` owns the masking workspace: layer/component selection and transient
