@@ -360,6 +360,53 @@ final class LibraryGridTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
+    /// KRMA-841: the id lookup used on every thumbnail arrival must stay correct across reloads
+    /// and removals, because it is cached rather than recomputed.
+    func testItemIndexLookupStaysCorrectAcrossReloadAndRemoval() {
+        let collection = ImageCollection()
+        let assets = (0..<6).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("lookup-\($0).jpg"))
+        }
+        collection.loadPortableWindow(
+            assets: assets, totalCount: 6, pageIndex: 0, pageSize: 6, query: .all)
+        XCTAssertEqual(collection.itemIndex(for: assets[4].id), 4)
+
+        collection.removeItems(with: [assets[1].id])
+        XCTAssertNil(collection.itemIndex(for: assets[1].id))
+        XCTAssertEqual(collection.itemIndex(for: assets[4].id), 3)
+
+        collection.loadPortableWindow(
+            assets: Array(assets.reversed()), totalCount: 6, pageIndex: 0, pageSize: 6, query: .all)
+        XCTAssertEqual(collection.itemIndex(for: assets[4].id), 1)
+        XCTAssertEqual(collection.itemIndex(for: assets[1].id), 4)
+    }
+
+    /// KRMA-841: a large cold library admits bounded decode work, and cells that leave the
+    /// viewport drop their queued decode instead of leaving a stale queue behind.
+    func testLargeColdLibraryBoundsDecodeWorkAndReleaseCancelsQueuedDecodes() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let scheduler = ImageWorkScheduler()
+        let collection = ImageCollection(scheduler: scheduler, originalThumbnailProvider: { _, _, _, _, _, _, _ in
+            try? await Task.sleep(for: .milliseconds(50))
+            return image
+        })
+        let assets = (0..<400).map {
+            PhotoAsset(url: tempDirectory.appendingPathComponent("cold-\($0).jpg"))
+        }
+        collection.loadPortableWindow(
+            assets: assets, totalCount: 400, pageIndex: 0, pageSize: 400, query: .all)
+        collection.beginThumbnailDemand()
+        let first = Array(assets[0..<60].map(\.id))
+        collection.requestVisibleThumbnails(for: first)
+
+        XCTAssertLessThanOrEqual(scheduler.runningThumbnailCount, 4)
+        XCTAssertLessThanOrEqual(scheduler.pendingThumbnailCount, 24)
+
+        for id in first { collection.releaseThumbnail(for: id) }
+        XCTAssertEqual(scheduler.pendingThumbnailCount, 0, "released cells must not stay queued")
+        await collection.shutdown()
+    }
+
     func testPortableWindowReloadReRequestsPreviouslyVisibleThumbnails() async throws {
         let image = try Fixtures.makeCGImage(width: 64, height: 48)
         let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in image })

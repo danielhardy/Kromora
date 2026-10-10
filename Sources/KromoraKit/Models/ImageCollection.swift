@@ -343,6 +343,9 @@ final class ImageCollectionPresentationModel {
     /// Column count of the mounted Library grid, published by the view so Up/Down can step by
     /// rows. Not observed: it changes with window width and nothing renders from it.
     @ObservationIgnored var libraryGridColumns = 1
+    /// id → index lookup. Hits are verified against `items`, so a mutation never needs to
+    /// invalidate it; a miss rebuilds it once.
+    @ObservationIgnored private var itemIndexCache: [PhotoAssetID: Int] = [:]
     var onVisibleIDsPublished: (@MainActor @Sendable ([PhotoAssetID]) -> Void)?
     private var frameReadJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var pendingFrameReadIDs: Set<PhotoAssetID> = []
@@ -459,7 +462,7 @@ final class ImageCollectionPresentationModel {
         _ flag: PhotoFlag, for id: PhotoAssetID? = nil, advance shouldAdvance: Bool = false
     ) -> Bool {
         guard let itemID = id ?? selectedItem?.id,
-              let index = items.firstIndex(where: { $0.id == itemID }) else { return false }
+              let index = itemIndex(for: itemID) else { return false }
         let oldState = items[index].asset.libraryState
         guard oldState.flag != flag else {
             if shouldAdvance { advance(from: index) }
@@ -477,7 +480,7 @@ final class ImageCollectionPresentationModel {
     @discardableResult
     func setRating(_ rating: Int, for id: PhotoAssetID? = nil) -> Bool {
         guard let itemID = id ?? selectedItem?.id,
-              let index = items.firstIndex(where: { $0.id == itemID }) else { return false }
+              let index = itemIndex(for: itemID) else { return false }
         let clamped = min(max(rating, 0), 5)
         let oldState = items[index].asset.libraryState
         guard oldState.rating != clamped else { return false }
@@ -570,6 +573,19 @@ final class ImageCollectionPresentationModel {
         for item in fresh { enqueueMetadata(for: item, generation: scanGeneration) }
         enqueueThumbnails()
         return true
+    }
+
+    /// O(1) amortized replacement for `items.firstIndex(where:)`, which a thousands-item library
+    /// otherwise pays on every thumbnail arrival, request, and release.
+    func itemIndex(for id: PhotoAssetID) -> Int? {
+        if let cached = itemIndexCache[id], items.indices.contains(cached), items[cached].id == id {
+            return cached
+        }
+        var rebuilt: [PhotoAssetID: Int] = [:]
+        rebuilt.reserveCapacity(items.count)
+        for (index, item) in items.enumerated() { rebuilt[item.id] = index }
+        itemIndexCache = rebuilt
+        return rebuilt[id]
     }
 
     var isPortableWindowed: Bool { portableTotalCount != nil }
@@ -666,7 +682,7 @@ final class ImageCollectionPresentationModel {
         priority: ImageWorkScheduler.Priority = .visibleGrid,
         requestsEditedThumbnail: Bool = true
     ) {
-        guard isThumbnailDemandDriven, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        guard isThumbnailDemandDriven, let index = itemIndex(for: id) else { return }
         // Record the cell's demand even if a cached frame already painted it or its packed
         // read is still pending. A reload replaces that raster without another onAppear.
         thumbnailDemandIDs.insert(id)
@@ -679,7 +695,7 @@ final class ImageCollectionPresentationModel {
                 await self.waitForFrameReads(of: [id])
                 guard generation == self.thumbnailGeneration,
                       self.thumbnailDemandIDs.contains(id),
-                      let currentIndex = self.items.firstIndex(where: { $0.id == id }) else { return }
+                      let currentIndex = self.itemIndex(for: id) else { return }
                 self.requestOriginalThumbnail(for: id, at: currentIndex, priority: priority)
                 if requestsEditedThumbnail { self.onThumbnailDemand?(id, priority) }
             }
@@ -717,7 +733,7 @@ final class ImageCollectionPresentationModel {
         thumbnailDemandPriorities.removeValue(forKey: id)
         visibleEditedThumbnailIDs.removeAll { $0 == id }
         guard !preparedThumbnailIDs.contains(id),
-              let index = items.firstIndex(where: { $0.id == id }), items[index].thumbnail == nil else { return }
+              let index = itemIndex(for: id), items[index].thumbnail == nil else { return }
         let jobID = thumbnailJobID(for: items[index])
         scheduler.cancel(id: jobID)
         thumbnailJobIDs.remove(jobID)
@@ -781,7 +797,7 @@ final class ImageCollectionPresentationModel {
     }
 
     func applyEditedThumbnail(_ thumbnail: NSImage?, for id: PhotoAssetID, revision: String) {
-        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        guard let index = itemIndex(for: id) else { return }
         items[index].applyEditedThumbnail(thumbnail, revision: revision)
         // Reverting to the original falls back to the original raster. A cell that only ever
         // painted a stored edited frame never loaded one, and original loads are otherwise driven
@@ -870,7 +886,7 @@ final class ImageCollectionPresentationModel {
         reprioritizeThumbnails()
     }
     private func syncSelectedIndex() {
-        guard let id = selection.activeID, let index = items.firstIndex(where: { $0.id == id }) else {
+        guard let id = selection.activeID, let index = itemIndex(for: id) else {
             if items.isEmpty { selectedIndex = 0 }
             return
         }
@@ -945,7 +961,7 @@ final class ImageCollectionPresentationModel {
         _ outcome: MetadataOutcome, itemID: PhotoAssetID, generation: UInt64, requestID: UInt64
     ) {
         pendingMetadataRequestIDs.remove(requestID)
-        guard generation == scanGeneration, let index = items.firstIndex(where: { $0.id == itemID }) else {
+        guard generation == scanGeneration, let index = itemIndex(for: itemID) else {
             finishMetadataWaitersIfIdle()
             return
         }
@@ -1071,7 +1087,7 @@ final class ImageCollectionPresentationModel {
         surface: FrameLookupSurface = .gridOriginal
     ) {
         guard generation == thumbnailGeneration,
-              let item = items.first(where: { $0.id == itemID }),
+              let index = itemIndex(for: itemID), case let item = items[index],
               item.asset.source.portableIdentity == identity else { return }
         if let hit = frames.edited {
             let result = FrameClassifier.classifyWithReason(
@@ -1193,7 +1209,7 @@ final class ImageCollectionPresentationModel {
         if scheduler.contains(id) { thumbnailJobIDs.insert(id); item.asset.thumbnailState = .loading }
     }
     private func applyThumbnail(_ thumbnail: NSImage?, itemID: PhotoAssetID, generation: UInt64) {
-        guard generation == thumbnailGeneration, let item = items.first(where: { $0.id == itemID }) else { return }
+        guard generation == thumbnailGeneration, let index = itemIndex(for: itemID), case let item = items[index] else { return }
         thumbnailJobIDs.remove(thumbnailJobID(for: item))
         item.setOriginalThumbnail(thumbnail)
         item.asset.thumbnailState = thumbnail == nil ? .failed : .ready
@@ -1241,17 +1257,28 @@ final class ImageCollectionPresentationModel {
             guard self.visibleEditedDemandGeneration == demandGeneration else { return }
             self.visibleEditedDemandScheduled = false
             for id in ids {
-                guard let index = self.items.firstIndex(where: { $0.id == id }) else { continue }
+                guard let index = self.itemIndex(for: id) else { continue }
                 self.requestOriginalThumbnail(for: id, at: index, priority: self.priority(for: index))
                 self.onThumbnailDemand?(id, .background)
             }
         }
     }
     private func fillThumbnailQueue() {
-        let candidates = items.indices.filter {
+        // Runs on every thumbnail arrival; a full queue needs no scan at all.
+        guard scheduler.canQueueThumbnail else { return }
+        let indices: [Int]
+        if isThumbnailDemandDriven {
+            // Only demanded or prepared photos can qualify, so walk those instead of the library.
+            indices = thumbnailDemandIDs.union(preparedThumbnailIDs).compactMap { itemIndex(for: $0) }
+        } else {
+            indices = Array(items.indices)
+        }
+        let candidates = indices.filter {
             items[$0].thumbnail == nil && !pendingFrameReadIDs.contains(items[$0].id)
-                && (!isThumbnailDemandDriven || thumbnailDemandIDs.contains(items[$0].id) || preparedThumbnailIDs.contains(items[$0].id))
-        }.sorted { priority(for: $0).rawValue < priority(for: $1).rawValue }
+        }.sorted {
+            let (lhs, rhs) = (priority(for: $0).rawValue, priority(for: $1).rawValue)
+            return lhs != rhs ? lhs < rhs : $0 < $1
+        }
         for index in candidates {
             guard scheduler.canQueueThumbnail else { return }
             let item = items[index]

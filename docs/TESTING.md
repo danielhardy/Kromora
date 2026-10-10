@@ -80,6 +80,25 @@ The pre-package folder-backed library baseline is documented in
 optional lane with `KROMORA_LIBRARY_BASELINE_BENCHMARK=1` and emits the stable JSON report shape
 described there.
 
+## Library grid with a large cold import (KRMA-841)
+
+Static analysis of the post-import path (no Instruments profile or timing numbers have been
+recorded yet; they need a supervised release-build session, `swift run -c release`, since debug
+builds inflate Swift-side grid and observation cost):
+
+- Rejected: unbounded decode concurrency and stale queued work. `ImageWorkScheduler` already caps
+  thumbnails at 4 running / 24 queued, orders by priority, and `releaseThumbnail` cancels a queued
+  decode when a cell leaves the viewport (`testLargeColdLibraryBoundsDecodeWorkAndReleaseCancelsQueuedDecodes`).
+- Confirmed main-actor cost: every thumbnail arrival, request, and release did linear
+  `items.firstIndex(where:)` scans, and `fillThumbnailQueue` filtered and sorted the whole library
+  on each arrival. With thousands of items and several arrivals per frame that is quadratic work
+  on the main actor. `ImageCollection.itemIndex(for:)` is now a verified cache, and
+  `fillThumbnailQueue` returns immediately when the queue is full and otherwise walks only the
+  demanded and prepared ids.
+- Still open and worth measuring: the grid body reads selection at grid and row level, so a
+  selection change re-evaluates hosted rows; `applyThumbnail` re-signals edited demand for every
+  visible id on each arrival.
+
 ## Optional RAW and performance work
 
 Use local RAW fixtures in `realworldtest/` by default, or set `KROMORA_RAW_FIXTURE_DIR` to another
