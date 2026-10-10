@@ -180,6 +180,8 @@ enum KromoraWorkflowEvent: CaseIterable {
     case cellGeometryReflow
     case maskResolutionState
     case maskResolveTiming
+    case thumbnailFrameRead
+    case thumbnailOriginalLoad
 
     var name: StaticString {
         switch self {
@@ -212,6 +214,8 @@ enum KromoraWorkflowEvent: CaseIterable {
         case .cellGeometryReflow: return "CellGeometryReflow"
         case .maskResolutionState: return "MaskResolutionState"
         case .maskResolveTiming: return "MaskResolveTiming"
+        case .thumbnailFrameRead: return "ThumbnailFrameRead"
+        case .thumbnailOriginalLoad: return "ThumbnailOriginalLoad"
         }
     }
 }
@@ -302,6 +306,15 @@ enum KromoraObservability {
     /// Mask-resolution diagnostics also go to the regular log: signposts are invisible to a plain
     /// `log stream` (they need `--signpost`), and these are the events used to triage a hang.
     private static let maskLog = Logger(subsystem: "com.kromora.app", category: "mask-resolution")
+
+    private static let thumbnailLog = Logger(subsystem: "com.kromora.app", category: "thumbnail-frames")
+
+    /// Library thumbnail load diagnostics, mirrored to the regular log for the same reason as
+    /// `maskDiagnostic`: a plain `log stream` cannot see signposts.
+    static func thumbnailDiagnostic(_ event: KromoraWorkflowEvent, detail: String) {
+        thumbnailLog.notice("\(event.name.description, privacy: .public) \(detail, privacy: .public)")
+        Self.event(event, detail: detail)
+    }
 
     static func maskDiagnostic(_ event: KromoraWorkflowEvent, source: ImageSource? = nil,
                                quality: RenderQuality? = nil, detail: String) {

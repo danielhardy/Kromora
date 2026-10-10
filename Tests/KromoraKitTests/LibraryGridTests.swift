@@ -186,6 +186,58 @@ final class LibraryGridTests: TempDirectoryTestCase {
         XCTAssertEqual(resolved.item.id, expectedID)
     }
 
+    /// The package stores no pixel dimensions, so an unedited photo starts on the 4:3 placeholder
+    /// and used to reflow when its metadata arrived. The persisted original thumbnail carries the
+    /// oriented ratio it was made with, which is enough to lay the cell out correctly at once.
+    func testStoredOriginalGeometryResolvesAnUnresolvedCellWithoutOverridingKnownShapes() throws {
+        let geometry = PresentedGeometry(
+            crop: CropAdjustments(), rotation: .zero, orientedAspectRatio: 1.5
+        )
+        let item = ImageCollection.Item(
+            url: tempDirectory.appendingPathComponent("unresolved.jpg"),
+            displayName: "unresolved.jpg", imageData: nil
+        )
+        XCTAssertFalse(item.hasResolvedLibraryAspect)
+        XCTAssertEqual(item.libraryAspectRatio, 4.0 / 3.0, accuracy: 1e-9)
+
+        XCTAssertTrue(item.adoptStoredOriginalAspect(geometry))
+        XCTAssertTrue(item.hasResolvedLibraryAspect)
+        XCTAssertEqual(item.libraryAspectRatio, 1.5, accuracy: 1e-9)
+        XCTAssertFalse(
+            item.adoptStoredOriginalAspect(geometry), "a resolved cell must not be adopted twice"
+        )
+
+        // Pixel dimensions already known: the stored ratio must not replace them.
+        let known = ImageCollection.Item(asset: PhotoAsset(
+            source: PhotoAssetSource(data: Data([0x01]), id: PhotoAssetID(rawValue: "known")),
+            filename: "known.jpg", fileType: "jpg",
+            metadata: PhotoAssetMetadata(
+                dimensions: PhotoPixelDimensions(width: 800, height: 1_000)
+            ),
+            presentedAspectRatio: nil
+        ))
+        XCTAssertFalse(known.adoptStoredOriginalAspect(geometry))
+        XCTAssertEqual(known.libraryAspectRatio, 0.8, accuracy: 1e-9)
+
+        // Live document geometry wins over a persisted frame.
+        let live = ImageCollection.Item(
+            url: tempDirectory.appendingPathComponent("live.jpg"),
+            displayName: "live.jpg", imageData: nil
+        )
+        live.setPresentedCrop(CropAdjustments(), rotation: .zero)
+        XCTAssertFalse(live.adoptStoredOriginalAspect(geometry))
+
+        // A nonsensical stored ratio is ignored.
+        let bad = ImageCollection.Item(
+            url: tempDirectory.appendingPathComponent("bad.jpg"),
+            displayName: "bad.jpg", imageData: nil
+        )
+        XCTAssertFalse(bad.adoptStoredOriginalAspect(PresentedGeometry(
+            crop: CropAdjustments(), rotation: .zero, orientedAspectRatio: .nan
+        )))
+        XCTAssertFalse(bad.hasResolvedLibraryAspect)
+    }
+
     func testEXIFPortraitKeepsItsFramingBeforeAndAfterSelection() async throws {
         try Fixtures.writeJPEG(
             width: 800, height: 600, orientation: 6,

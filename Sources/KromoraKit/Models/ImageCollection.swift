@@ -266,6 +266,23 @@ final class ImageCollectionPresentationModel {
             return abs(after - before) > 1e-9
         }
 
+        /// Adopt the oriented aspect ratio a persisted *original* thumbnail was made with, for a
+        /// photo whose cell shape is still the 4:3 placeholder: the package stores no pixel
+        /// dimensions, so an unedited photo otherwise reflows when its metadata arrives. Never
+        /// overrides dimensions, a published ratio, or live document geometry.
+        @discardableResult
+        @MainActor func adoptStoredOriginalAspect(_ geometry: PresentedGeometry) -> Bool {
+            guard !hasLivePresentedGeometry, !hasResolvedLibraryAspect,
+                  Self.isUsableRatio(geometry.orientedAspectRatio) else { return false }
+            let before = libraryAspectRatio
+            asset.presentedAspectRatio = LibraryGridLayout.normalizedAspectRatio(
+                geometry.orientedAspectRatio
+            )
+            let after = libraryAspectRatio
+            recordCellGeometryReflow(from: before, to: after)
+            return abs(after - before) > 1e-9
+        }
+
         /// Install the document's crop and rotation. Returns true only when the cell shape changes,
         /// so a document that agrees with the published ratio causes no relayout.
         @discardableResult
@@ -1076,16 +1093,28 @@ final class ImageCollectionPresentationModel {
                 visibleSet.contains(id) ? priority(for: index) : .background
             pendingFrameReadIDs.insert(id)
             frameReadJobIDs.insert(jobID)
+            let clock = ContinuousClock()
+            let enqueuedAt = clock.now
+            let isVisible = visibleSet.contains(id)
             let admitted = scheduler.enqueueFrameRead(
                 id: jobID, priority: readPriority,
                 onTerminal: { [weak self] outcome in
                     self?.finishFrameRead(id, jobID: jobID, generation: generation, outcome: outcome)
                 },
                 operation: { [weak self] in
+                    let startedAt = clock.now
                     let frames = await store.readFrames(for: identity)
+                    let readAt = clock.now
                     guard !Task.isCancelled else { return }
                     await self?.applyStoredFrames(
                         frames, itemID: id, identity: identity, generation: generation
+                    )
+                    KromoraObservability.thumbnailDiagnostic(
+                        .thumbnailFrameRead,
+                        detail: "visible=\(isVisible) queueMs=\((startedAt - enqueuedAt).milliseconds) "
+                            + "readMs=\((readAt - startedAt).milliseconds) "
+                            + "applyMs=\((clock.now - readAt).milliseconds) "
+                            + "original=\(frames.original != nil) edited=\(frames.edited != nil)"
                     )
                 }
             )
@@ -1172,6 +1201,10 @@ final class ImageCollectionPresentationModel {
                     outcome: Self.ledgerOutcome(result)
                 )
             }
+            if result.classification == .exact, item.adoptStoredOriginalAspect(hit.frame.geometry) {
+                storedGeometryFallbackReflowCount += 1
+                invalidateCollectionProjection(notify: true)
+            }
             if item.originalThumbnailForPresentation == nil && result.classification == .exact {
                 PlatformThumbnailProvider.primeMemoryCache(
                     hit.image, identity: identity,
@@ -1232,9 +1265,12 @@ final class ImageCollectionPresentationModel {
         priority requested: ImageWorkScheduler.Priority? = nil
     ) {
         let id = thumbnailJobID(for: item)
+        let clock = ContinuousClock()
+        let enqueuedAt = clock.now
         scheduler.enqueue(id: id, lane: .thumbnail, priority: requested ?? priority(for: index)) { [weak self] in
             // Memory, then the package's packed frame, then a decode of the source — the last
             // only on a miss.
+            let startedAt = clock.now
             let image = await self?.originalThumbnailProvider(
                 item.url, item.url == nil ? item.imageData : nil,
                 item.dataFingerprint, item.asset.source.portableIdentity,
@@ -1242,6 +1278,11 @@ final class ImageCollectionPresentationModel {
                 requested == .adjacentFilmstrip ? .filmstrip : .gridOriginal
             )
             guard !Task.isCancelled else { return }
+            KromoraObservability.thumbnailDiagnostic(
+                .thumbnailOriginalLoad,
+                detail: "queueMs=\((startedAt - enqueuedAt).milliseconds) "
+                    + "loadMs=\((clock.now - startedAt).milliseconds) loaded=\(image != nil)"
+            )
             let thumbnail = image.map {
                 NSImage(cgImage: $0, size: NSSize(width: $0.width, height: $0.height))
             }
@@ -1362,3 +1403,10 @@ final class ImageCollectionPresentationModel {
 }
 
 typealias ImageCollection = ImageCollectionPresentationModel
+
+private extension Duration {
+    var milliseconds: Int {
+        let parts = components
+        return Int(parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000)
+    }
+}
