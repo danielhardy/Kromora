@@ -135,13 +135,12 @@ private struct MaskActivityIndicator: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+                    .accessibilityLabel("Mask analysis unavailable. \(message)")
                 Button("Retry", action: retry)
                     .buttonStyle(.borderless)
                     .font(.caption)
             }
             .help(message)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Mask analysis unavailable. \(message)")
         case .idle, .ready, .empty:
             EmptyView()
         }
