@@ -76,7 +76,8 @@ struct StatusBar: View {
 
             Spacer()
 
-            MaskActivityIndicator(state: viewModel.maskInteractionState)
+            MaskActivityIndicator(
+                state: viewModel.maskInteractionState, retry: viewModel.retryMaskAnalysis)
 
             if showsKeyHints {
                 // Hints
@@ -112,9 +113,11 @@ struct StatusBar: View {
 /// its appearance never shifts the controls the user is dragging.
 private struct MaskActivityIndicator: View {
     @ObservedObject var state: MaskInteractionState
+    let retry: () -> Void
 
     var body: some View {
-        if case .loading = state.resolutionState {
+        switch state.resolutionState {
+        case .loading:
             HStack(spacing: 6) {
                 ProgressView()
                     .controlSize(.mini)
@@ -124,6 +127,23 @@ private struct MaskActivityIndicator: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Analyzing selected mask")
+        case .unavailable(let message), .failed(let message):
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundColor(.orange)
+                Text("Mask analysis unavailable")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Button("Retry", action: retry)
+                    .buttonStyle(.borderless)
+                    .font(.caption)
+            }
+            .help(message)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Mask analysis unavailable. \(message)")
+        case .idle, .ready, .empty:
+            EmptyView()
         }
     }
 }

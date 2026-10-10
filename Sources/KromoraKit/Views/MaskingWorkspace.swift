@@ -237,16 +237,9 @@ struct MaskingWorkspace: View {
             .font(.caption)
                 .foregroundStyle(.secondary)
                 .accessibilityLabel("Selected mask is empty")
-        case .unavailable(let message):
-            statusBanner(
-                title: "Mask analysis unavailable", message: message,
-                retryTitle: "Retry mask analysis", retry: viewModel.retryMaskAnalysis)
-        case .failed(let message):
-            statusBanner(
-                title: "Mask analysis failed", message: message,
-                retryTitle: "Retry mask analysis", retry: viewModel.retryMaskAnalysis)
-        case .idle, .loading, .ready:
-            // Transient progress lives in the status bar so the panel never reflows.
+        case .idle, .loading, .ready, .unavailable, .failed:
+            // Progress and analysis failures live in the status bar so the panel never reflows
+            // under the pointer while a mask is being edited.
             EmptyView()
         }
 
