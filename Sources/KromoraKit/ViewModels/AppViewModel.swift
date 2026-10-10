@@ -1311,6 +1311,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             self.isInspectorSourceDocumentPending = false
             self.isNavigationLoading = false
             self.previewState = .failed
+            self.previewSurface.discardDepartingFrame()
             self.toolbarPhotoActionsAvailable = self.sourceImage != nil
             self.isToolbarPhotoTransitioning = false
             self.presentError(message)
@@ -1814,6 +1815,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         isLoading = false
         previewState = .failed
+        previewSurface.discardDepartingFrame()
         presentError("Could not open \(url.lastPathComponent): \(reason)")
     }
 
@@ -5231,6 +5233,7 @@ extension AppViewModel: PreviewPublicationDestination {
     func publishPreviewFailure() {
         isNavigationLoading = false
         previewState = .failed
+        previewSurface.discardDepartingFrame()
         toolbarPhotoActionsAvailable = sourceImage != nil
         isToolbarPhotoTransitioning = false
         presentPendingImportOutcome()

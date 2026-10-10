@@ -826,6 +826,13 @@ final class PreviewSurface: ObservableObject {
         holdsDepartingFrame = departingFrameIsOnScreen
     }
 
+    /// Drop the display hint when a source switch finishes without a replacement frame.
+    /// The drawable can be unmounted after failure, so carrying this hint into a later switch
+    /// would claim that a frame is still retained when the layer may already be gone.
+    func discardDepartingFrame() {
+        holdsDepartingFrame = false
+    }
+
     func clear() {
         holdsDepartingFrame = false
         finishCrossfade()

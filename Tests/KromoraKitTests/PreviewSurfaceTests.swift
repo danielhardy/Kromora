@@ -427,6 +427,18 @@ final class PreviewSurfaceTests: XCTestCase {
         XCTAssertFalse(surface.holdsDepartingFrame)
     }
 
+    func testFailedSourceSwitchDiscardsTheDepartingFrameHint() {
+        let surface = PreviewSurface()
+        XCTAssertTrue(surface.present(Self.solid(.red)))
+        surface.clearForSourceSwitch()
+        XCTAssertTrue(surface.holdsDepartingFrame)
+
+        surface.discardDepartingFrame()
+
+        XCTAssertNil(surface.image)
+        XCTAssertFalse(surface.holdsDepartingFrame)
+    }
+
     func testSourceSwitchWithNothingOnScreenHoldsNothing() {
         let surface = PreviewSurface()
         surface.clearForSourceSwitch()
