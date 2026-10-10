@@ -8,6 +8,9 @@ struct ResetIconButton: View {
     var disabled = false
     let action: () -> Void
 
+    var resolvedAccessibilityLabel: String { accessibilityLabel ?? title }
+    var resolvedAccessibilityHint: String { accessibilityHint ?? "" }
+
     init(
         _ title: String,
         accessibilityLabel: String? = nil,
@@ -33,7 +36,7 @@ struct ResetIconButton: View {
         .foregroundStyle(.secondary)
         .disabled(disabled)
         .help(title)
-        .accessibilityLabel(accessibilityLabel ?? title)
-        .accessibilityHint(accessibilityHint ?? "")
+        .accessibilityLabel(resolvedAccessibilityLabel)
+        .accessibilityHint(resolvedAccessibilityHint)
     }
 }

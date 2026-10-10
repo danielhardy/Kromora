@@ -36,11 +36,7 @@ struct CropInspectorView: View {
                     .font(.title3.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
-                ResetIconButton(
-                    "Reset crop",
-                    accessibilityHint: "Return the crop frame to the full image",
-                    action: onReset
-                )
+                Self.resetButton(action: onReset)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
@@ -76,6 +72,14 @@ struct CropInspectorView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Crop inspector")
         .onExitCommand(perform: onCancel)
+    }
+
+    static func resetButton(action: @escaping () -> Void) -> ResetIconButton {
+        ResetIconButton(
+            "Reset crop",
+            accessibilityHint: "Return the crop frame to the full image",
+            action: action
+        )
     }
 
     private var aspectSection: some View {

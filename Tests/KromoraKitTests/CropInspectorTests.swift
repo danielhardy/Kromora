@@ -1,28 +1,27 @@
 import XCTest
 
+@testable import KromoraKit
+
+@MainActor
 final class CropInspectorTests: XCTestCase {
-    func testResetButtonUsesTheSharedAccessibleIconAction() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // KromoraKitTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // package root
-        let cropInspector = try String(
-            contentsOf: packageRoot.appendingPathComponent(
-                "Sources/KromoraKit/Views/CropInspectorView.swift"
-            ),
-            encoding: .utf8
+    func testCropResetButtonUsesSharedAccessibilityAndInvokesReset() {
+        var resetCount = 0
+        let button = CropInspectorView.resetButton { resetCount += 1 }
+
+        XCTAssertEqual(button.resolvedAccessibilityLabel, "Reset crop")
+        XCTAssertEqual(
+            button.resolvedAccessibilityHint,
+            "Return the crop frame to the full image"
         )
 
-        XCTAssertTrue(cropInspector.contains("ResetIconButton("))
-        XCTAssertTrue(cropInspector.contains("\"Reset crop\""))
-        XCTAssertTrue(cropInspector.contains("accessibilityHint: \"Return the crop frame to the full image\""))
+        button.action()
+        XCTAssertEqual(resetCount, 1)
+    }
 
-        let resetButton = try String(
-            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ResetIconButton.swift"),
-            encoding: .utf8
-        )
-        XCTAssertTrue(resetButton.contains(".buttonStyle(.plain)"))
-        XCTAssertTrue(resetButton.contains(".accessibilityLabel(accessibilityLabel ?? title)"))
-        XCTAssertTrue(resetButton.contains(".accessibilityHint(accessibilityHint ?? \"\")"))
+    func testSharedResetButtonDefaultsAccessibilityToItsTitle() {
+        let button = ResetIconButton("Reset test") {}
+
+        XCTAssertEqual(button.resolvedAccessibilityLabel, "Reset test")
+        XCTAssertEqual(button.resolvedAccessibilityHint, "")
     }
 }
