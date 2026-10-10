@@ -2178,7 +2178,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         presentationSelectionUptime: UInt64? = nil
     ) {
         guard !isShuttingDown else { return }
+        let loadClock = ContinuousClock()
+        var loadMark = loadClock.now
+        func lap(_ name: String) -> String {
+            let now = loadClock.now
+            defer { loadMark = now }
+            let parts = (now - loadMark).components
+            return "\(name)=\(Int(parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000))"
+        }
+        var laps: [String] = []
         cancelIdlePreviewBuild(resetCursor: true)
+        laps.append(lap("cancelIdlePreviewBuildMs"))
         let importPlan = SourceImportPlan(
             name: name, url: url, data: data, assetID: assetID,
             portableIdentity: portableIdentity, fileChangeSignature: fileChangeSignature,
@@ -2195,7 +2205,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         // Make the source switch observable and invalidate old pixels immediately. Package state,
         // editor cleanup, and candidate materialization continue after the selection event yields.
         activeAssetID = importPlan.assetID
+        laps.append(lap("planMs"))
         updatePinnedFrameAssets(visible: Array(collection.visibleEditedThumbnailAssetIDs))
+        laps.append(lap("pinnedFramesMs"))
         isToolbarPhotoTransitioning = true
         isLoading = true
         isNavigationLoading = true
@@ -2203,10 +2215,16 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         imageSource = nil
         sourceImage = nil
         statusMessage = "Loading \(importPlan.name)..."
+        laps.append(lap("publishedStateMs"))
         previewPresentation.resetForSource()
+        laps.append(lap("presentationResetMs"))
         previewSurface.clearForSourceSwitch()
+        laps.append(lap("clearSurfaceMs"))
         originalPreviewSurface.clear()
-        KromoraObservability.photoSwitchPhase("loadSyncPrefix", since: presentationSelectionUptime)
+        laps.append(lap("clearOriginalSurfaceMs"))
+        KromoraObservability.photoSwitchPhase(
+            "loadSyncPrefix", since: presentationSelectionUptime, detail: laps.joined(separator: " ")
+        )
 
         Task { @MainActor [weak self] in
             await Task.yield()

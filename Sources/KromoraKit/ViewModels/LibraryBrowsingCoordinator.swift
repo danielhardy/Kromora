@@ -351,10 +351,28 @@ final class LibraryBrowsingCoordinator {
             library.togglePortableSelection(portableID)
             collection.select(at: index, modifiers: modifiers)
         } else {
+            let clock = ContinuousClock()
+            let start = clock.now
             library.select(portableID, additive: false)
+            let afterLibrary = clock.now
             collection.select(at: index, modifiers: modifiers)
+            let afterCollection = clock.now
+            syncPortableSelection()
+            let afterSync = clock.now
+            KromoraObservability.photoSwitchPhase(
+                "selectPortableItem.steps", since: nil,
+                detail: "librarySelectMs=\(Self.milliseconds(afterLibrary - start)) "
+                    + "collectionSelectMs=\(Self.milliseconds(afterCollection - afterLibrary)) "
+                    + "syncSelectionMs=\(Self.milliseconds(afterSync - afterCollection))"
+            )
+            return
         }
         syncPortableSelection()
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Int {
+        let parts = duration.components
+        return Int(parts.seconds * 1000 + parts.attoseconds / 1_000_000_000_000_000)
     }
 
     func selectNextPortableInGrid() {
