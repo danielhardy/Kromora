@@ -38,6 +38,7 @@ private struct KromoraRootView: View {
 
     var body: some View {
         ContentView(viewModel: viewModel)
+            .background(WindowFrameAutosave(name: "KromoraMainWindow"))
     }
 }
 
