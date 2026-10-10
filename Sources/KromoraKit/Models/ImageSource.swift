@@ -217,6 +217,21 @@ struct ImageSource: Sendable, Equatable {
                existingFileChangeSignature.isSameFileSnapshot(as: currentFileChangeSignature) {
                 fingerprint = existing.sourceFingerprint.with(geometry: geometry)
             } else {
+                // The expensive path: it reads and hashes the whole file. It runs on whatever
+                // thread builds the source, which during a photo switch is the main actor, so say
+                // so in the log instead of leaving it to be inferred from a stall.
+                let hashStart = DispatchTime.now().uptimeNanoseconds
+                defer {
+                    let ms = Double(DispatchTime.now().uptimeNanoseconds &- hashStart) / 1_000_000
+                    KromoraObservability.photoSwitchPhase(
+                        "wholeFileRehash", since: nil,
+                        detail: String(
+                            format: "hashMs=%.1f hadStoredSignature=%@ mainThread=%@", ms,
+                            existingFileChangeSignature == nil ? "false" : "true",
+                            Thread.isMainThread ? "true" : "false"
+                        )
+                    )
+                }
                 fingerprint = (try? PortablePhotoSourceFingerprint.file(
                     at: url,
                     sourceRevision: existing?.sourceFingerprint.sourceRevision ?? 0,
