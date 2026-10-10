@@ -166,6 +166,13 @@ final class PreviewAdmissionCoordinator {
     private var comparisonPreviewRetriedRevision: UInt64?
     private var comparisonPreviewRetryTask: Task<Void, Never>?
     var previewBackingSize = CGSize(width: 1600, height: 1200)
+    private var viewportBackingSize: CGSize?
+    /// Fit needs a complete frame sized for the largest canvas, so crop chrome cannot change
+    /// its detail level. Zoom/fill requests need the actual visible viewport for correct ROI.
+    var planningViewportSize: CGSize {
+        destination?.admissionCanvasNavigation.mode == .fit
+            ? previewBackingSize : viewportBackingSize ?? previewBackingSize
+    }
     private static let intensityDebounceMs = 60
     private var previewDebounceTask: Task<Void, Never>?
     private var previewDebounceGeneration: UInt64 = 0
@@ -797,7 +804,7 @@ final class PreviewAdmissionCoordinator {
         destination.admissionPresentation.advanceDisplayRevision()
         let (requested, look) = displayRequest
         let plan = destination.admissionPresentation.plan(
-            for: requested, nativeExtent: source.nativeExtent, viewportSize: previewBackingSize,
+            for: requested, nativeExtent: source.nativeExtent, viewportSize: planningViewportSize,
             surface: .mainPreview, navigation: destination.admissionCanvasNavigation
         )
         previewScheduledSourceRevision = destination.admissionSourceRevision
@@ -922,7 +929,7 @@ final class PreviewAdmissionCoordinator {
         cancelHistogram(clear: false, pump: false)
         let (requested, lut) = displayRequest
         let plan = destination.admissionPresentation.plan(
-            for: requested, nativeExtent: source.nativeExtent, viewportSize: previewBackingSize,
+            for: requested, nativeExtent: source.nativeExtent, viewportSize: planningViewportSize,
             surface: .mainPreview, navigation: destination.admissionCanvasNavigation
         )
         let request = RenderRequest(
@@ -942,6 +949,12 @@ final class PreviewAdmissionCoordinator {
             sourceRevision: destination.admissionSourceRevision,
             displayRevision: destination.admissionDisplayRevision
         )
+    }
+
+    /// Presentation geometry can change at animation frequency without admitting engine work.
+    func updateViewportBackingSize(_ size: CGSize) {
+        guard size.width.isFinite, size.height.isFinite, size.width >= 1, size.height >= 1 else { return }
+        viewportBackingSize = size
     }
 
     func updatePreviewBackingSize(_ size: CGSize) {

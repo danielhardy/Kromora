@@ -4097,6 +4097,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     private func scheduleCorrectivePreview() { previewAdmissionCoordinator.scheduleCorrectivePreview() }
     private func scheduleInteractivePreview() { previewAdmissionCoordinator.scheduleInteractivePreview() }
     func updateCanvasBackingSize(_ size: CGSize) -> CanvasNavigation {
+        previewAdmissionCoordinator.updateViewportBackingSize(size)
         canvasWorkflow.updateCanvasBackingSize(size)
         return canvasState.navigation
     }
@@ -5372,7 +5373,7 @@ extension AppViewModel: PreviewAdmissionDestination {
     var admissionSourceSessionIsBusy: Bool { sourceSession.isBusy }
     var admissionPreviewDebouncing: Bool { previewAdmissionCoordinator.isPreviewDebouncing }
     var admissionPreviewInteractionActive: Bool { isPreviewInteractionActive }
-    var admissionPreviewBackingSize: CGSize { previewAdmissionCoordinator.previewBackingSize }
+    var admissionPreviewBackingSize: CGSize { previewAdmissionCoordinator.planningViewportSize }
     var admissionDocument: EditDocument { document }
     var admissionComparisonBaselineDocument: EditDocument { comparisonBaselineDocument }
     var admissionComparisonRevision: UInt64 { comparisonRevision }

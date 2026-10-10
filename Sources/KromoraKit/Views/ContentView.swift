@@ -239,32 +239,33 @@ public struct ContentView: View {
                     }
 
                     VStack(spacing: 0) {
-                        PreviewView(viewModel: viewModel)
-
-                        if collection.isActive && !canvasState.isCropToolActive {
-                            VStack(spacing: 0) {
-                                CullingBarView(
-                                    viewModel: viewModel,
-                                    collection: collection,
-                                    isCompact: true,
-                                    surface: KromoraTheme.canvasBackground
-                                )
-                                FilmstripView(
-                                    collection: collection,
-                                    settings: viewModel.settings
-                                ) { index, modifiers in
-                                    viewModel.selectCollectionImage(at: index, modifiers: modifiers)
-                                }
-                                .frame(
-                                    height: FilmstripLayout.stripHeight(
-                                        showPhotoNames: viewModel.settings.showPhotoNames
+                        EditorCanvasLayout(
+                            isChromeHidden: canvasState.isCropToolActive,
+                            reduceMotion: accessibilityReduceMotion
+                        ) { surfaceSize in
+                            PreviewView(viewModel: viewModel, surfaceHeight: surfaceSize.height)
+                        } chrome: {
+                            if collection.isActive {
+                                VStack(spacing: 0) {
+                                    CullingBarView(
+                                        viewModel: viewModel,
+                                        collection: collection,
+                                        isCompact: true,
+                                        surface: KromoraTheme.canvasBackground
                                     )
-                                )
+                                    FilmstripView(
+                                        collection: collection,
+                                        settings: viewModel.settings
+                                    ) { index, modifiers in
+                                        viewModel.selectCollectionImage(at: index, modifiers: modifiers)
+                                    }
+                                    .frame(
+                                        height: FilmstripLayout.stripHeight(
+                                            showPhotoNames: viewModel.settings.showPhotoNames
+                                        )
+                                    )
+                                }
                             }
-                            .transition(bottomChromeTransition)
-                            // Keep the strip above the canvas while it slides away or back, so the
-                            // photo area's resize happens behind it rather than in front of it.
-                            .zIndex(1)
                         }
 
                         StatusBar(
@@ -318,12 +319,6 @@ public struct ContentView: View {
 
     private var chromeAnimation: Animation? {
         accessibilityReduceMotion ? nil : .easeInOut(duration: 0.3)
-    }
-
-    private var bottomChromeTransition: AnyTransition {
-        accessibilityReduceMotion
-            ? .opacity
-            : .move(edge: .bottom).combined(with: .opacity)
     }
 
     private var sourceBrowserTransition: AnyTransition {

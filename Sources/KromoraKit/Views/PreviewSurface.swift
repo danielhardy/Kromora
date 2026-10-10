@@ -1112,6 +1112,8 @@ final class PreviewSurface: ObservableObject {
 struct PreviewSurfaceView: NSViewRepresentable {
     @ObservedObject var surface: PreviewSurface
     var navigation: CanvasNavigation = CanvasNavigation()
+    /// Point-space visible area inside the stable, top-aligned drawable.
+    var viewportSize: CGSize?
     var onScrollZoom: ((CGFloat, CGPoint, CGSize) -> Void)?
     var onDoubleClick: ((CGPoint, CGSize) -> Void)?
     var onCanvasInteractionBegan: (() -> Void)?
@@ -1159,6 +1161,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         context.coordinator.viewSpaceRotationAngle = viewSpaceRotationAngle
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
         context.coordinator.onCanvasGeometryChange = onCanvasGeometryChange
+        view.viewportSize = viewportSize
         view.onScrollZoom = onScrollZoom
         view.onDoubleClick = onDoubleClick
         view.onCanvasInteractionBegan = onCanvasInteractionBegan
@@ -1193,6 +1196,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         context.coordinator.onDrawableSizeChange = onDrawableSizeChange
         context.coordinator.onCanvasGeometryChange = onCanvasGeometryChange
         if let view = view as? PreviewMTKView {
+            view.viewportSize = viewportSize
             view.onScrollZoom = onScrollZoom
             view.onDoubleClick = onDoubleClick
             view.onCanvasInteractionBegan = onCanvasInteractionBegan
@@ -1231,6 +1235,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
         private var lastDrawnViewSpaceRotationAngle: Double?
         private var lastDrawnTextureGeneration: UInt64?
         private var lastDrawableSize: (width: Int, height: Int)?
+        private var lastDrawnViewportSize: CGSize?
         /// A drawable can be skipped after its command buffer has been submitted. Remember which
         /// draw needs replaying so the completion handler cannot mark the skipped revision as the
         /// settled frame and suppress the retry.
@@ -1438,7 +1443,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
             let drawableSize = (drawable.texture.width, drawable.texture.height)
             let backingSize = CGSize(width: drawableSize.0, height: drawableSize.1)
-            if let updatedNavigation = onCanvasGeometryChange?(backingSize) {
+            let viewportBackingSize = Self.viewportBackingSize(in: view, drawableSize: backingSize)
+            if let updatedNavigation = onCanvasGeometryChange?(viewportBackingSize) {
                 navigation = updatedNavigation
             }
             onDrawableSizeChange?(backingSize)
@@ -1462,15 +1468,15 @@ struct PreviewSurfaceView: NSViewRepresentable {
             guard
                 surface.revision != lastDrawnRevision || !sameDrawableSize
                     || drawNavigation != lastDrawnNavigation || !sameTextureGeneration
-                    || !sameViewSpaceRotation
+                    || !sameViewSpaceRotation || viewportBackingSize != lastDrawnViewportSize
             else {
                 return
             }
 
             let destination = CGRect(
                 x: 0, y: 0,
-                width: CGFloat(drawable.texture.width),
-                height: CGFloat(drawable.texture.height)
+                width: viewportBackingSize.width,
+                height: viewportBackingSize.height
             )
             guard destination.width > 0, destination.height > 0,
                 frame.image.extent.width > 0, frame.image.extent.height > 0,
@@ -1504,6 +1510,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     commandBuffer.makeRenderCommandEncoder(descriptor: $0)
                 })
             {
+                Self.setViewport(destination.size, encoder: encoder)
                 encode(
                     metalFrames, destination: destination, rotation: drawViewSpaceRotationAngle,
                     encoder: encoder)
@@ -1522,9 +1529,16 @@ struct PreviewSurfaceView: NSViewRepresentable {
             ) {
                 // Compatibility seam for a host without a usable Metal texture/pipeline. The
                 // production path above never evaluates this graph on presentation-only redraws.
+                let fullDestination = CGRect(origin: .zero, size: backingSize)
+                let topAligned = output.transformed(by: CGAffineTransform(
+                    translationX: 0, y: backingSize.height - destination.height))
+                let background = CIImage(color: CIColor(
+                    red: CGFloat(clearColor.red), green: CGFloat(clearColor.green),
+                    blue: CGFloat(clearColor.blue), alpha: 1)).cropped(to: fullDestination)
                 context.render(
-                    output, to: drawable.texture, commandBuffer: commandBuffer,
-                    bounds: destination, colorSpace: frame.space.cgColorSpace)
+                    topAligned.composited(over: background), to: drawable.texture,
+                    commandBuffer: commandBuffer, bounds: fullDestination,
+                    colorSpace: frame.space.cgColorSpace)
                 RenderDiagnostics.notePresentationCoreImageEvaluation()
             } else {
                 isDrawing = false
@@ -1569,7 +1583,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
                     }
                     self?.drawingFinished(
                         drawRevision: drawRevision, navigation: drawNavigation,
-                        drawableSize: drawableSize, textureGeneration: drawTextureGeneration,
+                        drawableSize: drawableSize, viewportSize: viewportBackingSize,
+                        textureGeneration: drawTextureGeneration,
                         succeeded: succeeded
                     )
                 }
@@ -1751,7 +1766,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
 
         private func drawingFinished(
             drawRevision: UInt64, navigation: CanvasNavigation,
-            drawableSize: (width: Int, height: Int), textureGeneration: UInt64,
+            drawableSize: (width: Int, height: Int), viewportSize: CGSize,
+            textureGeneration: UInt64,
             succeeded: Bool
         ) {
             let retry = skippedDrawNeedsRetry
@@ -1776,6 +1792,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
                 lastDrawnViewSpaceRotationAngle = viewSpaceRotationAngle
                 lastDrawnTextureGeneration = textureGeneration
                 lastDrawableSize = drawableSize
+                lastDrawnViewportSize = viewportSize
             } else {
                 lastDrawnRevision = nil
                 lastDrawnNavigation = nil
@@ -1857,11 +1874,29 @@ struct PreviewSurfaceView: NSViewRepresentable {
             lastDrawableSize = nil
             let backingSize = CGSize(
                 width: size.width.rounded(.down), height: size.height.rounded(.down))
-            if let updatedNavigation = onCanvasGeometryChange?(backingSize) {
+            if let updatedNavigation = onCanvasGeometryChange?(
+                Self.viewportBackingSize(in: view, drawableSize: backingSize)
+            ) {
                 navigation = updatedNavigation
             }
             onDrawableSizeChange?(backingSize)
             view.setNeedsDisplay(view.bounds)
+        }
+
+        private static func viewportBackingSize(in view: MTKView, drawableSize: CGSize) -> CGSize {
+            CanvasViewportGeometry(
+                surfaceSize: view.bounds.size,
+                viewportSize: (view as? PreviewMTKView)?.viewportSize
+            ).backingSize(drawableSize: drawableSize)
+        }
+
+        private static func setViewport(_ size: CGSize, encoder: MTLRenderCommandEncoder) {
+            encoder.setViewport(MTLViewport(
+                originX: 0, originY: 0, width: size.width, height: size.height,
+                znear: 0, zfar: 1))
+            encoder.setScissorRect(MTLScissorRect(
+                x: 0, y: 0, width: max(1, Int(size.width.rounded(.up))),
+                height: max(1, Int(size.height.rounded(.up)))))
         }
 
         /// Render one retained presentation texture into an offscreen target using the same
@@ -1870,7 +1905,8 @@ struct PreviewSurfaceView: NSViewRepresentable {
         func renderRetainedTexture(
             surface: PreviewSurface, navigation: CanvasNavigation, destinationSize: CGSize,
             viewSpaceRotationAngle: Double = 0,
-            appearance: NSAppearance? = nil
+            appearance: NSAppearance? = nil,
+            viewportSize: CGSize? = nil
         ) -> MTLTexture? {
             guard destinationSize.width > 0, destinationSize.height > 0,
                 destinationSize.width.isFinite, destinationSize.height.isFinite,
@@ -1888,7 +1924,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
             )
             descriptor.usage = [.shaderRead, .renderTarget]
             descriptor.storageMode = .shared
-            let destination = CGRect(x: 0, y: 0, width: width, height: height)
+            let viewport = CanvasViewportGeometry(
+                surfaceSize: CGSize(width: width, height: height), viewportSize: viewportSize
+            ).viewportSize
+            let destination = CGRect(origin: .zero, size: viewport)
             guard let target = device.makeTexture(descriptor: descriptor),
                 let commandBuffer = commandQueue.makeCommandBuffer()
             else { return nil }
@@ -1901,6 +1940,7 @@ struct PreviewSurfaceView: NSViewRepresentable {
             guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: pass) else {
                 return nil
             }
+            Self.setViewport(viewport, encoder: encoder)
             encode(
                 metalFrames, destination: destination, rotation: viewSpaceRotationAngle,
                 encoder: encoder)
@@ -1920,6 +1960,10 @@ struct PreviewSurfaceView: NSViewRepresentable {
 /// covers the case where SwiftUI's update arrived before the view had a drawable.
 // Internal so the AppKit mouse-down seam can be exercised with a real NSEvent in tests.
 final class PreviewMTKView: MTKView {
+    var viewportSize: CGSize?
+    var effectiveViewportSize: CGSize {
+        CanvasViewportGeometry(surfaceSize: bounds.size, viewportSize: viewportSize).viewportSize
+    }
     var onScrollZoom: ((CGFloat, CGPoint, CGSize) -> Void)?
     var onDoubleClick: ((CGPoint, CGSize) -> Void)?
     var onCanvasInteractionBegan: (() -> Void)?
@@ -1945,17 +1989,21 @@ final class PreviewMTKView: MTKView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        ignoresHits ? nil : super.hitTest(point)
+        guard !ignoresHits else { return nil }
+        var local = convert(point, from: superview)
+        if !isFlipped { local.y = bounds.height - local.y }
+        guard CGRect(origin: .zero, size: effectiveViewportSize).contains(local) else { return nil }
+        return super.hitTest(point)
     }
 
     override func mouseDown(with event: NSEvent) {
         if isWhiteBalanceSampling {
-            onWhiteBalanceSamplePoint?(canvasPoint(for: event), bounds.size, true)
+            onWhiteBalanceSamplePoint?(canvasPoint(for: event), effectiveViewportSize, true)
             return
         }
         if event.clickCount == 2 {
             cancelPanWithoutEndingInteraction()
-            onDoubleClick?(canvasPoint(for: event), bounds.size)
+            onDoubleClick?(canvasPoint(for: event), effectiveViewportSize)
             return
         }
         let point = canvasPoint(for: event)
@@ -1966,7 +2014,7 @@ final class PreviewMTKView: MTKView {
 
     override func mouseDragged(with event: NSEvent) {
         if isWhiteBalanceSampling {
-            onWhiteBalanceSamplePoint?(canvasPoint(for: event), bounds.size, false)
+            onWhiteBalanceSamplePoint?(canvasPoint(for: event), effectiveViewportSize, false)
             return
         }
         let point = canvasPoint(for: event)
@@ -2008,7 +2056,7 @@ final class PreviewMTKView: MTKView {
             onCanvasInteractionBegan?()
         }
         if factor.isFinite, factor > 0, event.phase != .ended, event.phase != .cancelled {
-            onMagnify?(factor, canvasPoint(for: event), bounds.size)
+            onMagnify?(factor, canvasPoint(for: event), effectiveViewportSize)
         }
         if event.phase == .ended || event.phase == .cancelled {
             guard isMagnifying else { return }
@@ -2020,7 +2068,7 @@ final class PreviewMTKView: MTKView {
     override func scrollWheel(with event: NSEvent) {
         let delta = event.scrollingDeltaY
         if delta.isFinite, abs(delta) > 0.001 {
-            onScrollZoom?(pow(1.01, delta), canvasPoint(for: event), bounds.size)
+            onScrollZoom?(pow(1.01, delta), canvasPoint(for: event), effectiveViewportSize)
         } else {
             super.scrollWheel(with: event)
         }
@@ -2061,12 +2109,12 @@ final class PreviewMTKView: MTKView {
 
     override func mouseMoved(with event: NSEvent) {
         let point = canvasPoint(for: event)
-        if isWhiteBalanceSampling { onWhiteBalanceSamplePoint?(point, bounds.size, false) }
+        if isWhiteBalanceSampling { onWhiteBalanceSamplePoint?(point, effectiveViewportSize, false) }
     }
 
     override func mouseExited(with event: NSEvent) {
         let point = canvasPoint(for: event)
-        if isWhiteBalanceSampling { onWhiteBalanceSamplePoint?(point, bounds.size, false) }
+        if isWhiteBalanceSampling { onWhiteBalanceSamplePoint?(point, effectiveViewportSize, false) }
     }
 
     private func canvasPoint(for event: NSEvent) -> CGPoint {
@@ -2078,7 +2126,7 @@ final class PreviewMTKView: MTKView {
     }
 
     private func publishPan(from last: CGPoint, to point: CGPoint) {
-        let viewport = bounds.size
+        let viewport = effectiveViewportSize
         guard viewport.width > 0, viewport.height > 0 else { return }
         onPan?(
             CGSize(width: point.x - last.x, height: point.y - last.y),

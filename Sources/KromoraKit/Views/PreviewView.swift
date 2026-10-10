@@ -11,13 +11,16 @@ struct PreviewView: View {
     // until an unrelated AppViewModel change causes this view to rebuild.
     @ObservedObject private var previewSurface: PreviewSurface
     @ObservedObject private var originalPreviewSurface: PreviewSurface
+    /// Full drawable height, including the area temporarily covered by the bottom chrome.
+    private let surfaceHeight: CGFloat?
     @State private var isDropTargeted = false
     @State private var isCaptureOverlayVisible = false
     @ObservedObject private var maskingState: MaskInteractionState
     @ObservedObject private var retouchState: RetouchInteractionState
     @ObservedObject private var settings: KromoraSettings
 
-    init(viewModel: AppViewModel) {
+    init(viewModel: AppViewModel, surfaceHeight: CGFloat? = nil) {
+        self.surfaceHeight = surfaceHeight
         _viewModel = ObservedObject(wrappedValue: viewModel)
         _canvasState = Bindable(wrappedValue: viewModel.canvasState)
         _previewSurface = ObservedObject(wrappedValue: viewModel.previewSurface)
@@ -52,9 +55,7 @@ struct PreviewView: View {
 
             Group {
                 if showsCanvas {
-                    if canvasState.isCropToolActive {
-                        singleView
-                    } else if viewModel.isSideBySideVisible {
+                    if viewModel.isSideBySideVisible && !canvasState.isCropToolActive {
                         sideBySideView
                     } else {
                         singleView
@@ -340,6 +341,7 @@ struct PreviewView: View {
             let preview = PreviewSurfaceView(
                 surface: surface,
                 navigation: canvasState.navigation,
+                viewportSize: geometry.size,
                 onScrollZoom: { factor, point, viewportSize in
                     viewModel.zoomCanvas(by: factor, at: point, viewportSize: viewportSize)
                 },
@@ -368,14 +370,15 @@ struct PreviewView: View {
                 ignoresHits: canvasState.isCropToolActive,
                 reduceMotion: accessibilityReduceMotion
             )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .frame(
+                width: geometry.size.width,
+                height: surfaceHeight.map { max(1, $0 - 16) } ?? geometry.size.height
+            )
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+            .clipped()
 
             ZStack {
-                if canvasState.isCropToolActive {
-                    preview.allowsHitTesting(false)
-                } else {
-                    preview
-                }
+                preview.allowsHitTesting(!canvasState.isCropToolActive)
 
                 if showsMaskOverlay, viewModel.isMaskingWorkspaceActive,
                     (maskingState.showOverlay || maskingState.overlayPreviewTarget != nil),

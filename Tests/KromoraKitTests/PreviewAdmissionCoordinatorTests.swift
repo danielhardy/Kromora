@@ -5,6 +5,40 @@ import XCTest
 
 @MainActor
 final class PreviewAdmissionCoordinatorTests: TempDirectoryTestCase {
+    func testViewportAnimationDoesNotAdmitRendersAndZoomPlansTheVisibleROI() async throws {
+        let engine = FakeRenderEngine()
+        let destination = makeDestination(engine: engine)
+        let coordinator = makeCoordinator(destination: destination, engine: engine)
+        let full = CGSize(width: 900, height: 700)
+        coordinator.previewBackingSize = full
+        for height in stride(from: CGFloat(570), through: 700, by: 5) {
+            coordinator.updateViewportBackingSize(CGSize(width: 900, height: height))
+            coordinator.updatePreviewBackingSize(full)
+            XCTAssertEqual(coordinator.planningViewportSize, full,
+                           "fit keeps the largest canvas detail budget through the animation")
+        }
+        try await Task.sleep(for: .milliseconds(80))
+        let renders = await engine.renderRequests
+        XCTAssertTrue(renders.isEmpty)
+
+        let visible = CGSize(width: 900, height: 570)
+        coordinator.updateViewportBackingSize(visible)
+        destination.admissionCanvasNavigation.setZoom(8)
+        XCTAssertEqual(coordinator.planningViewportSize, visible)
+        var planner = ResolutionPlanner()
+        let expected = planner.plan(
+            nativeExtent: destination.source.nativeExtent, viewportSize: visible,
+            navigation: destination.admissionCanvasNavigation)
+        coordinator.scheduleInteractivePreview()
+        try await waitUntil("visible-viewport ROI") { await engine.renderRequests.count == 1 }
+        let requests = await engine.renderRequests
+        let request = try XCTUnwrap(requests.first)
+        XCTAssertEqual(request.presentationROI, expected.visiblePresentationRect)
+        XCTAssertEqual(request.sourceROI, expected.previewSourceROI(nativeExtent: destination.source.nativeExtent))
+        coordinator.shutdown()
+        await destination.scheduler.cancelAllAndWait()
+    }
+
     func testPresentedTextureSamplePublishesWithoutAnEngineHistogram() async throws {
         let engine = FakeRenderEngine()
         let destination = makeDestination(engine: engine)

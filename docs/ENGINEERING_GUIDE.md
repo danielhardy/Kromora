@@ -69,6 +69,13 @@ ROI scaling is capped at 36 MP across the full decoded source per 16.7 ms frame 
 shorter frame budgets scale both limits proportionally. The decoded source is cached across a drag,
 so the larger decode is paid once per gesture unless the control changes RAW development.
 
+Crop chrome animates a top-aligned visible viewport inside a stable, full-height Metal drawable.
+`EditorCanvasViewport` interpolates layout for the photo and its overlays; `CanvasViewportGeometry`
+converts that visible area to drawable pixels. Pointer navigation and zoom/fill ROI planning use the
+visible viewport. Fit retains the full canvas resolution budget, and viewport animation never
+admits preview renders. Keep the single-image representable mounted across crop entry and exit;
+animating its AppKit bounds or replacing it with a conditional branch can snap or stretch the photo.
+
 White balance stays in the same `EditDocument`: RAW presets and samples write decoder temperature
 and tint overrides before RAW rendering; standard-image edits write the existing temperature/tint
 adjustment node. The Color inspector's eyedropper samples the currently rendered preview, averages
