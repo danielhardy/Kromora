@@ -49,6 +49,7 @@ struct EffectsInspectorView: View {
     }
 
     private var sharpeningSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
         InspectorDisclosure(
             "Sharpening",
             isExpanded: $sharpeningExpanded,
@@ -56,14 +57,17 @@ struct EffectsInspectorView: View {
             trailingActionEnabled: viewModel.hasSharpeningAdjustments,
             trailingAction: viewModel.resetAllSharpening,
             trailingAccessory: AnyView(advancedToggle(
-                "Sharpening", isExpanded: $sharpeningAdvancedExpanded,
+                "Sharpening", isExpanded: $sharpeningAdvancedExpanded, sectionExpanded: $sharpeningExpanded,
                 isModified: sharpeningHasAdvancedAdjustments
             ))
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 detailRow(.sharpeningAmount)
-                if sharpeningAdvancedExpanded {
-                    InspectorAdvancedGroup(title: "Sharpening") {
+                            }
+            .padding(.top, 10)
+        }
+        if sharpeningExpanded && sharpeningAdvancedExpanded {
+            InspectorAdvancedBand(title: "Sharpening") {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach([DetailControl.sharpeningRadius, .sharpeningDetail, .sharpeningMasking], id: \.self) { control in
                                 detailRow(control)
@@ -71,10 +75,8 @@ struct EffectsInspectorView: View {
                             Text("Masking protects smooth areas; higher values restrict sharpening to stronger edges.")
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
-                    }
-                }
             }
-            .padding(.top, 10)
+        }
         }
         .onChange(of: viewModel.document.effects.detail, initial: true) { _, _ in
             expandSharpeningAdvancedIfNeeded()
@@ -137,6 +139,7 @@ struct EffectsInspectorView: View {
     }
 
     private var vignetteSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
         InspectorDisclosure(
             "Vignette",
             isExpanded: $vignetteExpanded,
@@ -144,23 +147,24 @@ struct EffectsInspectorView: View {
             trailingActionEnabled: viewModel.hasVignetteAdjustments,
             trailingAction: viewModel.resetAllVignette,
             trailingAccessory: AnyView(advancedToggle(
-                "Vignette", isExpanded: $vignetteAdvancedExpanded,
+                "Vignette", isExpanded: $vignetteAdvancedExpanded, sectionExpanded: $vignetteExpanded,
                 isModified: vignetteHasAdvancedAdjustments
             ))
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 vignetteRow(.amount)
-                if vignetteAdvancedExpanded {
-                    InspectorAdvancedGroup(title: "Vignette") {
+                            }
+            .padding(.top, 10)
+        }
+        if vignetteExpanded && vignetteAdvancedExpanded {
+            InspectorAdvancedBand(title: "Vignette") {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach([VignetteControl.midpoint, .roundness, .feather, .highlights], id: \.self) { control in
                                 vignetteRow(control)
                             }
                         }
-                    }
-                }
             }
-            .padding(.top, 10)
+        }
         }
         .onChange(of: viewModel.document.effects.vignette, initial: true) { _, _ in
             expandVignetteAdvancedIfNeeded()
@@ -186,6 +190,7 @@ struct EffectsInspectorView: View {
     }
 
     private var grainSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
         InspectorDisclosure(
             "Grain",
             isExpanded: $grainExpanded,
@@ -193,23 +198,24 @@ struct EffectsInspectorView: View {
             trailingActionEnabled: viewModel.hasGrainAdjustments,
             trailingAction: viewModel.resetAllGrain,
             trailingAccessory: AnyView(advancedToggle(
-                "Grain", isExpanded: $grainAdvancedExpanded,
+                "Grain", isExpanded: $grainAdvancedExpanded, sectionExpanded: $grainExpanded,
                 isModified: grainHasAdvancedAdjustments
             ))
         ) {
             VStack(alignment: .leading, spacing: 12) {
                 grainRow(.amount)
-                if grainAdvancedExpanded {
-                    InspectorAdvancedGroup(title: "Grain") {
+                            }
+            .padding(.top, 10)
+        }
+        if grainExpanded && grainAdvancedExpanded {
+            InspectorAdvancedBand(title: "Grain") {
                         VStack(alignment: .leading, spacing: 12) {
                             ForEach([GrainControl.size, .roughness], id: \.self) { control in
                                 grainRow(control)
                             }
                         }
-                    }
-                }
             }
-            .padding(.top, 10)
+        }
         }
         .onChange(of: viewModel.document.effects.grain, initial: true) { _, _ in
             expandGrainAdvancedIfNeeded()
@@ -245,31 +251,40 @@ struct EffectsInspectorView: View {
             .contains { $0.value(in: viewModel.document.effects.grain) != $0.neutral }
     }
 
+    /// An icon beside the section's reset icon. Opening it also opens its section, so the band
+    /// never hides behind a collapsed header. A dot marks advanced values that differ from
+    /// neutral while the band is closed.
     private func advancedToggle(
         _ section: String,
         isExpanded: Binding<Bool>,
+        sectionExpanded: Binding<Bool>,
         isModified: Bool
     ) -> some View {
         Button {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                isExpanded.wrappedValue.toggle()
+            withAnimation(.easeInOut(duration: 0.25)) {
+                let opening = !isExpanded.wrappedValue
+                isExpanded.wrappedValue = opening
+                if opening { sectionExpanded.wrappedValue = true }
             }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 10, weight: .medium))
-                Text("Advanced")
-                if isModified && !isExpanded.wrappedValue {
-                    Circle().fill(Color.accentColor).frame(width: 5, height: 5)
-                        .accessibilityHidden(true)
+            Image(systemName: "slider.horizontal.3")
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 24, height: 24)
+                .background {
+                    Circle().fill(Color.accentColor.opacity(isExpanded.wrappedValue ? 0.2 : 0))
                 }
-            }
-            .font(.caption.weight(.semibold))
-            .contentShape(Rectangle())
+                .overlay(alignment: .topTrailing) {
+                    if isModified && !isExpanded.wrappedValue {
+                        Circle().fill(Color.accentColor).frame(width: 5, height: 5)
+                            .padding(3)
+                            .accessibilityHidden(true)
+                    }
+                }
+                .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(Color.accentColor)
-        .help("Show or hide advanced \(section) controls")
+        .foregroundStyle(isExpanded.wrappedValue ? Color.accentColor : Color.secondary)
+        .help("\(isExpanded.wrappedValue ? "Hide" : "Show") advanced \(section) controls")
         .accessibilityLabel("Advanced \(section) controls")
         .accessibilityValue(isExpanded.wrappedValue ? "Expanded" : "Collapsed")
         .accessibilityHint("Show or hide advanced \(section) controls")
@@ -318,30 +333,71 @@ struct EffectsInspectorView: View {
 }
 
 /// A subordinate, keyboard-accessible group for controls that refine a section's primary value.
-private struct InspectorAdvancedGroup<Content: View>: View {
+/// The advanced controls for a section: a full-width, darker band that slices open under the
+/// section's main control and pushes everything below it down. It bleeds past the inspector's
+/// content inset to the panel's edges and is bounded by hairlines, so it reads as part of the
+/// panel rather than as a card floating on it.
+struct InspectorAdvancedBand<Content: View>: View {
     let title: String
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text("\(title) · Advanced")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .accessibilityAddTraits(.isHeader)
             content()
         }
-        .padding(10)
+        .padding(.horizontal, InspectorStyle.contentInset)
+        .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.primary.opacity(0.1))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.accentColor.opacity(0.32), lineWidth: 1)
-                }
+        .background(Color.black.opacity(0.22))
+        .overlay(alignment: .top) { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1) }
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.08)).frame(height: 1) }
+        .padding(.horizontal, -InspectorStyle.contentInset)
+        .padding(.top, 12)
+        .transition(.modifier(active: BandRevealTransition(progress: 0), identity: BandRevealTransition(progress: 1)))
+    }
+}
+
+/// Reports a fraction of the band's height and clips to it, so inserting the band grows it from a
+/// slit and the rows below ride down with it instead of being overlapped.
+private struct RevealHeightLayout: Layout {
+    var progress: Double
+
+    var animatableData: Double {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let subview = subviews.first else { return .zero }
+        let size = subview.sizeThatFits(proposal)
+        return CGSize(width: size.width, height: size.height * progress)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(
+            at: bounds.origin, anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: nil)
+        )
+    }
+}
+
+private struct BandRevealTransition: ViewModifier {
+    var progress: Double
+
+    func body(content: Content) -> some View {
+        RevealHeightLayout(progress: progress) {
+            content
         }
-        .padding(.leading, 12)
-        .transition(.opacity.combined(with: .move(edge: .top)))
+        // Clip vertically to the revealed height but not horizontally: the band bleeds past the
+        // content inset on both sides.
+        .mask {
+            Rectangle().padding(.horizontal, -InspectorStyle.contentInset)
+        }
+        .opacity(0.35 + 0.65 * progress)
     }
 }
 
