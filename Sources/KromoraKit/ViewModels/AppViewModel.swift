@@ -3625,6 +3625,20 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         libraryBrowsingCoordinator.setFocusedRating(rating)
     }
 
+    /// Apply a culling key to every selected photo, in the grid or the Edit filmstrip, or to the
+    /// active photo when nothing else is selected. Marking never moves the selection: the arrow
+    /// keys stay free for navigating, and a multi-selection stays selected for the next key.
+    @discardableResult
+    func perform(_ command: LibraryCullingCommand) -> Bool {
+        switch command {
+        case .pick: setFocusedFlag(.pick)
+        case .reject: setFocusedFlag(.reject)
+        case .clearFlag: setFocusedFlag(.none)
+        case .clearRating: setFocusedRating(0)
+        case .rating(let rating): setFocusedRating(rating)
+        }
+    }
+
     @discardableResult
     func undoCullingChange() -> Bool {
         libraryBrowsingCoordinator.undoCullingChange()

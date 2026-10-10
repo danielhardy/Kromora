@@ -378,8 +378,11 @@ final class ImageCollectionPresentationModel {
         let oldState: PhotoAssetLibraryState
         let activeIDBefore: PhotoAssetID?
     }
-    private var cullingUndoStack: [CullingChange] = []
+    /// One entry per user action: a batch over a multi-selection undoes together.
+    private var cullingUndoStack: [[CullingChange]] = []
     private(set) var lastCullingAssetID: PhotoAssetID?
+    /// Every photo the last culling action changed, for catalog persistence.
+    private(set) var lastCullingAssetIDs: [PhotoAssetID] = []
     private let scheduler: ImageWorkScheduler
     let frameLookupLedger: FrameLookupLedger
     private let originalThumbnailProvider: OriginalThumbnailProvider
@@ -474,6 +477,60 @@ final class ImageCollectionPresentationModel {
     }
     func clearFilter() { setFilter(.all) }
 
+    /// The photos a culling key acts on: every selected photo (Shift/Command selection in the
+    /// grid or the filmstrip), or the active photo when nothing else is selected.
+    var cullingTargetIDs: [PhotoAssetID] {
+        let selected = selection.orderedIDs(from: items.map(\.id))
+        if selected.count > 1 { return selected }
+        return selectedItem.map { [$0.id] } ?? []
+    }
+
+    /// Flag the whole selection. A single photo keeps the one-photo behavior, including advancing
+    /// to the next photo; a batch stays on its selection so the next key still applies to it.
+    @discardableResult
+    func setFlagForSelection(_ flag: PhotoFlag, advance shouldAdvance: Bool = false) -> Bool {
+        let ids = cullingTargetIDs
+        guard ids.count > 1 else { return setFlag(flag, advance: shouldAdvance) }
+        var group: [CullingChange] = []
+        for id in ids {
+            guard let index = itemIndex(for: id), items[index].asset.flag != flag else { continue }
+            group.append(.init(
+                itemID: id, oldState: items[index].asset.libraryState,
+                activeIDBefore: selection.activeID
+            ))
+            items[index].asset.flag = flag
+        }
+        return finishCullingBatch(group)
+    }
+
+    /// Rate the whole selection (see `setFlagForSelection`).
+    @discardableResult
+    func setRatingForSelection(_ rating: Int) -> Bool {
+        let ids = cullingTargetIDs
+        guard ids.count > 1 else { return setRating(rating) }
+        let clamped = min(max(rating, 0), 5)
+        var group: [CullingChange] = []
+        for id in ids {
+            guard let index = itemIndex(for: id), items[index].asset.rating != clamped else { continue }
+            group.append(.init(
+                itemID: id, oldState: items[index].asset.libraryState,
+                activeIDBefore: selection.activeID
+            ))
+            items[index].asset.rating = clamped
+        }
+        return finishCullingBatch(group)
+    }
+
+    private func finishCullingBatch(_ group: [CullingChange]) -> Bool {
+        guard !group.isEmpty else { return false }
+        pushCullingGroup(group)
+        lastCullingAssetIDs = group.map(\.itemID)
+        lastCullingAssetID = group.last?.itemID
+        invalidateCollectionProjection(notify: true)
+        if !filteredIndices.contains(selectedIndex) { reconcileFilteredSelection() }
+        return true
+    }
+
     @discardableResult
     func setFlag(
         _ flag: PhotoFlag, for id: PhotoAssetID? = nil, advance shouldAdvance: Bool = false
@@ -487,6 +544,7 @@ final class ImageCollectionPresentationModel {
         }
         recordCullingChange(itemID: itemID, oldState: oldState)
         lastCullingAssetID = itemID
+        lastCullingAssetIDs = [itemID]
         items[index].asset.flag = flag
         invalidateCollectionProjection(notify: true)
         if shouldAdvance { advance(from: index) }
@@ -503,6 +561,7 @@ final class ImageCollectionPresentationModel {
         guard oldState.rating != clamped else { return false }
         recordCullingChange(itemID: itemID, oldState: oldState)
         lastCullingAssetID = itemID
+        lastCullingAssetIDs = [itemID]
         items[index].asset.rating = clamped
         invalidateCollectionProjection(notify: true)
         if !filteredIndices.contains(selectedIndex) { reconcileFilteredSelection() }
@@ -511,12 +570,20 @@ final class ImageCollectionPresentationModel {
 
     @discardableResult
     func undoLastCullingChange() -> Bool {
-        guard let change = cullingUndoStack.popLast(),
-              let index = items.firstIndex(where: { $0.id == change.itemID }) else { return false }
-        lastCullingAssetID = change.itemID
-        items[index].asset.libraryState = change.oldState
+        guard let group = cullingUndoStack.popLast(), let first = group.first else { return false }
+        var restored: [PhotoAssetID] = []
+        for change in group {
+            guard let index = items.firstIndex(where: { $0.id == change.itemID }) else { continue }
+            items[index].asset.libraryState = change.oldState
+            restored.append(change.itemID)
+        }
+        guard !restored.isEmpty else { return false }
+        lastCullingAssetIDs = restored
+        lastCullingAssetID = restored.last
         invalidateCollectionProjection(notify: true)
-        if let activeID = change.activeIDBefore,
+        // A batch keeps its selection so the user can keep working on it; a single change puts
+        // focus back where it was.
+        if group.count == 1, let activeID = first.activeIDBefore,
            filteredIndices.contains(where: { items[$0].id == activeID }) {
             var next = selection
             next.focus(activeID, in: items.map(\.id))
@@ -705,7 +772,10 @@ final class ImageCollectionPresentationModel {
             preparedThumbnailIDs.remove(item.id)
         }
         items.removeAll { ids.contains($0.id) }
-        cullingUndoStack.removeAll { ids.contains($0.itemID) }
+        cullingUndoStack = cullingUndoStack.compactMap { group in
+            let kept = group.filter { !ids.contains($0.itemID) }
+            return kept.isEmpty ? nil : kept
+        }
         portableTotalCount = portableTotalCount.map { max(0, $0 - removed.count) }
         invalidateCollectionProjection()
         reconcileSelection()
@@ -925,7 +995,10 @@ final class ImageCollectionPresentationModel {
         items.forEach { $0.presentationChangeLedger = ledger }
     }
     private func recordCullingChange(itemID: PhotoAssetID, oldState: PhotoAssetLibraryState) {
-        cullingUndoStack.append(.init(itemID: itemID, oldState: oldState, activeIDBefore: selection.activeID))
+        pushCullingGroup([.init(itemID: itemID, oldState: oldState, activeIDBefore: selection.activeID)])
+    }
+    private func pushCullingGroup(_ group: [CullingChange]) {
+        cullingUndoStack.append(group)
         if cullingUndoStack.count > 100 { cullingUndoStack.removeFirst() }
     }
     private func reconcileSelection() {

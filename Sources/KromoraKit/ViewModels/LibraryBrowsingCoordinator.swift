@@ -482,14 +482,18 @@ final class LibraryBrowsingCoordinator {
 
     @discardableResult
     func setFocusedFlag(_ flag: PhotoFlag, advance: Bool = false) -> Bool {
+        let targets = collection.cullingTargetIDs
         let name = collection.selectedItem?.displayName
         let previousIndex = collection.selectedIndex
-        let changed = collection.setFlag(flag, advance: advance)
+        let changed = collection.setFlagForSelection(flag, advance: advance)
         if changed { persistPortableLibraryStateIfNeeded() }
-        if changed, let name {
-            destination?.setLibraryStatusMessage(
-                "\(name): \(flag == .pick ? "Picked" : flag == .reject ? "Rejected" : "Flag cleared")"
-            )
+        if changed {
+            let outcome = flag == .pick ? "Picked" : flag == .reject ? "Rejected" : "Flag cleared"
+            if targets.count > 1 {
+                destination?.setLibraryStatusMessage("\(targets.count) photos: \(outcome)")
+            } else if let name {
+                destination?.setLibraryStatusMessage("\(name): \(outcome)")
+            }
         }
         if advance, destination?.isLibraryGridShowing == false,
            collection.selectedIndex != previousIndex {
@@ -500,12 +504,16 @@ final class LibraryBrowsingCoordinator {
 
     @discardableResult
     func setFocusedRating(_ rating: Int) -> Bool {
-        let changed = collection.setRating(rating)
+        let targets = collection.cullingTargetIDs
+        let changed = collection.setRatingForSelection(rating)
         if changed { persistPortableLibraryStateIfNeeded() }
-        if changed, let item = collection.selectedItem {
-            destination?.setLibraryStatusMessage(
-                "\(item.displayName): \(rating == 0 ? "Rating cleared" : "Rated \(rating) stars")"
-            )
+        if changed {
+            let outcome = rating == 0 ? "Rating cleared" : "Rated \(rating) stars"
+            if targets.count > 1 {
+                destination?.setLibraryStatusMessage("\(targets.count) photos: \(outcome)")
+            } else if let item = collection.selectedItem {
+                destination?.setLibraryStatusMessage("\(item.displayName): \(outcome)")
+            }
         }
         return changed
     }
@@ -518,17 +526,22 @@ final class LibraryBrowsingCoordinator {
     }
 
     private func persistPortableLibraryStateIfNeeded() {
-        guard let library, let assetID = collection.lastCullingAssetID,
-            let item = collection.items.first(where: { $0.id == assetID })
-        else { return }
-        do {
-            try library.updateLibraryState(
-                for: item.asset.source.portableIdentity.assetID,
-                rating: item.asset.rating, flag: item.asset.flag
-            )
-        } catch {
+        guard let library else { return }
+        var failure: Error?
+        for assetID in collection.lastCullingAssetIDs {
+            guard let item = collection.items.first(where: { $0.id == assetID }) else { continue }
+            do {
+                try library.updateLibraryState(
+                    for: item.asset.source.portableIdentity.assetID,
+                    rating: item.asset.rating, flag: item.asset.flag
+                )
+            } catch {
+                failure = error
+            }
+        }
+        if let failure {
             destination?.presentLibraryError(
-                "Kromora could not update the library catalog: \(error.localizedDescription)"
+                "Kromora could not update the library catalog: \(failure.localizedDescription)"
             )
         }
     }

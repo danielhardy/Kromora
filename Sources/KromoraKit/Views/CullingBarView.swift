@@ -20,7 +20,7 @@ struct CullingBarView: View {
                         item: item,
                         isCompact: isCompact,
                         onFlag: { flag in
-                            viewModel.setFocusedFlag(flag, advance: true)
+                            viewModel.setFocusedFlag(flag)
                         },
                         onRating: { rating in
                             viewModel.setFocusedRating(rating)

@@ -454,18 +454,7 @@ final class KeyMonitor {
             // Culling belongs to a browsable collection. A one-off image opened outside the
             // library should not swallow P/X/rating keys when there is no focused asset to edit.
             guard vm.collection.isActive else { return event }
-            switch command {
-            case .pick:
-                vm.setFocusedFlag(.pick, advance: true)
-            case .reject:
-                vm.setFocusedFlag(.reject, advance: true)
-            case .clearFlag:
-                vm.setFocusedFlag(.none, advance: true)
-            case .clearRating:
-                vm.setFocusedRating(0)
-            case .rating(let rating):
-                vm.setFocusedRating(rating)
-            }
+            vm.perform(command)
             return nil
         }
         switch chars {
