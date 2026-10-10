@@ -1487,7 +1487,7 @@ struct MaskCanvasOverlay: View {
             let presentation = MaskOverlayPresentation(
                 coverageOpacity: maskingState.overlayOpacity)
             let taskID = OverlayTaskID(
-                layers: layers,
+                layers: layers.map(\.overlayIdentity),
                 selectedLayerID: overlaySelection.layerID,
                 soloLayerID: overlaySelection.soloLayerID,
                 selectedComponentID: overlaySelection.componentID,
@@ -1803,6 +1803,9 @@ struct MaskCanvasOverlay: View {
     }
 
     private struct OverlayTaskID: Equatable {
+    /// The overlay shows mask coverage, which a layer's look (exposure, contrast, ...) never
+    /// changes. Keying the task on the look would cancel and restart mask resolution, and flash
+    /// "Analyzing mask…", on every adjustment-slider tick.
         let layers: [LocalAdjustmentLayer]
         let selectedLayerID: UUID?
         let soloLayerID: UUID?
@@ -2293,5 +2296,16 @@ struct MaskCanvasOverlay: View {
         let t = min(
             max(((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared, 0), 1)
         return distance(point, CGPoint(x: start.x + t * dx, y: start.y + t * dy))
+    }
+}
+
+private extension LocalAdjustmentLayer {
+    /// Only what can change the overlay: membership, geometry, inversion and amount.
+    var overlayIdentity: LocalAdjustmentLayer {
+        var copy = self
+        copy.adjustments = .neutral
+        copy.name = ""
+        copy.autoProvenance = nil
+        return copy
     }
 }
