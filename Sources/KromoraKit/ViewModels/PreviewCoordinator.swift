@@ -40,15 +40,16 @@ final class PreviewCoordinator {
     /// Vision. Once a resolved frame for this photo and mask recipe has reached the screen, the
     /// renderer's component cache answers the next render without suspending, and a base frame
     /// would just be a second full-graph render for every pointer tick. Mask resolution is keyed
-    /// by the component definitions, the mask quality tier and the requested box — not by the
-    /// document's global look — so a slider drag keeps the warm identity while adding or editing a
-    /// smart mask correctly loses it.
+    /// by the component definitions and the mask quality tier — not by the document's global look
+    /// or the requested box — so a slider drag or a zoom keeps the warm identity while adding or
+    /// editing a smart mask correctly loses it. A new box only costs a resize of the cached
+    /// matte; treating it as cold published a base frame without the smart mask on every zoom
+    /// step (the layer is deferred whole), which read as the mask flickering off and on.
     private struct SemanticWarmth: Equatable {
         let source: ImageSource
         let assetID: PhotoAssetID?
         let components: [MaskSource]
         let maskQuality: MaskQuality
-        let targetSize: CGSize?
     }
 
     private struct Token: Equatable {
@@ -428,8 +429,7 @@ final class PreviewCoordinator {
                     }.map(\.source)
                     : []
             },
-            maskQuality: request.quality.maskQuality,
-            targetSize: request.targetSize
+            maskQuality: request.quality.maskQuality
         )
     }
 

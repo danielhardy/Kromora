@@ -381,6 +381,36 @@ final class PreviewCoordinatorTests: XCTestCase {
                        "a new smart mask must publish a base frame while Vision resolves it")
     }
 
+    /// Zooming changes only the requested box. The cached matte is size-independent, so a warm
+    /// smart mask must not publish a mask-less base frame (the layer is deferred whole) and then
+    /// refine over it: that read as the mask flickering off and on at every zoom step.
+    func testZoomingAWarmSmartMaskDoesNotPublishAMasklessBaseFrame() async throws {
+        let fake = ControlledRenderEngine()
+        let coordinator = PreviewCoordinator(engine: fake, settleDelay: .zero)
+        var publications: [PreviewCoordinator.Publication] = []
+        coordinator.onPublication = { publications.append($0) }
+        let source = makeSource()
+
+        coordinator.submit(maskedRequest(source: source, exposure: 0.1))
+        try await waitUntil("the base render") { await fake.requests.count == 1 }
+        await fake.releaseNext()
+        try await waitUntil("the refining render") { await fake.requests.count == 2 }
+        await fake.releaseNext()
+        try await waitUntil("the refined publication") { publications.count == 2 }
+
+        let base = maskedRequest(source: source, exposure: 0.1)
+        coordinator.submit(RenderRequest(
+            source: base.source, document: base.document,
+            targetSize: CGSize(width: 640, height: 480), quality: .preview, output: .raster
+        ))
+        try await waitUntil("the zoomed render") { await fake.requests.count == 3 }
+        await fake.releaseNext()
+        try await waitUntil("the zoomed publication") { publications.count == 3 }
+        let requests = await fake.allRequests()
+        XCTAssertEqual(requests.count, 3, "a new box alone must not trigger a second base frame")
+        XCTAssertEqual(requests[2].maskResolution, .resolved)
+    }
+
     /// The refinement is fenced by the same token as the base frame: a superseded base frame must
     /// neither publish nor drag its own refinement onto the screen behind a newer edit.
     func testASupersededBaseFrameNeitherPublishesNorRefines() async throws {
