@@ -360,6 +360,35 @@ final class LibraryGridTests: TempDirectoryTestCase {
         await collection.shutdown()
     }
 
+    func testRevertingToOriginalDoesNotReloadAnExistingOriginalRaster() async throws {
+        let image = try Fixtures.makeCGImage(width: 64, height: 48)
+        let providerCalls = LibraryGridThumbnailProviderCalls()
+        let collection = ImageCollection(originalThumbnailProvider: { _, _, _, _, _, _, _ in
+            await providerCalls.record()
+            return image
+        })
+        let asset = PhotoAsset(url: tempDirectory.appendingPathComponent("existing-original.jpg"))
+        collection.loadPortableWindow(
+            assets: [asset], totalCount: 1, pageIndex: 0, pageSize: 1, query: .all
+        )
+        let item = try XCTUnwrap(collection.items.first)
+        try await waitForThumbnails(in: collection, ids: [asset.id])
+        let original = try XCTUnwrap(item.originalThumbnailForPresentation)
+        let callsBeforeRevert = await providerCalls.count
+
+        collection.applyEditedThumbnail(
+            NSImage(cgImage: image, size: NSSize(width: 64, height: 48)),
+            for: asset.id, revision: "edited"
+        )
+        collection.applyEditedThumbnail(nil, for: asset.id, revision: "identity")
+        await Task.yield()
+
+        XCTAssertTrue(item.thumbnail === original)
+        let callsAfterRevert = await providerCalls.count
+        XCTAssertEqual(callsAfterRevert, callsBeforeRevert)
+        await collection.shutdown()
+    }
+
     /// KRMA-841: the id lookup used on every thumbnail arrival must stay correct across reloads
     /// and removals, because it is cached rather than recomputed.
     func testItemIndexLookupStaysCorrectAcrossReloadAndRemoval() {
@@ -510,5 +539,13 @@ final class LibraryGridTests: TempDirectoryTestCase {
 
     private static func pumpRunLoop() {
         RunLoop.current.run(until: Date().addingTimeInterval(0.4))
+    }
+}
+
+private actor LibraryGridThumbnailProviderCalls {
+    private(set) var count = 0
+
+    func record() {
+        count += 1
     }
 }
