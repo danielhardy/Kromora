@@ -22,27 +22,57 @@ enum MaskOperations {
         try combine(minuend, subtrahend) { max(0, $0 - $1) }
     }
 
-    /// A small separable box blur is deterministic and keeps this foundation free of a second image
-    /// representation. The later render-quality implementation can replace this hook with a GPU
-    /// blur without changing callers or the MaskStore seam.
+    /// A separable box blur over the clipped (2r+1)² window, averaged by the in-bounds sample count.
+    /// Each pass uses a running sum, so cost is O(pixels) regardless of radius; a naive window scan
+    /// is O(pixels × r²) and stalls the render at the radii "Soften edges" produces on a
+    /// full-resolution mask. Cancellable between rows so a dragged slider can abandon stale work.
     static func feather(_ mask: NormalizedMask, radius: Int) throws -> NormalizedMask {
         guard radius > 0 else { return mask }
         let width = mask.size.width
         let height = mask.size.height
-        var blurred = Array(repeating: Float.zero, count: mask.values.count)
+        guard width > 0, height > 0 else { return mask }
+
+        // Horizontal pass: windowed sums per row.
+        var horizontal = [Double](repeating: 0, count: mask.values.count)
+        for y in 0..<height {
+            if y & 63 == 0 { try Task.checkCancellation() }
+            let row = y * width
+            var sum = 0.0
+            for x in 0...min(width - 1, radius) { sum += Double(mask.values[row + x]) }
+            horizontal[row] = sum
+            for x in 1..<max(width, 1) {
+                let entering = x + radius
+                if entering < width { sum += Double(mask.values[row + entering]) }
+                let leaving = x - radius - 1
+                if leaving >= 0 { sum -= Double(mask.values[row + leaving]) }
+                horizontal[row + x] = sum
+            }
+        }
+
+        // Vertical pass over the row sums, then divide by the clipped window area.
+        var blurred = [Float](repeating: 0, count: mask.values.count)
+        var columnSums = [Double](repeating: 0, count: width)
+        for y in 0...min(height - 1, radius) {
+            for x in 0..<width { columnSums[x] += horizontal[y * width + x] }
+        }
         var outputTotal: Float = 0
         var outputIsBinary = true
         for y in 0..<height {
-            for x in 0..<width {
-                var sampleTotal: Float = 0
-                var count: Float = 0
-                for sampleY in max(0, y - radius)...min(height - 1, y + radius) {
-                    for sampleX in max(0, x - radius)...min(width - 1, x + radius) {
-                        sampleTotal += mask.values[sampleY * width + sampleX]
-                        count += 1
-                    }
+            if y & 63 == 0 { try Task.checkCancellation() }
+            if y > 0 {
+                let entering = y + radius
+                if entering < height {
+                    for x in 0..<width { columnSums[x] += horizontal[entering * width + x] }
                 }
-                let value = sampleTotal / count
+                let leaving = y - radius - 1
+                if leaving >= 0 {
+                    for x in 0..<width { columnSums[x] -= horizontal[leaving * width + x] }
+                }
+            }
+            let rows = Double(min(height - 1, y + radius) - max(0, y - radius) + 1)
+            for x in 0..<width {
+                let columns = Double(min(width - 1, x + radius) - max(0, x - radius) + 1)
+                let value = min(max(Float(columnSums[x] / (rows * columns)), 0), 1)
                 blurred[y * width + x] = value
                 outputTotal += value
                 if value != 0, value != 1 { outputIsBinary = false }
