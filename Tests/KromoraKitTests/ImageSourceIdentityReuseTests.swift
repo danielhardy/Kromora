@@ -63,4 +63,59 @@ final class ImageSourceIdentityReuseTests: TempDirectoryTestCase {
         )
         XCTAssertNotEqual(source.portableIdentity.sourceFingerprint.contentHash, "persisted-content-hash")
     }
+
+    /// Package browsing assets carry a real content hash but a placeholder change signature, and
+    /// five main-actor callers (edited thumbnails, adjacent previews, the idle warmer, open) build
+    /// an `ImageSource` from them. None of those may read and hash the whole file.
+    func testBrowsingAssetReusesItsContentHashWithoutReadingTheFile() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 64, height: 48, orientation: 1, named: "browsing.jpg", in: tempDirectory
+        )
+        let assetID = PortablePhotoAssetID()
+        let browsingSignature = PhotoSourceFingerprint(
+            byteCount: nil, modificationDate: nil, resourceIdentifier: nil,
+            sampleDigest: PhotoAssetID.contentDigest(Data("browsing:\(assetID.raw)".utf8))
+        )
+        XCTAssertTrue(browsingSignature.isBrowsingObservation)
+        XCTAssertFalse(PhotoSourceFingerprint.file(at: url).isBrowsingObservation)
+
+        let identity = PortablePhotoIdentity(
+            assetID: assetID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(
+                contentHash: "stored-import-hash", decoderVersion: "import-v1"
+            )
+        )
+        let source = ImageSource(
+            url: url, nativeExtent: CGSize(width: 64, height: 48), portableIdentity: identity,
+            existingFileChangeSignature: browsingSignature
+        )
+        XCTAssertEqual(source.portableIdentity.sourceFingerprint.contentHash, "stored-import-hash")
+        XCTAssertEqual(
+            source.portableIdentity.sourceFingerprint.geometry,
+            PhotoPixelDimensions(width: 64, height: 48), "geometry is still applied"
+        )
+    }
+
+    /// A summary with no persisted fingerprint has a synthetic identity too. That one has no real
+    /// hash to reuse, so the file is still hashed.
+    func testPlaceholderIdentityStillHashesTheFile() throws {
+        let url = try Fixtures.writeJPEG(
+            width: 64, height: 48, orientation: 1, named: "legacy.jpg", in: tempDirectory
+        )
+        let assetID = PortablePhotoAssetID()
+        let browsingSignature = PhotoSourceFingerprint(
+            byteCount: nil, modificationDate: nil, resourceIdentifier: nil, sampleDigest: "x"
+        )
+        let identity = PortablePhotoIdentity(
+            assetID: assetID,
+            sourceFingerprint: PortablePhotoSourceFingerprint(
+                contentHash: "synthetic", decoderVersion: "browsing-v1"
+            )
+        )
+        let source = ImageSource(
+            url: url, nativeExtent: .zero, portableIdentity: identity,
+            existingFileChangeSignature: browsingSignature
+        )
+        XCTAssertNotEqual(source.portableIdentity.sourceFingerprint.contentHash, "synthetic")
+    }
 }

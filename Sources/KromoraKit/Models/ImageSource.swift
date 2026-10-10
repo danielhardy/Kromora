@@ -210,7 +210,16 @@ struct ImageSource: Sendable, Equatable {
         case .url(let url):
             let decoderVersion = existing?.sourceFingerprint.decoderVersion
                 ?? "imageio-\(kind)-v1"
-            if let existing, let existingFileChangeSignature,
+            if let existing, existingFileChangeSignature?.isBrowsingObservation == true,
+               !existing.sourceFingerprint.isBrowsingPlaceholder {
+                // A browsing asset keeps the content hash computed when it entered the library
+                // but a placeholder change signature, so there is nothing to compare and the
+                // match test below can never succeed. Rehashing the whole file here ran on the
+                // main actor (about 50 ms for a 126 MB RAW) for every thumbnail request,
+                // prefetch and idle-warm candidate. The authoritative check against the record's
+                // signature happens when the photo is opened and prepared off the main actor.
+                fingerprint = existing.sourceFingerprint.with(geometry: geometry)
+            } else if let existing, let existingFileChangeSignature,
                let currentFileChangeSignature,
                // A signature that came from the package has whole-second dates, so exact equality
                // never matched a real file and every open hashed the whole file on the main actor.

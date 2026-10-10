@@ -149,6 +149,14 @@ struct PhotoSourceFingerprint: Codable, Hashable, Sendable, Equatable {
             && sampleDigest == other.sampleDigest
     }
 
+    /// The synthetic change signature a package browsing asset carries before its record is
+    /// resolved: no size, date or file identity, only a per-asset digest. It describes nothing
+    /// about the file, so it can never be compared with a fresh observation.
+    var isBrowsingObservation: Bool {
+        byteCount == nil && modificationDate == nil && resourceIdentifier == nil
+            && sampleDigest != nil
+    }
+
     /// Compare a persisted snapshot with a fresh resource-values read. Package JSON stores dates
     /// as ISO-8601 whole seconds, so allow that subsecond truncation while requiring the byte count,
     /// resource identity, and bounded content sample to remain identical.
