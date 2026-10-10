@@ -1,7 +1,7 @@
 import XCTest
 
 final class CropInspectorTests: XCTestCase {
-    func testResetButtonUsesTheSemanticPrimaryAccentAndKeepsLinkAccessibility() throws {
+    func testResetButtonUsesTheSharedAccessibleIconAction() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent() // KromoraKitTests
             .deletingLastPathComponent() // Tests
@@ -13,19 +13,16 @@ final class CropInspectorTests: XCTestCase {
             encoding: .utf8
         )
 
-        let resetButtonStart = try XCTUnwrap(cropInspector.range(of: "Button(\"Reset\", action: onReset)"))
-        let resetButtonEnd = try XCTUnwrap(
-            cropInspector[resetButtonStart.upperBound...].range(of: "\n            }")
-        )
-        let resetButton = cropInspector[resetButtonStart.lowerBound..<resetButtonEnd.lowerBound]
+        XCTAssertTrue(cropInspector.contains("ResetIconButton("))
+        XCTAssertTrue(cropInspector.contains("\"Reset crop\""))
+        XCTAssertTrue(cropInspector.contains("accessibilityHint: \"Return the crop frame to the full image\""))
 
-        XCTAssertTrue(resetButton.contains(".buttonStyle(.link)"))
-        XCTAssertTrue(resetButton.contains(".tint(KromoraTheme.primaryAccent)"))
-        XCTAssertTrue(resetButton.contains(".accessibilityLabel(\"Reset crop\")"))
-        XCTAssertTrue(
-            resetButton.contains(
-                ".accessibilityHint(\"Return the crop frame to the full image\")"
-            )
+        let resetButton = try String(
+            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/ResetIconButton.swift"),
+            encoding: .utf8
         )
+        XCTAssertTrue(resetButton.contains(".buttonStyle(.plain)"))
+        XCTAssertTrue(resetButton.contains(".accessibilityLabel(accessibilityLabel ?? title)"))
+        XCTAssertTrue(resetButton.contains(".accessibilityHint(accessibilityHint ?? \"\")"))
     }
 }

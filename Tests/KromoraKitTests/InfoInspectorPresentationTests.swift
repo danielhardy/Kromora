@@ -95,17 +95,20 @@ final class InfoInspectorPresentationTests: XCTestCase {
         let infoSource = try infoInspectorSource()
         let histogramHeading = try XCTUnwrap(infoSource.range(of: "Text(\"Histogram\")"))
         let histogramSection = String(infoSource[histogramHeading.lowerBound...])
-        XCTAssertTrue(histogramSection.hasPrefix("Text(\"Histogram\")\n                    .font(InspectorStyle.sectionTitle)"))
-        XCTAssertTrue(histogramSection.contains(".accessibilityAddTraits(.isHeader)"))
+        let histogramHeadingEnd = try XCTUnwrap(
+            histogramSection.range(of: "Spacer(minLength: 4)")
+        )
+        let histogramHeadingSource = String(histogramSection[..<histogramHeadingEnd.lowerBound])
+        XCTAssertTrue(histogramHeadingSource.contains(".font(InspectorStyle.sectionTitle)"))
+        XCTAssertTrue(histogramHeadingSource.contains(".accessibilityAddTraits(.isHeader)"))
 
         let healSource = try String(
             contentsOf: root.appendingPathComponent("RetouchInspectorView.swift"),
             encoding: .utf8
         )
-        let resetButton = try XCTUnwrap(healSource.range(of: "Button(\"Reset All\")"))
-        let resetSection = String(healSource[resetButton.lowerBound...])
-        XCTAssertTrue(resetSection.hasPrefix("Button(\"Reset All\") {"))
-        XCTAssertTrue(resetSection.contains(".buttonStyle(.link)"))
+        XCTAssertTrue(healSource.contains("ResetIconButton(\"Reset All Heal controls\""))
+        XCTAssertTrue(healSource.contains("viewModel.document.retouch.isIdentity"))
+        XCTAssertTrue(healSource.contains("viewModel.updateDocument { $0.retouch = .neutral }"))
     }
 
     private func infoInspectorSource() throws -> String {

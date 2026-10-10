@@ -206,15 +206,14 @@ final class MenuCommandTests: XCTestCase {
         )
         let titleRow = cropInspector[titleRowStart.lowerBound..<titleRowEnd.lowerBound]
 
-        XCTAssertTrue(titleRow.contains("Button(\"Reset\", action: onReset)"))
-        XCTAssertTrue(titleRow.contains(".buttonStyle(.link)"))
-        XCTAssertTrue(titleRow.contains(".accessibilityLabel(\"Reset crop\")"))
+        XCTAssertTrue(titleRow.contains("ResetIconButton("))
+        XCTAssertTrue(titleRow.contains("\"Reset crop\""))
         XCTAssertTrue(
-            titleRow.contains(".accessibilityHint(\"Return the crop frame to the full image\")")
+            titleRow.contains("accessibilityHint: \"Return the crop frame to the full image\"")
         )
         XCTAssertTrue(titleRow.contains("Spacer(minLength: 8)"))
         XCTAssertEqual(
-            cropInspector.components(separatedBy: "Button(\"Reset\", action: onReset)").count - 1,
+            cropInspector.components(separatedBy: "ResetIconButton(").count - 1,
             1
         )
         XCTAssertTrue(cropInspector.contains("onResetStraighten"))

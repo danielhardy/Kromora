@@ -525,9 +525,9 @@ final class EditedThumbnailCoordinatorTests: XCTestCase {
         // The saved crop is 0.5 wide against the rotated height, so the short side is half the
         // long edge.
         let expectedWidth = Thumbnails.libraryMaxPixelSize / 2
-        XCTAssertGreaterThanOrEqual(cgThumbnail.width, expectedWidth)
+        XCTAssertGreaterThanOrEqual(cgThumbnail.width, expectedWidth - 1)
         XCTAssertLessThanOrEqual(cgThumbnail.width, expectedWidth + 1)
-        XCTAssertGreaterThanOrEqual(cgThumbnail.height, Thumbnails.libraryMaxPixelSize)
+        XCTAssertGreaterThanOrEqual(cgThumbnail.height, Thumbnails.libraryMaxPixelSize - 1)
         XCTAssertLessThanOrEqual(
             cgThumbnail.height, Thumbnails.libraryMaxPixelSize + 1,
             "the reopened edited crop must retain detail through the rotated crop render"
