@@ -98,6 +98,67 @@ final class AppViewModelTests: TempDirectoryTestCase {
         XCTAssertNil(viewModel.errorMessage)
     }
 
+    func testStaleLibraryIndexRepairReachesStatusBarOnBothOpenPaths() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("StaleIndex.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("StaleIndex.store")
+        let source = try Fixtures.writeGradientPNG(
+            width: 12, height: 8, named: "stale-index-photo.png", in: tempDirectory
+        )
+        let seed = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        _ = try seed.importURLs([source])
+        try seed.lease.release()
+        let package = try PortableLibraryPackage.open(at: packageURL)
+        try LibraryIndexProjection(libraryID: package.manifest.libraryID, entries: [])
+            .write(to: indexURL)
+
+        let synchronousSession = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        let synchronousViewModel = makeAppViewModel(
+            portableLibrarySession: synchronousSession
+        )
+        XCTAssertEqual(
+            synchronousViewModel.statusMessage,
+            "Rebuilt the library index from package membership."
+        )
+        await synchronousViewModel.shutdown()
+        try LibraryIndexProjection(libraryID: package.manifest.libraryID, entries: [])
+            .write(to: indexURL)
+
+        let asyncSession = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, asynchronousIndexLoading: true
+        )
+        let asyncViewModel = makeAppViewModel(
+            portableLibrarySession: asyncSession,
+            asynchronousPortableLibraryIndexLoading: true
+        )
+        try await waitUntil("the asynchronous library index repair status") {
+            asyncViewModel.statusMessage == "Rebuilt the library index from package membership."
+        }
+        await asyncViewModel.shutdown()
+    }
+
+    func testLibraryIndexWriteFailureReachesStatusBar() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("IndexWriteFailure.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("IndexWriteFailure.store")
+        let scheduler = ImageWorkScheduler()
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, scheduler: scheduler
+        )
+        let viewModel = makeAppViewModel(portableLibrarySession: session)
+        try FileManager.default.removeItem(at: indexURL)
+        try FileManager.default.createDirectory(at: indexURL, withIntermediateDirectories: true)
+        let source = try Fixtures.writeGradientPNG(
+            width: 12, height: 8, named: "index-write-failure.png", in: tempDirectory
+        )
+
+        let handle = try session.startImportURLs([source])
+        let result = try await handle.value()
+        XCTAssertEqual(result.imported.count, 1)
+        try await waitUntil("the failed library index write status") {
+            viewModel.statusMessage.hasPrefix("Could not save the library index:")
+        }
+        await viewModel.shutdown()
+    }
+
     func testOpeningUnsupportedSourceURLReportsNoSupportedImages() {
         let viewModel = makeAppViewModel()
 

@@ -70,7 +70,9 @@ final class PortableLibrarySession {
     private let sourceFingerprintBackfillJobID: ImageWorkScheduler.JobID
     private(set) var indexLoadingState: LibraryIndexLoadingState?
     private(set) var isLoadingIndex = false
+    private(set) var didRepairIndexOnOpen = false
     var onIndexLoadingStateChange: (@MainActor (LibraryIndexLoadingState) -> Void)?
+    var onIndexWriteFailure: (@MainActor (String) -> Void)?
     var onPresentedAspectRatioUpdates: (@MainActor ([PortablePhotoAssetID: Double]) -> Void)?
     private var activeImportJobIDs: Set<ImageWorkScheduler.JobID> = []
     private var asyncImportCatalog: ImportCatalogState?
@@ -124,6 +126,7 @@ final class PortableLibrarySession {
             self.indexURL =
                 indexURL?.standardizedFileURL
                 ?? LibraryIndexSession.defaultIndexURL(for: package.manifest.libraryID)
+            let hadPersistedIndex = fileManager.fileExists(atPath: self.indexURL.path)
 
             // A warm projection is preferred, but every mismatch/corruption is recoverable from
             // package membership summaries. This keeps the package canonical and the index
@@ -136,6 +139,7 @@ final class PortableLibrarySession {
                       let valid = try? loaded.validated(for: package) {
                 let reconciled = try valid.reconcilingMembership(with: package)
                 if reconciled != valid {
+                    self.didRepairIndexOnOpen = true
                     Self.noteIndexRepaired(from: valid, to: reconciled)
                     try reconciled.write(to: self.indexURL)
                 }
@@ -143,6 +147,7 @@ final class PortableLibrarySession {
             } else {
                 projection = try LibraryIndexProjection(package: package)
                 try projection.write(to: self.indexURL)
+                self.didRepairIndexOnOpen = hadPersistedIndex
             }
             self.queryController = LibraryQueryController(index: projection, pageSize: pageSize)
             self.leaseDuration = max(0.001, leaseDuration)
@@ -166,7 +171,7 @@ final class PortableLibrarySession {
             if scheduler != nil { startLeaseHeartbeat() }
             if asynchronousIndexLoading {
                 self.isLoadingIndex = true
-                startIndexLoading(package: package)
+                startIndexLoading(package: package, hadPersistedIndex: hadPersistedIndex)
             } else {
                 startPresentedAspectRatioRepair()
             }
@@ -206,7 +211,9 @@ final class PortableLibrarySession {
         )
     }
 
-    private func startIndexLoading(package: PortableLibraryPackage) {
+    private func startIndexLoading(
+        package: PortableLibraryPackage, hadPersistedIndex: Bool
+    ) {
         let indexURL = self.indexURL
         let pageSize = queryController.pageSize
         let publish: @Sendable (LibraryIndexProjection?, LibraryQueryPage?, Int, Int, Bool, String?) async -> Void = {
@@ -246,11 +253,15 @@ final class PortableLibrarySession {
                     KromoraObservability.event(.libraryIndexWarm)
                     let controller = LibraryQueryController(index: reconciled, pageSize: pageSize)
                     if reconciled != valid {
+                        await MainActor.run { self.didRepairIndexOnOpen = true }
                         Self.noteIndexRepaired(from: valid, to: reconciled)
                         try reconciled.write(to: indexURL)
                     }
                     await publish(reconciled, controller.page(at: 0), 0, 0, true, nil)
                     return
+                }
+                if hadPersistedIndex {
+                    await MainActor.run { self.didRepairIndexOnOpen = true }
                 }
                 KromoraObservability.event(.libraryIndexRebuild)
                 _ = try await LibraryIndexProjection.rebuild(
@@ -696,26 +707,40 @@ final class PortableLibrarySession {
         guard let scheduler else {
             // Headless/session tests without a scheduler still get a durable projection. The
             // production composition root always supplies the shared package-I/O lane.
-            Self.writeIndex(projection, to: indexURL)
+            Self.writeIndex(projection, to: indexURL) { [weak self] message in
+                Task { @MainActor [weak self] in self?.onIndexWriteFailure?(message) }
+            }
             return
         }
         let generation = indexWriteGeneration.publish()
         _ = scheduler.enqueuePackageIO(
             id: indexWriteJobID,
             lane: .indexRebuild,
-            operation: { [indexWriteGeneration, projection, indexURL] in
+            operation: { [weak self, indexWriteGeneration, projection, indexURL] in
                 guard indexWriteGeneration.isCurrent(generation), !Task.isCancelled else { return }
-                Self.writeIndex(projection, to: indexURL)
+                Self.writeIndex(projection, to: indexURL) { [weak self] message in
+                    Task { @MainActor [weak self] in self?.onIndexWriteFailure?(message) }
+                }
             }
         )
     }
 
+    private func reportIndexWriteFailure(_ error: Error) {
+        let message = error.localizedDescription
+        KromoraObservability.event(.libraryIndexWriteFailed, detail: message)
+        onIndexWriteFailure?(message)
+    }
+
     /// The index is disposable and repaired from membership on the next open, so a failed write is
     /// not fatal, but it must not disappear silently.
-    nonisolated private static func writeIndex(_ projection: LibraryIndexProjection, to url: URL) {
+    nonisolated private static func writeIndex(
+        _ projection: LibraryIndexProjection, to url: URL,
+        onFailure: @escaping @Sendable (String) -> Void
+    ) {
         do {
             try projection.write(to: url)
         } catch {
+            onFailure(error.localizedDescription)
             KromoraObservability.event(.libraryIndexWriteFailed, detail: error.localizedDescription)
         }
     }
@@ -855,11 +880,9 @@ final class PortableLibrarySession {
                         } catch {
                             // The package remains canonical; rebuild the disposable index now so the
                             // grid cannot go stale, and record the failure if that fails too.
-                            KromoraObservability.event(
-                                .libraryIndexWriteFailed, detail: error.localizedDescription)
+                            self.reportIndexWriteFailure(error)
                             do { _ = try self.refreshIndex() } catch {
-                                KromoraObservability.event(
-                                    .libraryIndexWriteFailed, detail: error.localizedDescription)
+                                self.reportIndexWriteFailure(error)
                             }
                         }
                     }

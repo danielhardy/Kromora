@@ -1381,6 +1381,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         wireCoordinators()
+        portableLibrary?.onIndexWriteFailure = { [weak self] message in
+            guard let self, !self.isShuttingDown else { return }
+            self.statusMessage = "Could not save the library index: \(message)"
+        }
         portableLibrary?.onPresentedAspectRatioUpdates = { [weak self] updates in
             self?.libraryBrowsingCoordinator.applyPresentedAspectRatioUpdates(updates)
         }
@@ -1399,6 +1403,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
                     || self.statusMessage.hasPrefix("Rebuilding library index") {
                     self.statusMessage = ""
                 }
+                if self.portableLibrary?.didRepairIndexOnOpen == true {
+                    self.statusMessage = "Rebuilt the library index from package membership."
+                }
             } else {
                 self.statusMessage =
                     "Rebuilding library index… \(state.shardsRead) of \(state.totalShards) sections"
@@ -1411,6 +1418,10 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
         if let state = portableLibrary?.indexLoadingState {
             portableLibrary?.onIndexLoadingStateChange?(state)
+        }
+        if portableLibrary?.didRepairIndexOnOpen == true,
+           portableLibrary?.isLoadingIndex == false {
+            statusMessage = "Rebuilt the library index from package membership."
         }
         if recoveredPreviousWriter {
             statusMessage = "Recovered interrupted writes from the previous library session."

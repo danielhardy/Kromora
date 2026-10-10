@@ -480,6 +480,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         try session.lease.release()
 
         let reopened = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
+        XCTAssertTrue(reopened.didRepairIndexOnOpen)
         let ids = Set(reopened.queryController.index.entries.map(\.assetID))
         XCTAssertEqual(ids, Set(imported[0...2]), "index matches live package membership")
         XCTAssertFalse(ids.contains(removedID))
@@ -863,6 +864,7 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         XCTAssertEqual(session.assetCount, 550)
         XCTAssertEqual(session.page(at: 0).items.count, 25)
         XCTAssertEqual(session.indexLoadingState?.errorMessage, nil)
+        XCTAssertTrue(session.didRepairIndexOnOpen, "a corrupt persisted index was rebuilt")
 
         await session.shutdown()
         let reopened = try PortableLibrarySession(at: packageURL, indexURL: indexURL)
