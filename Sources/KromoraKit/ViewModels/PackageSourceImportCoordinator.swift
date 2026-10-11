@@ -175,7 +175,7 @@ final class PackageSourceImportCoordinator {
             )
             observe(
                 handle, operationID: operationID, total: files.count,
-                prefix: "Removable media import",
+                prefix: request.source.statusPrefix,
                 onSuccess: { [weak self] result in
                     guard let self, let destination = self.destination else { return }
                     do {

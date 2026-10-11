@@ -80,6 +80,12 @@ public struct ContentView: View {
             )) {
                 LookSaveSheet(coordinator: viewModel.lookSave)
             }
+            .sheet(isPresented: Binding(
+                get: { viewModel.photosImportReview.isPresented },
+                set: { if !$0 { viewModel.photosImportReview.cancel() } }
+            )) {
+                PhotosImportReviewView(review: viewModel.photosImportReview)
+            }
             .sheet(isPresented: $viewModel.isRemovableMediaSelectorPresented) {
                 RemovableMediaSelectorView(viewModel: viewModel)
             }
@@ -176,12 +182,14 @@ public struct ContentView: View {
 
     private func handlePhotosSelection(_ selection: [PhotosPickerItem]) {
         guard !selection.isEmpty else { return }
-        photosImportCoordinator.start(
+        viewModel.photosImportReview.begin(
             selections: selection.enumerated().map {
                 PhotosImportSelection(ordinal: $0.offset, localIdentifier: $0.element.itemIdentifier)
             },
             provider: PhotosPickerImportProvider(items: selection)
         )
+        // The provider keeps the picked items, so the picker binding can be reset for next time.
+        photosSelection = []
     }
 
     private func cancelPhotosImport() {

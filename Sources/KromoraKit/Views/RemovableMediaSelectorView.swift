@@ -7,6 +7,8 @@ import AppKit
 struct RemovableMediaSelectorView: View {
     @ObservedObject var viewModel: AppViewModel
 
+    private var isFolder: Bool { viewModel.mediaImportSource == .folder }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -14,15 +16,15 @@ struct RemovableMediaSelectorView: View {
             if viewModel.isRemovableMediaScanning && viewModel.removableMediaFiles.isEmpty {
                 VStack(spacing: 12) {
                     ProgressView()
-                    Text("Scanning \(viewModel.removableMediaVolume?.name ?? "volume")…")
+                    Text("Scanning \(viewModel.removableMediaVolume?.name ?? "source")…")
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if viewModel.removableMediaFiles.isEmpty {
                 ContentUnavailableView(
                     "No Supported Images",
-                    systemImage: "externaldrive",
-                    description: Text("This volume has no readable images Kromora can open.")
+                    systemImage: isFolder ? "folder" : "externaldrive",
+                    description: Text("This \(isFolder ? "folder" : "volume") has no readable images Kromora can open.")
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -38,7 +40,10 @@ struct RemovableMediaSelectorView: View {
     private var header: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 3) {
-                Label(viewModel.removableMediaVolume?.name ?? "Removable Media", systemImage: "externaldrive.connected.to.line.below")
+                Label(
+                    viewModel.removableMediaVolume?.name ?? (isFolder ? "Folder" : "Removable Media"),
+                    systemImage: isFolder ? "folder" : "externaldrive.connected.to.line.below"
+                )
                     .font(.headline)
                 if let accessHint = viewModel.removableMediaVolume?.accessHint {
                     Text(accessHint)

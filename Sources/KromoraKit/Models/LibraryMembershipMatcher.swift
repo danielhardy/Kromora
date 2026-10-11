@@ -23,7 +23,23 @@ struct LibraryMembershipMatcher: Sendable {
         self.init(knownHashes: Set(try PortablePackageImportCatalog(package: package).existingHashes.keys))
     }
 
+    /// Loads the catalog on a detached task that is cancelled with the caller. The catalog read
+    /// itself is synchronous, so cancellation is honored before it starts and the caller is
+    /// released immediately rather than waiting for the read to finish.
+    static func load(from package: PortableLibraryPackage) async throws -> LibraryMembershipMatcher {
+        let work = Task.detached(priority: .utility) {
+            try Task.checkCancellation()
+            return try LibraryMembershipMatcher(package: package)
+        }
+        return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+    }
+
     var isEmpty: Bool { knownHashes.isEmpty }
+
+    /// The digest of in-memory bytes, identical to `contentHash(of:)` for the same content.
+    static func contentHash(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
 
     func contains(contentHash: String) -> Bool {
         knownHashes.contains(contentHash)

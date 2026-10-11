@@ -187,7 +187,7 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
         await coordinator.shutdown()
     }
 
-    func testDialogAndDropRouteOutsideTheDestinationPolicy() throws {
+    func testDialogAndDropRouteOutsideTheDestinationPolicy() async throws {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("kromora-source-folder-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -199,17 +199,61 @@ final class LibraryMediaWorkflowCoordinatorTests: XCTestCase {
             provider: WorkflowMediaProvider(volumes: [], result: .success(.init(files: [], warnings: []))),
             fileDialog: dialog
         )
-        var selectedFolder: URL?
         var selectedImage: URL?
-        coordinator.onSourceFolder = { url, _ in selectedFolder = url }
         coordinator.onImageURL = { url, _ in selectedImage = url }
 
         coordinator.chooseSourceFolder(startingAt: nil)
+        XCTAssertEqual(coordinator.removableMediaVolume?.url, folder.standardizedFileURL.resolvingSymlinksInPath())
+        XCTAssertEqual(coordinator.importSource, .folder)
+        XCTAssertTrue(coordinator.isRemovableMediaSelectorPresented)
+        coordinator.cancelRemovableMediaImport()
         coordinator.handleDroppedURL(folder)
+        XCTAssertEqual(coordinator.importSource, .folder)
+        XCTAssertTrue(coordinator.isRemovableMediaSelectorPresented)
         coordinator.handleDroppedURL(image)
 
-        XCTAssertEqual(selectedFolder, folder)
         XCTAssertEqual(selectedImage, image)
+        await coordinator.shutdown()
+    }
+
+    func testFolderSelectorTagsLibraryMembersAndImportsOnlyTheSelection() async throws {
+        let folder = FileManager.default.temporaryDirectory
+            .appendingPathComponent("kromora-folder-tags-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        func make(_ name: String, _ byte: UInt8) throws -> MediaVolumeFile {
+            let url = folder.appendingPathComponent(name)
+            try Data(repeating: byte, count: 64).write(to: url)
+            return MediaVolumeFile(url: url)
+        }
+        let known = try make("known.jpg", 1), new = try make("new.jpg", 2)
+        let hash = try XCTUnwrap(LibraryMembershipMatcher.contentHash(of: known.url))
+        let coordinator = LibraryMediaWorkflowCoordinator(
+            provider: WorkflowMediaProvider(
+                volumes: [], result: .success(.init(files: [known, new], warnings: []))
+            ),
+            fileDialog: WorkflowFileDialog(folder: folder)
+        )
+        coordinator.libraryMatcherLoader = { LibraryMembershipMatcher(knownHashes: [hash]) }
+        var request: RemovableMediaImportRequest?
+        coordinator.onImportRequest = { request = $0 }
+
+        coordinator.chooseSourceFolder(startingAt: nil)
+        try await waitUntil { coordinator.removableMediaLibraryChecked == 2 && !coordinator.isRemovableMediaScanning }
+        XCTAssertEqual(coordinator.removableMediaInLibrary, [known.id])
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles, [new])
+
+        // Late results do not undo a click; Select All still leaves matches out.
+        coordinator.toggleRemovableMediaSelection(known)
+        coordinator.selectAllRemovableMedia()
+        XCTAssertEqual(coordinator.selectedRemovableMediaFiles, [new])
+
+        coordinator.importSelectedRemovableMedia()
+        try await waitUntil { request != nil }
+        XCTAssertEqual(request?.source, .folder)
+        XCTAssertEqual(request?.files, [new])
+        request?.access?.release()
+        await coordinator.shutdown()
     }
 
     func testRemovableMediaPanelGrantSurvivesPreflightAndMovesToImportRequest() async throws {

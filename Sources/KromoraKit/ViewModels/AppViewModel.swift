@@ -691,6 +691,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         set { libraryMediaWorkflow.isRemovableMediaSelectorPresented = newValue }
     }
     var removableMediaVolume: MediaVolume? { libraryMediaWorkflow.removableMediaVolume }
+    var mediaImportSource: MediaImportSource { libraryMediaWorkflow.importSource }
     var removableMediaFiles: [MediaVolumeFile] { libraryMediaWorkflow.removableMediaFiles }
     var removableMediaWarnings: [String] { libraryMediaWorkflow.removableMediaWarnings }
     var removableMediaInLibrary: Set<String> { libraryMediaWorkflow.removableMediaInLibrary }
@@ -733,6 +734,7 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
     /// Provider interaction and progress belong to the application composition root, while this
     /// model remains the narrow destination for durable collection admission and source loading.
     let photosImportCoordinator: PhotosImportCoordinator
+    let photosImportReview = PhotosImportReviewCoordinator()
     /// Shared package-write generation, cancellation, and progress owner for every import source.
     private lazy var libraryImportCoordinator = LibraryImportCoordinator(
         package: portableLibrary,
@@ -1174,6 +1176,9 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
             allowsUnregisteredSourceDeletion: self.usesInjectedEditStore
         )
         self.photosImportCoordinator.destination = self
+        self.photosImportReview.onImport = { [weak self] selections, provider in
+            self?.photosImportCoordinator.start(selections: selections, provider: provider)
+        }
         self.photosImportBatchCoordinator.destination = self
         self.photosImportCoordinator.onStatus = { [weak self] message in
             self?.statusMessage = message
@@ -1227,20 +1232,17 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         }
 
         if let package = portableLibrary?.package {
-            libraryMediaWorkflow.libraryMatcherLoader = {
-                try await Task.detached(priority: .utility) {
-                    try LibraryMembershipMatcher(package: package)
-                }.value
+            let loader: @Sendable () async throws -> LibraryMembershipMatcher = {
+                try await LibraryMembershipMatcher.load(from: package)
             }
+            libraryMediaWorkflow.libraryMatcherLoader = loader
+            photosImportReview.libraryMatcherLoader = loader
         }
         libraryMediaWorkflow.onStatus = { [weak self] message in
             self?.statusMessage = message
         }
         libraryMediaWorkflow.onError = { [weak self] message in
             self?.presentError(message)
-        }
-        libraryMediaWorkflow.onSourceFolder = { [weak self] url, access in
-            self?.openSourceFolder(url: url, access: access)
         }
         libraryMediaWorkflow.onImageURL = { [weak self] url, access in
             self?.openImage(url: url, access: access)
@@ -4615,11 +4617,11 @@ public final class AppViewModel: ObservableObject, LookPreviewProviding, PhotosI
         persistence.onStatusChange = nil
         persistence.onFailure = nil
         persistence.onDurableWrite = nil
+        photosImportReview.shutdown()
         photosImportCoordinator.onStatus = nil
         photosImportCoordinator.destination = nil
         libraryMediaWorkflow.onStatus = nil
         libraryMediaWorkflow.onError = nil
-        libraryMediaWorkflow.onSourceFolder = nil
         libraryMediaWorkflow.onImageURL = nil
         libraryMediaWorkflow.onImageURLs = nil
         libraryMediaWorkflow.onImportRequest = nil

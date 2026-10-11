@@ -3,11 +3,26 @@ import Combine
 import Foundation
 import UniformTypeIdentifiers
 
+/// Which kind of source the in-app import selector is showing. Both are scanned and selected the
+/// same way; only wording and the import status prefix differ.
+enum MediaImportSource: Sendable, Equatable {
+    case removableMedia
+    case folder
+
+    var statusPrefix: String {
+        switch self {
+        case .removableMedia: return "Removable media import"
+        case .folder: return "Folder import"
+        }
+    }
+}
+
 /// The value handed to the composition root after a removable-media selection has been
 /// scanned and selected. The coordinator deliberately does not know whether the destination is the
 /// portable package or the legacy presentation projection.
 struct RemovableMediaImportRequest: Sendable {
     let volume: MediaVolume
+    let source: MediaImportSource
     let files: [MediaVolumeFile]
     let totalSelected: Int
     let operationID: UUID
@@ -15,12 +30,14 @@ struct RemovableMediaImportRequest: Sendable {
 
     init(
         volume: MediaVolume,
+        source: MediaImportSource = .removableMedia,
         files: [MediaVolumeFile],
         totalSelected: Int? = nil,
         operationID: UUID = UUID(),
         access: SecurityScopedResourceAccess? = nil
     ) {
         self.volume = volume
+        self.source = source
         self.files = files
         self.totalSelected = totalSelected ?? files.count
         self.operationID = operationID
@@ -48,6 +65,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
     @Published private(set) var removableMediaVolumes: [MediaVolume] = []
     @Published var isRemovableMediaSelectorPresented = false
     @Published private(set) var removableMediaVolume: MediaVolume?
+    @Published private(set) var importSource: MediaImportSource = .removableMedia
     @Published private(set) var removableMediaFiles: [MediaVolumeFile] = []
     @Published private(set) var removableMediaWarnings: [String] = []
     @Published private(set) var isRemovableMediaScanning = false
@@ -81,7 +99,6 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
 
     var onStatus: (@MainActor (String) -> Void)?
     var onError: (@MainActor (String) -> Void)?
-    var onSourceFolder: (@MainActor (URL, SecurityScopedResourceAccess?) -> Void)?
     var onImageURL: (@MainActor (URL, SecurityScopedResourceAccess?) -> Void)?
     var onImageURLs: (@MainActor ([URL], [SecurityScopedResourceAccess]) -> Void)?
     var onImportRequest: (@MainActor (RemovableMediaImportRequest) -> Void)?
@@ -111,7 +128,16 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             title: "Choose Source Folder", prompt: "Use Folder", startingAt: directoryURL,
             canCreateDirectories: false
         ) else { return }
-        onSourceFolder?(url, .systemGranted(for: url))
+        openFolder(url, access: .systemGranted(for: url))
+    }
+
+    /// A folder is scanned and shown in the same selector as a removable volume, so already
+    /// imported photos are tagged and left out of the default selection. The selector owns
+    /// `access` until the import request takes it or the selector closes.
+    func openFolder(_ url: URL, access: SecurityScopedResourceAccess?) {
+        openRemovableMedia(
+            MediaVolume(name: url.lastPathComponent, url: url), source: .folder, access: access
+        )
     }
 
     func handleDroppedURL(_ url: URL) {
@@ -121,7 +147,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             onImageURL?(imageURL, scope(from: dropAccess))
         case .openFolder(let folderURL):
             guard let dropAccess = accessForDrop(folderURL) else { return }
-            onSourceFolder?(folderURL, scope(from: dropAccess))
+            openFolder(folderURL, access: scope(from: dropAccess))
         case .invalid: break
         }
     }
@@ -145,7 +171,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
                 if let access = scope(from: dropAccess) { accesses.append(access) }
             case .openFolder(let folderURL):
                 guard let dropAccess = accessForDrop(folderURL) else { continue }
-                onSourceFolder?(folderURL, scope(from: dropAccess))
+                openFolder(folderURL, access: scope(from: dropAccess))
             case .invalid: break
             }
         }
@@ -197,8 +223,13 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
         }
     }
 
-    func openRemovableMedia(_ volume: MediaVolume) {
+    func openRemovableMedia(
+        _ volume: MediaVolume, source: MediaImportSource = .removableMedia,
+        access: SecurityScopedResourceAccess? = nil
+    ) {
         let operationID = beginImportOperation()
+        importSource = source
+        removableMediaAccess = access
         scanTask?.cancel()
         importRequestTask?.cancel()
         removableMediaVolume = volume
@@ -320,7 +351,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             }
             onImportRequest(
                 RemovableMediaImportRequest(
-                    volume: volume, files: selected, totalSelected: selected.count,
+                    volume: volume, source: importSource, files: selected, totalSelected: selected.count,
                     operationID: operationID, access: access
                 )
             )
@@ -341,7 +372,7 @@ final class LibraryMediaWorkflowCoordinator: ObservableObject {
             currentName: nil,
             cancelled: summary.cancelled
         )
-        onStatus?(summary.status(prefix: "Removable media import"))
+        onStatus?(summary.status(prefix: importSource.statusPrefix))
     }
 
     func finishImport(imported: Int, skipped: Int, cancelled: Bool, total: Int) {

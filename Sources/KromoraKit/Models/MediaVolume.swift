@@ -166,7 +166,11 @@ struct MediaVolumeSelectionModel: Sendable, Equatable {
 
     /// Selects every file except `excluded` (files already in the library), as a fresh default.
     mutating func selectAll(in files: [MediaVolumeFile], excluding excluded: Set<String> = []) {
-        selectedIDs = Set(files.map(\.id)).subtracting(excluded)
+        selectAll(ids: files.map(\.id), excluding: excluded)
+    }
+
+    mutating func selectAll(ids: [String], excluding excluded: Set<String> = []) {
+        selectedIDs = Set(ids).subtracting(excluded)
         explicitIDs.removeAll()
     }
 
@@ -179,7 +183,11 @@ struct MediaVolumeSelectionModel: Sendable, Equatable {
     /// Adds files without touching the rest of the selection or the shift-click anchor, so a
     /// streamed batch never disturbs choices already made.
     mutating func select(_ files: [MediaVolumeFile], excluding excluded: Set<String> = []) {
-        selectedIDs.formUnion(files.map(\.id).filter { !excluded.contains($0) })
+        select(ids: files.map(\.id), excluding: excluded)
+    }
+
+    mutating func select(ids: [String], excluding excluded: Set<String> = []) {
+        selectedIDs.formUnion(ids.filter { !excluded.contains($0) })
     }
 
     /// Drops files that were only selected by default and have since been identified as already
@@ -189,30 +197,40 @@ struct MediaVolumeSelectionModel: Sendable, Equatable {
     }
 
     mutating func toggle(_ file: MediaVolumeFile) {
-        if !selectedIDs.insert(file.id).inserted {
-            selectedIDs.remove(file.id)
-        }
-        explicitIDs.insert(file.id)
-        anchorID = file.id
+        toggle(id: file.id)
     }
 
-    /// Adds every file between the anchor and `file` (inclusive, in `files` order). Without a
-    /// usable anchor this behaves like a plain click.
+    mutating func toggle(id: String) {
+        if !selectedIDs.insert(id).inserted {
+            selectedIDs.remove(id)
+        }
+        explicitIDs.insert(id)
+        anchorID = id
+    }
+
     mutating func selectRange(to file: MediaVolumeFile, in files: [MediaVolumeFile]) {
+        selectRange(toID: file.id, in: files.map(\.id))
+    }
+
+    mutating func selectRange(toID id: String, in ids: [String]) {
         guard let anchorID,
-              let from = files.firstIndex(where: { $0.id == anchorID }),
-              let to = files.firstIndex(where: { $0.id == file.id }) else {
-            toggle(file)
+              let from = ids.firstIndex(of: anchorID),
+              let to = ids.firstIndex(of: id) else {
+            toggle(id: id)
             return
         }
-        for item in files[min(from, to)...max(from, to)] {
-            selectedIDs.insert(item.id)
-            explicitIDs.insert(item.id)
+        for item in ids[min(from, to)...max(from, to)] {
+            selectedIDs.insert(item)
+            explicitIDs.insert(item)
         }
     }
 
     func contains(_ file: MediaVolumeFile) -> Bool {
         selectedIDs.contains(file.id)
+    }
+
+    func contains(id: String) -> Bool {
+        selectedIDs.contains(id)
     }
 }
 
