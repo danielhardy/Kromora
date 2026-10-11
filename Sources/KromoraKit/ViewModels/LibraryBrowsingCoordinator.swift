@@ -330,6 +330,12 @@ final class LibraryBrowsingCoordinator {
         try? reloadPortableWindow(pageIndex: 0)
     }
 
+    func clearPortableFilters() {
+        guard let destination, destination.portableQuery.hasActiveFilters else { return }
+        destination.portableQuery = destination.portableQuery.clearingFilters()
+        try? reloadPortableWindow(pageIndex: 0)
+    }
+
     func portableFacetCounts() async -> LibraryFacetCounts? {
         guard let library, let destination else { return nil }
         return await library.facetCounts(query: destination.portableQuery)

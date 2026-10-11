@@ -278,6 +278,26 @@ final class LibraryBrowsingCoordinatorTests: XCTestCase {
         XCTAssertEqual(destination.portableQuery.searchText, "photo")
     }
 
+    func testClearPortableFiltersResetsFiltersAndPreservesSort() throws {
+        let (coordinator, _, library, destination) = makeCoordinator()
+        try coordinator.reloadPortableWindow()
+        let sort = LibraryQuerySort(key: .rating, direction: .descending)
+        coordinator.setPortableSort(sort)
+        coordinator.setPortableFilter(LibraryFilter(flag: .picks, rating: .minimum(3)))
+        coordinator.setPortableSearch("photo")
+        var facets = LibraryFacetSelection()
+        facets.toggle("Sony A7", in: .camera)
+        coordinator.setPortableFacets(facets)
+        let loads = library.requestedPages.count
+
+        coordinator.clearPortableFilters()
+        XCTAssertEqual(destination.portableQuery, LibraryQuery(sort: sort))
+        XCTAssertEqual(library.requestedPages.count, loads + 1)
+
+        coordinator.clearPortableFilters()
+        XCTAssertEqual(library.requestedPages.count, loads + 1, "no-op when nothing is active")
+    }
+
     func testPresentedAspectRatioDeltaTouchesOnlyGeometryAndDoesNotRequestPixels() async throws {
         let assetID = PortablePhotoAssetID()
         let summary = PortablePackageAssetSummary(

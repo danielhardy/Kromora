@@ -78,26 +78,29 @@ private struct FacetSection: View {
     }
 }
 
-/// Toolbar toggle plus a one-action summary of the active metadata filters.
+/// Toolbar toggle plus a one-action summary of every active Library query filter.
 struct LibraryFacetToolbarControls: View {
     let viewModel: AppViewModel
     @Binding var isSidebarPresented: Bool
 
     var body: some View {
         HStack(spacing: 8) {
-            let facets = viewModel.portableQuery.facets
-            if facets.isActive {
-                Text("\(facets.activeCount) metadata filter\(facets.activeCount == 1 ? "" : "s"): "
-                    + (facets.cameras.union(facets.lenses)).sorted().joined(separator: ", "))
+            let query = viewModel.portableQuery
+            if query.hasActiveFilters {
+                let parts = query.activeFilterDescriptions
+                Text("\(parts.count) active filter\(parts.count == 1 ? "" : "s"): "
+                    + parts.joined(separator: ", "))
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: 260)
-                Button("Clear") { viewModel.setPortableFacets(.none) }
+                    .accessibilityLabel("Active filters: " + parts.joined(separator: ", "))
+                Button("Clear") { viewModel.clearPortableFilters() }
                     .buttonStyle(.borderless)
                     .font(.caption)
-                    .help("Clear metadata filters")
+                    .help("Clear all filters and search")
+                    .accessibilityLabel("Clear all filters")
             }
             Button {
                 isSidebarPresented.toggle()

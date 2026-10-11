@@ -532,6 +532,29 @@ struct LibraryQuery: Codable, Equatable, Sendable {
     }
 
     static let all = Self()
+
+    /// True when any filter dimension (flag, rating, metadata facets, search text) narrows the
+    /// query. Sort is ordering, not filtering, so it never counts.
+    var hasActiveFilters: Bool {
+        filter.isFiltered || facets.isActive || searchText?.isEmpty == false
+    }
+
+    /// Human-readable descriptions of each active filter, in a stable order: flag, rating,
+    /// cameras, lenses, then search text.
+    var activeFilterDescriptions: [String] {
+        var parts: [String] = []
+        if filter.flag != .all { parts.append(filter.flag.title) }
+        if filter.rating != .any { parts.append(filter.rating.title) }
+        parts.append(contentsOf: facets.cameras.sorted())
+        parts.append(contentsOf: facets.lenses.sorted())
+        if let text = searchText, !text.isEmpty { parts.append("“\(text)”") }
+        return parts
+    }
+
+    /// The same query with every filter reset; sort is preserved.
+    func clearingFilters() -> LibraryQuery {
+        LibraryQuery(sort: sort)
+    }
 }
 
 /// A value summary returned by a paged query.  `isSelected` is computed from UUID state at query

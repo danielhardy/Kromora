@@ -33,6 +33,38 @@ final class LibraryFacetTests: XCTestCase {
         Row(make: nil, model: nil, lens: nil, rating: 3),
     ]
 
+    func testActiveFilterSummaryListsEveryDimensionInStableOrder() {
+        var query = LibraryQuery(sort: .ratingDescending)
+        XCTAssertFalse(query.hasActiveFilters)
+        XCTAssertEqual(query.activeFilterDescriptions, [])
+
+        query.filter = LibraryFilter(flag: .picks, rating: .minimum(4))
+        query.facets.toggle("Sony A7", in: .camera)
+        query.facets.toggle("85mm", in: .lens)
+        query.searchText = "beach"
+        XCTAssertTrue(query.hasActiveFilters)
+        XCTAssertEqual(
+            query.activeFilterDescriptions,
+            ["Picks", "4+ stars", "Sony A7", "85mm", "“beach”"])
+    }
+
+    func testSortAloneIsNotAnActiveFilter() {
+        XCTAssertFalse(LibraryQuery(sort: .captureDateDescending).hasActiveFilters)
+        XCTAssertTrue(LibraryQuery(searchText: "x").hasActiveFilters)
+        XCTAssertFalse(LibraryQuery(searchText: "   ").hasActiveFilters)
+    }
+
+    func testClearingFiltersKeepsSortAndMatchesAllRows() throws {
+        let controller = try controller(rows)
+        var query = LibraryQuery(sort: .ratingDescending)
+        query.filter = LibraryFilter(flag: .picks)
+        query.facets.toggle("Fuji X100", in: .camera)
+        query.searchText = "photo"
+        let cleared = query.clearingFilters()
+        XCTAssertEqual(cleared, LibraryQuery(sort: .ratingDescending))
+        XCTAssertEqual(controller.page(at: 0, query: cleared).totalCount, rows.count)
+    }
+
     func testCameraFacetFiltersWithOROverValues() throws {
         let controller = try controller(rows)
         var query = LibraryQuery()
