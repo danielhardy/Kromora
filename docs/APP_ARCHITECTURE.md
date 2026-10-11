@@ -354,7 +354,7 @@ source-identity late-result rejection, revision composition, and identity-docume
 
 `AppViewModel` is the composition root, the main-window command façade, and the sole publisher of
 the active `EditDocument`. The inventory below reflects the current `AppViewModel.swift` MARKs
-after the ownership stages; the main file is 4,293 lines, recorded here only as supporting context.
+after the ownership stages; the main file is 5,148 lines, recorded here only as supporting context.
 
 | MARK / remaining workflow | Owner and root responsibility |
 | --- | --- |
