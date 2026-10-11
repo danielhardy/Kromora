@@ -602,6 +602,51 @@ extension PortableLibraryPackage {
         return repaired
     }
 
+    /// Reads an unedited legacy summary's upright shape from the original's header. Packages
+    /// written before import recorded pixel dimensions have no source shape, so such a photo could
+    /// not reserve its cell before a raster arrived. Nil when the summary already has a shape.
+    func legacySourceDimensions(
+        of summary: PortablePackageAssetSummary, record: PortablePackageAssetRecord?
+    ) -> PhotoPixelDimensions? {
+        guard summary.sourceAspectRatio == nil, let record,
+              record.source.storage == .embedded, let relativePath = record.source.relativePath,
+              let url = try? packageURL(for: relativePath)
+        else { return nil }
+        return PortablePackageAssetSummary.sourceDimensions(at: url)
+    }
+
+    private func currentEditDocument(
+        record: PortablePackageAssetRecord?, assetID: PortablePhotoAssetID
+    ) -> EditDocument {
+        if let record, record.currentRevision > 0,
+           let revision = try? readEditRevision(for: assetID) {
+            return revision.document
+        }
+        return EditDocument()
+    }
+
+    /// The presented ratios of `entries` whose summary has none, resolved without writing. Lets the
+    /// first grid page publish final geometry on the first launch after an upgrade; the durable
+    /// summary is still written by `repairPresentedAspectRatios`.
+    func resolvedPresentedAspectRatios(
+        for entries: [LibraryIndexEntry]
+    ) -> [PortablePhotoAssetID: Double] {
+        var ratios: [PortablePhotoAssetID: Double] = [:]
+        for entry in entries where entry.deletedRevision == nil
+            && entry.summary.presentedAspectRatio == nil {
+            let record = try? readAssetRecord(for: entry.assetID)
+            var summary = entry.summary
+            if let dimensions = legacySourceDimensions(of: summary, record: record) {
+                summary.dimensions = dimensions
+            }
+            let document = currentEditDocument(record: record, assetID: entry.assetID)
+            if let ratio = summary.presentedAspectRatio(for: document) {
+                ratios[entry.assetID] = ratio
+            }
+        }
+        return ratios
+    }
+
     /// Repairs one shard so the scheduler can return to queued user-visible package work between
     /// transactions. The lease mutation lock covers sidecar reads through commit: if an edit is
     /// already in progress it wins first and repair reads that edit, and if repair is first the
@@ -631,23 +676,11 @@ extension PortableLibraryPackage {
                 let assetID = entry.assetID
                 var summary = entry.summary
                 let record = try? readAssetRecord(for: assetID)
-                // Packages written before import recorded pixel dimensions have no source
-                // shape, so an unedited photo could not reserve its cell before a raster
-                // arrived. Read the original's header once and publish the result.
-                if summary.sourceAspectRatio == nil, let record,
-                   record.source.storage == .embedded, let relativePath = record.source.relativePath,
-                   let url = try? packageURL(for: relativePath),
-                   let dimensions = PortablePackageAssetSummary.sourceDimensions(at: url) {
+                if let dimensions = legacySourceDimensions(of: summary, record: record) {
                     summary.dimensions = dimensions
                     resolvedDimensions[assetID] = dimensions
                 }
-                let document: EditDocument
-                if let record, record.currentRevision > 0,
-                   let revision = try? readEditRevision(for: assetID) {
-                    document = revision.document
-                } else {
-                    document = EditDocument()
-                }
+                let document = currentEditDocument(record: record, assetID: assetID)
                 if let ratio = summary.presentedAspectRatio(for: document) {
                     presentedRatios[assetID] = ratio
                 }

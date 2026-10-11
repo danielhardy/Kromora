@@ -82,6 +82,9 @@ final class PortableLibrarySession {
     private var detachedPresentedAspectRatioRepairTask: Task<Void, Never>?
     private var detachedSourceFingerprintBackfillTask: Task<Void, Never>?
     private var didStartPresentedAspectRatioRepair = false
+    /// Assets whose ratio was resolved in memory for the first page but is not yet durable, so the
+    /// repair pass still has to write their summaries.
+    private var hydratedAspectRatioAssetIDs: Set<PortablePhotoAssetID> = []
     private var presentedAspectRatioRepairShards: [String] = []
     private var nextPresentedAspectRatioRepairShard = 0
     private var didStartSourceFingerprintBackfill = false
@@ -216,7 +219,7 @@ final class PortableLibrarySession {
     ) {
         let indexURL = self.indexURL
         let pageSize = queryController.pageSize
-        let publish: @Sendable (LibraryIndexProjection?, LibraryQueryPage?, Int, Int, Bool, String?) async -> Void = {
+        let rawPublish: @Sendable (LibraryIndexProjection?, LibraryQueryPage?, Int, Int, Bool, String?) async -> Void = {
             [weak self] projection, page, shardsRead, totalShards, isComplete, error in
             await MainActor.run {
                 guard let self, !self.isShuttingDown else { return }
@@ -239,6 +242,27 @@ final class PortableLibrarySession {
                 }
                 self.onIndexLoadingStateChange?(state)
             }
+        }
+        // A legacy summary has no presented ratio, so its cell would take the 4:3 fallback in the
+        // first projection. Resolve the first page's ratios from the originals' headers before
+        // publishing; the repair pass makes them durable afterwards.
+        let publish: @Sendable (LibraryIndexProjection?, LibraryQueryPage?, Int, Int, Bool, String?) async -> Void = {
+            [weak self] projection, page, shardsRead, totalShards, isComplete, error in
+            var projection = projection
+            var page = page
+            if let current = projection, let firstPage = page {
+                let pageIDs = Set(firstPage.items.map(\.assetID))
+                let ratios = package.resolvedPresentedAspectRatios(
+                    for: current.entries.filter { pageIDs.contains($0.assetID) }
+                )
+                if !ratios.isEmpty,
+                   let hydrated = try? current.applying(.init(presentedAspectRatioUpdates: ratios)) {
+                    projection = hydrated
+                    page = LibraryQueryController(index: hydrated, pageSize: pageSize).page(at: 0)
+                    await MainActor.run { self?.hydratedAspectRatioAssetIDs.formUnion(ratios.keys) }
+                }
+            }
+            await rawPublish(projection, page, shardsRead, totalShards, isComplete, error)
         }
         let operation: @Sendable () async -> Void = {
             var interval = KromoraSignpostInterval(
@@ -302,7 +326,9 @@ final class PortableLibrarySession {
     private func startPresentedAspectRatioRepair() {
         guard !didStartPresentedAspectRatioRepair, !isShuttingDown else { return }
         let missing = queryController.index.entries.filter {
-            $0.deletedRevision == nil && $0.summary.presentedAspectRatio == nil
+            $0.deletedRevision == nil
+                && ($0.summary.presentedAspectRatio == nil
+                    || hydratedAspectRatioAssetIDs.contains($0.assetID))
         }
         guard !missing.isEmpty else {
             startSourceFingerprintBackfill()
@@ -411,6 +437,7 @@ final class PortableLibrarySession {
             uniquingKeysWith: { _, latest in latest }
         )
         guard !updates.isEmpty else { return }
+        hydratedAspectRatioAssetIDs.subtract(updates.keys)
         _ = try? applyIndexDelta(.init(presentedAspectRatioUpdates: updates))
     }
 

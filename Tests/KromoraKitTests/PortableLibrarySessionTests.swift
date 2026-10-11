@@ -233,6 +233,56 @@ final class PortableLibrarySessionTests: TempDirectoryTestCase {
         await session.shutdown()
     }
 
+    func testColdRelaunchPublishesLegacyUneditedFirstPageWithFinalRatio() async throws {
+        let packageURL = tempDirectory.appendingPathComponent("ColdLegacy.kromoralibrary")
+        let indexURL = tempDirectory.appendingPathComponent("ColdLegacy.index")
+        let package = try PortableLibraryPackage.create(at: packageURL)
+        let setupLease = try PortablePackageLease.acquire(at: packageURL)
+        let sourceURL = try Fixtures.writeJPEG(
+            width: 40, height: 20, orientation: 1, named: "cold-legacy.jpg", in: tempDirectory
+        )
+        let imported = try package.importSources([.init(url: sourceURL)], lease: setupLease)
+        let assetID = try XCTUnwrap(imported.imported.first?.assetID)
+        let shardName = PortableLibraryPackage.shard(for: assetID)
+        var shard = try package.readMembershipShard(shardName)
+        let entryIndex = try XCTUnwrap(shard.entries.firstIndex { $0.assetID == assetID })
+        shard.entries[entryIndex].summary.dimensions = nil
+        shard.entries[entryIndex].summary.aspectRatio = nil
+        shard.entries[entryIndex].summary.presentedAspectRatio = nil
+        try package.writeMembershipShard(shard)
+        try setupLease.release()
+        try? FileManager.default.removeItem(at: indexURL)
+
+        let session = try PortableLibrarySession(
+            at: packageURL, indexURL: indexURL, asynchronousIndexLoading: true
+        )
+        var firstPublishedRatio: Double?
+        session.onIndexLoadingStateChange = { state in
+            guard state.isComplete, firstPublishedRatio == nil else { return }
+            firstPublishedRatio = session.queryController.index.entries
+                .first { $0.assetID == assetID }?.summary.presentedAspectRatio
+        }
+        for _ in 0..<20_000 where session.isLoadingIndex { await Task.yield() }
+
+        XCTAssertEqual(try XCTUnwrap(firstPublishedRatio), 2, accuracy: 1e-9)
+        let asset = try XCTUnwrap(session.browsingAssets().first)
+        XCTAssertEqual(try XCTUnwrap(asset.presentedAspectRatio), 2, accuracy: 1e-9)
+
+        // The in-memory hydration is not durable; the repair pass still writes the summary.
+        for _ in 0..<20_000 {
+            let durable = (try? package.readMembershipShard(shardName))?
+                .entries.first { $0.assetID == assetID }?.summary.presentedAspectRatio
+            if durable != nil { break }
+            await Task.yield()
+        }
+        let durable = try XCTUnwrap(
+            package.readMembershipShard(shardName).entries
+                .first { $0.assetID == assetID }?.summary
+        )
+        XCTAssertEqual(durable.dimensions, PhotoPixelDimensions(width: 40, height: 20))
+        await session.shutdown()
+    }
+
     func testPackageOpenRepairsLegacyPresentedGeometryAndSecondOpenSkipsTheGate() async throws {
         let packageURL = tempDirectory.appendingPathComponent("LegacyPresentedGeometry.kromoralibrary")
         let indexURL = tempDirectory.appendingPathComponent("LegacyPresentedGeometry.index")
