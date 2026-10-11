@@ -378,10 +378,8 @@ struct LookInspectorView: View {
         count: Int
     ) -> some View {
         HStack {
-            Text(collection.title)
-                .font(InspectorStyle.sectionTitle)
+            InspectorHeading(title: collection.title, level: .section)
                 .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
             if collection.isReadOnly {
                 Text("Read-only")
                     .font(.caption2)
@@ -409,8 +407,7 @@ struct LookInspectorView: View {
             VStack(alignment: .leading, spacing: 2) {
                 if includesCollectionLabel {
                     HStack(spacing: 5) {
-                        Text("Starter Looks")
-                            .font(InspectorStyle.sectionTitle)
+                        InspectorHeading(title: "Starter Looks", level: .section)
                             .foregroundStyle(.secondary)
                         Text("Read-only")
                             .font(.caption2)
@@ -420,10 +417,8 @@ struct LookInspectorView: View {
                             .background(KromoraTheme.primaryAccent.opacity(0.12), in: Capsule())
                     }
                 }
-                Text(category.name)
-                    .font(InspectorStyle.nestedSectionTitle)
+                InspectorHeading(title: category.name, level: .nested)
                     .foregroundStyle(.secondary)
-                    .accessibilityAddTraits(.isHeader)
             }
             Spacer()
             Text("\(category.luts.count)")

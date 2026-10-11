@@ -65,8 +65,10 @@ struct CropInspectorView: View {
 
     static func resetButton(action: @escaping () -> Void) -> ResetIconButton {
         ResetIconButton(
-            "Reset crop",
+            "Reset",
+            accessibilityLabel: "Reset crop",
             accessibilityHint: "Return the crop frame to the full image",
+            appearance: .semanticLink,
             action: action
         )
     }

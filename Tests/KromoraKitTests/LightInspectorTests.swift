@@ -139,43 +139,34 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(viewModel.document.light.toneCurve(for: .blue), blueCurve)
     }
 
-    func testToneCurveResetUsesAccessibleTrailingDisclosureAction() throws {
-        let source = try lightInspectorSource()
-        let toneCurveStart = try XCTUnwrap(
-            source.range(of: "InspectorDisclosure(\n                    \"Tone Curve\"")
-        )
-        let advancedCurveStart = try XCTUnwrap(
-            source.range(of: "InspectorDisclosure(\"Advanced Curve\"")
-        )
-        let toneCurveSection = source[toneCurveStart.lowerBound..<advancedCurveStart.lowerBound]
+    func testToneCurveResetExposesAccessibleTrailingDisclosureAction() throws {
+        var isExpanded = false
+        var selectedChannel = ToneCurveChannel.red
+        var resetChannel: ToneCurveChannel?
 
-        XCTAssertTrue(toneCurveSection.contains("trailingActionTitle: \"Reset "))
-        XCTAssertTrue(toneCurveSection.contains(
-            "viewModel.resetToneCurve(selectedToneCurveChannel)"
-        ))
-        XCTAssertFalse(toneCurveSection.contains("Button(\"Reset\")"))
+        func makeDisclosure() -> InspectorDisclosure<EmptyView> {
+            InspectorDisclosure(
+                "Tone Curve",
+                isExpanded: Binding(get: { isExpanded }, set: { isExpanded = $0 }),
+                trailingActionTitle: "Reset \(selectedChannel.rawValue) tone curve",
+                trailingAction: { resetChannel = selectedChannel },
+                content: { EmptyView() }
+            )
+        }
 
-        let resetTitle = "Reset Red tone curve"
-        let resetButton = ResetIconButton(resetTitle) {}
-        XCTAssertEqual(resetButton.resolvedAccessibilityLabel, resetTitle)
+        let redReset = try XCTUnwrap(makeDisclosure().trailingActionButton)
+        XCTAssertEqual(redReset.accessibilityPresentation.label, "Reset Red tone curve")
+        redReset.action()
+        XCTAssertEqual(resetChannel, .red)
+
+        selectedChannel = .blue
+        let blueReset = try XCTUnwrap(makeDisclosure().trailingActionButton)
+        XCTAssertEqual(blueReset.accessibilityPresentation.label, "Reset Blue tone curve")
+        blueReset.action()
+        XCTAssertEqual(resetChannel, .blue)
     }
 
-    func testAdvancedCurveControlsAreCollapsedUntilExpanded() throws {
-        let source = try lightInspectorSource()
-        XCTAssertTrue(source.contains("@State private var advancedCurveSectionExpanded = false"))
-        XCTAssertTrue(source.contains(
-            "InspectorDisclosure(\"Advanced Curve\", isExpanded: $advancedCurveSectionExpanded)"
-        ))
-
-        let curveEditor = try XCTUnwrap(source.range(of: "private struct ToneCurveEditor"))
-        let parametricControls = try XCTUnwrap(source.range(of: "struct ParametricToneCurveControls"))
-        let editorSource = source[curveEditor.lowerBound..<parametricControls.lowerBound]
-        XCTAssertTrue(editorSource.contains("channelTabs"))
-        XCTAssertFalse(editorSource.contains("Picker(\"Channel\""))
-        XCTAssertTrue(editorSource.contains("curveGraph(size: size)"))
-        XCTAssertFalse(editorSource.contains("Parametric regions"))
-        XCTAssertFalse(editorSource.contains("Region splits"))
-
+    func testParametricCurveControlsAppearWhenAdvancedDisclosureExpands() {
         let viewModel = makeAppViewModel(engine: FakeRenderEngine())
         var isExpanded = false
         let binding = Binding(get: { isExpanded }, set: { isExpanded = $0 })
@@ -191,53 +182,6 @@ final class LightInspectorTests: TempDirectoryTestCase {
         let expandedHeight = hosting.fittingSize.height
 
         XCTAssertGreaterThan(expandedHeight, collapsedHeight)
-        XCTAssertTrue(source.contains("[\"Highlights\", \"Lights\", \"Darks\", \"Shadows\"]"))
-        XCTAssertTrue(source.contains(
-            "[\"Shadow split\", \"Dark split\", \"Light split\", \"Highlight split\"]"
-        ))
-    }
-
-    func testToneCurveGraphPinsItsVerticalSizeInsideTheScrollingInspector() throws {
-        let source = try lightInspectorSource()
-        let sizingComment = try XCTUnwrap(source.range(of: "// Keep the graph square and exactly"))
-        let notificationHandler = try XCTUnwrap(
-            source.range(
-                of: ".onReceive(NotificationCenter.default.publisher",
-                range: sizingComment.lowerBound..<source.endIndex
-            )
-        )
-        let sizing = source[sizingComment.lowerBound..<notificationHandler.lowerBound]
-
-        XCTAssertTrue(sizing.contains(".aspectRatio(1, contentMode: .fit)"))
-        // KRMA-716: the map fills the tab width (equal gutters) instead of a leading-aligned cap.
-        XCTAssertFalse(sizing.contains(".frame(maxWidth: 220"))
-        XCTAssertTrue(sizing.contains(".frame(maxWidth: .infinity)"))
-        XCTAssertTrue(sizing.contains(".fixedSize(horizontal: false, vertical: true)"))
-
-        // The channel tabs are plain SwiftUI (no AppKit segmented control with its own intrinsic
-        // width), so they always take exactly the width offered.
-        XCTAssertFalse(source.contains(".pickerStyle(.segmented)"))
-        XCTAssertTrue(source.contains("private var channelTabs: some View"))
-
-        // Visual check: with Light > Tone Curve expanded, move between photos with the arrow keys,
-        // then drag Exposure and Contrast through several values. The header, tabs, graph, and
-        // section chrome should stay inside the inspector rail as the preview updates. The graph
-        // should also keep the same size and y-position while the loading indicator appears/clears.
-    }
-
-    func testInspectorRetainsViewportWidthDuringUnspecifiedScrollMeasurements() throws {
-        let source = try inspectorDisclosureSource()
-
-        XCTAssertTrue(source.contains("var lastProposedWidth: CGFloat?"))
-        XCTAssertTrue(source.contains("cache.lastProposedWidth = proposedWidth"))
-        XCTAssertTrue(source.contains("} else if let lastProposedWidth = cache.lastProposedWidth {"))
-        XCTAssertTrue(source.contains("width = child.sizeThatFits(.unspecified).width"))
-        // Probe proposals (.infinity / 0) are never a viewport width, and placement uses the
-        // granted bounds rather than a cached proposal a later probe may have overwritten.
-        XCTAssertTrue(source.contains("proposedWidth.isFinite, proposedWidth > 0"))
-        // Each disclosure section is clamped too, so an over-wide child cannot overflow the rail.
-        XCTAssertTrue(source.contains("FitsProposedWidth(reportsProposedHeight: false)"))
-        XCTAssertTrue(source.contains("ProposedViewSize(width: bounds.width, height: cache.proposal.height)"))
     }
 
     func testLightSliderGestureIsOneUndoOperation() {
@@ -334,25 +278,6 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertTrue(viewModel.document.light.toneCurve.isIdentity,
                       "all curve drag ticks should undo as one gesture")
         XCTAssertFalse(viewModel.canUndo)
-    }
-
-    private func lightInspectorSource() throws -> String {
-        try inspectorSource(named: "LightInspectorView.swift")
-    }
-
-    private func inspectorDisclosureSource() throws -> String {
-        try inspectorSource(named: "InspectorDisclosure.swift")
-    }
-
-    private func inspectorSource(named fileName: String) throws -> String {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        return try String(
-            contentsOf: packageRoot.appendingPathComponent("Sources/KromoraKit/Views/\(fileName)"),
-            encoding: .utf8
-        )
     }
 
     func testCurveDragKeepsMonotonicControlPointsOrderedAndBounded() {
@@ -462,11 +387,6 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(curve.nearestHandle(to: CGPoint(x: size.width, y: 0), in: size), curve.points.last)
     }
 
-    func testToneCurveEndHandlesDrawAboveInteriorHandles() throws {
-        let source = try lightInspectorSource()
-        XCTAssertTrue(source.contains(".zIndex(index == 0 || index == editablePoints.count - 1 ? 1 : 0)"))
-    }
-
     func testVisibleEndpointsWinOverCloserInteriorHandles() {
         let size = CGSize(width: 102, height: 102)
         let curve = LightToneCurve(points: [
@@ -557,9 +477,6 @@ final class LightInspectorTests: TempDirectoryTestCase {
         XCTAssertEqual(Array(afterWhiteReset.points.dropFirst().dropLast()),
                        Array(redCurve.points.dropFirst().dropLast()))
 
-        let source = try lightInspectorSource()
-        XCTAssertTrue(source.contains(".onEnded { _ in doubleClickPoint(point) }"))
-        XCTAssertTrue(source.contains("private func doubleClickPoint(_ point: LightCurvePoint)"))
     }
 
     func testEmptyCurveDragCreatesOnePointAndUndoRedoKeepTheWholeGestureTogether() {

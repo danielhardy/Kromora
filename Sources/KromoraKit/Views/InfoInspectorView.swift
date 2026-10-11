@@ -339,11 +339,9 @@ struct InfoInspectorView: View {
     private var histogramSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("Histogram")
-                    .font(InspectorStyle.sectionTitle)
+                InspectorHeading(title: "Histogram", level: .section)
                     .lineLimit(1)
                     .fixedSize()
-                    .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 4)
                 if let histogram = viewModel.histogram {
                     clippingCount(

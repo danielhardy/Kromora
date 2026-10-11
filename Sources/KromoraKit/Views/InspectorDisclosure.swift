@@ -19,10 +19,34 @@ enum InspectorStyle {
 
 struct InspectorPanelHeading: View {
     let title: String
+    let level = InspectorHeadingLevel.panel
+
+    var body: some View {
+        InspectorHeading(title: title, level: level)
+    }
+}
+
+enum InspectorHeadingLevel: CaseIterable, Equatable {
+    case panel
+    case section
+    case nested
+
+    var font: Font {
+        switch self {
+        case .panel: InspectorStyle.panelTitle
+        case .section: InspectorStyle.sectionTitle
+        case .nested: InspectorStyle.nestedSectionTitle
+        }
+    }
+}
+
+struct InspectorHeading: View {
+    let title: String
+    let level: InspectorHeadingLevel
 
     var body: some View {
         Text(title)
-            .font(InspectorStyle.panelTitle)
+            .font(level.font)
             .accessibilityAddTraits(.isHeader)
     }
 }
@@ -41,6 +65,15 @@ struct InspectorDisclosure<Content: View>: View {
     var trailingAction: (() -> Void)?
     var trailingAccessory: AnyView?
     @ViewBuilder let content: () -> Content
+
+    var trailingActionButton: ResetIconButton? {
+        guard let trailingActionTitle, let trailingAction else { return nil }
+        return ResetIconButton(
+            trailingActionTitle,
+            disabled: !trailingActionEnabled,
+            action: trailingAction
+        )
+    }
 
     init(
         _ title: String,
@@ -87,12 +120,8 @@ struct InspectorDisclosure<Content: View>: View {
                     trailingAccessory
                 }
 
-                if let trailingActionTitle, let trailingAction {
-                    ResetIconButton(
-                        trailingActionTitle,
-                        disabled: !trailingActionEnabled,
-                        action: trailingAction
-                    )
+                if let trailingActionButton {
+                    trailingActionButton
                 }
             }
 

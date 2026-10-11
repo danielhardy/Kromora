@@ -8,9 +8,11 @@ final class CropInspectorTests: XCTestCase {
         var resetCount = 0
         let button = CropInspectorView.resetButton { resetCount += 1 }
 
-        XCTAssertEqual(button.resolvedAccessibilityLabel, "Reset crop")
+        XCTAssertEqual(button.title, "Reset")
+        XCTAssertEqual(button.appearance, .semanticLink)
+        XCTAssertEqual(button.accessibilityPresentation.label, "Reset crop")
         XCTAssertEqual(
-            button.resolvedAccessibilityHint,
+            button.accessibilityPresentation.hint,
             "Return the crop frame to the full image"
         )
 
@@ -21,8 +23,8 @@ final class CropInspectorTests: XCTestCase {
     func testSharedResetButtonDefaultsAccessibilityToItsTitle() {
         let button = ResetIconButton("Reset test") {}
 
-        XCTAssertEqual(button.resolvedAccessibilityLabel, "Reset test")
-        XCTAssertEqual(button.resolvedAccessibilityHint, "")
+        XCTAssertEqual(button.accessibilityPresentation.label, "Reset test")
+        XCTAssertEqual(button.accessibilityPresentation.hint, "")
     }
 
     /// A missing SF Symbol draws nothing, so the button looks blank. `rectangle.landscape` was one.
